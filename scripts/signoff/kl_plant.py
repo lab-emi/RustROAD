@@ -3,7 +3,8 @@
 #   klayout -b -r kl_plant.py -rd gds=IN -rd out=OUT -rd report=JSON -rd kind=KIND
 #       -rd metal=L/D -rd pin_layer=L/D -rd pin_text=L/D -rd draw_layer=L/D -rd boundary=L/D
 #       [-rd via_cell=NAME -rd via_x=DBU -rd via_y=DBU] [-rd pins=A,B] [-rd antenna_pin=NAME]
-# KIND: spacing | offgrid | short | missing_via | antenna | no_boundary | dbu_half
+# KIND: spacing | offgrid | short | missing_via | antenna | rect | no_boundary | dbu_half
+# (rect: -rd rect=x1,y1,x2,y2 in GDS dbu on -rd metal=L/D)
 # Geometry for spacing/offgrid is placed in a region with no shapes on any layer
 # (except the PR boundary) within a 2 um margin, so the planted defect is the
 # only new interaction. All coordinates stay integer database units.
@@ -109,6 +110,10 @@ elif kind == "missing_via":
         raise RuntimeError("expected exactly one %s at %s, found %d" % (via_cell, target, len(victims)))
     victims[0].delete()
     info.update(removed=via_cell, at=[target.x, target.y])
+elif kind == "rect":
+    r = pya.Box(*[int(v) for v in rect.split(",")])
+    top.shapes(metal_li).insert(r)
+    info.update(shapes=[str(r)], layer=metal)
 elif kind == "no_boundary":
     bl, bd = [int(v) for v in boundary.split("/")]
     li = ly.find_layer(bl, bd)
