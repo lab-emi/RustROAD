@@ -107,6 +107,17 @@ pub struct LefMacro {
     pub symmetry: Vec<String>,
     pub pins: Vec<LefPin>,
     pub obstructions: Vec<LefGeometry>,
+    /// `FOREIGN name [x y [orient]]` bindings to an external (GDS) cell.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub foreign: Vec<LefForeign>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LefForeign {
+    pub name: String,
+    /// Offset of the foreign cell origin, in DBU.
+    pub origin: [i64; 2],
+    pub orientation: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -792,6 +803,7 @@ impl<'a> Parser<'a, '_> {
             symmetry: Vec::new(),
             pins: Vec::new(),
             obstructions: Vec::new(),
+            foreign: Vec::new(),
         };
         let mut size_seen = false;
         let mut origin_seen = false;
@@ -832,7 +844,8 @@ impl<'a> Parser<'a, '_> {
                 "SIZE" => { if size_seen { return Err(error("LEF_SYNTAX",key.line,"duplicate SIZE")); } size_seen=true; result.size=self.size(&values,key.line)?; }
                 "SITE" => { self.arity(&values,1,key.line)?; if result.site.is_some() { return Err(error("LEF_UNSUPPORTED",key.line,"multiple macro sites")); } result.site=Some(self.owned(values[0])?); }
                 "SYMMETRY" => { if !result.symmetry.is_empty() { return Err(error("LEF_SYNTAX",key.line,"duplicate SYMMETRY")); } result.symmetry=self.symmetry(&values,key.line)?; }
-                "FOREIGN"|"PROPERTY"|"EEQ"|"LEQ"|"SOURCE"|"POWER"|"FIXEDMASK" => self.warn(key,"macro","Macro annotation/foreign mapping is not modeled; use only retained local geometry")?,
+                "FOREIGN" => { let f = self.foreign(&values, key.line)?; if result.foreign.len() >= 16 { return Err(error("LEF_BUDGET", key.line, "more than 16 FOREIGN statements")); } result.foreign.push(f); self.warn(key,"macro","FOREIGN is retained for GDS cell binding (checked by export-gds); import uses LEF geometry only")?; }
+                "PROPERTY"|"EEQ"|"LEQ"|"SOURCE"|"POWER"|"FIXEDMASK" => self.warn(key,"macro","Macro annotation/foreign mapping is not modeled; use only retained local geometry")?,
                 _ => return Err(self.unsupported(key,"MACRO")),
             }
         }
@@ -840,6 +853,41 @@ impl<'a> Parser<'a, '_> {
             return Err(error("LEF_SYNTAX", name.line, "MACRO missing SIZE"));
         }
         Ok(result)
+    }
+    fn foreign(&mut self, values: &[Token<'a>], line: usize) -> Result<LefForeign> {
+        if !matches!(values.len(), 1 | 3 | 4) || values[0].kind != Kind::Word {
+            return Err(error(
+                "LEF_SYNTAX",
+                line,
+                "FOREIGN requires name [x y [orientation]]",
+            ));
+        }
+        let name = self.owned(values[0])?;
+        let origin = if values.len() >= 3 {
+            [self.coord(values[1])?, self.coord(values[2])?]
+        } else {
+            [0, 0]
+        };
+        let orientation = match values.get(3) {
+            Some(token) => {
+                let text = token.text.to_ascii_uppercase();
+                if !matches!(
+                    text.as_str(),
+                    "N" | "S" | "E" | "W" | "FN" | "FS" | "FE" | "FW"
+                ) {
+                    return Err(error("LEF_SYNTAX", line, "invalid FOREIGN orientation"));
+                }
+                self.charge(text.len(), line)?;
+                Some(text)
+            }
+            None => None,
+        };
+        self.charge(2 * size_of::<LefForeign>(), line)?;
+        Ok(LefForeign {
+            name,
+            origin,
+            orientation,
+        })
     }
     fn units(&mut self) -> Result<()> {
         loop {
@@ -1212,6 +1260,34 @@ OBS LAYER Metal1 ; RECT 0.3 0.1 0.4 0.2 ; END END cell END LIBRARY"#;
         );
     }
     #[test]
+    fn foreign_bindings_are_retained_exactly() {
+        let s = "MACRO a FOREIGN a ; SIZE 1 BY 1 ; END a\n\
+MACRO b FOREIGN other 0.5 -1 FS ; FOREIGN b ; SIZE 1 BY 1 ; END b";
+        let doc = parse_lef(s, 2000, &LefLimits::default()).unwrap();
+        assert_eq!(
+            doc.macros[0].foreign,
+            vec![LefForeign {
+                name: "a".into(),
+                origin: [0, 0],
+                orientation: None
+            }]
+        );
+        assert_eq!(doc.macros[1].foreign[0].origin, [1000, -2000]);
+        assert_eq!(doc.macros[1].foreign[0].orientation.as_deref(), Some("FS"));
+        assert_eq!(doc.macros[1].foreign.len(), 2);
+        assert!(doc.diagnostics.iter().any(|d| d.keyword == "FOREIGN"));
+        for bad in [
+            "MACRO a FOREIGN a 1 ; SIZE 1 BY 1 ; END a",
+            "MACRO a FOREIGN a 0 0 R90 ; SIZE 1 BY 1 ; END a",
+            "MACRO a FOREIGN a 0.00001 0 ; SIZE 1 BY 1 ; END a",
+        ] {
+            assert!(
+                parse_lef(bad, 1000, &LefLimits::default()).is_err(),
+                "{bad}"
+            );
+        }
+    }
+    #[test]
     fn decimals_never_round_or_use_float_geometry() {
         for (s, expected) in [
             ("1.25", 1250),
@@ -1338,6 +1414,11 @@ OBS LAYER Metal1 ; RECT 0.3 0.1 0.4 0.2 ; END END cell END LIBRARY"#;
                             .sum::<usize>()
                 })
                 .sum();
+            // Every PDK cell binds to the same-named GDS cell at the origin.
+            assert!(document.macros.iter().all(|m| m.foreign.len() == 1
+                && m.foreign[0].name == m.name
+                && m.foreign[0].origin == [0, 0]
+                && m.foreign[0].orientation.is_none()));
             if variable == "RUSTROAD_SKY130_CELL_LEF" {
                 assert_eq!((pins, shapes), (3526, 22849));
             }
