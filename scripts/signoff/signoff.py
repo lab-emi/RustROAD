@@ -45,6 +45,9 @@ SCOPE = dict(level="block/macro", pad_ring="not_applicable", seal_ring="not_appl
              density="reported separately (density_status); not part of the block DRC verdict",
              ir_drop="unchecked", electromigration="unchecked", signal_integrity="unchecked",
              ocv="unchecked", cppr="unchecked")
+# Body/substrate terminals the PDK KLayout LVS decks synthesize on library cells
+# (layout name, schematic name). Only these named child-cell pin pairs may differ.
+LVS_BODY_PINS = {"sky130": (("sky130_gnd", "VNB"),), "gf180": (("SUB", "VPW"),)}
 # Signoff deck options pinned here and echoed into every verdict.
 KLAYOUT_DRC_OPTIONS = {
     "sky130": dict(feol="true", beol="true", offgrid="true", floating_met="false", seal="false"),
@@ -470,11 +473,20 @@ def check_density(s: Session) -> dict:
             entry["status"] = "failed" if parsed["total"] else "passed"
             if parsed["total"]:
                 v.fail(f"density deck: {parsed['total']} items {parsed['by_rule']}")
-            v.data["counts"] = dict(total=parsed["total"], by_rule=parsed["by_rule"],
-                                    by_cell=parsed["by_cell"], unit="lyrdb items, all cells")
         decks.append(entry)
-    if s.pdk == "sky130" and decks and "items" in decks[0]:
-        v.data["counts"] = dict(total=decks[0]["items"], by_rule=decks[0]["by_rule"], unit="lyrdb items")
+    # Per-deck counts; the total is null (never 0) unless every deck produced a definitive count.
+    by_rule, by_cell = {}, {}
+    for entry in decks:
+        for rule_name, n in (entry.get("by_rule") or {}).items():
+            by_rule[rule_name] = by_rule.get(rule_name, 0) + n
+        for cell, n in (entry.get("by_cell") or {}).items():
+            by_cell[cell] = by_cell.get(cell, 0) + n
+    complete = bool(decks) and all(e.get("status") in ("passed", "failed") and isinstance(e.get("items"), int)
+                                   for e in decks)
+    v.data["counts"] = dict(total=sum(e["items"] for e in decks) if complete else None,
+                            by_deck={e["deck"]: dict(status=e.get("status"), items=e.get("items")) for e in decks},
+                            by_rule=by_rule, by_cell=by_cell, unit="density deck items, all cells",
+                            note=None if complete else "total is null: at least one density deck gave no definitive count")
     v.data["result"] = dict(decks=decks, note="density_status is separate from the block DRC verdict")
     return v.finish()
 
@@ -569,7 +581,10 @@ def check_lvs_klayout(s: Session) -> dict:
                                      "-rd", f"target_netlist=/out/{d.name}/extracted.cir",
                                      "-rd", f"top_cell={s.top}"] +
                   [x for k, val in options.items() for x in ("-rd", f"{k}={val}")])
-    v.data["options"] = dict(deck=s.cpath("klayout_lvs_runner" if cdl else "klayout_lvs"), **options)
+    v.data["options"] = dict(deck=s.cpath("klayout_lvs_runner" if cdl else "klayout_lvs"),
+                             pin_name_check="top pins: every layout<->schematic pin pair must have equal names "
+                                            "(case-insensitive); library cells: equal unless a deck body pin",
+                             body_pin_pairs=[list(x) for x in LVS_BODY_PINS[s.pdk]], **options)
     log = save_log(r, d / "klayout_lvs.log")
     v.data["reports"].update(lvsdb=str(lvsdb), log=str(d / "klayout_lvs.log"))
     if not lvsdb.is_file() or lvsdb.stat().st_mtime < start - 1:
@@ -582,7 +597,7 @@ def check_lvs_klayout(s: Session) -> dict:
     if not xref_path.is_file():
         v.unknown("lvsdb cross-reference dump failed")
         return v.finish()
-    verdict = parsers.lvsdb_verdict(json.loads(xref_path.read_text()), s.top)
+    verdict = parsers.lvsdb_verdict(json.loads(xref_path.read_text()), s.top, LVS_BODY_PINS[s.pdk])
     v.data["reports"]["xref"] = str(xref_path)
     if cdl:
         congrats = "Congratulations! Netlists match." in log
@@ -666,7 +681,9 @@ def run_checks(args, checks) -> dict:
                    antenna_status=st.get("antenna"),
                    lvs_status=worst(st.get("lvs_netgen"), st.get("lvs_klayout")) if {"lvs_netgen", "lvs_klayout"} <= set(st) else None,
                    density_status=st.get("density"),
-                   counts={c: (v.get("counts") or {}).get("total") for c, v in verdicts.items()},
+                   # A count is reported only for a definitive verdict; unverified -> null, never 0.
+                   counts={c: (v.get("counts") or {}).get("total") if v["status"] in ("passed", "failed") else None
+                           for c, v in verdicts.items()},
                    by_rule={c: (v.get("counts") or {}).get("by_rule") for c, v in verdicts.items()},
                    verdicts={c: v["verdict_path"] for c, v in verdicts.items()},
                    scope=SCOPE,

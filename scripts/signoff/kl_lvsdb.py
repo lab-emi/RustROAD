@@ -1,12 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # KLayout batch macro: klayout -b -r kl_lvsdb.py -rd db_path=X.lvsdb -rd out=Y.json
 # Dumps the LVS cross-reference of a KLayout .lvsdb as JSON: every circuit
-# pair with its status, and (bounded) every non-matching net/pin/device/
-# subcircuit pair. A verdict is computed by the host harness, not here.
+# pair with its status, every pin pair (layout name <-> schematic name) of
+# every circuit pair, and (bounded) every non-matching net/pin/device/
+# subcircuit pair. KLayout pairs pins by topology, so a symmetric design with
+# swapped port labels still reports Match; the host harness therefore compares
+# the paired pin NAMES itself. A verdict is computed by the host, not here.
 import json
 import pya
 
 MAX_DETAILS = 400
+MAX_PIN_PAIRS = 100000
 lvs = pya.LayoutVsSchematic()
 lvs.read(db_path)
 xref = lvs.xref()
@@ -28,7 +32,7 @@ def name(obj):
             value = getattr(obj, attr)()
             if value:
                 return value
-    return str(obj)
+    return ""
 
 
 def count(circuit, method):
@@ -37,8 +41,10 @@ def count(circuit, method):
     return sum(1 for _ in getattr(circuit, method)())
 
 
-result = {"db_path": db_path, "circuits": [], "details": [], "details_truncated": False}
+result = {"db_path": db_path, "circuits": [], "details": [], "details_truncated": False,
+          "pin_pairs_truncated": False, "pin_pairs_dumped": True}
 details = 0
+pin_pairs = 0
 for cp in xref.each_circuit_pair():
     a, b = cp.first(), cp.second()
     status = STATUS.get(cp.status(), str(cp.status()))
@@ -47,7 +53,14 @@ for cp in xref.each_circuit_pair():
              "layout_nets": count(a, "each_net"), "schematic_nets": count(b, "each_net"),
              "layout_pins": count(a, "each_pin"), "schematic_pins": count(b, "each_pin"),
              "layout_subcircuits": count(a, "each_subcircuit"),
-             "schematic_subcircuits": count(b, "each_subcircuit")}
+             "schematic_subcircuits": count(b, "each_subcircuit"), "pin_pairs": []}
+    for pair in xref.each_pin_pair(cp):
+        pin_pairs += 1
+        if pin_pairs > MAX_PIN_PAIRS:
+            result["pin_pairs_truncated"] = True
+            break
+        entry["pin_pairs"].append({"layout": name(pair.first()), "schematic": name(pair.second()),
+                                   "status": STATUS.get(pair.status(), str(pair.status()))})
     result["circuits"].append(entry)
     if status == "Match":
         continue

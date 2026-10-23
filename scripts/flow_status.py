@@ -3,13 +3,16 @@
 
 The overall status is ``passed`` only when the flow ran functionally on every
 PDK, tool identities stayed stable, the post-route timing comparison passed
-and EVERY required signoff item below passed on every PDK. A missing,
-unverified, unchecked or failed item gives ``partial`` (exit 3); a functional
-flow failure or identity change gives ``failed`` (exit 1). Density is reported
-separately and is not a required item (owner decision d). RustSTA design-rule
-(DRV) counts are not evidence (the engine records but does not analyze
-max_transition/max_capacitance/max_fanout), and unanalyzed min-pulse-width or
-minimum-period arcs are never a pass.
+and EVERY required signoff item below passed on every PDK. A definitive
+failure of any required item (e.g. DRC items found, LVS mismatch, native GDS
+XOR difference), a functional flow failure or an identity change gives
+``failed`` (exit 1). Otherwise any missing, unverified or unchecked required
+item, or a post-route timing status other than passed, gives ``partial``
+(exit 3); ``partial`` therefore always means "not proven", never "proven
+bad". Density is reported separately and is not a required item (owner
+decision d). RustSTA design-rule (DRV) counts are not evidence (the engine
+records but does not analyze max_transition/max_capacitance/max_fanout), and
+unanalyzed min-pulse-width or minimum-period arcs are never a pass.
 """
 from __future__ import annotations
 
@@ -51,9 +54,11 @@ def overall(pdks: list[dict], postroute_timing_status: str, functional: bool, id
     """Return dict(status, blocking[...]) from per-PDK ``signoff_statuses`` dicts."""
     blocking = []
     if not functional:
-        return dict(status="failed", blocking=[dict(pdk="*", item="functional", status="failed")])
+        return dict(status="failed", blocking=[dict(pdk="*", item="functional", status="failed")],
+                    failed_items=["*:functional"])
     if not identity_stable:
-        return dict(status="failed", blocking=[dict(pdk="*", item="identity", status="failed")])
+        return dict(status="failed", blocking=[dict(pdk="*", item="identity", status="failed")],
+                    failed_items=["*:identity"])
     if postroute_timing_status != "passed":
         blocking.append(dict(pdk="*", item="postroute_timing", status=postroute_timing_status))
     for p in pdks:
@@ -63,7 +68,10 @@ def overall(pdks: list[dict], postroute_timing_status: str, functional: bool, id
             if entry.get("status") != "passed":
                 blocking.append(dict(pdk=p.get("pdk"), item=key, status=entry.get("status", "missing"),
                                      reason=entry.get("reason")))
-    return dict(status="passed" if not blocking and pdks else "partial", blocking=blocking)
+    failed = [b for b in blocking if b["status"] == "failed" and b["item"] != "postroute_timing"]
+    if failed:
+        return dict(status="failed", blocking=blocking, failed_items=[f"{b['pdk']}:{b['item']}" for b in failed])
+    return dict(status="passed" if not blocking and pdks else "partial", blocking=blocking, failed_items=[])
 
 
 def main(argv=None) -> int:
@@ -86,6 +94,7 @@ def main(argv=None) -> int:
                 (p.setdefault("signoff_statuses", {}))[key] = item("passed", "assumed (what-if)")
     gate = overall(pdks, timing, data.get("functional_status") == "passed", bool(data.get("identity_stable")))
     print(json.dumps(dict(status=gate["status"], exit=EXIT[gate["status"]], assume_timing_passed=args.assume_timing_passed,
+                          failed_items=gate.get("failed_items", []),
                           blocking=[f"{b['pdk']}:{b['item']}={b['status']}" for b in gate["blocking"]])))
     return EXIT[gate["status"]]
 

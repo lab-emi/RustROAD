@@ -44,27 +44,168 @@ PHYSICAL_ONLY = {"sky130": ["tap*", "decap*", "fill*", "diode*"],
                  "gf180": ["filltie", "fill_*", "fillcap_*", "endcap", "antenna"]}
 CTS_HOLD = {"sky130": ["clkbuf*", "clkinv*", "clkinvlp*", "clkdlybuf*", "dlygate*", "dlymetal*"],
             "gf180": ["dly*", "clkbuf*", "clkinv*"]}
-KEYWORDS = {"module", "endmodule", "input", "output", "inout", "wire", "reg", "assign", "supply0",
-            "supply1", "parameter", "localparam"}
+DECLARATIONS = {"input", "output", "inout", "wire", "reg", "tri", "wand", "wor", "tri0", "tri1",
+                "supply0", "supply1", "assign", "parameter", "localparam", "defparam", "integer", "genvar"}
+# Verilog keywords that can never be a cell name in a structural instance.
+RESERVED = DECLARATIONS | {"module", "macromodule", "endmodule", "always", "initial", "generate",
+                           "endgenerate", "begin", "end", "if", "else", "case", "endcase", "for",
+                           "function", "endfunction", "task", "endtask", "specify", "endspecify",
+                           "primitive", "endprimitive", "table", "endtable", "and", "or", "nand", "nor",
+                           "xor", "xnor", "buf", "not", "bufif0", "bufif1", "notif0", "notif1"}
+HARMLESS_DIRECTIVES = {"timescale", "default_nettype", "celldefine", "endcelldefine", "resetall"}
 MAX_INSTANCES = 1_000_000
+MAX_TOKENS = 50_000_000
+MAX_REPORTED = 20
+TOKEN = re.compile(r"""
+    (?P<ws>\s+)
+  | (?P<lcomment>//[^\n]*)
+  | (?P<bcomment>/\*.*?\*/)
+  | (?P<attr>\(\*(?!\s*\)).*?\*\))
+  | (?P<directive>`[A-Za-z_]\w*[^\n]*)
+  | (?P<escaped>\\\S+)
+  | (?P<ident>[A-Za-z_][\w$]*)
+  | (?P<number>\d[\w.]*(?:'[sS]?[bBoOdDhH][0-9a-fA-FxXzZ_?]+)?|'[sS]?[bBoOdDhH][0-9a-fA-FxXzZ_?]+)
+  | (?P<string>"(?:[^"\\\n]|\\.)*")
+  | (?P<punct>[()\[\]{},;.#:=+\-*/?!~&|^<>@%])
+""", re.S | re.X)
+
+
+class NetlistError(ValueError):
+    """The netlist cannot be scanned completely."""
+
+
+def tokens(text: str):
+    """Lex structural Verilog; comments and (* attributes *) are dropped, escaped identifiers kept whole."""
+    out, directives, pos, n = [], [], 0, len(text)
+    while pos < n:
+        m = TOKEN.match(text, pos)
+        if m is None:
+            raise NetlistError(f"unrecognised character {text[pos]!r} at offset {pos}")
+        pos = m.end()
+        kind = m.lastgroup
+        if kind in ("ws", "lcomment", "bcomment", "attr"):
+            continue
+        if kind == "directive":
+            directives.append(m[0].strip())
+            continue
+        out.append((kind, m[0]))
+        if len(out) > MAX_TOKENS:
+            raise NetlistError("token budget exceeded")
+    return out, directives
+
+
+def scan(text: str) -> dict:
+    """Classify every module-level statement of a structural netlist.
+
+    Returns instances [(cell, instance)], module names, and every statement
+    or compiler directive that is not a recognised declaration or instance
+    (``unrecognised``); a caller must not report a pass when that is non-empty,
+    because an unparsed statement could hide an excluded cell (Rule 7).
+    """
+    try:
+        toks, directives = tokens(text)
+    except NetlistError as error:
+        return dict(instances=[], modules=[], unrecognised=[str(error)], directives=[])
+    instances_, modules, unrecognised = [], [], []
+    for d in directives:
+        word = re.match(r"`(\w+)", d)[1]
+        if word not in HARMLESS_DIRECTIVES:
+            unrecognised.append(f"compiler directive {d[:80]!r} can change the netlist")
+    i, n = 0, len(toks)
+
+    def balanced(j: int) -> int:
+        """toks[j] is '(' ; return the index after its matching ')'."""
+        depth = 0
+        while j < n:
+            if toks[j][1] == "(":
+                depth += 1
+            elif toks[j][1] == ")":
+                depth -= 1
+                if depth == 0:
+                    return j + 1
+            elif toks[j][1] == ";":
+                break
+            j += 1
+        raise NetlistError("unbalanced parentheses")
+
+    def skip_to_semicolon(j: int) -> int:
+        while j < n and toks[j][1] != ";":
+            j += 1
+        return j + 1
+
+    def name_tok(j: int) -> bool:
+        return j < n and (toks[j][0] == "escaped" or (toks[j][0] == "ident" and toks[j][1] not in RESERVED))
+
+    while i < n:
+        kind, word = toks[i]
+        try:
+            if word == "endmodule":
+                i += 1
+                continue
+            if word in ("module", "macromodule"):
+                if i + 1 < n:
+                    modules.append(toks[i + 1][1].lstrip("\\"))
+                i = skip_to_semicolon(i)
+                continue
+            if word in DECLARATIONS:
+                i = skip_to_semicolon(i)
+                continue
+            if word == ";":
+                i += 1
+                continue
+            # CELL [#(params)] INST [range] (conns) {, INST [range] (conns)} ;
+            if name_tok(i):
+                cell = word.lstrip("\\")
+                j = i + 1
+                if j < n and toks[j][1] == "#":
+                    if j + 1 < n and toks[j + 1][1] == "(":
+                        j = balanced(j + 1)
+                    else:
+                        raise NetlistError("unsupported #delay/parameter form")
+                found = []
+                while True:
+                    if not name_tok(j):
+                        raise NetlistError("expected an instance name")
+                    inst = toks[j][1].lstrip("\\")
+                    j += 1
+                    if j < n and toks[j][1] == "[":
+                        while j < n and toks[j][1] != "]":
+                            j += 1
+                        j += 1
+                    if j >= n or toks[j][1] != "(":
+                        raise NetlistError("expected a port list")
+                    j = balanced(j)
+                    found.append((cell, inst))
+                    if j < n and toks[j][1] == ",":
+                        j += 1
+                        continue
+                    break
+                if j >= n or toks[j][1] != ";":
+                    raise NetlistError("instance not terminated by ';'")
+                instances_ += found
+                if len(instances_) > MAX_INSTANCES:
+                    raise NetlistError("instance budget exceeded")
+                i = j + 1
+                continue
+            raise NetlistError(f"unsupported statement starting with {word!r}")
+        except NetlistError as error:
+            end = skip_to_semicolon(i)
+            if len(unrecognised) < MAX_REPORTED:
+                snippet = " ".join(t[1] for t in toks[i:min(end, i + 12)])
+                unrecognised.append(f"{error}: {snippet[:160]!r}")
+            elif len(unrecognised) == MAX_REPORTED:
+                unrecognised.append("further unrecognised statements omitted")
+            i = max(end, i + 1)
+    return dict(instances=instances_, modules=modules, unrecognised=unrecognised, directives=directives)
+
+
+def instances(text: str) -> list[tuple[str, str]]:
+    return scan(text)["instances"]
 
 
 def read_list(path: Path) -> list[str]:
     return [line.split("#", 1)[0].strip() for line in path.read_text().splitlines()
             if line.split("#", 1)[0].strip()]
-
-
-def instances(text: str) -> list[tuple[str, str]]:
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
-    text = re.sub(r"//[^\n]*", " ", text)
-    out = []
-    for stmt in text.split(";"):
-        m = re.match(r"\s*(\\\S+|[A-Za-z_][\w$]*)\s+(\\\S+|[A-Za-z_][\w$]*)\s*\(", stmt)
-        if m and m[1] not in KEYWORDS:
-            out.append((m[1].lstrip("\\"), m[2].lstrip("\\")))
-            if len(out) > MAX_INSTANCES:
-                raise SystemExit("instance budget exceeded")
-    return out
 
 
 def match(cell: str, globs: list[str]) -> str | None:
@@ -116,14 +257,21 @@ def check(tag: str, stage: str, netlists: list[Path], mapped: Path | None, polic
         report["problems"] += consistency
     mapped_names = {}
     if mapped is not None:
-        mapped_names = {inst: cell for cell, inst in instances(mapped.read_text())}
+        scanned = scan(mapped.read_text())
+        mapped_names = {inst: cell for cell, inst in scanned["instances"]}
+        for why in scanned["unrecognised"]:
+            report["problems"].append(f"{mapped}: unrecognised statement (cannot certify): {why}")
     counts, files = Counter(), []
     for path in netlists:
         if not path.is_file():
             report["problems"].append(f"netlist missing: {path}")
             continue
-        insts = instances(path.read_text())
-        files.append(dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(), instances=len(insts)))
+        scanned = scan(path.read_text())
+        insts = scanned["instances"]
+        for why in scanned["unrecognised"]:
+            report["problems"].append(f"{path}: unrecognised statement (cannot certify): {why}")
+        files.append(dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(), instances=len(insts),
+                          modules=scanned["modules"], unrecognised=len(scanned["unrecognised"])))
         for cell, inst in insts:
             counts[cell] += 1
             g = match(cell, pnr)

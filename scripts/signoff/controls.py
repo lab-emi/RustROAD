@@ -10,10 +10,15 @@ pinned image), runs the relevant signoff checks and records whether the
 harness detected it, by comparing rule counts against the unmodified
 baseline (``SIGNOFF_DIR/signoff.json`` from ``signoff.py all``). Controls:
 spacing, offgrid, short, missing_via, antenna, wrong_top, missing_report,
-no_boundary (sky130), dbu_half (gf180); positive controls: the clean mini
-layout must pass both DRC oracles, the reference must XOR-identical to itself
-re-streamed, and a planted variant must XOR-differ. Exit 0 iff every control
-behaved as expected.
+no_boundary (sky130), dbu_half (gf180), label_swap (two top-level port labels
+exchanged: each LVS tool must fail on its own, KLayout through the pin-name
+comparison), missing_label (one port label deleted) and cell_swap (one
+reference-netlist cell replaced by another drive strength of the same
+function: each LVS tool must fail on its own, Netgen through device-property
+errors where the topology still matches). Positive controls: the clean mini
+layout must pass both DRC oracles, the reference must be XOR-identical to
+itself re-streamed, and a planted variant must XOR-differ. Exit 0 iff every
+control behaved as expected.
 """
 from __future__ import annotations
 
@@ -34,11 +39,13 @@ LAYERS = {
     "sky130": dict(metal="68/20", pin_layer="70/16", pin_text="70/5", draw_layer="70/20", boundary="235/4",
                    spacing_um="0.10", spacing_rule_kl="m1.2", spacing_rule_magic="met1.2",
                    short_pins="a[1],clk", antenna_pin="a[1]", antenna_length_um="600", via="M1M2_PR",
-                   via_net="a[0]"),
+                   via_net="a[0]", swap_pins="a[0],a[1]",
+                   cell_swap=("g0", "sky130_fd_sc_hd__and2_2", "sky130_fd_sc_hd__and2_4")),
     "gf180": dict(metal="34/0", pin_layer="42/10", pin_text="42/10", draw_layer="42/0", boundary="0/0",
                   spacing_um="0.12", spacing_rule_kl="M1.2a", spacing_rule_magic="M1.2a",
                   short_pins="a[1],clk", antenna_pin="a[1]", antenna_length_um="2000", via="Via1_HV",
-                  via_net="a[0]"),
+                  via_net="a[0]", swap_pins="a[0],a[1]",
+                  cell_swap=("g0", "gf180mcu_fd_sc_mcu7t5v0__and2_2", "gf180mcu_fd_sc_mcu7t5v0__and2_4")),
 }
 
 
@@ -60,7 +67,7 @@ def plant(args, kind: str, work: Path, **extra) -> tuple[Path, dict]:
     rd = dict(gds="/in/design.gds", out=f"/out/{out.name}", report=f"/out/{report.name}", kind=kind,
               metal=lay["metal"], pin_layer=lay["pin_layer"], pin_text=lay["pin_text"],
               draw_layer=lay["draw_layer"], boundary=lay["boundary"], spacing_um=lay["spacing_um"],
-              pins=lay["short_pins"], antenna_pin=lay["antenna_pin"],
+              pins=lay["short_pins"], antenna_pin=lay["antenna_pin"], swap=lay["swap_pins"],
               antenna_length_um=lay["antenna_length_um"], **extra)
     cmd = ["/foss/tools/klayout/klayout", "-b", "-r", "/scripts/kl_plant.py"]
     for k, v in rd.items():
@@ -73,8 +80,9 @@ def plant(args, kind: str, work: Path, **extra) -> tuple[Path, dict]:
     return out, json.loads(report.read_text())
 
 
-def run(args, gds: Path, checks, out: Path, top: str | None = None, plant_flag=None, against=None) -> dict:
-    ns = argparse.Namespace(gds=gds, top=top or args.top, pdk=args.pdk, out=out, netlist=args.netlist,
+def run(args, gds: Path, checks, out: Path, top: str | None = None, plant_flag=None, against=None,
+        netlist: Path | None = None) -> dict:
+    ns = argparse.Namespace(gds=gds, top=top or args.top, pdk=args.pdk, out=out, netlist=netlist or args.netlist,
                             against=against, against_top=args.top if against else None,
                             manifest=args.manifest, threads=args.threads, memory="4g", timeout=900,
                             plant=plant_flag)
@@ -149,6 +157,37 @@ def main(argv=None) -> int:
     ng, kv = r["verdicts"]["lvs-netgen"], r["verdicts"]["lvs-klayout"]
     record("missing_via", "both LVS tools report a mismatch", ng["status"] == "failed" and kv["status"] == "failed",
            dict(plant=info, netgen=ng["failures"][:2], klayout=kv["failures"][:2]))
+    # Negative: two top-level port labels exchanged (symmetric datapath bits).
+    gds, info = plant(args, "label_swap", work)
+    r = run(args, gds, ["lvs-netgen", "lvs-klayout"], work / "label_swap")
+    ng, kv = r["verdicts"]["lvs-netgen"], r["verdicts"]["lvs-klayout"]
+    kl_names = (kv["result"].get("top_pins") or {}).get("name_mismatches") or []
+    record("label_swap", "both LVS tools fail on their own; KLayout via the top pin-name comparison",
+           ng["status"] == "failed" and kv["status"] == "failed" and len(kl_names) >= 2,
+           dict(plant=info, netgen=ng["failures"][:2], klayout=kv["failures"][:2], klayout_pin_name_mismatches=kl_names,
+                klayout_circuit_status=[c.get("status") for c in [kv["result"].get("top") or {}]]))
+    # Negative: one top-level port label deleted (the port exists only in the reference).
+    gds, info = plant(args, "missing_label", work)
+    r = run(args, gds, ["lvs-netgen", "lvs-klayout"], work / "missing_label")
+    ng, kv = r["verdicts"]["lvs-netgen"], r["verdicts"]["lvs-klayout"]
+    record("missing_label", "both LVS tools fail on their own", ng["status"] == "failed" and kv["status"] == "failed",
+           dict(plant=info, netgen=ng["failures"][:2], klayout=kv["failures"][:2]))
+    # Negative: one reference-netlist cell replaced by a different drive strength (same function).
+    inst, old_cell, new_cell = lay["cell_swap"]
+    text = args.netlist.read_text()
+    pattern = re.compile(r"^(\s*)" + re.escape(old_cell) + r"(\s+" + re.escape(inst) + r"\s*\()", re.M)
+    swapped, n = pattern.subn(lambda m: m[1] + new_cell + m[2], text)
+    if n != 1:
+        raise SystemExit(f"cell_swap: expected exactly one {old_cell} {inst} in {args.netlist}, found {n}")
+    swapped_netlist = work / "cell_swap.v"
+    swapped_netlist.write_text(swapped)
+    r = run(args, args.gds, ["lvs-netgen", "lvs-klayout"], work / "cell_swap", netlist=swapped_netlist)
+    ng, kv = r["verdicts"]["lvs-netgen"], r["verdicts"]["lvs-klayout"]
+    record("cell_swap", "both LVS tools fail on their own (Netgen property errors count as a mismatch)",
+           ng["status"] == "failed" and kv["status"] == "failed",
+           dict(instance=inst, reference_cell=old_cell, swapped_cell=new_cell, netlist=str(swapped_netlist),
+                netgen=ng["failures"][:2], netgen_property_errors=ng["result"].get("property_errors"),
+                netgen_final=ng["result"].get("final_result"), klayout=kv["failures"][:2]))
     # Negative: long gate-only metal3 wire on an input pin.
     gds, info = plant(args, "antenna", work)
     r = run(args, gds, ["antenna"], work / "antenna")

@@ -199,6 +199,27 @@ class NetgenTest(unittest.TestCase):
         with self.assertRaises(parsers.ParseError):
             parsers.parse_netgen("[]", "", "top")
 
+    def test_property_errors_fail_even_when_topology_matches(self):
+        # Drive-strength swap: same topology, different transistor widths (F1).
+        bad = json.loads(json.dumps(NETGEN_OK))
+        bad[2]["properties"] = [[["and2_2_3/nfet:4", [["w", "1.3"]]], ["g0/nfet:3", [["w", "2.6"]]]]]
+        out = "Netlists match uniquely with property errors.\nFinal result: Circuits match uniquely.\n" \
+              "Property errors were found.\n"
+        r = parsers.parse_netgen(json.dumps(bad), out, "top")
+        self.assertFalse(r["matched"])
+        self.assertEqual(r["property_errors"], 1)
+        self.assertTrue(any("device property mismatches" in x for x in r["problems"]), r["problems"])
+        # Either signal alone is enough.
+        r = parsers.parse_netgen(json.dumps(bad), "Final result: Circuits match uniquely.\n", "top")
+        self.assertFalse(r["matched"])
+        r = parsers.parse_netgen(json.dumps(NETGEN_OK), out, "top")
+        self.assertFalse(r["matched"])
+        self.assertTrue(any("comp.out reports property errors" in x for x in r["problems"]))
+        # An empty properties list is clean.
+        ok = json.loads(json.dumps(NETGEN_OK))
+        ok[2]["properties"] = []
+        self.assertTrue(parsers.parse_netgen(json.dumps(ok), "Final result: Circuits match uniquely.\n", "top")["matched"])
+
 
 class MiscParserTest(unittest.TestCase):
     def test_density_finite(self):
@@ -217,16 +238,64 @@ class MiscParserTest(unittest.TestCase):
         self.assertEqual(r["layer_differences"], {"68/20": 2, "70/20": 3})
         self.assertEqual(r["difference_count"], 5)
 
+    @staticmethod
+    def pins(*pairs, status="Match"):
+        return [dict(layout=a, schematic=b, status=status) for a, b in pairs]
+
     def test_lvsdb_verdict(self):
-        good = dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=3, schematic_pins=3),
-                              dict(layout="inv", schematic="INV", status="Match")])
-        self.assertTrue(parsers.lvsdb_verdict(good, "top")["matched"])
+        top_pins = self.pins(("a[0]", "A[0]"), ("a[1]", "A[1]"), ("y", "Y"))
+        good = dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=3, schematic_pins=3,
+                                   pin_pairs=top_pins),
+                              dict(layout="inv", schematic="INV", status="Match",
+                                   pin_pairs=self.pins(("A", "A"), ("sky130_gnd", "VNB"), ("$4", None)))])
+        r = parsers.lvsdb_verdict(good, "top", (("sky130_gnd", "VNB"),))
+        self.assertTrue(r["matched"], r["problems"])
+        self.assertEqual((r["child_pins"]["body_pairs"], r["child_pins"]["unnamed"]), (1, 1))
+        self.assertFalse(parsers.lvsdb_verdict(good, "top")["matched"], "body pins differ unless allowlisted")
+        no_pairs = json.loads(json.dumps(good))
+        del no_pairs["circuits"][0]["pin_pairs"]
+        self.assertFalse(parsers.lvsdb_verdict(no_pairs, "top", (("sky130_gnd", "VNB"),))["matched"])
         skipped = dict(circuits=[dict(layout="top", schematic="TOP", status="Skipped"),
                                  dict(layout="fill", schematic=None, status="NoMatch")])
         self.assertFalse(parsers.lvsdb_verdict(skipped, "top")["matched"])
         pins = dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=2, schematic_pins=3)])
         self.assertFalse(parsers.lvsdb_verdict(pins, "top")["matched"])
         self.assertFalse(parsers.lvsdb_verdict(dict(circuits=[]), "top")["matched"])
+
+    def test_lvsdb_swapped_top_labels_fail_despite_match(self):
+        # KLayout pairs symmetric ports by topology and reports Match (F2).
+        swapped = dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=3, schematic_pins=3,
+                                      pin_pairs=self.pins(("a[0]", "A[1]"), ("a[1]", "A[0]"), ("y", "Y")))])
+        r = parsers.lvsdb_verdict(swapped, "top")
+        self.assertFalse(r["matched"])
+        self.assertEqual(r["top_pins"]["name_mismatches"], [["a[0]", "A[1]"], ["a[1]", "A[0]"]])
+        unnamed = dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=2, schematic_pins=2,
+                                      pin_pairs=self.pins(("$1", "A"), ("y", "Y")))])
+        self.assertFalse(parsers.lvsdb_verdict(unnamed, "top")["matched"])
+        dup = dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=2, schematic_pins=2,
+                                  pin_pairs=self.pins(("y", "Y"), ("Y", "y")))])
+        self.assertFalse(parsers.lvsdb_verdict(dup, "top")["matched"])
+        child = dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=1, schematic_pins=1,
+                                    pin_pairs=self.pins(("y", "Y"))),
+                               dict(layout="nand2", schematic="NAND2", status="Match",
+                                    pin_pairs=self.pins(("A", "B"), ("B", "A")))])
+        self.assertFalse(parsers.lvsdb_verdict(child, "top")["matched"])
+        truncated = dict(good_top := dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=1,
+                                                         schematic_pins=1, pin_pairs=self.pins(("y", "Y")))]),
+                         pin_pairs_truncated=True)
+        self.assertTrue(parsers.lvsdb_verdict(good_top, "top")["matched"])
+        self.assertFalse(parsers.lvsdb_verdict(truncated, "top")["matched"])
+
+    def test_planted_gap_edge_pair(self):
+        bump, target = [58.945, 28.7, 60.38, 28.96], [60.58, 28.005, 61.17, 29.045]
+        exact = dict(values=["edge-pair: (60.58,28.586;60.58,29.045)|(60.38,28.96;60.38,28.7)"])
+        notch = dict(values=["edge-pair: (59.32,28.96;59.325,28.96)|(59.392,29.18;59.32,29.18)"])
+        above = dict(values=["edge-pair: (59.32,28.96;59.897,28.96)|(59.83,29.18;59.32,29.18)"])
+        self.assertEqual(parsers.planted_gap_hits([exact, notch, above], bump, target, 0.2), exact["values"])
+        self.assertEqual(parsers.planted_gap_hits([notch, above], bump, target, 0.2), [])
+        with self.assertRaises(parsers.ParseError):
+            parsers.planted_gap_hits([exact], bump, target, 0.3)
+        self.assertIsNone(parsers.parse_edge_pair("polygon: (1,2;3,4;5,6)"))
 
     def test_def_odd_coordinates(self):
         r = parsers.count_def_odd_coordinates(
@@ -327,6 +396,22 @@ class FlowStatusTest(unittest.TestCase):
         self.assertEqual(flow_status.overall(pdks, "passed", True, True)["status"], "passed",
                          "density is reported separately and is not a required item")
 
+    def test_definitive_required_failure_is_failed(self):
+        statuses = self.passed()
+        statuses["drc_klayout"] = flow_status.item("failed")
+        statuses["timing_ss_max_setup"] = flow_status.item("missing")
+        gate = flow_status.overall([dict(pdk="gf180", signoff_statuses=statuses)], "passed", True, True)
+        self.assertEqual(gate["status"], "failed")
+        self.assertEqual(flow_status.EXIT[gate["status"]], 1)
+        self.assertEqual(gate["failed_items"], ["gf180:drc_klayout"])
+        statuses["drc_klayout"] = flow_status.item("unverified")
+        gate = flow_status.overall([dict(pdk="gf180", signoff_statuses=statuses)], "passed", True, True)
+        self.assertEqual(gate["status"], "partial")
+        statuses = self.passed()
+        statuses["timing_tt_nom"] = flow_status.item("failed")
+        gate = flow_status.overall([dict(pdk="gf180", signoff_statuses=statuses)], "partial", True, True)
+        self.assertEqual(gate["status"], "partial", "TT is reported only; post-route timing partial is not proof")
+
     def test_mpw_and_drv_never_pass_without_evidence(self):
         self.assertEqual(flow_status.mpw_status({"unanalyzed_arcs": {"min_pulse_width": 4}})["status"], "unchecked")
         self.assertEqual(flow_status.mpw_status({"unanalyzed_arcs": {}})["status"], "unchecked")
@@ -372,6 +457,34 @@ class CellPolicyTest(unittest.TestCase):
         self.assertEqual(r["violations"][0]["rule"], "excluded_cell_added_after_synthesis")
         r = check_cell_policy.check("gf180", "physical", [self.final], None, None, self.root)
         self.assertEqual(r["status"], "unverified")
+
+    def test_attribute_and_parameter_instances_are_seen(self):
+        p = "gf180mcu_fd_sc_mcu7t5v0__"
+        for form in (f"(* keep *) {p}mux2_1 xattr (.I0(a), .Z(y));",
+                     f"{p}mux2_1 #(.X(1)) xparam (.I0(a), .Z(y));",
+                     f"{p}mux2_1 xmulti0 (.I0(a)), xmulti [1:0] (.I0(a));",
+                     f"\\{p}mux2_1  \\x;esc  (.I0(a), .Z(y));"):
+            bad = self.root / "form.v"
+            bad.write_text(f"module t(input a, output y);\n{form}\nendmodule\n")
+            r = check_cell_policy.check("gf180", "synth", [bad], None, None, self.root)
+            self.assertEqual(r["status"], "failed", (form, r))
+            self.assertEqual(r["violations"][0]["cell"], f"{p}mux2_1")
+
+    def test_unrecognised_statements_are_unverified_not_passed(self):
+        p = "gf180mcu_fd_sc_mcu7t5v0__"
+        for extra in ("always @(posedge a) y <= a;", "`define CELL mux2_1", f"{p}and2_2 (.A1(a));",
+                      "generate for (i = 0; i < 2; i = i + 1) begin end endgenerate"):
+            odd = self.root / "odd.v"
+            odd.write_text(self.mapped.read_text().replace("endmodule", extra + "\nendmodule"))
+            r = check_cell_policy.check("gf180", "synth", [odd], None, None, self.root)
+            self.assertEqual(r["status"], "unverified", (extra, r))
+            self.assertTrue(any("unrecognised statement" in x for x in r["problems"]))
+        ok = self.root / "ok.v"
+        ok.write_text("`timescale 1ns/1ps\n/* c */ module t(input a, output y); // x\n wire \\q[0] ;\n"
+                      f" assign y = a;\n {p}and2_2 g0 (.A1(a), .A2(1'b0), .Z(\\q[0] ));\nendmodule\n")
+        r = check_cell_policy.check("gf180", "synth", [ok], None, None, self.root)
+        self.assertEqual(r["status"], "passed", r)
+        self.assertEqual(check_cell_policy.scan(ok.read_text())["instances"], [(f"{p}and2_2", "g0")])
 
     def test_committed_policy_is_consistent_with_owner_reservation(self):
         policy = json.loads((SCRIPTS.parent / "fixtures/flow/cell-policy.json").read_text())

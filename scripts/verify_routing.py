@@ -244,7 +244,7 @@ def main():
         scope=dict(level='block/macro (no pad ring, no seal ring)',drc='foundry decks via scripts/signoff when requested, else missing',
                    lvs='Netgen + KLayout via scripts/signoff when requested, else missing',density='reported separately',
                    ir_drop='unchecked',electromigration='unchecked',signal_integrity='unchecked',ocv='unchecked',
-                   timing_accuracy_gate_ns=0.001,cppr='off'),
+                   timing_accuracy_gate_ns=0.001,cppr='unchecked'),
         required_items=list(flow_status.REQUIRED),reported_items=list(flow_status.REPORTED))
     try:
         r=run_ok(h,'memory_preflight',['free','-h']);summary['memory_preflight']=bounded_text(Path(r['stdout']))
@@ -253,6 +253,7 @@ def main():
             if n in ('rustsys','yosys','verilator','opensta'):require(sha256(p)==pinned[n]['sha256'],'pinned tool changed: '+n)
             r=run_ok(h,n+'_version',[p,'-V' if n=='yosys' else '-version' if n=='opensta' else '-v' if n=='klayout' else '--version'])
             summary['tools'][n]={**fingerprint(p),'version':bounded_text(Path(r['stdout'])).strip()}
+            if n=='klayout':summary['tools'][n].update(signoff_role='not_for_signoff: host build used only by the RustROAD subset routing-geometry checker; signoff verdicts use the pinned image (fixtures/flow/signoff-pinned.json)')
         r=run_ok(h,'openroad_identity',['podman','run','--rm','--pull=never','--network=none','--read-only','--memory=2g','--memory-swap=2g','--entrypoint=/usr/bin/sha256sum',IMAGE,OPENROAD])
         require(bounded_text(Path(r['stdout'])).split()[0]==old['openroad_reference']['sha256'],'OpenROAD identity changed')
         summary['openroad_reference']=old['openroad_reference']
@@ -270,7 +271,7 @@ def main():
     finally:
         summary['identity_stable']=all(sha256(Path(t['path']))==t['sha256'] for t in summary['tools'].values()) and bool(summary['tools'])
         gate=flow_status.overall(summary['pdks'],summary['postroute_timing_status'],summary['functional_status']=='passed',summary['identity_stable'])
-        summary['status']=gate['status'];summary['blocking']=gate['blocking']
+        summary['status']=gate['status'];summary['blocking']=gate['blocking'];summary['failed_items']=gate.get('failed_items',[])
         summary['receipts']=h.receipts;summary['wall_seconds']=time.monotonic()-start;summary['peak_rss_kib']=max((r['peak_rss_kib'] for r in h.receipts if r['peak_rss_kib'] is not None),default=None)
         write_json(root/'summary.json',summary);(root/'HEAD').write_text('rev1\n')
     print(json.dumps(dict(status=summary['status'],postroute_timing_status=summary['postroute_timing_status'],functional_status=summary['functional_status'],

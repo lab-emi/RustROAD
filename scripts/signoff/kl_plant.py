@@ -3,7 +3,11 @@
 #   klayout -b -r kl_plant.py -rd gds=IN -rd out=OUT -rd report=JSON -rd kind=KIND
 #       -rd metal=L/D -rd pin_layer=L/D -rd pin_text=L/D -rd draw_layer=L/D -rd boundary=L/D
 #       [-rd via_cell=NAME -rd via_x=DBU -rd via_y=DBU] [-rd pins=A,B] [-rd antenna_pin=NAME]
-# KIND: spacing | offgrid | short | missing_via | antenna | rect | no_boundary | dbu_half
+#       [-rd swap=A,B]
+# KIND: spacing | offgrid | short | missing_via | antenna | rect | no_boundary | dbu_half | label_swap
+#       | missing_label
+# (label_swap: exchange the strings of every top-cell text labelled A or B, on all layers;
+#  missing_label: delete every top-cell text labelled A, i.e. the first name of -rd swap)
 # (rect: -rd rect=x1,y1,x2,y2 in GDS dbu on -rd metal=L/D)
 # Geometry for spacing/offgrid is placed in a region with no shapes on any layer
 # (except the PR boundary) within a 2 um margin, so the planted defect is the
@@ -110,6 +114,29 @@ elif kind == "missing_via":
         raise RuntimeError("expected exactly one %s at %s, found %d" % (via_cell, target, len(victims)))
     victims[0].delete()
     info.update(removed=via_cell, at=[target.x, target.y])
+elif kind == "label_swap":
+    first, second = swap.split(",")
+    swapped = {first: 0, second: 0}
+    for index in ly.layer_indexes():
+        labels = [sh for sh in top.shapes(index).each() if sh.is_text() and sh.text.string in swapped]
+        for shape in labels:
+            t = shape.text
+            swapped[t.string] += 1
+            t.string = second if t.string == first else first
+            shape.text = t
+    if not all(swapped.values()):
+        raise RuntimeError("label_swap: labels not found %r" % swapped)
+    info.update(swapped=swapped, pins=[first, second])
+elif kind == "missing_label":
+    victim = swap.split(",")[0]
+    deleted = 0
+    for index in ly.layer_indexes():
+        for shape in [sh for sh in top.shapes(index).each() if sh.is_text() and sh.text.string == victim]:
+            shape.delete()
+            deleted += 1
+    if not deleted:
+        raise RuntimeError("missing_label: label %r not found" % victim)
+    info.update(deleted_label=victim, deleted=deleted)
 elif kind == "rect":
     r = pya.Box(*[int(v) for v in rect.split(",")])
     top.shapes(metal_li).insert(r)
