@@ -135,15 +135,32 @@ python3 scripts/signoff/signoff.py CHECK --gds LAYOUT.gds --top CELL --pdk sky13
 # CHECK: drc-magic | drc-klayout | antenna | density | lvs-netgen | lvs-klayout | xor | all
 ```
 
-**Preflight (all checks).** A KLayout probe (`kl_probe.py`) checks four
-things. A violation sets the status to `failed`.
+**Preflight (all checks).** A KLayout probe (`kl_probe.py`) checks the
+following. A violation sets the status to `failed`.
 
 - The requested top cell exists. Magic would otherwise silently create an
   empty cell.
+- The requested cell is a top cell of the GDS, and the GDS has exactly one top
+  cell. A library cell inside the GDS given as `--top` (e.g. `and2_2`, which
+  in gf180 even carries its own 0/0 boundary) used to pass Magic DRC, antenna
+  and Netgen LVS; a stray second top cell would never be checked at all.
 - The top cell's bbox is non-empty.
 - The PR boundary is drawn in the top cell itself: sky130 235/4, gf180 0/0.
   This matters because gf180 standard cells carry their own 0/0.
 - The GDS dbu is 0.001 µm.
+
+The probe also lists every text label placed directly in the top cell
+(`top_texts`: layer, string, position in integer picometres) and writes every
+text of the flattened hierarchy to a sorted list with its sha256 (used by the
+XOR label comparison). Geometry outside the PR boundary is reported
+(`geometry_outside_boundary`) but not failed, because standard-cell wells
+legitimately overhang the row boundary.
+
+**Port-label oracle (both LVS checks).** Independently of either LVS tool, the
+set of top-cell label strings must equal the set of reference-netlist ports,
+both ways (`result.port_labels`): every port labelled, every top label a port.
+Its failures are prefixed `port labels:` so they stay distinguishable from the
+tool's own findings.
 
 ### Checks
 
@@ -204,10 +221,24 @@ things. A violation sets the status to `failed`.
   hierarchically.
 - Step 2: `netgen -batch` reads the PDK cell SPICE, then the powered Verilog
   on top of it, with the PDK setup file.
+- The reference Verilog must define exactly one module, named `--top`.
+  Otherwise Netgen silently compares against whatever else carries that name
+  (for a child-cell top, the PDK SPICE subckt of the library cell).
 - Pass requires every comp.json entry clean (`badnets`, `badelements`,
   `properties`, device multisets, net counts, pin sets), the top circuit
-  compared, the final result exactly `Circuits match uniquely.`, and no
-  `property errors` line anywhere in comp.out.
+  compared, the final result exactly `Circuits match uniquely.`, and none of
+  these lines anywhere in comp.out: `property errors`, `port errors`,
+  `(no matching pin)`, `disconnected node`.
+- Port errors matter. A labelled floating metal pin that is not in the
+  reference ends with `Netlists match uniquely with port errors.`, the pin
+  table shows `extra |(no matching pin)`, `Cell lane_smoke (0) disconnected
+  node: extra` is printed, and the final line still says `Circuits match
+  uniquely.`; comp.json drops the pin from both lists. That is a failure here.
+- Magic extraction is evidence of the same flow: Magic's `Ports "A" and "B"
+  are electrically shorted` warning fails the check, and the extracted
+  top-level `.subckt` port list must equal the reference port set. On gf180 a
+  second label on an existing port net (`en_alias` on `en`) is merged by
+  Magic, so Netgen itself matches; the shorted-port warning catches it.
 - Device properties matter. A drive-strength swap with the same topology
   (sky130 `and2_2` -> `and2_4`) ends with `Final result: Circuits match
   uniquely.` followed by `Property errors were found.`, and comp.json lists
@@ -234,6 +265,16 @@ things. A violation sets the status to `failed`.
   library cells a named pin pair must also agree, except the body pins the
   decks synthesize (`LVS_BODY_PINS`: sky130 `sky130_gnd`<->`VNB`, gf180
   `SUB`<->`VPW`); unnamed deck pins (`$n`) are only counted.
+- Labelled nets are compared by the harness. KLayout leaves a labelled
+  floating net (an extra pin label not in the schematic) out of the
+  comparison and still reports `Match` with 12/12 pins. `kl_lvsdb.py` dumps
+  every named (non-`$`) net of the layout top circuit with its pairing; each
+  must be paired, `Match`, with the equally named schematic net.
+- Reference ports are compared by the harness. sky130 `schematic_simplify`
+  drops an unconnected reference port, so the post-simplify pin counts are
+  equal (12 = 12) although the reference has 13 ports. Every port of the
+  reference Verilog must be a paired top-level schematic pin, and every paired
+  schematic pin a reference port (case-insensitive).
 
 **xor**
 
@@ -241,6 +282,11 @@ things. A violation sets the status to `failed`.
   Without `--layer-details`, layers present in only one file are ignored,
   which is a false pass.
 - Pass requires both `No differences found` and an empty difference table.
+- strmxor compares polygons only; text labels are compared separately and
+  exactly: the top-cell labels as a multiset of (layer, string, x, y), and
+  the flattened label lists of both layouts by sha256 with a bounded streaming
+  diff when they differ (`result.labels`). A renamed port label (`en` ->
+  `enx`, geometry identical) is therefore an XOR failure, `counts.labels` 2.
 - Hierarchy facts (cell counts, top instances) are reported.
 
 `all` runs every check except `xor` (which needs `--against`) and writes
@@ -263,7 +309,8 @@ things. A violation sets the status to `failed`.
  "input": {"gds": {"path": "/abs", "sha256": "...", "bytes": 1}, "top_cell": "lane_smoke",
            "reference_netlist": null, "against": null, "against_top": null},
  "preflight": {"dbu_um": 0.001, "bbox_um": [0, 0, 70, 70.56], "boundary_layer": [0, 0],
-               "boundary_shapes_in_top": 1, "assertions": {"top_cell_exists": true,
+               "boundary_shapes_in_top": 1, "top_cells": ["lane_smoke"], "top_labels": ["VDD", "..."],
+               "assertions": {"top_cell_exists": true, "top_is_a_top_cell": true, "single_top_cell": true,
                "bbox_nonempty": true, "boundary_present": true, "dbu_expected": true}},
  "identity": {"status": "verified", "manifest": "...", "manifest_sha256": "...", "mismatches": []},
  "tools": {"klayout": {"version": "KLayout 0.30.9", "files": {"/foss/tools/klayout/klayout": "sha256"}}},
@@ -277,11 +324,41 @@ things. A violation sets the status to `failed`.
  "resources": {"wall_seconds": 3.0, "tool_wall_seconds": 2.9, "peak_rss_kib": 445596}}
 ```
 
+Check-specific `result` fields:
+
+- `lvs-netgen`: `final_result`, `problems` (Netgen's own findings),
+  `property_errors`, `port_error_lines`, `unmatched_pins`,
+  `disconnected_nodes`, `extraction {shorted_ports, extracted_top_ports,
+  layout_only_ports, reference_only_ports, problems}`, `reference_modules`,
+  `port_labels`.
+- `lvs-klayout`: `problems` (from the lvsdb cross-reference), `top_pins
+  {pairs, name_mismatches, unnamed}`, `top_nets {named, unpaired,
+  mismatched}`, `reference_ports {reference, unpaired_reference_ports,
+  schematic_pins_not_ports}`, `child_pins`, `port_labels`.
+- `xor`: `layer_differences`, `labels {status, top, flat {only_in_design,
+  only_in_against, samples_*, design_sha256, against_sha256}}`; `counts` has
+  `geometry` and `labels`.
+
 The status is `failed` when there is any definite failure: a rule item, a
 mismatch or a preflight violation. Otherwise it is `unverified` when any
 evidence is missing: identity, report, completion marker, finite densities.
 Otherwise it is `passed`. Exit codes are 0 for passed, 1 for failed and 3 for
 unverified.
+
+- **Counts.** Whenever a verdict has any unverified reason, every count in
+  `counts` is `null` (never 0), in the per-check file as well as in the
+  summary. A clean, complete run keeps its 0.
+- **Killed tools.** A tool run that exited 124 (timeout), 125-127 (podman
+  could not start it) or 128+N (killed by signal N, e.g. 137 for the OOM
+  killer) is not evidence: the verdict is `unverified` with the reason, even
+  when partial output exists. Exit codes 0/1 are recorded, never trusted.
+- **Manifest completeness.** Before anything is probed, the manifest must hold
+  every file, tree, tool and image entry the harness uses, with paths and
+  roots equal to the generator's spec, and the image ids the harness actually
+  runs. A missing entry gives `unverified` (exit 3) for every check.
+- **Harness errors.** Any unexpected exception writes an `unverified` verdict
+  for each requested check (with the traceback) and exits 3; a crash never
+  produces exit 1, which means `failed`.
 
 ## Reference streamout
 
@@ -332,9 +409,12 @@ are satisfied in context.
 ## Planted controls
 
 Each control is planted with `kl_plant.py` into a copy of the reference GDS.
-Every one is detected on both PDKs (`controls.py`; all 15 entries per PDK are
-as expected). Each LVS control must be caught by each LVS tool on its own; the
-flow gate needing both tools is not counted as detection.
+Every one is detected on both PDKs (`controls.py`; all 23 entries per PDK are
+as expected). Each LVS control must be caught by each LVS flow on its own
+(Netgen: comp.out/comp.json and its Magic extraction; KLayout: the lvsdb
+cross-reference), and for the port/label controls the harness port-label
+oracle must fail as well; the flow gate needing both tools is not counted as
+detection.
 
 | Control | What is planted | Detection |
 |---|---|---|
@@ -351,6 +431,14 @@ flow gate needing both tools is not counted as detection.
 | label swap | exchange the `a[0]` and `a[1]` port labels in the top cell | Netgen `Netlists do not match`; KLayout circuit status is still `Match`, but the pin-name check reports `a[0]<->A[1], a[1]<->A[0]` → `failed` |
 | missing label | delete the `a[0]` port label | Netgen pin matching fails; KLayout pins 11 ≠ 12 and an unnamed top pin pair |
 | cell swap | reference netlist `g0` and2_2 → and2_4 (same function, other drive) | sky130 Netgen: topology matches, 6 width property errors → `failed`; gf180 Netgen pin matching fails; KLayout `NoMatch` on both |
+| extra pin | floating 1×1 µm met3/Metal3 rectangle labelled `extra` (sky130 also on 70/16) | Netgen `port errors`, `extra (no matching pin)`, `disconnected node: extra` (final line still "match uniquely"); KLayout labelled net `extra` unpaired (status still `Match`, 12/12 pins); port-label oracle: `extra` is not a port |
+| extra port | reference netlist gets `input wire extra` (no layout counterpart) | Netgen pin lists differ; KLayout sky130 reference port `extra` not paired (simplify dropped it, 12 = 12 pins), gf180 13 ≠ 12 pins; port-label oracle: port without label |
+| rename label | port text `en` → `enx`, geometry unchanged | XOR geometry 0 but labels differ (2 records) → `failed`; Netgen pin matching fails; KLayout pin/net names differ |
+| alias label | a second label `en_alias` at the `en` label position | sky130 Netgen pin matching fails; gf180 Netgen matches (Magic merges the label) but Magic reports `Ports "en" and "en_alias" are electrically shorted` and the extracted ports differ; KLayout net `en,en_alias`; port-label oracle |
+| child cell as top | `--top` = a library cell inside the GDS (`and2_2`) | every check `failed`: not a top cell; Netgen also: reference defines no such module |
+| extra top cell | uninstantiated `stray_top` cell with one metal rectangle | every check `failed`: GDS has 2 top cells |
+| OOM kill | antenna, drc-klayout and lvs-netgen with a 24 MiB container cap | all `unverified` (exit 137, killed by signal 9) with `counts.total` null |
+| manifest missing entry | `pdks.<pdk>.files.klayout_lvs` deleted from a manifest copy | `lvs-klayout` exit 3 `unverified` ("manifest incomplete"), verdict written, no crash |
 | mini (positive) | clean 2-row PDK-cell layout | Magic and KLayout DRC both `passed` (0) |
 | xor (positive) / LVS (positive) | re-streamed reference; baseline LVS | `passed` |
 
@@ -403,7 +491,8 @@ pre-existing notch item and did not discriminate.)
 
 - The previous overall verdict is now `postroute_timing_status`.
 - The top-level `status` (`scripts/flow_status.py`) requires all of these, on
-  both PDKs, plus `postroute_timing_status == passed` and a functional,
+  both PDKs (exactly one sky130 and one gf180 result; a single-PDK summary is
+  `partial`), plus `postroute_timing_status == passed` and a functional,
   identity-stable flow:
   - `gds`, `drc_magic`, `drc_klayout`, `antenna`, `lvs_netgen`, `lvs_klayout`;
   - `timing_ss_max_setup`, `timing_ss_max_hold`, `timing_ff_min_hold`;
@@ -486,7 +575,12 @@ multi-instance statements are understood. Any statement that is neither a
 declaration nor a recognised instance (for example `always`, `generate`, a
 primitive without a name) and any compiler directive other than
 `timescale`/`default_nettype`/`celldefine`/`resetall` makes the result
-`unverified`, never `passed`. It applies these rules:
+`unverified`, never `passed`. Every instantiated cell must be a MACRO of the
+PDK cell LEF (read from the same pinned root; its sha256 is reported) or a
+module defined in the scanned files. Anything else, such as a black-box
+wrapper whose body is not supplied or an upper-cased excluded cell name, could
+hide an excluded cell, so it gives `unverified` (`unknown_cells`). It applies
+these rules:
 
 - `pnr_exclude` cells are forbidden everywhere.
 - Instances from synthesis must obey the synthesis rule.
@@ -495,8 +589,9 @@ primitive without a name) and any compiler directive other than
 `scripts/signoff/cellpol_controls.py` adds a gf180 `mux2_1` (a `pnr_exclude`
 cell) to the real mapped netlist in five syntaxes (plain, attribute,
 parameter list, second instance of a statement, escaped names): all five are
-`failed`. An added `always` block or `define` gives `unverified`, and the
-unmodified netlists give `passed`.
+`failed`. An added `always` block, a `define`, an instance of an undefined
+`hidden_wrapper` module or an upper-cased `GF180MCU_FD_SC_MCU7T5V0__MUX2_1`
+gives `unverified`, and the unmodified netlists give `passed`.
 
 As a control on the sys scout's `probe.v` with `--timing-period 2`:
 
@@ -538,12 +633,14 @@ which:
 These are real regressions for the routing and hold streams to close. They
 are not hidden.
 
-The fix-round rerun (`.work/final2`) used the worktree's own RustROAD build
-(`fb910e71…`). Its DEF, mapped and powered netlists are byte-identical to the
-earlier run with the main-tree binary, and every timing and signoff number is
-unchanged; only the sky130 density count is now `null` instead of 0. The
-policy-run netlists also pass both LVS tools under the stricter property and
-pin-name checks. A fourth flow variant feeds the planted spacing GDS as the
+The fix-round reruns (`.work/final2`, `.work/final3`) used the worktree's own
+RustROAD build (`fb910e71…`). Their DEF, mapped and powered netlists are
+byte-identical to the earlier run with the main-tree binary, and every timing
+and signoff number is unchanged; only the sky130 density count is now `null`
+instead of 0. In `.work/final3` every flow artifact and timing number is
+byte-identical to `.work/final2`. The policy-run netlists pass both LVS tools
+under the property, pin-name, named-net, reference-port, extraction and
+port-label checks. A fourth flow variant feeds the planted spacing GDS as the
 "native" GDS: XOR fails, `gds` is `failed`, and the run is `failed` (exit 1).
 
 ## Reproduction and resources
@@ -561,31 +658,32 @@ The script covers:
 - the cell-policy scanner controls (`cellpol_controls.py`);
 - the GF180 gap cross-check;
 - the gate what-if;
-- the unit tests (`python3 -m unittest discover -s scripts/tests`, 31 tests);
+- the unit tests (`python3 -m unittest discover -s scripts/tests`, 42 tests);
 - `docs/evidence/signoff-results.json`, written by `evidence.py`.
 
 Measured on this host:
 
 | Step (container wall incl. podman start) | Sky130 | GF180 |
 |---|---|---|
-| Magic DRC (hierarchical + flattened recheck) | 1.0 s, 87 MiB | 0.7 s, 81 MiB |
-| KLayout DRC deck | 3.4 s, 423 MiB | 9.1 s, 433 MiB |
-| Antenna (Magic; gf180 + KLayout deck) | 0.7 s, 71 MiB | 0.5 s + 2.1 s, 416 MiB |
-| Density decks | 1.7 s + 0.9 s, 403 MiB | 1.9 s, 413 MiB |
-| Magic extraction + Netgen | 1.8 s + 0.5 s, 462 MiB | 0.9 s + 0.4 s, 251 MiB |
-| KLayout LVS + xref/pin-pair dump | 3.1 s + 1.6 s, 422 MiB | 10.1 s + 1.8 s, 420 MiB |
-| reference streamout | 2.0 s, 410 MiB | 1.8 s, 404 MiB |
-| `signoff.py all` (incl. identity + preflight) | 17.4 s | 29.9 s |
-| `controls.py` (15 controls) | 119 s, 79 tool runs | 177 s, 78 tool runs |
-| `verify_routing.py` frozen / policy + reference signoff / native path / bad native | 27 s / 81 s / 83 s / 81 s, 406,116 KiB host process | (both PDKs per run) |
-| `gap_crosscheck.py` (planted + baseline deck runs) | | 25 s |
+| Preflight probe (incl. label lists: 12 top labels; 677 / 1056 flattened) | 1.6 s, 402 MiB | 1.7 s, 401 MiB |
+| Magic DRC (hierarchical + flattened recheck) | 1.0 s, 87 MiB | 0.9 s, 82 MiB |
+| KLayout DRC deck | 3.3 s, 427 MiB | 9.3 s, 435 MiB |
+| Antenna (Magic; gf180 + KLayout deck) | 0.7 s, 71 MiB | 0.6 s + 2.3 s, 416 MiB |
+| Density decks | 1.8 s + 0.7 s, 403 MiB | 2.1 s, 413 MiB |
+| Magic extraction + Netgen | 1.7 s + 0.5 s, 462 MiB | 0.9 s + 0.5 s, 251 MiB |
+| KLayout LVS + xref/pin-pair/named-net dump | 3.0 s + 1.7 s, 424 MiB | 8.5 s + 1.6 s, 419 MiB |
+| reference streamout | 2.5 s (host step) | 2.5 s (host step) |
+| `signoff.py all` (incl. identity + preflight) | 16.7 s | 29.2 s |
+| `controls.py` (23 controls) | 200 s, 136 tool runs | 313 s, 136 tool runs |
+| `verify_routing.py` frozen / policy + reference signoff / native path / bad native | 28 s / 82 s / 87 s / 86 s, 405,696 KiB host process | (both PDKs per run) |
+| `gap_crosscheck.py` (planted + baseline deck runs) | | 26 s |
 
-The fix-round `reproduce.sh` run took 9:29 wall (plus 81 s for the bad-native
-flow, run separately and since added to the script). It made 639 container
-tool runs; the largest peak RSS was 474,808 KiB (Netgen reading the full
-sky130 cell SPICE) and none exceeded 1 GiB. All container runs used a 4 GiB
-cap (2 GiB for probes). The largest host process was `verify_routing.py` at
-406,116 KiB. The Rust worktree checks (`cargo build --release`, `cargo clippy
+The fix-round-2 `reproduce.sh` run (`.work/final3`) took 14:37 wall with a
+host peak of 405,696 KiB. It made 754 container tool runs; the largest peak
+RSS was 474,844 KiB (Netgen reading the full sky130 cell SPICE) and none
+exceeded 1 GiB. All container runs used a 4 GiB cap (2 GiB for probes; the
+OOM control deliberately uses 24 MiB). The largest host process was
+`verify_routing.py` at 405,696 KiB. The Rust worktree checks (`cargo build --release`, `cargo clippy
 --workspace --all-targets -- -D warnings`, `cargo test --workspace`) run with
 `PATH=/home/cgao/.cargo/bin` first (the host `/usr/bin/rustc` 1.93.1 fails
 with E0514) under `systemd-run MemoryMax=8G`, see `.work/build-check.sh`.
@@ -613,3 +711,18 @@ with E0514) under `systemd-run MemoryMax=8G`, see `.work/build-check.sh`.
 - KLayout's GDS writer stamps the time unless `gds2_write_timestamps=False`.
 - The PDK CDL is not parseable as a whole for gf180 (line 598). Only the
   needed `.SUBCKT`s are extracted.
+- An extra top-level pin that is not in the reference (a labelled floating
+  metal rectangle) passes both tools on both PDKs unless their outputs are
+  read closely: Netgen prints `port errors`/`(no matching pin)`/`disconnected
+  node` but still `Circuits match uniquely.`; KLayout drops the floating
+  labelled net from the comparison and reports `Match`. Because the reference
+  streamout comes from the same DEF, a DEF-level extra pin would also pass the
+  XOR. The harness now fails on the Netgen lines, on unpaired labelled
+  KLayout nets, and on any top label that is not a reference port.
+- sky130 `schematic_simplify` silently drops an unconnected reference port, so
+  equal top pin counts prove nothing; the reference port list is compared.
+- Netgen compares the layout cell against any reference circuit of the same
+  name, including a PDK library subckt; the reference module name is checked.
+- strmxor ignores text labels; labels are compared separately.
+- Magic (gf180) merges a second label at the same position into the existing
+  port and only warns `Ports ... are electrically shorted`.
