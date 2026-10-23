@@ -222,6 +222,23 @@ XOR-identical to an independent KLayout LEF/DEF reference and gets the same
 Magic/KLayout DRC counts and Netgen/KLayout LVS verdicts. It is not a DRC
 signoff: the known router defects remain. See [the GDS export guide](docs/gds-export.md).
 
+## Native RC extraction
+
+`extract` is read-only. It writes detailed SPEF for the routed HEAD revision,
+atomically and outside the workspace, using a per-corner profile generated from
+PDK data (`scripts/build_rc_profile.py`):
+
+```sh
+rustroad extract --workspace .work/chip --rc-profile fixtures/pdk/sky130-rc-max.json \
+  --corner max --out .work/routed_max.spef
+```
+
+The SPEF imports into RustSTA 0.3 (`wire_model=spef_rc`). The model, SPEF
+naming, budgets and the black-box OpenRCX comparison at min/nom/max on both
+PDKs are in [docs/extraction.md](docs/extraction.md). The result is partial:
+total and per-net C meet their targets against a geometry-identical reference,
+but min/max resistance and ss+max slack do not.
+
 ## Verification and research
 
 - [REA/OpenROAD study and placement evidence](docs/openroad-blackbox.md)

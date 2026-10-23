@@ -89,6 +89,29 @@ enum Command {
         #[arg(long)]
         include_power: bool,
     },
+    /// Read-only native RC extraction of the routed HEAD revision to SPEF.
+    Extract {
+        /// rustroad.rc-profile.v1 JSON (scripts/build_rc_profile.py).
+        #[arg(long)]
+        rc_profile: PathBuf,
+        /// Must equal the profile corner (min, nom or max).
+        #[arg(long)]
+        corner: String,
+        /// SPEF output path, written atomically outside the workspace.
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u64).range(1..=256))]
+        max_spef_mib: u64,
+        /// Straight wire runs longer than this are split into several resistors.
+        #[arg(long, default_value_t = 25.0)]
+        max_segment_um: f64,
+        #[arg(long, default_value_t = 500_000)]
+        max_rc_nodes: usize,
+        #[arg(long, default_value_t = 1_000_000)]
+        max_coupling_caps: usize,
+        #[arg(long, default_value_t = 200_000_000)]
+        max_extract_work: usize,
+    },
     /// Write the linked connectivity/LEF geometry snapshot as JSON.
     ExportConnectivity,
     /// Write a deterministic hierarchical GDSII stream (read-only; HEAD unchanged).
@@ -258,6 +281,42 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             options.max_output_records = max_gds_records;
             emit(&rustroad_workspace::gds::export_gds(
                 &workspace, &options, &limits,
+            )?)
+        }
+        Command::Extract {
+            rc_profile,
+            corner,
+            out,
+            max_spef_mib,
+            max_segment_um,
+            max_rc_nodes,
+            max_coupling_caps,
+            max_extract_work,
+        } => {
+            if !(max_segment_um.is_finite() && (0.1..=10_000.0).contains(&max_segment_um)) {
+                return Err("INVALID_ARGUMENT: --max-segment-um must be within 0.1..=10000".into());
+            }
+            let snapshot_units = rustroad_workspace::read(&workspace, &limits)?
+                .metadata()
+                .design
+                .units_per_micron;
+            let extract_limits = rustroad_core::extract::ExtractLimits {
+                max_nodes: max_rc_nodes,
+                max_couplings: max_coupling_caps,
+                max_work: max_extract_work,
+                max_segment_length: (max_segment_um * f64::from(snapshot_units)).round() as i64,
+                ..Default::default()
+            };
+            emit(&rustroad_workspace::extract::extract(
+                &workspace,
+                &rustroad_workspace::extract::ExtractRequest {
+                    profile: rc_profile,
+                    corner,
+                    out,
+                    max_spef_bytes: max_spef_mib * 1024 * 1024,
+                    limits: extract_limits,
+                },
+                &limits,
             )?)
         }
         Command::FlowCheck { manifest } => {

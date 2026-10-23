@@ -4,4 +4,5 @@ pub mod gds;
 pub mod gdsmap;
 pub mod lef;
 pub mod sdc;
+pub mod spef;
 pub mod verilog;

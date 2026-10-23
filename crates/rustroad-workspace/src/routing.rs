@@ -357,6 +357,17 @@ pub(crate) fn route_technology<'a>(
     Ok((layers, vias, indices))
 }
 
+/// Electrical owner of one routing obstacle, kept for extraction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ObstacleOwner {
+    /// Instance pin shape, by connectivity pin index.
+    InstancePin(u32),
+    InstanceObstruction,
+    /// Signal I/O pin rectangle, by connectivity pin index.
+    PortPin(u32),
+    Supply,
+}
+
 pub(crate) fn build_input(
     design: &Design,
     bundle: &PhysicalBundle,
@@ -364,6 +375,17 @@ pub(crate) fn build_input(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<RouteInput> {
+    build_input_with_owners(design, bundle, placed, config, scope).map(|(input, _)| input)
+}
+
+/// Same routing input plus one owner per obstacle (parallel vector).
+pub(crate) fn build_input_with_owners(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    placed: &[Placed],
+    config: &RoutingConfig,
+    scope: RouteScope,
+) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
     config.validate()?;
     let state = bundle
         .state
@@ -402,12 +424,14 @@ pub(crate) fn build_input(
         .map(|(i, p)| (p.owner, i as u32))
         .collect();
     let mut obstacles = Vec::new();
+    let mut owners = Vec::new();
     let mut terminals = Vec::new();
-    let mut push = |layer: u32, rect: Rect, net: Option<u32>| -> Result<()> {
+    let mut push = |layer: u32, rect: Rect, net: Option<u32>, owner: ObstacleOwner| -> Result<()> {
         if obstacles.len() >= config.limits.max_obstacles {
             return Err(Error::Budget("routing input obstacles".into()));
         }
         obstacles.push(Blockage { layer, rect, net });
+        owners.push(owner);
         Ok(())
     };
     let mut classes = Vec::<AccessClass>::new();
@@ -431,7 +455,7 @@ pub(crate) fn build_input(
                 };
                 let (_, r) = rectangle(geometry)?;
                 let r = rustroad_core::transform_rect(r, p.x, p.y, p.height, orientation)?;
-                push(li, r, net)?;
+                push(li, r, net, ObstacleOwner::InstancePin(pin_ids[&owner]))?;
                 if layers[li as usize].vertical.is_some() {
                     shapes.push(LayerRect { layer: li, rect: r });
                 }
@@ -485,6 +509,7 @@ pub(crate) fn build_input(
                     li,
                     rustroad_core::transform_rect(r, p.x, p.y, p.height, orientation)?,
                     None,
+                    ObstacleOwner::InstanceObstruction,
                 )?;
             }
         }
@@ -508,7 +533,7 @@ pub(crate) fn build_input(
                 bit: bit as u32,
             };
             let net = pin_nets[&owner];
-            push(layer, p.rect, net)?;
+            push(layer, p.rect, net, ObstacleOwner::PortPin(pin_ids[&owner]))?;
             if let Some(net) = net
                 && selected.contains(&net)
             {
@@ -553,6 +578,7 @@ pub(crate) fn build_input(
                     w.width,
                 )?,
                 Some(supply_net(w.polarity)?),
+                ObstacleOwner::Supply,
             )?;
         }
     }
@@ -566,30 +592,43 @@ pub(crate) fn build_input(
         for g in &via.geometries {
             let (name, r) = lef_rectangle(g)?;
             if let Some(&l) = indices.get(name) {
-                push(l, routing::shifted(r, v.at)?, Some(supply_net(v.polarity)?))?;
+                push(
+                    l,
+                    routing::shifted(r, v.at)?,
+                    Some(supply_net(v.polarity)?),
+                    ObstacleOwner::Supply,
+                )?;
             }
         }
     }
     for p in &state.supply.ports {
         if let Some(&l) = indices.get(p.layer.as_str()) {
-            push(l, p.rect, Some(supply_net(p.polarity)?))?;
+            push(
+                l,
+                p.rect,
+                Some(supply_net(p.polarity)?),
+                ObstacleOwner::Supply,
+            )?;
         }
     }
     let access_layer = *indices
         .get(config.access_layer.as_str())
         .ok_or_else(|| fail("configured access layer absent"))?;
-    Ok(RouteInput {
-        die: design.die_area,
-        grid,
-        step: config.grid_step,
-        access_layer,
-        layers,
-        vias,
-        obstacles,
-        terminals,
-        rules: config.lef_rules,
-        access_classes: classes,
-    })
+    Ok((
+        RouteInput {
+            die: design.die_area,
+            grid,
+            step: config.grid_step,
+            access_layer,
+            layers,
+            vias,
+            obstacles,
+            terminals,
+            rules: config.lef_rules,
+            access_classes: classes,
+        },
+        owners,
+    ))
 }
 /// Relative (origin 0,0) pin and same-master other-net geometry of one
 /// (master, orientation, pin) access class on the selected layers.
