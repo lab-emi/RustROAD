@@ -44,9 +44,15 @@ t flow_policy python3 scripts/verify_routing.py --workspace "$RUN/w4/flow-policy
     --signoff-reference "${common[@]}"
 t flow_nativepath python3 scripts/verify_routing.py --workspace "$RUN/w4/flow-nativepath" --base-rev empty --producer frozen \
     --signoff-gds "sky130=$B/ref/sky130.gds" --signoff-gds "gf180=$B/ref/gf180.gds" "${common[@]}"
+# A planted (spacing-control) GDS posing as the native GDS: XOR differs -> gds failed -> status failed (exit 1).
+t flow_nativebad python3 scripts/verify_routing.py --workspace "$RUN/w4/flow-nativebad" --base-rev empty --producer frozen \
+    --signoff-gds "sky130=$B/controls_sky130/spacing.gds" --signoff-gds "gf180=$B/controls_gf180/spacing.gds" "${common[@]}"
 t gap_crosscheck python3 scripts/signoff/gap_crosscheck.py --summary "$RUN/w4/flow-frozen/summary.json" \
     --gds "$B/ref/gf180.gds" --out "$RUN/w3"
 t gate_whatif python3 scripts/flow_status.py "$RUN/w4/flow-frozen/summary.json" --assume-timing-passed
+# Independent cell-policy checker: every instance syntax is seen, uncertifiable statements are unverified.
+t cellpol python3 scripts/signoff/cellpol_controls.py --mapped-gf180 "$RUN/w4/flow-policy/gf180_mapped.v" \
+    --mapped-sky130 "$RUN/w4/flow-policy/sky130_mapped.v" --out "$RUN/cellpol"
 t unit python3 -m unittest discover -s scripts/tests -v
 python3 scripts/signoff/evidence.py --run "$RUN" --out "$RUN/signoff-results.json"
 echo "done: $RUN"

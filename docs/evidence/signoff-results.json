@@ -47,7 +47,7 @@
     "drc-magic": 26,
     "drc-klayout": 9,
     "antenna": 0,
-    "density": 0,
+    "density": null,
     "lvs-netgen": 0,
     "lvs-klayout": 0
    },
@@ -72,14 +72,14 @@
    "gds_sha256": "3d3a78fbdb302c70a3f49af6dcae715f19f28d9cc8b1cbc4c9a9f98b859b54d7",
    "identity": "verified",
    "manifest_sha256": "446347653af195e1337997f57309fa4d8efec1c31be55b9b3a41067ea8775c24",
-   "wall_seconds": 19.836,
+   "wall_seconds": 17.363,
    "peak_rss_kib_per_check": {
-    "drc-magic": 89440,
-    "drc-klayout": 437692,
-    "antenna": 73108,
-    "density": 412768,
-    "lvs-netgen": 473784,
-    "lvs-klayout": 429736
+    "drc-magic": 89392,
+    "drc-klayout": 432980,
+    "antenna": 72688,
+    "density": 412856,
+    "lvs-netgen": 473536,
+    "lvs-klayout": 431876
    },
    "by_cell": {
     "drc-magic": null,
@@ -87,7 +87,7 @@
      "lane_smoke": 9
     },
     "antenna": null,
-    "density": null,
+    "density": {},
     "lvs-netgen": null,
     "lvs-klayout": null
    },
@@ -95,58 +95,58 @@
     "drc-magic": [
      {
       "label": "drc_magic_0",
-      "wall_seconds": 1.218,
-      "peak_rss_kib": 89440
+      "wall_seconds": 1.018,
+      "peak_rss_kib": 89392
      }
     ],
     "drc-klayout": [
      {
       "label": "drc_klayout_klayout_0",
-      "wall_seconds": 3.621,
-      "peak_rss_kib": 437692
+      "wall_seconds": 3.376,
+      "peak_rss_kib": 432980
      }
     ],
     "antenna": [
      {
       "label": "antenna_magic_0",
-      "wall_seconds": 1.017,
-      "peak_rss_kib": 73108
+      "wall_seconds": 0.715,
+      "peak_rss_kib": 72688
      }
     ],
     "density": [
      {
       "label": "density_klayout_0",
-      "wall_seconds": 2.118,
-      "peak_rss_kib": 412768
+      "wall_seconds": 1.719,
+      "peak_rss_kib": 412856
      },
      {
       "label": "density_magic_0",
-      "wall_seconds": 1.169,
-      "peak_rss_kib": 82668
+      "wall_seconds": 0.92,
+      "peak_rss_kib": 83256
      }
     ],
     "lvs-netgen": [
      {
       "label": "lvs_magic_extract_0",
-      "wall_seconds": 1.825,
-      "peak_rss_kib": 74356
+      "wall_seconds": 1.779,
+      "peak_rss_kib": 74236
      },
      {
       "label": "lvs_netgen_0",
-      "wall_seconds": 0.566,
-      "peak_rss_kib": 473784
+      "wall_seconds": 0.521,
+      "peak_rss_kib": 473536
      }
     ],
     "lvs-klayout": [
      {
       "label": "lvs_klayout_0",
-      "wall_seconds": 3.575,
-      "peak_rss_kib": 429736
+      "wall_seconds": 3.126,
+      "peak_rss_kib": 431876
      },
      {
       "label": "lvs_klayout_xref_0",
-      "wall_seconds": 1.874,
-      "peak_rss_kib": 412080
+      "wall_seconds": 1.617,
+      "peak_rss_kib": 412556
      }
     ]
    }
@@ -203,14 +203,14 @@
    "gds_sha256": "9838ac5e1a935d4a32bd036928a4d0943887cc0776fc3c4a1010235efaa319b6",
    "identity": "verified",
    "manifest_sha256": "446347653af195e1337997f57309fa4d8efec1c31be55b9b3a41067ea8775c24",
-   "wall_seconds": 29.675,
+   "wall_seconds": 29.822,
    "peak_rss_kib_per_check": {
-    "drc-magic": 83124,
-    "drc-klayout": 443564,
-    "antenna": 425944,
-    "density": 422752,
-    "lvs-netgen": 256488,
-    "lvs-klayout": 429696
+    "drc-magic": 83452,
+    "drc-klayout": 443496,
+    "antenna": 425684,
+    "density": 423344,
+    "lvs-netgen": 256788,
+    "lvs-klayout": 429608
    },
    "by_cell": {
     "drc-magic": null,
@@ -229,58 +229,58 @@
     "drc-magic": [
      {
       "label": "drc_magic_0",
-      "wall_seconds": 0.966,
-      "peak_rss_kib": 83124
+      "wall_seconds": 0.715,
+      "peak_rss_kib": 83452
      }
     ],
     "drc-klayout": [
      {
       "label": "drc_klayout_klayout_0",
-      "wall_seconds": 9.235,
-      "peak_rss_kib": 443564
+      "wall_seconds": 9.084,
+      "peak_rss_kib": 443496
      }
     ],
     "antenna": [
      {
       "label": "antenna_magic_0",
-      "wall_seconds": 0.617,
-      "peak_rss_kib": 68176
+      "wall_seconds": 0.515,
+      "peak_rss_kib": 68440
      },
      {
       "label": "antenna_klayout_0",
-      "wall_seconds": 2.218,
-      "peak_rss_kib": 425944
+      "wall_seconds": 2.118,
+      "peak_rss_kib": 425684
      }
     ],
     "density": [
      {
       "label": "density_klayout_0",
-      "wall_seconds": 2.019,
-      "peak_rss_kib": 422752
+      "wall_seconds": 1.869,
+      "peak_rss_kib": 423344
      }
     ],
     "lvs-netgen": [
      {
       "label": "lvs_magic_extract_0",
-      "wall_seconds": 0.967,
-      "peak_rss_kib": 68076
+      "wall_seconds": 0.866,
+      "peak_rss_kib": 68436
      },
      {
       "label": "lvs_netgen_0",
-      "wall_seconds": 0.416,
-      "peak_rss_kib": 256488
+      "wall_seconds": 0.365,
+      "peak_rss_kib": 256788
      }
     ],
     "lvs-klayout": [
      {
       "label": "lvs_klayout_0",
-      "wall_seconds": 8.681,
-      "peak_rss_kib": 429696
+      "wall_seconds": 10.088,
+      "peak_rss_kib": 429608
      },
      {
       "label": "lvs_klayout_xref_0",
-      "wall_seconds": 1.818,
-      "peak_rss_kib": 410860
+      "wall_seconds": 1.769,
+      "peak_rss_kib": 410460
      }
     ]
    }
@@ -300,8 +300,8 @@
     "bytes": 398850
    },
    "resources": {
-    "wall_seconds": 1.867,
-    "peak_rss_kib": 418892,
+    "wall_seconds": 1.971,
+    "peak_rss_kib": 419844,
     "receipt": "<run>/baseline/ref/receipts/def2gds_sky130_0/receipt.json"
    }
   },
@@ -318,8 +318,8 @@
     "bytes": 383424
    },
    "resources": {
-    "wall_seconds": 1.721,
-    "peak_rss_kib": 413540,
+    "wall_seconds": 1.769,
+    "peak_rss_kib": 413536,
     "receipt": "<run>/baseline/ref/receipts/def2gds_gf180_0/receipt.json"
    }
   }
@@ -328,9 +328,9 @@
   "sky130": {
    "all_expected": true,
    "resources": {
-    "wall_seconds": 94.082,
-    "tool_runs": 59,
-    "max_peak_rss_kib": 474788
+    "wall_seconds": 119.016,
+    "tool_runs": 79,
+    "max_peak_rss_kib": 474808
    },
    "results": {
     "spacing": {
@@ -356,6 +356,21 @@
     "missing_via": {
      "kind": "negative",
      "expected": "both LVS tools report a mismatch",
+     "detected": true
+    },
+    "label_swap": {
+     "kind": "negative",
+     "expected": "both LVS tools fail on their own; KLayout via the top pin-name comparison",
+     "detected": true
+    },
+    "missing_label": {
+     "kind": "negative",
+     "expected": "both LVS tools fail on their own",
+     "detected": true
+    },
+    "cell_swap": {
+     "kind": "negative",
+     "expected": "both LVS tools fail on their own (Netgen property errors count as a mismatch)",
      "detected": true
     },
     "antenna": {
@@ -398,9 +413,9 @@
   "gf180": {
    "all_expected": true,
    "resources": {
-    "wall_seconds": 131.046,
-    "tool_runs": 58,
-    "max_peak_rss_kib": 444152
+    "wall_seconds": 177.219,
+    "tool_runs": 78,
+    "max_peak_rss_kib": 446444
    },
    "results": {
     "spacing": {
@@ -426,6 +441,21 @@
     "missing_via": {
      "kind": "negative",
      "expected": "both LVS tools report a mismatch",
+     "detected": true
+    },
+    "label_swap": {
+     "kind": "negative",
+     "expected": "both LVS tools fail on their own; KLayout via the top pin-name comparison",
+     "detected": true
+    },
+    "missing_label": {
+     "kind": "negative",
+     "expected": "both LVS tools fail on their own",
+     "detected": true
+    },
+    "cell_swap": {
+     "kind": "negative",
+     "expected": "both LVS tools fail on their own (Netgen property errors count as a mismatch)",
      "detected": true
     },
     "antenna": {
@@ -477,6 +507,19 @@
     "sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
     "cell_policy": null
    },
+   "failed_items": [],
+   "scope": {
+    "level": "block/macro (no pad ring, no seal ring)",
+    "drc": "foundry decks via scripts/signoff when requested, else missing",
+    "lvs": "Netgen + KLayout via scripts/signoff when requested, else missing",
+    "density": "reported separately",
+    "ir_drop": "unchecked",
+    "electromigration": "unchecked",
+    "signal_integrity": "unchecked",
+    "ocv": "unchecked",
+    "timing_accuracy_gate_ns": 0.001,
+    "cppr": "unchecked"
+   },
    "blocking": [
     "*:postroute_timing=partial",
     "sky130:gds=missing",
@@ -504,8 +547,8 @@
     "gf180:drv=unchecked",
     "gf180:cell_policy=unchecked"
    ],
-   "wall_seconds": 26.198,
-   "peak_rss_kib": 405816,
+   "wall_seconds": 27.408,
+   "peak_rss_kib": 405624,
    "pdks": {
     "sky130": {
      "status": "passed",
@@ -703,7 +746,7 @@
    }
   },
   "flow-policy": {
-   "status": "partial",
+   "status": "failed",
    "postroute_timing_status": "partial",
    "functional_status": "passed",
    "producer": {
@@ -711,6 +754,25 @@
     "path": "/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target/release/rustsys",
     "sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
     "cell_policy": "<repo>/fixtures/flow/cell-policy.json"
+   },
+   "failed_items": [
+    "sky130:drc_magic",
+    "sky130:drc_klayout",
+    "sky130:antenna",
+    "gf180:drc_magic",
+    "gf180:drc_klayout"
+   ],
+   "scope": {
+    "level": "block/macro (no pad ring, no seal ring)",
+    "drc": "foundry decks via scripts/signoff when requested, else missing",
+    "lvs": "Netgen + KLayout via scripts/signoff when requested, else missing",
+    "density": "reported separately",
+    "ir_drop": "unchecked",
+    "electromigration": "unchecked",
+    "signal_integrity": "unchecked",
+    "ocv": "unchecked",
+    "timing_accuracy_gate_ns": 0.001,
+    "cppr": "unchecked"
    },
    "blocking": [
     "*:postroute_timing=partial",
@@ -732,8 +794,8 @@
     "gf180:mpw_min_period=unchecked",
     "gf180:drv=unchecked"
    ],
-   "wall_seconds": 82.0,
-   "peak_rss_kib": 405460,
+   "wall_seconds": 81.237,
+   "peak_rss_kib": 405356,
    "pdks": {
     "sky130": {
      "status": "passed",
@@ -828,7 +890,7 @@
       "drc-magic": 25,
       "drc-klayout": 9,
       "antenna": 1,
-      "density": 0,
+      "density": null,
       "lvs-netgen": 0,
       "lvs-klayout": 0
      },
@@ -993,7 +1055,7 @@
    }
   },
   "flow-nativepath": {
-   "status": "partial",
+   "status": "failed",
    "postroute_timing_status": "partial",
    "functional_status": "passed",
    "producer": {
@@ -1001,6 +1063,24 @@
     "path": "/mnt/data2/cgao/git/RustSys/target/release/rustsys",
     "sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
     "cell_policy": null
+   },
+   "failed_items": [
+    "sky130:drc_magic",
+    "sky130:drc_klayout",
+    "gf180:drc_magic",
+    "gf180:drc_klayout"
+   ],
+   "scope": {
+    "level": "block/macro (no pad ring, no seal ring)",
+    "drc": "foundry decks via scripts/signoff when requested, else missing",
+    "lvs": "Netgen + KLayout via scripts/signoff when requested, else missing",
+    "density": "reported separately",
+    "ir_drop": "unchecked",
+    "electromigration": "unchecked",
+    "signal_integrity": "unchecked",
+    "ocv": "unchecked",
+    "timing_accuracy_gate_ns": 0.001,
+    "cppr": "unchecked"
    },
    "blocking": [
     "*:postroute_timing=partial",
@@ -1021,8 +1101,8 @@
     "gf180:drv=unchecked",
     "gf180:cell_policy=unchecked"
    ],
-   "wall_seconds": 82.018,
-   "peak_rss_kib": 405700,
+   "wall_seconds": 82.61,
+   "peak_rss_kib": 406116,
    "pdks": {
     "sky130": {
      "status": "passed",
@@ -1116,7 +1196,7 @@
       "drc-magic": 26,
       "drc-klayout": 9,
       "antenna": 0,
-      "density": 0,
+      "density": null,
       "lvs-netgen": 0,
       "lvs-klayout": 0,
       "xor": 0
@@ -1279,6 +1359,320 @@
      }
     }
    }
+  },
+  "flow-nativebad": {
+   "status": "failed",
+   "postroute_timing_status": "partial",
+   "functional_status": "passed",
+   "producer": {
+    "mode": "frozen",
+    "path": "/mnt/data2/cgao/git/RustSys/target/release/rustsys",
+    "sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
+    "cell_policy": null
+   },
+   "failed_items": [
+    "sky130:gds",
+    "sky130:drc_magic",
+    "sky130:drc_klayout",
+    "gf180:gds",
+    "gf180:drc_magic",
+    "gf180:drc_klayout"
+   ],
+   "scope": {
+    "level": "block/macro (no pad ring, no seal ring)",
+    "drc": "foundry decks via scripts/signoff when requested, else missing",
+    "lvs": "Netgen + KLayout via scripts/signoff when requested, else missing",
+    "density": "reported separately",
+    "ir_drop": "unchecked",
+    "electromigration": "unchecked",
+    "signal_integrity": "unchecked",
+    "ocv": "unchecked",
+    "timing_accuracy_gate_ns": 0.001,
+    "cppr": "unchecked"
+   },
+   "blocking": [
+    "*:postroute_timing=partial",
+    "sky130:gds=failed",
+    "sky130:drc_magic=failed",
+    "sky130:drc_klayout=failed",
+    "sky130:timing_ss_max_setup=missing",
+    "sky130:timing_ss_max_hold=missing",
+    "sky130:timing_ff_min_hold=missing",
+    "sky130:mpw_min_period=unchecked",
+    "sky130:drv=unchecked",
+    "sky130:cell_policy=unchecked",
+    "gf180:gds=failed",
+    "gf180:drc_magic=failed",
+    "gf180:drc_klayout=failed",
+    "gf180:timing_ss_max_setup=missing",
+    "gf180:timing_ss_max_hold=missing",
+    "gf180:timing_ff_min_hold=missing",
+    "gf180:mpw_min_period=unchecked",
+    "gf180:drv=unchecked",
+    "gf180:cell_policy=unchecked"
+   ],
+   "wall_seconds": 80.796,
+   "peak_rss_kib": 405924,
+   "pdks": {
+    "sky130": {
+     "status": "passed",
+     "synth": {
+      "area": 165.1584,
+      "cells": {
+       "sky130_fd_sc_hd__and2_2": 4,
+       "sky130_fd_sc_hd__dfxtp_1": 4,
+       "sky130_fd_sc_hd__xor2_4": 2
+      }
+     },
+     "timing": {
+      "wns_ns": 0.0,
+      "tns_ns": 0.0,
+      "violating_endpoints": 0,
+      "whs_ns": 0.0,
+      "ths_ns": 0.0,
+      "hold_violating_endpoints": 0,
+      "worst_setup_slack_ns": 8.945669658248658,
+      "worst_hold_slack_ns": 0.0002468887865704761
+     },
+     "unanalyzed_arcs": {
+      "min_pulse_width": 4
+     },
+     "opensta_max_difference_ns": 0.0005490974976520846,
+     "opensta_status": "passed",
+     "skew_ns": [
+      0.043527822942,
+      0.02324673906
+     ],
+     "cec": "passed",
+     "native_cec": "equivalent",
+     "simulation": "passed",
+     "geometry": {
+      "routed_nets": 19,
+      "terminals": 46,
+      "wires": 4964,
+      "vias": 101
+     },
+     "planted_gap": {
+      "layer": "met1",
+      "net": "a[0]",
+      "target_net": "en",
+      "gap_dbu": 110,
+      "bump": [
+       9770,
+       14685,
+       10060,
+       15400
+      ],
+      "target": [
+       9740,
+       15510,
+       10060,
+       15770
+      ],
+      "candidates": 52,
+      "lef_spacing_result": "rejected: different-net short or spacing violation",
+      "half_unit_spacing_result": "rejected: different-net short or spacing violation",
+      "gap_um": 0.11,
+      "lef_spacing_dbu": 140,
+      "half_unit_spacing_dbu": 140
+     },
+     "artifacts": {
+      "rtl": "1239bbd086f74052a8f27bdd70db0cdf0e9caf2f7454c72f4b794ab409e3f6f5",
+      "mapped": "cc52904484cc48003cb34d4dc4cbb81347db3bf12a046058598b41f94b4c133b",
+      "netlist": "1ad8fa185c81674e73aced9f851af3a9c45bc15e18d9830e60e9ca5727041be9",
+      "powered": "4e05dce955d612660f5a22dc391b2a7d42f45d409703f55ed7d2f78fd34e68ff",
+      "def": "23b4c5cf2692cc420fea5d35c499e22f37ee233a3ca44f385e19ae01bf21cbbb",
+      "floor": "0e6db14b53fc631975645e6c6833792740e7ac16194e946c0a835cb098c91529",
+      "sdc": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+      "geometry": "fd104572b9ca6722a6f346cedf244b6e3ae863d169a135df0524db2499ce5ef0"
+     },
+     "signoff_statuses": {
+      "gds": "failed",
+      "drc_magic": "failed",
+      "drc_klayout": "failed",
+      "antenna": "passed",
+      "lvs_netgen": "passed",
+      "lvs_klayout": "passed",
+      "density": "unverified",
+      "timing_tt_nom": "passed",
+      "timing_ss_max_setup": "missing",
+      "timing_ss_max_hold": "missing",
+      "timing_ff_min_hold": "missing",
+      "mpw_min_period": "unchecked",
+      "drv": "unchecked",
+      "cell_policy": "unchecked"
+     },
+     "signoff_counts": {
+      "drc-magic": 28,
+      "drc-klayout": 10,
+      "antenna": 0,
+      "density": null,
+      "lvs-netgen": 0,
+      "lvs-klayout": 0,
+      "xor": 2
+     },
+     "signoff_by_rule": {
+      "drc-magic": {
+       "met2.2": 16,
+       "met1.2": 27
+      },
+      "drc-klayout": {
+       "m1.2": 6,
+       "m2.2": 4
+      },
+      "antenna": {},
+      "density": {},
+      "lvs-netgen": {
+       "mismatch": 0
+      },
+      "lvs-klayout": {
+       "mismatch": 0
+      },
+      "xor": {
+       "68/20": 2
+      }
+     },
+     "signoff_evidence_gds": "native",
+     "cell_policy": {
+      "mapped": "passed",
+      "physical": "passed"
+     }
+    },
+    "gf180": {
+     "status": "passed",
+     "synth": {
+      "area": 412.69759999999997,
+      "cells": {
+       "gf180mcu_fd_sc_mcu7t5v0__and2_2": 4,
+       "gf180mcu_fd_sc_mcu7t5v0__dffq_1": 4,
+       "gf180mcu_fd_sc_mcu7t5v0__xor2_2": 2
+      }
+     },
+     "timing": {
+      "wns_ns": 0.0,
+      "tns_ns": 0.0,
+      "violating_endpoints": 0,
+      "whs_ns": -0.6355345830601125,
+      "ths_ns": -2.1930445465871835,
+      "hold_violating_endpoints": 4,
+      "worst_setup_slack_ns": 7.315693878229817,
+      "worst_hold_slack_ns": -0.6355345830601125
+     },
+     "unanalyzed_arcs": {
+      "min_pulse_width": 8,
+      "minimum_period": 8
+     },
+     "opensta_max_difference_ns": 0.0003017938614919835,
+     "opensta_status": "passed",
+     "skew_ns": [
+      0.074712350965,
+      0.065211392939
+     ],
+     "cec": "passed",
+     "native_cec": "equivalent",
+     "simulation": "passed",
+     "geometry": {
+      "routed_nets": 19,
+      "terminals": 46,
+      "wires": 4982,
+      "vias": 77
+     },
+     "planted_gap": {
+      "layer": "Metal1",
+      "net": "clk",
+      "target_net": "rr_clock_2",
+      "gap_dbu": 400,
+      "bump": [
+       117890,
+       57400,
+       120760,
+       57920
+      ],
+      "target": [
+       121160,
+       56010,
+       122340,
+       58090
+      ],
+      "candidates": 2,
+      "lef_spacing_result": "rejected: different-net short or spacing violation",
+      "half_unit_spacing_result": "accepted",
+      "gap_um": 0.2,
+      "lef_spacing_dbu": 460,
+      "half_unit_spacing_dbu": 230
+     },
+     "artifacts": {
+      "rtl": "1239bbd086f74052a8f27bdd70db0cdf0e9caf2f7454c72f4b794ab409e3f6f5",
+      "mapped": "1e06b782693ee505d5e00dc306de1332171845a4b2a79025a17069fc872fc0ba",
+      "netlist": "ed1022d774cfe365fb879344f013363e12ca122936003131a52c5f6e68d1d5a4",
+      "powered": "7e072878ddde2a8b7dc5d4e1862db37b8559b4798c52cea2eb0dc47d4369088d",
+      "def": "f5fd22114abf4e22ba7ea61f88251c7eddaa626fe110af4ff227215dbb5a3084",
+      "floor": "272ce90fd7f536149830d4ebcdc397bf53ff0a93d890ba1c50a27f9c1b374ebf",
+      "sdc": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+      "geometry": "55fe8b7c7e964f8f285132afdd17c4d712e21dbc190d112f475e02084ffdc2eb"
+     },
+     "signoff_statuses": {
+      "gds": "failed",
+      "drc_magic": "failed",
+      "drc_klayout": "failed",
+      "antenna": "passed",
+      "lvs_netgen": "passed",
+      "lvs_klayout": "passed",
+      "density": "failed",
+      "timing_tt_nom": "failed",
+      "timing_ss_max_setup": "missing",
+      "timing_ss_max_hold": "missing",
+      "timing_ff_min_hold": "missing",
+      "mpw_min_period": "unchecked",
+      "drv": "unchecked",
+      "cell_policy": "unchecked"
+     },
+     "signoff_counts": {
+      "drc-magic": 14,
+      "drc-klayout": 8,
+      "antenna": 0,
+      "density": 8,
+      "lvs-netgen": 0,
+      "lvs-klayout": 0,
+      "xor": 2
+     },
+     "signoff_by_rule": {
+      "drc-magic": {
+       "M2.3": 10,
+       "M1.2a": 7
+      },
+      "drc-klayout": {
+       "M1.2a": 5,
+       "M2.3": 3
+      },
+      "antenna": {},
+      "density": {
+       "DCF.1b": 1,
+       "M1.4": 1,
+       "M2.4": 1,
+       "M3.4": 1,
+       "M4.4": 1,
+       "M5.4": 1,
+       "MT.3": 1,
+       "PL.8": 1
+      },
+      "lvs-netgen": {
+       "mismatch": 0
+      },
+      "lvs-klayout": {
+       "mismatch": 0
+      },
+      "xor": {
+       "34/0": 2
+      }
+     },
+     "signoff_evidence_gds": "native",
+     "cell_policy": {
+      "mapped": "passed",
+      "physical": "passed"
+     }
+    }
+   }
   }
  },
  "identity": {
@@ -1307,15 +1701,26 @@
  },
  "gf180_planted_gap_foundry_crosscheck": {
   "agrees": true,
+  "problems": [],
+  "rule": "M1.2a",
+  "baseline_count": 4,
+  "planted_count": 5,
   "deck_counts": {
    "M1.2a": 5,
    "M2.3": 3
   },
-  "items": [
-   "edge-pair: (59.32,28.96;59.325,28.96)|(59.392,29.18;59.32,29.18)",
+  "baseline_counts": {
+   "M1.2a": 4,
+   "M2.3": 3
+  },
+  "new_items": [
    "edge-pair: (59.32,28.96;59.897,28.96)|(59.83,29.18;59.32,29.18)",
    "edge-pair: (60.58,28.586;60.58,29.045)|(60.38,28.96;60.38,28.7)"
   ],
+  "items": [
+   "edge-pair: (60.58,28.586;60.58,29.045)|(60.38,28.96;60.38,28.7)"
+  ],
+  "baseline_items_matching_predicate": [],
   "gap": {
    "layer": "Metal1",
    "net": "clk",
@@ -1341,10 +1746,249 @@
    "half_unit_spacing_dbu": 230
   }
  },
+ "lvs_oracle_controls": {
+  "sky130": {
+   "label_swap": {
+    "plant": {
+     "dbu_um": 0.001,
+     "kind": "label_swap",
+     "pins": [
+      "a[0]",
+      "a[1]"
+     ],
+     "swapped": {
+      "a[0]": 1,
+      "a[1]": 1
+     },
+     "top": "lane_smoke"
+    },
+    "netgen": [
+     "Netgen: lane_smoke: 9 badnets; final result 'Netlists do not match.'"
+    ],
+    "klayout": [
+     "KLayout LVS: top pin names swapped/mismatched (layout<->schematic) a[0]<->A[1], a[1]<->A[0]"
+    ],
+    "klayout_pin_name_mismatches": [
+     [
+      "a[0]",
+      "A[1]"
+     ],
+     [
+      "a[1]",
+      "A[0]"
+     ]
+    ],
+    "klayout_circuit_status": [
+     "Match"
+    ]
+   },
+   "missing_label": {
+    "plant": {
+     "dbu_um": 0.001,
+     "deleted": 1,
+     "deleted_label": "a[0]",
+     "kind": "missing_label",
+     "top": "lane_smoke"
+    },
+    "netgen": [
+     "Netgen: lane_smoke: pin lists differ; final result 'Top level cell failed pin matching.'"
+    ],
+    "klayout": [
+     "KLayout LVS: top pin count layout 11 != schematic 12; unnamed top pin pairs [[None, 'A[0]']]"
+    ]
+   },
+   "cell_swap": {
+    "instance": "g0",
+    "reference_cell": "sky130_fd_sc_hd__and2_2",
+    "swapped_cell": "sky130_fd_sc_hd__and2_4",
+    "netlist": "<run>/baseline/controls_sky130/cell_swap.v",
+    "netgen": [
+     "Netgen: lane_smoke: 6 device property mismatches (sky130_fd_sc_hd__and2_2_3/sky130_fd_pr__nfet_01v8:4 [['w', '1.3']] vs g0/sky130_fd_pr__nfet_01v8:3 [['w', '2.6']]; sky130_fd_sc_hd__and2_2_3/sky130_fd_pr__nfet_01v8:7 [['w', '0.42']] vs g0/sky130_fd_pr__nfet_01v8:4 [['w', '0.65']]; sky130_fd_sc_hd__and2_2_3/sky130_fd_pr__nfet_01v8:3 [['w', '0.42']] vs g0/sky130_fd_pr__nfet_01v8:2 [['w', '0.65']]); comp.out reports property errors (3 lines, e.g. 'The following cells had property errors:')"
+    ],
+    "netgen_property_errors": 6,
+    "netgen_final": "Circuits match uniquely.",
+    "klayout": [
+     "KLayout LVS: circuit lane_smoke|LANE_SMOKE status NoMatch; unnamed top pin pairs [[None, 'Z[0]'], ['z[0]', None]]"
+    ]
+   }
+  },
+  "gf180": {
+   "label_swap": {
+    "plant": {
+     "dbu_um": 0.001,
+     "kind": "label_swap",
+     "pins": [
+      "a[0]",
+      "a[1]"
+     ],
+     "swapped": {
+      "a[0]": 1,
+      "a[1]": 1
+     },
+     "top": "lane_smoke"
+    },
+    "netgen": [
+     "Netgen: lane_smoke: 9 badnets; final result 'Netlists do not match.'"
+    ],
+    "klayout": [
+     "KLayout LVS: top pin names swapped/mismatched (layout<->schematic) a[0]<->A[1], a[1]<->A[0]"
+    ],
+    "klayout_pin_name_mismatches": [
+     [
+      "a[0]",
+      "A[1]"
+     ],
+     [
+      "a[1]",
+      "A[0]"
+     ]
+    ],
+    "klayout_circuit_status": [
+     "Match"
+    ]
+   },
+   "missing_label": {
+    "plant": {
+     "dbu_um": 0.001,
+     "deleted": 1,
+     "deleted_label": "a[0]",
+     "kind": "missing_label",
+     "top": "lane_smoke"
+    },
+    "netgen": [
+     "Netgen: lane_smoke: pin lists differ; final result 'Top level cell failed pin matching.'"
+    ],
+    "klayout": [
+     "KLayout LVS: top pin count layout 11 != schematic 12; unnamed top pin pairs [[None, 'A[0]']]"
+    ]
+   },
+   "cell_swap": {
+    "instance": "g0",
+    "reference_cell": "gf180mcu_fd_sc_mcu7t5v0__and2_2",
+    "swapped_cell": "gf180mcu_fd_sc_mcu7t5v0__and2_4",
+    "netlist": "<run>/baseline/controls_gf180/cell_swap.v",
+    "netgen": [
+     "Netgen: lane_smoke: device counts differ {'nfet_05v0': 12, 'pfet_05v0': 12, 'gf180mcu_fd_sc_mcu7t5v0__dffq_1': 4, 'gf180mcu_fd_sc_mcu7t5v0__clkbuf_1': 3, 'gf180mcu_fd_sc_mcu7t5v0__xor2_2': 2} vs {'nfet_05v0': 14, 'pfet_05v0': 12, 'gf180mcu_fd_sc_mcu7t5v0__dffq_1': 4, 'gf180mcu_fd_sc_mcu7t5v0__clkbuf_1': 3, 'gf180mcu_fd_sc_mcu7t5v0__xor2_2': 2}; lane_smoke: net counts differ [29, 30]; lane_smoke: 1 badnets; lane_smoke: 1 badelements; lane_smoke: pin lists differ; final result 'Top level cell failed pin matching.'"
+    ],
+    "netgen_property_errors": 0,
+    "netgen_final": "Top level cell failed pin matching.",
+    "klayout": [
+     "KLayout LVS: circuit lane_smoke|LANE_SMOKE status NoMatch; unnamed top pin pairs [[None, 'Z[0]'], ['z[0]', None]]"
+    ]
+   }
+  }
+ },
+ "cell_policy_scanner_controls": {
+  "schema": "rustroad.cell-policy-controls.v1",
+  "all_expected": true,
+  "controls": [
+   {
+    "control": "unmodified",
+    "pdk": "gf180",
+    "expected": "passed",
+    "status": "passed",
+    "ok": true,
+    "violations": [],
+    "problems": []
+   },
+   {
+    "control": "unmodified",
+    "pdk": "sky130",
+    "expected": "passed",
+    "status": "passed",
+    "ok": true,
+    "violations": [],
+    "problems": []
+   },
+   {
+    "control": "plain",
+    "pdk": "gf180",
+    "expected": "failed",
+    "status": "failed",
+    "ok": true,
+    "violations": [
+     "gf180mcu_fd_sc_mcu7t5v0__mux2_1"
+    ],
+    "problems": []
+   },
+   {
+    "control": "attribute",
+    "pdk": "gf180",
+    "expected": "failed",
+    "status": "failed",
+    "ok": true,
+    "violations": [
+     "gf180mcu_fd_sc_mcu7t5v0__mux2_1"
+    ],
+    "problems": []
+   },
+   {
+    "control": "parameter",
+    "pdk": "gf180",
+    "expected": "failed",
+    "status": "failed",
+    "ok": true,
+    "violations": [
+     "gf180mcu_fd_sc_mcu7t5v0__mux2_1"
+    ],
+    "problems": []
+   },
+   {
+    "control": "multi_instance",
+    "pdk": "gf180",
+    "expected": "failed",
+    "status": "failed",
+    "ok": true,
+    "violations": [
+     "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
+     "gf180mcu_fd_sc_mcu7t5v0__mux2_1"
+    ],
+    "problems": []
+   },
+   {
+    "control": "escaped",
+    "pdk": "gf180",
+    "expected": "failed",
+    "status": "failed",
+    "ok": true,
+    "violations": [
+     "gf180mcu_fd_sc_mcu7t5v0__mux2_1"
+    ],
+    "problems": []
+   },
+   {
+    "control": "always_block",
+    "pdk": "gf180",
+    "expected": "unverified",
+    "status": "unverified",
+    "ok": true,
+    "violations": [],
+    "problems": [
+     "<run>/cellpol/gf180_always_block.v: unrecognised statement (cannot certify): unsupported statement starting with 'always': 'always @ ( posedge clk ) n0 < = a [ 0'"
+    ]
+   },
+   {
+    "control": "define",
+    "pdk": "gf180",
+    "expected": "unverified",
+    "status": "unverified",
+    "ok": true,
+    "violations": [],
+    "problems": [
+     "<run>/cellpol/gf180_define.v: unrecognised statement (cannot certify): compiler directive '`define CELL mux2_1' can change the netlist"
+    ]
+   }
+  ],
+  "inputs": {
+   "gf180": "<run>/w4/flow-policy/gf180_mapped.v",
+   "sky130": "<run>/w4/flow-policy/sky130_mapped.v"
+  }
+ },
  "gate_whatif_timing_passed": {
   "status": "partial",
   "exit": 3,
   "assume_timing_passed": true,
+  "failed_items": [],
   "blocking": [
    "sky130:gds=missing",
    "sky130:drc_magic=missing",
@@ -1367,80 +2011,90 @@
   ]
  },
  "step_resources": {
+  "cellpol": {
+   "wall": "0:00.05",
+   "host_process_peak_rss_kib": 20924,
+   "exit_status": 0
+  },
   "controls_gf180": {
-   "wall": "2:11.12",
-   "host_process_peak_rss_kib": 47480,
+   "wall": "2:57.29",
+   "host_process_peak_rss_kib": 47280,
    "exit_status": 0
   },
   "controls_sky130": {
-   "wall": "1:34.14",
-   "host_process_peak_rss_kib": 47756,
+   "wall": "1:59.08",
+   "host_process_peak_rss_kib": 47624,
    "exit_status": 0
   },
   "flow_frozen": {
-   "wall": "0:26.30",
-   "host_process_peak_rss_kib": 405816,
+   "wall": "0:27.51",
+   "host_process_peak_rss_kib": 405624,
    "exit_status": 3
+  },
+  "flow_nativebad": {
+   "wall": "1:20.91",
+   "host_process_peak_rss_kib": 405924,
+   "exit_status": 1
   },
   "flow_nativepath": {
-   "wall": "1:22.11",
-   "host_process_peak_rss_kib": 405700,
-   "exit_status": 3
+   "wall": "1:22.73",
+   "host_process_peak_rss_kib": 406116,
+   "exit_status": 1
   },
   "flow_policy": {
-   "wall": "1:22.10",
-   "host_process_peak_rss_kib": 405460,
-   "exit_status": 3
+   "wall": "1:21.35",
+   "host_process_peak_rss_kib": 405356,
+   "exit_status": 1
   },
   "gap_crosscheck": {
-   "wall": "0:13.44",
-   "host_process_peak_rss_kib": 47692,
+   "wall": "0:25.08",
+   "host_process_peak_rss_kib": 46544,
    "exit_status": 0
   },
   "gate_whatif": {
-   "wall": "0:00.04",
-   "host_process_peak_rss_kib": 24672,
+   "wall": "0:00.06",
+   "host_process_peak_rss_kib": 24444,
    "exit_status": 3
   },
   "identity": {
-   "wall": "0:01.95",
-   "host_process_peak_rss_kib": 46144,
+   "wall": "0:01.84",
+   "host_process_peak_rss_kib": 46692,
    "exit_status": 0
   },
   "ref_gf180": {
    "wall": "0:02.52",
-   "host_process_peak_rss_kib": 45596,
+   "host_process_peak_rss_kib": 46460,
    "exit_status": 0
   },
   "ref_sky130": {
-   "wall": "0:02.74",
-   "host_process_peak_rss_kib": 46796,
+   "wall": "0:02.73",
+   "host_process_peak_rss_kib": 46168,
    "exit_status": 0
   },
   "signoff_gf180": {
-   "wall": "0:29.73",
-   "host_process_peak_rss_kib": 47360,
+   "wall": "0:29.88",
+   "host_process_peak_rss_kib": 47312,
    "exit_status": 1
   },
   "signoff_sky130": {
-   "wall": "0:19.90",
-   "host_process_peak_rss_kib": 47244,
+   "wall": "0:17.42",
+   "host_process_peak_rss_kib": 47088,
    "exit_status": 1
   },
   "tampered": {
-   "wall": "0:00.94",
-   "host_process_peak_rss_kib": 46640,
+   "wall": "0:00.96",
+   "host_process_peak_rss_kib": 45452,
    "exit_status": 3
   },
   "unit": {
-   "wall": "0:00.08",
-   "host_process_peak_rss_kib": 25284,
+   "wall": "0:00.09",
+   "host_process_peak_rss_kib": 25376,
    "exit_status": 0
   }
  },
  "container_tool_runs": {
-  "count": 476,
-  "max_peak_rss_kib": 474788,
+  "count": 639,
+  "max_peak_rss_kib": 474808,
   "max_label": "lvs_netgen_0",
   "over_1_gib": 0
  }

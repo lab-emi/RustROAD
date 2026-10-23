@@ -59,6 +59,7 @@ def flow_facts(d: Path) -> dict:
         pdks[p["pdk"]] = entry
     return dict(status=s["status"], postroute_timing_status=s["postroute_timing_status"],
                 functional_status=s["functional_status"], producer=s["producer"],
+                failed_items=s.get("failed_items", []), scope=s.get("scope"),
                 blocking=[f"{b['pdk']}:{b['item']}={b['status']}" for b in s["blocking"]],
                 wall_seconds=round(s["wall_seconds"], 3), peak_rss_kib=s["peak_rss_kib"], pdks=pdks)
 
@@ -80,7 +81,7 @@ def main(argv=None) -> int:
         out["controls"][t] = dict(all_expected=c["all_expected"], resources=c["resources"],
                                   results={x["control"]: dict(kind=x["kind"], expected=x["expected"], detected=x["detected"])
                                            for x in c["controls"]})
-    for name in ("flow-frozen", "flow-policy", "flow-nativepath"):
+    for name in ("flow-frozen", "flow-policy", "flow-nativepath", "flow-nativebad"):
         if (run / "w4" / name / "summary.json").is_file():
             out["flows"][name] = flow_facts(run / "w4" / name)
     ident = run / "identity/identity.json"
@@ -94,8 +95,22 @@ def main(argv=None) -> int:
     gap = run / "w3/gap_crosscheck.json"
     if gap.is_file():
         g = load(gap)
-        out["gf180_planted_gap_foundry_crosscheck"] = dict(agrees=g["agrees"], deck_counts=g["deck_counts"],
-                                                           items=g["deck_items_at_planted_gap"], gap=g["gap"])
+        out["gf180_planted_gap_foundry_crosscheck"] = dict(
+            agrees=g["agrees"], problems=g.get("problems"), rule=g.get("rule"),
+            baseline_count=g.get("baseline_count"), planted_count=g.get("planted_count"),
+            deck_counts=g["deck_counts"], baseline_counts=g.get("baseline_counts"), new_items=g.get("new_items"),
+            items=g["deck_items_at_planted_gap"], baseline_items_matching_predicate=g.get("baseline_items_matching_predicate"),
+            gap=g["gap"])
+    lvs_controls = {}
+    for t in ("sky130", "gf180"):
+        c = load(run / f"baseline/controls_{t}/controls.json")
+        for x in c["controls"]:
+            if x["control"] in ("label_swap", "missing_label", "cell_swap"):
+                lvs_controls.setdefault(t, {})[x["control"]] = x["evidence"]
+    out["lvs_oracle_controls"] = lvs_controls
+    cellpol = run / "cellpol/cellpol.json"
+    if cellpol.is_file():
+        out["cell_policy_scanner_controls"] = load(cellpol)
     whatif = run / "gate_whatif.out"
     if whatif.is_file():
         out["gate_whatif_timing_passed"] = json.loads(whatif.read_text().strip().splitlines()[-1])

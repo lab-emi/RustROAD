@@ -65,7 +65,12 @@ records the following.
   two must agree.
 - The host tools `/usr/bin/magic` 8.3.105, `/usr/bin/klayout` 0.30.0 and
   `/usr/lib/netgen/bin/netgen` 1.5.133, marked `not_for_signoff` with the
-  reason.
+  reason. The same three entries in `fixtures/flow/local-pinned.json` carry a
+  `not_for_signoff` reason too, so `rustroad flow-check` reports them as
+  `not_for_signoff` and keeps the gds_streamout, drc and lvs stages
+  `unverified` (`tool_<id>_not_for_signoff`). Host KLayout is still used by
+  `verify_routing.py`, but only for the RustROAD subset routing-geometry
+  checker, which is not a signoff verdict; the summary labels it that way.
 
 ```sh
 python3 scripts/signoff/manifest.py generate --work .work/manifest-gen   # regenerate (review the diff)
@@ -188,6 +193,10 @@ things. A violation sets the status to `failed`.
   - The PDK `check_density.py` 700 µm windowed check. Below window size it
     refuses, which gives `unverified`.
 - gf180: `gf180mcu.drc decks=density`, counting the global coverage items.
+- Counts are per deck (`counts.by_deck`). `counts.total`, and the summary
+  count, are `null` unless every density deck gave a definitive count, so the
+  sky130 result is never reported as 0. More generally, every summary count is
+  `null` for an `unverified` verdict.
 
 **lvs-netgen**
 
@@ -196,8 +205,13 @@ things. A violation sets the status to `failed`.
 - Step 2: `netgen -batch` reads the PDK cell SPICE, then the powered Verilog
   on top of it, with the PDK setup file.
 - Pass requires every comp.json entry clean (`badnets`, `badelements`,
-  device multisets, net counts, pin sets), the top circuit compared, and the
-  final result exactly `Circuits match uniquely.`
+  `properties`, device multisets, net counts, pin sets), the top circuit
+  compared, the final result exactly `Circuits match uniquely.`, and no
+  `property errors` line anywhere in comp.out.
+- Device properties matter. A drive-strength swap with the same topology
+  (sky130 `and2_2` -> `and2_4`) ends with `Final result: Circuits match
+  uniquely.` followed by `Property errors were found.`, and comp.json lists
+  the width mismatches under `properties`. That is a failure here.
 
 **lvs-klayout**
 
@@ -211,6 +225,15 @@ things. A violation sets the status to `failed`.
 - Pass requires every circuit pair in the `.lvsdb` cross-reference to be
   `Match`, the top-pin counts to be equal, and, for gf180, `Congratulations!
   Netlists match.` in the log.
+- Pin names are compared by the harness. KLayout pairs pins by topology, so
+  swapped labels on the symmetric `a[0]`/`a[1]` bits still report `Match`
+  (and the gf180 deck still prints its congratulations). `kl_lvsdb.py` dumps
+  every pin pair. On the top circuit every pair must join a layout pin and a
+  schematic pin of the same name (case-insensitive, since the SPICE reader
+  upper-cases), every top pin must be named, and names must be unique. In
+  library cells a named pin pair must also agree, except the body pins the
+  decks synthesize (`LVS_BODY_PINS`: sky130 `sky130_gnd`<->`VNB`, gf180
+  `SUB`<->`VPW`); unnamed deck pins (`$n`) are only counted.
 
 **xor**
 
@@ -309,8 +332,9 @@ are satisfied in context.
 ## Planted controls
 
 Each control is planted with `kl_plant.py` into a copy of the reference GDS.
-Every one is detected on both PDKs (`controls.py`; all 12 entries per PDK are
-as expected).
+Every one is detected on both PDKs (`controls.py`; all 15 entries per PDK are
+as expected). Each LVS control must be caught by each LVS tool on its own; the
+flow gate needing both tools is not counted as detection.
 
 | Control | What is planted | Detection |
 |---|---|---|
@@ -324,6 +348,9 @@ as expected).
 | missing report | relative KLayout report path (KLayout exits 0, "Unable to open file") | drc-klayout `unverified` (report not written) |
 | missing 235/4 (sky130) | remove the PR boundary | densities −Infinity/NaN → density not passed; boundary assertion fails |
 | GF180 dbu 0.0005 | geometry-preserving rescale | deck `DBU` ×1 plus the dbu assertion |
+| label swap | exchange the `a[0]` and `a[1]` port labels in the top cell | Netgen `Netlists do not match`; KLayout circuit status is still `Match`, but the pin-name check reports `a[0]<->A[1], a[1]<->A[0]` → `failed` |
+| missing label | delete the `a[0]` port label | Netgen pin matching fails; KLayout pins 11 ≠ 12 and an unnamed top pin pair |
+| cell swap | reference netlist `g0` and2_2 → and2_4 (same function, other drive) | sky130 Netgen: topology matches, 6 width property errors → `failed`; gf180 Netgen pin matching fails; KLayout `NoMatch` on both |
 | mini (positive) | clean 2-row PDK-cell layout | Magic and KLayout DRC both `passed` (0) |
 | xor (positive) / LVS (positive) | re-streamed reference; baseline LVS | `passed` |
 
@@ -362,9 +389,15 @@ GF180 Metal1 bump. The bump overlaps net `clk`'s Via1 pad and leaves exactly
 The sky130 equivalent, a 0.11 µm gap, is rejected.
 
 **Independent oracle.** `gap_crosscheck.py` plants the same bump into the
-reference GDS and runs the gf180 foundry deck. The deck reports a new M1.2a
-edge pair at the planted gap (60.38 → 60.58 µm), so it agrees with the
-corrected subset checker.
+reference GDS and runs the gf180 foundry deck on the planted copy and on the
+unplanted reference, then diffs the two report databases. It agrees only if
+the M1.2a count increases and a NEW M1.2a edge pair has one edge on the
+bump's edge facing the target and the other on the target's facing edge,
+exactly 0.20 µm apart; the same predicate must find nothing in the unplanted
+baseline. The deck reports that edge pair, `(60.58,28.586;60.58,29.045)|
+(60.38,28.96;60.38,28.7)`, so it agrees with the corrected subset checker.
+(The earlier predicate, any M1.2a item within 0.25 µm, also matched a
+pre-existing notch item and did not discriminate.)
 
 **Flow status in `verify_routing.py`.**
 
@@ -375,9 +408,13 @@ corrected subset checker.
   - `gds`, `drc_magic`, `drc_klayout`, `antenna`, `lvs_netgen`, `lvs_klayout`;
   - `timing_ss_max_setup`, `timing_ss_max_hold`, `timing_ff_min_hold`;
   - `mpw_min_period`, `drv`, `cell_policy`.
-- A required item that is missing, unverified, unchecked or failed gives
-  `partial` (exit 3). A functional failure or identity change gives `failed`
-  (exit 1).
+- A definitive failure of a required item (DRC items, antenna violations,
+  an LVS mismatch, a native-GDS XOR difference, a cell-policy violation), a
+  functional failure or an identity change gives `failed` (exit 1) and lists
+  `failed_items`. Otherwise a required item that is missing, unverified or
+  unchecked, or a post-route timing status other than `passed`, gives
+  `partial` (exit 3). `partial` means "not proven", never "proven bad".
+- The scope block reports `cppr: unchecked` together with IR, EM, SI and OCV.
 - `timing_tt_nom` and `density` are reported but not required.
 - RustSTA DRV is always `unchecked`. RustSTA records `set_max_*` without
   analysing it (D0021), so its zero counts are not evidence. OpenSTA's TT
@@ -388,8 +425,10 @@ corrected subset checker.
   timing stream supplies them.
 
 `python3 scripts/flow_status.py SUMMARY.json --assume-timing-passed` replays
-the gate with every timing item forced to `passed`. On the real summary it
-still gives `partial`/exit 3, because the signoff items are missing.
+the gate with every timing item forced to `passed`. On the frozen-producer
+summary (no signoff run) it still gives `partial`/exit 3, because the signoff
+items are missing. The runs that do sign off the reference streamout give
+`failed`/exit 1, because DRC really fails.
 
 ## Producer and cell policy (W4)
 
@@ -440,11 +479,24 @@ python3 scripts/check_cell_policy.py --pdk gf180 --stage physical --mapped mappe
 
 The checker reads the PDK exclusion files directly from the pinned Ciel path,
 restates the owner reservation, and cross-checks the policy's globs and
-source hashes. It applies these rules:
+source hashes. Netlists are read by a small structural-Verilog tokenizer and
+statement classifier: comments and `(* attributes *)` are dropped, escaped
+identifiers are kept whole, and `#(...)` parameter lists, instance arrays and
+multi-instance statements are understood. Any statement that is neither a
+declaration nor a recognised instance (for example `always`, `generate`, a
+primitive without a name) and any compiler directive other than
+`timescale`/`default_nettype`/`celldefine`/`resetall` makes the result
+`unverified`, never `passed`. It applies these rules:
 
 - `pnr_exclude` cells are forbidden everywhere.
 - Instances from synthesis must obey the synthesis rule.
 - Instances added later may only be physical-only or CTS/hold cells.
+
+`scripts/signoff/cellpol_controls.py` adds a gf180 `mux2_1` (a `pnr_exclude`
+cell) to the real mapped netlist in five syntaxes (plain, attribute,
+parameter list, second instance of a statement, escaped names): all five are
+`failed`. An added `always` block or `define` gives `unverified`, and the
+unmodified netlists give `passed`.
 
 As a control on the sys scout's `probe.v` with `--timing-period 2`:
 
@@ -473,7 +525,7 @@ Both runs use the same RustROAD binary (`07788f84…`) and RustSTA 0.3.
 | reference-GDS DRC: KLayout / Magic | 9 / 26 | 9 (m1.2 4, m2.2 4, **m3.2 1**) / 25 | 7 / 13 | 7 / 13 |
 | antenna | 0 | **Magic metal3 ratio 469.5 > 400** | 0 | 0 |
 | LVS Netgen / KLayout | match / match | match / match | match / match | match / match |
-| top-level status | partial (exit 3) | partial (exit 3) | | |
+| top-level status (frozen: no signoff run; policy: reference signoff) | partial (exit 3) | failed (exit 1): DRC + antenna | | failed (exit 1): DRC |
 
 On `pipeline.v` the policy changes nothing: the mapped netlists are
 byte-identical with and without `--dont-use`. Every difference comes from the
@@ -486,6 +538,14 @@ which:
 These are real regressions for the routing and hold streams to close. They
 are not hidden.
 
+The fix-round rerun (`.work/final2`) used the worktree's own RustROAD build
+(`fb910e71…`). Its DEF, mapped and powered netlists are byte-identical to the
+earlier run with the main-tree binary, and every timing and signoff number is
+unchanged; only the sky130 density count is now `null` instead of 0. The
+policy-run netlists also pass both LVS tools under the stricter property and
+pin-name checks. A fourth flow variant feeds the planted spacing GDS as the
+"native" GDS: XOR fails, `gds` is `failed`, and the run is `failed` (exit 1).
+
 ## Reproduction and resources
 
 ```sh
@@ -496,29 +556,39 @@ The script covers:
 
 - identity, reference streamout, `signoff.py all` and controls on both PDKs;
 - the tampered manifest;
-- the three flow variants;
+- the four flow variants (frozen, policy + reference signoff, native path,
+  bad native GDS);
+- the cell-policy scanner controls (`cellpol_controls.py`);
 - the GF180 gap cross-check;
 - the gate what-if;
-- the unit tests (`python3 -m unittest discover -s scripts/tests`, 25 tests);
+- the unit tests (`python3 -m unittest discover -s scripts/tests`, 31 tests);
 - `docs/evidence/signoff-results.json`, written by `evidence.py`.
 
 Measured on this host:
 
 | Step (container wall incl. podman start) | Sky130 | GF180 |
 |---|---|---|
-| Magic DRC (hierarchical + flattened recheck) | 1.2 s, 87 MiB | 1.0 s, 81 MiB |
-| KLayout DRC deck | 3.6 s, 427 MiB | 9.2 s, 433 MiB |
-| Antenna (Magic; gf180 + KLayout deck) | 1.0 s, 71 MiB | 0.6 s + 2.2 s, 416 MiB |
-| Density decks | 2.1 s + 1.2 s, 403 MiB | 2.0 s, 413 MiB |
-| Magic extraction + Netgen | 1.8 s + 0.6 s, 463 MiB | 1.0 s + 0.4 s, 250 MiB |
-| KLayout LVS + xref dump | 3.6 s + 1.9 s, 420 MiB | 8.7 s + 1.8 s, 420 MiB |
-| reference streamout | 2.7 s, 409 MiB | 2.5 s, 404 MiB |
-| `signoff.py all` (incl. identity + preflight) | 19.9 s | 29.7 s |
-| `controls.py` (12 controls) | 94 s | 131 s |
-| `verify_routing.py` frozen / policy + reference signoff / native path | 26 s / 82 s / 82 s, 405,816 KiB host process | (both PDKs per run) |
+| Magic DRC (hierarchical + flattened recheck) | 1.0 s, 87 MiB | 0.7 s, 81 MiB |
+| KLayout DRC deck | 3.4 s, 423 MiB | 9.1 s, 433 MiB |
+| Antenna (Magic; gf180 + KLayout deck) | 0.7 s, 71 MiB | 0.5 s + 2.1 s, 416 MiB |
+| Density decks | 1.7 s + 0.9 s, 403 MiB | 1.9 s, 413 MiB |
+| Magic extraction + Netgen | 1.8 s + 0.5 s, 462 MiB | 0.9 s + 0.4 s, 251 MiB |
+| KLayout LVS + xref/pin-pair dump | 3.1 s + 1.6 s, 422 MiB | 10.1 s + 1.8 s, 420 MiB |
+| reference streamout | 2.0 s, 410 MiB | 1.8 s, 404 MiB |
+| `signoff.py all` (incl. identity + preflight) | 17.4 s | 29.9 s |
+| `controls.py` (15 controls) | 119 s, 79 tool runs | 177 s, 78 tool runs |
+| `verify_routing.py` frozen / policy + reference signoff / native path / bad native | 27 s / 81 s / 83 s / 81 s, 406,116 KiB host process | (both PDKs per run) |
+| `gap_crosscheck.py` (planted + baseline deck runs) | | 25 s |
 
-The whole `reproduce.sh` run took 8:07 wall. It made 476 container tool runs; the largest peak RSS was
-474,788 KiB (Netgen reading the full sky130 cell SPICE) and none exceeded 1 GiB. All container runs used a 4 GiB cap (2 GiB for probes).
+The fix-round `reproduce.sh` run took 9:29 wall (plus 81 s for the bad-native
+flow, run separately and since added to the script). It made 639 container
+tool runs; the largest peak RSS was 474,808 KiB (Netgen reading the full
+sky130 cell SPICE) and none exceeded 1 GiB. All container runs used a 4 GiB
+cap (2 GiB for probes). The largest host process was `verify_routing.py` at
+406,116 KiB. The Rust worktree checks (`cargo build --release`, `cargo clippy
+--workspace --all-targets -- -D warnings`, `cargo test --workspace`) run with
+`PATH=/home/cgao/.cargo/bin` first (the host `/usr/bin/rustc` 1.93.1 fails
+with E0514) under `systemd-run MemoryMax=8G`, see `.work/build-check.sh`.
 
 ## Traps handled
 
@@ -533,8 +603,11 @@ The whole `reproduce.sh` run took 8:07 wall. It made 476 container tool runs; th
 - KLayout deep mode reports some items in child cells. Counts cover all
   cells.
 - strmxor without `--layer-details` ignores layers missing in one file.
-- KLayout LVS without `top_lvl_pins` compares 0 top pins, so swapped port
-  labels would still match.
+- KLayout LVS without `top_lvl_pins` compares 0 top pins. With it, KLayout
+  still pairs pins by topology, so swapped port labels on symmetric bits
+  still match; only the harness's pin-name comparison catches them.
+- Netgen reports a same-topology device-parameter mismatch as `Circuits match
+  uniquely.` plus `Property errors were found.`.
 - The gf180 `run_lvs.py` and the KLayout DRC decks exit 0 on failure, and
   Netgen always exits 0.
 - KLayout's GDS writer stamps the time unless `gds2_write_timestamps=False`.
