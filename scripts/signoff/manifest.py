@@ -289,6 +289,90 @@ def load(path: Path = DEFAULT_MANIFEST) -> dict:
     return data
 
 
+EXTRA_TOOLS = {"openroad": dict(image="orfs", files=[ORFS_OPENROAD]),
+               "opensta": dict(host=True, path=OPENSTA_HOST)}
+
+
+def structure_mismatches(manifest, pdks: list[str], tools: list[str]) -> list[str]:
+    """Every entry the harness relies on must be present and equal to the generator's spec.
+
+    A manifest that lacks a required file/tree/tool entry, or whose paths, roots
+    or images differ from what the harness runs, cannot vouch for the run: the
+    caller turns any problem listed here into ``unverified``.
+    """
+    out: list[str] = []
+    if not isinstance(manifest, dict):
+        return ["manifest is not a JSON object"]
+    images = manifest.get("images")
+    if not isinstance(images, dict):
+        return ["manifest has no images table"]
+    for key, want in (("iic_osic_tools", container.SIGNOFF_IMAGE), ("orfs", ORFS_IMAGE)):
+        got = images.get(key)
+        if not isinstance(got, dict) or got.get("id") != want:
+            out.append(f"image {key} entry missing or not the image the harness runs ({want[:12]})")
+        elif not isinstance(got.get("repo_digests"), list):
+            out.append(f"image {key} has no repo_digests list")
+    table = manifest.get("tools")
+    if not isinstance(table, dict):
+        return out + ["manifest has no tools table"]
+    for name in tools:
+        entry = table.get(name)
+        if not isinstance(entry, dict):
+            out.append(f"tool {name} entry missing")
+            continue
+        if name in TOOL_SPEC:
+            spec = TOOL_SPEC[name]
+            if entry.get("image") != "iic_osic_tools":
+                out.append(f"tool {name} is not pinned to the iic_osic_tools image")
+            files, trees = entry.get("files"), entry.get("trees")
+            if not isinstance(files, dict) or not isinstance(trees, dict):
+                out.append(f"tool {name} files/trees tables missing")
+                continue
+            out += [f"tool {name} file entry {f} missing" for f in spec["files"]
+                    if not isinstance(files.get(f), dict) or "sha256" not in files[f] or "bytes" not in files[f]]
+            out += [f"tool {name} tree entry {t} missing" for t in spec["trees"]
+                    if not isinstance(trees.get(t), dict) or "sha256" not in trees[t] or "files" not in trees[t]]
+            if entry.get("version_command") != spec["version"] or entry.get("version_regex") != spec["expect"]:
+                out.append(f"tool {name} version probe differs from the harness spec")
+        elif name in EXTRA_TOOLS:
+            spec = EXTRA_TOOLS[name]
+            if spec.get("host"):
+                if entry.get("path") != spec["path"] or not entry.get("sha256"):
+                    out.append(f"host tool {name} path/sha256 entry missing or changed")
+            elif entry.get("image") != spec["image"] or any(
+                    not isinstance((entry.get("files") or {}).get(f), dict) or
+                    not (entry.get("files") or {})[f].get("sha256") for f in spec["files"]):
+                out.append(f"tool {name} image/file entries missing")
+        else:
+            out.append(f"tool {name} is not a known signoff tool")
+    pdk_table = manifest.get("pdks")
+    if not isinstance(pdk_table, dict):
+        return out + ["manifest has no pdks table"]
+    for tag in pdks:
+        spec, entry = PDK_SPEC.get(tag), pdk_table.get(tag)
+        if spec is None:
+            out.append(f"pdk {tag} is not a known PDK")
+            continue
+        if not isinstance(entry, dict):
+            out.append(f"pdk {tag} not in manifest")
+            continue
+        for key, want in spec.items():
+            if key in ("files", "trees"):
+                continue
+            if entry.get(key) != want:
+                out.append(f"pdk {tag} {key} missing or differs from the harness spec")
+        for table_key, check_field in (("files", "bytes"), ("trees", "files")):
+            have = entry.get(table_key)
+            if not isinstance(have, dict):
+                out.append(f"pdk {tag} {table_key} table missing")
+                continue
+            for key, rel in spec[table_key].items():
+                got = have.get(key)
+                if not isinstance(got, dict) or got.get("path") != rel or not got.get("sha256") or check_field not in got:
+                    out.append(f"pdk {tag} {table_key[:-1]} entry {key} ({rel}) missing or changed")
+    return out
+
+
 def verify(path: Path, out_dir: Path, pdks: list[str], tools: list[str], label: str = "identity",
            host_files: bool = True) -> dict:
     """Re-verify identities. Never raises for identity problems: returns status=unverified."""
@@ -299,6 +383,12 @@ def verify(path: Path, out_dir: Path, pdks: list[str], tools: list[str], label: 
         manifest_sha = sha256_file(path)[0]
     except (OSError, ValueError, json.JSONDecodeError) as error:
         return dict(status="unverified", mismatches=[f"manifest unreadable: {error}"], receipts=[])
+    structural = structure_mismatches(manifest, pdks, tools)
+    if structural:
+        # Nothing below can be trusted (or even indexed) without the required entries.
+        return dict(status="unverified", manifest=str(path), manifest_sha256=manifest_sha, pdks=pdks, tools=tools,
+                    mismatches=["manifest incomplete: " + m for m in structural], receipts=[],
+                    checked=dict(files=0, trees=0, versions=0))
     images_needed = {"iic_osic_tools"} | {manifest["tools"][t].get("image") for t in tools
                                           if t in manifest["tools"] and manifest["tools"][t].get("image")}
     for key in sorted(images_needed):
