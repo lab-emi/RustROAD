@@ -5,6 +5,7 @@ use slotmap::{Key, SlotMap, new_key_type};
 use std::collections::{HashMap, HashSet};
 
 pub mod connectivity;
+pub mod extract;
 pub mod io;
 pub mod power;
 pub mod routing;
