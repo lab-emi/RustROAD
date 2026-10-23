@@ -114,6 +114,13 @@ regular-file checks and nonblocking opens reject FIFOs. No subprocess is started
 by the Rust API. Expected RSS is below 16 MiB excluding runtime/CLI state; no
 per-node graphs, tag tables, cuts, clauses or paths are created.
 
+A tool entry may carry `"not_for_signoff": "<reason>"`. Such a tool's identity
+is reported as `not_for_signoff` and every stage that depends on it stays
+`unverified` with `tool_<id>_not_for_signoff` in `missing`. The host Magic
+8.3.105, KLayout 0.30.0 and Netgen 1.5.133 in `local-pinned.json` are marked
+this way; foundry signoff uses the pinned image in
+`fixtures/flow/signoff-pinned.json` (see [signoff.md](signoff.md)).
+
 `ready_to_attempt` only means required pinned files matched. Every stage still
 has `verification_status: "not_run"`; missing or mismatched inputs are
 `unverified`. Unknown timing scope fields are `null`, never invented zeroes.
