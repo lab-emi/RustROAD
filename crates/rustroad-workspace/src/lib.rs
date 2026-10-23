@@ -9,6 +9,7 @@ use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 pub mod clock;
+pub mod gds;
 pub mod pdk;
 pub mod physical;
 pub mod routing;
@@ -33,6 +34,9 @@ pub enum Error {
     Invalid(String),
     #[error("BUDGET_EXCEEDED: {0}")]
     Budget(String),
+    /// Coded stream-export failure (e.g. GDS_ODD_COORDINATE, GDS_CELL_MISSING).
+    #[error("{code}: {message}")]
+    Gds { code: &'static str, message: String },
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
