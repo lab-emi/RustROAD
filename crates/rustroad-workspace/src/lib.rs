@@ -9,6 +9,8 @@ use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 pub mod pdk;
+pub mod physical;
+pub mod ties;
 use rustroad_core::connectivity::{ConnectedDesign, ConnectivityLimits, PinOwner};
 
 pub const MAX_METADATA_BYTES: u64 = 16 * 1024 * 1024;
@@ -72,6 +74,10 @@ pub struct Summary {
     pub power_grid_status: &'static str,
     pub io_placement_status: &'static str,
     pub diagnostics: Vec<pdk::Diagnostic>,
+    pub inserted_tie_cells: Option<usize>,
+    pub filler_cells: Option<usize>,
+    pub rail_continuity_status: &'static str,
+    pub body_bias_status: &'static str,
 }
 impl Metadata {
     pub fn summary(&self) -> Summary {
@@ -101,12 +107,38 @@ impl Metadata {
             } else {
                 "not_imported"
             },
-            power_grid_status: "unchecked",
-            io_placement_status: "not_placed",
+            power_grid_status: if self.physical.as_ref().is_some_and(|p| p.state.is_some()) {
+                "primary_grid_generated"
+            } else {
+                "unchecked"
+            },
+            io_placement_status: if self.physical.as_ref().is_some_and(|p| p.state.is_some()) {
+                "placed_geometry_checked"
+            } else {
+                "not_placed"
+            },
             diagnostics: self
                 .physical
                 .as_ref()
                 .map_or_else(Vec::new, |p| p.diagnostics.clone()),
+            inserted_tie_cells: self
+                .physical
+                .as_ref()
+                .and_then(|p| p.ties.as_ref().map(|t| t.new_cells)),
+            filler_cells: self
+                .physical
+                .as_ref()
+                .and_then(|p| p.state.as_ref().map(|s| s.fillers_added)),
+            rail_continuity_status: if self.physical.as_ref().is_some_and(|p| p.state.is_some()) {
+                "geometry_checked"
+            } else {
+                "unchecked"
+            },
+            body_bias_status: if self.physical.as_ref().is_some_and(|p| p.config.is_some()) {
+                "logically_connected"
+            } else {
+                "unchecked"
+            },
         }
     }
 }
@@ -117,6 +149,7 @@ pub struct Snapshot {
     metadata: Metadata,
     map: Mmap,
     _connections: Option<ConnectionMaps>,
+    _layout: Option<Mmap>,
 }
 struct ConnectionMaps {
     _pins: Option<Mmap>,
@@ -141,26 +174,36 @@ impl Snapshot {
         }
         let records = self.records().collect::<Vec<_>>();
         if let Some(physical) = &self.metadata.physical {
-            rustroad_core::connectivity::write_connected_def(
-                &self.metadata.design,
-                &records,
-                &physical.connectivity,
-                &ConnectivityLimits::default(),
-                output,
-            )?;
+            if physical.config.is_some() {
+                crate::physical::export_def(&self.metadata.design, &records, physical, output)?;
+            } else {
+                rustroad_core::connectivity::write_connected_def(
+                    &self.metadata.design,
+                    &records,
+                    &physical.connectivity,
+                    &ConnectivityLimits::default(),
+                    output,
+                )?;
+            }
         } else {
             rustroad_core::write_def(&self.metadata.design, &records, output)?;
         }
         Ok(())
     }
     pub fn export_verilog(&self, output: &mut impl Write) -> Result<()> {
+        self.export_verilog_with_power(false, output)
+    }
+    pub fn export_verilog_with_power(
+        &self,
+        include_power: bool,
+        output: &mut impl Write,
+    ) -> Result<()> {
         let physical = self
             .metadata
             .physical
             .as_ref()
             .ok_or_else(|| Error::Invalid("no mapped netlist imported".into()))?;
-        rustroad_formats::verilog::write_verilog(&physical.netlist, output)
-            .map_err(|e| Error::Invalid(e.to_string()))?;
+        crate::physical::export_verilog(physical, include_power, output)?;
         Ok(())
     }
     pub fn connectivity(&self) -> Option<&ConnectedDesign> {
@@ -205,14 +248,35 @@ pub fn place(path: &Path, base_rev: &str, limits: &Limits) -> Result<Summary> {
     let current = head(path)?;
     check_base(base_rev, &current)?;
     let snapshot = load(path, lock, limits)?;
-    let db = DesignDb::new(&snapshot.metadata.design, limits)?;
-    let placement = place_cpu_ref(&db, limits)?;
     let mut metadata = snapshot.metadata.clone();
+    if let Some(bundle) = &mut metadata.physical
+        && bundle.config.is_some()
+    {
+        crate::physical::clear_fillers(&mut metadata.design, bundle)?;
+    }
+    let db = DesignDb::new(&metadata.design, limits)?;
+    let placement = place_cpu_ref(&db, limits)?;
+    let mut records = placement.cells;
+    let mut expansions = placement.expansions;
+    if let Some(bundle) = &mut metadata.physical
+        && bundle.config.is_some()
+    {
+        let (p, e) = crate::physical::prepare(&mut metadata.design, bundle, records, limits)?;
+        records = p;
+        expansions = expansions
+            .checked_add(e)
+            .ok_or_else(|| Error::Budget("placement work overflow".into()))?;
+    }
+    if expansions > limits.max_expansions {
+        return Err(Error::Budget(
+            "physical placement expansions exceeded".into(),
+        ));
+    }
     metadata.parent_revision = current;
     metadata.stage = Stage::Placed;
-    metadata.expansions = placement.expansions;
+    metadata.expansions = expansions;
     // Keep the exclusive lock for the entire calculation and publication.
-    commit(path, metadata, &placement.cells)
+    commit(path, metadata, &records)
 }
 
 pub fn read(path: &Path, limits: &Limits) -> Result<Snapshot> {
@@ -319,14 +383,20 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         &revision_dir.join("design.json"),
         MAX_METADATA_BYTES,
     )?)?;
-    if !matches!(metadata.format_version, 1 | 2)
+    if !matches!(metadata.format_version, 1..=3)
         || metadata.revision != current
         || revision_number(&metadata.parent_revision)? >= revision_number(&current)?
     {
         return Err(Error::Invalid("snapshot schema/revision mismatch".into()));
     }
     metadata.design.validate(limits)?;
-    if (metadata.format_version == 2) != metadata.physical.is_some() {
+    if (metadata.format_version >= 2) != metadata.physical.is_some()
+        || (metadata.format_version == 3)
+            != metadata
+                .physical
+                .as_ref()
+                .is_some_and(|p| p.config.is_some())
+    {
         return Err(Error::Invalid("connected schema/payload mismatch".into()));
     }
     let connections = if let Some(physical) = &metadata.physical {
@@ -365,6 +435,7 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         metadata,
         map,
         _connections: connections,
+        _layout: None,
     };
     let mut seen = HashSet::with_capacity(snapshot.metadata.design.cells.len());
     for (record, cell) in snapshot.records().zip(&snapshot.metadata.design.cells) {
@@ -378,41 +449,39 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
             ));
         }
     }
+    let mut snapshot = snapshot;
     if snapshot.metadata.stage == Stage::Placed {
         check_placed(&snapshot)?;
+        if let Some(bundle) = &snapshot.metadata.physical
+            && bundle.config.is_some()
+        {
+            let records = snapshot.records().collect::<Vec<_>>();
+            crate::physical::validate_state(&snapshot.metadata.design, bundle, &records)?;
+            let expected = crate::physical::table_bytes(bundle.state.as_ref().unwrap())?;
+            let map = map_table(&revision_dir.join("physical.rbin"), expected.len())?
+                .ok_or_else(|| Error::Invalid("empty prepared geometry table".into()))?;
+            if map[..] != expected {
+                return Err(Error::Invalid("prepared geometry table mismatch".into()));
+            }
+            snapshot._layout = Some(map);
+        }
+    } else if snapshot
+        .metadata
+        .physical
+        .as_ref()
+        .is_some_and(|p| p.state.is_some())
+    {
+        return Err(Error::Invalid(
+            "imported snapshot has prepared state".into(),
+        ));
     }
     Ok(snapshot)
 }
 
-// Linear validation for the version-1 fixed-order row-packer snapshot contract.
 fn check_placed(snapshot: &Snapshot) -> Result<()> {
-    let design = &snapshot.metadata.design;
-    let mut row_index = 0;
-    let mut previous_right = design.rows[0].x_start;
-    for cell in snapshot.records() {
-        while row_index < design.rows.len() && design.rows[row_index].y < cell.y {
-            row_index += 1;
-            if row_index < design.rows.len() {
-                previous_right = design.rows[row_index].x_start;
-            }
-        }
-        let row = design
-            .rows
-            .get(row_index)
-            .ok_or_else(|| Error::Invalid("instance outside rows".into()))?;
-        let right = cell
-            .x
-            .checked_add(cell.width)
-            .ok_or_else(|| Error::Invalid("coordinate overflow".into()))?;
-        if cell.y != row.y
-            || cell.x < previous_right
-            || right > row.x_end
-            || (i128::from(cell.x) - i128::from(row.x_start)) % i128::from(design.site.width) != 0
-        {
-            return Err(Error::Invalid("illegal placement in snapshot".into()));
-        }
-        previous_right = right;
-    }
+    let records = snapshot.records().collect::<Vec<_>>();
+    rustroad_core::validate_placement(&snapshot.metadata.design, &records, &Limits::default())
+        .map_err(|e| Error::Invalid(e.to_string()))?;
     Ok(())
 }
 
@@ -460,6 +529,12 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
     if let Some(physical) = &metadata.physical {
         pdk::validate_bundle(physical, &metadata.design, &ConnectivityLimits::default())?;
         write_connection_tables(&directory, &metadata.design, &physical.connectivity)?;
+        if let Some(state) = &physical.state {
+            write_new(
+                &directory.join("physical.rbin"),
+                &crate::physical::table_bytes(state)?,
+            )?;
+        }
     }
     sync_directory(&directory)?;
     sync_directory(&path.join("revisions"))?;
@@ -699,6 +774,7 @@ mod tests {
                 x_start: 0,
                 x_end: 100,
                 y: 0,
+                orientation: rustroad_core::Orientation::N,
             }],
             cells: vec![Cell {
                 name: "u0".into(),

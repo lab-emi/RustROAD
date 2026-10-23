@@ -5,6 +5,47 @@ use slotmap::{Key, SlotMap, new_key_type};
 use std::collections::{HashMap, HashSet};
 
 pub mod connectivity;
+pub mod io;
+pub mod power;
+pub mod supply;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Orientation {
+    #[default]
+    N,
+    FS,
+}
+
+pub fn transform_rect(
+    rect: Rect,
+    x: i64,
+    y: i64,
+    height: i64,
+    orientation: Orientation,
+) -> Result<Rect> {
+    if !rect.valid() || height <= 0 {
+        return Err(Error::Invalid("invalid rectangle transform input".into()));
+    }
+    let (ly, uy) = match orientation {
+        Orientation::N => (
+            i128::from(y) + i128::from(rect.ly),
+            i128::from(y) + i128::from(rect.uy),
+        ),
+        Orientation::FS => (
+            i128::from(y) + i128::from(height) - i128::from(rect.uy),
+            i128::from(y) + i128::from(height) - i128::from(rect.ly),
+        ),
+    };
+    let convert = |v: i128| {
+        i64::try_from(v).map_err(|_| Error::Invalid("rectangle transform overflow".into()))
+    };
+    Ok(Rect {
+        lx: convert(i128::from(x) + i128::from(rect.lx))?,
+        ly: convert(ly)?,
+        ux: convert(i128::from(x) + i128::from(rect.ux))?,
+        uy: convert(uy)?,
+    })
+}
 
 new_key_type! { pub struct InstId; }
 
@@ -69,6 +110,8 @@ pub struct Row {
     pub x_start: i64,
     pub x_end: i64,
     pub y: i64,
+    #[serde(default)]
+    pub orientation: Orientation,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -354,6 +397,65 @@ pub fn place_cpu_ref(db: &DesignDb, limits: &Limits) -> Result<Placement> {
     Ok(Placement { cells, expansions })
 }
 
+impl Orientation {
+    pub fn def(self) -> &'static str {
+        match self {
+            Self::N => "N",
+            Self::FS => "FS",
+        }
+    }
+}
+
+pub fn placed_orientation(design: &Design, placed: &Placed) -> Result<Orientation> {
+    let index = design
+        .rows
+        .binary_search_by_key(&placed.y, |r| r.y)
+        .map_err(|_| Error::Invalid("instance outside rows".into()))?;
+    Ok(design.rows[index].orientation)
+}
+
+/// Bounded order-independent validation permits physical-only filler instances
+/// to be appended after logical cells without changing their IDs/order.
+pub fn validate_placement(design: &Design, cells: &[Placed], limits: &Limits) -> Result<()> {
+    design.validate(limits)?;
+    if cells.len() != design.cells.len() {
+        return Err(Error::Invalid("placement length mismatch".into()));
+    }
+    let mut intervals = Vec::with_capacity(cells.len());
+    for (cell, spec) in cells.iter().zip(&design.cells) {
+        let index = design
+            .rows
+            .binary_search_by_key(&cell.y, |r| r.y)
+            .map_err(|_| Error::Invalid("illegal placement: instance outside rows".into()))?;
+        let row = design.rows[index];
+        let right = cell
+            .x
+            .checked_add(cell.width)
+            .ok_or_else(|| Error::Invalid("coordinate overflow".into()))?;
+        if cell.width != spec.width
+            || cell.height != spec.height
+            || cell.x < row.x_start
+            || right > row.x_end
+            || (i128::from(cell.x) - i128::from(row.x_start)) % i128::from(design.site.width) != 0
+        {
+            return Err(Error::Invalid(
+                "illegal placement: dimensions/bounds/grid".into(),
+            ));
+        }
+        intervals.push((index, cell.x, right));
+    }
+    intervals.sort_unstable();
+    if intervals
+        .windows(2)
+        .any(|w| w[0].0 == w[1].0 && w[0].2 > w[1].1)
+    {
+        return Err(Error::Invalid(
+            "illegal placement: overlapping cells".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Serialize fixed-order placement only. Nets, pin geometry, routing and signoff
 /// are absent. Validate even when called outside the workspace API.
 pub fn write_def(
@@ -365,57 +467,21 @@ pub fn write_def(
     writeln!(output, "END DESIGN")
 }
 
-pub(crate) fn write_def_components(
+pub fn write_def_components(
     design: &Design,
     cells: &[Placed],
     output: &mut impl std::io::Write,
 ) -> std::io::Result<()> {
-    use std::io::{Error, ErrorKind};
-    if cells.len() != design.cells.len() {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            "placement length mismatch",
-        ));
-    }
-    let limits = Limits {
-        max_cells: cells.len(),
-        max_rows: design.rows.len(),
-        max_expansions: 0,
-    };
-    design
-        .validate(&limits)
-        .map_err(|error| Error::new(ErrorKind::InvalidData, error))?;
-    let mut row_index = 0;
-    let mut previous_right = design.rows[0].x_start;
-    for (cell, spec) in cells.iter().zip(&design.cells) {
-        while row_index < design.rows.len() && design.rows[row_index].y < cell.y {
-            row_index += 1;
-            if row_index < design.rows.len() {
-                previous_right = design.rows[row_index].x_start;
-            }
-        }
-        let row = design
-            .rows
-            .get(row_index)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "instance outside rows"))?;
-        let right = cell
-            .x
-            .checked_add(cell.width)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "coordinate overflow"))?;
-        if cell.y != row.y
-            || cell.x < previous_right
-            || right > row.x_end
-            || cell.width != spec.width
-            || cell.height != spec.height
-            || (i128::from(cell.x) - i128::from(row.x_start)) % i128::from(design.site.width) != 0
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "illegal fixed-order placement",
-            ));
-        }
-        previous_right = right;
-    }
+    validate_placement(
+        design,
+        cells,
+        &Limits {
+            max_cells: cells.len(),
+            max_rows: design.rows.len(),
+            max_expansions: 0,
+        },
+    )
+    .map_err(std::io::Error::other)?;
     writeln!(
         output,
         "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN {} ;\nUNITS DISTANCE MICRONS {} ;",
@@ -433,10 +499,11 @@ pub(crate) fn write_def_components(
             (i128::from(row.x_end) - i128::from(row.x_start)) / i128::from(design.site.width);
         writeln!(
             output,
-            "ROW row{i} {} {} {} N DO {count} BY 1 STEP {} 0 ;",
+            "ROW row{i} {} {} {} {} DO {count} BY 1 STEP {} 0 ;",
             def_name(&design.site.name),
             row.x_start,
             row.y,
+            row.orientation.def(),
             design.site.width
         )?;
     }
@@ -444,11 +511,14 @@ pub(crate) fn write_def_components(
     for (cell, placed) in design.cells.iter().zip(cells) {
         writeln!(
             output,
-            "- {} {} + PLACED ( {} {} ) N ;",
+            "- {} {} + PLACED ( {} {} ) {} ;",
             def_name(&cell.name),
             def_name(&cell.master),
             placed.x,
-            placed.y
+            placed.y,
+            placed_orientation(design, placed)
+                .map_err(std::io::Error::other)?
+                .def()
         )?;
     }
     writeln!(output, "END COMPONENTS")
@@ -483,11 +553,13 @@ mod tests {
                     x_start: 0,
                     x_end: 100,
                     y: 0,
+                    orientation: Orientation::N,
                 },
                 Row {
                     x_start: 0,
                     x_end: 100,
                     y: 20,
+                    orientation: Orientation::N,
                 },
             ],
             cells: (0..3)

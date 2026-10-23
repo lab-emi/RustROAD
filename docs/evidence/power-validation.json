@@ -1,0 +1,53 @@
+{
+  "schema": "rustroad.power-validation.v1",
+  "date": "2026-10-23",
+  "version": "0.3.0",
+  "unit_integration": {
+    "passed": 65,
+    "failed": 0,
+    "max_rss_kib": 263852,
+    "wall_clock": "0:01.37",
+    "exit_status": 0
+  },
+  "real_lef_corpus": {
+    "passed": 2,
+    "max_rss_kib": 29736,
+    "wall_clock": "0:00.12",
+    "exit_status": 0
+  },
+  "clippy": {
+    "status": "passed",
+    "warnings": "denied",
+    "max_rss_kib": 195700,
+    "wall_clock": "0:00.43",
+    "exit_status": 0
+  },
+  "release": {
+    "status": "passed",
+    "max_rss_kib": 360488,
+    "wall_clock": "0:05.98",
+    "exit_status": 0
+  },
+  "binary_sha256": "fd5f827406a2e90bb6822dfe0c7f2ebdf2d335f4c490fcfe6ad08ed8d53f5654",
+  "source_sha256": {
+    "crates/rustroad-cli/src/main.rs": "5c26d9140153e5d7141a917f3d4d364852952c3bb6a41c674844db1a1a68438e",
+    "crates/rustroad-core/src/connectivity.rs": "d167c703e4ccb9ba7edec5490cf9f0dbd312e3a092bcd5d7aee075348e58aee0",
+    "crates/rustroad-core/src/io.rs": "56e82ac9596c61b1c8429ee397c693a63b5f8101ac2b3909670c5a2c55dab62e",
+    "crates/rustroad-core/src/lib.rs": "5d41f7b23d5b574ea30d46159b5b080e2f998843509c59e9ab58929270658606",
+    "crates/rustroad-core/src/power.rs": "bb0a4bcfae43b443444d057b270d59cfa1110a333e32436f29059ac3955085b3",
+    "crates/rustroad-core/src/supply.rs": "8279c03c91ab9687c4313296aa8b779729574024c7a0b464dda1eba758b68719",
+    "crates/rustroad-flow/src/lib.rs": "f6b2b0a2cdaf5a3bfc8ae306bc926124c1334a260364ca1e2845cd334b7e1885",
+    "crates/rustroad-formats/src/lef.rs": "8cd2988d143a458312a6d546acd2920948c23ebaa70054c0a369a66e508ae6ac",
+    "crates/rustroad-formats/src/lib.rs": "b6b712fb8b09b0ea176c42821480e808a0d89516073bfcc60781a1674e566132",
+    "crates/rustroad-formats/src/verilog.rs": "2c50f26e19f2864af4661d786b682d75b47aa5bb2ef9599dff97b73cb360d7dc",
+    "crates/rustroad-workspace/src/lib.rs": "a1c6c42a1bad32727792ff12342937510efa80af1396a111c3194aed9e2e2748",
+    "crates/rustroad-workspace/src/pdk.rs": "c805af4705ddacb05c98313e23fdfa11e9d3bd588f098d6bbf1e1623822ad54b",
+    "crates/rustroad-workspace/src/physical.rs": "99bae4683cbc7d5d0ea244a8dae4e52cfed04e8e632be303f8972c652b926bae",
+    "crates/rustroad-workspace/src/ties.rs": "d771cf701d668f8d56b9cc25f51c76af5d54f03f019b6d26ca0d0921d3b9427e",
+    "crates/rustroad-workspace/tests/pdk_import.rs": "2fcc3d58f4b9342fda1d13c96b49b0c928eacead23df72adb7da2504e7531b8a",
+    "crates/rustroad-workspace/tests/physical_prepare.rs": "1c120fe6eac283c6f00aa80792b56917e710ecfa82a141033c328245cfc107d3",
+    "crates/rustroad-workspace/tests/robustness.rs": "08fac2391cb0400df72ee5e41948742e7b898feaa2e0c0b2e00890250e2e1a10"
+  },
+  "full_rtl_to_gds_status": "unverified",
+  "report_validation": "HTML source/links checked; no browser-render QA claimed"
+}

@@ -59,6 +59,14 @@ pub struct PhysicalBundle {
     pub connectivity: ConnectedDesign,
     pub sources: Vec<SourcePin>,
     pub diagnostics: Vec<Diagnostic>,
+    #[serde(default)]
+    pub config: Option<crate::physical::PhysicalConfig>,
+    #[serde(default)]
+    pub ties: Option<crate::ties::TieReport>,
+    #[serde(default)]
+    pub generated_fillers: Vec<String>,
+    #[serde(default)]
+    pub state: Option<crate::physical::PhysicalState>,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -124,10 +132,13 @@ pub(crate) fn validate_bundle(
         || bundle.netlist.module != design.name
         || bundle.technology.dbu_per_micron != design.units_per_micron
         || bundle.netlist.instances.len() != design.cells.len()
-        || bundle.sources.len() != 4
+        || bundle.sources.len() != if bundle.config.is_some() { 5 } else { 4 }
         || bundle.diagnostics.len() > 1024
     {
         return Err(invalid("invalid physical import metadata"));
+    }
+    if bundle.config.is_some() != bundle.ties.is_some() {
+        return Err(invalid("physical configuration/tie report mismatch"));
     }
     for source in &bundle.sources {
         if source.sha256.len() != 64
@@ -158,12 +169,47 @@ pub(crate) fn validate_bundle(
     }
     bundle.connectivity.validate(design, limits)?;
     // Individually valid AST and connection tables must describe the same design.
-    let (ports, nets, pins) = link(
+    let (mut ports, mut nets, mut pins) = link(
         &bundle.netlist,
         &bundle.connectivity.masters,
         &bundle.connectivity.instance_masters,
         limits,
     )?;
+    if let Some(cfg) = &bundle.config {
+        crate::physical::attach_supplies(
+            &bundle.connectivity.masters,
+            &bundle.connectivity.instance_masters,
+            &mut ports,
+            &mut nets,
+            &mut pins,
+            cfg,
+            limits,
+        )?;
+        let instance_names: HashMap<_, _> = bundle
+            .netlist
+            .instances
+            .iter()
+            .map(|i| (i.name.as_str(), i))
+            .collect();
+        let mut names = HashSet::new();
+        for name in &bundle.generated_fillers {
+            if !names.insert(name) {
+                return Err(invalid("duplicate generated filler"));
+            }
+            let inst = instance_names
+                .get(name.as_str())
+                .ok_or_else(|| invalid("generated filler missing"))?;
+            if !cfg.filler_cells.contains(&inst.cell) || !inst.connections.is_empty() {
+                return Err(invalid("invalid generated filler"));
+            }
+        }
+        crate::physical::validate_ties(bundle)?;
+    } else if bundle.ties.is_some()
+        || bundle.state.is_some()
+        || !bundle.generated_fillers.is_empty()
+    {
+        return Err(invalid("physical state without configuration"));
+    }
     if ports != bundle.connectivity.ports
         || nets != bundle.connectivity.nets
         || pins != bundle.connectivity.pins
@@ -179,6 +225,17 @@ pub fn import_pdk(
     sources: &ImportSources,
     limits: &Limits,
     connection_limits: &ConnectivityLimits,
+) -> Result<Summary> {
+    import_pdk_with_config(path, base_rev, sources, limits, connection_limits, None)
+}
+
+pub fn import_pdk_with_config(
+    path: &Path,
+    base_rev: &str,
+    sources: &ImportSources,
+    limits: &Limits,
+    connection_limits: &ConnectivityLimits,
+    config_path: Option<&Path>,
 ) -> Result<Summary> {
     let _lock = lock(path, true, true)?;
     let current = head(path)?;
@@ -198,7 +255,7 @@ pub fn import_pdk(
     };
     let (verilog_text, verilog_pin) =
         read_input(&sources.netlist, MAX_NETLIST_BYTES, "mapped_verilog")?;
-    let netlist =
+    let mut netlist =
         verilog::parse_verilog(&verilog_text, &vlimits).map_err(|e| invalid(e.to_string()))?;
     drop(verilog_text);
     if floor.name != netlist.module {
@@ -224,6 +281,40 @@ pub fn import_pdk(
     let cells = lef::parse_lef(&cell_text, floor.units_per_micron, &llef)
         .map_err(|e| invalid(e.to_string()))?;
     drop(cell_text);
+    let (config, config_pin) = if let Some(path) = config_path {
+        let (text, pin) = read_input(path, 1024 * 1024, "physical_config")?;
+        let cfg: crate::physical::PhysicalConfig = serde_json::from_str(&text)?;
+        cfg.validate()?;
+        (Some(cfg), Some(pin))
+    } else {
+        (None, None)
+    };
+    let mut tie_report = None;
+    if let Some(cfg) = &config {
+        let find = |name: &str| {
+            tech.macros
+                .iter()
+                .chain(&cells.macros)
+                .find(|m| m.name == name)
+                .ok_or_else(|| invalid(format!("missing tie master {name}")))
+        };
+        let (updated, report) = crate::ties::materialize_constants(
+            &netlist,
+            find(&cfg.tie_high.cell)?,
+            &cfg.tie_high.pin,
+            find(&cfg.tie_low.cell)?,
+            &cfg.tie_low.pin,
+            &crate::ties::TieLimits {
+                max_new_cells: cfg
+                    .max_added_cells
+                    .min(limits.max_cells.saturating_sub(netlist.instances.len())),
+                ..Default::default()
+            },
+        )
+        .map_err(|e| invalid(e.to_string()))?;
+        netlist = updated;
+        tie_report = Some(report);
+    }
     let mut diagnostics = Vec::new();
     for (source, doc) in [("technology_lef", &tech), ("cell_lef", &cells)] {
         for d in &doc.diagnostics {
@@ -238,7 +329,13 @@ pub fn import_pdk(
             });
         }
     }
-    let (technology, masters) = select_technology(&tech, &cells, &floor, &netlist)?;
+    let extra = config.as_ref().map_or_else(Vec::new, |c| {
+        let mut v = c.filler_cells.clone();
+        v.push(c.tie_high.cell.clone());
+        v.push(c.tie_low.cell.clone());
+        v
+    });
+    let (technology, masters) = select_technology(&tech, &cells, &floor, &netlist, &extra)?;
     drop(tech);
     drop(cells);
     let mut design = Design {
@@ -250,6 +347,15 @@ pub fn import_pdk(
         rows: floor.rows,
         cells: Vec::with_capacity(netlist.instances.len()),
     };
+    if config.as_ref().is_some_and(|c| c.alternating_rows) {
+        for (i, row) in design.rows.iter_mut().enumerate() {
+            row.orientation = if i % 2 == 0 {
+                rustroad_core::Orientation::N
+            } else {
+                rustroad_core::Orientation::FS
+            };
+        }
+    }
     let mut master_indices = HashMap::new();
     for (i, m) in masters.iter().enumerate() {
         master_indices.insert(m.name.as_str(), i as u32);
@@ -269,7 +375,19 @@ pub fn import_pdk(
         instance_masters.push(id);
     }
     design.validate(limits)?;
-    let (ports, nets, pins) = link(&netlist, &masters, &instance_masters, connection_limits)?;
+    let (mut ports, mut nets, mut pins) =
+        link(&netlist, &masters, &instance_masters, connection_limits)?;
+    if let Some(cfg) = &config {
+        crate::physical::attach_supplies(
+            &masters,
+            &instance_masters,
+            &mut ports,
+            &mut nets,
+            &mut pins,
+            cfg,
+            connection_limits,
+        )?;
+    }
     let connectivity = ConnectedDesign {
         layers: technology.layers.iter().map(|l| l.name.clone()).collect(),
         masters,
@@ -293,24 +411,36 @@ pub fn import_pdk(
             _ => false,
         })
         .count();
-    diagnostics.push(Diagnostic {code:"POWER_GRID_UNCHECKED".into(),source:"physical_import".into(),occurrences:supplies,
-        message:"LEF power/ground pin geometry is preserved; supply nets and row power continuity have not been constructed or verified".into()});
-    diagnostics.push(Diagnostic {code:"IO_PLACEMENT_UNCHECKED".into(),source:"physical_import".into(),occurrences:connectivity.ports.iter().map(|p|p.bits.len()).sum(),
-        message:"Top-level logical terminals are preserved in DEF PINS; no I/O placement or fabricated port geometry is emitted".into()});
+    diagnostics.push(Diagnostic {code:if config.is_some(){"POWER_GRID_PENDING"}else{"POWER_GRID_UNCHECKED"}.into(),source:"physical_import".into(),occurrences:supplies,
+        message:if config.is_some(){"Supply pins are logically connected; primary metal network construction and rail verification occur during placement"}else{"LEF power/ground pin geometry is preserved; supply nets and row power continuity have not been constructed or verified"}.into()});
+    diagnostics.push(Diagnostic {code:if config.is_some(){"IO_PLACEMENT_PENDING"}else{"IO_PLACEMENT_UNCHECKED"}.into(),source:"physical_import".into(),occurrences:connectivity.ports.iter().map(|p|p.bits.len()).sum(),
+        message:if config.is_some(){"Top-level terminals are preserved; boundary I/O placement occurs during placement"}else{"Top-level logical terminals are preserved in DEF PINS; no I/O placement or fabricated port geometry is emitted"}.into()});
     if pin_count > connection_limits.max_pins {
         return Err(budget("max_pins exceeded"));
+    }
+    let mut source_pins = vec![floor_pin, verilog_pin, tech_pin, cell_pin];
+    if let Some(pin) = config_pin {
+        source_pins.push(pin);
+    }
+    if source_pins.iter().map(|p| p.bytes as u64).sum::<u64>() > MAX_AGGREGATE_BYTES {
+        return Err(budget("physical import aggregate byte budget"));
     }
     let physical = PhysicalBundle {
         import_version: 1,
         technology,
         netlist,
         connectivity,
-        sources: vec![floor_pin, verilog_pin, tech_pin, cell_pin],
+        sources: source_pins,
         diagnostics,
+        config,
+        ties: tie_report,
+        generated_fillers: Vec::new(),
+        state: None,
     };
+    validate_bundle(&physical, &design, connection_limits)?;
     let records = DesignDb::new(&design, limits)?.unplaced_records();
     let metadata = Metadata {
-        format_version: 2,
+        format_version: if physical.config.is_some() { 3 } else { 2 },
         revision: String::new(),
         parent_revision: current,
         stage: Stage::Imported,
@@ -326,6 +456,7 @@ fn select_technology(
     cells: &lef::LefDocument,
     floor: &Floorplan,
     netlist: &verilog::Netlist,
+    extra: &[String],
 ) -> Result<(Technology, Vec<Master>)> {
     let mut layer_map = BTreeMap::new();
     for l in tech.layers.iter().chain(&cells.layers) {
@@ -360,13 +491,18 @@ fn select_technology(
     }
     let mut seen = HashSet::new();
     let mut masters = Vec::new();
-    for instance in &netlist.instances {
-        if !seen.insert(instance.cell.as_str()) {
+    for name in netlist
+        .instances
+        .iter()
+        .map(|i| i.cell.as_str())
+        .chain(extra.iter().map(String::as_str))
+    {
+        if !seen.insert(name) {
             continue;
         }
         let m = library
-            .get(instance.cell.as_str())
-            .ok_or_else(|| invalid(format!("missing LEF master {}", instance.cell)))?;
+            .get(name)
+            .ok_or_else(|| invalid(format!("missing LEF master {name}")))?;
         if m.origin != [0, 0] {
             return Err(invalid(format!(
                 "unsupported nonzero LEF origin for {}",
@@ -418,8 +554,15 @@ fn select_technology(
         (Some(a), Some(b)) if a != b => return Err(invalid("LEF manufacturing grid mismatch")),
         (a, b) => a.or(b),
     };
-    let mut vias = tech.vias.clone();
-    vias.extend(cells.vias.iter().cloned());
+    let mut via_names = BTreeMap::new();
+    for via in tech.vias.iter().chain(&cells.vias) {
+        if let Some(old) = via_names.insert(via.name.clone(), via.clone())
+            && old != *via
+        {
+            return Err(invalid(format!("conflicting fixed VIA {}", via.name)));
+        }
+    }
+    let vias = via_names.into_values().collect();
     Ok((
         Technology {
             dbu_per_micron: floor.units_per_micron,
@@ -600,7 +743,7 @@ fn range_width(range: verilog::Range, max: usize) -> Result<usize> {
     Ok(width as usize)
 }
 
-fn link(
+pub(super) fn link(
     netlist: &verilog::Netlist,
     masters: &[Master],
     instance_masters: &[u32],
@@ -663,6 +806,7 @@ fn link(
             nets.push(Net {
                 name: signals.names[signals.canonical[root]].clone(),
                 aliases: Vec::new(),
+                use_: PinUse::Signal,
             });
             n
         };
@@ -680,6 +824,7 @@ fn link(
             name: port.name.clone(),
             direction: vdirection(port.direction),
             bits: bits.iter().map(|&i| signals.names[i].clone()).collect(),
+            use_: PinUse::Signal,
         });
         for (bit, &i) in bits.iter().enumerate() {
             pins.push(Connection {

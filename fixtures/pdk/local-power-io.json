@@ -1,0 +1,109 @@
+{
+  "schema": "rustroad.power-io-profile.v1",
+  "pdks": [
+    {
+      "tag": "sky130",
+      "name": "sky130_fd_sc_hd",
+      "corner": "tt_025C_1v80",
+      "source": {
+        "distribution": "Ciel/open_pdks",
+        "version": "f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7",
+        "process_variant": "sky130A"
+      },
+      "technology_lef": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef",
+        "sha256": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "bytes": 18167
+      },
+      "cell_lef": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lef/sky130_fd_sc_hd.lef",
+        "sha256": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "bytes": 1415362
+      },
+      "liberty": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+        "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "bytes": 12841637
+      },
+      "config": "fixtures/pdk/sky130-power-io.json",
+      "pin_roles": {
+        "VPWR": "VDD",
+        "VGND": "VSS",
+        "VPB": "VDD",
+        "VNB": "VSS"
+      },
+      "primary_pins": [
+        "VPWR",
+        "VGND"
+      ],
+      "rail_layer": "met1",
+      "conductor_layers": [
+        "met1",
+        "met2"
+      ],
+      "tie_high": {
+        "master": "sky130_fd_sc_hd__conb_1",
+        "pin": "HI"
+      },
+      "tie_low": {
+        "master": "sky130_fd_sc_hd__conb_1",
+        "pin": "LO"
+      },
+      "via": "M1M2_PR",
+      "power_net": "VDD",
+      "ground_net": "VSS"
+    },
+    {
+      "tag": "gf180",
+      "name": "gf180mcu_fd_sc_mcu7t5v0",
+      "corner": "tt_025C_3v30",
+      "source": {
+        "distribution": "Ciel/open_pdks",
+        "version": "f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7",
+        "process_variant": "gf180mcuD"
+      },
+      "technology_lef": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/techlef/gf180mcu_fd_sc_mcu7t5v0__nom.tlef",
+        "sha256": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "bytes": 33047
+      },
+      "cell_lef": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lef/gf180mcu_fd_sc_mcu7t5v0.lef",
+        "sha256": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "bytes": 671072
+      },
+      "liberty": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+        "sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "bytes": 20107439
+      },
+      "config": "fixtures/pdk/gf180-power-io.json",
+      "pin_roles": {
+        "VDD": "VDD",
+        "VSS": "VSS",
+        "VNW": "VDD",
+        "VPW": "VSS"
+      },
+      "primary_pins": [
+        "VDD",
+        "VSS"
+      ],
+      "rail_layer": "Metal1",
+      "conductor_layers": [
+        "Metal1",
+        "Metal2"
+      ],
+      "tie_high": {
+        "master": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+        "pin": "Z"
+      },
+      "tie_low": {
+        "master": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+        "pin": "ZN"
+      },
+      "via": "Via1_HV",
+      "power_net": "VDD",
+      "ground_net": "VSS"
+    }
+  ]
+}

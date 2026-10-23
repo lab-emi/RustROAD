@@ -47,6 +47,8 @@ enum Command {
         netlist: PathBuf,
         #[arg(long)]
         floorplan: PathBuf,
+        #[arg(long)]
+        physical_config: Option<PathBuf>,
     },
     /// Deterministic, single-height fixed-order row placement (not global optimization).
     Place {
@@ -58,7 +60,10 @@ enum Command {
     /// Write placed DEF, including imported PINS/NETS when present.
     ExportDef,
     /// Write the imported logical netlist to stdout with canonical syntax.
-    ExportVerilog,
+    ExportVerilog {
+        #[arg(long)]
+        include_power: bool,
+    },
     /// Write the linked connectivity/LEF geometry snapshot as JSON.
     ExportConnectivity,
     /// Inspect pinned external tools and PDK files; readiness is not signoff.
@@ -105,6 +110,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             cell_lef,
             netlist,
             floorplan,
+            physical_config,
         } => {
             let sources = rustroad_workspace::pdk::ImportSources {
                 technology_lef: tech_lef,
@@ -112,12 +118,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 netlist,
                 floorplan,
             };
-            emit(&rustroad_workspace::pdk::import_pdk(
+            emit(&rustroad_workspace::pdk::import_pdk_with_config(
                 &workspace,
                 &base_rev,
                 &sources,
                 &limits,
                 &connection_limits,
+                physical_config.as_deref(),
             )?)
         }
         Command::Place { base_rev } => {
@@ -132,11 +139,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             output.flush()?;
             Ok(())
         }
-        Command::ExportVerilog => {
+        Command::ExportVerilog { include_power } => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
             let stdout = io::stdout();
             let mut output = io::BufWriter::with_capacity(256 * 1024, stdout.lock());
-            snapshot.export_verilog(&mut output)?;
+            snapshot.export_verilog_with_power(include_power, &mut output)?;
             output.flush()?;
             Ok(())
         }

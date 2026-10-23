@@ -19,7 +19,14 @@ Core connectivity has separate generational `InstId`, `CellId`, `NetId`, `PinId`
 arenas and a derived CSR view. It expands signal bits with hard caps and unifies
 wire aliases with bounded union/find. Driver and endpoint coverage checks do not
 enumerate graph paths. Imported LEF supply geometry is retained; no supply wiring
-or I/O physical placement is inferred.
+or I/O physical placement is inferred without an explicit physical profile.
+
+Version 0.3 adds bounded I/O, rail and supply-grid kernels. Profile-driven import
+materializes literal constants into PDK tie cells; linked sink counts enforce
+the tie fanout budget. Placement inserts physical-only fillers, validates LEF
+symmetry for N/FS, and checks primary rails across each full row and shared row
+boundaries. Horizontal rails join two independent vertical supply spines through
+pinned fixed vias. I/O and supply geometry use separate routing layers.
 
 `rustroad-workspace` owns lock acquisition, strict schema validation, immutable
 revision directories and atomic HEAD replacement. The fixed 40-byte little-endian
@@ -36,6 +43,14 @@ indices. The reader checks lengths and fields against bounded metadata. It also
 relinks the stored logical AST and requires the same ports, nets and pin mapping
 before allowing Verilog or DEF export. A corrupted AST cannot silently produce
 a second circuit while the binary pin table still describes the first.
+
+Prepared physical profiles use version 3 and a further `physical.rbin` table:
+fixed 64-byte records mirror I/O rectangles, supply port rectangles, wire segments
+and via placements. Every read reruns bounded layout checks and compares the
+table to the regenerated state. Repeated placement first removes generated
+fillers and rebuilds the same deterministic result; logical cells and inserted
+ties retain their ordering. Default Verilog export removes physical-only fillers,
+while `--include-power` exposes the full PG-connected view for physical checking.
 
 Readers hold shared locks for the lifetime of their mapped snapshot; a writer
 holds an exclusive lock through calculation and publication. This intentionally
@@ -63,13 +78,18 @@ expansions. It preserves input instance order and packs from left to right while
 advancing monotonically through rows. It can reject a design that another packing
 could fit; it makes no minimum wirelength, density, routability or timing claim.
 
+The row-packing kernel remains linear, but complete snapshot legality and rail
+checks sort bounded intervals and take O(N log N) in the general case. Filler
+instances can follow logical instances in storage; geometry validation is
+independent of that storage order.
+
 ## Next gates, in dependency order
 
-1. **Broader technology and physical connectivity.** The initial LEF/mapped
-   Verilog path is independently verified on real `sky130_fd_sc_hd` and
-   `gf180mcu_fd_sc_mcu7t5v0` data. Extend it with DEF import, physical I/O placement,
-   supply/tie networks, row orientation and power continuity, multi-height cells,
-   complete required design rules and further PDK variants.
+1. **Broader technology and signoff requirements.** The LEF/mapped Verilog,
+   boundary I/O, primary supply/tie network and N/FS rail-continuity paths are
+   independently verified on the two baseline PDKs. Remaining scope includes DEF
+   import, well/tap placement, multi-height cells, richer orientations, complete
+   design-rule interpretation, IR/EM and further PDK variants.
 2. **Legalization and global placement.** Keep fixed-order packing as a baseline.
    Define objective/QoR, displacement and density constraints; estimate memory
    for pin CSR, gradient and density buffers first. Deterministic `cpu_ref` and

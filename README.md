@@ -2,7 +2,7 @@
 
 Clean-room, native Rust physical-design development for the RustEDA toolchain.
 Apache-2.0. This is an initial engineering baseline, **not a complete RTL-to-GDS
-implementation**. Current version: 0.2.0.
+implementation**. Current version: 0.3.0.
 
 Implemented:
 
@@ -23,11 +23,15 @@ Implemented:
   tables with logical-to-physical consistency checks when reopening snapshots.
 - An actual RustSys → RustROAD → RustSTA path on both real Sky130/GF180 PDKs,
   independently checked through Yosys, Verilator and OpenROAD/OpenSTA.
+- Physical boundary I/O placement, constant-to-tie-cell materialization with
+  bounded fanout, row fillers, N/FS row placement and primary power-rail checks.
+- An explicit primary supply grid: horizontal rails, two vertical spines,
+  fixed vias and supply ports, exported through DEF SPECIALNETS.
 - Read-only pinned-tool/dual-PDK flow readiness and a guarded logic validation
   harness using existing RustSys/RustSTA and independent external tools.
 
 Not implemented: global placement optimization, CTS, routing, extraction,
-GDS streamout, DRC/LVS, power-grid or I/O placement, or GUI. Real-PDK connectivity
+GDS streamout, DRC/LVS, well/tap verification, IR/EM analysis, or GUI. Real-PDK connectivity
 and cell placement are not PDK signoff. Missing results always
 remain `unverified`, `not_run` or `unchecked`.
 
@@ -65,8 +69,9 @@ duplicate names and overflowing coordinates fail explicitly. The optional
 matching site and matching cell dimensions.
 
 The JSON geometry example still exports rows/components only. Designs imported
-with `import-pdk` also export logical PINS/NETS; top-level I/O terminals are
-explicitly unplaced, and power-grid connectivity is unchecked. Exported Verilog
+with `import-pdk` also export logical PINS/NETS. With `--physical-config`, placement
+creates physical I/O, fillers, alternating rows and a primary supply network.
+Without that explicit profile, I/O and supply geometry remain unchecked. Exported Verilog
 preserves the mapped logic and interfaces. `placement_status` remains
 `placed_unverified`; external validation receipts are separate evidence.
 
@@ -86,10 +91,29 @@ The floorplan JSON contains `name`, `units_per_micron`, `die_area`, `core_area`,
 site identities must match. The importer derives every cell and pin from the
 mapped module and LEF, stores source hashes, rejects missing masters/pins,
 multi-driver signals, nonzero macro origins, inconsistent widths/units and
-unimplemented physical constants or supply wiring. Unsupported technology rules
+physical constants or supply wiring without a suitable profile. Unsupported technology rules
 are counted warnings rather than discarded signoff requirements. See
 [real-PDK validation and limitations](docs/pdk-import.md) and
 [import memory/work budgets](docs/pdk-import-budget.md).
+
+## Physical I/O, ties and primary supply grid
+
+Use a matching `fixtures/pdk/sky130-power-io.json` or `gf180-power-io.json` with
+`import-pdk --physical-config <profile>`. The floorplan must leave space for the
+two supply spines and I/O channels. Profiles bind exact PDK pin/master/via names,
+minimum geometry and the insertion budget. `alternating_rows` generates N/FS
+rows; FS cells must advertise LEF `SYMMETRY X`.
+
+`place` fills row gaps, checks intrinsic primary-rail continuity, creates routed
+SPECIALNETS and fixes I/O geometry on the boundary. `export-verilog` retains the
+logical interface and inserted ties; generated physical-only fillers are omitted.
+`export-verilog --include-power` includes fillers, supply ports and PG pin wiring
+for physical connectivity checks. Both views are independently verified.
+
+Well/body pins are logically connected; well ties, latch-up compliance, IR/EM and
+foundry DRC/LVS remain separate unverified requirements. See
+[physical preparation and verification](docs/power-io-integration.md) and
+[resource limits](docs/power-io-budget.md).
 
 ## Verification and research
 
@@ -99,7 +123,8 @@ are counted warnings rather than discarded signoff requirements. See
 - [GUI architecture and framework decision](docs/gui-architecture.md)
 - [GUI benchmark acceptance plan](docs/gui-benchmark-plan.md)
 - [Architecture and next implementation gates](docs/architecture.md)
-- [Chinese PDK integration report](docs/pdk-report.html)
+- [Chinese physical-preparation report](docs/power-io-report.html)
+- [Earlier PDK integration report](docs/pdk-report.html)
 - [Earlier bootstrap report](docs/report.html)
 
 Run the bounded placement workload after a release build:

@@ -1,6 +1,62 @@
 # RustROAD handoff
 
-## 2026-10-23 — v0.2.0 real-PDK connectivity (current)
+## 2026-10-23 — v0.3.0 physical I/O and primary supply (current)
+
+- `import-pdk --physical-config` binds explicit PDK power/bias, tie, filler,
+  layer and fixed-via roles. Literal constants become uniquely named tie cells;
+  alias-resolved load fanout is bounded (default 8). Existing native ties remain
+  intact. Tie functions are independently proved from actual Liberty data.
+- `place` supports N/FS, fills every full row, places boundary signal I/O, and
+  builds primary horizontal rails, two vertical supply spines, fixed vias and
+  supply terminals. FS requires master `SYMMETRY X`; positions stay lower-left.
+- Body bias is logically connected; well/tap continuity, latch-up, foundry
+  DRC/LVS, IR/EM and extracted timing remain unchecked. Do not equate primary
+  metal connectivity with these separate signoff requirements.
+- Default Verilog export omits generated physical-only fillers and retains
+  inserted ties. `--include-power` includes all physical cells and PG wiring.
+  DEF has PINS, NETS and routed SPECIALNETS. Schema 3 adds validated/mapped
+  `physical.rbin`; reads regenerate physical state. Re-placement rebuilds the
+  same filler/layout result and keeps logical ordering.
+- 65 ordinary Rust tests plus 2 explicitly enabled real-LEF tests passed;
+  strict Clippy and release build passed. Source/binary/resource receipts are
+  in `docs/evidence/power-validation.json`.
+- Final dual-PDK run: 6.90 s, 290,696 KiB maximum host process RSS, 62 receipts.
+  Sky130: 97 cells = 18 source + 2 ties + 77 fillers, 388 PG pins, 46 FS cells.
+  GF180: 44 = 22 source + 2 ties + 20 fillers, 176 PG pins, 19 FS cells.
+  Both have 20 signal I/O + 2 supply terminals, eight continuous filled rows,
+  one connected component per supply, and no detected primary metal short.
+  Polarity, row-gap, spine-gap, short and interior-I/O controls all reject.
+- CEC, tie-function proofs, 512-vector simulation per PDK, powered-Verilog vs
+  OpenDB connectivity and post-tie STA pass. Ideal-wire STA retains 14 constrained
+  endpoints and 2 constant-driven D pins without arrival. Only those independently
+  identified constant endpoints are allowed; unexpected uncovered endpoints fail.
+  Incremental STA remains a no-op update check, not changed-ECO verification.
+- Final binary SHA256: `fd5f827406a2e90bb6822dfe0c7f2ebdf2d335f4c490fcfe6ad08ed8d53f5654`.
+  Raw receipts: `.work/power-io-verified/`. Summaries and compact layouts:
+  `docs/evidence/power-io-*`. Report: `docs/power-io-report.html`.
+  No sibling RustSys/RustSTA source or frozen release binary was changed.
+
+### Physical-preparation pitfalls
+
+- Rail report success is `pass`, not `passed`; integration tests cover adapters.
+  LEF SPACING can be absent with SPACINGTABLE; explicit profile spacing must not
+  eagerly evaluate a missing fallback.
+- DEF FIXED reads as OpenDB FIRM; FS reads as MX. Transform pins using
+  `y + height - local_y`. GF180 rail pins have multiple rectangles: check unions.
+- SPECIALNETS longitudinal caps default to flush. Emit explicit half-width end
+  extensions to match square-cap geometry. A via changes the active layer on a
+  continued path; emit separate singleton via paths and independent spine paths.
+- Validate final tie fanout and bundle before commit. Commit also validates
+  before replacing HEAD; failures cannot expose an unreadable revision. A
+  configured snapshot without its tie report is invalid.
+- Use maps for tie endpoints, net aliases and filler names; avoid quadratic
+  scans. Added-cell, interval, geometry and work budgets remain hard caps.
+- RustSys already emits mapped ties. The literal test input is a documented,
+  CEC-proved verification projection; it is not presented as raw RustSys output.
+- Keep well/tap and constant-path timing limitations explicit. Complex physical
+  rules and signoff are not established by a connected drawing.
+
+## 2026-10-23 — v0.2.0 real-PDK connectivity (historical)
 
 - Implemented `import-pdk`, `export-verilog`, connected `export-def`, and
   `export-connectivity`. `rustroad-formats` adds exact integer-DBU LEF geometry

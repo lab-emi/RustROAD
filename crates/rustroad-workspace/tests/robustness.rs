@@ -82,6 +82,7 @@ fn fixture() -> Design {
             x_start: 0,
             x_end: 100,
             y: 0,
+            orientation: rustroad_core::Orientation::N,
         }],
         cells: vec![
             Cell {

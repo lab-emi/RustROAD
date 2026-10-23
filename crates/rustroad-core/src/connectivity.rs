@@ -51,9 +51,10 @@ impl Direction {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PinUse {
+    #[default]
     Signal,
     Clock,
     Power,
@@ -62,6 +63,14 @@ pub enum PinUse {
 impl PinUse {
     pub fn is_supply(self) -> bool {
         matches!(self, Self::Power | Self::Ground)
+    }
+    pub fn def(self) -> &'static str {
+        match self {
+            Self::Signal => "SIGNAL",
+            Self::Clock => "CLOCK",
+            Self::Power => "POWER",
+            Self::Ground => "GROUND",
+        }
     }
 }
 
@@ -102,6 +111,8 @@ pub struct Master {
 pub struct Net {
     pub name: String,
     pub aliases: Vec<String>,
+    #[serde(default)]
+    pub use_: PinUse,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -109,6 +120,8 @@ pub struct Port {
     pub name: String,
     pub direction: Direction,
     pub bits: Vec<String>,
+    #[serde(default)]
+    pub use_: PinUse,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -145,7 +158,7 @@ impl ConnectedDesign {
             || self.pins.len() > limits.max_pins
             || self.nets.len() >= u32::MAX as usize
             || self.pins.len() >= u32::MAX as usize
-            || self.masters.len() > design.cells.len()
+            || self.masters.len() > limits.max_instances
             || self.ports.len() > limits.max_pins
             || self.layers.len() > 4096
             || self.instance_masters.len() != design.cells.len()
@@ -304,7 +317,7 @@ impl ConnectedDesign {
             if !seen.insert(pin.owner) {
                 return Err(Error::Invalid("duplicate connected pin".into()));
             }
-            let (direction, supply, is_port) = match pin.owner {
+            let (direction, use_, is_port) = match pin.owner {
                 PinOwner::Instance { instance, terminal } => {
                     let mi = self
                         .instance_masters
@@ -314,7 +327,7 @@ impl ConnectedDesign {
                         .pins
                         .get(terminal as usize)
                         .ok_or_else(|| Error::Invalid("master pin index".into()))?;
-                    (spec.direction, spec.use_.is_supply(), false)
+                    (spec.direction, spec.use_, false)
                 }
                 PinOwner::Port { port, bit } => {
                     let spec = self
@@ -332,14 +345,14 @@ impl ConnectedDesign {
                             "port bit is assigned to the wrong net".into(),
                         ));
                     }
-                    (Some(spec.direction), false, true)
+                    (Some(spec.direction), spec.use_, true)
                 }
             };
-            if supply {
-                if pin.net.is_some() {
-                    return Err(Error::Invalid(
-                        "explicit power connectivity requires a supply-network importer".into(),
-                    ));
+            if use_.is_supply() {
+                if let Some(net) = pin.net
+                    && self.nets.get(net as usize).map(|n| n.use_) != Some(use_)
+                {
+                    return Err(Error::Invalid("supply pin net polarity mismatch".into()));
                 }
                 continue;
             }
@@ -352,6 +365,11 @@ impl ConnectedDesign {
             let net_index = net_index as usize;
             if net_index >= self.nets.len() {
                 return Err(Error::Invalid("pin net index".into()));
+            }
+            if self.nets[net_index].use_.is_supply() {
+                return Err(Error::Invalid(
+                    "signal pin is shorted to supply without a tie cell".into(),
+                ));
             }
             let driver = match direction {
                 Some(Direction::Input) => is_port,
