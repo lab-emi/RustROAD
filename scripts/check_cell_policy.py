@@ -14,6 +14,11 @@ usage: check_cell_policy.py --pdk sky130|gf180 --stage synth|physical --netlist 
   excluded cell only if it is a physical-only cell (tap/fill/decap/diode/...)
   or a clock/delay cell reserved for CTS and hold repair.
 
+Every instantiated cell must be a library cell (a MACRO of the PDK cell LEF)
+or a module defined in the scanned files; an instance of anything else (a
+black-box wrapper, a misspelt or differently cased cell name) could hide an
+excluded cell, so it makes the result ``unverified`` (Rule 7), never passed.
+
 The PDK files are read from the Ciel PDK root (default: the host path pinned
 in fixtures/flow/signoff-pinned.json), independently of the generated policy.
 When ``--policy`` is given its glob lists and source hashes are cross-checked
@@ -33,10 +38,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 FILES = {
     "sky130": dict(variant="sky130A", synth="libs.tech/librelane/sky130_fd_sc_hd/synth_excluded.cells",
-                   pnr="libs.tech/librelane/sky130_fd_sc_hd/pnr_excluded.cells", prefix="sky130_fd_sc_hd__"),
+                   pnr="libs.tech/librelane/sky130_fd_sc_hd/pnr_excluded.cells", prefix="sky130_fd_sc_hd__",
+                   lef="libs.ref/sky130_fd_sc_hd/lef/sky130_fd_sc_hd.lef"),
     "gf180": dict(variant="gf180mcuD", synth="libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/synth_exclude.cells",
-                  pnr="libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/pnr_exclude.cells", prefix="gf180mcu_fd_sc_mcu7t5v0__"),
+                  pnr="libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/pnr_exclude.cells", prefix="gf180mcu_fd_sc_mcu7t5v0__",
+                  lef="libs.ref/gf180mcu_fd_sc_mcu7t5v0/lef/gf180mcu_fd_sc_mcu7t5v0.lef"),
 }
+MAX_MACROS = 100_000
 # Owner decision (W4): GF180 delay/clock cells are reserved for CTS and hold repair.
 OWNER_RESERVED = {"sky130": [], "gf180": ["dly*", "clkbuf*", "clkinv*"]}
 # Cells the physical flow may add after synthesis (suffixes after the library prefix).
@@ -208,6 +216,19 @@ def read_list(path: Path) -> list[str]:
             if line.split("#", 1)[0].strip()]
 
 
+def lef_macros(path: Path) -> set[str]:
+    """MACRO names of a cell LEF (bounded)."""
+    names = set()
+    with path.open(errors="replace") as handle:
+        for line in handle:
+            m = re.match(r"\s*MACRO\s+(\S+)", line)
+            if m:
+                names.add(m[1])
+                if len(names) > MAX_MACROS:
+                    raise NetlistError("LEF macro budget exceeded")
+    return names
+
+
 def match(cell: str, globs: list[str]) -> str | None:
     for g in globs:
         if fnmatch.fnmatchcase(cell, g):
@@ -227,13 +248,18 @@ def check(tag: str, stage: str, netlists: list[Path], mapped: Path | None, polic
     report = dict(schema="rustroad.cell-policy-check.v1", pdk=tag, stage=stage, status="unverified",
                   problems=[], violations=[], sources={})
     try:
-        synth_path, pnr_path = root / spec["synth"], root / spec["pnr"]
+        synth_path, pnr_path, lef_path = root / spec["synth"], root / spec["pnr"], root / spec["lef"]
         synth, pnr = read_list(synth_path), read_list(pnr_path)
-    except OSError as error:
-        report["problems"].append(f"PDK exclusion file unreadable: {error}")
+        library = lef_macros(lef_path)
+    except (OSError, NetlistError) as error:
+        report["problems"].append(f"PDK exclusion file or cell LEF unreadable: {error}")
         return report
-    for key, path in (("synth_exclude", synth_path), ("pnr_exclude", pnr_path)):
+    if not library:
+        report["problems"].append(f"no MACRO in the cell LEF {lef_path}")
+        return report
+    for key, path in (("synth_exclude", synth_path), ("pnr_exclude", pnr_path), ("cell_lef", lef_path)):
         report["sources"][key] = dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    report["library_cells"] = len(library)
     reserved = [spec["prefix"] + g for g in OWNER_RESERVED[tag]]
     physical_only = [spec["prefix"] + g for g in PHYSICAL_ONLY[tag]]
     cts_hold = [spec["prefix"] + g for g in CTS_HOLD[tag]]
@@ -256,22 +282,31 @@ def check(tag: str, stage: str, netlists: list[Path], mapped: Path | None, polic
         report["policy_consistency"] = consistency or "consistent"
         report["problems"] += consistency
     mapped_names = {}
+    unknown_cells = Counter()
     if mapped is not None:
         scanned = scan(mapped.read_text())
         mapped_names = {inst: cell for cell, inst in scanned["instances"]}
         for why in scanned["unrecognised"]:
             report["problems"].append(f"{mapped}: unrecognised statement (cannot certify): {why}")
-    counts, files = Counter(), []
+        for cell, _ in scanned["instances"]:
+            if cell not in library and cell not in scanned["modules"]:
+                unknown_cells[cell] += 1
+    counts, files, scans = Counter(), [], []
     for path in netlists:
         if not path.is_file():
             report["problems"].append(f"netlist missing: {path}")
             continue
-        scanned = scan(path.read_text())
+        scans.append((path, scan(path.read_text())))
+    defined = {m for _, scanned in scans for m in scanned["modules"]}
+    for path, scanned in scans:
         insts = scanned["instances"]
         for why in scanned["unrecognised"]:
             report["problems"].append(f"{path}: unrecognised statement (cannot certify): {why}")
         files.append(dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(), instances=len(insts),
                           modules=scanned["modules"], unrecognised=len(scanned["unrecognised"])))
+        for cell, _ in insts:
+            if cell not in library and cell not in defined:
+                unknown_cells[cell] += 1
         for cell, inst in insts:
             counts[cell] += 1
             g = match(cell, pnr)
@@ -287,6 +322,11 @@ def check(tag: str, stage: str, netlists: list[Path], mapped: Path | None, polic
             elif not match(cell, physical_only + cts_hold):
                 report["violations"].append(dict(netlist=str(path), instance=inst, cell=cell,
                                                  rule="excluded_cell_added_after_synthesis", glob=g))
+    if unknown_cells:
+        report["problems"].append(f"{sum(unknown_cells.values())} instances of {len(unknown_cells)} cells that are neither "
+                                  f"library cells (cell LEF) nor modules defined in the scanned files (cannot certify "
+                                  f"what they contain): {sorted(unknown_cells)[:10]}")
+    report["unknown_cells"] = dict(sorted(unknown_cells.items())[:MAX_REPORTED])
     if stage == "physical" and mapped is None:
         report["problems"].append("physical stage needs --mapped to tell synthesized from inserted instances")
     report.update(netlists=files, cells=dict(sorted(counts.items())))

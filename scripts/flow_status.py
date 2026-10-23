@@ -20,6 +20,8 @@ REQUIRED = ("gds", "drc_magic", "drc_klayout", "antenna", "lvs_netgen", "lvs_kla
             "timing_ss_max_setup", "timing_ss_max_hold", "timing_ff_min_hold",
             "mpw_min_period", "drv", "cell_policy")
 REPORTED = ("timing_tt_nom", "density")
+# Both baseline PDKs must be present: a single-PDK summary is never a pass.
+REQUIRED_PDKS = ("sky130", "gf180")
 EXIT = {"passed": 0, "partial": 3, "unverified": 3, "failed": 1}
 
 
@@ -61,6 +63,11 @@ def overall(pdks: list[dict], postroute_timing_status: str, functional: bool, id
                     failed_items=["*:identity"])
     if postroute_timing_status != "passed":
         blocking.append(dict(pdk="*", item="postroute_timing", status=postroute_timing_status))
+    seen = [p.get("pdk") for p in pdks]
+    for tag in REQUIRED_PDKS:
+        if seen.count(tag) != 1:
+            blocking.append(dict(pdk=tag, item="pdk_run", status="missing",
+                                 reason=f"{seen.count(tag)} result entries for a required PDK (need exactly 1)"))
     for p in pdks:
         statuses = p.get("signoff_statuses") or {}
         for key in REQUIRED:

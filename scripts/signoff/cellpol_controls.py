@@ -8,8 +8,11 @@ Adds one PDK-excluded cell (gf180 mux2_1, a pnr_exclude cell) to a real mapped
 netlist in every instance syntax the checker must understand (plain, with a
 (* attribute *), with a #(parameter) list, as the second instance of a
 multi-instance statement, with escaped names), plus statements it cannot
-certify (behavioural ``always``, a ``define``). Expected: excluded cell ->
-failed; uncertifiable statement -> unverified; unmodified netlists -> passed.
+certify (behavioural ``always``, a ``define``) and instances of cells that are
+neither library cells nor modules defined in the netlist (a black-box wrapper,
+an upper-cased excluded cell name). Expected: excluded cell -> failed;
+uncertifiable statement or unknown cell -> unverified; unmodified netlists ->
+passed.
 Writes DIR/cellpol.json; exit 0 iff every control behaved as expected.
 """
 from __future__ import annotations
@@ -33,6 +36,8 @@ FORMS = {
 UNCERTIFIABLE = {
     "always_block": "  always @(posedge clk) n0 <= a[0];",
     "define": "`define CELL mux2_1",
+    "undefined_module": "  hidden_wrapper u_hw (.A(a[0]), .X(n0));",
+    "unknown_case_cell": f"  {P.upper()}MUX2_1 xupper (.I0(a[0]), .Z(n0));",
 }
 
 
