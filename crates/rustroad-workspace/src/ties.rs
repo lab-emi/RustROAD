@@ -626,6 +626,7 @@ mod tests {
             site: Some("s".into()),
             symmetry: vec![],
             obstructions: vec![],
+            foreign: vec![],
             pins: vec![
                 lef::LefPin {
                     name: "Y".into(),

@@ -315,6 +315,7 @@ name = "rustroad-formats"
 version = "0.5.0"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror",
 ]
 

@@ -91,6 +91,25 @@ enum Command {
     },
     /// Write the linked connectivity/LEF geometry snapshot as JSON.
     ExportConnectivity,
+    /// Write a deterministic hierarchical GDSII stream (read-only; HEAD unchanged).
+    ExportGds {
+        /// PDK standard-cell GDS; used structures are copied byte-identically.
+        #[arg(long)]
+        cell_gds: PathBuf,
+        /// Per-PDK layer map profile (schema rustroad.gds-layer-map.v1).
+        #[arg(long)]
+        layer_map: PathBuf,
+        /// Destination file, outside the workspace; written atomically.
+        #[arg(long)]
+        out: PathBuf,
+        /// Cell LEF override for the FOREIGN check; must match the imported sha256.
+        #[arg(long)]
+        cell_lef: Option<PathBuf>,
+        #[arg(long, default_value_t = rustroad_workspace::gds::DEFAULT_MAX_OUTPUT_BYTES)]
+        max_gds_bytes: u64,
+        #[arg(long, default_value_t = rustroad_workspace::gds::DEFAULT_MAX_OUTPUT_RECORDS)]
+        max_gds_records: u64,
+    },
     /// Inspect pinned external tools and PDK files; readiness is not signoff.
     FlowCheck {
         #[arg(long)]
@@ -225,6 +244,22 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 .ok_or("NO_CONNECTIVITY: import a mapped netlist first")?;
             emit(model)
         }
+        Command::ExportGds {
+            cell_gds,
+            layer_map,
+            out,
+            cell_lef,
+            max_gds_bytes,
+            max_gds_records,
+        } => {
+            let mut options = rustroad_workspace::gds::ExportOptions::new(cell_gds, layer_map, out);
+            options.cell_lef = cell_lef;
+            options.max_output_bytes = max_gds_bytes;
+            options.max_output_records = max_gds_records;
+            emit(&rustroad_workspace::gds::export_gds(
+                &workspace, &options, &limits,
+            )?)
+        }
         Command::FlowCheck { manifest } => {
             let _snapshot = rustroad_workspace::read(&workspace, &limits)?;
             emit(&rustroad_flow::assess_path(&manifest)?)
@@ -277,6 +312,35 @@ mod tests {
             .is_ok()
         );
         assert!(Cli::try_parse_from(["rustroad", "place", "--workspace", "demo"]).is_err());
+        // Export is read-only: it takes no --base-rev and needs all three paths.
+        assert!(
+            Cli::try_parse_from([
+                "rustroad",
+                "export-gds",
+                "--workspace",
+                "w",
+                "--cell-gds",
+                "c.gds",
+                "--layer-map",
+                "m.json",
+                "--out",
+                "o.gds"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "rustroad",
+                "export-gds",
+                "--workspace",
+                "w",
+                "--cell-gds",
+                "c.gds",
+                "--out",
+                "o.gds"
+            ])
+            .is_err()
+        );
         assert!(run(Cli::try_parse_from(["rustroad", "inspect"]).unwrap()).is_err());
     }
 }
