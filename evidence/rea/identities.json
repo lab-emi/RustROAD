@@ -1,0 +1,28 @@
+{
+  "Id": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+  "Digest": "sha256:2894c8431c5b0c778ba39a25dbbf1621ad52546098c43eb211a7f1deb039af66",
+  "RepoDigests": [
+    "docker.io/openroad/orfs@sha256:0a78705613f3135a842983d3fa02564ddd2c50cabdb7c41ae22693196848fe3d",
+    "docker.io/openroad/orfs@sha256:2894c8431c5b0c778ba39a25dbbf1621ad52546098c43eb211a7f1deb039af66"
+  ],
+  "Created": "2026-10-11T03:41:17.22985837Z",
+  "Architecture": "amd64",
+  "Os": "linux",
+  "Size": 4701357257,
+  "labels": {
+    "org.opencontainers.image.version": "22.04"
+  },
+  "openroad_executable": {
+    "container_path": "/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad",
+    "sha256": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+    "bytes": 147816048,
+    "version_report": "unknown",
+    "version_status": "unavailable-in-binary"
+  },
+  "rea": {
+    "version": "6.7.0",
+    "cli": "/home/cgao/.npm/_npx/a1722018f28f9df2/node_modules/rea-agents/scripts/rea.mjs",
+    "node_version": "v22.22.1",
+    "scope": "process capture only; no native analysis provider"
+  }
+}

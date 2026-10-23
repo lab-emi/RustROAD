@@ -1,0 +1,42 @@
+# Self-authored minimal geometry-only reference fixture, not a fabrication PDK.
+VERSION 5.8 ;
+BUSBITCHARS "[]" ;
+DIVIDERCHAR "/" ;
+UNITS
+  DATABASE MICRONS 1000 ;
+END UNITS
+MANUFACTURINGGRID 0.001 ;
+LAYER metal1
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.1 ;
+  WIDTH 0.05 ;
+  SPACING 0.05 ;
+END metal1
+SITE rustroad_site
+  CLASS CORE ;
+  SYMMETRY X Y ;
+  SIZE 0.5 BY 1.0 ;
+END rustroad_site
+MACRO CELL1
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 0.5 BY 1.0 ;
+  SYMMETRY X Y ;
+  SITE rustroad_site ;
+END CELL1
+MACRO CELL2
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 1.0 BY 1.0 ;
+  SYMMETRY X Y ;
+  SITE rustroad_site ;
+END CELL2
+MACRO CELL4
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 2.0 BY 1.0 ;
+  SYMMETRY X Y ;
+  SITE rustroad_site ;
+END CELL4
+END LIBRARY

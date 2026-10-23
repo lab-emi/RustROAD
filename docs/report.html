@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RustROAD · 首个工程基线</title>
+<style>
+:root{color-scheme:dark;--bg:#10191c;--panel:#18262b;--line:#31474e;--ink:#e5eeee;--muted:#aac0c5;--teal:#7ee3cc;--amber:#ffcd8d}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 system-ui,-apple-system,"Noto Sans CJK SC",sans-serif}main{max-width:1080px;margin:auto;padding:56px 24px 80px}h1{font-size:clamp(36px,6vw,64px);line-height:1.12;letter-spacing:-2px;margin:16px 0 24px}h2{font-size:25px;margin:40px 0 16px}h3{font-size:18px}p{max-width:880px}a{color:var(--teal);text-underline-offset:4px}code{font:14px ui-monospace,monospace;background:#0c1417;padding:3px 5px;border-radius:4px}nav{display:flex;gap:20px;flex-wrap:wrap;margin:24px 0}small,.muted{color:var(--muted)}.eyebrow{letter-spacing:3px;color:var(--teal);font-size:13px}.lead{font-size:21px}.notice{border-left:3px solid var(--amber);padding:12px 20px;background:#242820}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:28px 0}.card{border:1px solid var(--line);background:var(--panel);padding:22px;border-radius:12px}.number{font-size:35px;font-weight:650;color:var(--teal);line-height:1.3}.label{margin-top:12px}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;min-width:620px}th,td{padding:14px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-size:14px;font-weight:500}.ok{color:var(--teal)}.pending{color:var(--amber)}.flow{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}.flow span{border:1px solid var(--line);padding:14px 18px;border-radius:8px}.flow .future{border-style:dashed;color:var(--amber)}details{border:1px solid var(--line);padding:18px;border-radius:8px;margin:14px 0}summary{cursor:pointer;font-weight:600}pre{overflow:auto;padding:20px;background:#0c1417;line-height:1.6;border-radius:8px}pre code{padding:0}.footer{margin-top:48px;border-top:1px solid var(--line);padding-top:20px;color:var(--muted)}@media(max-width:720px){main{padding:30px 18px}.grid{grid-template-columns:1fr}.number{font-size:29px}.lead{font-size:18px}h1{letter-spacing:-1px}}
+</style></head><body><main>
+<div class="eyebrow">RUSTROAD / 2026-10-23 / 0.1.0</div>
+<h1>可运行的物理设计基础，<br>可追溯的验证证据。</h1>
+<p class="lead">RustROAD 已建立确定性行放置、带修订检查的磁盘工作区、DEF 导出和独立校验。RustSys / RustSTA 的双 PDK 逻辑子流程已实际运行。</p>
+<p class="notice"><strong>完整 RTL-to-GDS 仍未完成。</strong> 当前没有网表连接导入、全局优化、CTS、布线、寄生提取或 GDS 写出；DRC / LVS 尚未执行。这里的几何和逻辑验证是两个独立子流程，尚未连成物理签核闭环。</p>
+<nav><a href="#evidence">验证结果</a><a href="#architecture">实现</a><a href="#gui">GUI 选择</a><a href="#next">后续门槛</a><a href="../README.md">运行说明</a></nav>
+<div class="grid"><div class="card"><div class="number">17 / 17</div><div class="label">Rust 测试通过</div><small>Clippy 零警告 · release 构建通过</small></div><div class="card"><div class="number">50,000</div><div class="label">单元端到端放置与检查</div><small>1 / 2 线程生成相同 DEF 哈希</small></div><div class="card"><div class="number">2 个 PDK</div><div class="label">逻辑与理想线网时序对照</div><small>Sky130 HD · GF180 MCU 7T5V0</small></div></div>
+<h2 id="evidence">证据及其边界</h2>
+<div class="scroll"><table><thead><tr><th>检查</th><th>观察结果</th><th>范围</th></tr></thead><tbody>
+<tr><td>修订与持久化</td><td class="ok">通过</td><td>过期 base revision、并发写入、读锁、损坏坐标、重复 ID、发布失败恢复</td></tr>
+<tr><td>独立几何检查</td><td class="ok">通过，含 6 类错误注入</td><td>身份、覆盖、行、格点、包围与重叠；自编的 pinless 几何 fixture</td></tr>
+<tr><td>OpenROAD 外部 oracle</td><td class="ok">24 单元通过，故意重叠被拒绝</td><td>REA 黑盒捕获；没有读取任何参考实现源码</td></tr>
+<tr><td>RustSys + Yosys CEC</td><td class="ok">双 PDK 正例通过、错误逻辑被拒绝</td><td>两输入 XOR + 一个寄存器；原始状态不附加 reset 假设</td></tr>
+<tr><td>Verilator</td><td class="ok">4 个输入组合及反例控制通过</td><td>在时钟后比较 RTL 与映射后模型；不替代任意初始状态 CEC</td></tr>
+<tr><td>RustSTA / OpenSTA</td><td class="ok">双 PDK setup / hold 对照通过</td><td>TT、理想时钟、理想线网，容差 0.001 ns；原始库分析亦留存</td></tr>
+<tr><td>增量时序</td><td>无修改更新与完整计算一致</td><td>只验证 no-op 更新；尚未证明时序 ECO 的增量正确性</td></tr>
+<tr><td>完整物理流程 / macOS / GPU</td><td class="pending">unverified</td><td>没有相应实现或实测，不能给出完成或性能结论</td></tr>
+</tbody></table></div>
+<p>理想线网对照最大绝对偏差：Sky130 为 <code>1.021196e-6 ns</code>，GF180 为 <code>5.134069e-7 ns</code>。Sky130 对照使用明确记录哈希的验证专用 Liberty 投影，仅移除 wire-load 元数据；原始生产库没有修改。<code>min_pulse_width</code> / <code>minimum_period</code> 的未分析警告保留在证据中。</p>
+<details><summary>性能观察与资源上限</summary>
+<p>AMD Ryzen 9 9950X3D，Linux x86_64。50,000 单元 / 2,500 行，完整导入、放置、快照发布、mmap 读取、DEF 导出及独立检查：1 线程 <strong>0.373 秒</strong>，2 线程 <strong>0.373 秒</strong>。外层最大进程 RSS <strong>62,592 KiB</strong>。每种配置仅一次观察，不构成统计加速结论，也没有与 OpenROAD 比速。</p>
+<p>逻辑子流程整体 10.09 秒，最大进程 RSS 290,124 KiB。各子进程限制 2 GiB 地址空间、30 秒、有限输出，顺序运行。最大进程 RSS 不等于整个进程组同步合计峰值。</p>
+<p>布局默认上限：250,000 单元、100,000 行、350,000 次候选扩展、16 MiB 输入/元数据。内核没有全路径枚举；布局工作量 O(单元 + 行)。</p>
+<p><a href="evidence/placement-benchmark.json">放置测量</a> · <a href="evidence/validation.json">构建与测试</a> · <a href="memory-budget.md">完整内存估计</a></p></details>
+<details><summary>固定身份与可复现性</summary>
+<p>OpenROAD 的实际版本输出是 <code>unknown</code>，因此用 OCI 镜像内容 ID 和可执行文件 SHA-256 固定身份。REA 直接记录的是 podman 包装进程，需要另外保留目标二进制的哈希。部分 /proc 读取出现 EACCES，观察盲区没有被隐藏。</p>
+<p><a href="../evidence/rea/placement-oracle/result.json">OpenROAD 正反例</a> · <a href="openroad-blackbox.md">REA 分析</a> · <a href="evidence/logic-verification.json">双 PDK 逻辑证据</a> · <a href="evidence/def-controls.json">几何反例</a> · <a href="flow-integration.md">复现命令与范围</a></p></details>
+<h2 id="architecture">RustROAD 的实现边界</h2>
+<div class="flow"><span>独立 DesignDb<br><small>typed IDs · i64 DBU</small></span><span>CPU 连续视图<br><small>有界 · 确定性</small></span><span>不可变快照<br><small>锁 · base-rev · mmap</small></span><span>DEF 导出<br><small>独立几何校验</small></span><span class="future">布线 / 提取 / GDS<br><small>后续实现</small></span></div>
+<p>核心不依赖 Python、GUI 或后台服务。每次写入都检查 HEAD；失败的计算不发布部分布局。当前读快照持有共享锁，写事务持有独占锁；后续 GUI 需要快照租约与安全回收协议。<a href="architecture.md">架构与数据格式</a></p>
+<h2 id="gui">先选可测量的渲染边界</h2>
+<p class="lead">建议以 <strong>egui / eframe + 专用 wgpu 画布</strong>开始，保留 GPUI 为实测候选。</p>
+<p>决定大电路视图性能的主要因素是可见区域筛选、LOD、常驻缓冲区与批量绘制，不能为每个单元或线段创建一个 UI 控件。wgpu 覆盖 macOS Metal 与 Linux Vulkan；egui-wgpu 提供明确的自定义渲染回调。GPUI 的公开文档支持 macOS / Linux，但仍处于 pre-1.0，必须先验证真实电路的批处理接入和版本稳定性。</p>
+<p>权威坐标始终是 i64 DBU；仅在减去相机/分块原点后生成局部 GPU 浮点坐标。分层空间索引、查询输出、网格化、缓存、标签和同时驻留快照都有硬上限。GPU 计算另遵循 CPU 参考 → CUDA / Metal / Accelerate 的验证顺序。</p>
+<p><strong>尚未在 Mac 上运行，也没有 GUI 性能排行榜。</strong> <a href="gui-architecture.md">候选对比</a> · <a href="gui-benchmark-plan.md">实际 Mac / Linux 验收计划</a></p>
+<p class="muted">公开依据：<a href="https://docs.rs/egui-wgpu/latest/egui_wgpu/trait.CallbackTrait.html">egui-wgpu 回调</a> · <a href="https://wgpu.rs/">wgpu 平台</a> · <a href="https://docs.rs/gpui/0.2.2/gpui/">GPUI 0.2.2 文档</a></p>
+<h2 id="next">下一阶段的完成条件</h2>
+<ol><li>真实 LEF 与映射网表连接导入，双 PDK 单位、site、master、pin 一致性检查。</li><li>有界、网感知的布局优化及合法化；用独立 oracle 衡量线长、密度与时序。</li><li>CTS、布线、SPEF 提取，RustSTA 改动后的增量/完整一致性与 OpenSTA 对照。</li><li>真实单元 GDS 流出与独立 DRC / LVS，再连接 RTL / 门级仿真及形式等价。</li><li>在真实 Mac 和 Linux 上比较候选画布的 p95 交互延迟、显存和端到端加载时间。</li></ol>
+<p>本次保留了 RustSys / RustSTA 的既有版本与冻结二进制。RustSTA 工作目录另有未提交的 SPEF 开发，未将其作为本次已验证能力。</p>
+<h2>启动首个实例</h2><pre><code>cargo build --release --locked --bin rustroad
+target/release/rustroad init --workspace .work/demo \
+  --base-rev rev0 --input fixtures/physical-small.json
+target/release/rustroad place --workspace .work/demo --base-rev rev1
+target/release/rustroad export-def --workspace .work/demo &gt; .work/demo.def</code></pre>
+<p>构建前按 <a href="memory-budget.md">资源契约</a>设置并发、内存和超时。目录必须是新的；<code>init</code> 不覆盖现有设计。</p>
+<div class="footer">RustROAD · Apache-2.0 · 首个工程基线<br><a href="../HANDOFF.md">HANDOFF</a> · <a href="../README.md">README</a> · <a href="evidence/validation.json">验证收据</a></div>
+</main></body></html>

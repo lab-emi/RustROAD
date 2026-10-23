@@ -1,0 +1,26 @@
+{
+  "schema": "rustroad.flow.v1",
+  "tools": [],
+  "pdks": [
+    {
+      "name": "sky130_fd_sc_hd",
+      "corner": "tt",
+      "liberty": null,
+      "technology_lef": null,
+      "cell_lef": null,
+      "cell_gds": null,
+      "drc_deck": null,
+      "lvs_setup": null
+    },
+    {
+      "name": "gf180mcu_fd_sc_mcu7t5v0",
+      "corner": "tt",
+      "liberty": null,
+      "technology_lef": null,
+      "cell_lef": null,
+      "cell_gds": null,
+      "drc_deck": null,
+      "lvs_setup": null
+    }
+  ]
+}

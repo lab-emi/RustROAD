@@ -1,0 +1,15 @@
+[package]
+name = "rustroad-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rayon.workspace = true
+serde.workspace = true
+slotmap.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

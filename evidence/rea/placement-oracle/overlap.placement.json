@@ -1,0 +1,79 @@
+{
+    "DPL": {
+        "description": "",
+        "source": "",
+        "max_markers": "10000",
+        "category": {
+            "Overlap_failures": {
+                "description": "Cells that are overlapping with other cells.",
+                "source": "",
+                "max_markers": "10000",
+                "violations": [
+                    {
+                        "visited": "false",
+                        "visible": "true",
+                        "waived": "false",
+                        "shape": [
+                            {
+                                "type": "box",
+                                "points": [
+                                    {
+                                        "x": "1.0000",
+                                        "y": "1.0000"
+                                    },
+                                    {
+                                        "x": "2.0000",
+                                        "y": "2.0000"
+                                    }
+                                ]
+                            }
+                        ],
+                        "sources": [
+                            {
+                                "type": "inst",
+                                "name": "u0"
+                            },
+                            {
+                                "type": "inst",
+                                "name": "u1"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "Padding_failures": {
+                "description": "Cells that violate the padding rules.",
+                "source": "",
+                "max_markers": "10000",
+                "violations": [
+                    {
+                        "visited": "false",
+                        "visible": "true",
+                        "waived": "false",
+                        "shape": [
+                            {
+                                "type": "box",
+                                "points": [
+                                    {
+                                        "x": "1.0000",
+                                        "y": "1.0000"
+                                    },
+                                    {
+                                        "x": "2.0000",
+                                        "y": "2.0000"
+                                    }
+                                ]
+                            }
+                        ],
+                        "sources": [
+                            {
+                                "type": "inst",
+                                "name": "u1"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+}

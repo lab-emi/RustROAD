@@ -1,0 +1,18 @@
+{
+  "schema": "rustroad.def_legality.v1",
+  "status": "passed",
+  "instances": 24,
+  "rows": 6,
+  "checks": [
+    "identity",
+    "coverage",
+    "row_geometry",
+    "site_alignment",
+    "containment",
+    "overlap"
+  ],
+  "scope": "custom site name and digit/hyphen instance accepted in supported DEF subset",
+  "drc_status": "unchecked",
+  "lvs_status": "unchecked",
+  "routing_status": "unchecked"
+}

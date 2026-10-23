@@ -1,0 +1,46 @@
+{
+  "executable": "/usr/bin/podman",
+  "arguments": [
+    "run",
+    "--rm",
+    "--pull=never",
+    "--network=none",
+    "--read-only",
+    "--tmpfs=/tmp:rw,size=64m",
+    "--memory=2g",
+    "--memory-swap=2g",
+    "--cpus=2",
+    "--pids-limit=128",
+    "--volume=/mnt/data2/cgao/git/RustROAD/evidence/rea/placement-oracle:/oracle:rw",
+    "--entrypoint=/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad",
+    "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+    "-no_init",
+    "-no_splash",
+    "-threads",
+    "2",
+    "-exit",
+    "/oracle/overlap.tcl"
+  ],
+  "working_directory": "/mnt/data2/cgao/git/RustROAD/evidence/rea/placement-oracle",
+  "environment": {
+    "OMP_NUM_THREADS": "2"
+  },
+  "filesystem_observation_paths": [
+    "/mnt/data2/cgao/git/RustROAD/evidence/rea/placement-oracle/overlap.placement.json"
+  ],
+  "terminal": {
+    "columns": 160,
+    "rows": 50,
+    "scrollback": 100
+  },
+  "timeout_ms": 30000,
+  "idle_timeout_ms": 30000,
+  "settle_ms": 100,
+  "limits": {
+    "output_bytes": 262144,
+    "files": 32,
+    "file_bytes": 262144,
+    "processes": 128,
+    "filesystem_depth": 2
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "executable": "/usr/bin/podman",
+  "arguments": [
+    "run",
+    "--rm",
+    "--network=none",
+    "--read-only",
+    "--tmpfs=/tmp:rw,size=64m",
+    "--memory=2g",
+    "--memory-swap=2g",
+    "--cpus=2",
+    "--pids-limit=128",
+    "--entrypoint=/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad",
+    "--volume=/home/cgao/git/RustROAD/evidence/rea:/rustroad-evidence:ro",
+    "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+    "-no_init",
+    "-no_splash",
+    "-threads",
+    "2",
+    "-exit",
+    "/rustroad-evidence/public-contract.tcl"
+  ],
+  "working_directory": "/home/cgao/git/RustROAD/evidence/rea",
+  "environment": {
+    "OMP_NUM_THREADS": "2"
+  },
+  "terminal": {
+    "columns": 160,
+    "rows": 50,
+    "scrollback": 100
+  },
+  "timeout_ms": 30000,
+  "idle_timeout_ms": 30000,
+  "settle_ms": 100,
+  "limits": {
+    "output_bytes": 262144,
+    "files": 32,
+    "file_bytes": 262144,
+    "processes": 128,
+    "filesystem_depth": 2
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schema": "rustroad.validation.v1",
+  "date": "2026-10-23",
+  "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+  "rust_tests": {
+    "passed": 17,
+    "failed": 0,
+    "max_rss_kib": 181208,
+    "wall_clock": "0:00.48",
+    "exit_status": 0
+  },
+  "clippy": {
+    "status": "passed",
+    "warnings": "denied",
+    "max_rss_kib": 160708,
+    "wall_clock": "0:00.19",
+    "exit_status": 0
+  },
+  "release_build": {
+    "status": "passed",
+    "max_rss_kib": 205500,
+    "wall_clock": "0:01.28",
+    "exit_status": 0
+  },
+  "source_sha256": {
+    "crates/rustroad-cli/src/main.rs": "9a41fe787bbaa0f8e95d928e610a79bfc277348014b00048a9fafcbc289f2e6b",
+    "crates/rustroad-core/src/lib.rs": "7be29ee499abe12d49fbe9e45a0d12b228c167a9af8b4352b22cc410236714f4",
+    "crates/rustroad-flow/src/lib.rs": "f6b2b0a2cdaf5a3bfc8ae306bc926124c1334a260364ca1e2845cd334b7e1885",
+    "crates/rustroad-workspace/src/lib.rs": "2125d87cd99a04c2e0e25776e74ee5baf4982555323415015d596cdca8cbee32",
+    "crates/rustroad-workspace/tests/robustness.rs": "529831c5dde0456d73a53333a45a7a35d98e9f2062807b725fba019e7c930c24"
+  },
+  "full_rtl_to_gds_status": "unverified",
+  "macos_status": "unverified",
+  "report_validation": "HTML syntax/local links checked; browser file URL preview blocked by policy, no visual QA claim"
+}
