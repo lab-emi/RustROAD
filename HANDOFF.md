@@ -1,5 +1,64 @@
 # RustROAD handoff
 
+## 2026-10-23 — v0.2.0 real-PDK connectivity (current)
+
+- Implemented `import-pdk`, `export-verilog`, connected `export-def`, and
+  `export-connectivity`. `rustroad-formats` adds exact integer-DBU LEF geometry
+  and flat mapped-Verilog readers; warnings retain unsupported technology rules.
+- Mapped vectors, escaped identifiers and assign aliases are linked with bounded
+  bit expansion/union-find. Per-DB generational instance/master/net/pin arenas
+  remain separate from the CSR representation. Constants needing tie cells,
+  explicit supply wiring, bidirectional signal semantics, nonzero macro origins
+  and multi-height cells are rejected explicitly in this milestone.
+- Connected workspace schema 2 retains source hashes, used masters, logical AST
+  and connectivity. `pins.rbin` is 16-byte u32 owner/net records;
+  `net_offsets.rbin` contains u64 offsets with a final sentinel and
+  `net_pins.rbin` contains u32 pin indices. Schema 1 remains readable.
+- On read, bounded AST re-linking must equal stored ports/nets/pins; binary tables
+  must match that model. A regression test changes only a logical pin connection
+  to ensure Verilog and DEF cannot silently diverge. Public connectivity APIs
+  have an instance cap as well as net/pin/shape budgets.
+- 36 ordinary tests passed, plus both explicitly enabled real-LEF corpus tests;
+  strict Clippy and release build passed. The corpus covers 437 Sky130 and 229
+  GF180 macros plus 2,157 polygons from a GF180 standard LEF corpus. Final source
+  hashes and build/RSS receipts are in `docs/evidence/pdk-validation.json`.
+- The final RustSys -> RustROAD -> RustSTA campaign on true Ciel/open_pdks inputs
+  passed with native/external CEC, 512-vector-per-PDK Verilator checks, OpenDB
+  endpoint/direction/DBU/master-size/placement comparisons, and deliberate wrong
+  pin connections in Verilog and DEF. Used LEF pin/OBS geometry is independently
+  identical: Sky130 4 masters/30 pins/189 rectangles, GF180 5/36/169.
+- Sky130: 16 cells, 26 nets, 74 signal endpoints, 138 stored pins; GF180: 20 cells,
+  30 nets, 82 signal endpoints, 162 stored pins. Stored counts include unconnected
+  LEF supply pins, whose geometry is preserved. Do not describe them as completed
+  power networks. Top-level logical DEF pins are explicitly unplaced.
+- Final 70-receipt campaign: 12.61 s complete wall time, 289,556 KiB maximum host
+  process RSS. RustSTA/OpenSTA ideal-wire setup/hold differences <=6.029405e-7 ns
+  (Sky130) /8.695039e-7 ns (GF180), tolerance 0.001 ns, zero unconstrained
+  endpoints. Pulse-width/minimum-period warnings remain visible. Incremental
+  checks are no-op updates only, not changed timing ECO validation.
+- References: `docs/pdk-report.html`, `docs/pdk-import.md`,
+  `docs/pdk-import-budget.md`, and `docs/evidence/pdk-import-results.json`.
+  Full local receipts: `.work/pdk-import-geometry-final/`. This work did not alter
+  or rebuild the sibling RustSys/RustSTA sources or frozen release targets.
+
+### New lessons
+
+- Sky130 source DBU is 1000/um and GF180 is 2000/um. Coordinates are decimal
+  microns in LEF, not source-DBU integers. Reject nonintegral conversions instead
+  of silently rounding. Validate selected site and each master separately.
+- Verilog `alias` is a reserved keyword; use a valid or escaped identifier in
+  fixtures. Default expression depth is 32 to fit nested serialized ASTs within
+  the JSON recursion limit. Node/work budgets are separate from final pin count.
+- Avoid O(ports * aliases): build the alias-to-net map once. Alias union uses size
+  balancing/path compression and preserves a deterministic canonical name.
+- OpenROAD's allocator and Go-based Podman can fail virtual reservations under a
+  2 GiB AS cap even at low RSS. Keep the real container memory cap at 2 GiB/no swap,
+  allow 8 GiB VAS for that reference process, and set GOMAXPROCS=2. The native
+  Rust/timing tools keep their existing smaller limits. Preserve failed probes.
+- I/O placement, power-grid construction, CTS, routing, extraction, GDS and DRC/LVS
+  remain outstanding. The successful STA scope is ideal wire/clock, not extracted
+  post-route timing. The earlier section below is historical v0.1 evidence.
+
 ## 2026-10-23 — initial physical workspace and verified subflows
 
 - New clone of `git@github.com:lab-emi/RustROAD.git`, initial commit `625b5f4`;

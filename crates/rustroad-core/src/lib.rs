@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use slotmap::{Key, SlotMap, new_key_type};
 use std::collections::{HashMap, HashSet};
 
+pub mod connectivity;
+
 new_key_type! { pub struct InstId; }
 
 #[derive(Debug, thiserror::Error)]
@@ -97,6 +99,24 @@ pub fn valid_handle(value: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
 }
 
+/// Logical/physical object names are not CLI handles. Preserve escaped Verilog
+/// identifiers while forbidding controls, whitespace, and unbounded names.
+pub fn valid_object_name(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 1024 && value.bytes().all(|b| b.is_ascii_graphic())
+}
+
+/// DEF escaping is independent of shell-safe revision/object handles.
+pub fn def_name(value: &str) -> String {
+    let mut result = String::with_capacity(value.len());
+    for c in value.chars() {
+        if !c.is_ascii_alphanumeric() && !matches!(c, '_' | '.' | '/' | '[' | ']' | '-') {
+            result.push('\\');
+        }
+        result.push(c);
+    }
+    result
+}
+
 impl Design {
     pub fn validate(&self, limits: &Limits) -> Result<()> {
         if self.cells.len() > limits.max_cells || self.rows.len() > limits.max_rows {
@@ -107,7 +127,7 @@ impl Design {
         if self.cells.is_empty() || self.rows.is_empty() {
             return Err(Error::Invalid("at least one cell and row required".into()));
         }
-        if !valid_handle(&self.name) || self.units_per_micron == 0 {
+        if !valid_object_name(&self.name) || self.units_per_micron == 0 {
             return Err(Error::Invalid("invalid design name or DBU scale".into()));
         }
         if !self.die_area.valid()
@@ -118,7 +138,7 @@ impl Design {
                 "core must be a nonempty rectangle inside die".into(),
             ));
         }
-        if !valid_handle(&self.site.name) || self.site.width <= 0 || self.site.height <= 0 {
+        if !valid_object_name(&self.site.name) || self.site.width <= 0 || self.site.height <= 0 {
             return Err(Error::Invalid("site dimensions must be positive".into()));
         }
         let mut previous_top = None;
@@ -154,8 +174,8 @@ impl Design {
         let mut names = HashSet::with_capacity(self.cells.len());
         let mut masters = HashMap::new();
         for cell in &self.cells {
-            if !valid_handle(&cell.name)
-                || !valid_handle(&cell.master)
+            if !valid_object_name(&cell.name)
+                || !valid_object_name(&cell.master)
                 || !names.insert(cell.name.as_str())
             {
                 return Err(Error::Invalid("invalid or duplicate instance name".into()));
@@ -341,6 +361,15 @@ pub fn write_def(
     cells: &[Placed],
     output: &mut impl std::io::Write,
 ) -> std::io::Result<()> {
+    write_def_components(design, cells, output)?;
+    writeln!(output, "END DESIGN")
+}
+
+pub(crate) fn write_def_components(
+    design: &Design,
+    cells: &[Placed],
+    output: &mut impl std::io::Write,
+) -> std::io::Result<()> {
     use std::io::{Error, ErrorKind};
     if cells.len() != design.cells.len() {
         return Err(Error::new(
@@ -390,7 +419,8 @@ pub fn write_def(
     writeln!(
         output,
         "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN {} ;\nUNITS DISTANCE MICRONS {} ;",
-        design.name, design.units_per_micron
+        def_name(&design.name),
+        design.units_per_micron
     )?;
     let die = design.die_area;
     writeln!(
@@ -404,7 +434,10 @@ pub fn write_def(
         writeln!(
             output,
             "ROW row{i} {} {} {} N DO {count} BY 1 STEP {} 0 ;",
-            design.site.name, row.x_start, row.y, design.site.width
+            def_name(&design.site.name),
+            row.x_start,
+            row.y,
+            design.site.width
         )?;
     }
     writeln!(output, "COMPONENTS {} ;", cells.len())?;
@@ -412,10 +445,13 @@ pub fn write_def(
         writeln!(
             output,
             "- {} {} + PLACED ( {} {} ) N ;",
-            cell.name, cell.master, placed.x, placed.y
+            def_name(&cell.name),
+            def_name(&cell.master),
+            placed.x,
+            placed.y
         )?;
     }
-    writeln!(output, "END COMPONENTS\nEND DESIGN")
+    writeln!(output, "END COMPONENTS")
 }
 
 #[cfg(test)]

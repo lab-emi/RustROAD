@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/rustroad-core", "crates/rustroad-workspace", "crates/rustroad-flow", "crates/rustroad-cli"]
+members = ["crates/rustroad-core", "crates/rustroad-formats", "crates/rustroad-workspace", "crates/rustroad-flow", "crates/rustroad-cli"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.97"
 license = "Apache-2.0"
@@ -11,6 +11,7 @@ publish = false
 
 [workspace.dependencies]
 rustroad-core = { path = "crates/rustroad-core" }
+rustroad-formats = { path = "crates/rustroad-formats" }
 rustroad-workspace = { path = "crates/rustroad-workspace" }
 rustroad-flow = { path = "crates/rustroad-flow" }
 serde = { version = "=1.0.228", features = ["derive"] }

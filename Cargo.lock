@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "rustroad-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "rayon",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "rustroad-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rayon",
  "serde",
@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "rustroad-flow"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libc",
  "serde",
@@ -311,14 +311,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustroad-formats"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "rustroad-workspace"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fs2",
+ "libc",
  "memmap2",
  "rustroad-core",
+ "rustroad-formats",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
 ]
 

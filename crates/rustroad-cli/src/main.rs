@@ -17,6 +17,12 @@ struct Cli {
     max_rows: usize,
     #[arg(long, global = true, default_value_t = 350_000)]
     max_expansions: usize,
+    #[arg(long, global = true, default_value_t = 250_000)]
+    max_nets: usize,
+    #[arg(long, global = true, default_value_t = 1_000_000)]
+    max_pins: usize,
+    #[arg(long, global = true, default_value_t = 500_000)]
+    max_aliases: usize,
     #[command(subcommand)]
     command: Command,
 }
@@ -29,6 +35,19 @@ enum Command {
         #[arg(long)]
         input: PathBuf,
     },
+    /// Import real LEF technology/cells and a flat mapped Verilog netlist.
+    ImportPdk {
+        #[arg(long)]
+        base_rev: String,
+        #[arg(long)]
+        tech_lef: PathBuf,
+        #[arg(long)]
+        cell_lef: PathBuf,
+        #[arg(long)]
+        netlist: PathBuf,
+        #[arg(long)]
+        floorplan: PathBuf,
+    },
     /// Deterministic, single-height fixed-order row placement (not global optimization).
     Place {
         #[arg(long)]
@@ -36,8 +55,12 @@ enum Command {
     },
     /// Read the current revision and honest analysis coverage.
     Inspect,
-    /// Write placement-only DEF to stdout. No connectivity/routing is invented.
+    /// Write placed DEF, including imported PINS/NETS when present.
     ExportDef,
+    /// Write the imported logical netlist to stdout with canonical syntax.
+    ExportVerilog,
+    /// Write the linked connectivity/LEF geometry snapshot as JSON.
+    ExportConnectivity,
     /// Inspect pinned external tools and PDK files; readiness is not signoff.
     FlowCheck {
         #[arg(long)]
@@ -62,11 +85,39 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         max_rows: cli.max_rows,
         max_expansions: cli.max_expansions,
     };
+    let connection_limits = rustroad_core::connectivity::ConnectivityLimits {
+        max_instances: cli.max_cells,
+        max_nets: cli.max_nets,
+        max_pins: cli.max_pins,
+        max_aliases: cli.max_aliases,
+        ..Default::default()
+    };
     match cli.command {
         Command::Init { base_rev, input } => {
             let design = rustroad_workspace::read_design(&input, &limits)?;
             emit(&rustroad_workspace::init(
                 &workspace, &base_rev, design, &limits,
+            )?)
+        }
+        Command::ImportPdk {
+            base_rev,
+            tech_lef,
+            cell_lef,
+            netlist,
+            floorplan,
+        } => {
+            let sources = rustroad_workspace::pdk::ImportSources {
+                technology_lef: tech_lef,
+                cell_lef,
+                netlist,
+                floorplan,
+            };
+            emit(&rustroad_workspace::pdk::import_pdk(
+                &workspace,
+                &base_rev,
+                &sources,
+                &limits,
+                &connection_limits,
             )?)
         }
         Command::Place { base_rev } => {
@@ -80,6 +131,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             snapshot.export_def(&mut output)?;
             output.flush()?;
             Ok(())
+        }
+        Command::ExportVerilog => {
+            let snapshot = rustroad_workspace::read(&workspace, &limits)?;
+            let stdout = io::stdout();
+            let mut output = io::BufWriter::with_capacity(256 * 1024, stdout.lock());
+            snapshot.export_verilog(&mut output)?;
+            output.flush()?;
+            Ok(())
+        }
+        Command::ExportConnectivity => {
+            let snapshot = rustroad_workspace::read(&workspace, &limits)?;
+            let model = snapshot
+                .connectivity()
+                .ok_or("NO_CONNECTIVITY: import a mapped netlist first")?;
+            emit(model)
         }
         Command::FlowCheck { manifest } => {
             let _snapshot = rustroad_workspace::read(&workspace, &limits)?;

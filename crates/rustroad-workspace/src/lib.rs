@@ -8,6 +8,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
+pub mod pdk;
+use rustroad_core::connectivity::{ConnectedDesign, ConnectivityLimits, PinOwner};
+
 pub const MAX_METADATA_BYTES: u64 = 16 * 1024 * 1024;
 const RECORD_BYTES: usize = 40;
 const MAX_ORPHAN_SLOTS: u64 = 128;
@@ -44,6 +47,8 @@ pub struct Metadata {
     pub stage: Stage,
     pub design: Design,
     pub expansions: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical: Option<pdk::PhysicalBundle>,
 }
 #[derive(Debug, Serialize)]
 pub struct Summary {
@@ -60,6 +65,13 @@ pub struct Summary {
     pub corner: &'static str,
     pub wire_model: &'static str,
     pub unconstrained_endpoints: Option<usize>,
+    pub nets: Option<usize>,
+    pub pins: Option<usize>,
+    pub masters: Option<usize>,
+    pub connectivity_status: &'static str,
+    pub power_grid_status: &'static str,
+    pub io_placement_status: &'static str,
+    pub diagnostics: Vec<pdk::Diagnostic>,
 }
 impl Metadata {
     pub fn summary(&self) -> Summary {
@@ -81,6 +93,20 @@ impl Metadata {
             corner: "not_applicable",
             wire_model: "none",
             unconstrained_endpoints: None,
+            nets: self.physical.as_ref().map(|p| p.connectivity.nets.len()),
+            pins: self.physical.as_ref().map(|p| p.connectivity.pins.len()),
+            masters: self.physical.as_ref().map(|p| p.connectivity.masters.len()),
+            connectivity_status: if self.physical.is_some() {
+                "linked_unverified"
+            } else {
+                "not_imported"
+            },
+            power_grid_status: "unchecked",
+            io_placement_status: "not_placed",
+            diagnostics: self
+                .physical
+                .as_ref()
+                .map_or_else(Vec::new, |p| p.diagnostics.clone()),
         }
     }
 }
@@ -90,6 +116,12 @@ pub struct Snapshot {
     _lock: File,
     metadata: Metadata,
     map: Mmap,
+    _connections: Option<ConnectionMaps>,
+}
+struct ConnectionMaps {
+    _pins: Option<Mmap>,
+    _net_offsets: Mmap,
+    _net_pins: Option<Mmap>,
 }
 impl Snapshot {
     pub fn metadata(&self) -> &Metadata {
@@ -108,8 +140,31 @@ impl Snapshot {
             ));
         }
         let records = self.records().collect::<Vec<_>>();
-        rustroad_core::write_def(&self.metadata.design, &records, output)?;
+        if let Some(physical) = &self.metadata.physical {
+            rustroad_core::connectivity::write_connected_def(
+                &self.metadata.design,
+                &records,
+                &physical.connectivity,
+                &ConnectivityLimits::default(),
+                output,
+            )?;
+        } else {
+            rustroad_core::write_def(&self.metadata.design, &records, output)?;
+        }
         Ok(())
+    }
+    pub fn export_verilog(&self, output: &mut impl Write) -> Result<()> {
+        let physical = self
+            .metadata
+            .physical
+            .as_ref()
+            .ok_or_else(|| Error::Invalid("no mapped netlist imported".into()))?;
+        rustroad_formats::verilog::write_verilog(&physical.netlist, output)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        Ok(())
+    }
+    pub fn connectivity(&self) -> Option<&ConnectedDesign> {
+        self.metadata.physical.as_ref().map(|p| &p.connectivity)
     }
 }
 
@@ -138,6 +193,7 @@ pub fn init(path: &Path, base_rev: &str, design: Design, limits: &Limits) -> Res
         stage: Stage::Imported,
         design,
         expansions: 0,
+        physical: None,
     };
     let result = commit(path, metadata, &records)?;
     drop(lock);
@@ -226,7 +282,14 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
             path.display()
         )));
     }
-    let mut file = File::open(path)?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path)?;
     if !file.metadata()?.is_file() {
         return Err(Error::Invalid("input is not a regular file".into()));
     }
@@ -256,13 +319,26 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         &revision_dir.join("design.json"),
         MAX_METADATA_BYTES,
     )?)?;
-    if metadata.format_version != 1
+    if !matches!(metadata.format_version, 1 | 2)
         || metadata.revision != current
         || revision_number(&metadata.parent_revision)? >= revision_number(&current)?
     {
         return Err(Error::Invalid("snapshot schema/revision mismatch".into()));
     }
     metadata.design.validate(limits)?;
+    if (metadata.format_version == 2) != metadata.physical.is_some() {
+        return Err(Error::Invalid("connected schema/payload mismatch".into()));
+    }
+    let connections = if let Some(physical) = &metadata.physical {
+        pdk::validate_bundle(physical, &metadata.design, &ConnectivityLimits::default())?;
+        Some(read_connection_tables(
+            &revision_dir,
+            &metadata.design,
+            &physical.connectivity,
+        )?)
+    } else {
+        None
+    };
     if metadata.stage == Stage::Imported && metadata.expansions != 0 {
         return Err(Error::Invalid(
             "imported snapshot has placement expansions".into(),
@@ -288,6 +364,7 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         _lock: lock,
         metadata,
         map,
+        _connections: connections,
     };
     let mut seen = HashSet::with_capacity(snapshot.metadata.design.cells.len());
     for (record, cell) in snapshot.records().zip(&snapshot.metadata.design.cells) {
@@ -380,6 +457,10 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
     }
     table.flush()?;
     table.get_ref().sync_all()?;
+    if let Some(physical) = &metadata.physical {
+        pdk::validate_bundle(physical, &metadata.design, &ConnectivityLimits::default())?;
+        write_connection_tables(&directory, &metadata.design, &physical.connectivity)?;
+    }
     sync_directory(&directory)?;
     sync_directory(&path.join("revisions"))?;
     let pending = path.join(format!("HEAD-{}.pending", metadata.revision));
@@ -393,6 +474,138 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     file.write_all(bytes)?;
     file.sync_all()?;
     Ok(())
+}
+
+fn owner_record(pin: &rustroad_core::connectivity::Connection) -> [u32; 4] {
+    match pin.owner {
+        PinOwner::Instance { instance, terminal } => {
+            [0, instance, terminal, pin.net.unwrap_or(u32::MAX)]
+        }
+        PinOwner::Port { port, bit } => [1, port, bit, pin.net.unwrap_or(u32::MAX)],
+    }
+}
+fn write_connection_tables(
+    directory: &Path,
+    design: &Design,
+    model: &ConnectedDesign,
+) -> Result<()> {
+    let csr = model.lower_csr(design, &ConnectivityLimits::default())?;
+    let write_table =
+        |name: &str, produce: &mut dyn FnMut(&mut BufWriter<File>) -> Result<()>| -> Result<()> {
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(directory.join(name))?;
+            let mut out = BufWriter::with_capacity(256 * 1024, file);
+            produce(&mut out)?;
+            out.flush()?;
+            out.get_ref().sync_all()?;
+            Ok(())
+        };
+    write_table("pins.rbin", &mut |out| {
+        for pin in &model.pins {
+            for field in owner_record(pin) {
+                out.write_all(&field.to_le_bytes())?;
+            }
+        }
+        Ok(())
+    })?;
+    write_table("net_offsets.rbin", &mut |out| {
+        for offset in &csr.offsets {
+            out.write_all(&offset.to_le_bytes())?;
+        }
+        Ok(())
+    })?;
+    write_table("net_pins.rbin", &mut |out| {
+        for pin in &csr.pin_indices {
+            out.write_all(&pin.to_le_bytes())?;
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+fn map_table(path: &Path, bytes: usize) -> Result<Option<Mmap>> {
+    if !fs::metadata(path)?.is_file() {
+        return Err(Error::Invalid("side table must be a regular file".into()));
+    }
+    let file = File::open(path)?;
+    if file.metadata()?.len() != bytes as u64 {
+        return Err(Error::Invalid(format!(
+            "{}: connection table length mismatch",
+            path.display()
+        )));
+    }
+    if bytes == 0 {
+        return Ok(None);
+    }
+    // SAFETY: immutable published files; snapshot retains the workspace lock.
+    #[allow(unsafe_code)]
+    let map = unsafe { Mmap::map(&file)? };
+    Ok(Some(map))
+}
+fn read_connection_tables(
+    directory: &Path,
+    design: &Design,
+    model: &ConnectedDesign,
+) -> Result<ConnectionMaps> {
+    let csr = model.lower_csr(design, &ConnectivityLimits::default())?;
+    let pins = map_table(
+        &directory.join("pins.rbin"),
+        model
+            .pins
+            .len()
+            .checked_mul(16)
+            .ok_or_else(|| Error::Budget("pin table overflow".into()))?,
+    )?;
+    let offsets = map_table(
+        &directory.join("net_offsets.rbin"),
+        csr.offsets
+            .len()
+            .checked_mul(8)
+            .ok_or_else(|| Error::Budget("offset table overflow".into()))?,
+    )?
+    .ok_or_else(|| Error::Invalid("missing offset sentinel".into()))?;
+    let net_pins = map_table(
+        &directory.join("net_pins.rbin"),
+        csr.pin_indices
+            .len()
+            .checked_mul(4)
+            .ok_or_else(|| Error::Budget("CSR table overflow".into()))?,
+    )?;
+    for (bytes, expected) in pins
+        .as_deref()
+        .unwrap_or(&[])
+        .chunks_exact(16)
+        .zip(&model.pins)
+    {
+        for (b, field) in bytes.chunks_exact(4).zip(owner_record(expected)) {
+            if u32::from_le_bytes(b.try_into().unwrap()) != field {
+                return Err(Error::Invalid(
+                    "pin side table differs from metadata".into(),
+                ));
+            }
+        }
+    }
+    for (bytes, expected) in offsets.chunks_exact(8).zip(csr.offsets) {
+        if u64::from_le_bytes(bytes.try_into().unwrap()) != expected {
+            return Err(Error::Invalid("net offsets differ from metadata".into()));
+        }
+    }
+    for (bytes, expected) in net_pins
+        .as_deref()
+        .unwrap_or(&[])
+        .chunks_exact(4)
+        .zip(csr.pin_indices)
+    {
+        if u32::from_le_bytes(bytes.try_into().unwrap()) != expected {
+            return Err(Error::Invalid("net CSR differs from metadata".into()));
+        }
+    }
+    Ok(ConnectionMaps {
+        _pins: pins,
+        _net_offsets: offsets,
+        _net_pins: net_pins,
+    })
 }
 fn serialize_bounded(value: &impl Serialize) -> Result<Vec<u8>> {
     struct Buffer {

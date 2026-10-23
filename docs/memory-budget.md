@@ -1,5 +1,9 @@
 # Resource contract
 
+For real technology/netlist import in version 0.2, also read
+[the PDK import budget](pdk-import-budget.md), which includes parser, alias,
+connectivity, geometry and snapshot reconciliation state.
+
 Written before implementing the first physical pass and its verification fixtures.
 
 The initial pass is a single-height, fixed-order row packer, not an analytical
@@ -32,7 +36,7 @@ Workspace users must honor the lock and immutable-table contract; modifying an
 already mapped file from outside RustROAD is unsupported. A future renderer must
 define a reader lease/garbage-collection protocol before reclaiming snapshots.
 
-Build estimate: four small crates and their Rust dependencies, two concurrent
+Build estimate: five small crates and their Rust dependencies, two concurrent
 compiler jobs, expected below 2 GiB. Before builds run `free -h`. Use:
 
 ```sh

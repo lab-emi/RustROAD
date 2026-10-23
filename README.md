@@ -2,7 +2,7 @@
 
 Clean-room, native Rust physical-design development for the RustEDA toolchain.
 Apache-2.0. This is an initial engineering baseline, **not a complete RTL-to-GDS
-implementation**. Current version: 0.1.0.
+implementation**. Current version: 0.2.0.
 
 Implemented:
 
@@ -14,12 +14,21 @@ Implemented:
   atomic revision publication and read-only `memmap2` instance tables.
 - Placement-only DEF export, independent Python legality checking, and a pinned
   external OpenROAD positive/negative placement oracle captured by REA.
+- Real technology/cell LEF import with exact DBU conversion, sites, layers,
+  macros, pin/obstruction geometry, fixed vias and explicit unsupported-rule
+  diagnostics. Retains only used cell masters in the design snapshot.
+- Flat mapped Verilog import with buses, escaped names, bit/part selects,
+  concatenations and assignment aliases; bounded linking and driver validation.
+- Connected DEF PINS/NETS and canonical Verilog export; version-2 mmap pin/CSR
+  tables with logical-to-physical consistency checks when reopening snapshots.
+- An actual RustSys → RustROAD → RustSTA path on both real Sky130/GF180 PDKs,
+  independently checked through Yosys, Verilator and OpenROAD/OpenSTA.
 - Read-only pinned-tool/dual-PDK flow readiness and a guarded logic validation
   harness using existing RustSys/RustSTA and independent external tools.
 
-Not implemented: LEF/netlist connectivity import into the physical engine,
-global placement optimization, CTS, routing, extraction, GDS streamout, DRC/LVS,
-or GUI. Pinless geometry fixtures are not PDK signoff. Missing results always
+Not implemented: global placement optimization, CTS, routing, extraction,
+GDS streamout, DRC/LVS, power-grid or I/O placement, or GUI. Real-PDK connectivity
+and cell placement are not PDK signoff. Missing results always
 remain `unverified`, `not_run` or `unchecked`.
 
 ## Build and try
@@ -55,18 +64,43 @@ duplicate names and overflowing coordinates fail explicitly. The optional
 `site.name` defaults to `rustroad_site`; real LEF interoperability requires a
 matching site and matching cell dimensions.
 
-The exported DEF contains geometry only: rows and placed components. It does not
-invent pins, nets or routes. Its `placement_status` stays `placed_unverified`;
-external validation receipts are separate evidence.
+The JSON geometry example still exports rows/components only. Designs imported
+with `import-pdk` also export logical PINS/NETS; top-level I/O terminals are
+explicitly unplaced, and power-grid connectivity is unchecked. Exported Verilog
+preserves the mapped logic and interfaces. `placement_status` remains
+`placed_unverified`; external validation receipts are separate evidence.
+
+## Real PDK and mapped-netlist import
+
+```sh
+target/release/rustroad import-pdk --workspace .work/connected --base-rev rev0 \
+  --tech-lef /path/to/technology.tlef --cell-lef /path/to/cells.lef \
+  --netlist /path/to/rustsys-mapped.v --floorplan /path/to/floorplan.json
+target/release/rustroad place --workspace .work/connected --base-rev rev1
+target/release/rustroad export-verilog --workspace .work/connected > .work/connected.v
+target/release/rustroad export-def --workspace .work/connected > .work/connected.def
+```
+
+The floorplan JSON contains `name`, `units_per_micron`, `die_area`, `core_area`,
+`site` and `rows` using the example's schema, without a `cells` field. Module and
+site identities must match. The importer derives every cell and pin from the
+mapped module and LEF, stores source hashes, rejects missing masters/pins,
+multi-driver signals, nonzero macro origins, inconsistent widths/units and
+unimplemented physical constants or supply wiring. Unsupported technology rules
+are counted warnings rather than discarded signoff requirements. See
+[real-PDK validation and limitations](docs/pdk-import.md) and
+[import memory/work budgets](docs/pdk-import-budget.md).
 
 ## Verification and research
 
 - [REA/OpenROAD study and placement evidence](docs/openroad-blackbox.md)
 - [Flow integration contract](docs/flow-integration.md)
+- [Real-PDK connected flow](docs/pdk-import.md)
 - [GUI architecture and framework decision](docs/gui-architecture.md)
 - [GUI benchmark acceptance plan](docs/gui-benchmark-plan.md)
 - [Architecture and next implementation gates](docs/architecture.md)
-- [Chinese engineering report](docs/report.html)
+- [Chinese PDK integration report](docs/pdk-report.html)
+- [Earlier bootstrap report](docs/report.html)
 
 Run the bounded placement workload after a release build:
 

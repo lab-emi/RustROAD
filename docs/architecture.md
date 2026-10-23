@@ -7,12 +7,35 @@ generational instance arena. A separate contiguous CPU view supports the initial
 fixed-order row packer. Neither core nor workspace depends on Python, GUI, or an
 external EDA tool. Native Rust code is the authority for physical state.
 
+`rustroad-formats` provides bounded, separately typed LEF and structural-Verilog
+readers. The LEF AST preserves integer geometry, pin use/direction, sites, layers
+and fixed vias; unsupported rules are counted diagnostics. The mapped AST keeps
+vectors, escaped names and aliases. `rustroad-workspace::pdk` joins these inputs,
+checks exact site/master units, and retains only used masters. Constants requiring
+tie-cell insertion, explicit supply networks and nonzero macro origins fail with
+diagnostics rather than guessed physical semantics.
+
+Core connectivity has separate generational `InstId`, `CellId`, `NetId`, `PinId`
+arenas and a derived CSR view. It expands signal bits with hard caps and unifies
+wire aliases with bounded union/find. Driver and endpoint coverage checks do not
+enumerate graph paths. Imported LEF supply geometry is retained; no supply wiring
+or I/O physical placement is inferred.
+
 `rustroad-workspace` owns lock acquisition, strict schema validation, immutable
 revision directories and atomic HEAD replacement. The fixed 40-byte little-endian
 instance record is `(id: u64, x: i64, y: i64, width: i64, height: i64)`. Versioned
 JSON stores bounded design metadata and row/site geometry. Every reader validates
 format, table length and relevant invariants before using a read-only mmap. Files
 are created with exclusive creation and synced before HEAD is replaced.
+
+Connected snapshots use format version 2; legacy geometry-only version 1 remains
+readable. `pins.rbin` holds 16-byte `(owner_kind, owner_index, terminal_index,
+net_index)` u32 records (`u32::MAX` means unconnected), `net_offsets.rbin` holds
+u64 CSR offsets including the final sentinel, and `net_pins.rbin` holds u32 pin
+indices. The reader checks lengths and fields against bounded metadata. It also
+relinks the stored logical AST and requires the same ports, nets and pin mapping
+before allowing Verilog or DEF export. A corrupted AST cannot silently produce
+a second circuit while the binary pin table still describes the first.
 
 Readers hold shared locks for the lifetime of their mapped snapshot; a writer
 holds an exclusive lock through calculation and publication. This intentionally
@@ -42,10 +65,11 @@ could fit; it makes no minimum wirelength, density, routability or timing claim.
 
 ## Next gates, in dependency order
 
-1. **Real technology/connectivity import.** Add bounded LEF/DEF and mapped Verilog
-   import, `NetId`/`PinId` arenas, DB-owned technology data and cross-format unit
-   consistency. Unsupported semantic features must be diagnostics. Validate both
-   `sky130_fd_sc_hd` and `gf180mcu_fd_sc_mcu7t5v0`/`9t5v0`.
+1. **Broader technology and physical connectivity.** The initial LEF/mapped
+   Verilog path is independently verified on real `sky130_fd_sc_hd` and
+   `gf180mcu_fd_sc_mcu7t5v0` data. Extend it with DEF import, physical I/O placement,
+   supply/tie networks, row orientation and power continuity, multi-height cells,
+   complete required design rules and further PDK variants.
 2. **Legalization and global placement.** Keep fixed-order packing as a baseline.
    Define objective/QoR, displacement and density constraints; estimate memory
    for pin CSR, gradient and density buffers first. Deterministic `cpu_ref` and
