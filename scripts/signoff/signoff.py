@@ -221,6 +221,8 @@ class Session:
                     dbu_expected=dbu_ok)
 
     def apply_preflight(self, v: Verdict):
+        if self.identity is None or self.identity["status"] != "verified":
+            return  # tools are not trusted; gate() records the identity reason
         if self.preflight is None:
             v.unknown("preflight probe failed (GDS unreadable?)")
             return
