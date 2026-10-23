@@ -205,10 +205,21 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("cmd", nargs=argparse.REMAINDER)
     i = sub.add_parser("inspect", help="print podman identity of an image")
     i.add_argument("--image", default=SIGNOFF_IMAGE)
+    pr = sub.add_parser("probe", help="re-verify image/tool/PDK identities against the manifest")
+    pr.add_argument("--manifest", type=Path, default=Path(__file__).resolve().parents[2] / "fixtures/flow/signoff-pinned.json")
+    pr.add_argument("--out", type=Path, required=True)
+    pr.add_argument("--pdk", action="append", choices=("sky130", "gf180"))
     args = parser.parse_args(argv)
     if args.action == "inspect":
         print(json.dumps(image_identity(args.image), indent=2))
         return 0
+    if args.action == "probe":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import manifest  # noqa: PLC0415 (lazy: manifest imports this module)
+        result = manifest.verify(args.manifest.resolve(), args.out.resolve(), args.pdk or ["sky130", "gf180"],
+                                 sorted(manifest.TOOL_SPEC) + ["openroad", "opensta"], label=next_label(args.out, "probe"))
+        print(json.dumps(dict(status=result["status"], mismatches=result["mismatches"], checked=result.get("checked"))))
+        return 0 if result["status"] == "verified" else 3
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not cmd:
         parser.error("missing command after --")
