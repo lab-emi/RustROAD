@@ -275,23 +275,13 @@ fn encloses(bundle: &PhysicalBundle, v: &RouteVia, layers: &[RouteLayer]) -> Res
     Ok(true)
 }
 
-pub(crate) fn build_input(
-    design: &Design,
-    bundle: &PhysicalBundle,
-    placed: &[Placed],
+/// Routing layers (policy order, then cut layers) and fixed vias (policy via,
+/// then its LEF variants in LEF-rule mode) with the name-to-index map.
+pub(crate) type Technology<'a> = (Vec<RouteLayer>, Vec<RouteVia>, HashMap<&'a str, u32>);
+pub(crate) fn route_technology<'a>(
+    bundle: &'a PhysicalBundle,
     config: &RoutingConfig,
-    scope: RouteScope,
-) -> Result<RouteInput> {
-    config.validate()?;
-    let state = bundle
-        .state
-        .as_ref()
-        .ok_or_else(|| fail("prepared placement required"))?;
-    let model = &bundle.connectivity;
-    let grid = bundle
-        .technology
-        .manufacturing_grid
-        .ok_or_else(|| fail("manufacturing grid missing"))?;
+) -> Result<Technology<'a>> {
     let mut layers = Vec::new();
     let mut indices = HashMap::new();
     for policy in &config.layers {
@@ -364,6 +354,27 @@ pub(crate) fn build_input(
         vias.push(configured);
         vias.extend(family);
     }
+    Ok((layers, vias, indices))
+}
+
+pub(crate) fn build_input(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    placed: &[Placed],
+    config: &RoutingConfig,
+    scope: RouteScope,
+) -> Result<RouteInput> {
+    config.validate()?;
+    let state = bundle
+        .state
+        .as_ref()
+        .ok_or_else(|| fail("prepared placement required"))?;
+    let model = &bundle.connectivity;
+    let grid = bundle
+        .technology
+        .manufacturing_grid
+        .ok_or_else(|| fail("manufacturing grid missing"))?;
+    let (layers, vias, indices) = route_technology(bundle, config)?;
     let selected: BTreeSet<_> = match scope {
         RouteScope::Clock => {
             if bundle
@@ -582,7 +593,7 @@ pub(crate) fn build_input(
 }
 /// Relative (origin 0,0) pin and same-master other-net geometry of one
 /// (master, orientation, pin) access class on the selected layers.
-fn access_class(
+pub(crate) fn access_class(
     master: &rustroad_core::connectivity::Master,
     orientation: rustroad_core::Orientation,
     height: i64,
@@ -760,13 +771,32 @@ pub(crate) fn write_def_paths(
     patches: &[&routing::Patch],
     out: &mut impl Write,
 ) -> Result<()> {
+    write_paths(
+        &state.layers,
+        &state.via_names,
+        &state.via_lower_layers,
+        wires,
+        vias,
+        patches,
+        out,
+    )
+}
+pub(crate) fn write_paths(
+    layers: &[String],
+    via_names: &[String],
+    via_lower_layers: &[u32],
+    wires: &[&routing::Wire],
+    vias: &[&routing::Via],
+    patches: &[&routing::Patch],
+    out: &mut impl Write,
+) -> Result<()> {
     let mut first = true;
     for w in wires {
         write!(
             out,
             "\n  {} {} ( {} {} ) ( {} {} )",
             if first { "+ ROUTED" } else { "NEW" },
-            rustroad_core::def_name(&state.layers[w.layer as usize]),
+            rustroad_core::def_name(&layers[w.layer as usize]),
             w.start[0],
             w.start[1],
             w.end[0],
@@ -775,8 +805,8 @@ pub(crate) fn write_def_paths(
         first = false;
     }
     for v in vias {
-        let name = &state.via_names[v.kind as usize];
-        let lower = &state.layers[state.via_lower_layers[v.kind as usize] as usize];
+        let name = &via_names[v.kind as usize];
+        let lower = &layers[via_lower_layers[v.kind as usize] as usize];
         write!(
             out,
             "\n  {} {} ( {} {} ) {}",
@@ -794,7 +824,7 @@ pub(crate) fn write_def_paths(
             out,
             "\n  {} {} ( {} {} ) RECT ( 0 0 {} {} )",
             if first { "+ ROUTED" } else { "NEW" },
-            rustroad_core::def_name(&state.layers[p.layer as usize]),
+            rustroad_core::def_name(&layers[p.layer as usize]),
             p.rect.lx,
             p.rect.ly,
             p.rect.ux - p.rect.lx,

@@ -352,6 +352,7 @@ def main():
     ap.add_argument('--flow', type=Path, help='verify_routing.py workspace with <tag>.def and <tag>_powered.v')
     ap.add_argument('--pdk', default='sky130,gf180')
     ap.add_argument('--access-def', action='append', default=[], help='tag=path of a pin-access test DEF')
+    ap.add_argument('--rustroad', type=Path, help='binary used to export pin-access test DEFs from <flow>/<tag>_physical')
     ap.add_argument('--top', default='lane_smoke')
     ap.add_argument('--no-controls', action='store_true')
     a = ap.parse_args()
@@ -410,8 +411,28 @@ def main():
                                                         status='rejected' if bad_lvs['netgen']['status'] == 'mismatch'
                                                         and bad_lvs['klayout']['status'] == 'mismatch' else 'missed')
                     entry['controls'] = controls
+            if a.rustroad and a.flow and tag not in accesses:
+                # Production profile plus a legacy-mode copy as a detection control.
+                profile = ROOT / 'fixtures/pdk' / (tag + '-routing.json')
+                legacy = root / (tag + '-legacy-routing.json')
+                cfg = json.loads(profile.read_text())
+                cfg['lef_rules'] = False
+                legacy.write_text(json.dumps(cfg))
+                for name, prof in ((tag + '_access.def', profile), (tag + '_access_legacy.def', legacy)):
+                    with (root / name).open('wb') as f:
+                        rc = subprocess.run([str(a.rustroad), '--workspace', str(a.flow / (tag + '_physical')), 'export-access-test',
+                                             '--config', str(prof)], stdout=f, stderr=subprocess.PIPE, timeout=120).returncode
+                    require(rc == 0, 'export-access-test failed for ' + name)
+                accesses[tag] = str(root / (tag + '_access.def'))
+                c, _ = drc_suite(r, p, tag + '_access_legacy', root / (tag + '_access_legacy.def'), 'rustroad_access_test',
+                                 antenna=False, density=False)
+                entry['access_legacy_control'] = dict(magic=c['magic']['total'], klayout=c['klayout']['items'],
+                                                      magic_rules=c['magic']['rules'], klayout_rules=c['klayout']['categories'],
+                                                      note='informational: same layout routed with lef_rules=false')
             if tag in accesses:
                 res, _ = drc_suite(r, p, tag + '_access', Path(accesses[tag]), 'rustroad_access_test', antenna=False, density=False)
+                res['tests'] = len(re.findall(r'(?m)^- acc\d+ \(', Path(accesses[tag]).read_text()))
+                res['def_sha256'] = sha256(Path(accesses[tag]))
                 entry['access_test'] = res
             summary['pdks'][tag] = entry
         ok = True
@@ -435,7 +456,7 @@ def main():
     (root / 'summary.json').write_text(json.dumps(summary, indent=1))
     brief = {t: {k: (v.get('drc_status'), v.get('magic', {}).get('total'), v.get('klayout', {}).get('items'),
                      v.get('antenna', {}).get('items'), v.get('density', {}).get('items'),
-                     v.get('lvs', {}).get('status')) for k, v in e.items() if isinstance(v, dict) and 'magic' in v}
+                     v.get('lvs', {}).get('status')) for k, v in e.items() if isinstance(v, dict) and isinstance(v.get('magic'), dict)}
              for t, e in summary['pdks'].items()}
     print(json.dumps(dict(status=summary['status'], reason=summary.get('reason'), brief=brief,
                           summary=str(root / 'summary.json'))))

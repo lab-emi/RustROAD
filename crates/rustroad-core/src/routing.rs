@@ -1125,10 +1125,19 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
                 }
                 expanded += 1;
                 out.stats.expansions += 1;
-                if expanded > limits.max_search_expansions
-                    || out.stats.expansions > limits.max_expansions
-                {
-                    return Err(budget("routing expansion limit"));
+                if expanded > limits.max_search_expansions {
+                    return Err(budget(&format!(
+                        "routing expansion limit: per-sink search, pin {} net {net}, {} nets done",
+                        terminal.pin,
+                        out.nets.len() - 1
+                    )));
+                }
+                if out.stats.expansions > limits.max_expansions {
+                    return Err(budget(&format!(
+                        "routing expansion limit: total, pin {} net {net}, {} nets done",
+                        terminal.pin,
+                        out.nets.len() - 1
+                    )));
                 }
                 let (layer, p) = grid.point(id);
                 for (next, via) in grid.neighbors(id) {

@@ -74,6 +74,12 @@ enum Command {
     },
     /// Write checked routed geometry and scope as JSON.
     ExportRoutes,
+    /// Write a read-only pin-access test DEF (each used master, orientation
+    /// and signal pin routed by this profile) for external DRC decks.
+    ExportAccessTest {
+        #[arg(long)]
+        config: PathBuf,
+    },
     /// Read the current revision and honest analysis coverage.
     Inspect,
     /// Write placed DEF, including imported PINS/NETS when present.
@@ -182,6 +188,18 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|p| p.routing.as_ref())
                     .ok_or("NO_ROUTING: route first")?,
             )
+        }
+        Command::ExportAccessTest { config } => {
+            let stdout = io::stdout();
+            let mut output = io::BufWriter::with_capacity(256 * 1024, stdout.lock());
+            rustroad_workspace::access_test::export_access_test(
+                &workspace,
+                &config,
+                &limits,
+                &mut output,
+            )?;
+            output.flush()?;
+            Ok(())
         }
         Command::Inspect => emit(&rustroad_workspace::read(&workspace, &limits)?.summary()),
         Command::ExportDef => {
