@@ -31,6 +31,7 @@
     "gf180mcu_fd_sc_mcu7t5v0__fill_1"
   ],
   "alternating_rows": true,
+  "io_min_area": true,
   "io_width": 800,
   "io_spacing": 1600,
   "strap_width": 800,

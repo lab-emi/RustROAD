@@ -87,6 +87,18 @@ pub struct LefLayer {
     pub width: Option<i64>,
     /// A simple unconditional spacing only; complex rules remain diagnostics.
     pub spacing: Option<i64>,
+    /// Unconditional `AREA` minimum, exact integer DBU^2 at the caller DBU.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_area: Option<i64>,
+    /// Unconditional `MINSTEP` length in DBU (option forms stay diagnostics).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_step: Option<i64>,
+    /// Cut-layer `ENCLOSURE BELOW a b` overhangs in DBU (either orientation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enclosure_below: Option<[i64; 2]>,
+    /// Cut-layer `ENCLOSURE ABOVE a b` overhangs in DBU (either orientation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enclosure_above: Option<[i64; 2]>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -411,6 +423,11 @@ impl<'a> Parser<'a, '_> {
     fn coord(&self, token: Token<'a>) -> Result<i64> {
         decimal_dbu(token.text, self.doc.dbu_per_micron, token.line)
     }
+    /// Square-micron value converted exactly to DBU^2 (never rounded).
+    fn area(&self, token: Token<'a>) -> Result<i64> {
+        let dbu = i128::from(self.doc.dbu_per_micron);
+        decimal_scaled(token.text, dbu * dbu, token.line)
+    }
     fn pair(&self, values: &[Token<'a>], line: usize) -> Result<[i64; 2]> {
         self.arity(values, 2, line)?;
         Ok([self.coord(values[0])?, self.coord(values[1])?])
@@ -573,6 +590,10 @@ impl<'a> Parser<'a, '_> {
             offset: None,
             width: None,
             spacing: None,
+            min_area: None,
+            min_step: None,
+            enclosure_below: None,
+            enclosure_above: None,
         };
         loop {
             let key = self.next()?;
@@ -597,6 +618,22 @@ impl<'a> Parser<'a, '_> {
                 }
                 "WIDTH" => { if layer.width.is_some() { return Err(error("LEF_SYNTAX",key.line,"duplicate layer WIDTH")); } self.arity(&values, 1, key.line)?; let width = self.coord(values[0])?; if width <= 0 { return Err(error("LEF_GEOMETRY", key.line, "WIDTH must be positive")); } layer.width = Some(width); }
                 "SPACING" if values.len() == 1 && layer.spacing.is_none() => { let value = self.coord(values[0])?; if value < 0 { return Err(error("LEF_GEOMETRY", key.line, "SPACING must not be negative")); } layer.spacing = Some(value); }
+                "AREA" if values.len() == 1 && layer.min_area.is_none() => {
+                    let area = self.area(values[0])?;
+                    if area <= 0 { return Err(error("LEF_GEOMETRY", key.line, "AREA must be positive")); }
+                    layer.min_area = Some(area);
+                }
+                "MINSTEP" if values.len() == 1 && layer.min_step.is_none() => {
+                    let step = self.coord(values[0])?;
+                    if step <= 0 { return Err(error("LEF_GEOMETRY", key.line, "MINSTEP must be positive")); }
+                    layer.min_step = Some(step);
+                    self.warn(key, "layer", "MINSTEP retained; router enforces it only for pin-access landing pads")?;
+                }
+                "ENCLOSURE" if values.len() == 3 && (values[0].is("BELOW") || values[0].is("ABOVE")) && (if values[0].is("BELOW") { layer.enclosure_below.is_none() } else { layer.enclosure_above.is_none() }) => {
+                    let pair = [self.coord(values[1])?, self.coord(values[2])?];
+                    if pair.iter().any(|v| *v < 0) { return Err(error("LEF_GEOMETRY", key.line, "ENCLOSURE overhang must not be negative")); }
+                    if values[0].is("BELOW") { layer.enclosure_below = Some(pair); } else { layer.enclosure_above = Some(pair); }
+                }
                 "SPACING" | "SPACINGTABLE" | "MINWIDTH" | "AREA" | "THICKNESS" | "MINENCLOSEDAREA" | "EDGECAPACITANCE" | "CAPACITANCE" | "RESISTANCE" | "ENCLOSURE" | "PREFERENCLOSURE" | "DCCURRENTDENSITY" | "ACCURRENTDENSITY" | "MINIMUMDENSITY" | "MAXIMUMDENSITY" | "DENSITYCHECKWINDOW" | "DENSITYCHECKSTEP" | "ARRAYSPACING" | "PROPERTY" | "MAXWIDTH" | "MINSTEP" | "MINIMUMCUT" | "MINSIZE" | "PROTRUSIONWIDTH" | "HEIGHT" | "WIREEXTENSION" | "SLOTWIREWIDTH" | "SLOTWIRELENGTH" | "SLOTWIDTH" | "SLOTLENGTH" | "MAXADJACENTSLOTSPACING" | "MAXCOAXIALSLOTSPACING" | "MAXEDGESLOTSPACING" | "SPLITWIREWIDTH" => self.warn(key, "layer", "Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked")?,
                 _ if key.text.to_ascii_uppercase().starts_with("ANTENNA") => self.warn(key, "layer", "Antenna rule is not modeled; antenna status remains unchecked")?,
                 _ => return Err(self.unsupported(key, "LAYER")),
@@ -1109,6 +1146,10 @@ pub fn parse_lef(input: &str, dbu: u32, limits: &LefLimits) -> Result<LefDocumen
 }
 
 fn decimal_dbu(text: &str, dbu: u32, line: usize) -> Result<i64> {
+    decimal_scaled(text, i128::from(dbu), line)
+}
+
+fn decimal_scaled(text: &str, dbu: i128, line: usize) -> Result<i64> {
     let bad = || {
         error(
             "LEF_GEOMETRY",
@@ -1152,7 +1193,7 @@ fn decimal_dbu(text: &str, dbu: u32, line: usize) -> Result<i64> {
     if value == 0 {
         return Ok(0);
     }
-    value = value.checked_mul(i128::from(dbu)).ok_or_else(bad)?;
+    value = value.checked_mul(dbu).ok_or_else(bad)?;
     let scale = fractional.checked_sub(exponent).ok_or_else(bad)?;
     if scale >= 0 {
         let power = 10_i128
@@ -1162,7 +1203,7 @@ fn decimal_dbu(text: &str, dbu: u32, line: usize) -> Result<i64> {
             return Err(error(
                 "LEF_GEOMETRY",
                 line,
-                format!("coordinate {text} is not exactly representable at {dbu} DBU per micron"),
+                format!("value {text} is not exactly representable at scale {dbu} per micron unit"),
             ));
         }
         value /= power;
@@ -1349,6 +1390,39 @@ OBS LAYER Metal1 ; RECT 0.3 0.1 0.4 0.2 ; END END cell END LIBRARY"#;
                 document.diagnostics.len()
             );
         }
+    }
+    #[test]
+    fn area_minstep_and_cut_enclosure_are_exact_integer_rules() {
+        let s = "LAYER via TYPE CUT ; WIDTH 0.15 ; ENCLOSURE BELOW 0.055 0.085 ; ENCLOSURE ABOVE 0.055 0.085 ; END via
+LAYER met1 TYPE ROUTING ; DIRECTION HORIZONTAL ; WIDTH 0.14 ; AREA 0.083 ; MINSTEP 0.05 ; END met1
+LAYER Metal2 TYPE ROUTING ; DIRECTION VERTICAL ; WIDTH 0.28 ; AREA 0.1444 ; AREA 0.2 ; END Metal2
+LAYER Via9 TYPE CUT ; ENCLOSURE 0.01 0.06 ; END Via9";
+        let doc = parse_lef(s, 1000, &LefLimits::default()).unwrap();
+        assert_eq!(doc.layers[0].enclosure_below, Some([55, 85]));
+        assert_eq!(doc.layers[0].enclosure_above, Some([55, 85]));
+        assert_eq!(doc.layers[1].min_area, Some(83_000));
+        assert_eq!(doc.layers[1].min_step, Some(50));
+        // The first unconditional AREA is kept; a second one stays a diagnostic.
+        assert_eq!(doc.layers[2].min_area, Some(144_400));
+        assert!(doc.diagnostics.iter().any(|d| d.keyword == "AREA"));
+        // ENCLOSURE without BELOW/ABOVE is not modeled and is reported.
+        assert_eq!(doc.layers[3].enclosure_below, None);
+        assert!(doc.diagnostics.iter().any(|d| d.keyword == "ENCLOSURE"));
+        assert!(doc.diagnostics.iter().any(|d| d.keyword == "MINSTEP"));
+        // 2000 DBU/um: 0.1444 um^2 = 577,600 DBU^2 exactly.
+        let doc = parse_lef(s, 2000, &LefLimits::default()).unwrap();
+        assert_eq!(doc.layers[2].min_area, Some(577_600));
+        // An area that is not an integer number of DBU^2 is an error, not rounded.
+        let bad = "LAYER m TYPE ROUTING ; AREA 0.0000001 ; END m";
+        assert!(parse_lef(bad, 1000, &LefLimits::default()).is_err());
+        assert!(
+            parse_lef(
+                "LAYER m TYPE ROUTING ; AREA 0 ; END m",
+                1000,
+                &LefLimits::default()
+            )
+            .is_err()
+        );
     }
     #[test]
     fn duplicate_attributes_and_invalid_kinds_are_rejected() {

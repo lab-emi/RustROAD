@@ -1,6 +1,12 @@
 //! Deterministic, bounded rectilinear routing on a finite coordinate lattice.
 //! This compute view is separate from mutable netlist arenas. All geometry is
 //! integer DBU. Resource preflight: docs/routing-budget.md.
+//!
+//! With `RouteInput::rules` set, the router also uses every supplied fixed-via
+//! variant per layer pair, a per-(master, orientation, pin) access table and a
+//! bounded post-route same-net pass (dangling-stub pruning, notch patches and
+//! minimum-area stubs, see `route_rules`). Without it, behavior is unchanged.
+use crate::route_rules::{self, Violation};
 use crate::{Error, Rect, Result};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -63,6 +69,12 @@ pub struct RouteLayer {
     pub spacing: i64,
     /// None is a cut layer; true is preferred vertical, false horizontal.
     pub vertical: Option<bool>,
+    /// LEF AREA in DBU^2 (rules mode only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_area: Option<i64>,
+    /// LEF MINSTEP in DBU (rules mode, pin-access landing pads only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_step: Option<i64>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -90,6 +102,15 @@ pub struct Terminal {
     pub net: u32,
     pub driver: bool,
     pub shapes: Vec<LayerRect>,
+    /// Access-class index and instance origin; shapes = class shapes + origin.
+    pub class: Option<(u32, [i64; 2])>,
+}
+/// One (master, orientation, pin) access geometry relative to the origin.
+#[derive(Clone, Debug)]
+pub struct AccessClass {
+    pub shapes: Vec<LayerRect>,
+    /// Other-net geometry of the same master (other pins, OBS) on selected layers.
+    pub blockers: Vec<LayerRect>,
 }
 pub struct RouteInput {
     pub die: Rect,
@@ -100,6 +121,9 @@ pub struct RouteInput {
     pub vias: Vec<RouteVia>,
     pub obstacles: Vec<Blockage>,
     pub terminals: Vec<Terminal>,
+    /// Enable LEF-rule mode (variants, access table, same-net cleanup/checks).
+    pub rules: bool,
+    pub access_classes: Vec<AccessClass>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -124,6 +148,14 @@ pub struct Access {
     pub layer: u32,
     pub at: [i64; 2],
 }
+/// Same-net fill metal (DEF routing RECT); rules mode only.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Patch {
+    pub net: u32,
+    pub layer: u32,
+    pub rect: Rect,
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RouteStats {
@@ -138,6 +170,8 @@ pub struct Routes {
     pub wires: Vec<Wire>,
     pub vias: Vec<Via>,
     pub access: Vec<Access>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patches: Vec<Patch>,
     pub nets: Vec<u32>,
     pub stats: RouteStats,
 }
@@ -253,9 +287,15 @@ impl<'a> Spatial<'a> {
         Ok(())
     }
     fn clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
+        Ok(self.probe(layer, rect, net)?.is_some())
+    }
+    /// None when blocked; otherwise whether a same-net routing-layer shape is
+    /// within spacing without connecting (a potential notch; rules mode only).
+    fn probe(&mut self, layer: u32, rect: Rect, net: u32) -> Result<Option<bool>> {
         if !self.input.die.contains(rect) {
-            return Ok(false);
+            return Ok(None);
         }
+        let mut near = false;
         let query = expand(rect, self.input.layers[layer as usize].spacing)?;
         self.generation = self
             .generation
@@ -288,25 +328,56 @@ impl<'a> Spatial<'a> {
                             return Err(budget("routing comparison limit"));
                         }
                         let b = &self.shapes[id];
-                        let shared = b.net == Some(net)
-                            && (self.input.layers[layer as usize].vertical.is_some()
-                                || rect == b.rect);
-                        if !shared && overlap(query, b.rect) {
-                            return Ok(false);
+                        let routing = self.input.layers[layer as usize].vertical.is_some();
+                        let shared = b.net == Some(net) && (routing || rect == b.rect);
+                        if !overlap(query, b.rect) {
+                            continue;
+                        }
+                        if !shared {
+                            return Ok(None);
+                        }
+                        if self.input.rules
+                            && routing
+                            && route_rules::relation(
+                                rect,
+                                b.rect,
+                                self.input.layers[layer as usize].spacing,
+                            ) == route_rules::Relation::Near
+                        {
+                            near = true;
                         }
                     }
                 }
             }
         }
-        Ok(true)
+        Ok(Some(near))
     }
     fn via_clear(&mut self, kind: usize, at: [i64; 2], net: u32) -> Result<bool> {
+        Ok(self.via_probe(kind, at, net)?.is_some())
+    }
+    fn via_probe(&mut self, kind: usize, at: [i64; 2], net: u32) -> Result<Option<bool>> {
+        let mut near = false;
         for shape in &self.input.vias[kind].shapes {
-            if !self.clear(shape.layer, shifted(shape.rect, at)?, net)? {
-                return Ok(false);
+            match self.probe(shape.layer, shifted(shape.rect, at)?, net)? {
+                None => return Ok(None),
+                Some(n) => near |= n,
             }
         }
-        Ok(true)
+        Ok(Some(near))
+    }
+    /// First clear kind in order; in rules mode prefer one without a near miss.
+    fn choose(&mut self, kinds: &[usize], at: [i64; 2], net: u32) -> Result<Option<usize>> {
+        let mut fallback = None;
+        for &k in kinds {
+            match self.via_probe(k, at, net)? {
+                None => {}
+                Some(near) if !near || !self.input.rules => return Ok(Some(k)),
+                Some(_) => {
+                    fallback = fallback.or(Some(k));
+                }
+            }
+        }
+        Ok(fallback)
     }
     fn add_wire(&mut self, w: &Wire) -> Result<()> {
         self.add(Blockage {
@@ -360,7 +431,8 @@ fn preflight(input: &RouteInput, limits: &RouteLimits) -> Result<()> {
             || v.upper as usize >= input.layers.len()
             || input.layers[v.lower as usize].vertical.is_none()
             || input.layers[v.upper as usize].vertical.is_none()
-            || !pairs.insert((v.lower.min(v.upper), v.lower.max(v.upper)))
+            || (!pairs.insert((v.lower.min(v.upper), v.lower.max(v.upper))) && !input.rules)
+            || v.lower > v.upper
             || v.shapes.is_empty()
             || v.shapes.len() > 64
             || v.shapes
@@ -376,10 +448,50 @@ fn preflight(input: &RouteInput, limits: &RouteLimits) -> Result<()> {
         }
     }
     let mut pins = HashSet::new();
-    if input.terminals.len() > 16_000 || input.obstacles.len() > limits.max_obstacles {
+    if input.terminals.len() > 16_000
+        || input.obstacles.len() > limits.max_obstacles
+        || input.access_classes.len() > 16_000
+        || (!input.rules && !input.access_classes.is_empty())
+    {
         return Err(budget("routing input count"));
     }
+    for c in &input.access_classes {
+        if c.shapes.is_empty()
+            || c.shapes.len() > 64
+            || c.blockers.len() > 4096
+            || c.shapes
+                .iter()
+                .chain(&c.blockers)
+                .any(|s| s.layer as usize >= input.layers.len() || !s.rect.valid())
+        {
+            return Err(invalid("routing access class"));
+        }
+    }
+    for l in &input.layers {
+        if l.min_area.is_some_and(|a| a <= 0) || l.min_step.is_some_and(|s| s <= 0) {
+            return Err(invalid("routing layer area/step rule"));
+        }
+    }
     for t in &input.terminals {
+        if let Some((class, origin)) = t.class {
+            let c = input
+                .access_classes
+                .get(class as usize)
+                .ok_or_else(|| invalid("routing terminal access class"))?;
+            let moved: Vec<_> = c
+                .shapes
+                .iter()
+                .map(|s| shifted(s.rect, origin).map(|r| (s.layer, r)))
+                .collect::<Result<_>>()?;
+            if moved.len() != t.shapes.len()
+                || moved
+                    .iter()
+                    .zip(&t.shapes)
+                    .any(|(m, s)| m.0 != s.layer || m.1 != s.rect)
+            {
+                return Err(invalid("routing terminal differs from its access class"));
+            }
+        }
         if !pins.insert(t.pin)
             || t.shapes.is_empty()
             || t.shapes.len() > 64
@@ -395,38 +507,20 @@ fn preflight(input: &RouteInput, limits: &RouteLimits) -> Result<()> {
     Ok(())
 }
 fn candidates(t: &Terminal, input: &RouteInput) -> Result<Vec<(u32, [i64; 2])>> {
-    let mut seen = BTreeSet::new();
-    let mut points = Vec::new();
-    for s in &t.shapes {
-        for i in [2, 1, 3] {
-            for j in [2, 1, 3] {
-                let x =
-                    i128::from(s.rect.lx) + (i128::from(s.rect.ux) - i128::from(s.rect.lx)) * i / 4;
-                let y =
-                    i128::from(s.rect.ly) + (i128::from(s.rect.uy) - i128::from(s.rect.ly)) * j / 4;
-                let snap = |v: i128| {
-                    int(
-                        (v + i128::from(input.grid) / 2).div_euclid(i128::from(input.grid))
-                            * i128::from(input.grid),
-                    )
-                };
-                let p = [snap(x)?, snap(y)?];
-                if contains(s.rect, p) && contains(input.die, p) && seen.insert((s.layer, p)) {
-                    points.push((s.layer, p));
-                }
-            }
-        }
-    }
-    if points.len() > 128 {
-        return Err(budget("pin access candidates"));
-    }
-    Ok(points)
+    quartile_points(&t.shapes, input.grid, Some(input.die))
+}
+/// Fixed-via kinds grouped by connected layer pair, in first-use order.
+struct ViaPair {
+    lower: u32,
+    upper: u32,
+    kinds: Vec<usize>,
 }
 struct Lattice {
     xs: Vec<i64>,
     ys: Vec<i64>,
     layers: Vec<u32>,
     slots: HashMap<u32, usize>,
+    pairs: Vec<ViaPair>,
     len: usize,
 }
 impl Lattice {
@@ -475,11 +569,27 @@ impl Lattice {
             return Err(budget("routing grid node count"));
         }
         let slots = layers.iter().enumerate().map(|(i, l)| (*l, i)).collect();
+        let mut pairs: Vec<ViaPair> = Vec::new();
+        for (k, v) in input.vias.iter().enumerate() {
+            if let Some(p) = pairs
+                .iter_mut()
+                .find(|p| p.lower == v.lower && p.upper == v.upper)
+            {
+                p.kinds.push(k);
+            } else {
+                pairs.push(ViaPair {
+                    lower: v.lower,
+                    upper: v.upper,
+                    kinds: vec![k],
+                });
+            }
+        }
         Ok(Self {
             xs: xs.into_iter().collect(),
             ys: ys.into_iter().collect(),
             layers,
             slots,
+            pairs,
             len,
         })
     }
@@ -497,7 +607,7 @@ impl Lattice {
             [self.xs[k % self.xs.len()], self.ys[k / self.xs.len()]],
         )
     }
-    fn neighbors(&self, id: u32, input: &RouteInput) -> Vec<(u32, Option<usize>)> {
+    fn neighbors(&self, id: u32) -> Vec<(u32, Option<usize>)> {
         let i = id as usize;
         let nx = self.xs.len();
         let ny = self.ys.len();
@@ -518,7 +628,7 @@ impl Lattice {
             n.push((id + nx as u32, None));
         }
         let (l, p) = self.point(id);
-        for (k, v) in input.vias.iter().enumerate() {
+        for (k, v) in self.pairs.iter().enumerate() {
             if v.lower == l {
                 n.push((self.id(v.upper, p), Some(k)));
             } else if v.upper == l {
@@ -534,11 +644,148 @@ fn distance(a: [i64; 2], b: [i64; 2]) -> Result<u64> {
     u64::try_from(d).map_err(|_| invalid("routing distance overflow"))
 }
 
+/// A reserved pin escape: lattice edges with via kind (`u32::MAX` = wire).
 struct AccessPlan {
     access: Access,
     top: u32,
-    edges: Vec<(u32, u32)>,
+    edges: Vec<((u32, u32), u32)>,
 }
+const WIRE: u32 = u32::MAX;
+
+/// One precomputed landing for a (master, orientation, pin) class: relative
+/// point, legal upward via kinds (pads inside the pin first) and whether any
+/// legal pad lies entirely inside a pin rectangle.
+struct AccessEntry {
+    layer: u32,
+    at: [i64; 2],
+    kinds: Vec<usize>,
+    fits: bool,
+}
+
+fn quartile_points(
+    shapes: &[LayerRect],
+    grid: i64,
+    die: Option<Rect>,
+) -> Result<Vec<(u32, [i64; 2])>> {
+    let mut seen = BTreeSet::new();
+    let mut points = Vec::new();
+    for s in shapes {
+        for i in [2, 1, 3] {
+            for j in [2, 1, 3] {
+                let x =
+                    i128::from(s.rect.lx) + (i128::from(s.rect.ux) - i128::from(s.rect.lx)) * i / 4;
+                let y =
+                    i128::from(s.rect.ly) + (i128::from(s.rect.uy) - i128::from(s.rect.ly)) * j / 4;
+                let snap = |v: i128| {
+                    int((v + i128::from(grid) / 2).div_euclid(i128::from(grid)) * i128::from(grid))
+                };
+                let p = [snap(x)?, snap(y)?];
+                if contains(s.rect, p)
+                    && die.is_none_or(|d| contains(d, p))
+                    && seen.insert((s.layer, p))
+                {
+                    points.push((s.layer, p));
+                }
+            }
+        }
+    }
+    if points.len() > 128 {
+        return Err(budget("pin access candidates"));
+    }
+    Ok(points)
+}
+
+/// Build the access table of one class once: each candidate via is checked
+/// against the master's own other-net geometry (spacing), against same-pin
+/// notches, and against LEF MINSTEP when its pad protrudes from the pin.
+fn access_table(
+    input: &RouteInput,
+    grid: &Lattice,
+    class: &AccessClass,
+    work: &mut usize,
+    limits: &RouteLimits,
+) -> Result<Vec<AccessEntry>> {
+    let cap = limits.max_comparisons;
+    let access = grid.slots[&input.access_layer];
+    let mut entries = Vec::new();
+    for (layer, at) in quartile_points(&class.shapes, input.grid, None)? {
+        let pins = |l: u32| -> Vec<Rect> {
+            class
+                .shapes
+                .iter()
+                .filter(|s| s.layer == l)
+                .map(|s| s.rect)
+                .collect()
+        };
+        let own = pins(layer);
+        let (mut fit, mut other) = (Vec::new(), Vec::new());
+        for pair in &grid.pairs {
+            if pair.lower != layer || grid.slots.get(&pair.upper).is_none_or(|s| *s > access) {
+                continue;
+            }
+            'kind: for &k in &pair.kinds {
+                let mut fits = false;
+                for s in &input.vias[k].shapes {
+                    let rect = shifted(s.rect, at)?;
+                    let rule = &input.layers[s.layer as usize];
+                    let halo = expand(rect, rule.spacing)?;
+                    for b in class.blockers.iter().filter(|b| b.layer == s.layer) {
+                        *work += 1;
+                        if overlap(halo, b.rect) {
+                            continue 'kind;
+                        }
+                    }
+                    if rule.vertical.is_none() {
+                        continue;
+                    }
+                    let same = pins(s.layer);
+                    if !same.is_empty()
+                        && !route_rules::local_ok(rect, &same, rule.spacing, work, cap)?
+                    {
+                        continue 'kind;
+                    }
+                    if s.layer == layer {
+                        fits = own.iter().any(|p| p.contains(rect));
+                        if !fits
+                            && let Some(step) = rule.min_step
+                            && let Some(p) = own.iter().find(|p| contains(**p, at))
+                        {
+                            let sides = [
+                                p.lx - rect.lx,
+                                rect.ux - p.ux,
+                                p.ly - rect.ly,
+                                rect.uy - p.uy,
+                            ];
+                            if sides.iter().any(|d| *d > 0 && *d < step) {
+                                continue 'kind;
+                            }
+                        }
+                    }
+                }
+                if fits {
+                    fit.push(k);
+                } else {
+                    other.push(k);
+                }
+            }
+        }
+        entries.push(AccessEntry {
+            layer,
+            at,
+            fits: !fit.is_empty(),
+            kinds: fit.into_iter().chain(other).collect(),
+        });
+        if *work > cap {
+            return Err(budget("pin access table work"));
+        }
+    }
+    entries.sort_by_key(|e| !e.fits);
+    Ok(entries)
+}
+
+/// Access search start: layer, point, initial cost and table via kinds.
+type Start = (u32, [i64; 2], u64, Option<Vec<usize>>);
+
 fn reserve_access(
     input: &RouteInput,
     grid: &Lattice,
@@ -548,28 +795,77 @@ fn reserve_access(
 ) -> Result<(HashMap<u32, AccessPlan>, usize)> {
     let mut plans = HashMap::new();
     let mut total = 0usize;
+    let mut tables = BTreeMap::<u32, Vec<AccessEntry>>::new();
     for group in terminals.values().filter(|g| g.len() >= 2) {
         for t in group {
-            let points = candidates(t, input)?;
-            if points.is_empty() {
+            let generic = candidates(t, input)?;
+            // (layer, point) -> (start cost, table via kinds)
+            let mut starts: Vec<Start> = Vec::new();
+            if input.rules
+                && let Some((class, origin)) = t.class
+            {
+                if let std::collections::btree_map::Entry::Vacant(slot) = tables.entry(class) {
+                    let mut work = 0usize;
+                    let table = access_table(
+                        input,
+                        grid,
+                        &input.access_classes[class as usize],
+                        &mut work,
+                        limits,
+                    )?;
+                    spatial.work = spatial
+                        .work
+                        .checked_add(work)
+                        .ok_or_else(|| budget("routing comparison limit"))?;
+                    slot.insert(table);
+                }
+                let known: BTreeSet<_> = generic.iter().copied().collect();
+                for e in &tables[&class] {
+                    let p = [
+                        int(i128::from(e.at[0]) + i128::from(origin[0]))?,
+                        int(i128::from(e.at[1]) + i128::from(origin[1]))?,
+                    ];
+                    if known.contains(&(e.layer, p)) {
+                        let cost = if e.fits { 0 } else { input.step as u64 };
+                        starts.push((e.layer, p, cost, Some(e.kinds.clone())));
+                    }
+                }
+            }
+            if starts.is_empty() {
+                starts = generic.iter().map(|&(l, p)| (l, p, 0, None)).collect();
+            }
+            if starts.is_empty() {
                 return Err(no_route("no access candidates"));
             }
+            let pin_shapes = |l: u32| -> Vec<Rect> {
+                t.shapes
+                    .iter()
+                    .filter(|s| s.layer == l)
+                    .map(|s| s.rect)
+                    .collect()
+            };
+            let table_kinds: HashMap<(u32, [i64; 2]), Vec<usize>> = starts
+                .iter()
+                .filter_map(|(l, p, _, k)| k.clone().map(|k| ((*l, *p), k)))
+                .collect();
             let reach = input
                 .step
                 .checked_mul(4)
                 .ok_or_else(|| invalid("access radius overflow"))?;
             let bounds = expand(
                 Rect {
-                    lx: points.iter().map(|p| p.1[0]).min().unwrap(),
-                    ly: points.iter().map(|p| p.1[1]).min().unwrap(),
-                    ux: points.iter().map(|p| p.1[0]).max().unwrap(),
-                    uy: points.iter().map(|p| p.1[1]).max().unwrap(),
+                    lx: starts.iter().map(|p| p.1[0]).min().unwrap(),
+                    ly: starts.iter().map(|p| p.1[1]).min().unwrap(),
+                    ux: starts.iter().map(|p| p.1[0]).max().unwrap(),
+                    uy: starts.iter().map(|p| p.1[1]).max().unwrap(),
                 },
                 reach,
             )?;
             let mut heap = BinaryHeap::new();
-            let mut visited = HashMap::<u32, (u64, u32)>::new();
-            for (layer, at) in points {
+            // node -> (cost, parent, via kind of the parent edge)
+            let mut visited = HashMap::<u32, (u64, u32, u32)>::new();
+            for (layer, at, cost, _) in &starts {
+                let (layer, at, cost) = (*layer, *at, *cost);
                 let half = input.layers[layer as usize].width / 2;
                 let r = Rect {
                     lx: int(i128::from(at[0]) - i128::from(half))?,
@@ -579,8 +875,10 @@ fn reserve_access(
                 };
                 if spatial.clear(layer, r, t.net)? {
                     let id = grid.id(layer, at);
-                    visited.insert(id, (0, u32::MAX));
-                    heap.push(Reverse((0u64, id)));
+                    if visited.get(&id).is_none_or(|v| v.0 > cost) {
+                        visited.insert(id, (cost, u32::MAX, WIRE));
+                        heap.push(Reverse((cost, id)));
+                    }
                 }
             }
             let mut found = None;
@@ -599,7 +897,7 @@ fn reserve_access(
                 if expanded > limits.max_search_expansions || total > limits.max_expansions {
                     return Err(budget("pin access expansion limit"));
                 }
-                for (next, via) in grid.neighbors(id, input) {
+                for (next, via) in grid.neighbors(id) {
                     let (nl, q) = grid.point(next);
                     if grid.slots[&nl] > grid.slots[&input.access_layer] || !contains(bounds, q) {
                         continue;
@@ -615,30 +913,83 @@ fn reserve_access(
                     if visited.get(&next).is_some_and(|v| v.0 <= nc) {
                         continue;
                     }
-                    let clear = if let Some(k) = via {
-                        spatial.via_clear(k, at, t.net)?
+                    let kind = if let Some(pi) = via {
+                        let pair = &grid.pairs[pi];
+                        let listed: Vec<usize> = match table_kinds.get(&(layer, at)) {
+                            Some(ks) if pair.lower == layer => ks
+                                .iter()
+                                .copied()
+                                .filter(|k| pair.kinds.contains(k))
+                                .collect(),
+                            _ => pair.kinds.clone(),
+                        };
+                        let mut chosen = None;
+                        for k in listed {
+                            if input.rules {
+                                let mut ok = true;
+                                for s in &input.vias[k].shapes {
+                                    let rule = &input.layers[s.layer as usize];
+                                    let own = pin_shapes(s.layer);
+                                    if rule.vertical.is_some()
+                                        && !own.is_empty()
+                                        && !route_rules::local_ok(
+                                            shifted(s.rect, at)?,
+                                            &own,
+                                            rule.spacing,
+                                            &mut spatial.work,
+                                            limits.max_comparisons,
+                                        )?
+                                    {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                if !ok {
+                                    continue;
+                                }
+                            }
+                            if spatial.via_clear(k, at, t.net)? {
+                                chosen = Some(k as u32);
+                                break;
+                            }
+                        }
+                        match chosen {
+                            Some(k) => k,
+                            None => continue,
+                        }
                     } else {
-                        spatial.clear(
-                            layer,
-                            wire_rect(
-                                &Wire {
-                                    net: t.net,
-                                    layer,
-                                    start: at,
-                                    end: q,
-                                },
-                                input.layers[layer as usize].width,
-                            )?,
-                            t.net,
-                        )?
+                        let rect = wire_rect(
+                            &Wire {
+                                net: t.net,
+                                layer,
+                                start: at,
+                                end: q,
+                            },
+                            input.layers[layer as usize].width,
+                        )?;
+                        if input.rules {
+                            let own = pin_shapes(layer);
+                            if !own.is_empty()
+                                && !route_rules::local_ok(
+                                    rect,
+                                    &own,
+                                    input.layers[layer as usize].spacing,
+                                    &mut spatial.work,
+                                    limits.max_comparisons,
+                                )?
+                            {
+                                continue;
+                            }
+                        }
+                        if !spatial.clear(layer, rect, t.net)? {
+                            continue;
+                        }
+                        WIRE
                     };
-                    if !clear {
-                        continue;
-                    }
                     if heap.len() >= limits.max_heap || visited.len() >= limits.max_grid_nodes {
                         return Err(budget("pin access frontier"));
                     }
-                    visited.insert(next, (nc, id));
+                    visited.insert(next, (nc, id, kind));
                     heap.push(Reverse((nc, next)));
                 }
             }
@@ -647,15 +998,15 @@ fn reserve_access(
             let mut current = top;
             let mut edges = Vec::new();
             while visited[&current].1 != u32::MAX {
-                let next = visited[&current].1;
-                edges.push((current.min(next), current.max(next)));
+                let (_, next, kind) = visited[&current];
+                edges.push(((current.min(next), current.max(next)), kind));
                 current = next;
                 if edges.len() > limits.max_segments {
                     return Err(budget("access path limit"));
                 }
             }
             let (layer, at) = grid.point(current);
-            for &(a, b) in &edges {
+            for &((a, b), kind) in &edges {
                 let (l, p) = grid.point(a);
                 let (other, q) = grid.point(b);
                 if l == other {
@@ -666,16 +1017,9 @@ fn reserve_access(
                         end: q,
                     })?;
                 } else {
-                    let kind = input
-                        .vias
-                        .iter()
-                        .position(|v| {
-                            (v.lower == l && v.upper == other) || (v.upper == l && v.lower == other)
-                        })
-                        .unwrap();
                     spatial.add_via(&Via {
                         net: t.net,
-                        kind: kind as u32,
+                        kind,
                         at: p,
                     })?;
                 }
@@ -711,6 +1055,7 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
         wires: Vec::new(),
         vias: Vec::new(),
         access: Vec::new(),
+        patches: Vec::new(),
         nets: Vec::new(),
         stats: RouteStats {
             grid_nodes: grid.len,
@@ -720,6 +1065,7 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
     };
     let mut costs = vec![u64::MAX; grid.len];
     let mut parents = vec![u32::MAX; grid.len];
+    let mut parent_kinds = vec![WIRE; grid.len];
     let mut tags = vec![0u32; grid.len];
     let mut epoch = 0u32;
     for (net, mut terminals) in groups {
@@ -734,8 +1080,8 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
         let root = &plans[&terminals[0].pin];
         out.access.push(root.access.clone());
         let mut tree = HashSet::from([root.top]);
-        let mut edges: BTreeSet<_> = root.edges.iter().copied().collect();
-        for &(a, b) in &root.edges {
+        let mut edges: BTreeMap<(u32, u32), u32> = root.edges.iter().copied().collect();
+        for &((a, b), _) in &root.edges {
             tree.insert(a);
             tree.insert(b);
         }
@@ -763,6 +1109,7 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
             for &id in &starts {
                 costs[id as usize] = 0;
                 parents[id as usize] = u32::MAX;
+                parent_kinds[id as usize] = WIRE;
                 tags[id as usize] = epoch;
                 heap.push(Reverse((heuristic(grid.point(id).1)?, 0u64, id)));
             }
@@ -784,7 +1131,7 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
                     return Err(budget("routing expansion limit"));
                 }
                 let (layer, p) = grid.point(id);
-                for (next, via) in grid.neighbors(id, input) {
+                for (next, via) in grid.neighbors(id) {
                     let (_, q) = grid.point(next);
                     let length = if via.is_some() {
                         u64::try_from(input.step)
@@ -812,10 +1159,13 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
                     if tags[next as usize] == epoch && costs[next as usize] <= next_cost {
                         continue;
                     }
-                    let clear = if let Some(v) = via {
-                        spatial.via_clear(v, p, net)?
+                    let kind = if let Some(pi) = via {
+                        match spatial.choose(&grid.pairs[pi].kinds, p, net)? {
+                            Some(k) => k as u32,
+                            None => continue,
+                        }
                     } else {
-                        spatial.clear(
+                        if !spatial.clear(
                             layer,
                             wire_rect(
                                 &Wire {
@@ -827,14 +1177,15 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
                                 input.layers[layer as usize].width,
                             )?,
                             net,
-                        )?
+                        )? {
+                            continue;
+                        }
+                        WIRE
                     };
-                    if !clear {
-                        continue;
-                    }
                     tags[next as usize] = epoch;
                     costs[next as usize] = next_cost;
                     parents[next as usize] = id;
+                    parent_kinds[next as usize] = kind;
                     if heap.len() >= limits.max_heap {
                         return Err(budget("routing frontier limit"));
                     }
@@ -853,7 +1204,9 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
             let mut length = 0usize;
             while parents[current as usize] != u32::MAX {
                 let next = parents[current as usize];
-                edges.insert((current.min(next), current.max(next)));
+                edges
+                    .entry((current.min(next), current.max(next)))
+                    .or_insert(parent_kinds[current as usize]);
                 tree.insert(current);
                 current = next;
                 length += 1;
@@ -862,13 +1215,13 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
                 }
             }
             tree.insert(current);
-            for &(a, b) in &plan.edges {
-                edges.insert((a, b));
+            for &((a, b), kind) in &plan.edges {
+                edges.insert((a, b), kind);
                 tree.insert(a);
                 tree.insert(b);
             }
         }
-        for (a, b) in edges {
+        for ((a, b), kind) in edges {
             if out.wires.len() + out.vias.len() >= limits.max_segments {
                 return Err(budget("routing output segment limit"));
             }
@@ -889,26 +1242,290 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
                 spatial.add_wire(&wire)?;
                 out.wires.push(wire);
             } else {
-                let kind = input
-                    .vias
-                    .iter()
-                    .position(|v| {
-                        (v.lower == l && v.upper == other) || (v.upper == l && v.lower == other)
+                if kind == WIRE
+                    || input.vias.get(kind as usize).is_none_or(|v| {
+                        !((v.lower == l && v.upper == other) || (v.upper == l && v.lower == other))
                     })
-                    .ok_or_else(|| invalid("missing path via"))?;
-                let v = Via {
-                    net,
-                    kind: kind as u32,
-                    at: p,
-                };
+                {
+                    return Err(invalid("missing path via"));
+                }
+                let v = Via { net, kind, at: p };
                 spatial.add_via(&v)?;
                 out.vias.push(v);
             }
         }
     }
     out.stats.comparisons = spatial.work;
+    if input.rules {
+        let work = cleanup(input, &mut out, limits)?;
+        out.stats.comparisons = out
+            .stats
+            .comparisons
+            .checked_add(work)
+            .ok_or_else(|| budget("routing comparison limit"))?;
+        if out.stats.comparisons > limits.max_comparisons {
+            return Err(budget("routing comparison limit"));
+        }
+        out.stats.wire_length_dbu = out.wires.iter().try_fold(0u64, |n, w| {
+            n.checked_add(distance(w.start, w.end)?)
+                .ok_or_else(|| budget("total wire length"))
+        })?;
+    }
     validate(input, &out, limits)?;
     Ok(out)
+}
+
+type Node = (u32, u32, i64, i64);
+
+/// Remove dead-end wires/vias that lead to no access point (bounded by edges).
+fn prune(input: &RouteInput, out: &mut Routes) {
+    let anchors: BTreeSet<Node> = out
+        .access
+        .iter()
+        .map(|a| (a.net, a.layer, a.at[0], a.at[1]))
+        .collect();
+    let nw = out.wires.len();
+    let ends = |i: usize| -> (Node, Node) {
+        if i < nw {
+            let w = &out.wires[i];
+            (
+                (w.net, w.layer, w.start[0], w.start[1]),
+                (w.net, w.layer, w.end[0], w.end[1]),
+            )
+        } else {
+            let v = &out.vias[i - nw];
+            let s = &input.vias[v.kind as usize];
+            (
+                (v.net, s.lower, v.at[0], v.at[1]),
+                (v.net, s.upper, v.at[0], v.at[1]),
+            )
+        }
+    };
+    let total = nw + out.vias.len();
+    let mut incident = BTreeMap::<Node, Vec<usize>>::new();
+    for i in 0..total {
+        let (a, b) = ends(i);
+        incident.entry(a).or_default().push(i);
+        incident.entry(b).or_default().push(i);
+    }
+    let mut degree: BTreeMap<Node, usize> = incident.iter().map(|(k, v)| (*k, v.len())).collect();
+    let mut alive = vec![true; total];
+    let mut queue: BTreeSet<Node> = degree
+        .iter()
+        .filter(|(n, d)| **d == 1 && !anchors.contains(n))
+        .map(|(n, _)| *n)
+        .collect();
+    while let Some(node) = queue.pop_first() {
+        if degree[&node] != 1 {
+            continue;
+        }
+        let Some(&e) = incident[&node].iter().find(|&&e| alive[e]) else {
+            continue;
+        };
+        alive[e] = false;
+        let (a, b) = ends(e);
+        for end in [a, b] {
+            let d = degree.get_mut(&end).unwrap();
+            *d -= 1;
+            if *d == 1 && !anchors.contains(&end) {
+                queue.insert(end);
+            }
+        }
+    }
+    let mut i = 0;
+    out.wires.retain(|_| {
+        i += 1;
+        alive[i - 1]
+    });
+    let mut j = nw;
+    out.vias.retain(|_| {
+        j += 1;
+        alive[j - 1]
+    });
+}
+
+/// Post-route same-net legalization: prune dead ends, then up to eight rounds
+/// of notch/point-contact patches and minimum-area stubs, each checked against
+/// other nets. Unresolved violations fail explicitly (HEAD stays unchanged).
+fn cleanup(input: &RouteInput, out: &mut Routes, limits: &RouteLimits) -> Result<usize> {
+    prune(input, out);
+    let mut spatial = Spatial::new(input, limits)?;
+    for w in &out.wires {
+        spatial.add_wire(w)?;
+    }
+    for v in &out.vias {
+        spatial.add_via(v)?;
+    }
+    let mut work = 0usize;
+    let mut tried = BTreeSet::new();
+    for _ in 0..8 {
+        let violations = route_rules::check(input, out, limits, &mut work)?;
+        if violations.is_empty() {
+            break;
+        }
+        let mut changed = false;
+        for v in &violations {
+            match v {
+                Violation::Spacing { net, layer, a, b } => {
+                    let width = input.layers[*layer as usize].width;
+                    let fill = route_rules::fill_for(*a, *b, width, input.grid);
+                    if tried.insert((*net, *layer, fill.lx, fill.ly, fill.ux, fill.uy))
+                        && spatial.clear(*layer, fill, *net)?
+                    {
+                        spatial.add(Blockage {
+                            layer: *layer,
+                            rect: fill,
+                            net: Some(*net),
+                        })?;
+                        out.patches.push(Patch {
+                            net: *net,
+                            layer: *layer,
+                            rect: fill,
+                        });
+                        changed = true;
+                    }
+                }
+                Violation::Area {
+                    net, layer, shapes, ..
+                } => {
+                    if let Some(w) = area_stub(
+                        input,
+                        out,
+                        &mut spatial,
+                        *net,
+                        *layer,
+                        shapes,
+                        limits,
+                        &mut work,
+                    )? {
+                        spatial.add_wire(&w)?;
+                        out.wires.push(w);
+                        changed = true;
+                    }
+                }
+                Violation::Floating { .. } => {}
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let remaining = route_rules::check(input, out, limits, &mut work)?;
+    if let Some(v) = remaining.first() {
+        return Err(no_route(&format!(
+            "ROUTING_RULE unresolved {} ({} total)",
+            v.describe(),
+            remaining.len()
+        )));
+    }
+    work.checked_add(spatial.work)
+        .ok_or_else(|| budget("routing comparison limit"))
+}
+
+/// Shortest default-width stub from a via/wire node of the component that
+/// lifts its merged area to the LEF minimum without new same-net notches.
+#[allow(clippy::too_many_arguments)]
+fn area_stub(
+    input: &RouteInput,
+    out: &Routes,
+    spatial: &mut Spatial<'_>,
+    net: u32,
+    layer: u32,
+    shapes: &[Rect],
+    limits: &RouteLimits,
+    work: &mut usize,
+) -> Result<Option<Wire>> {
+    let rule = &input.layers[layer as usize];
+    let Some(min) = rule.min_area else {
+        return Ok(None);
+    };
+    let cap = limits.max_comparisons;
+    let inside = |p: [i64; 2]| shapes.iter().any(|s| contains(*s, p));
+    let mut anchors: Vec<[i64; 2]> = Vec::new();
+    let vias: BTreeSet<[i64; 2]> = out
+        .vias
+        .iter()
+        .filter(|v| {
+            v.net == net
+                && input.vias[v.kind as usize]
+                    .shapes
+                    .iter()
+                    .any(|s| s.layer == layer)
+                && inside(v.at)
+        })
+        .map(|v| v.at)
+        .collect();
+    anchors.extend(vias.iter().copied());
+    let ends: BTreeSet<[i64; 2]> = out
+        .wires
+        .iter()
+        .filter(|w| w.net == net && w.layer == layer)
+        .flat_map(|w| [w.start, w.end])
+        .filter(|p| inside(*p))
+        .collect();
+    anchors.extend(ends.into_iter().filter(|p| !vias.contains(p)));
+    let others: Vec<Rect> = route_rules::collect(input, out)?
+        .remove(&(net, layer))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.rect)
+        .collect();
+    let span = shapes
+        .iter()
+        .map(|s| (s.ux - s.lx).max(s.uy - s.ly))
+        .max()
+        .unwrap_or(0);
+    let steps = ((min / rule.width.max(1)) + 2 * span + 2 * input.grid) / input.grid + 1;
+    let steps = steps.min(1 << 16);
+    let dirs: [[i64; 2]; 4] = if rule.vertical == Some(true) {
+        [[0, 1], [0, -1], [1, 0], [-1, 0]]
+    } else {
+        [[1, 0], [-1, 0], [0, 1], [0, -1]]
+    };
+    let stub = |a: [i64; 2], d: [i64; 2], n: i64| -> Result<(Wire, Rect)> {
+        let end = [
+            int(i128::from(a[0]) + i128::from(d[0]) * i128::from(n) * i128::from(input.grid))?,
+            int(i128::from(a[1]) + i128::from(d[1]) * i128::from(n) * i128::from(input.grid))?,
+        ];
+        let w = Wire {
+            net,
+            layer,
+            start: a,
+            end,
+        };
+        let r = wire_rect(&w, rule.width)?;
+        Ok((w, r))
+    };
+    for a in anchors {
+        for d in dirs {
+            let area = |n: i64, work: &mut usize| -> Result<i128> {
+                let (_, r) = stub(a, d, n)?;
+                let mut all = shapes.to_vec();
+                all.push(r);
+                route_rules::union_area(&all, work, cap)
+            };
+            if area(steps, work)? < i128::from(min) {
+                continue;
+            }
+            let (mut lo, mut hi) = (1i64, steps);
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if area(mid, work)? >= i128::from(min) {
+                    hi = mid;
+                } else {
+                    lo = mid + 1;
+                }
+            }
+            let (w, r) = stub(a, d, lo)?;
+            if !spatial.clear(layer, r, net)?
+                || !route_rules::local_ok(r, &others, rule.spacing, work, cap)?
+            {
+                continue;
+            }
+            return Ok(Some(w));
+        }
+    }
+    Ok(None)
 }
 
 /// Independent of search history: check geometry against blockages and bounded
@@ -926,10 +1543,13 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
     {
         return Err(invalid("routing telemetry/geometry mismatch"));
     }
-    if routes.wires.len() + routes.vias.len() > limits.max_segments
+    if routes.wires.len() + routes.vias.len() + routes.patches.len() > limits.max_segments
         || routes.access.len() > input.terminals.len()
     {
         return Err(budget("stored routing size"));
+    }
+    if !input.rules && !routes.patches.is_empty() {
+        return Err(invalid("routing patches require LEF-rule mode"));
     }
     let mut spatial = Spatial::new(input, limits)?;
     let mut counts = BTreeMap::<u32, usize>::new();
@@ -991,6 +1611,26 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
         g.entry(a).or_default().push(b);
         g.entry(b).or_default().push(a);
     }
+    for p in &routes.patches {
+        if !selected.contains(&p.net)
+            || p.layer as usize >= input.layers.len()
+            || input.layers[p.layer as usize].vertical.is_none()
+            || !p.rect.valid()
+            || [p.rect.lx, p.rect.ly, p.rect.ux, p.rect.uy]
+                .iter()
+                .any(|x| x % input.grid != 0)
+        {
+            return Err(invalid("stored patch identity/grid"));
+        }
+        if !spatial.clear(p.layer, p.rect, p.net)? {
+            return Err(invalid("patch collides with blockage/other net"));
+        }
+        spatial.add(Blockage {
+            layer: p.layer,
+            rect: p.rect,
+            net: Some(p.net),
+        })?;
+    }
     let terminals: HashMap<_, _> = input.terminals.iter().map(|t| (t.pin, t)).collect();
     let mut seen = HashSet::new();
     for a in &routes.access {
@@ -1046,6 +1686,17 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             return Err(invalid("disconnected routed net"));
         }
     }
+    if input.rules {
+        let mut work = 0usize;
+        let violations = route_rules::check(input, routes, limits, &mut work)?;
+        if let Some(v) = violations.first() {
+            return Err(invalid(&format!(
+                "ROUTING_RULE {} ({} total)",
+                v.describe(),
+                violations.len()
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -1059,18 +1710,24 @@ mod tests {
                 width: 2,
                 spacing: 2,
                 vertical: Some(false),
+                min_area: None,
+                min_step: None,
             },
             RouteLayer {
                 name: "M2".into(),
                 width: 2,
                 spacing: 2,
                 vertical: Some(true),
+                min_area: None,
+                min_step: None,
             },
             RouteLayer {
                 name: "V1".into(),
                 width: 2,
                 spacing: 2,
                 vertical: None,
+                min_area: None,
+                min_step: None,
             },
         ];
         RouteInput {
@@ -1124,6 +1781,7 @@ mod tests {
                             uy: 11,
                         },
                     }],
+                    class: None,
                 },
                 Terminal {
                     pin: 1,
@@ -1138,9 +1796,299 @@ mod tests {
                             uy: 91,
                         },
                     }],
+                    class: None,
+                },
+            ],
+            rules: false,
+            access_classes: Vec::new(),
+        }
+    }
+
+    fn rect(lx: i64, ly: i64, ux: i64, uy: i64) -> Rect {
+        Rect { lx, ly, ux, uy }
+    }
+    fn layer(name: &str, vertical: Option<bool>, spacing: i64) -> RouteLayer {
+        RouteLayer {
+            name: name.into(),
+            width: 2,
+            spacing,
+            vertical,
+            min_area: None,
+            min_step: None,
+        }
+    }
+    fn via(name: &str, m1: Rect) -> RouteVia {
+        RouteVia {
+            name: name.into(),
+            lower: 0,
+            upper: 1,
+            shapes: vec![
+                LayerRect { layer: 0, rect: m1 },
+                LayerRect {
+                    layer: 2,
+                    rect: rect(-1, -1, 1, 1),
+                },
+                LayerRect {
+                    layer: 1,
+                    rect: rect(-1, -1, 1, 1),
                 },
             ],
         }
+    }
+    fn terminal(pin: u32, driver: bool, shapes: Vec<Rect>) -> Terminal {
+        Terminal {
+            pin,
+            net: 0,
+            driver,
+            shapes: shapes
+                .into_iter()
+                .map(|rect| LayerRect { layer: 0, rect })
+                .collect(),
+            class: None,
+        }
+    }
+    /// Two M1 pins of one net, no obstacles; M1 spacing 4, cut spacing 0.
+    fn rules_input() -> RouteInput {
+        RouteInput {
+            die: rect(0, 0, 100, 100),
+            grid: 1,
+            step: 10,
+            access_layer: 1,
+            layers: vec![
+                layer("M1", Some(false), 4),
+                layer("M2", Some(true), 4),
+                layer("V1", None, 0),
+            ],
+            vias: vec![via("V12", rect(-1, -1, 1, 1))],
+            obstacles: Vec::new(),
+            terminals: vec![
+                terminal(0, true, vec![rect(9, 9, 11, 11)]),
+                terminal(1, false, vec![rect(9, 24, 11, 26)]),
+            ],
+            rules: true,
+            access_classes: Vec::new(),
+        }
+    }
+    fn manual(
+        input: &RouteInput,
+        wires: &[([i64; 2], [i64; 2], u32)],
+        vias: &[[i64; 2]],
+    ) -> Routes {
+        let wires: Vec<_> = wires
+            .iter()
+            .map(|&(start, end, layer)| Wire {
+                net: 0,
+                layer,
+                start,
+                end,
+            })
+            .collect();
+        Routes {
+            stats: RouteStats {
+                grid_nodes: Lattice::new(input, &RouteLimits::default()).unwrap().len,
+                expansions: 0,
+                comparisons: 0,
+                wire_length_dbu: wires
+                    .iter()
+                    .map(|w| distance(w.start, w.end).unwrap())
+                    .sum(),
+            },
+            wires,
+            vias: vias
+                .iter()
+                .map(|&at| Via {
+                    net: 0,
+                    kind: 0,
+                    at,
+                })
+                .collect(),
+            access: vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [10, 10],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 0,
+                    at: [10, 25],
+                },
+            ],
+            patches: Vec::new(),
+            nets: vec![0],
+        }
+    }
+    #[test]
+    fn planted_same_net_notch_is_rejected_by_native_validate() {
+        let mut input = rules_input();
+        // Straight connection plus a dangling hook 2 DBU from it (< spacing 4).
+        let routes = manual(
+            &input,
+            &[
+                ([10, 10], [10, 25], 0),
+                ([10, 25], [14, 25], 0),
+                ([14, 25], [14, 12], 0),
+            ],
+            &[],
+        );
+        let err = validate(&input, &routes, &RouteLimits::default()).unwrap_err();
+        assert!(
+            err.to_string().contains("ROUTING_RULE same-net notch"),
+            "{err}"
+        );
+        // The legacy checker exempts same-net shapes and accepts the defect.
+        input.rules = false;
+        validate(&input, &routes, &RouteLimits::default()).unwrap();
+        // Without the hook the same geometry is clean under the rules.
+        input.rules = true;
+        let clean = manual(&input, &[([10, 10], [10, 25], 0)], &[]);
+        validate(&input, &clean, &RouteLimits::default()).unwrap();
+    }
+    #[test]
+    fn planted_min_area_island_and_floating_patch_are_rejected() {
+        let mut input = rules_input();
+        input.layers[1].min_area = Some(50);
+        // Up and immediately down: the M2 island is 2 x 4 = 8 DBU^2 < 50.
+        let routes = manual(
+            &input,
+            &[([10, 10], [10, 12], 1), ([10, 12], [10, 25], 0)],
+            &[[10, 10], [10, 12]],
+        );
+        let err = validate(&input, &routes, &RouteLimits::default()).unwrap_err();
+        assert!(err.to_string().contains("minimum area"), "{err}");
+        input.rules = false;
+        validate(&input, &routes, &RouteLimits::default()).unwrap();
+        // A patch must touch same-net routed metal.
+        input.rules = true;
+        let mut floating = manual(&input, &[([10, 10], [10, 25], 0)], &[]);
+        floating.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(40, 40, 44, 44),
+        });
+        let err = validate(&input, &floating, &RouteLimits::default()).unwrap_err();
+        assert!(err.to_string().contains("floating patch"), "{err}");
+        // Patches are never legal in legacy mode.
+        input.rules = false;
+        assert!(validate(&input, &floating, &RouteLimits::default()).is_err());
+    }
+    #[test]
+    fn rules_mode_adds_min_area_stub_and_is_deterministic() {
+        // A full-height M1 wall forces an M2 hop that is below its area rule.
+        let mut input = rules_input();
+        input.terminals = vec![
+            terminal(0, true, vec![rect(9, 49, 11, 51)]),
+            terminal(1, false, vec![rect(89, 49, 91, 51)]),
+        ];
+        input.obstacles.push(Blockage {
+            layer: 0,
+            rect: rect(49, 0, 51, 100),
+            net: None,
+        });
+        input.layers[1].min_area = Some(120);
+        let limits = RouteLimits::default();
+        let a = route_cpu_ref(&input, &limits).unwrap();
+        let b = route_cpu_ref(&input, &limits).unwrap();
+        assert_eq!(a.wires, b.wires);
+        assert_eq!(a.vias, b.vias);
+        assert_eq!(a.patches, b.patches);
+        validate(&input, &a, &limits).unwrap();
+        let mut work = 0;
+        assert!(
+            route_rules::check(&input, &a, &limits, &mut work)
+                .unwrap()
+                .is_empty()
+        );
+        // Without the area rule the same hop routes with less M2 metal.
+        input.layers[1].min_area = None;
+        let plain = route_cpu_ref(&input, &limits).unwrap();
+        let m2 = |r: &Routes| -> u64 {
+            r.wires
+                .iter()
+                .filter(|w| w.layer == 1)
+                .map(|w| distance(w.start, w.end).unwrap())
+                .sum()
+        };
+        assert!(m2(&a) > m2(&plain), "{} <= {}", m2(&a), m2(&plain));
+        // Stored routes from the area-free run violate the stricter rule.
+        input.layers[1].min_area = Some(120);
+        assert!(validate(&input, &plain, &limits).is_err());
+    }
+    #[test]
+    fn access_table_picks_the_variant_whose_pad_fits_the_pin() {
+        let mut input = rules_input();
+        input.layers[0].spacing = 3;
+        input.layers[1].spacing = 3;
+        // Wide pad (6 x 2) versus rotated pad (2 x 6) on a 4-wide pin leg.
+        input.vias = vec![
+            via("V12", rect(-3, -1, 3, 1)),
+            via("V12_R", rect(-1, -3, 1, 3)),
+        ];
+        let leg = rect(8, 0, 12, 30);
+        let bar = rect(8, 30, 30, 34);
+        input.access_classes = vec![AccessClass {
+            shapes: vec![
+                LayerRect {
+                    layer: 0,
+                    rect: leg,
+                },
+                LayerRect {
+                    layer: 0,
+                    rect: bar,
+                },
+            ],
+            blockers: Vec::new(),
+        }];
+        let mut t0 = terminal(0, true, vec![leg, bar]);
+        t0.class = Some((0, [0, 0]));
+        input.terminals = vec![t0, terminal(1, false, vec![rect(79, 79, 81, 81)])];
+        // An M1 wall keeps the landing via in the final route (no pruning).
+        input.obstacles.push(Blockage {
+            layer: 0,
+            rect: rect(49, 0, 51, 100),
+            net: None,
+        });
+        let limits = RouteLimits::default();
+        let grid = Lattice::new(&input, &limits).unwrap();
+        let mut work = 0;
+        let table =
+            access_table(&input, &grid, &input.access_classes[0], &mut work, &limits).unwrap();
+        let name = |k: usize| input.vias[k].name.as_str();
+        // Leg points land the rotated pad inside the pin; bar points the wide one.
+        let on = |r: Rect, e: &AccessEntry| contains(r, e.at) && !contains(bar, e.at);
+        assert!(table.iter().any(|e| on(leg, e) && e.fits));
+        for e in &table {
+            if on(leg, e) && e.fits {
+                assert_eq!(name(e.kinds[0]), "V12_R");
+            }
+            if contains(bar, e.at) && !contains(leg, e.at) && e.fits {
+                assert_eq!(name(e.kinds[0]), "V12");
+            }
+        }
+        // Table order puts fitting landings first.
+        let first_misfit = table.iter().position(|e| !e.fits).unwrap_or(table.len());
+        assert!(table[first_misfit..].iter().all(|e| !e.fits));
+        let routes = route_cpu_ref(&input, &limits).unwrap();
+        validate(&input, &routes, &limits).unwrap();
+        let access = routes.access.iter().find(|a| a.pin == 0).unwrap();
+        if let Some(landing) = routes.vias.iter().find(|v| v.at == access.at) {
+            assert_eq!(name(landing.kind as usize), "V12_R");
+        }
+        assert_eq!(
+            route_cpu_ref(&input, &limits).unwrap().wires,
+            routes.wires,
+            "rules-mode routing must be repeatable"
+        );
+        // A class whose shapes disagree with the terminal is rejected.
+        input.terminals[0].class = Some((0, [1, 0]));
+        assert!(route_cpu_ref(&input, &limits).is_err());
+        // Legacy mode refuses multiple vias for one layer pair.
+        input.terminals[0].class = None;
+        input.access_classes.clear();
+        input.rules = false;
+        assert!(route_cpu_ref(&input, &limits).is_err());
     }
     #[test]
     fn routes_around_blockage_using_vias_and_is_deterministic() {

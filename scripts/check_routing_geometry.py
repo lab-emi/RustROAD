@@ -55,6 +55,14 @@ def check(data,routes,profile,scope):
         require(min(box[2]-box[0],box[3]-box[1])>=routes['layer_widths'][wire['layer']],'route below default width')
         add(drawn,wire['net'],wire['layer'],box)
     policies={v['name']:v['cut_spacing'] for v in config['vias']}
+    # LEF-rule profiles also route single-cut LEF variants of a policy via;
+    # such a variant takes its cut layer's policy spacing (else the largest).
+    layer_policy={}
+    for via in routes['vias']+data['vias']:
+        if via['name'] in policies:
+            for shape in via['shapes']:
+                if shape['layer'] not in layers:
+                    layer_policy[shape['layer']]=max(layer_policy.get(shape['layer'],0),policies[via['name']])
     for via,is_new in [(v,True) for v in routes['vias']]+[(v,False) for v in data['vias']]:
         for shape in via['shapes']:
             l,r=shape['layer'],shape['rect']
@@ -63,8 +71,9 @@ def check(data,routes,profile,scope):
                 if is_new:add(drawn,via['net'],l,r)
             else:
                 cuts.setdefault(l,{})[tuple(r)]=via['net']
-                require(via['name'] in policies,'VIA policy missing')
-                cut_spacings[l]=max(cut_spacings.get(l,0),policies[via['name']])
+                require(via['name'] in policies or config.get('lef_rules'),'VIA policy missing')
+                spacing=policies[via['name']] if via['name'] in policies else layer_policy.get(l,max(policies.values()))
+                cut_spacings[l]=max(cut_spacings.get(l,0),spacing)
     for key in groups:groups[key]=groups[key].merged()
     for (net,layer),r in drawn.items():
         charge()

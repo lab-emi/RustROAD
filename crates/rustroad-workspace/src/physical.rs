@@ -58,6 +58,9 @@ pub struct PhysicalConfig {
     pub cell_spacing_sites: u32,
     #[serde(default)]
     pub io_width: Option<i64>,
+    /// Grow square signal I/O pins to at least the I/O layer LEF AREA.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub io_min_area: bool,
     #[serde(default)]
     pub io_spacing: Option<i64>,
     #[serde(default)]
@@ -758,6 +761,26 @@ pub(super) fn layout(
         Error::Invalid("manufacturing grid required for physical preparation".into())
     })?;
     let io_layer = layer(&bundle.technology, &cfg.io_layer)?;
+    // Smallest grid-aligned square side whose area meets the LEF AREA rule.
+    let area_side = match (cfg.io_min_area, io_layer.min_area) {
+        (true, Some(area)) => {
+            let area =
+                u128::try_from(area).map_err(|_| Error::Invalid("I/O layer area rule".into()))?;
+            let mut side = area.isqrt();
+            if side * side < area {
+                side += 1;
+            }
+            let g = u128::try_from(grid).map_err(|_| Error::Invalid("grid".into()))?;
+            i64::try_from(side.div_ceil(g) * g)
+                .map_err(|_| Error::Invalid("I/O area side overflow".into()))?
+        }
+        (true, None) => {
+            return Err(Error::Invalid(
+                "io_min_area requires a LEF AREA rule on the I/O layer".into(),
+            ));
+        }
+        _ => 0,
+    };
     let io_constraints = IoConstraints {
         die: design.die_area,
         core: design.core_area,
@@ -767,7 +790,8 @@ pub(super) fn layout(
             .io_width
             .or(io_layer.width)
             .ok_or_else(|| Error::Invalid("I/O minimum width missing".into()))?
-            .max(io_layer.width.unwrap_or(0)),
+            .max(io_layer.width.unwrap_or(0))
+            .max(area_side),
         min_spacing: cfg
             .io_spacing
             .or(io_layer.spacing)
@@ -1019,6 +1043,7 @@ pub(super) fn export_def(
     let csr = model.lower_csr(design, &ConnectivityLimits::default())?;
     let mut routed_wires = HashMap::<u32, Vec<_>>::new();
     let mut routed_vias = HashMap::<u32, Vec<_>>::new();
+    let mut routed_patches = HashMap::<u32, Vec<_>>::new();
     if let Some(routing) = &bundle.routing {
         crate::routing::validate_state(design, bundle, placed)?;
         for wire in &routing.routes.wires {
@@ -1026,6 +1051,9 @@ pub(super) fn export_def(
         }
         for via in &routing.routes.vias {
             routed_vias.entry(via.net).or_default().push(via);
+        }
+        for patch in &routing.routes.patches {
+            routed_patches.entry(patch.net).or_default().push(patch);
         }
     }
     for special in [false, true] {
@@ -1066,6 +1094,7 @@ pub(super) fn export_def(
                     routing,
                     routed_wires.get(&(ni as u32)).map_or(&[], Vec::as_slice),
                     routed_vias.get(&(ni as u32)).map_or(&[], Vec::as_slice),
+                    routed_patches.get(&(ni as u32)).map_or(&[], Vec::as_slice),
                     output,
                 )?;
             }

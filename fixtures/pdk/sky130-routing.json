@@ -14,5 +14,6 @@
     {"name":"M2M3_PR", "cut_spacing":200},
     {"name":"M3M4_PR", "cut_spacing":200}
   ],
+  "lef_rules": true,
   "max_skew_ns": 0.5
 }

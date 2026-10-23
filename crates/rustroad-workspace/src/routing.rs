@@ -3,7 +3,8 @@ use crate::pdk::{PhysicalBundle, SourcePin};
 use crate::{Error, Result, Stage, Summary};
 use rustroad_core::connectivity::{Direction, Geometry, PinOwner};
 use rustroad_core::routing::{
-    self, Blockage, LayerRect, RouteInput, RouteLayer, RouteLimits, RouteVia, Routes, Terminal,
+    self, AccessClass, Blockage, LayerRect, RouteInput, RouteLayer, RouteLimits, RouteVia, Routes,
+    Terminal,
 };
 use rustroad_core::{Design, Limits, Placed, Rect};
 use rustroad_formats::lef::LefGeometry;
@@ -34,6 +35,10 @@ pub struct RoutingConfig {
     #[serde(default)]
     pub limits: RouteLimits,
     pub max_skew_ns: f64,
+    /// LEF-rule mode: AREA/MINSTEP/ENCLOSURE, every single-cut LEF fixed-via
+    /// variant per policy via, the pin-access table and same-net cleanup.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub lef_rules: bool,
 }
 impl RoutingConfig {
     fn validate(&self) -> Result<()> {
@@ -146,6 +151,130 @@ pub(crate) fn clock_nets(bundle: &PhysicalBundle) -> Result<BTreeSet<u32>> {
     Ok(nets)
 }
 
+/// One LEF fixed via as routing shapes; a cut layer joins the routing view
+/// with the policy cut spacing. The via must join two selected routing layers.
+fn route_via<'a>(
+    bundle: &'a PhysicalBundle,
+    via: &'a rustroad_formats::lef::LefVia,
+    policy: &ViaPolicy,
+    layers: &mut Vec<RouteLayer>,
+    indices: &mut HashMap<&'a str, u32>,
+) -> Result<RouteVia> {
+    let mut shapes = Vec::new();
+    let mut metals = BTreeSet::new();
+    for g in &via.geometries {
+        let (name, r) = lef_rectangle(g)?;
+        let tech = bundle
+            .technology
+            .layers
+            .iter()
+            .find(|l| l.name == name)
+            .ok_or_else(|| fail("VIA layer absent"))?;
+        let index = if let Some(i) = indices.get(name) {
+            *i
+        } else if tech.kind.as_deref() == Some("CUT") {
+            let i = layers.len() as u32;
+            layers.push(RouteLayer {
+                name: name.into(),
+                width: tech.width.unwrap_or(r.ux - r.lx),
+                spacing: policy.cut_spacing.max(tech.spacing.unwrap_or(0)),
+                vertical: None,
+                min_area: None,
+                min_step: None,
+            });
+            indices.insert(tech.name.as_str(), i);
+            i
+        } else {
+            return Err(fail("VIA reaches a layer outside routing policy"));
+        };
+        if layers[index as usize].vertical.is_some() {
+            metals.insert(index);
+        }
+        shapes.push(LayerRect {
+            layer: index,
+            rect: r,
+        });
+    }
+    if metals.len() != 2 {
+        return Err(fail("VIA must connect two selected routing layers"));
+    }
+    Ok(RouteVia {
+        name: via.name.clone(),
+        lower: *metals.first().unwrap(),
+        upper: *metals.last().unwrap(),
+        shapes,
+    })
+}
+fn cuts(v: &RouteVia, layers: &[RouteLayer]) -> Vec<LayerRect> {
+    v.shapes
+        .iter()
+        .filter(|s| layers[s.layer as usize].vertical.is_none())
+        .cloned()
+        .collect()
+}
+/// A single-cut variant of `base`: same cut rectangle, same two metal layers,
+/// exactly one pad rectangle per metal layer.
+fn variant_of(base: &RouteVia, other: &RouteVia, layers: &[RouteLayer]) -> bool {
+    let (a, b) = (cuts(base, layers), cuts(other, layers));
+    let pads = |v: &RouteVia, l: u32| v.shapes.iter().filter(|s| s.layer == l).count();
+    a.len() == 1
+        && b.len() == 1
+        && a[0].layer == b[0].layer
+        && a[0].rect == b[0].rect
+        && other.lower == base.lower
+        && other.upper == base.upper
+        && pads(other, other.lower) == 1
+        && pads(other, other.upper) == 1
+        && other.shapes.len() == 3
+}
+fn same_shapes(a: &RouteVia, b: &RouteVia) -> bool {
+    let key = |v: &RouteVia| {
+        let mut k: Vec<_> = v
+            .shapes
+            .iter()
+            .map(|s| (s.layer, s.rect.lx, s.rect.ly, s.rect.ux, s.rect.uy))
+            .collect();
+        k.sort_unstable();
+        k
+    };
+    key(a) == key(b)
+}
+fn pad_area(v: &RouteVia, layers: &[RouteLayer]) -> i128 {
+    v.shapes
+        .iter()
+        .filter(|s| layers[s.layer as usize].vertical.is_some())
+        .map(|s| i128::from(s.rect.ux - s.rect.lx) * i128::from(s.rect.uy - s.rect.ly))
+        .sum()
+}
+/// LEF cut ENCLOSURE BELOW/ABOVE: every pad on the lower/upper metal must
+/// overhang each cut by (a, b) in either orientation. Absent rules pass.
+fn encloses(bundle: &PhysicalBundle, v: &RouteVia, layers: &[RouteLayer]) -> Result<bool> {
+    for cut in cuts(v, layers) {
+        let tech = bundle
+            .technology
+            .layers
+            .iter()
+            .find(|l| l.name == layers[cut.layer as usize].name)
+            .ok_or_else(|| fail("VIA cut layer absent"))?;
+        for (metal, rule) in [
+            (v.lower, tech.enclosure_below),
+            (v.upper, tech.enclosure_above),
+        ] {
+            let Some([a, b]) = rule else {
+                continue;
+            };
+            for pad in v.shapes.iter().filter(|s| s.layer == metal) {
+                let ox = (cut.rect.lx - pad.rect.lx).min(pad.rect.ux - cut.rect.ux);
+                let oy = (cut.rect.ly - pad.rect.ly).min(pad.rect.uy - cut.rect.uy);
+                if !((ox >= a && oy >= b) || (ox >= b && oy >= a)) {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
 pub(crate) fn build_input(
     design: &Design,
     bundle: &PhysicalBundle,
@@ -189,9 +318,11 @@ pub(crate) fn build_input(
             width,
             spacing: policy.spacing.max(l.spacing.unwrap_or(0)),
             vertical: Some(vertical),
+            min_area: if config.lef_rules { l.min_area } else { None },
+            min_step: if config.lef_rules { l.min_step } else { None },
         });
     }
-    let mut vias = Vec::new();
+    let mut vias: Vec<RouteVia> = Vec::new();
     for policy in &config.vias {
         let via = bundle
             .technology
@@ -199,48 +330,39 @@ pub(crate) fn build_input(
             .iter()
             .find(|v| v.name == policy.name)
             .ok_or_else(|| fail("routing VIA absent"))?;
-        let mut shapes = Vec::new();
-        let mut metals = BTreeSet::new();
-        for g in &via.geometries {
-            let (name, r) = lef_rectangle(g)?;
-            let tech = bundle
-                .technology
-                .layers
-                .iter()
-                .find(|l| l.name == name)
-                .ok_or_else(|| fail("VIA layer absent"))?;
-            let index = if let Some(i) = indices.get(name) {
-                *i
-            } else if tech.kind.as_deref() == Some("CUT") {
-                let i = layers.len() as u32;
-                layers.push(RouteLayer {
-                    name: name.into(),
-                    width: tech.width.unwrap_or(r.ux - r.lx),
-                    spacing: policy.cut_spacing.max(tech.spacing.unwrap_or(0)),
-                    vertical: None,
-                });
-                indices.insert(name, i);
-                i
-            } else {
-                return Err(fail("VIA reaches a layer outside routing policy"));
-            };
-            if layers[index as usize].vertical.is_some() {
-                metals.insert(index);
+        let configured = route_via(bundle, via, policy, &mut layers, &mut indices)?;
+        if config.lef_rules && !encloses(bundle, &configured, &layers)? {
+            return Err(fail("configured routing VIA violates LEF cut ENCLOSURE"));
+        }
+        let mut family = Vec::new();
+        if config.lef_rules {
+            for other in &bundle.technology.vias {
+                if other.name == via.name
+                    || other
+                        .geometries
+                        .iter()
+                        .any(|g| matches!(g, LefGeometry::Polygon { .. }))
+                {
+                    continue;
+                }
+                let Ok(candidate) = route_via(bundle, other, policy, &mut layers, &mut indices)
+                else {
+                    continue;
+                };
+                if variant_of(&configured, &candidate, &layers)
+                    && encloses(bundle, &candidate, &layers)?
+                    && !family
+                        .iter()
+                        .chain(std::iter::once(&configured))
+                        .any(|v: &RouteVia| same_shapes(v, &candidate))
+                {
+                    family.push(candidate);
+                }
             }
-            shapes.push(LayerRect {
-                layer: index,
-                rect: r,
-            });
+            family.sort_by_key(|v| (pad_area(v, &layers), v.name.clone()));
         }
-        if metals.len() != 2 {
-            return Err(fail("VIA must connect two selected routing layers"));
-        }
-        vias.push(RouteVia {
-            name: via.name.clone(),
-            lower: *metals.first().unwrap(),
-            upper: *metals.last().unwrap(),
-            shapes,
-        });
+        vias.push(configured);
+        vias.extend(family);
     }
     let selected: BTreeSet<_> = match scope {
         RouteScope::Clock => {
@@ -277,6 +399,8 @@ pub(crate) fn build_input(
         obstacles.push(Blockage { layer, rect, net });
         Ok(())
     };
+    let mut classes = Vec::<AccessClass>::new();
+    let mut class_ids = HashMap::<(u32, bool, usize), u32>::new();
     for (i, p) in placed.iter().enumerate() {
         let master = &model.masters[model.instance_masters[i] as usize];
         let orientation = rustroad_core::placed_orientation(design, p)?;
@@ -305,11 +429,38 @@ pub(crate) fn build_input(
                 && selected.contains(&n)
                 && !pin.use_.is_supply()
             {
+                let class = if config.lef_rules {
+                    let key = (
+                        model.instance_masters[i],
+                        orientation == rustroad_core::Orientation::FS,
+                        ti,
+                    );
+                    let id = match class_ids.get(&key) {
+                        Some(id) => *id,
+                        None => {
+                            let id = classes.len() as u32;
+                            classes.push(access_class(
+                                master,
+                                orientation,
+                                p.height,
+                                ti,
+                                &indices,
+                                &layers,
+                            )?);
+                            class_ids.insert(key, id);
+                            id
+                        }
+                    };
+                    Some((id, [p.x, p.y]))
+                } else {
+                    None
+                };
                 terminals.push(Terminal {
                     pin: pin_ids[&owner],
                     net: n,
                     driver: pin.direction == Some(Direction::Output),
                     shapes,
+                    class,
                 });
             }
         }
@@ -358,6 +509,7 @@ pub(crate) fn build_input(
                         layer,
                         rect: p.rect,
                     }],
+                    class: None,
                 });
             }
         }
@@ -424,7 +576,51 @@ pub(crate) fn build_input(
         vias,
         obstacles,
         terminals,
+        rules: config.lef_rules,
+        access_classes: classes,
     })
+}
+/// Relative (origin 0,0) pin and same-master other-net geometry of one
+/// (master, orientation, pin) access class on the selected layers.
+fn access_class(
+    master: &rustroad_core::connectivity::Master,
+    orientation: rustroad_core::Orientation,
+    height: i64,
+    pin_index: usize,
+    indices: &HashMap<&str, u32>,
+    layers: &[RouteLayer],
+) -> Result<AccessClass> {
+    let mut class = AccessClass {
+        shapes: Vec::new(),
+        blockers: Vec::new(),
+    };
+    let mut add = |g: &Geometry, own: bool| -> Result<()> {
+        let layer = match g {
+            Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
+        };
+        if let Some(&li) = indices.get(layer.as_str()) {
+            let (_, r) = rectangle(g)?;
+            let rect = rustroad_core::transform_rect(r, 0, 0, height, orientation)?;
+            let shape = LayerRect { layer: li, rect };
+            if own {
+                if layers[li as usize].vertical.is_some() {
+                    class.shapes.push(shape);
+                }
+            } else {
+                class.blockers.push(shape);
+            }
+        }
+        Ok(())
+    };
+    for (ti, pin) in master.pins.iter().enumerate() {
+        for g in pin.ports.iter().flatten() {
+            add(g, ti == pin_index)?;
+        }
+    }
+    for g in &master.obstructions {
+        add(g, false)?;
+    }
+    Ok(class)
 }
 
 pub fn route(
@@ -504,6 +700,7 @@ pub(crate) fn table_bytes(state: &RoutingState) -> Result<Vec<u8>> {
         .len()
         .checked_add(state.routes.vias.len())
         .and_then(|n| n.checked_add(state.routes.access.len()))
+        .and_then(|n| n.checked_add(state.routes.patches.len()))
         .and_then(|n| n.checked_mul(64))
         .ok_or_else(|| Error::Budget("routing table overflow".into()))?;
     if n > crate::MAX_METADATA_BYTES as usize {
@@ -542,12 +739,25 @@ pub(crate) fn table_bytes(state: &RoutingState) -> Result<Vec<u8>> {
             0,
         ]);
     }
+    for p in &state.routes.patches {
+        record([
+            4,
+            p.net as i64,
+            p.layer as i64,
+            p.rect.lx,
+            p.rect.ly,
+            p.rect.ux,
+            p.rect.uy,
+            0,
+        ]);
+    }
     Ok(data)
 }
 pub(crate) fn write_def_paths(
     state: &RoutingState,
     wires: &[&routing::Wire],
     vias: &[&routing::Via],
+    patches: &[&routing::Patch],
     out: &mut impl Write,
 ) -> Result<()> {
     let mut first = true;
@@ -575,6 +785,20 @@ pub(crate) fn write_def_paths(
             v.at[0],
             v.at[1],
             rustroad_core::def_name(name)
+        )?;
+        first = false;
+    }
+    // DEF 5.8 routing RECT, relative to its anchor point (the lower-left corner).
+    for p in patches {
+        write!(
+            out,
+            "\n  {} {} ( {} {} ) RECT ( 0 0 {} {} )",
+            if first { "+ ROUTED" } else { "NEW" },
+            rustroad_core::def_name(&state.layers[p.layer as usize]),
+            p.rect.lx,
+            p.rect.ly,
+            p.rect.ux - p.rect.lx,
+            p.rect.uy - p.rect.ly
         )?;
         first = false;
     }

@@ -87,6 +87,7 @@ fn config() -> PhysicalConfig {
         alternating_rows: true,
         cell_spacing_sites: 0,
         io_width: None,
+        io_min_area: false,
         io_spacing: None,
         strap_width: None,
         strap_spacing: None,
