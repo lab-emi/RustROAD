@@ -1,5 +1,36 @@
 # RustROAD handoff
 
+## 2026-10-23 — post-route timing with RustSTA 0.3 (current validation)
+
+- The strict 1 ps endpoint gate now passes with the nonlinear RC/effective-load/
+  slew model: Sky130 0.5490975 ps, GF180 0.3017939 ps. Fresh routed geometry and
+  actual nominal-rule extraction were used; no zero-R projection or tolerance
+  change. Native scope must be spef_rc/nldm_ceff_ramp with propagated clocks.
+- scripts/verify_routing.py requires that scope and emits timing_accuracy_status
+  separately from functional_status and overall status. Pass current 0.3 native
+  binaries explicitly; the frozen .work/routing-tools candidates remain older.
+  New binaries used here are in the sibling timing tool's .work/rc-wave/target/release.
+- Fresh final flow: .work/rc-timing/ready, 90 receipts, 14.38 s wall clock,
+  peak host-process RSS 404008 KiB. CEC, 512 vectors (511 checked pipeline cycles),
+  original GDS/DEF/PG/tap checks, all-net routing, repeatability, extraction,
+  routed clock skew, full timing consistency and negative controls pass on both.
+- Physical results unchanged: 19 signal nets and 46 terminals per PDK;
+  4964 wires/101 vias (Sky130), 4982 wires/77 vias (GF180). Eight timing endpoints
+  each, zero unconstrained. Clock skew remains under the original limits.
+- Accuracy/functional verdicts pass, but total status remains PARTIAL. Sky130
+  nominal hold is +0.000246889 ns (below the comparison gate); GF180 has four
+  hold violations, worst -0.635534583 ns. Do not claim signoff. Physical hold
+  optimization must re-route/re-extract and re-run timing before acceptance.
+- The timing engine independently checks nine Ngspice transient circuits,
+  actual dual-PDK cell resize/restore with fixed RC topology and CPU/CUDA f64
+  identity. The flow's update remains a no-op consistency check. A fixed-topology
+  resize does not prove a physically rerouted ECO.
+- New report: docs/postroute-timing.html; reproducibility/scope in
+  docs/postroute-timing.md; sanitized tool/input fingerprints and verdicts in
+  docs/evidence/postroute-timing.json. Previous reports remain historical.
+- This integration changes only the verification adapter; RustROAD remains
+  version 0.5.0 with the same native binary. Complete GDS/DRC/LVS remain unverified.
+
 ## 2026-10-23 — v0.5.0 constrained CTS, routing and external RC extraction (current)
 
 - `clock-tree --sdc FILE` accepts a strict bounded literal primary-clock SDC

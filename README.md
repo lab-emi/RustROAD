@@ -37,7 +37,9 @@ Implemented:
   pin-access reservation, fixed vias, LEF/PG obstacles and persistent routed DEF.
 - A real four-register dual-PDK RTL → synthesis → placement/CTS → signal routing
   → external OpenRCX SPEF → propagated-clock RustSTA/OpenSTA integration case.
-  Geometry/skew checks pass; timing parity and hold closure remain incomplete.
+  Geometry/skew checks pass. With RustSTA 0.3, endpoint parity passes the fixed
+  1 ps gate on both PDKs; GF180 hold closure remains incomplete. See the
+  [post-route timing report](docs/postroute-timing.html).
 - Read-only pinned-tool/dual-PDK flow readiness and a guarded logic validation
   harness using existing RustSys/RustSTA and independent external tools.
 

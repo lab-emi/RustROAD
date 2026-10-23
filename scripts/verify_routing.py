@@ -53,7 +53,7 @@ def sta(h,tag,tools,lib,netlist,sdc,spef):
     update=h.json_command(tag+'_sta_update',[str(tools['ruststa']),*common,'update','--base-rev',full['new_rev'],'--backend','cpu','--precision','f64','--max-paths','8','--max-state-gib','1'],True)
     check=h.json_command(tag+'_sta_updated_full',[str(tools['ruststa']),*common,'check','--base-rev',update['new_rev'],'--method','full','--tolerance','1e-9'],True)
     require(full.get('verdict')=='agree' and check.get('verdict')=='agree','full/incremental inconsistency')
-    require(r['scope'].get('clock_model')=='propagated' and r['scope'].get('wire_model')=='spef_elmore','wrong extracted timing scope')
+    require(r['scope'].get('clock_model')=='propagated' and r['scope'].get('wire_model')=='spef_rc' and r['scope'].get('delay_calculator')=='nldm_ceff_ramp','wrong extracted timing scope')
     require(r['completeness']['unconstrained_endpoints']==0,'unconstrained pipeline endpoints')
     return dict(status='passed',scope=r['scope'],metrics=r['metrics'],completeness=r['completeness'],diagnostics=r['diagnostics'],
                 endpoints=report['sections']['checks']['rows'],full=full,incremental_noop=check,workspace=str(ws))
@@ -185,6 +185,7 @@ def main():
             except (RuntimeError,ValueError,KeyError,OSError) as error:summary['pdks'].append(dict(pdk=p['tag'],status='failed',reason=str(error)))
         functional=len(summary['pdks'])==2 and all(p['status']=='passed' for p in summary['pdks'])
         summary['functional_status']='passed' if functional else 'failed'
+        summary['timing_accuracy_status']='passed' if functional and all(p['opensta']['status']=='passed' for p in summary['pdks']) else 'failed'
         summary['status']='passed' if functional and all(p['opensta']['status']=='passed' and p['timing_closure']=='met' for p in summary['pdks']) else 'partial' if functional else 'failed'
     except (RuntimeError,ValueError,KeyError,OSError) as error:summary['reason']=str(error)
     finally:
