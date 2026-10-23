@@ -264,10 +264,129 @@ def parse_netgen(comp_json_text: str, comp_out_text: str, top: str) -> dict:
     if property_lines:
         problems.append(f"comp.out reports property errors ({len(property_lines)} lines, e.g. "
                         f"{property_lines[-1].strip()[:120]!r})")
+    # Port errors: a pin on one side only (e.g. a labelled floating layout pin, or an
+    # unconnected reference port) is reported as "Netlists match uniquely with port
+    # errors." / "(no matching pin)" / "disconnected node", yet the final line still
+    # says "Circuits match uniquely." and comp.json drops the pin from both lists.
+    port_lines = re.findall(r"^.*\bport errors?\b.*$", comp_out_text, re.M | re.I)
+    unmatched_pins = [_netgen_unmatched_pin(x) for x in
+                      re.findall(r"^.*\(no matching pin\).*$", comp_out_text, re.M)]
+    disconnected = re.findall(r"^Cell\s+(\S+)\s+\((\d+)\)\s+disconnected node:\s*(.*?)\s*$", comp_out_text, re.M)
+    if port_lines:
+        problems.append(f"comp.out reports port errors ({port_lines[-1].strip()[:120]!r})")
+    if unmatched_pins:
+        problems.append(f"{len(unmatched_pins)} pins without a matching pin: {unmatched_pins[:6]}")
+    if disconnected:
+        problems.append(f"{len(disconnected)} disconnected nodes: "
+                        + ", ".join(f"{c}({side}):{n}" for c, side, n in disconnected[:6]))
     return dict(final_result=final, circuits=len(circuits), problems=problems,
                 property_error_lines=[x.strip()[:200] for x in property_lines[:10]],
                 property_errors=sum(c["property_errors"] for c in circuits),
+                port_error_lines=[x.strip()[:200] for x in port_lines[:10]],
+                unmatched_pins=unmatched_pins[:50],
+                disconnected_nodes=[dict(cell=c, side=int(side), node=n) for c, side, n in disconnected[:50]],
                 matched=not problems, details=circuits[-20:])
+
+
+def _netgen_unmatched_pin(line: str) -> str:
+    left, _, right = line.partition("|")
+    left, right = left.strip(), right.strip()
+    return f"layout-only {left}" if "(no matching pin)" in right else f"reference-only {right}"
+
+
+def parse_magic_extract(text: str) -> dict:
+    """Facts from a Magic extraction log: port pairs Magic reports as shorted together."""
+    shorted = re.findall(r'Ports\s+"([^"]*)"\s+and\s+"([^"]*)"\s+are electrically shorted', text)
+    return dict(shorted_ports=[list(x) for x in shorted[:50]], shorted_count=len(shorted))
+
+
+def spice_subckt_ports(text: str, name: str) -> list[str] | None:
+    """Port list of ``.subckt name`` in a SPICE netlist (continuation lines joined), or None."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(r"\s*\.subckt\s+(\S+)\s*(.*)$", line, re.I)
+        if not m or m[1] != name:
+            continue
+        ports = [p for p in m[2].split() if "=" not in p]
+        j = i + 1
+        while j < len(lines) and lines[j].lstrip().startswith("+"):
+            ports += [p for p in lines[j].lstrip()[1:].split() if "=" not in p]
+            j += 1
+        return ports
+    return None
+
+
+def reference_module_names(verilog_text: str) -> list[str]:
+    """Names of every module declared in a Verilog file (comments stripped)."""
+    text = re.sub(r"/\*.*?\*/", " ", verilog_text, flags=re.S)
+    text = re.sub(r"//[^\n]*", " ", text)
+    names = re.findall(r"\b(?:module|macromodule)\s+(\\\S+|[A-Za-z_][\w$]*)", text)
+    return [n[1:] if n.startswith("\\") else n for n in names]
+
+
+def port_label_check(top_texts: list, ports: list[str]) -> dict:
+    """Compare the GDS top-cell text labels with the reference netlist ports, both ways.
+
+    Every reference port must be labelled in the top cell, and every top-cell
+    label must name a reference port (exact, case-sensitive: labels and ports
+    come from the same names). Several labels of one port (e.g. power pins on
+    two layers) are fine; a label that is not a port is a failure.
+    """
+    labels = sorted({t[1] for t in top_texts})
+    port_set = set(ports)
+    missing = sorted(port_set - set(labels))
+    extra = sorted(set(labels) - port_set)
+    problems = []
+    if missing:
+        problems.append(f"reference ports without a top-cell label: {missing[:10]}")
+    if extra:
+        problems.append(f"top-cell labels that are not reference ports: {extra[:10]}")
+    return dict(matched=not problems, problems=problems, labels=len(labels), ports=len(port_set),
+                missing_labels=missing[:50], extra_labels=extra[:50])
+
+
+def compare_texts(design: list, against: list, limit: int = 50) -> dict:
+    """Multiset comparison of text records [layer, string, x_pm, y_pm] (both directions)."""
+    a, b = Counter(map(tuple, design)), Counter(map(tuple, against))
+    only_a, only_b = a - b, b - a
+    return dict(identical=not only_a and not only_b, design=sum(a.values()), against=sum(b.values()),
+                only_in_design=sum(only_a.values()), only_in_against=sum(only_b.values()),
+                samples_only_in_design=[list(k) for k in sorted(only_a)[:limit]],
+                samples_only_in_against=[list(k) for k in sorted(only_b)[:limit]])
+
+
+def diff_sorted_lines(path_a, path_b, limit: int = 50) -> dict:
+    """Streaming multiset diff of two sorted text files (bounded samples, exact counts).
+
+    Raises ParseError if either file is not sorted (a merge would be meaningless).
+    """
+    only_a, only_b, samples_a, samples_b = 0, 0, [], []
+    with open(path_a, encoding="utf-8") as fa, open(path_b, encoding="utf-8") as fb:
+        def reader(handle):
+            last = None
+            for raw in handle:
+                line = raw.rstrip("\n")
+                if last is not None and line < last:
+                    raise ParseError(f"{handle.name} is not sorted")
+                last = line
+                yield line
+        ia, ib = reader(fa), reader(fb)
+        la, lb = next(ia, None), next(ib, None)
+        while la is not None or lb is not None:
+            if la is not None and (lb is None or la < lb):
+                only_a += 1
+                if len(samples_a) < limit:
+                    samples_a.append(la)
+                la = next(ia, None)
+            elif lb is not None and (la is None or lb < la):
+                only_b += 1
+                if len(samples_b) < limit:
+                    samples_b.append(lb)
+                lb = next(ib, None)
+            else:
+                la, lb = next(ia, None), next(ib, None)
+    return dict(only_in_design=only_a, only_in_against=only_b, samples_only_in_design=samples_a,
+                samples_only_in_against=samples_b)
 
 
 def parse_density_log(text: str) -> dict:
@@ -304,7 +423,7 @@ def _unnamed(value) -> bool:
     return not text or text.startswith("$")
 
 
-def lvsdb_verdict(xref: dict, top: str, body_pin_pairs=()) -> dict:
+def lvsdb_verdict(xref: dict, top: str, body_pin_pairs=(), reference_ports=None) -> dict:
     """KLayout LVS verdict from the kl_lvsdb.py dump.
 
     KLayout pairs pins by topology, so a symmetric design with swapped port
@@ -315,6 +434,15 @@ def lvsdb_verdict(xref: dict, top: str, body_pin_pairs=()) -> dict:
     child (library) cells a named-vs-named pin pair must also agree, except the
     body/substrate terminals the PDK deck synthesizes (``body_pin_pairs``,
     e.g. sky130_gnd<->VNB); unnamed deck-generated pins ($n) are only reported.
+
+    Two holes of the pairing are closed explicitly: (1) a NAMED layout net of
+    the top circuit (i.e. one carrying a label) that is not paired, or paired
+    with a differently named or non-matching schematic net, fails -- KLayout
+    leaves a labelled floating net (an extra pin) out of the comparison and
+    still reports Match; (2) with ``reference_ports`` (the port list of the
+    reference netlist), every reference port must appear as a paired top-level
+    schematic pin and vice versa -- schematic simplification silently drops an
+    unconnected reference port, so equal post-simplify pin counts prove nothing.
     """
     problems = []
     body = {(a.casefold(), b.casefold()) for a, b in body_pin_pairs}
@@ -359,6 +487,39 @@ def lvsdb_verdict(xref: dict, top: str, body_pin_pairs=()) -> dict:
             if top_pins["name_mismatches"]:
                 problems.append("top pin names swapped/mismatched (layout<->schematic) "
                                 + ", ".join(f"{a}<->{b}" for a, b in top_pins["name_mismatches"][:6]))
+    nets = dict(named=None, unpaired=[], mismatched=[])
+    if top_pair:
+        named = top_pair[0].get("named_nets")
+        if named is None:
+            problems.append("named top-level nets not dumped; labelled floating nets cannot be excluded")
+        else:
+            nets["named"] = len(named)
+            for n in named:
+                lname, sname = _pin_name(n.get("layout")), n.get("schematic")
+                if not n.get("paired") or _unnamed(sname):
+                    nets["unpaired"].append(lname)
+                elif n.get("status") not in (None, "Match") or lname.casefold() != _pin_name(sname).casefold():
+                    nets["mismatched"].append([lname, sname, n.get("status")])
+            if nets["unpaired"]:
+                problems.append(f"labelled top-level layout nets not in the schematic (extra pins/labels): "
+                                f"{nets['unpaired'][:6]}")
+            if nets["mismatched"]:
+                problems.append(f"labelled top-level nets paired with a different or non-matching schematic net: "
+                                f"{nets['mismatched'][:6]}")
+    if xref.get("named_nets_truncated"):
+        problems.append("named-net dump truncated; labelled nets not fully compared")
+    ports = dict(reference=None, unpaired_reference_ports=[], schematic_pins_not_ports=[])
+    if reference_ports is not None and top_pair and top_pair[0].get("pin_pairs") is not None:
+        want = {p.casefold(): p for p in reference_ports}
+        paired = {_pin_name(p.get("schematic")).casefold() for p in top_pair[0]["pin_pairs"]
+                  if not _unnamed(p.get("schematic")) and not _unnamed(p.get("layout"))}
+        ports["reference"] = len(want)
+        ports["unpaired_reference_ports"] = sorted(want[k] for k in set(want) - paired)
+        ports["schematic_pins_not_ports"] = sorted(paired - set(want))
+        if ports["unpaired_reference_ports"]:
+            problems.append(f"reference ports not paired with a layout pin: {ports['unpaired_reference_ports'][:6]}")
+        if ports["schematic_pins_not_ports"]:
+            problems.append(f"paired schematic pins that are not reference ports: {ports['schematic_pins_not_ports'][:6]}")
     child = dict(compared=0, name_mismatches=[], body_pairs=0, unnamed=0)
     for c in circuits:
         if top_pair and c is top_pair[0]:
@@ -380,8 +541,11 @@ def lvsdb_verdict(xref: dict, top: str, body_pin_pairs=()) -> dict:
         problems.append("library-cell pin names mismatched "
                         + ", ".join(f"{cell}:{a}<->{b}" for cell, a, b in child["name_mismatches"][:6]))
     return dict(matched=not problems, problems=problems, circuits=len(circuits),
-                top=({k: v for k, v in top_pair[0].items() if k != "pin_pairs"} if top_pair else None),
-                top_pins=top_pins, child_pins=dict(child, name_mismatches=child["name_mismatches"][:20]),
+                top=({k: v for k, v in top_pair[0].items() if k not in ("pin_pairs", "named_nets")} if top_pair else None),
+                top_pins=top_pins, top_nets=dict(nets, unpaired=nets["unpaired"][:50], mismatched=nets["mismatched"][:50]),
+                reference_ports=dict(ports, unpaired_reference_ports=ports["unpaired_reference_ports"][:50],
+                                     schematic_pins_not_ports=ports["schematic_pins_not_ports"][:50]),
+                child_pins=dict(child, name_mismatches=child["name_mismatches"][:20]),
                 details=(xref.get("details") or [])[:40])
 
 

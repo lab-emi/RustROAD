@@ -105,7 +105,8 @@ def main(argv=None) -> int:
     for t in ("sky130", "gf180"):
         c = load(run / f"baseline/controls_{t}/controls.json")
         for x in c["controls"]:
-            if x["control"] in ("label_swap", "missing_label", "cell_swap"):
+            if x["control"] in ("label_swap", "missing_label", "cell_swap", "extra_pin", "extra_port", "rename_label",
+                                "child_top", "oom_kill", "manifest_missing_entry"):
                 lvs_controls.setdefault(t, {})[x["control"]] = x["evidence"]
     out["lvs_oracle_controls"] = lvs_controls
     cellpol = run / "cellpol/cellpol.json"

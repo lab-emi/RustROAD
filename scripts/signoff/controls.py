@@ -15,10 +15,21 @@ exchanged: each LVS tool must fail on its own, KLayout through the pin-name
 comparison), missing_label (one port label deleted) and cell_swap (one
 reference-netlist cell replaced by another drive strength of the same
 function: each LVS tool must fail on its own, Netgen through device-property
-errors where the topology still matches). Positive controls: the clean mini
-layout must pass both DRC oracles, the reference must be XOR-identical to
-itself re-streamed, and a planted variant must XOR-differ. Exit 0 iff every
-control behaved as expected.
+errors where the topology still matches), extra_pin (a labelled floating
+metal pin that is not a reference port), extra_port (an unconnected port added
+to the reference netlist only), rename_label (one port label renamed: LVS in
+both tools and the XOR label comparison must fail), alias_label (a second,
+non-reference label on an existing port net), child_top (a library cell
+inside the GDS given as --top: no check may pass), extra_top (a stray second
+top cell next to the block: no check may pass), oom_kill (tools starved of
+memory: unverified with null counts, never 0) and manifest_missing_entry (a
+required manifest entry deleted: unverified, exit 3, no crash). For the LVS
+controls every tool must fail through its OWN result (Netgen comp.out/json,
+KLayout lvsdb cross-reference), independently of the harness port-label
+oracle, which must fail too. Positive controls: the clean mini layout must pass
+both DRC oracles, the reference must be XOR-identical to itself re-streamed,
+and a planted variant must XOR-differ. Exit 0 iff every control behaved as
+expected.
 """
 from __future__ import annotations
 
@@ -26,6 +37,7 @@ import argparse
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import time
 
@@ -40,12 +52,14 @@ LAYERS = {
                    spacing_um="0.10", spacing_rule_kl="m1.2", spacing_rule_magic="met1.2",
                    short_pins="a[1],clk", antenna_pin="a[1]", antenna_length_um="600", via="M1M2_PR",
                    via_net="a[0]", swap_pins="a[0],a[1]",
-                   cell_swap=("g0", "sky130_fd_sc_hd__and2_2", "sky130_fd_sc_hd__and2_4")),
+                   cell_swap=("g0", "sky130_fd_sc_hd__and2_2", "sky130_fd_sc_hd__and2_4"),
+                   child_top="sky130_fd_sc_hd__and2_2"),
     "gf180": dict(metal="34/0", pin_layer="42/10", pin_text="42/10", draw_layer="42/0", boundary="0/0",
                   spacing_um="0.12", spacing_rule_kl="M1.2a", spacing_rule_magic="M1.2a",
                   short_pins="a[1],clk", antenna_pin="a[1]", antenna_length_um="2000", via="Via1_HV",
                   via_net="a[0]", swap_pins="a[0],a[1]",
-                  cell_swap=("g0", "gf180mcu_fd_sc_mcu7t5v0__and2_2", "gf180mcu_fd_sc_mcu7t5v0__and2_4")),
+                  cell_swap=("g0", "gf180mcu_fd_sc_mcu7t5v0__and2_2", "gf180mcu_fd_sc_mcu7t5v0__and2_4"),
+                  child_top="gf180mcu_fd_sc_mcu7t5v0__and2_2"),
 }
 
 
@@ -60,14 +74,14 @@ def first_via(def_text: str, net: str, via: str) -> tuple[int, int]:
     raise SystemExit(f"no {via} on net {net}")
 
 
-def plant(args, kind: str, work: Path, **extra) -> tuple[Path, dict]:
+def plant(args, kind: str, work: Path, swap: str | None = None, **extra) -> tuple[Path, dict]:
     lay = LAYERS[args.pdk]
     out = work / f"{kind}.gds"
     report = work / f"{kind}.plant.json"
     rd = dict(gds="/in/design.gds", out=f"/out/{out.name}", report=f"/out/{report.name}", kind=kind,
               metal=lay["metal"], pin_layer=lay["pin_layer"], pin_text=lay["pin_text"],
               draw_layer=lay["draw_layer"], boundary=lay["boundary"], spacing_um=lay["spacing_um"],
-              pins=lay["short_pins"], antenna_pin=lay["antenna_pin"], swap=lay["swap_pins"],
+              pins=lay["short_pins"], antenna_pin=lay["antenna_pin"], swap=swap or lay["swap_pins"],
               antenna_length_um=lay["antenna_length_um"], **extra)
     cmd = ["/foss/tools/klayout/klayout", "-b", "-r", "/scripts/kl_plant.py"]
     for k, v in rd.items():
@@ -81,10 +95,10 @@ def plant(args, kind: str, work: Path, **extra) -> tuple[Path, dict]:
 
 
 def run(args, gds: Path, checks, out: Path, top: str | None = None, plant_flag=None, against=None,
-        netlist: Path | None = None) -> dict:
+        netlist: Path | None = None, memory: str = "4g") -> dict:
     ns = argparse.Namespace(gds=gds, top=top or args.top, pdk=args.pdk, out=out, netlist=netlist or args.netlist,
                             against=against, against_top=args.top if against else None,
-                            manifest=args.manifest, threads=args.threads, memory="4g", timeout=900,
+                            manifest=args.manifest, threads=args.threads, memory=memory, timeout=900,
                             plant=plant_flag)
     summary = signoff.run_checks(ns, checks)
     (out / "signoff.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -94,6 +108,26 @@ def run(args, gds: Path, checks, out: Path, top: str | None = None, plant_flag=N
 
 def rule(verdict: dict, name: str) -> int:
     return ((verdict.get("counts") or {}).get("by_rule") or {}).get(name, 0)
+
+
+def lvs_own(verdict: dict) -> list[str]:
+    """Problems the LVS flow's own results produced, excluding the harness port-label oracle:
+    Netgen comp.out/comp.json plus its Magic extraction (shorted ports, extracted port list),
+    or the KLayout lvsdb cross-reference."""
+    result = verdict.get("result") or {}
+    return list(result.get("problems") or []) + list((result.get("extraction") or {}).get("problems") or [])
+
+
+def labels_failed(verdict: dict) -> bool:
+    return (verdict.get("result") or {}).get("port_labels", {}).get("matched") is False
+
+
+def lvs_independent(ng: dict, kv: dict) -> dict:
+    """Each LVS tool must fail on its own AND the harness port-label oracle must fail."""
+    return dict(netgen_status=ng["status"], netgen_own_problems=lvs_own(ng)[:4],
+                klayout_status=kv["status"], klayout_own_problems=lvs_own(kv)[:4],
+                port_labels_netgen=(ng.get("result") or {}).get("port_labels"),
+                port_labels_klayout_matched=(kv.get("result") or {}).get("port_labels", {}).get("matched"))
 
 
 def main(argv=None) -> int:
@@ -188,6 +222,52 @@ def main(argv=None) -> int:
            dict(instance=inst, reference_cell=old_cell, swapped_cell=new_cell, netlist=str(swapped_netlist),
                 netgen=ng["failures"][:2], netgen_property_errors=ng["result"].get("property_errors"),
                 netgen_final=ng["result"].get("final_result"), klayout=kv["failures"][:2]))
+    # Negative: a labelled floating metal pin that is not a reference port.
+    gds, info = plant(args, "extra_pin", work)
+    r = run(args, gds, ["lvs-netgen", "lvs-klayout"], work / "extra_pin")
+    ng, kv = r["verdicts"]["lvs-netgen"], r["verdicts"]["lvs-klayout"]
+    ev = lvs_independent(ng, kv)
+    record("extra_pin", "each LVS tool fails on its own (Netgen port errors, KLayout unpaired labelled net) "
+           "and the port-label oracle fails",
+           ng["status"] == "failed" and kv["status"] == "failed" and ev["netgen_own_problems"] and
+           ev["klayout_own_problems"] and labels_failed(ng) and labels_failed(kv), dict(plant=info, **ev))
+    # Negative: an unconnected port that exists only in the reference netlist.
+    text = args.netlist.read_text()
+    header = f"module {args.top} ("
+    if text.count(header) != 1:
+        raise SystemExit(f"extra_port: expected one '{header}' in {args.netlist}")
+    extra_netlist = work / "extra_port.v"
+    extra_netlist.write_text(text.replace(header, header + "\n  input wire extra,", 1))
+    r = run(args, args.gds, ["lvs-netgen", "lvs-klayout"], work / "extra_port", netlist=extra_netlist)
+    ng, kv = r["verdicts"]["lvs-netgen"], r["verdicts"]["lvs-klayout"]
+    ev = lvs_independent(ng, kv)
+    record("extra_port", "each LVS tool fails on its own (KLayout: the reference port is not a paired pin even "
+           "after schematic simplification drops it) and the port-label oracle fails",
+           ng["status"] == "failed" and kv["status"] == "failed" and ev["netgen_own_problems"] and
+           ev["klayout_own_problems"] and labels_failed(ng) and labels_failed(kv),
+           dict(netlist=str(extra_netlist), klayout_reference_ports=(kv.get("result") or {}).get("reference_ports"), **ev))
+    # Negative: one port label renamed (geometry unchanged): XOR labels and both LVS tools must fail.
+    gds, info = plant(args, "rename_label", work, swap="en,")
+    r = run(args, gds, ["xor", "lvs-netgen", "lvs-klayout"], work / "rename_label", against=args.gds)
+    xo, ng, kv = r["verdicts"]["xor"], r["verdicts"]["lvs-netgen"], r["verdicts"]["lvs-klayout"]
+    ev = lvs_independent(ng, kv)
+    labels = (xo.get("result") or {}).get("labels") or {}
+    record("rename_label", "XOR fails through the label comparison (geometry identical); each LVS tool fails on its own",
+           xo["status"] == "failed" and labels.get("status") == "failed" and (xo["counts"] or {}).get("geometry") == 0 and
+           ng["status"] == "failed" and kv["status"] == "failed" and ev["netgen_own_problems"] and
+           ev["klayout_own_problems"],
+           dict(plant=info, xor_counts=xo["counts"], xor_labels_top=labels.get("top"),
+                xor_failures=xo["failures"][:2], **ev))
+    # Negative: a second, non-reference label on an existing port net (an alias port name).
+    gds, info = plant(args, "alias_label", work, swap="en,")
+    r = run(args, gds, ["lvs-netgen", "lvs-klayout"], work / "alias_label")
+    ng, kv = r["verdicts"]["lvs-netgen"], r["verdicts"]["lvs-klayout"]
+    ev = lvs_independent(ng, kv)
+    record("alias_label", "each LVS flow fails on its own (Netgen pin matching or Magic's shorted-port report, "
+           "KLayout pin/net names) and the port-label oracle fails",
+           ng["status"] == "failed" and kv["status"] == "failed" and ev["netgen_own_problems"] and
+           ev["klayout_own_problems"] and labels_failed(ng) and labels_failed(kv),
+           dict(plant=info, netgen_extraction=(ng.get("result") or {}).get("extraction"), **ev))
     # Negative: long gate-only metal3 wire on an input pin.
     gds, info = plant(args, "antenna", work)
     r = run(args, gds, ["antenna"], work / "antenna")
@@ -201,6 +281,49 @@ def main(argv=None) -> int:
     statuses = {c: v["status"] for c, v in r["verdicts"].items()}
     record("wrong_top", "no check passes", all(s != "passed" for s in statuses.values()),
            dict(statuses=statuses, magic=r["verdicts"]["drc-magic"]["failures"][:2]))
+    # Negative: a library cell that exists inside the GDS given as the top cell.
+    r = run(args, args.gds, checks, work / "child_top", top=lay["child_top"])
+    statuses = {c: v["status"] for c, v in r["verdicts"].items()}
+    pre = r["verdicts"]["drc-magic"]["preflight"]
+    record("child_top", "no check passes; preflight refuses a cell that is not a top cell",
+           all(s != "passed" for s in statuses.values()) and pre.get("top_exists") is True and
+           pre["assertions"]["top_is_a_top_cell"] is False,
+           dict(top=lay["child_top"], statuses=statuses, top_cells=pre.get("top_cells"),
+                netgen=r["verdicts"]["lvs-netgen"]["failures"][:2]))
+    # Negative: a stray second top cell next to the block (never checked by a per-top run).
+    gds, info = plant(args, "extra_top", work)
+    r = run(args, gds, checks, work / "extra_top")
+    statuses = {c: v["status"] for c, v in r["verdicts"].items()}
+    pre = r["verdicts"]["drc-magic"]["preflight"]
+    record("extra_top", "no check passes; preflight requires exactly one top cell",
+           all(s != "passed" for s in statuses.values()) and pre["assertions"]["single_top_cell"] is False,
+           dict(plant=info, statuses=statuses, top_cells=pre.get("top_cells")))
+    # Negative: tools starved of memory -> unverified with null counts (never 0).
+    r = run(args, args.gds, ["antenna", "drc-klayout", "lvs-netgen"], work / "oom_kill", memory="24m")
+    statuses = {c: v["status"] for c, v in r["verdicts"].items()}
+    # counts is either null altogether (the tool never produced any) or carries total = null.
+    totals = {c: (v.get("counts") or {}).get("total") for c, v in r["verdicts"].items()}
+    record("oom_kill", "every starved check unverified with counts.total null",
+           all(s == "unverified" for s in statuses.values()) and all(t is None for t in totals.values()),
+           dict(statuses=statuses, totals=totals,
+                exit_codes={c: [x["exit_code"] for x in v["runs"]] for c, v in r["verdicts"].items()},
+                reasons={c: v["unverified_reasons"][:2] for c, v in r["verdicts"].items()}))
+    # Negative: a required manifest entry deleted -> unverified, exit 3, verdict written (no crash).
+    tampered = work / "manifest_missing_entry.json"
+    data = json.loads(args.manifest.read_text())
+    del data["pdks"][args.pdk]["files"]["klayout_lvs"]
+    tampered.write_text(json.dumps(data, indent=1) + "\n")
+    out_dir = work / "manifest_missing_entry"
+    proc = subprocess.run([sys.executable, str(HERE / "signoff.py"), "lvs-klayout", "--gds", str(args.gds), "--top",
+                           args.top, "--pdk", args.pdk, "--netlist", str(args.netlist), "--manifest", str(tampered),
+                           "--out", str(out_dir)], capture_output=True, text=True, timeout=600, check=False)
+    verdict_path = out_dir / "lvs_klayout.json"
+    verdict = json.loads(verdict_path.read_text()) if verdict_path.is_file() else {}
+    record("manifest_missing_entry", "lvs-klayout unverified (exit 3) naming the incomplete manifest",
+           proc.returncode == 3 and verdict.get("status") == "unverified" and
+           any("manifest incomplete" in m for m in (verdict.get("identity") or {}).get("mismatches", [])),
+           dict(exit_code=proc.returncode, status=verdict.get("status"),
+                mismatches=(verdict.get("identity") or {}).get("mismatches", [])[:2], stderr_tail=proc.stderr[-400:]))
     # Negative: missing report (relative KLayout report path writes nothing, exit 0).
     r = run(args, args.gds, ["drc-klayout"], work / "missing_report", plant_flag="relative-report")
     kl = r["verdicts"]["drc-klayout"]

@@ -3,14 +3,18 @@
 # Dumps the LVS cross-reference of a KLayout .lvsdb as JSON: every circuit
 # pair with its status, every pin pair (layout name <-> schematic name) of
 # every circuit pair, and (bounded) every non-matching net/pin/device/
-# subcircuit pair. KLayout pairs pins by topology, so a symmetric design with
-# swapped port labels still reports Match; the host harness therefore compares
-# the paired pin NAMES itself. A verdict is computed by the host, not here.
+# subcircuit pair, and every NAMED net of the layout top circuit with its
+# pairing (a labelled floating net, e.g. an extra pin label that is not in the
+# schematic, is silently left out of the comparison and still gives Match).
+# KLayout pairs pins by topology, so a symmetric design with swapped port
+# labels still reports Match; the host harness therefore compares the paired
+# pin and net NAMES itself. A verdict is computed by the host, not here.
 import json
 import pya
 
 MAX_DETAILS = 400
 MAX_PIN_PAIRS = 100000
+MAX_NAMED_NETS = 200000
 lvs = pya.LayoutVsSchematic()
 lvs.read(db_path)
 xref = lvs.xref()
@@ -41,8 +45,10 @@ def count(circuit, method):
     return sum(1 for _ in getattr(circuit, method)())
 
 
+top_layout = lvs.internal_top_cell().name if lvs.internal_top_cell() else None
 result = {"db_path": db_path, "circuits": [], "details": [], "details_truncated": False,
-          "pin_pairs_truncated": False, "pin_pairs_dumped": True}
+          "pin_pairs_truncated": False, "pin_pairs_dumped": True, "named_nets_truncated": False}
+named_nets = 0
 details = 0
 pin_pairs = 0
 for cp in xref.each_circuit_pair():
@@ -61,6 +67,26 @@ for cp in xref.each_circuit_pair():
             break
         entry["pin_pairs"].append({"layout": name(pair.first()), "schematic": name(pair.second()),
                                    "status": STATUS.get(pair.status(), str(pair.status()))})
+    if a is not None and a.name == top_layout:
+        # Named layout nets of the top circuit and how (or whether) each was paired.
+        partner = {}
+        for pair in xref.each_net_pair(cp):
+            if pair.first() is not None:
+                partner[pair.first().cluster_id] = (name(pair.second()), STATUS.get(pair.status(), str(pair.status())))
+        entry["named_nets"] = []
+        for net in a.each_net():
+            text = net.name
+            if not text or text.startswith("$"):
+                continue
+            named_nets += 1
+            if named_nets > MAX_NAMED_NETS:
+                result["named_nets_truncated"] = True
+                break
+            other, pstatus = partner.get(net.cluster_id, (None, None))
+            entry["named_nets"].append({"layout": text, "paired": net.cluster_id in partner,
+                                        "schematic": other, "status": pstatus, "pins": net.pin_count(),
+                                        "subcircuit_pins": net.subcircuit_pin_count(),
+                                        "terminals": net.terminal_count()})
     result["circuits"].append(entry)
     if status == "Match":
         continue
@@ -77,7 +103,6 @@ for cp in xref.each_circuit_pair():
             result["details"].append({"circuit": entry["layout"] or entry["schematic"], "kind": kind,
                                       "layout": name(pair.first()), "schematic": name(pair.second()),
                                       "status": pstatus})
-top_layout = lvs.internal_top_cell().name if lvs.internal_top_cell() else None
 result["layout_top"] = top_layout
 with open(out, "w") as handle:
     json.dump(result, handle, indent=1, sort_keys=True)

@@ -23,6 +23,7 @@ import manifest  # noqa: E402
 import parsers  # noqa: E402
 import refnet  # noqa: E402
 import routing_units  # noqa: E402
+import signoff  # noqa: E402
 
 LYRDB = """<?xml version="1.0" encoding="utf-8"?>
 <report-database>
@@ -221,6 +222,36 @@ class NetgenTest(unittest.TestCase):
         self.assertTrue(parsers.parse_netgen(json.dumps(ok), "Final result: Circuits match uniquely.\n", "top")["matched"])
 
 
+    def test_port_errors_fail_even_when_final_line_matches(self):
+        # Labelled floating layout pin (round-2 F1): comp.json drops it from both pin lists.
+        out = ("Cell lane_smoke (0) disconnected node: extra\nNetlists match uniquely with port errors.\n"
+               "extra                                      |(no matching pin)\n"
+               "Final result: Circuits match uniquely.\n")
+        r = parsers.parse_netgen(json.dumps(NETGEN_OK), out, "top")
+        self.assertFalse(r["matched"])
+        self.assertEqual(r["unmatched_pins"], ["layout-only extra"])
+        self.assertEqual(r["disconnected_nodes"], [dict(cell="lane_smoke", side=0, node="extra")])
+        self.assertEqual(len(r["problems"]), 3, r["problems"])
+        for line in ("Netlists match uniquely with port errors.\n", "(no matching pin)   |extra\n",
+                     "Cell sky130_fd_sc_hd__and2_2 (0) disconnected node: A\n"):
+            r = parsers.parse_netgen(json.dumps(NETGEN_OK), line + "Final result: Circuits match uniquely.\n", "top")
+            self.assertFalse(r["matched"], line)
+        self.assertEqual(parsers.parse_netgen(json.dumps(NETGEN_OK), "(no matching pin)   |extra\n", "top")
+                         ["unmatched_pins"], ["reference-only extra"])
+
+    def test_magic_extract_facts(self):
+        log = 'Warning:  Ports "en" and "en_alias" are electrically shorted.\nRR_EXT_DONE x\n'
+        self.assertEqual(parsers.parse_magic_extract(log)["shorted_ports"], [["en", "en_alias"]])
+        self.assertEqual(parsers.parse_magic_extract("RR_EXT_DONE x\n")["shorted_count"], 0)
+        spice = ".subckt inv A Y\n.ends\n.subckt top VDD VSS a\n+ y[0] y[1]\nX1 a y inv\n.ends\n"
+        self.assertEqual(parsers.spice_subckt_ports(spice, "top"), ["VDD", "VSS", "a", "y[0]", "y[1]"])
+        self.assertIsNone(parsers.spice_subckt_ports(spice, "other"))
+
+    def test_reference_module_names(self):
+        text = "// module fake\n/* module hidden */ module \\top$1 (a);\nendmodule\nmodule lane_smoke(input a); endmodule\n"
+        self.assertEqual(parsers.reference_module_names(text), ["top$1", "lane_smoke"])
+
+
 class MiscParserTest(unittest.TestCase):
     def test_density_finite(self):
         ok = parsers.parse_density_log("li1_ca_density is 0.94\nm1_ca_density is 0.9\n")
@@ -244,8 +275,10 @@ class MiscParserTest(unittest.TestCase):
 
     def test_lvsdb_verdict(self):
         top_pins = self.pins(("a[0]", "A[0]"), ("a[1]", "A[1]"), ("y", "Y"))
+        named = [dict(layout=a, paired=True, schematic=b, status="Match") for a, b in
+                 (("a[0]", "A[0]"), ("a[1]", "A[1]"), ("y", "Y"))]
         good = dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=3, schematic_pins=3,
-                                   pin_pairs=top_pins),
+                                   pin_pairs=top_pins, named_nets=named),
                               dict(layout="inv", schematic="INV", status="Match",
                                    pin_pairs=self.pins(("A", "A"), ("sky130_gnd", "VNB"), ("$4", None)))])
         r = parsers.lvsdb_verdict(good, "top", (("sky130_gnd", "VNB"),))
@@ -281,10 +314,59 @@ class MiscParserTest(unittest.TestCase):
                                     pin_pairs=self.pins(("A", "B"), ("B", "A")))])
         self.assertFalse(parsers.lvsdb_verdict(child, "top")["matched"])
         truncated = dict(good_top := dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=1,
-                                                         schematic_pins=1, pin_pairs=self.pins(("y", "Y")))]),
+                                                         schematic_pins=1, pin_pairs=self.pins(("y", "Y")),
+                                                         named_nets=[dict(layout="y", paired=True, schematic="Y",
+                                                                          status="Match")])]),
                          pin_pairs_truncated=True)
         self.assertTrue(parsers.lvsdb_verdict(good_top, "top")["matched"])
         self.assertFalse(parsers.lvsdb_verdict(truncated, "top")["matched"])
+
+    def test_lvsdb_unpaired_labelled_net_and_reference_ports(self):
+        pins = self.pins(("a", "A"), ("y", "Y"))
+        def top(named, layout_pins=2, schematic_pins=2, pin_pairs=pins):
+            return dict(circuits=[dict(layout="top", schematic="TOP", status="Match", layout_pins=layout_pins,
+                                       schematic_pins=schematic_pins, pin_pairs=pin_pairs, named_nets=named)])
+        clean = [dict(layout="a", paired=True, schematic="A", status="Match"),
+                 dict(layout="y", paired=True, schematic="Y", status="Match")]
+        self.assertTrue(parsers.lvsdb_verdict(top(clean), "top", reference_ports=["a", "y"])["matched"])
+        # Extra labelled floating layout net: left out of the pairing, circuit still Match (round-2 F1).
+        extra = clean + [dict(layout="extra", paired=False, schematic=None, status=None)]
+        r = parsers.lvsdb_verdict(top(extra), "top", reference_ports=["a", "y"])
+        self.assertFalse(r["matched"])
+        self.assertEqual(r["top_nets"]["unpaired"], ["extra"])
+        renamed = [dict(layout="a", paired=True, schematic="Y", status="Match")]
+        self.assertFalse(parsers.lvsdb_verdict(top(renamed), "top")["matched"])
+        self.assertFalse(parsers.lvsdb_verdict(top(None), "top")["matched"], "named nets must be dumped")
+        # Reference port dropped by schematic simplification (round-2 F2): 2 == 2 pins, still a failure.
+        r = parsers.lvsdb_verdict(top(clean), "top", reference_ports=["a", "y", "extra"])
+        self.assertFalse(r["matched"])
+        self.assertEqual(r["reference_ports"]["unpaired_reference_ports"], ["extra"])
+        r = parsers.lvsdb_verdict(top(clean), "top", reference_ports=["a"])
+        self.assertEqual(r["reference_ports"]["schematic_pins_not_ports"], ["y"])
+        self.assertTrue(parsers.lvsdb_verdict(top(clean), "top", reference_ports=["A", "Y"])["matched"],
+                        "the SPICE reader upper-cases names; port comparison is case-insensitive")
+
+    def test_port_labels_and_text_comparison(self):
+        texts = [["70/5", "a", 1000, 2000], ["69/5", "VDD", 0, 0], ["69/16", "VDD", 5, 5]]
+        self.assertTrue(parsers.port_label_check(texts, ["a", "VDD"])["matched"])
+        r = parsers.port_label_check(texts + [["70/5", "extra", 7, 7]], ["a", "VDD"])
+        self.assertEqual((r["matched"], r["extra_labels"]), (False, ["extra"]))
+        r = parsers.port_label_check(texts, ["a", "VDD", "en"])
+        self.assertEqual((r["matched"], r["missing_labels"]), (False, ["en"]))
+        self.assertTrue(parsers.compare_texts(texts, list(reversed(texts)))["identical"])
+        r = parsers.compare_texts(texts, [["70/5", "ax", 1000, 2000]] + texts[1:])
+        self.assertEqual((r["identical"], r["only_in_design"], r["only_in_against"]), (False, 1, 1))
+        self.assertFalse(parsers.compare_texts(texts, texts + [texts[0]])["identical"], "multiset, not set")
+        with tempfile.TemporaryDirectory() as d:
+            a, b = Path(d) / "a.tsv", Path(d) / "b.tsv"
+            a.write_text("1\tx\n2\ty\n3\tz\n")
+            b.write_text("1\tx\n2\tyy\n3\tz\n3\tz\n")
+            r = parsers.diff_sorted_lines(a, b)
+            self.assertEqual((r["only_in_design"], r["only_in_against"]), (1, 2))
+            self.assertEqual(r["samples_only_in_design"], ["2\ty"])
+            b.write_text("2\tx\n1\tx\n")
+            with self.assertRaises(parsers.ParseError):
+                parsers.diff_sorted_lines(a, b)
 
     def test_planted_gap_edge_pair(self):
         bump, target = [58.945, 28.7, 60.38, 28.96], [60.58, 28.005, 61.17, 29.045]
@@ -377,11 +459,13 @@ class FlowStatusTest(unittest.TestCase):
         statuses = self.passed()
         for k in ("gds", "drc_magic", "lvs_netgen"):
             statuses[k] = flow_status.item("missing")
-        gate = flow_status.overall([dict(pdk="sky130", signoff_statuses=statuses)], "passed", True, True)
+        both = [dict(pdk="sky130", signoff_statuses=statuses), dict(pdk="gf180", signoff_statuses=self.passed())]
+        gate = flow_status.overall(both, "passed", True, True)
         self.assertEqual(gate["status"], "partial")
         self.assertEqual(flow_status.EXIT[gate["status"]], 3)
         self.assertEqual({b["item"] for b in gate["blocking"]}, {"gds", "drc_magic", "lvs_netgen"})
-        gate = flow_status.overall([dict(pdk="sky130")], "passed", True, True)
+        gate = flow_status.overall([dict(pdk="sky130"), dict(pdk="gf180", signoff_statuses=self.passed())],
+                                   "passed", True, True)
         self.assertEqual(gate["status"], "partial")
         self.assertEqual(len(gate["blocking"]), len(flow_status.REQUIRED))
 
@@ -395,6 +479,9 @@ class FlowStatusTest(unittest.TestCase):
         pdks[0]["signoff_statuses"]["density"] = flow_status.item("failed")
         self.assertEqual(flow_status.overall(pdks, "passed", True, True)["status"], "passed",
                          "density is reported separately and is not a required item")
+        self.assertEqual(flow_status.overall(pdks[:1], "passed", True, True)["status"], "partial",
+                         "a single-PDK summary is never a pass")
+        self.assertEqual(flow_status.overall(pdks + pdks[:1], "passed", True, True)["status"], "partial")
 
     def test_definitive_required_failure_is_failed(self):
         statuses = self.passed()
@@ -427,6 +514,11 @@ class CellPolicyTest(unittest.TestCase):
         lib.mkdir(parents=True)
         (lib / "synth_exclude.cells").write_text("gf180mcu_fd_sc_mcu7t5v0__sdffq_1\n")
         (lib / "pnr_exclude.cells").write_text("# DRC\ngf180mcu_fd_sc_mcu7t5v0__mux2_1\n")
+        lef = root / "libs.ref/gf180mcu_fd_sc_mcu7t5v0/lef"
+        lef.mkdir(parents=True)
+        (lef / "gf180mcu_fd_sc_mcu7t5v0.lef").write_text("VERSION 5.7 ;\n" + "".join(
+            f"MACRO gf180mcu_fd_sc_mcu7t5v0__{c}\n  CLASS CORE ;\nEND gf180mcu_fd_sc_mcu7t5v0__{c}\n"
+            for c in ("and2_2", "and2_4", "clkbuf_1", "filltie", "mux2_1", "sdffq_1", "dlyb_1")) + "END LIBRARY\n")
         self.root = root
         p = "gf180mcu_fd_sc_mcu7t5v0__"
         self.mapped = root / "mapped.v"
@@ -486,6 +578,24 @@ class CellPolicyTest(unittest.TestCase):
         self.assertEqual(r["status"], "passed", r)
         self.assertEqual(check_cell_policy.scan(ok.read_text())["instances"], [(f"{p}and2_2", "g0")])
 
+    def test_unknown_cells_are_unverified_not_passed(self):
+        # Round-2 F5: a black-box wrapper or an unknown (e.g. upper-case) cell name could hide anything.
+        p = "gf180mcu_fd_sc_mcu7t5v0__"
+        for extra in ("hidden_wrapper u_hw (.A(a), .X());", f"{p.upper()}MUX2_1 u0 (.I0(a), .Z(y));"):
+            odd = self.root / "unknown.v"
+            odd.write_text(self.mapped.read_text().replace("endmodule", extra + "\nendmodule"))
+            r = check_cell_policy.check("gf180", "synth", [odd], None, None, self.root)
+            self.assertEqual(r["status"], "unverified", (extra, r))
+            self.assertTrue(any("neither library cells" in x for x in r["problems"]), r["problems"])
+        # A submodule defined in the scanned files is fine (and is scanned itself).
+        hier = self.root / "hier.v"
+        hier.write_text(f"module leaf(input a, output y);\n {p}and2_2 g (.A1(a), .A2(a), .Z(y));\nendmodule\n"
+                        "module t(input a, output y);\n leaf u (.a(a), .y(y));\nendmodule\n")
+        self.assertEqual(check_cell_policy.check("gf180", "synth", [hier], None, None, self.root)["status"], "passed")
+        (self.root / "libs.ref/gf180mcu_fd_sc_mcu7t5v0/lef/gf180mcu_fd_sc_mcu7t5v0.lef").unlink()
+        r = check_cell_policy.check("gf180", "synth", [self.mapped], None, None, self.root)
+        self.assertEqual(r["status"], "unverified", "no cell LEF: nothing can be certified")
+
     def test_committed_policy_is_consistent_with_owner_reservation(self):
         policy = json.loads((SCRIPTS.parent / "fixtures/flow/cell-policy.json").read_text())
         gf = policy["pdks"]["gf180"]
@@ -534,6 +644,103 @@ class ContainerAndManifestTest(unittest.TestCase):
             bad.write_text(json.dumps(dict(m, schema="other")))
             with self.assertRaises(ValueError):
                 manifest.load(bad)
+
+    def test_incomplete_manifest_is_unverified_without_running_anything(self):
+        # Round-2 F7: a missing required entry must give unverified, never a KeyError/crash.
+        m = manifest.load(SCRIPTS.parent / "fixtures/flow/signoff-pinned.json")
+        tools = sorted(manifest.TOOL_SPEC) + ["openroad", "opensta"]
+        self.assertEqual(manifest.structure_mismatches(m, ["sky130", "gf180"], tools), [])
+        cases = []
+        for mutate in (lambda x: x["pdks"]["sky130"]["files"].pop("klayout_lvs"),
+                       lambda x: x["pdks"]["gf180"]["trees"].pop("klayout_drc_tree"),
+                       lambda x: x["pdks"]["gf180"].__setitem__("container_root", "/elsewhere"),
+                       lambda x: x["pdks"]["sky130"]["files"]["magicrc"].__setitem__("path", "other.magicrc"),
+                       lambda x: x["tools"]["magic"]["files"].pop("/foss/tools/bin/magic"),
+                       lambda x: x["tools"].pop("netgen"),
+                       lambda x: x["images"]["iic_osic_tools"].__setitem__("id", "0" * 64),
+                       lambda x: x.pop("pdks")):
+            copy = json.loads(json.dumps(m))
+            mutate(copy)
+            cases.append(manifest.structure_mismatches(copy, ["sky130", "gf180"], tools))
+        self.assertTrue(all(cases), cases)
+        with tempfile.TemporaryDirectory() as d:
+            copy = json.loads(json.dumps(m))
+            del copy["pdks"]["sky130"]["files"]["klayout_lvs"]
+            path = Path(d) / "nolvs.json"
+            path.write_text(json.dumps(copy))
+            r = manifest.verify(path, Path(d) / "out", ["sky130"], ["klayout"])
+            self.assertEqual(r["status"], "unverified")
+            self.assertTrue(r["mismatches"][0].startswith("manifest incomplete"))
+            self.assertEqual(r["receipts"], [], "nothing is probed for an incomplete manifest")
+
+
+class SignoffHarnessTest(unittest.TestCase):
+    """Harness behaviour that needs no container: identity failures and tool-run failures."""
+
+    def test_run_incomplete_codes(self):
+        base = dict(exit_code=0, timed_out=False, host_error=None, time={"inner_exit_status": 0})
+        self.assertIsNone(signoff.run_incomplete(base))
+        self.assertIsNone(signoff.run_incomplete(dict(base, exit_code=1)), "exit codes never pass a verdict; 1 is parsed")
+        for code in (124, 125, 127, 137, 139):
+            self.assertIn("incomplete", signoff.run_incomplete(dict(base, exit_code=code)))
+        self.assertIn("signal 9", signoff.run_incomplete(dict(base, exit_code=137)))
+        self.assertIn("did not finish", signoff.run_incomplete(dict(base, exit_code=None, host_error="x")))
+
+    def test_oom_killed_tool_reports_null_counts_not_zero(self):
+        # Round-2 F4: an unverified verdict must never carry counts.total = 0.
+        with tempfile.TemporaryDirectory() as d:
+            session = type("S", (), {})()
+            session.pdk, session.gds, session.top, session.netlist = "sky130", None, "top", None
+            session.against, session.against_top, session.out = None, None, Path(d)
+            session.manifest_path, session.m = Path(d) / "m.json", None
+            session.identity = dict(status="verified", mismatches=[])
+            session.preflight_summary = lambda: dict(ran=False)
+            v = signoff.Verdict("antenna", session)
+            v.run(dict(label="antenna_magic_0", exit_code=137, timed_out=False, host_error=None, wall_seconds=0.5,
+                       peak_rss_kib=24000, stdout=str(Path(d) / "r" / "stdout.txt")))
+            v.data["counts"] = dict(total=0, by_rule={}, unit="Magic violations (by plane)")
+            out = v.finish()
+            self.assertEqual(out["status"], "unverified")
+            self.assertIsNone(out["counts"]["total"])
+            self.assertIsNone(out["counts"]["by_rule"])
+            on_disk = json.loads((Path(d) / "antenna.json").read_text())
+            self.assertIsNone(on_disk["counts"]["total"])
+            ok = signoff.Verdict("drc-magic", session)
+            ok.data["counts"] = dict(total=0, by_rule={})
+            self.assertEqual(ok.finish()["counts"]["total"], 0, "a definitive clean result keeps its 0")
+
+    def test_bad_or_incomplete_manifest_gives_unverified_exit_3(self):
+        m = manifest.load(SCRIPTS.parent / "fixtures/flow/signoff-pinned.json")
+        with tempfile.TemporaryDirectory() as d:
+            gds = Path(d) / "x.gds"
+            gds.write_bytes(b"\0" * 16)
+            copy = json.loads(json.dumps(m))
+            del copy["pdks"]["sky130"]["files"]["klayout_lvs"]
+            (Path(d) / "nolvs.json").write_text(json.dumps(copy))
+            for name in ("missing.json", "nolvs.json"):
+                out = Path(d) / name.replace(".", "_")
+                code = signoff.main(["all", "--gds", str(gds), "--top", "lane_smoke", "--pdk", "sky130",
+                                     "--out", str(out), "--manifest", str(Path(d) / name)])
+                self.assertEqual(code, 3, name)
+                for check in ("drc_magic", "drc_klayout", "antenna", "density", "lvs_netgen", "lvs_klayout"):
+                    verdict = json.loads((out / f"{check}.json").read_text())
+                    self.assertEqual(verdict["status"], "unverified", (name, check))
+                    self.assertIsNone((verdict["counts"] or {}).get("total"))
+
+    def test_harness_crash_is_unverified_not_failed(self):
+        with tempfile.TemporaryDirectory() as d:
+            gds = Path(d) / "x.gds"
+            gds.write_bytes(b"\0" * 16)
+            real = signoff.run_checks
+            def boom(*_a, **_k):
+                raise KeyError("simulated")
+            signoff.run_checks = boom
+            try:
+                code = signoff.main(["drc-klayout", "--gds", str(gds), "--top", "t", "--pdk", "gf180", "--out", d])
+            finally:
+                signoff.run_checks = real
+            self.assertEqual(code, 3)
+            self.assertEqual(json.loads((Path(d) / "drc_klayout.json").read_text())["status"], "unverified")
 
 
 if __name__ == "__main__":
