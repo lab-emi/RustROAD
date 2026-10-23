@@ -70,7 +70,7 @@ pub struct ExtractLimits {
     /// Resistors plus ground and coupling capacitors.
     pub max_elements: usize,
     pub max_couplings: usize,
-    /// Candidate-by-interval comparisons over the whole design.
+    /// Bin-entry scans plus candidate-by-interval comparisons, whole design.
     pub max_work: usize,
     /// Candidate shapes considered for one wire run.
     pub max_candidates: usize,
@@ -841,6 +841,13 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                     let Some(list) = bins.map.get(&(layer, x, y)) else {
                         continue;
                     };
+                    stats.work = stats
+                        .work
+                        .checked_add(list.len())
+                        .ok_or_else(|| budget("extraction work"))?;
+                    if stats.work > limits.max_work {
+                        return Err(budget("extraction work"));
+                    }
                     for &s in list {
                         if stamp[s as usize] == ri as u32 || s as usize == ri {
                             continue;

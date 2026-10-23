@@ -36,8 +36,8 @@
   "tools": {
     "rustroad": {
       "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/target/release/rustroad",
-      "sha256": "40b711005f572429a9c37385f0e49a0b467dc1c729f673b55f11ce72e124d47c",
-      "bytes": 22024216,
+      "sha256": "90a0c4f91ebc4e69b075cfe263cd8dbe8be8ca8146cb38eede7576f3971770ec",
+      "bytes": 22023592,
       "version": "rustroad-cli 0.5.0"
     },
     "rusteda": {
@@ -592,8 +592,8 @@
       "status": "passed"
     }
   ],
-  "wall_seconds": 29.370767906017136,
-  "peak_child_rss_kib": 136324,
+  "wall_seconds": 28.29956603201572,
+  "peak_child_rss_kib": 136396,
   "receipts": 169,
   "pdks": [
     {
@@ -666,7 +666,7 @@
             "couplings": 579,
             "shapes": 1517,
             "intervals": 2619,
-            "work": 128961,
+            "work": 160513,
             "context_fallback_intervals": 0,
             "foreign_overlaps": 0,
             "unrouted_pin_partners": 0,
@@ -691,8 +691,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.029878242989070714,
-          "peak_rss_kib": 8032
+          "elapsed_seconds": 0.045475449005607516,
+          "peak_rss_kib": 8092
         },
         "nom": {
           "output": {
@@ -717,7 +717,7 @@
             "couplings": 579,
             "shapes": 1517,
             "intervals": 2619,
-            "work": 128961,
+            "work": 160513,
             "context_fallback_intervals": 0,
             "foreign_overlaps": 0,
             "unrouted_pin_partners": 0,
@@ -742,8 +742,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.024294286035001278,
-          "peak_rss_kib": 7812
+          "elapsed_seconds": 0.028519164014142007,
+          "peak_rss_kib": 8220
         },
         "max": {
           "output": {
@@ -768,7 +768,7 @@
             "couplings": 579,
             "shapes": 1517,
             "intervals": 2619,
-            "work": 128961,
+            "work": 160513,
             "context_fallback_intervals": 0,
             "foreign_overlaps": 0,
             "unrouted_pin_partners": 0,
@@ -793,8 +793,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.02806948800571263,
-          "peak_rss_kib": 8016
+          "elapsed_seconds": 0.02433582703815773,
+          "peak_rss_kib": 8100
         }
       },
       "reference_runs": {
@@ -807,11 +807,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_min.spef",
-              "sha256": "5b533386f571a79f1eaa3db645718ec434faff072df0a90fd0f70d648b4350ee",
+              "sha256": "698f486a7bcc21b4d03bc870f4c368966ee57bb0c54b7c9c4b343fb9867dc9a3",
               "bytes": 551845
             },
-            "container_peak_rss_kib": 110552,
-            "elapsed_seconds": 0.6490612159832381,
+            "container_peak_rss_kib": 110696,
+            "elapsed_seconds": 0.567092822981067,
             "receipt": "sky130_harness_min"
           },
           "nom": {
@@ -822,11 +822,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_nom.spef",
-              "sha256": "fa041be6baf7268252089951e2cbb1971364907b0a509f14794f711e6b411603",
+              "sha256": "777b24bdff0bf5bbce5c585a628117510fad4208a4a0a3d660993a788df79961",
               "bytes": 551074
             },
-            "container_peak_rss_kib": 110296,
-            "elapsed_seconds": 0.6305472599924542,
+            "container_peak_rss_kib": 110276,
+            "elapsed_seconds": 0.5965452900272794,
             "receipt": "sky130_harness_nom"
           },
           "max": {
@@ -837,11 +837,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_max.spef",
-              "sha256": "39e2c902153ebe427c51d0db17a2683427b9d656abec693285e203410ef704cb",
+              "sha256": "180881be82e4c711b0c42d83f655d43d9cfd205f4f3c377f28082080cfb74061",
               "bytes": 550370
             },
-            "container_peak_rss_kib": 110532,
-            "elapsed_seconds": 0.6648925649933517,
+            "container_peak_rss_kib": 110784,
+            "elapsed_seconds": 0.6289468679460697,
             "receipt": "sky130_harness_max"
           }
         },
@@ -854,11 +854,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_min.spef",
-              "sha256": "83b512362b1e7fadb4a0835011fded28041f11db82cf8918a34d77d9574dc3cf",
+              "sha256": "403f7c302c59f36c34bb3123be0bda3db204c180196855cf6afc0725e01ba8a6",
               "bytes": 17079
             },
-            "container_peak_rss_kib": 108876,
-            "elapsed_seconds": 0.6319359990302473,
+            "container_peak_rss_kib": 109296,
+            "elapsed_seconds": 0.5193346730084158,
             "receipt": "sky130_merged_min"
           },
           "nom": {
@@ -869,11 +869,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_nom.spef",
-              "sha256": "668924d4981f8ce8ef4d332e35c0398ae2ad04437910060cca86b311494e0aec",
+              "sha256": "a0f458a050f4f5057a25b379d062106ff0e27cd53f4ed0d1d1cdf2f25a0a9587",
               "bytes": 17061
             },
-            "container_peak_rss_kib": 108732,
-            "elapsed_seconds": 0.6741782139870338,
+            "container_peak_rss_kib": 109328,
+            "elapsed_seconds": 0.5540048319962807,
             "receipt": "sky130_merged_nom"
           },
           "max": {
@@ -884,11 +884,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_max.spef",
-              "sha256": "1245b0e69f3dbbf24a59df607cf5cf5c682335612efeb1a7faab0c4274da84b8",
+              "sha256": "ddab4ac670e085a775cbde1776df20ecd0aa9f57eae0b971630e1cf295279f5d",
               "bytes": 17048
             },
-            "container_peak_rss_kib": 109284,
-            "elapsed_seconds": 0.6499290080391802,
+            "container_peak_rss_kib": 109232,
+            "elapsed_seconds": 0.5998714159941301,
             "receipt": "sky130_merged_max"
           }
         }
@@ -899,7 +899,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_min.spef",
             "native_sha256": "7fe9bbbcbe480436286415f4a8ad96cfbab4e17267dcc0e288ff4b9a689d6406",
-            "reference_sha256": "5b533386f571a79f1eaa3db645718ec434faff072df0a90fd0f70d648b4350ee",
+            "reference_sha256": "698f486a7bcc21b4d03bc870f4c368966ee57bb0c54b7c9c4b343fb9867dc9a3",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1000,7 +1000,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_min.spef",
             "native_sha256": "7fe9bbbcbe480436286415f4a8ad96cfbab4e17267dcc0e288ff4b9a689d6406",
-            "reference_sha256": "83b512362b1e7fadb4a0835011fded28041f11db82cf8918a34d77d9574dc3cf",
+            "reference_sha256": "403f7c302c59f36c34bb3123be0bda3db204c180196855cf6afc0725e01ba8a6",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1083,8 +1083,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_min.spef",
-            "native_sha256": "83b512362b1e7fadb4a0835011fded28041f11db82cf8918a34d77d9574dc3cf",
-            "reference_sha256": "5b533386f571a79f1eaa3db645718ec434faff072df0a90fd0f70d648b4350ee",
+            "native_sha256": "403f7c302c59f36c34bb3123be0bda3db204c180196855cf6afc0725e01ba8a6",
+            "reference_sha256": "698f486a7bcc21b4d03bc870f4c368966ee57bb0c54b7c9c4b343fb9867dc9a3",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1183,7 +1183,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_nom.spef",
             "native_sha256": "59cd50e6226a4a15531aaadf58a278f2c6e7f538a19ef848a64be6cfa359107b",
-            "reference_sha256": "fa041be6baf7268252089951e2cbb1971364907b0a509f14794f711e6b411603",
+            "reference_sha256": "777b24bdff0bf5bbce5c585a628117510fad4208a4a0a3d660993a788df79961",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1284,7 +1284,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_nom.spef",
             "native_sha256": "59cd50e6226a4a15531aaadf58a278f2c6e7f538a19ef848a64be6cfa359107b",
-            "reference_sha256": "668924d4981f8ce8ef4d332e35c0398ae2ad04437910060cca86b311494e0aec",
+            "reference_sha256": "a0f458a050f4f5057a25b379d062106ff0e27cd53f4ed0d1d1cdf2f25a0a9587",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1347,8 +1347,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_nom.spef",
-            "native_sha256": "668924d4981f8ce8ef4d332e35c0398ae2ad04437910060cca86b311494e0aec",
-            "reference_sha256": "fa041be6baf7268252089951e2cbb1971364907b0a509f14794f711e6b411603",
+            "native_sha256": "a0f458a050f4f5057a25b379d062106ff0e27cd53f4ed0d1d1cdf2f25a0a9587",
+            "reference_sha256": "777b24bdff0bf5bbce5c585a628117510fad4208a4a0a3d660993a788df79961",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1451,7 +1451,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_max.spef",
             "native_sha256": "76ee3c3f1f3d1c28ac5fe933933fd77549e9376c9c06575918a818d30c5219d2",
-            "reference_sha256": "39e2c902153ebe427c51d0db17a2683427b9d656abec693285e203410ef704cb",
+            "reference_sha256": "180881be82e4c711b0c42d83f655d43d9cfd205f4f3c377f28082080cfb74061",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1550,7 +1550,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_max.spef",
             "native_sha256": "76ee3c3f1f3d1c28ac5fe933933fd77549e9376c9c06575918a818d30c5219d2",
-            "reference_sha256": "1245b0e69f3dbbf24a59df607cf5cf5c682335612efeb1a7faab0c4274da84b8",
+            "reference_sha256": "ddab4ac670e085a775cbde1776df20ecd0aa9f57eae0b971630e1cf295279f5d",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1629,8 +1629,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_max.spef",
-            "native_sha256": "1245b0e69f3dbbf24a59df607cf5cf5c682335612efeb1a7faab0c4274da84b8",
-            "reference_sha256": "39e2c902153ebe427c51d0db17a2683427b9d656abec693285e203410ef704cb",
+            "native_sha256": "ddab4ac670e085a775cbde1776df20ecd0aa9f57eae0b971630e1cf295279f5d",
+            "reference_sha256": "180881be82e4c711b0c42d83f655d43d9cfd205f4f3c377f28082080cfb74061",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -2126,7 +2126,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67404
+              "peak_rss_kib": 67468
             },
             "harness": {
               "scope": {
@@ -2172,7 +2172,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67528
+              "peak_rss_kib": 67472
             },
             "merged": {
               "scope": {
@@ -2218,7 +2218,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67460
+              "peak_rss_kib": 67428
             }
           },
           "vs_merged_def": {
@@ -2322,7 +2322,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67432
+              "peak_rss_kib": 67352
             },
             "harness": {
               "scope": {
@@ -2368,7 +2368,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67544
+              "peak_rss_kib": 67488
             },
             "merged": {
               "scope": {
@@ -2414,7 +2414,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67100
+              "peak_rss_kib": 67428
             }
           },
           "vs_merged_def": {
@@ -2518,7 +2518,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 62664
+              "peak_rss_kib": 62844
             },
             "harness": {
               "scope": {
@@ -2564,7 +2564,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 62896
+              "peak_rss_kib": 63068
             },
             "merged": {
               "scope": {
@@ -2610,7 +2610,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 63240
+              "peak_rss_kib": 62748
             }
           },
           "vs_merged_def": {
@@ -2952,7 +2952,7 @@
             "couplings": 518,
             "shapes": 984,
             "intervals": 1637,
-            "work": 48507,
+            "work": 63664,
             "context_fallback_intervals": 0,
             "foreign_overlaps": 0,
             "unrouted_pin_partners": 0,
@@ -2977,8 +2977,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.037837264011614025,
-          "peak_rss_kib": 8044
+          "elapsed_seconds": 0.02363303699530661,
+          "peak_rss_kib": 8060
         },
         "nom": {
           "output": {
@@ -3003,7 +3003,7 @@
             "couplings": 518,
             "shapes": 984,
             "intervals": 1637,
-            "work": 48507,
+            "work": 63664,
             "context_fallback_intervals": 0,
             "foreign_overlaps": 0,
             "unrouted_pin_partners": 0,
@@ -3028,8 +3028,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.030782285961322486,
-          "peak_rss_kib": 8100
+          "elapsed_seconds": 0.022476661019027233,
+          "peak_rss_kib": 8036
         },
         "max": {
           "output": {
@@ -3054,7 +3054,7 @@
             "couplings": 517,
             "shapes": 984,
             "intervals": 1637,
-            "work": 48507,
+            "work": 63664,
             "context_fallback_intervals": 0,
             "foreign_overlaps": 0,
             "unrouted_pin_partners": 0,
@@ -3079,8 +3079,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.033542844001203775,
-          "peak_rss_kib": 8104
+          "elapsed_seconds": 0.022676284017506987,
+          "peak_rss_kib": 8100
         }
       },
       "reference_runs": {
@@ -3093,11 +3093,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_min.spef",
-              "sha256": "31dcc8a6abf78e5636356160e96d163262708e0ea76acc440bfe80b39368b64a",
+              "sha256": "b87316047e995d295e4fbf9cfb2f2e2f6ada56709bb74988ad028645ed42f432",
               "bytes": 639758
             },
-            "container_peak_rss_kib": 125428,
-            "elapsed_seconds": 0.8335449180449359,
+            "container_peak_rss_kib": 125148,
+            "elapsed_seconds": 0.7986933849751949,
             "receipt": "gf180_harness_min"
           },
           "nom": {
@@ -3108,11 +3108,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_nom.spef",
-              "sha256": "ea902a4aa943653a3a36a60b3de9ac29e5d50618c15f15e72655ce9229c0b1a3",
+              "sha256": "9b83d144fbfbc40fa3bfcbfc4fb173eac8d1236d048659e77618bb47848d95b5",
               "bytes": 635802
             },
-            "container_peak_rss_kib": 125136,
-            "elapsed_seconds": 0.9073915889603086,
+            "container_peak_rss_kib": 124832,
+            "elapsed_seconds": 0.8286251090466976,
             "receipt": "gf180_harness_nom"
           },
           "max": {
@@ -3123,11 +3123,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_max.spef",
-              "sha256": "9be7f4b107e2a42226c90a0ad468482b81388d3e93a3fb4ac5cf0246461ac466",
+              "sha256": "346e4403b8d4a23f2ff8289559c24630b34592e477d189904684137fdf273f47",
               "bytes": 635551
             },
-            "container_peak_rss_kib": 124768,
-            "elapsed_seconds": 0.9464109679684043,
+            "container_peak_rss_kib": 125124,
+            "elapsed_seconds": 0.8293760900269262,
             "receipt": "gf180_harness_max"
           }
         },
@@ -3140,11 +3140,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_min.spef",
-              "sha256": "1829ba2710c3ec8a9fbca457b898fc21c5c747e20aff8bfea8d8c1fb0f7f9d88",
+              "sha256": "9dfd47ea1e860607ce17701a1600e1f4d7415dbb17e1735f4d71bd1f18c40a9a",
               "bytes": 15833
             },
-            "container_peak_rss_kib": 124348,
-            "elapsed_seconds": 0.808048554987181,
+            "container_peak_rss_kib": 123472,
+            "elapsed_seconds": 0.7963205729611218,
             "receipt": "gf180_merged_min"
           },
           "nom": {
@@ -3155,11 +3155,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_nom.spef",
-              "sha256": "9005844e4e3b3bd3c61ad8db31f17ac951c6a48653fae13772d6410515a025b1",
+              "sha256": "6d29541ea94b58cb0c3513d23f12c864128d241653336ddc3cd78cd0ec385046",
               "bytes": 15808
             },
-            "container_peak_rss_kib": 123504,
-            "elapsed_seconds": 0.827004536986351,
+            "container_peak_rss_kib": 123616,
+            "elapsed_seconds": 0.7960101980133913,
             "receipt": "gf180_merged_nom"
           },
           "max": {
@@ -3170,11 +3170,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_max.spef",
-              "sha256": "f0e042523d0fc6da5e7a22c4e3b73b1de79a47dcae6d2b4359ba89ea345d0883",
+              "sha256": "1381dc64ff5277c2b3539cf0456eb12879c5c637fddfc0a4ca18ed917b960b5b",
               "bytes": 15795
             },
-            "container_peak_rss_kib": 124052,
-            "elapsed_seconds": 0.8246359539916739,
+            "container_peak_rss_kib": 123572,
+            "elapsed_seconds": 0.8547364210244268,
             "receipt": "gf180_merged_max"
           }
         }
@@ -3185,7 +3185,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_min.spef",
             "native_sha256": "7d5ab3a7058cbf69780f71099d727695ad5857fe213430e00635907374199996",
-            "reference_sha256": "31dcc8a6abf78e5636356160e96d163262708e0ea76acc440bfe80b39368b64a",
+            "reference_sha256": "b87316047e995d295e4fbf9cfb2f2e2f6ada56709bb74988ad028645ed42f432",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3284,7 +3284,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_min.spef",
             "native_sha256": "7d5ab3a7058cbf69780f71099d727695ad5857fe213430e00635907374199996",
-            "reference_sha256": "1829ba2710c3ec8a9fbca457b898fc21c5c747e20aff8bfea8d8c1fb0f7f9d88",
+            "reference_sha256": "9dfd47ea1e860607ce17701a1600e1f4d7415dbb17e1735f4d71bd1f18c40a9a",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3347,8 +3347,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_min.spef",
-            "native_sha256": "1829ba2710c3ec8a9fbca457b898fc21c5c747e20aff8bfea8d8c1fb0f7f9d88",
-            "reference_sha256": "31dcc8a6abf78e5636356160e96d163262708e0ea76acc440bfe80b39368b64a",
+            "native_sha256": "9dfd47ea1e860607ce17701a1600e1f4d7415dbb17e1735f4d71bd1f18c40a9a",
+            "reference_sha256": "b87316047e995d295e4fbf9cfb2f2e2f6ada56709bb74988ad028645ed42f432",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3452,7 +3452,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_nom.spef",
             "native_sha256": "d5ac6380f00e28f6e32dc23a8e8c3989bf3d8793d8ed1b9f7656c6abd3660a14",
-            "reference_sha256": "ea902a4aa943653a3a36a60b3de9ac29e5d50618c15f15e72655ce9229c0b1a3",
+            "reference_sha256": "9b83d144fbfbc40fa3bfcbfc4fb173eac8d1236d048659e77618bb47848d95b5",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3555,7 +3555,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_nom.spef",
             "native_sha256": "d5ac6380f00e28f6e32dc23a8e8c3989bf3d8793d8ed1b9f7656c6abd3660a14",
-            "reference_sha256": "9005844e4e3b3bd3c61ad8db31f17ac951c6a48653fae13772d6410515a025b1",
+            "reference_sha256": "6d29541ea94b58cb0c3513d23f12c864128d241653336ddc3cd78cd0ec385046",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3618,8 +3618,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_nom.spef",
-            "native_sha256": "9005844e4e3b3bd3c61ad8db31f17ac951c6a48653fae13772d6410515a025b1",
-            "reference_sha256": "ea902a4aa943653a3a36a60b3de9ac29e5d50618c15f15e72655ce9229c0b1a3",
+            "native_sha256": "6d29541ea94b58cb0c3513d23f12c864128d241653336ddc3cd78cd0ec385046",
+            "reference_sha256": "9b83d144fbfbc40fa3bfcbfc4fb173eac8d1236d048659e77618bb47848d95b5",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3724,7 +3724,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_max.spef",
             "native_sha256": "028b4c1408a7f1e65ec7811d54de037809abc8a1eb92149fa79d54398f96a936",
-            "reference_sha256": "9be7f4b107e2a42226c90a0ad468482b81388d3e93a3fb4ac5cf0246461ac466",
+            "reference_sha256": "346e4403b8d4a23f2ff8289559c24630b34592e477d189904684137fdf273f47",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3822,7 +3822,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_max.spef",
             "native_sha256": "028b4c1408a7f1e65ec7811d54de037809abc8a1eb92149fa79d54398f96a936",
-            "reference_sha256": "f0e042523d0fc6da5e7a22c4e3b73b1de79a47dcae6d2b4359ba89ea345d0883",
+            "reference_sha256": "1381dc64ff5277c2b3539cf0456eb12879c5c637fddfc0a4ca18ed917b960b5b",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3903,8 +3903,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_max.spef",
-            "native_sha256": "f0e042523d0fc6da5e7a22c4e3b73b1de79a47dcae6d2b4359ba89ea345d0883",
-            "reference_sha256": "9be7f4b107e2a42226c90a0ad468482b81388d3e93a3fb4ac5cf0246461ac466",
+            "native_sha256": "1381dc64ff5277c2b3539cf0456eb12879c5c637fddfc0a4ca18ed917b960b5b",
+            "reference_sha256": "346e4403b8d4a23f2ff8289559c24630b34592e477d189904684137fdf273f47",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -4404,7 +4404,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 120592
+              "peak_rss_kib": 120420
             },
             "harness": {
               "scope": {
@@ -4451,7 +4451,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 120536
+              "peak_rss_kib": 120656
             },
             "merged": {
               "scope": {
@@ -4498,7 +4498,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 120440
+              "peak_rss_kib": 120352
             }
           },
           "vs_merged_def": {
@@ -4603,7 +4603,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 120420
+              "peak_rss_kib": 120188
             },
             "harness": {
               "scope": {
@@ -4650,7 +4650,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 120368
+              "peak_rss_kib": 119968
             },
             "merged": {
               "scope": {
@@ -4697,7 +4697,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 120264
+              "peak_rss_kib": 120396
             }
           },
           "vs_merged_def": {
@@ -4802,7 +4802,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 136256
+              "peak_rss_kib": 136172
             },
             "harness": {
               "scope": {
@@ -4849,7 +4849,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 136068
+              "peak_rss_kib": 136072
             },
             "merged": {
               "scope": {
@@ -4896,7 +4896,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 136120
+              "peak_rss_kib": 136396
             }
           },
           "vs_merged_def": {

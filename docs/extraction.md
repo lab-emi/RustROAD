@@ -193,8 +193,8 @@ bounded by the window, `max_candidates` and `max_work`.
 
 Measured on the pipeline fixture:
 
-* native extraction: 0.02-0.04 s and 7.8-8.1 MiB peak RSS per run (36 runs);
-* full comparison campaign (169 guarded processes): 29.4 s wall clock, 136 MiB
+* native extraction: 0.02-0.04 s and 8.0-8.2 MiB peak RSS per run (36 runs);
+* full comparison campaign (169 guarded processes): 28.4 s wall clock, 136 MiB
   peak child RSS (RustSTA import);
 * OpenRCX container: 109-125 MiB, under 1 s per run.
 
