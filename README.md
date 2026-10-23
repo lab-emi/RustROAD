@@ -204,6 +204,24 @@ visible. The verification command exits **3** for this partial result; it must
 not be treated as complete timing closure. See
 [the exact scope and reproduction steps](docs/cts-routing.md).
 
+### GDSII streamout
+
+`export-gds` is read-only and byte-deterministic. It copies the used PDK cell
+structures verbatim, writes one structure per used fixed via and a top cell with
+SREFs, DEF-semantics wires, supply geometry, labelled pins and the PR boundary:
+
+```sh
+rustroad export-gds --workspace .work/chip \
+  --cell-gds <pdk>/libs.ref/sky130_fd_sc_hd/gds/sky130_fd_sc_hd.gds \
+  --layer-map fixtures/pdk/sky130-gds-map.json --out .work/chip.gds
+```
+
+GF180 LEF coordinates (2000 DBU/um) are divided exactly onto the 0.001 um GDS
+grid; an odd coordinate is an explicit error. On both PDKs the native stream is
+XOR-identical to an independent KLayout LEF/DEF reference and gets the same
+Magic/KLayout DRC counts and Netgen/KLayout LVS verdicts. It is not a DRC
+signoff: the known router defects remain. See [the GDS export guide](docs/gds-export.md).
+
 ## Verification and research
 
 - [REA/OpenROAD study and placement evidence](docs/openroad-blackbox.md)
@@ -214,6 +232,7 @@ not be treated as complete timing closure. See
 - [Architecture and next implementation gates](docs/architecture.md)
 - [Chinese tap and clock-topology report](docs/tap-report.html)
 - [Chinese CTS/routing/extraction report](docs/cts-routing-report.html)
+- [Native GDSII streamout and black-box acceptance](docs/gds-export.md)
 - [Chinese physical-preparation report](docs/power-io-report.html)
 - [Earlier PDK integration report](docs/pdk-report.html)
 - [Earlier bootstrap report](docs/report.html)
