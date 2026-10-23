@@ -61,6 +61,12 @@ pub struct ToolSpec {
     pub id: String,
     pub executable: FilePin,
     pub version: String,
+    /// Marks a pinned host tool that must never produce a signoff verdict
+    /// (for example a host Magic/KLayout/Netgen build that differs from the
+    /// pinned signoff image). The text says why and where the signoff
+    /// identity lives. Such a tool never makes a stage `ready_to_attempt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_for_signoff: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -225,6 +231,7 @@ pub fn assess(manifest: &FlowManifest) -> Result<ReadinessReport, FlowError> {
     }
     let mut ids = std::collections::BTreeSet::new();
     let mut identities = Vec::new();
+    let mut not_for_signoff = std::collections::BTreeSet::new();
     for tool in &manifest.tools {
         if !valid_id(&tool.id) || !ids.insert(tool.id.clone()) {
             return Err(FlowError::Manifest("invalid or duplicate tool id".into()));
@@ -235,6 +242,15 @@ pub fn assess(manifest: &FlowManifest) -> Result<ReadinessReport, FlowError> {
             ));
         }
         validate_pin(&tool.executable)?;
+        if tool
+            .not_for_signoff
+            .as_ref()
+            .is_some_and(|why| why.is_empty() || why.len() > 1024)
+        {
+            return Err(FlowError::Manifest(
+                "not_for_signoff must be 1..1024 bytes".into(),
+            ));
+        }
         let mut evidence = identity(format!("tool_{}", tool.id), Some(&tool.executable));
         #[cfg(unix)]
         if evidence.status == "available" {
@@ -245,6 +261,13 @@ pub fn assess(manifest: &FlowManifest) -> Result<ReadinessReport, FlowError> {
                 evidence.status = "unverified".into();
                 evidence.reason = Some("tool file has no executable permission".into());
             }
+        }
+        if let Some(why) = &tool.not_for_signoff {
+            if evidence.status == "available" {
+                evidence.status = "not_for_signoff".into();
+                evidence.reason = Some(why.clone());
+            }
+            not_for_signoff.insert(format!("tool_{}", tool.id));
         }
         identities.push(evidence);
     }
@@ -332,6 +355,11 @@ pub fn assess(manifest: &FlowManifest) -> Result<ReadinessReport, FlowError> {
                 deps.clear();
             }
             deps.retain(|dep| !available(dep));
+            for dep in &mut deps {
+                if not_for_signoff.contains(dep.as_str()) {
+                    dep.push_str("_not_for_signoff");
+                }
+            }
             if stage == "placement_routing" {
                 deps.push("rustroad_routing_engine_not_implemented".into());
             }
@@ -462,6 +490,7 @@ mod tests {
                 sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
             },
             version: "declared".into(),
+            not_for_signoff: None,
         });
         assert_eq!(assess(&manifest).unwrap().identities[0].status, "available");
         #[cfg(unix)]
@@ -483,6 +512,64 @@ mod tests {
             assess(&manifest).unwrap().identities[0].status,
             "unverified"
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn not_for_signoff_tool_never_readies_a_signoff_stage() {
+        let dir = scratch("nfs");
+        let path = dir.join("magic");
+        fs::write(&path, b"abc").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let deck = dir.join("deck");
+        fs::write(&deck, b"abc").unwrap();
+        let pin = |p: &Path| FilePin {
+            path: p.to_path_buf(),
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+        };
+        let mut manifest = empty();
+        manifest.tools.push(ToolSpec {
+            id: "magic".into(),
+            executable: pin(&path),
+            version: "declared".into(),
+            not_for_signoff: None,
+        });
+        manifest.pdks.push(PdkSpec {
+            name: "sky130_fd_sc_hd".into(),
+            corner: "tt".into(),
+            liberty: None,
+            technology_lef: None,
+            cell_lef: None,
+            cell_gds: None,
+            drc_deck: Some(pin(&deck)),
+            lvs_setup: None,
+        });
+        let drc = |r: &ReadinessReport| {
+            r.stages
+                .iter()
+                .find(|s| s.stage == "drc" && s.pdk == "sky130_fd_sc_hd")
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(drc(&assess(&manifest).unwrap()).status, "ready_to_attempt");
+        manifest.tools[0].not_for_signoff =
+            Some("host build; signoff uses the pinned image".into());
+        let report = assess(&manifest).unwrap();
+        assert_eq!(report.identities[0].status, "not_for_signoff");
+        let stage = drc(&report);
+        assert_eq!(stage.status, "unverified");
+        assert_eq!(
+            stage.missing,
+            vec!["tool_magic_not_for_signoff".to_string()]
+        );
+        let json = serde_json::to_string(&manifest).unwrap();
+        let back: FlowManifest = serde_json::from_str(&json).unwrap();
+        assert!(back.tools[0].not_for_signoff.is_some());
+        manifest.tools[0].not_for_signoff = Some(String::new());
+        assert!(matches!(assess(&manifest), Err(FlowError::Manifest(_))));
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

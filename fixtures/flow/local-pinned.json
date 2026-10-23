@@ -55,7 +55,8 @@
         "path": "/usr/bin/klayout",
         "sha256": "32441e21747f7718500e6c36c028229f6f1ce2ffcfe5b11acf03305047639ee3"
       },
-      "version": "KLayout 0.30.0"
+      "version": "KLayout 0.30.0",
+      "not_for_signoff": "host KLayout 0.30.0 fails the gf180 DRC deck; signoff, reference streamout and XOR use the pinned image in fixtures/flow/signoff-pinned.json (KLayout 0.30.9). Host use is limited to the non-signoff RustROAD subset routing-geometry checker."
     },
     {
       "id": "magic",
@@ -63,7 +64,8 @@
         "path": "/usr/bin/magic",
         "sha256": "48b77b32097244c66c857ee28769d2a4f434de00e7c02193d0e00c3a94240b2f"
       },
-      "version": "8.3.105"
+      "version": "8.3.105",
+      "not_for_signoff": "host Magic 8.3.105 segfaults with the PDK tech files; signoff uses Magic 8.3.678 from the pinned image in fixtures/flow/signoff-pinned.json."
     },
     {
       "id": "ngspice",
@@ -79,7 +81,8 @@
         "path": "/usr/lib/netgen/bin/netgen",
         "sha256": "ac52d4ed680ee955983c883be61968b6788fe5f96a5514d3f101f7ee71f908ce"
       },
-      "version": "Netgen 1.5.133 compiled on Thu Dec  1 22:32:11 UTC 2022\nWarning: netgen command 'global' use fully-qualified name '::netgen::global'"
+      "version": "Netgen 1.5.133 compiled on Thu Dec  1 22:32:11 UTC 2022\nWarning: netgen command 'global' use fully-qualified name '::netgen::global'",
+      "not_for_signoff": "host Netgen 1.5.133 is not the signoff build; LVS uses Netgen 1.5.323 from the pinned image in fixtures/flow/signoff-pinned.json."
     }
   ],
   "pdks": [
