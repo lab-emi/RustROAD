@@ -83,6 +83,41 @@ def main(argv=None) -> int:
     for name in ("flow-frozen", "flow-policy", "flow-nativepath"):
         if (run / "w4" / name / "summary.json").is_file():
             out["flows"][name] = flow_facts(run / "w4" / name)
+    ident = run / "identity/identity.json"
+    if ident.is_file():
+        i = load(ident)
+        out["identity"] = dict(status=i["status"], mismatches=i["mismatches"], checked=i["checked"])
+    tampered = run / "baseline/tampered_gf180/signoff.json"
+    if tampered.is_file():
+        t = load(tampered)
+        out["tampered_manifest"] = dict(status=t["status"], statuses=t["statuses"], mismatches=t["identity"]["mismatches"][:2])
+    gap = run / "w3/gap_crosscheck.json"
+    if gap.is_file():
+        g = load(gap)
+        out["gf180_planted_gap_foundry_crosscheck"] = dict(agrees=g["agrees"], deck_counts=g["deck_counts"],
+                                                           items=g["deck_items_at_planted_gap"], gap=g["gap"])
+    whatif = run / "gate_whatif.out"
+    if whatif.is_file():
+        out["gate_whatif_timing_passed"] = json.loads(whatif.read_text().strip().splitlines()[-1])
+    resources = {}
+    for tf in sorted(run.glob("*.time")):
+        text = tf.read_text()
+        import re
+        wall = re.search(r"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\):\s*(\S+)", text)
+        rss = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", text)
+        code = re.search(r"Exit status:\s*(\d+)", text)
+        resources[tf.stem] = dict(wall=wall[1] if wall else None, host_process_peak_rss_kib=int(rss[1]) if rss else None,
+                                  exit_status=int(code[1]) if code else None)
+    out["step_resources"] = resources
+    peak = []
+    for receipt in run.rglob("receipts/*/receipt.json"):
+        r = load(receipt)
+        if r.get("peak_rss_kib"):
+            peak.append((r["peak_rss_kib"], r["label"]))
+    if peak:
+        top = max(peak)
+        out["container_tool_runs"] = dict(count=len(peak), max_peak_rss_kib=top[0], max_label=top[1],
+                                          over_1_gib=sum(1 for v, _ in peak if v >= 1024 * 1024))
     text = json.dumps(out, indent=1, sort_keys=False) + "\n"
     text = text.replace(str(run), "<run>").replace(str(ROOT), "<repo>")
     args.out.write_text(text)
