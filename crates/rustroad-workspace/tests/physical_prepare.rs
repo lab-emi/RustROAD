@@ -85,6 +85,7 @@ fn config() -> PhysicalConfig {
         },
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,
+        cell_spacing_sites: 0,
         io_width: None,
         io_spacing: None,
         strap_width: None,
@@ -261,6 +262,82 @@ fn clock_budget_failure_keeps_previous_revision() {
     assert!(rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).is_err());
     assert_eq!(f.head(), "rev2\n");
     assert!(read(&f.workspace, &limits()).is_ok());
+}
+
+#[test]
+fn constrained_clock_and_routed_snapshot_are_transactional() {
+    let f = clock_fixture(10);
+    let technology = TECHNOLOGY.replace("END LIBRARY", "LAYER V2 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V2\nVIA V23 DEFAULT\nLAYER M2 ; RECT -0.05 -0.05 0.05 0.05 ;\nLAYER V2 ; RECT -0.03 -0.03 0.03 0.03 ;\nLAYER M3 ; RECT -0.05 -0.05 0.05 0.05 ; END V23\nEND LIBRARY");
+    fs::write(&f.sources.technology_lef, technology).unwrap();
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let sdc = f.root.join("clock.sdc");
+    fs::write(&sdc, "create_generated_clock -name unsupported").unwrap();
+    assert!(
+        rustroad_workspace::clock::synthesize_with_sdc(&f.workspace, "rev2", &limits(), Some(&sdc))
+            .is_err()
+    );
+    assert_eq!(f.head(), "rev2\n");
+    fs::write(&sdc,"create_clock -name core -period 10 [get_ports a]\nset_clock_transition 0.1 [get_clocks core]\nset_max_fanout 2 [current_design]\n").unwrap();
+    let clk =
+        rustroad_workspace::clock::synthesize_with_sdc(&f.workspace, "rev2", &limits(), Some(&sdc))
+            .unwrap();
+    assert_eq!(clk.clock_constraint_status, "explicit_sdc");
+    let config = f.root.join("routing.json");
+    let mut value = serde_json::json!({"grid_step":400,"access_layer":"M2","layers":[{"name":"M1","spacing":200},{"name":"M2","spacing":200},{"name":"M3","spacing":200}],"vias":[{"name":"V12","cut_spacing":60},{"name":"V23","cut_spacing":60}],"max_skew_ns":1.0});
+    fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+    let routed = rustroad_workspace::routing::route(
+        &f.workspace,
+        &clk.revision,
+        &config,
+        rustroad_workspace::routing::RouteScope::All,
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(routed.routed_nets, Some(7));
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    assert_eq!(snapshot.metadata().format_version, 5);
+    let mut def = Vec::new();
+    snapshot.export_def(&mut def).unwrap();
+    assert!(String::from_utf8(def).unwrap().contains("\n  NEW M"));
+    drop(snapshot);
+    value["limits"] = serde_json::to_value(rustroad_core::routing::RouteLimits {
+        max_grid_nodes: 1,
+        ..Default::default()
+    })
+    .unwrap();
+    fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(
+        rustroad_workspace::routing::route(
+            &f.workspace,
+            &routed.revision,
+            &config,
+            rustroad_workspace::routing::RouteScope::All,
+            &limits()
+        )
+        .is_err()
+    );
+    assert_eq!(f.head(), format!("{}\n", routed.revision));
+    let table = f
+        .workspace
+        .join("revisions")
+        .join(&routed.revision)
+        .join("routing.rbin");
+    let original = fs::read(&table).unwrap();
+    let mut corrupt = original.clone();
+    corrupt[0] ^= 1;
+    fs::write(&table, &corrupt).unwrap();
+    assert!(read(&f.workspace, &limits()).is_err());
+    fs::write(&table, &original).unwrap();
+    let p = place(&f.workspace, &routed.revision, &limits()).unwrap();
+    assert_eq!(p.routed_nets, None);
+    assert_eq!(
+        read(&f.workspace, &limits())
+            .unwrap()
+            .metadata()
+            .format_version,
+        4
+    );
 }
 
 #[test]

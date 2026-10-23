@@ -134,6 +134,18 @@ pub fn reserve(
 }
 
 pub fn place(design: &Design, tap_width: i64, max_gap: i64, limits: &TapLimits) -> Result<TapPlan> {
+    place_with_spacing(design, tap_width, max_gap, 0, limits)
+}
+pub fn place_with_spacing(
+    design: &Design,
+    tap_width: i64,
+    max_gap: i64,
+    cell_gap: i64,
+    limits: &TapLimits,
+) -> Result<TapPlan> {
+    if design.site.width <= 0 || cell_gap < 0 || cell_gap % design.site.width != 0 {
+        return Err(invalid("cell spacing must follow site lattice"));
+    }
     let mut report = reserve(design, tap_width, max_gap, limits)?;
     let mut intervals = Vec::with_capacity(report.sites.len());
     for pair in report.sites.windows(2) {
@@ -161,7 +173,9 @@ pub fn place(design: &Design, tap_width: i64, max_gap: i64, limits: &TapLimits) 
             })?;
             if let Some(right) = x.checked_add(cell.width).filter(|r| *r <= current.1) {
                 cells.push([x, current.2]);
-                x = right;
+                x = right
+                    .checked_add(cell_gap)
+                    .ok_or_else(|| invalid("cell spacing overflow"))?;
                 break;
             }
             interval += 1;

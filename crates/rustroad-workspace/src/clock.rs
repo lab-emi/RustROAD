@@ -61,6 +61,14 @@ pub struct ClockReport {
     pub levels: usize,
     pub max_fanout: usize,
     pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints: Option<ClockConstraintBinding>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClockConstraintBinding {
+    pub source: crate::pdk::SourcePin,
+    pub clock: rustroad_formats::sdc::ClockConstraints,
 }
 fn fail(s: &str) -> Error {
     Error::Invalid(s.into())
@@ -138,13 +146,27 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
         .ok_or_else(|| fail("clock tree without configuration"))?;
     cfg.validate()?;
     master(bundle, cfg)?;
+    let fanout = if let Some(c) = &report.constraints {
+        c.clock.validate().map_err(Error::Invalid)?;
+        if c.clock.port != cfg.port
+            || c.source.bytes > 1024 * 1024
+            || c.source.sha256.len() != 64
+            || !c.source.sha256.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(fail("clock constraint source/port mismatch"));
+        }
+        cfg.max_fanout
+            .min(c.clock.max_fanout.unwrap_or(cfg.max_fanout))
+    } else {
+        cfg.max_fanout
+    };
     if report.buffers.is_empty()
         || report.buffers.len() > cfg.max_buffers
         || report.sinks.is_empty()
         || report.sinks.len() > 1_000_000
         || report.levels == 0
         || report.levels > 32
-        || report.max_fanout != cfg.max_fanout
+        || report.max_fanout != fanout
     {
         return Err(budget("clock report limit"));
     }
@@ -215,7 +237,7 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
         if depth > 32 || !visited.insert(net) {
             return Err(fail("clock cycle or merged tree branch"));
         }
-        if receivers[net as usize].len() > cfg.max_fanout {
+        if receivers[net as usize].is_empty() || receivers[net as usize].len() > fanout {
             return Err(fail("clock fanout exceeded"));
         }
         for &(instance, terminal) in &receivers[net as usize] {
@@ -252,6 +274,15 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
 }
 
 pub fn synthesize(path: &Path, base_rev: &str, limits: &Limits) -> Result<Summary> {
+    synthesize_with_sdc(path, base_rev, limits, None)
+}
+
+pub fn synthesize_with_sdc(
+    path: &Path,
+    base_rev: &str,
+    limits: &Limits,
+    sdc: Option<&Path>,
+) -> Result<Summary> {
     let lock = crate::lock(path, false, true)?;
     let current = crate::head(path)?;
     crate::check_base(base_rev, &current)?;
@@ -276,6 +307,24 @@ pub fn synthesize(path: &Path, base_rev: &str, limits: &Limits) -> Result<Summar
         .and_then(|c| c.clock.clone())
         .ok_or_else(|| fail("clock configuration required"))?;
     cfg.validate()?;
+    let constraints = sdc
+        .map(|p| {
+            let (text, source) = crate::pdk::read_input(p, 1024 * 1024, "cts_sdc")?;
+            let clock = rustroad_formats::sdc::parse(&text).map_err(Error::Invalid)?;
+            if clock.port != cfg.port {
+                return Err(fail(
+                    "SDC clock port differs from physical clock configuration",
+                ));
+            }
+            Ok(ClockConstraintBinding { source, clock })
+        })
+        .transpose()?;
+    let fanout = cfg.max_fanout.min(
+        constraints
+            .as_ref()
+            .and_then(|c| c.clock.max_fanout)
+            .unwrap_or(cfg.max_fanout),
+    );
     let m = master(bundle, &cfg)?;
     let size = m.size;
     let root = root_net(bundle, &cfg)?;
@@ -342,7 +391,7 @@ pub fn synthesize(path: &Path, base_rev: &str, limits: &Limits) -> Result<Summar
             return Err(budget("clock tree depth"));
         }
         let mut next = Vec::new();
-        for group in current.chunks(cfg.max_fanout) {
+        for group in current.chunks(fanout) {
             work = work
                 .checked_add(group.len() + 1)
                 .ok_or_else(|| budget("clock work overflow"))?;
@@ -413,8 +462,9 @@ pub fn synthesize(path: &Path, base_rev: &str, limits: &Limits) -> Result<Summar
         sinks: leaves,
         buffers,
         levels,
-        max_fanout: cfg.max_fanout,
+        max_fanout: fanout,
         scope: "unrouted level-balanced topology; no skew/RC guarantee".into(),
+        constraints,
     });
     crate::physical::relink(bundle)?;
     validate_tree(bundle)?;

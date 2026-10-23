@@ -2,7 +2,7 @@
 
 Clean-room, native Rust physical-design development for the RustEDA toolchain.
 Apache-2.0. This is an initial engineering baseline, **not a complete RTL-to-GDS
-implementation**. Current version: 0.4.0.
+implementation**. Current version: 0.5.0.
 
 Implemented:
 
@@ -32,12 +32,18 @@ Implemented:
   contacts, their connection to supply metal, and active-region tap distance.
 - Bounded, level-balanced clock-buffer topology, with independent Liberty
   truth-table proofs, RTL equivalence, OpenDB connectivity and ideal-wire STA.
-  This is an unrouted CTS prototype, without skew optimization.
+  Optional strict primary-clock SDC, plus routed-clock skew checks in the harness.
+- A deterministic bounded CPU router for clock and signal nets, with explicit
+  pin-access reservation, fixed vias, LEF/PG obstacles and persistent routed DEF.
+- A real four-register dual-PDK RTL → synthesis → placement/CTS → signal routing
+  → external OpenRCX SPEF → propagated-clock RustSTA/OpenSTA integration case.
+  Geometry/skew checks pass; timing parity and hold closure remain incomplete.
 - Read-only pinned-tool/dual-PDK flow readiness and a guarded logic validation
   harness using existing RustSys/RustSTA and independent external tools.
 
-Not implemented: global placement optimization, routed/timing-driven CTS,
-signal routing, extraction, GDS streamout, full-deck DRC/LVS, IR/EM analysis, or GUI. Real-PDK connectivity
+Not implemented: global placement optimization, timing-driven CTS optimization,
+industrial detailed routing, a native calibrated RC extractor, GDS streamout,
+full-deck DRC/LVS, IR/EM analysis, or GUI. Real-PDK connectivity
 and cell placement are not PDK signoff. Missing results always
 remain `unverified`, `not_run` or `unchecked`.
 
@@ -142,8 +148,9 @@ target/release/rustroad export-def --workspace .work/connected > .work/clock.def
 The command accepts a scalar clock input and explicitly named sink pin. It
 inserts bounded-fanout buffers, rebuilds physical placement and validates the
 tree before publishing. Repeated `place` keeps the same result; changing the
-clock topology requires a fresh import. No propagated-clock, skew or RC result
-is claimed. Read [the implementation and reproduction guide](docs/tap-integration.md).
+clock topology requires a fresh import. That standalone command does not produce
+propagated-clock, skew or RC results; the routing/extraction flow below adds those
+checks. Read [the implementation guide](docs/tap-integration.md).
 
 Run the combined, guarded, dual-PDK verification with installed dependencies:
 
@@ -159,6 +166,42 @@ Local PDK paths and SHA256 pins are in `fixtures/pdk/local-taps.json`. Missing
 tools/data cannot produce a passing result. KLayout is an external verification
 dependency, not a Rust core dependency.
 
+## Constrained CTS, physical routing and SPEF
+
+`clock-tree --sdc fixtures/flow/cts.sdc` reads a strict primary-clock subset:
+period/waveform, transition, uncertainty and explicit design limits.
+Unsupported Tcl or timing semantics fail instead of being ignored. Routing uses
+an explicit layer/via policy and finite search budgets:
+
+```sh
+rustroad clock-tree --workspace .work/chip --base-rev rev2 \
+  --sdc fixtures/flow/cts.sdc
+rustroad route --workspace .work/chip --base-rev rev3 --scope clock \
+  --config fixtures/pdk/sky130-routing.json
+rustroad route --workspace .work/chip --base-rev rev4 --scope all \
+  --config fixtures/pdk/sky130-routing.json
+rustroad export-def --workspace .work/chip > .work/routed.def
+```
+
+For the routed fixture, import with the matching `sky130-routed-physical.json`
+or `gf180-routed-physical.json` profile. These leave two sites between logical
+cells before filler insertion. This first router can fail on dense pin access
+or its finite lattice; a failed route preserves HEAD. Re-placement invalidates
+routes. Schema 5 stores checked geometry in `routing.rbin`.
+
+The [CTS/routing report](docs/cts-routing-report.html) records actual results.
+The small four-register pipeline routes all 19 signal nets on both PDKs, with
+independent OpenDB/KLayout geometry, original-GDS tap checks, external OpenRCX
+extraction, CEC and simulation. The six-register dense case remains outside this
+router's demonstrated coverage. GF180 extraction uses its dedicated PDK rules,
+not the technology LEF's explicitly unsuitable parasitic values.
+
+Propagated-clock skew passes the configured limits, but the strict 1 ps
+RustSTA/OpenSTA parity gate does not: differences and hold violations remain
+visible. The verification command exits **3** for this partial result; it must
+not be treated as complete timing closure. See
+[the exact scope and reproduction steps](docs/cts-routing.md).
+
 ## Verification and research
 
 - [REA/OpenROAD study and placement evidence](docs/openroad-blackbox.md)
@@ -168,6 +211,7 @@ dependency, not a Rust core dependency.
 - [GUI benchmark acceptance plan](docs/gui-benchmark-plan.md)
 - [Architecture and next implementation gates](docs/architecture.md)
 - [Chinese tap and clock-topology report](docs/tap-report.html)
+- [Chinese CTS/routing/extraction report](docs/cts-routing-report.html)
 - [Chinese physical-preparation report](docs/power-io-report.html)
 - [Earlier PDK integration report](docs/pdk-report.html)
 - [Earlier bootstrap report](docs/report.html)

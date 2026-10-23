@@ -55,6 +55,8 @@ pub struct PhysicalConfig {
     pub filler_cells: Vec<String>,
     pub alternating_rows: bool,
     #[serde(default)]
+    pub cell_spacing_sites: u32,
+    #[serde(default)]
     pub io_width: Option<i64>,
     #[serde(default)]
     pub io_spacing: Option<i64>,
@@ -73,6 +75,11 @@ pub struct PhysicalConfig {
 }
 impl PhysicalConfig {
     pub fn validate(&self) -> Result<()> {
+        if self.cell_spacing_sites > 64 || (self.cell_spacing_sites > 0 && self.tap.is_none()) {
+            return Err(Error::Invalid(
+                "cell spacing needs tap-reserved rows and <=64 sites".into(),
+            ));
+        }
         if let Some(c) = &self.clock {
             c.validate()?;
         }
@@ -383,6 +390,7 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
 }
 
 pub(super) fn clear_fillers(design: &mut Design, bundle: &mut PhysicalBundle) -> Result<()> {
+    bundle.routing = None;
     if bundle.generated_fillers.is_empty() && bundle.generated_taps.is_empty() {
         bundle.state = None;
         return Ok(());
@@ -472,10 +480,13 @@ pub(super) fn prepare(
             .saturating_sub(bundle.ties.as_ref().map_or(0, |t| t.new_cells))
             .saturating_sub(bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len()))
             .min(limits.max_cells.saturating_sub(design.cells.len()));
-        let plan = rustroad_core::tap::place(
+        let plan = rustroad_core::tap::place_with_spacing(
             design,
             width,
             tap.max_gap,
+            i64::from(cfg.cell_spacing_sites)
+                .checked_mul(design.site.width)
+                .ok_or_else(|| Error::Budget("cell spacing overflow".into()))?,
             &rustroad_core::tap::TapLimits {
                 max_taps: remaining,
                 max_work: limits.max_expansions,
@@ -1006,6 +1017,17 @@ pub(super) fn export_def(
     }
     writeln!(output, "END PINS")?;
     let csr = model.lower_csr(design, &ConnectivityLimits::default())?;
+    let mut routed_wires = HashMap::<u32, Vec<_>>::new();
+    let mut routed_vias = HashMap::<u32, Vec<_>>::new();
+    if let Some(routing) = &bundle.routing {
+        crate::routing::validate_state(design, bundle, placed)?;
+        for wire in &routing.routes.wires {
+            routed_wires.entry(wire.net).or_default().push(wire);
+        }
+        for via in &routing.routes.vias {
+            routed_vias.entry(via.net).or_default().push(via);
+        }
+    }
     for special in [false, true] {
         let count = model
             .nets
@@ -1039,6 +1061,14 @@ pub(super) fn export_def(
                 }
             }
             write!(output, " + USE {}", net.use_.def())?;
+            if !special && let Some(routing) = &bundle.routing {
+                crate::routing::write_def_paths(
+                    routing,
+                    routed_wires.get(&(ni as u32)).map_or(&[], Vec::as_slice),
+                    routed_vias.get(&(ni as u32)).map_or(&[], Vec::as_slice),
+                    output,
+                )?;
+            }
             if special {
                 let polarity = if net.use_ == PinUse::Power {
                     RailPolarity::Power

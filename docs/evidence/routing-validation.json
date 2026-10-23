@@ -1,0 +1,73 @@
+{
+  "schema": "rustroad.routing-validation.v1",
+  "version": "0.5.0",
+  "unit_tests": {
+    "passed": 79,
+    "wall_clock": "0:01.28",
+    "max_rss_kib": 250316,
+    "exit_status": 0
+  },
+  "corpus": {
+    "passed": 2,
+    "wall_clock": "0:00.12",
+    "max_rss_kib": 36088,
+    "exit_status": 0
+  },
+  "clippy": {
+    "status": "passed",
+    "wall_clock": "0:00.94",
+    "max_rss_kib": 206000,
+    "exit_status": 0
+  },
+  "release": {
+    "status": "passed",
+    "wall_clock": "0:09.80",
+    "max_rss_kib": 439188,
+    "exit_status": 0
+  },
+  "functional_status": "passed",
+  "integration_status": "partial",
+  "integration": {
+    "wall_clock": "0:13.46",
+    "max_rss_kib": 404064,
+    "exit_status": 3
+  },
+  "binary_sha256": "07788f848ed292a470242fba5e551b9752f0871edd05e7373903128b477e77ca",
+  "source_sha256": {
+    "Cargo.lock": "455e7c7f8430bad768512592231f56c1955de79e05517bb053c8fcc3354b337d",
+    "Cargo.toml": "cc8134740e3dddb87a3e13716d89af16be544d2e455b3ae059cb338d5259619f",
+    "crates/rustroad-cli/Cargo.toml": "47a11d1e4adab261825de57ef0d77e3a23eaa48f50486bf94055c28c4d7af3c8",
+    "crates/rustroad-cli/src/main.rs": "24eb2ddfd5a7f2c8e8d18868f0131735229ee66fd97bf2f248ac48f3dab4b9c6",
+    "crates/rustroad-core/Cargo.toml": "099c9f728a52198bae30c2adbcd3dad4fb9d6887165202ea82592867ae7126da",
+    "crates/rustroad-core/src/connectivity.rs": "d167c703e4ccb9ba7edec5490cf9f0dbd312e3a092bcd5d7aee075348e58aee0",
+    "crates/rustroad-core/src/io.rs": "56e82ac9596c61b1c8429ee397c693a63b5f8101ac2b3909670c5a2c55dab62e",
+    "crates/rustroad-core/src/lib.rs": "71c21e23e4f2346a1c25291b83cc1b9bf42171fa0fb189849d48318238277c81",
+    "crates/rustroad-core/src/power.rs": "bb0a4bcfae43b443444d057b270d59cfa1110a333e32436f29059ac3955085b3",
+    "crates/rustroad-core/src/routing.rs": "bb52dc48b5f2796f6c86b8b3ba58307ea905a8655d23869aa13777ae0b0287c0",
+    "crates/rustroad-core/src/supply.rs": "8279c03c91ab9687c4313296aa8b779729574024c7a0b464dda1eba758b68719",
+    "crates/rustroad-core/src/tap.rs": "256c9a16eaf861a8cdffcc6818c57c3a77d3a11ee752972dcc2e65e6400aa778",
+    "crates/rustroad-flow/Cargo.toml": "63a2a7420a9c5f6aa0109c32de46098e9128c1b2956fab35f77d1e5c146aabae",
+    "crates/rustroad-flow/src/lib.rs": "f6b2b0a2cdaf5a3bfc8ae306bc926124c1334a260364ca1e2845cd334b7e1885",
+    "crates/rustroad-formats/Cargo.toml": "cb575b0c505bc6d78affcfa27b86247302ec99dd02bbff16f132b32462c93b48",
+    "crates/rustroad-formats/src/lef.rs": "8cd2988d143a458312a6d546acd2920948c23ebaa70054c0a369a66e508ae6ac",
+    "crates/rustroad-formats/src/lib.rs": "04923007bb20116fcbca46062c1a455824903b7398100347b2d1bbf3a3ff17d6",
+    "crates/rustroad-formats/src/sdc.rs": "78eb26e0959867ad91a35b2f49df837f4c19575b56c81e5def6f29063725ddeb",
+    "crates/rustroad-formats/src/verilog.rs": "2c50f26e19f2864af4661d786b682d75b47aa5bb2ef9599dff97b73cb360d7dc",
+    "crates/rustroad-workspace/Cargo.toml": "bf3805316d5f793c5813e0557e1135c71e19463f9498d8383d0d77d8cef0891b",
+    "crates/rustroad-workspace/src/clock.rs": "89bde14e1cc5309894cb6fd74e79d00e94a9c65e36776ce5f1e62e5c5a524bf0",
+    "crates/rustroad-workspace/src/lib.rs": "2491e311a3ac0be275fd233ef9ffe7257d046568702ff3fdfa98f92101ba00b4",
+    "crates/rustroad-workspace/src/pdk.rs": "7f31651ad76e5ab5f2c6cdc566a67457370b2299acb83bb20f377d3affaedc38",
+    "crates/rustroad-workspace/src/physical.rs": "da0180c84ebf35f2ab6bfe2a9ac974ee4ff105e51c24cb0d46b1fcb8368b4bb1",
+    "crates/rustroad-workspace/src/routing.rs": "7f4047d052c4dec7cfa2747a424cb90aa6a08cca76ed8626ae2085a187b11757",
+    "crates/rustroad-workspace/src/ties.rs": "d771cf701d668f8d56b9cc25f51c76af5d54f03f019b6d26ca0d0921d3b9427e",
+    "crates/rustroad-workspace/tests/pdk_import.rs": "2fcc3d58f4b9342fda1d13c96b49b0c928eacead23df72adb7da2504e7531b8a",
+    "crates/rustroad-workspace/tests/physical_prepare.rs": "33f8e3a5a74d57672ce3472efe7dfe6eccb199e5cddfe56f00909aec21a8f5c8",
+    "crates/rustroad-workspace/tests/robustness.rs": "08fac2391cb0400df72ee5e41948742e7b898feaa2e0c0b2e00890250e2e1a10"
+  },
+  "legacy_tap_regression": {
+    "status": "passed",
+    "raw_summary": "/mnt/data2/cgao/git/RustROAD/.work/routing-legacy/summary.json",
+    "receipts": 117
+  },
+  "report_validation": "HTML source/links/data/JavaScript syntax checked; browser rendering unverified"
+}

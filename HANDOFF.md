@@ -1,6 +1,83 @@
 # RustROAD handoff
 
-## 2026-10-23 — v0.4.0 taps and bounded clock topology (current)
+## 2026-10-23 — v0.5.0 constrained CTS, routing and external RC extraction (current)
+
+- `clock-tree --sdc FILE` accepts a strict bounded literal primary-clock SDC
+  subset. Period/waveform, transition, uncertainty and design limits are retained
+  with source identity; unsupported semantics fail. SDC max fanout caps topology
+  branching. This is not timing-driven CTS optimization.
+- `route --scope clock|all --config FILE` uses a separate bounded CPU lattice.
+  Local pin-access search reserves wires/fixed vias before A* net routing.
+  Native checks cover selected width/spacing, LEF pin/OBS and PG obstacles,
+  integer manufacturing-grid geometry, connectivity and total work budgets.
+  Same-net cut spacing is checked too. No unbounded path/cut enumeration.
+- Schema 5 stores routed wire/via/access records in `routing.rbin`, checks the
+  mirrored metadata and geometry on reload, and exports real DEF ROUTED/NEW
+  paths. Failed routing leaves HEAD unchanged; repeated routing is byte-stable.
+  Placement invalidates routes. Legacy schemas remain readable.
+- `cell_spacing_sites` is an explicit optional tap-row packing policy. Routed
+  profiles leave two sites between logical cells, then fill the gaps. It does
+  not imply placement optimization. A zero-width public input is rejected
+  before lattice modulus operations.
+- The verified fixture is now `fixtures/flow/pipeline.v`: four registers,
+  two pipeline stages, 19 routed signal nets including a 3-buffer/2-level clock
+  tree. Both Sky130/GF180 pass independent CEC, 512-vector simulation (511
+  pipeline outputs after initialization), OpenDB/KLayout route geometry,
+  original-GDS tap coverage, PG and powered-netlist checks.
+- Actual final geometries: Sky130 131 cells, 4964 wire segments/101 vias;
+  GF180 134 cells, 4982 wire segments/77 vias. All 19 nets and 46 signal terminals
+  are checked. The prior dense six-register fixture can exceed pin-access/
+  comparison/expansion bounds; do not claim broad routing coverage or scaling.
+- OpenRCX runs only as an external pinned executable. It reads actual routed
+  DEF and original PDK nominal extraction rules and produces detailed SPEF.
+  GF180's technology LEF explicitly warns against its parasitic placeholders;
+  use `rules.openrcx.gf180mcuD.nom`, not those LEF values. No native calibrated
+  RC field extractor or complete GDS/DRC/LVS signoff is implemented.
+- RustSTA/RustEDA postroute candidate binaries were copied unchanged from
+  `.work/postroute/target/x86_64-unknown-linux-musl/release` in the sibling repo
+  into `.work/routing-tools/`. They support SPEF + propagated clocks. The old
+  frozen release binaries do not. No sibling source or target was modified.
+  Tool identities and origins are in `routing-sources.json`.
+- Native scope: TT, f64 NLDM/lumped Elmore, grounded coupling factor 1, propagated
+  primary clocks, CPPR off. Eight endpoints are constrained, zero uncovered.
+  Full vs no-op update consistency passes. Deleted SPEF annotation fails rather
+  than silently using ideal wire. This is not changed-ECO verification.
+- **Overall result is PARTIAL, not a timing signoff pass.** OpenSTA max skew is
+  43.53 ps (Sky130) / 74.71 ps (GF180), under configured 500/1000 ps limits.
+  A 10000x branch-R perturbation fails the skew check. Strict RustSTA/OpenSTA
+  endpoint parity differs by 3.1487 / 6.7928 ps, over the unchanged 1 ps gate.
+  Native worst hold is -0.000906 / -0.640654 ns. Near-zero Sky130 hold changes
+  sign in the reference; retain both results, do not hide this accuracy gap.
+  No reference implementation source was inspected to explain or close it.
+- 79 ordinary tests + 2 real-LEF tests pass, strict Clippy/release pass.
+  The old dual-PDK tap/CTS suite also passes (117 receipts). New integration:
+  0:13.46 wall clock, 404,064 KiB peak host-process RSS,
+  90 receipts. Exit 3 means functional pass with pending parity/closure.
+  This small test is not an industrial-scale performance claim.
+- Raw final run: `.work/routing-final/`. Report:
+  `docs/cts-routing-report.html`; reproduction/scope: `docs/cts-routing.md`.
+  Results, compressed exact SPEFs, source pins and resources are in
+  `docs/evidence/routing-*`. Final RustROAD SHA256:
+  `07788f848ed292a470242fba5e551b9752f0871edd05e7373903128b477e77ca`.
+
+### Routing/extraction lessons
+
+- Reserve pin access before net routing. A same-XY stack is insufficient for
+  dense cells: bounded local escape wires may be needed before climbing layers.
+  Route and access searches need separate accounting within a total work cap.
+- A default tool version flag does not establish SPEF/propagated-clock support.
+  Functional import/run probes distinguished old native releases from the
+  isolated postroute candidate. Pin the chosen binaries, never overwrite them.
+- OpenDB in this container has Tcl bindings but no `-python` mode. Public
+  `dbWirePathItr` / `dbWirePathShape` expose real paths and fixed-via geometry.
+  Read only public interfaces and standard data, never reference internals.
+- Report clock latency for all sinks, not only register-to-register skew pairs.
+  Explicitly keep skew acceptance, subset DRC, timing parity and hold closure
+  as different outcomes. Constraints/geometry verification is not signoff.
+- Keep raw failed large-fixture probes; lowering accuracy requirements or
+  discarding unannotated nets must not turn incomplete work into a passing flow.
+
+## 2026-10-23 — v0.4.0 taps and bounded clock topology (historical)
 
 - `PhysicalConfig.tap` selects actual WELLTAP masters and an explicit horizontal
   gap policy. Native reservation places taps at both row edges and between them,

@@ -59,7 +59,21 @@ enum Command {
     ClockTree {
         #[arg(long)]
         base_rev: String,
+        /// Strict primary-clock SDC; unsupported timing semantics fail explicitly.
+        #[arg(long)]
+        sdc: Option<PathBuf>,
     },
+    /// Bounded obstacle-aware routing with explicit technology and search limits.
+    Route {
+        #[arg(long)]
+        base_rev: String,
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long, value_parser=["clock", "all"], default_value="clock")]
+        scope: String,
+    },
+    /// Write checked routed geometry and scope as JSON.
+    ExportRoutes,
     /// Read the current revision and honest analysis coverage.
     Inspect,
     /// Write placed DEF, including imported PINS/NETS when present.
@@ -135,9 +149,40 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::Place { base_rev } => {
             emit(&rustroad_workspace::place(&workspace, &base_rev, &limits)?)
         }
-        Command::ClockTree { base_rev } => emit(&rustroad_workspace::clock::synthesize(
-            &workspace, &base_rev, &limits,
+        Command::ClockTree { base_rev, sdc } => {
+            emit(&rustroad_workspace::clock::synthesize_with_sdc(
+                &workspace,
+                &base_rev,
+                &limits,
+                sdc.as_deref(),
+            )?)
+        }
+        Command::Route {
+            base_rev,
+            config,
+            scope,
+        } => emit(&rustroad_workspace::routing::route(
+            &workspace,
+            &base_rev,
+            &config,
+            if scope == "clock" {
+                rustroad_workspace::routing::RouteScope::Clock
+            } else {
+                rustroad_workspace::routing::RouteScope::All
+            },
+            &limits,
         )?),
+        Command::ExportRoutes => {
+            let snapshot = rustroad_workspace::read(&workspace, &limits)?;
+            emit(
+                snapshot
+                    .metadata()
+                    .physical
+                    .as_ref()
+                    .and_then(|p| p.routing.as_ref())
+                    .ok_or("NO_ROUTING: route first")?,
+            )
+        }
         Command::Inspect => emit(&rustroad_workspace::read(&workspace, &limits)?.summary()),
         Command::ExportDef => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;

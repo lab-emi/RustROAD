@@ -1,0 +1,16 @@
+{
+  "grid_step": 1120,
+  "access_layer": "Metal2",
+  "layers": [
+    {"name":"Metal1", "spacing":230},
+    {"name":"Metal2", "spacing":280},
+    {"name":"Metal3", "spacing":280},
+    {"name":"Metal4", "spacing":280}
+  ],
+  "vias": [
+    {"name":"Via1_HV", "cut_spacing":260},
+    {"name":"Via2_HV", "cut_spacing":260},
+    {"name":"Via3_HV", "cut_spacing":260}
+  ],
+  "max_skew_ns": 1.0
+}

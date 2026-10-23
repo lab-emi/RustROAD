@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 pub mod clock;
 pub mod pdk;
 pub mod physical;
+pub mod routing;
 pub mod ties;
 use rustroad_core::connectivity::{ConnectedDesign, ConnectivityLimits, PinOwner};
 
@@ -83,6 +84,10 @@ pub struct Summary {
     pub tap_placement_status: &'static str,
     pub clock_buffers: Option<usize>,
     pub clock_topology_status: &'static str,
+    pub clock_constraint_status: &'static str,
+    pub routed_nets: Option<usize>,
+    pub routing_segments: Option<usize>,
+    pub routing_expansions: Option<usize>,
 }
 impl Metadata {
     pub fn summary(&self) -> Summary {
@@ -100,7 +105,11 @@ impl Metadata {
             },
             drc_status: "unchecked",
             lvs_status: "unchecked",
-            routing_status: "not_run",
+            routing_status: match self.physical.as_ref().and_then(|p| p.routing.as_ref()) {
+                Some(r) if r.scope == routing::RouteScope::Clock => "clock_geometry_checked",
+                Some(_) => "signal_geometry_checked",
+                None => "not_run",
+            },
             corner: "not_applicable",
             wire_model: "none",
             unconstrained_endpoints: None,
@@ -169,10 +178,37 @@ impl Metadata {
                 .as_ref()
                 .is_some_and(|p| p.clock_tree.is_some())
             {
-                "unrouted_topology_checked"
+                if self.physical.as_ref().is_some_and(|p| p.routing.is_some()) {
+                    "routed_geometry_checked"
+                } else {
+                    "unrouted_topology_checked"
+                }
             } else {
                 "not_run"
             },
+            clock_constraint_status: if self
+                .physical
+                .as_ref()
+                .and_then(|p| p.clock_tree.as_ref())
+                .is_some_and(|c| c.constraints.is_some())
+            {
+                "explicit_sdc"
+            } else {
+                "unverified"
+            },
+            routed_nets: self
+                .physical
+                .as_ref()
+                .and_then(|p| p.routing.as_ref().map(|r| r.routes.nets.len())),
+            routing_segments: self.physical.as_ref().and_then(|p| {
+                p.routing
+                    .as_ref()
+                    .map(|r| r.routes.wires.len() + r.routes.vias.len())
+            }),
+            routing_expansions: self
+                .physical
+                .as_ref()
+                .and_then(|p| p.routing.as_ref().map(|r| r.routes.stats.expansions)),
         }
     }
 }
@@ -184,6 +220,7 @@ pub struct Snapshot {
     map: Mmap,
     _connections: Option<ConnectionMaps>,
     _layout: Option<Mmap>,
+    _routing: Option<Mmap>,
 }
 struct ConnectionMaps {
     _pins: Option<Mmap>,
@@ -417,7 +454,7 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         &revision_dir.join("design.json"),
         MAX_METADATA_BYTES,
     )?)?;
-    if !matches!(metadata.format_version, 1..=4)
+    if !matches!(metadata.format_version, 1..=5)
         || metadata.revision != current
         || revision_number(&metadata.parent_revision)? >= revision_number(&current)?
     {
@@ -433,14 +470,23 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
     {
         return Err(Error::Invalid("connected schema/payload mismatch".into()));
     }
-    if (metadata.format_version == 4)
+    if (metadata.format_version >= 4)
         != metadata.physical.as_ref().is_some_and(|p| {
-            p.config
-                .as_ref()
-                .is_some_and(|c| c.tap.is_some() || c.clock.is_some())
+            p.routing.is_some()
+                || p.config
+                    .as_ref()
+                    .is_some_and(|c| c.tap.is_some() || c.clock.is_some())
         })
     {
         return Err(Error::Invalid("tap schema/configuration mismatch".into()));
+    }
+    if (metadata.format_version == 5)
+        != metadata
+            .physical
+            .as_ref()
+            .is_some_and(|p| p.routing.is_some())
+    {
+        return Err(Error::Invalid("routing schema/payload mismatch".into()));
     }
     let connections = if let Some(physical) = &metadata.physical {
         pdk::validate_bundle(physical, &metadata.design, &ConnectivityLimits::default())?;
@@ -479,6 +525,7 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         map,
         _connections: connections,
         _layout: None,
+        _routing: None,
     };
     let mut seen = HashSet::with_capacity(snapshot.metadata.design.cells.len());
     for (record, cell) in snapshot.records().zip(&snapshot.metadata.design.cells) {
@@ -507,6 +554,15 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
                 return Err(Error::Invalid("prepared geometry table mismatch".into()));
             }
             snapshot._layout = Some(map);
+            crate::routing::validate_state(&snapshot.metadata.design, bundle, &records)?;
+            if let Some(routing) = &bundle.routing {
+                let expected = crate::routing::table_bytes(routing)?;
+                let map = map_table(&revision_dir.join("routing.rbin"), expected.len())?;
+                if map.as_ref().map_or(&[][..], |m| &m[..]) != expected {
+                    return Err(Error::Invalid("routing table mismatch".into()));
+                }
+                snapshot._routing = map;
+            }
         }
     } else if snapshot
         .metadata
@@ -529,6 +585,22 @@ fn check_placed(snapshot: &Snapshot) -> Result<()> {
 }
 
 fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Summary> {
+    if let Some(p) = &metadata.physical {
+        metadata.format_version = if p.routing.is_some() {
+            5
+        } else if p
+            .config
+            .as_ref()
+            .is_some_and(|c| c.tap.is_some() || c.clock.is_some())
+        {
+            4
+        } else if p.config.is_some() {
+            3
+        } else {
+            2
+        };
+        crate::routing::validate_state(&metadata.design, p, records)?;
+    }
     fs::create_dir_all(path.join("revisions"))?;
     let first = revision_number(&metadata.parent_revision)?
         .checked_add(1)
@@ -572,6 +644,12 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
     if let Some(physical) = &metadata.physical {
         pdk::validate_bundle(physical, &metadata.design, &ConnectivityLimits::default())?;
         write_connection_tables(&directory, &metadata.design, &physical.connectivity)?;
+        if let Some(routing) = &physical.routing {
+            write_new(
+                &directory.join("routing.rbin"),
+                &crate::routing::table_bytes(routing)?,
+            )?;
+        }
         if let Some(state) = &physical.state {
             write_new(
                 &directory.join("physical.rbin"),

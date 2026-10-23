@@ -69,6 +69,8 @@ pub struct PhysicalBundle {
     pub generated_taps: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock_tree: Option<crate::clock::ClockReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<crate::routing::RoutingState>,
     #[serde(default)]
     pub state: Option<crate::physical::PhysicalState>,
 }
@@ -83,7 +85,7 @@ struct Floorplan {
     rows: Vec<Row>,
 }
 
-fn read_input(path: &Path, limit: u64, role: &str) -> Result<(String, SourcePin)> {
+pub(crate) fn read_input(path: &Path, limit: u64, role: &str) -> Result<(String, SourcePin)> {
     let bytes = read_bounded(path, limit)?;
     let pin = SourcePin {
         role: role.into(),
@@ -235,6 +237,7 @@ pub(crate) fn validate_bundle(
         }
     } else if bundle.ties.is_some()
         || bundle.clock_tree.is_some()
+        || bundle.routing.is_some()
         || bundle.state.is_some()
         || !bundle.generated_fillers.is_empty()
         || !bundle.generated_taps.is_empty()
@@ -474,6 +477,7 @@ pub fn import_pdk_with_config(
         generated_fillers: Vec::new(),
         generated_taps: Vec::new(),
         clock_tree: None,
+        routing: None,
         state: None,
     };
     validate_bundle(&physical, &design, connection_limits)?;

@@ -44,8 +44,21 @@ bounded breadth-first native check enforces sink coverage, uniform depth,
 fanout and no repeated nets. Independent OpenDB traces follow unique drivers
 backwards; Liberty SAT, whole-design CEC, simulation and ideal-wire timing provide
 separate semantic checks. This stage does not optimize skew or produce signal
-wire geometry. Timing remains ideal clock/ideal wire until a routed extraction
-and propagated-clock flow is implemented and independently validated.
+wire geometry. Version 0.5 adds strict primary-clock SDC binding and a separate
+bounded routing pass. Local pin-access searches reserve escape wires and fixed
+vias; multi-terminal A* uses an explicit lattice, heap, expansion and comparison
+budget. Wire/via records are separate from the netlist and stored in schema 5
+`routing.rbin`. Placement invalidates routes; every reload checks geometry,
+endpoint connectivity and table identity. Cell-spacing policy is explicit.
+
+The external integration harness now feeds routed DEF to pinned OpenRCX with
+original PDK extraction rules, then imports detailed SPEF into pinned postroute
+RustSTA candidate tools and compares propagated-clock timing with OpenSTA.
+This is an independently checked functional chain on a four-register pipeline.
+The dense six-register case still exceeds this router's demonstrated coverage.
+The unchanged 1 ps parity gate is not met (about 3.15/6.79 ps discrepancies), and
+hold closure is incomplete. The harness returns partial, never signoff success.
+See `cts-routing.md`; a native calibrated RC extractor remains future work.
 
 `rustroad-workspace` owns lock acquisition, strict schema validation, immutable
 revision directories and atomic HEAD replacement. The fixed 40-byte little-endian
