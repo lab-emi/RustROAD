@@ -8,6 +8,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
+pub mod access_test;
 pub mod clock;
 pub mod pdk;
 pub mod physical;

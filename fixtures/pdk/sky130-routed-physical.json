@@ -28,6 +28,7 @@
     "sky130_fd_sc_hd__fill_1"
   ],
   "alternating_rows": true,
+  "io_min_area": true,
   "io_width": 400,
   "io_spacing": 800,
   "strap_width": 400,

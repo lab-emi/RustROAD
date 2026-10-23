@@ -5,7 +5,7 @@ Geometry is i64 DBU; timing constraints use finite f64 in explicit ns units.
 The first router is deterministic CPU reference code, not GPU code.
 
 The router uses a finite, rectilinear coordinate lattice: manufacturing-aligned
-regular coordinates plus bounded pin-access coordinates, <=512 per axis and
+regular coordinates plus bounded pin-access coordinates, <=1024 per axis and
 <=8 routing layers. A configurable `max_grid_nodes` (default 2,000,000) is
 checked before allocating state. Distance, predecessor and generation arrays
 cost <=16 bytes/node (~32 MiB); heap entries <=500,000 at ~32 bytes (~32 MiB).
@@ -48,3 +48,33 @@ LEF placeholder RC to foundry extraction evidence. Both PDKs must retain the
 distinction between routed connectivity, subset geometric checks, extracted
 timing and complete foundry DRC/LVS. Clock skew acceptance must use explicit
 limits and propagated clocks, never ideal-clock equality as a skew oracle.
+
+## LEF-rule routing mode (`lef_rules: true`)
+
+Written before implementing the via-variant, pin-access-table and same-net
+cleanup changes. All caps above are unchanged and still cannot be raised.
+
+- Via variants: per policy via at most the single-cut LEF fixed vias on the same
+  cut layer (sky130 <=5, gf180 <=4 per layer pair); the config cap of 12 policy
+  vias bounds the expanded list to <100 entries. Each search move tries the
+  variants in order and stops at the first clear one, so query work grows by at
+  most the variant count on via moves only; it is charged to `max_comparisons`.
+- Access classes: one per distinct (master, orientation, pin), at most one per
+  terminal (<=16,000). Aggregate class rectangles (pin shapes plus same-master
+  blockers) share the 200,000-rectangle obstacle cap (~8 MiB). A class table has
+  <=128 candidate points, each with the via kinds of one layer pair (<1 MiB per
+  class). Tables are built once per class, not per instance.
+- Same-net pass: one rebuilt spatial index (same 200,000-shape/1,000,000-bin
+  caps as `validate`), shapes grouped per (net, layer) after merging collinear
+  wires (<= segments + via pads + patches + terminal rectangles, ~50 B each),
+  union-find arrays of the same size, at most eight repair rounds. Pair sweeps,
+  coverage subtraction (<=64 pieces), area slabs (O(k^2) per component) and stub
+  searches (binary search, <=65,536 steps) are all charged to one counter that
+  is capped by `max_comparisons`; patches count against `max_segments`.
+- Measured on the dual-PDK pipeline fixture: route step 0.58 s / 15.9 MiB RSS
+  (sky130) and 0.57 s / 14.3 MiB (gf180) versus 0.45 s / 14.8 MiB and
+  0.41 s / 12.7 MiB before; 59.4M / 33.4M comparisons of the 200M cap.
+
+Unresolvable same-net violations fail the command with `ROUTING_RULE` and HEAD
+stays unchanged. The native same-net check is a self-check; foundry decks are
+the DRC oracle (see router-drc.md).

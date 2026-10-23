@@ -12,5 +12,6 @@
     {"name":"Via2_HV", "cut_spacing":520},
     {"name":"Via3_HV", "cut_spacing":520}
   ],
+  "lef_rules": true,
   "max_skew_ns": 1.0
 }
