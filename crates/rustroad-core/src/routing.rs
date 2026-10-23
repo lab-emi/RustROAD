@@ -455,6 +455,16 @@ fn preflight(input: &RouteInput, limits: &RouteLimits) -> Result<()> {
     {
         return Err(budget("routing input count"));
     }
+    // Aggregate class geometry shares the obstacle cap (<= 200k rectangles).
+    if input
+        .access_classes
+        .iter()
+        .map(|c| c.shapes.len() + c.blockers.len())
+        .sum::<usize>()
+        > limits.max_obstacles
+    {
+        return Err(budget("routing access class geometry"));
+    }
     for c in &input.access_classes {
         if c.shapes.is_empty()
             || c.shapes.len() > 64
