@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Independent standard-cell policy checker (reads the PDK exclusion files directly).
+
+usage: check_cell_policy.py --pdk sky130|gf180 --stage synth|physical --netlist N.v [--netlist ...]
+                            [--mapped MAPPED.v] [--policy fixtures/flow/cell-policy.json]
+                            [--pdk-root DIR] [--out REPORT.json]
+
+* synth: no instance may use a cell matching the PDK synthesis exclusion list,
+  the PDK PnR/DRC exclusion list, or the owner-reserved CTS/hold cells.
+* physical (CTS'd / final / powered netlists): no instance may use a PnR/DRC
+  excluded cell; an instance that already exists in ``--mapped`` must still
+  obey the synthesis rule; an instance added after synthesis may use an
+  excluded cell only if it is a physical-only cell (tap/fill/decap/diode/...)
+  or a clock/delay cell reserved for CTS and hold repair.
+
+The PDK files are read from the Ciel PDK root (default: the host path pinned
+in fixtures/flow/signoff-pinned.json), independently of the generated policy.
+When ``--policy`` is given its glob lists and source hashes are cross-checked
+against the PDK files. Exit: 0 passed, 1 failed, 3 unverified.
+"""
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+import fnmatch
+import hashlib
+import json
+from pathlib import Path
+import re
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+FILES = {
+    "sky130": dict(variant="sky130A", synth="libs.tech/librelane/sky130_fd_sc_hd/synth_excluded.cells",
+                   pnr="libs.tech/librelane/sky130_fd_sc_hd/pnr_excluded.cells", prefix="sky130_fd_sc_hd__"),
+    "gf180": dict(variant="gf180mcuD", synth="libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/synth_exclude.cells",
+                  pnr="libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/pnr_exclude.cells", prefix="gf180mcu_fd_sc_mcu7t5v0__"),
+}
+# Owner decision (W4): GF180 delay/clock cells are reserved for CTS and hold repair.
+OWNER_RESERVED = {"sky130": [], "gf180": ["dly*", "clkbuf*", "clkinv*"]}
+# Cells the physical flow may add after synthesis (suffixes after the library prefix).
+PHYSICAL_ONLY = {"sky130": ["tap*", "decap*", "fill*", "diode*"],
+                 "gf180": ["filltie", "fill_*", "fillcap_*", "endcap", "antenna"]}
+CTS_HOLD = {"sky130": ["clkbuf*", "clkinv*", "clkinvlp*", "clkdlybuf*", "dlygate*", "dlymetal*"],
+            "gf180": ["dly*", "clkbuf*", "clkinv*"]}
+KEYWORDS = {"module", "endmodule", "input", "output", "inout", "wire", "reg", "assign", "supply0",
+            "supply1", "parameter", "localparam"}
+MAX_INSTANCES = 1_000_000
+
+
+def read_list(path: Path) -> list[str]:
+    return [line.split("#", 1)[0].strip() for line in path.read_text().splitlines()
+            if line.split("#", 1)[0].strip()]
+
+
+def instances(text: str) -> list[tuple[str, str]]:
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", " ", text)
+    out = []
+    for stmt in text.split(";"):
+        m = re.match(r"\s*(\\\S+|[A-Za-z_][\w$]*)\s+(\\\S+|[A-Za-z_][\w$]*)\s*\(", stmt)
+        if m and m[1] not in KEYWORDS:
+            out.append((m[1].lstrip("\\"), m[2].lstrip("\\")))
+            if len(out) > MAX_INSTANCES:
+                raise SystemExit("instance budget exceeded")
+    return out
+
+
+def match(cell: str, globs: list[str]) -> str | None:
+    for g in globs:
+        if fnmatch.fnmatchcase(cell, g):
+            return g
+    return None
+
+
+def default_root(tag: str) -> Path:
+    manifest = json.loads((ROOT / "fixtures/flow/signoff-pinned.json").read_text())
+    return Path(manifest["pdks"][tag]["host_root"])
+
+
+def check(tag: str, stage: str, netlists: list[Path], mapped: Path | None, policy: Path | None,
+          pdk_root: Path | None) -> dict:
+    spec = FILES[tag]
+    root = pdk_root or default_root(tag)
+    report = dict(schema="rustroad.cell-policy-check.v1", pdk=tag, stage=stage, status="unverified",
+                  problems=[], violations=[], sources={})
+    try:
+        synth_path, pnr_path = root / spec["synth"], root / spec["pnr"]
+        synth, pnr = read_list(synth_path), read_list(pnr_path)
+    except OSError as error:
+        report["problems"].append(f"PDK exclusion file unreadable: {error}")
+        return report
+    for key, path in (("synth_exclude", synth_path), ("pnr_exclude", pnr_path)):
+        report["sources"][key] = dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    reserved = [spec["prefix"] + g for g in OWNER_RESERVED[tag]]
+    physical_only = [spec["prefix"] + g for g in PHYSICAL_ONLY[tag]]
+    cts_hold = [spec["prefix"] + g for g in CTS_HOLD[tag]]
+    synth_forbidden = synth + pnr + reserved
+    report["rules"] = dict(synth_forbidden=synth_forbidden, pnr_forbidden=pnr,
+                           post_synthesis_allowed=physical_only + cts_hold)
+    if policy is not None:
+        data = json.loads(policy.read_text())["pdks"][tag]
+        consistency = []
+        if set(data["synth_dont_use"]) != set(synth_forbidden):
+            consistency.append(f"policy synth_dont_use differs from PDK lists + owner reservation: "
+                               f"missing {sorted(set(synth_forbidden) - set(data['synth_dont_use']))} "
+                               f"extra {sorted(set(data['synth_dont_use']) - set(synth_forbidden))}")
+        if set(data["pnr_exclude"]) != set(pnr):
+            consistency.append("policy pnr_exclude differs from the PDK file")
+        for src in data["sources"]:
+            got = report["sources"].get(src["role"], {}).get("sha256")
+            if got != src["sha256"]:
+                consistency.append(f"policy source {src['role']} sha256 {src['sha256'][:12]} != PDK {str(got)[:12]}")
+        report["policy_consistency"] = consistency or "consistent"
+        report["problems"] += consistency
+    mapped_names = {}
+    if mapped is not None:
+        mapped_names = {inst: cell for cell, inst in instances(mapped.read_text())}
+    counts, files = Counter(), []
+    for path in netlists:
+        if not path.is_file():
+            report["problems"].append(f"netlist missing: {path}")
+            continue
+        insts = instances(path.read_text())
+        files.append(dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(), instances=len(insts)))
+        for cell, inst in insts:
+            counts[cell] += 1
+            g = match(cell, pnr)
+            if g:
+                report["violations"].append(dict(netlist=str(path), instance=inst, cell=cell, rule="pnr_exclude", glob=g))
+                continue
+            g = match(cell, synth_forbidden)
+            if g is None:
+                continue
+            if stage == "synth" or inst in mapped_names:
+                report["violations"].append(dict(netlist=str(path), instance=inst, cell=cell,
+                                                 rule="synth_exclude_or_reserved", glob=g))
+            elif not match(cell, physical_only + cts_hold):
+                report["violations"].append(dict(netlist=str(path), instance=inst, cell=cell,
+                                                 rule="excluded_cell_added_after_synthesis", glob=g))
+    if stage == "physical" and mapped is None:
+        report["problems"].append("physical stage needs --mapped to tell synthesized from inserted instances")
+    report.update(netlists=files, cells=dict(sorted(counts.items())))
+    if report["violations"]:
+        report["status"] = "failed"
+    elif report["problems"] or not files:
+        report["status"] = "unverified"
+    else:
+        report["status"] = "passed"
+    return report
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("--pdk", choices=sorted(FILES), required=True)
+    p.add_argument("--stage", choices=("synth", "physical"), required=True)
+    p.add_argument("--netlist", type=Path, action="append", required=True)
+    p.add_argument("--mapped", type=Path)
+    p.add_argument("--policy", type=Path)
+    p.add_argument("--pdk-root", type=Path)
+    p.add_argument("--out", type=Path)
+    args = p.parse_args(argv)
+    report = check(args.pdk, args.stage, args.netlist, args.mapped, args.policy, args.pdk_root)
+    if args.out:
+        args.out.write_text(json.dumps(report, indent=2) + "\n")
+    print(json.dumps(dict(pdk=report["pdk"], stage=report["stage"], status=report["status"],
+                          violations=len(report["violations"]), problems=report["problems"][:3])))
+    return {"passed": 0, "failed": 1}.get(report["status"], 3)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
