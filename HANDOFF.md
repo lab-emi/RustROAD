@@ -1,6 +1,79 @@
 # RustROAD handoff
 
-## 2026-10-23 — v0.3.0 physical I/O and primary supply (current)
+## 2026-10-23 — v0.4.0 taps and bounded clock topology (current)
+
+- `PhysicalConfig.tap` selects actual WELLTAP masters and an explicit horizontal
+  gap policy. Native reservation places taps at both row edges and between them,
+  packs logic into free intervals, then fills remaining gaps. Tap, tie, clock
+  and filler additions share a checked total budget. Dimensions remain i64 DBU.
+- Sky130 uses `sky130_fd_sc_hd__tapvpwrvgnd_1`; GF180 uses
+  `gf180mcu_fd_sc_mcu7t5v0__filltie`. Each eight-row fixture has 32 taps. Actual
+  maximum edge-to-edge gaps are 14.72 / 17.36 µm, under the 20 µm profile limit.
+- The independent KLayout checker uses original PDK GDS and layer maps, not
+  native LEF labels as its oracle. It checks contact-to-correct-rail paths,
+  all body components and 15 µm Manhattan active-region contact coverage.
+  Per-tap nwell/substrate contact counts are 2/1 (Sky130) and 3/2 (GF180).
+  Missing contact, no taps, end-only taps and wrong supply controls reject.
+- The 15 µm policy is an engineering scope, not complete foundry latch-up signoff.
+  Deep wells are explicitly unsupported; IO guard rings, full DRC/LVS, IR/EM,
+  routed skew and extracted timing remain unchecked. Keep this distinction.
+- `clock-tree --workspace W --base-rev REV` inserts configured non-inverting
+  buffers, builds bounded equal-depth branches, re-links and re-places. Native
+  checking is BFS with work/size/depth limits. No SDC clock discovery, skew
+  optimization or signal routing is implemented. Status is
+  `unrouted_topology_checked`. Changing a built tree requires fresh import.
+- Both PDKs have 6 sinks, 6 buffers, 3 levels and fanout <=2. The independent
+  OpenDB checker traces drivers backwards and rejects bypass/disconnection.
+  Actual Liberty buffer functions are proved with Yosys (wrong-polarity control
+  rejects); RTL CEC, 512-vector simulation per PDK and ideal-wire/ideal-clock
+  RustSTA/OpenSTA comparisons pass. Repeated placement exports identical DEF.
+- Post-clock Sky130: 127 total cells = 18 source + 2 ties + 6 buffers + 32 taps
+  + 69 fillers; GF180: 123 = 22 + 2 + 6 + 32 + 61. Primary supply remains one
+  component per net; PG pin counts are 444 / 428. GDS active-input cell coverage
+  is 24 / 28. Both have 59 FS cells and 20 signal + 2 supply I/O terminals.
+- TT timing retains 14 constrained endpoints and 2 constant-driven D pins
+  without arrival. Maximum setup/hold differences remain about 6.03e-7 ns /
+  8.70e-7 ns. Unsupported pulse-width/minimum-period diagnostics remain visible.
+  Incremental testing remains a no-op, not changed-ECO validation.
+- Schema 4 retains tap/clock metadata and tap records in `physical.rbin`;
+  schemas 1–3 remain readable. Readback regenerates/checks tap geometry and the
+  clock topology. Default Verilog omits physical-only taps/fillers and includes
+  clock buffers; `--include-power` includes all physical cells and PG wiring.
+- 74 ordinary Rust tests + 2 real-LEF tests pass; strict Clippy and release
+  build pass. Final combined run: 0:16.56 wall clock, 403,524 KiB maximum
+  host process RSS, 117 process receipts. This is a small functional baseline,
+  not industrial-scale throughput evidence. Guard settings are in
+  `docs/tap-budget.md` and all measured files in `docs/evidence/tap-*`.
+- Final binary SHA256:
+  `95f75e6816bc27ea1e92503bac648072d1e58fc4595c9682eddccc89a4a216a5`.
+  Final raw run: `.work/tap-release-final/`; report: `docs/tap-report.html`;
+  reproduction: `docs/tap-integration.md`. No RustSys/RustSTA source or frozen
+  binary was modified. No reference implementation source was inspected.
+
+### Lessons from tap and clock integration
+
+- LEF well/rail pin geometry does not prove a physical contact exists. Use GDS
+  contact, active, implant and metal polygons as a distinct oracle, then check
+  PG connectivity from independently read DEF.
+- A primary tap pin's OpenDB ITerm bbox can include both well and metal layers.
+  Compare its bbox against all pin geometry; insert only conductor-layer
+  rectangles into the metal connectivity graph.
+- Sky130 GDS grid converts with factor 1; GF180 needs factor 2 to its LEF DBU.
+  KLayout's `find_layer` can return None. Sky130 LYP names and GF180's empty-name,
+  source-prefixed LYP entries need separate parsing cases; a missing mapping
+  must never silently produce an empty-geometry pass.
+- Check empty-row well components too. Logic-only coverage can miss uncontacted
+  filler wells. Assert logic-input cells have active GDS geometry before doing
+  distance checks. Keep GDS shape/work/process caps on all negative controls.
+- Ideal-clock agreement does not validate clock insertion delay, skew, clock
+  transition or RC. The reported tree is only a topology milestone. Preserve
+  constant-driven no-arrival endpoints instead of hiding them as zero.
+- Reject aliased top-level clock ports and unsupported root loads explicitly.
+  Do not silently reuse LEF pin names as Boolean buffer-function evidence.
+- HTML source/links/JS syntax are checked; browser rendering remains unverified.
+  The earlier local-file URL policy block is still not a reason to bypass policy.
+
+## 2026-10-23 — v0.3.0 physical I/O and primary supply (historical)
 
 - `import-pdk --physical-config` binds explicit PDK power/bias, tie, filler,
   layer and fixed-via roles. Literal constants become uniquely named tie cells;

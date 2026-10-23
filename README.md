@@ -2,7 +2,7 @@
 
 Clean-room, native Rust physical-design development for the RustEDA toolchain.
 Apache-2.0. This is an initial engineering baseline, **not a complete RTL-to-GDS
-implementation**. Current version: 0.3.0.
+implementation**. Current version: 0.4.0.
 
 Implemented:
 
@@ -27,11 +27,17 @@ Implemented:
   bounded fanout, row fillers, N/FS row placement and primary power-rail checks.
 - An explicit primary supply grid: horizontal rails, two vertical spines,
   fixed vias and supply ports, exported through DEF SPECIALNETS.
+- Profile-driven well/substrate tap reservation, insertion and repeatable
+  re-placement. Independent OpenDB + original-PDK GDS checks cover actual
+  contacts, their connection to supply metal, and active-region tap distance.
+- Bounded, level-balanced clock-buffer topology, with independent Liberty
+  truth-table proofs, RTL equivalence, OpenDB connectivity and ideal-wire STA.
+  This is an unrouted CTS prototype, without skew optimization.
 - Read-only pinned-tool/dual-PDK flow readiness and a guarded logic validation
   harness using existing RustSys/RustSTA and independent external tools.
 
-Not implemented: global placement optimization, CTS, routing, extraction,
-GDS streamout, DRC/LVS, well/tap verification, IR/EM analysis, or GUI. Real-PDK connectivity
+Not implemented: global placement optimization, routed/timing-driven CTS,
+signal routing, extraction, GDS streamout, full-deck DRC/LVS, IR/EM analysis, or GUI. Real-PDK connectivity
 and cell placement are not PDK signoff. Missing results always
 remain `unverified`, `not_run` or `unchecked`.
 
@@ -71,6 +77,7 @@ matching site and matching cell dimensions.
 The JSON geometry example still exports rows/components only. Designs imported
 with `import-pdk` also export logical PINS/NETS. With `--physical-config`, placement
 creates physical I/O, fillers, alternating rows and a primary supply network.
+Profiles with `tap` also reserve and insert well/substrate taps before filling.
 Without that explicit profile, I/O and supply geometry remain unchecked. Exported Verilog
 preserves the mapped logic and interfaces. `placement_status` remains
 `placed_unverified`; external validation receipts are separate evidence.
@@ -106,14 +113,51 @@ rows; FS cells must advertise LEF `SYMMETRY X`.
 
 `place` fills row gaps, checks intrinsic primary-rail continuity, creates routed
 SPECIALNETS and fixes I/O geometry on the boundary. `export-verilog` retains the
-logical interface and inserted ties; generated physical-only fillers are omitted.
+logical interface and inserted ties; generated physical-only fillers and taps
+are omitted.
 `export-verilog --include-power` includes fillers, supply ports and PG pin wiring
 for physical connectivity checks. Both views are independently verified.
 
-Well/body pins are logically connected; well ties, latch-up compliance, IR/EM and
-foundry DRC/LVS remain separate unverified requirements. See
+Profiles without a tap policy still connect body pins logically only. Complete
+latch-up compliance, IR/EM and foundry DRC/LVS remain separate requirements. See
 [physical preparation and verification](docs/power-io-integration.md) and
 [resource limits](docs/power-io-budget.md).
+
+## Well/substrate taps and clock topology
+
+Use `fixtures/pdk/sky130-tap.json` or `gf180-tap.json` as the physical profile.
+These bind actual tap and clock-buffer masters. Both configure a maximum 20 µm
+horizontal gap between reserved tap-cell edges. The independent GDS checker
+separately requires all inspected active polygons to be within 15 µm Manhattan
+distance of a powered contact in the same body component. This is a conservative
+engineering test policy, not a substitute for the complete foundry rule deck.
+
+After `import-pdk` and `place`, add the configured clock-buffer topology:
+
+```sh
+target/release/rustroad clock-tree --workspace .work/connected --base-rev rev2
+target/release/rustroad export-def --workspace .work/connected > .work/clock.def
+```
+
+The command accepts a scalar clock input and explicitly named sink pin. It
+inserts bounded-fanout buffers, rebuilds physical placement and validates the
+tree before publishing. Repeated `place` keeps the same result; changing the
+clock topology requires a fresh import. No propagated-clock, skew or RC result
+is claimed. Read [the implementation and reproduction guide](docs/tap-integration.md).
+
+Run the combined, guarded, dual-PDK verification with installed dependencies:
+
+```sh
+free -h
+ulimit -v 8388608
+export CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 RAYON_NUM_THREADS=2
+/usr/bin/time -v -o .work/taps.time timeout 180s \
+  python3 scripts/verify_taps.py --workspace .work/taps --base-rev empty
+```
+
+Local PDK paths and SHA256 pins are in `fixtures/pdk/local-taps.json`. Missing
+tools/data cannot produce a passing result. KLayout is an external verification
+dependency, not a Rust core dependency.
 
 ## Verification and research
 
@@ -123,6 +167,7 @@ foundry DRC/LVS remain separate unverified requirements. See
 - [GUI architecture and framework decision](docs/gui-architecture.md)
 - [GUI benchmark acceptance plan](docs/gui-benchmark-plan.md)
 - [Architecture and next implementation gates](docs/architecture.md)
+- [Chinese tap and clock-topology report](docs/tap-report.html)
 - [Chinese physical-preparation report](docs/power-io-report.html)
 - [Earlier PDK integration report](docs/pdk-report.html)
 - [Earlier bootstrap report](docs/report.html)

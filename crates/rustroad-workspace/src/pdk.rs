@@ -65,6 +65,10 @@ pub struct PhysicalBundle {
     pub ties: Option<crate::ties::TieReport>,
     #[serde(default)]
     pub generated_fillers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generated_taps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock_tree: Option<crate::clock::ClockReport>,
     #[serde(default)]
     pub state: Option<crate::physical::PhysicalState>,
 }
@@ -176,6 +180,16 @@ pub(crate) fn validate_bundle(
         limits,
     )?;
     if let Some(cfg) = &bundle.config {
+        let generated = bundle
+            .generated_fillers
+            .len()
+            .checked_add(bundle.generated_taps.len())
+            .and_then(|n| n.checked_add(bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len())))
+            .and_then(|n| n.checked_add(bundle.ties.as_ref().map_or(0, |t| t.new_cells)))
+            .ok_or_else(|| budget("generated physical-cell count overflow"))?;
+        if generated > cfg.max_added_cells {
+            return Err(budget("total generated physical-cell budget exceeded"));
+        }
         crate::physical::attach_supplies(
             &bundle.connectivity.masters,
             &bundle.connectivity.instance_masters,
@@ -204,9 +218,26 @@ pub(crate) fn validate_bundle(
             }
         }
         crate::physical::validate_ties(bundle)?;
+        crate::physical::validate_tap_master(bundle)?;
+        crate::clock::validate_tree(bundle)?;
+        for name in &bundle.generated_taps {
+            if !names.insert(name) {
+                return Err(invalid("duplicate generated physical instance"));
+            }
+            let inst = instance_names
+                .get(name.as_str())
+                .ok_or_else(|| invalid("generated tap absent"))?;
+            if Some(inst.cell.as_str()) != cfg.tap.as_ref().map(|t| t.cell.as_str())
+                || !inst.connections.is_empty()
+            {
+                return Err(invalid("invalid generated tap"));
+            }
+        }
     } else if bundle.ties.is_some()
+        || bundle.clock_tree.is_some()
         || bundle.state.is_some()
         || !bundle.generated_fillers.is_empty()
+        || !bundle.generated_taps.is_empty()
     {
         return Err(invalid("physical state without configuration"));
     }
@@ -333,6 +364,12 @@ pub fn import_pdk_with_config(
         let mut v = c.filler_cells.clone();
         v.push(c.tie_high.cell.clone());
         v.push(c.tie_low.cell.clone());
+        if let Some(t) = &c.tap {
+            v.push(t.cell.clone());
+        }
+        if let Some(t) = &c.clock {
+            v.push(t.cell.clone());
+        }
         v
     });
     let (technology, masters) = select_technology(&tech, &cells, &floor, &netlist, &extra)?;
@@ -435,12 +472,24 @@ pub fn import_pdk_with_config(
         config,
         ties: tie_report,
         generated_fillers: Vec::new(),
+        generated_taps: Vec::new(),
+        clock_tree: None,
         state: None,
     };
     validate_bundle(&physical, &design, connection_limits)?;
     let records = DesignDb::new(&design, limits)?.unplaced_records();
     let metadata = Metadata {
-        format_version: if physical.config.is_some() { 3 } else { 2 },
+        format_version: if physical
+            .config
+            .as_ref()
+            .is_some_and(|c| c.tap.is_some() || c.clock.is_some())
+        {
+            4
+        } else if physical.config.is_some() {
+            3
+        } else {
+            2
+        },
         revision: String::new(),
         parent_revision: current,
         stage: Stage::Imported,

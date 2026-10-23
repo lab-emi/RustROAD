@@ -10,7 +10,7 @@ use rustroad_core::connectivity::{ConnectivityLimits, PinOwner, PinUse};
 use rustroad_core::{Limits, Orientation};
 use rustroad_formats::verilog;
 use rustroad_workspace::pdk::{ImportSources, import_pdk_with_config};
-use rustroad_workspace::physical::{PhysicalConfig, TieCell};
+use rustroad_workspace::physical::{PhysicalConfig, TapConfig, TieCell};
 use rustroad_workspace::{Error, place, read};
 use std::fs;
 use std::path::PathBuf;
@@ -91,6 +91,8 @@ fn config() -> PhysicalConfig {
         strap_spacing: None,
         max_added_cells: 64,
         max_tie_fanout: 8,
+        tap: None,
+        clock: None,
     }
 }
 
@@ -167,6 +169,187 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+fn tapped_fixture() -> Fixture {
+    let mut cfg = config();
+    cfg.tap = Some(TapConfig {
+        cell: "TAP".into(),
+        max_gap: 3000,
+        well_layer: "NW".into(),
+        substrate_layer: "PW".into(),
+    });
+    let f = Fixture::new(LOGIC, &cfg);
+    fs::write(
+        &f.sources.technology_lef,
+        TECHNOLOGY.replace(
+            "END LIBRARY",
+            "LAYER NW TYPE MASTERSLICE ; END NW\nLAYER PW TYPE MASTERSLICE ; END PW\nEND LIBRARY",
+        ),
+    )
+    .unwrap();
+    let tap = "MACRO TAP CLASS CORE WELLTAP ; ORIGIN 0 0 ; SIZE 1 BY 2 ; SITE s ; SYMMETRY X Y ;\nPIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER NW ; RECT 0 1 1 2.1 ; LAYER M1 ; RECT 0 1.9 1 2.1 ; END END VDD\nPIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER PW ; RECT 0 -0.1 1 1 ; LAYER M1 ; RECT 0 -0.1 1 0.1 ; END END VSS\nEND TAP\nEND LIBRARY";
+    fs::write(&f.sources.cell_lef, library().replace("END LIBRARY", tap)).unwrap();
+    f
+}
+
+fn clock_fixture(max_buffers: usize) -> Fixture {
+    let mut c = config();
+    c.clock = Some(rustroad_workspace::clock::ClockConfig {
+        port: "a".into(),
+        cell: "BUF".into(),
+        input_pin: "A".into(),
+        output_pin: "Y".into(),
+        sink_pin: "A".into(),
+        max_fanout: 2,
+        max_buffers,
+        max_work: 1000,
+    });
+    Fixture::new(
+        "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule",
+        &c,
+    )
+}
+
+#[test]
+fn bounded_clock_tree_is_level_balanced_and_persistent() {
+    let f = clock_fixture(10);
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let done = rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+    assert_eq!(done.clock_buffers, Some(3));
+    assert_eq!(done.clock_topology_status, "unrouted_topology_checked");
+    let s = read(&f.workspace, &limits()).unwrap();
+    let report = s
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .clock_tree
+        .as_ref()
+        .unwrap();
+    assert_eq!(report.levels, 2);
+    assert_eq!(report.sinks.len(), 3);
+    let before = s.records().collect::<Vec<_>>();
+    let mut definition = Vec::new();
+    s.export_def(&mut definition).unwrap();
+    drop(s);
+    assert!(
+        rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("REVISION_CONFLICT")
+    );
+    let repeated = place(&f.workspace, &done.revision, &limits()).unwrap();
+    let s = read(&f.workspace, &limits()).unwrap();
+    assert_eq!(before, s.records().collect::<Vec<_>>());
+    let mut after = Vec::new();
+    s.export_def(&mut after).unwrap();
+    assert_eq!(definition, after);
+    drop(s);
+    assert!(
+        rustroad_workspace::clock::synthesize(&f.workspace, &repeated.revision, &limits()).is_err()
+    );
+    assert_eq!(f.head(), format!("{}\n", repeated.revision));
+}
+
+#[test]
+fn clock_budget_failure_keeps_previous_revision() {
+    let f = clock_fixture(1);
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    assert!(rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).is_err());
+    assert_eq!(f.head(), "rev2\n");
+    assert!(read(&f.workspace, &limits()).is_ok());
+}
+
+#[test]
+fn clock_port_alias_fails_explicitly_without_publication() {
+    let f = clock_fixture(10);
+    fs::write(
+        &f.sources.netlist,
+        "module chip(input a, output y, output h, output l, output forwarded); assign forwarded=a; BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule",
+    )
+    .unwrap();
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let error = rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap_err();
+    assert!(error.to_string().contains("aliases another top-level port"));
+    assert_eq!(f.head(), "rev2\n");
+}
+
+#[test]
+fn tap_reservations_are_persistent_and_logically_invisible() {
+    let f = tapped_fixture();
+    f.import().unwrap();
+    let first = place(&f.workspace, "rev1", &limits()).unwrap();
+    assert_eq!(first.tap_cells, Some(8));
+    let s = read(&f.workspace, &limits()).unwrap();
+    assert_eq!(s.metadata().format_version, 4);
+    assert_eq!(
+        s.metadata()
+            .physical
+            .as_ref()
+            .unwrap()
+            .state
+            .as_ref()
+            .unwrap()
+            .tap
+            .as_ref()
+            .unwrap()
+            .max_clear_gap,
+        2000
+    );
+    let before = s.records().collect::<Vec<_>>();
+    let mut v = Vec::new();
+    s.export_verilog(&mut v).unwrap();
+    assert!(!String::from_utf8(v).unwrap().contains("TAP "));
+    let mut def = Vec::new();
+    s.export_def(&mut def).unwrap();
+    drop(s);
+    let second = place(&f.workspace, &first.revision, &limits()).unwrap();
+    assert_eq!(second.tap_cells, Some(8));
+    let s = read(&f.workspace, &limits()).unwrap();
+    assert_eq!(before, s.records().collect::<Vec<_>>());
+    let mut after = Vec::new();
+    s.export_def(&mut after).unwrap();
+    assert_eq!(def, after);
+}
+
+#[test]
+fn tap_identity_and_spacing_fail_without_publishing() {
+    let f = tapped_fixture();
+    let mut cfg: PhysicalConfig =
+        serde_json::from_slice(&fs::read(&f.config_path).unwrap()).unwrap();
+    cfg.tap.as_mut().unwrap().cell = "FILL".into();
+    fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+    assert!(f.import().unwrap_err().to_string().contains("WELLTAP"));
+    assert!(!f.workspace.join("HEAD").exists());
+    cfg.tap.as_mut().unwrap().cell = "TAP".into();
+    cfg.tap.as_mut().unwrap().max_gap = 0;
+    fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+    f.import().unwrap();
+    assert!(place(&f.workspace, "rev1", &limits()).is_err());
+    assert_eq!(f.head(), "rev1\n");
+}
+
+#[test]
+fn lost_tap_metadata_is_rejected_on_read() {
+    let f = tapped_fixture();
+    f.import().unwrap();
+    let p = place(&f.workspace, "rev1", &limits()).unwrap();
+    let file = f
+        .workspace
+        .join("revisions")
+        .join(p.revision)
+        .join("design.json");
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    value["physical"]["generated_taps"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    fs::write(file, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(read(&f.workspace, &limits()).is_err());
 }
 
 #[test]

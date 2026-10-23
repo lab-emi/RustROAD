@@ -12,8 +12,8 @@ readers. The LEF AST preserves integer geometry, pin use/direction, sites, layer
 and fixed vias; unsupported rules are counted diagnostics. The mapped AST keeps
 vectors, escaped names and aliases. `rustroad-workspace::pdk` joins these inputs,
 checks exact site/master units, and retains only used masters. Constants requiring
-tie-cell insertion, explicit supply networks and nonzero macro origins fail with
-diagnostics rather than guessed physical semantics.
+tie-cell insertion and explicit supply networks require a physical profile;
+nonzero macro origins fail with diagnostics rather than guessed semantics.
 
 Core connectivity has separate generational `InstId`, `CellId`, `NetId`, `PinId`
 arenas and a derived CSR view. It expands signal bits with hard caps and unifies
@@ -27,6 +27,25 @@ the tie fanout budget. Placement inserts physical-only fillers, validates LEF
 symmetry for N/FS, and checks primary rails across each full row and shared row
 boundaries. Horizontal rails join two independent vertical supply spines through
 pinned fixed vias. I/O and supply geometry use separate routing layers.
+
+Version 0.4 adds a separate bounded tap reservation/packing kernel. It reserves
+both row ends and intermediate site-aligned tap slots before packing logical
+cells and filling remaining gaps. The workspace validates the selected WELLTAP
+master and supply/LEF geometry, but deliberately does not infer GDS contacts from
+LEF labels. An independent checker reconstructs placed original-PDK GDS polygons
+and verifies contact-to-metal paths plus active-region distance within each
+well/substrate component. The profile's engineering distance policy is distinct
+from full foundry latch-up/DRC/LVS acceptance.
+
+The `clock-tree` mutation builds a bounded level-balanced buffer topology from
+one configured scalar input to direct configured sink pins, then re-places the
+logical cells and regenerates taps, fillers and primary supply geometry. A
+bounded breadth-first native check enforces sink coverage, uniform depth,
+fanout and no repeated nets. Independent OpenDB traces follow unique drivers
+backwards; Liberty SAT, whole-design CEC, simulation and ideal-wire timing provide
+separate semantic checks. This stage does not optimize skew or produce signal
+wire geometry. Timing remains ideal clock/ideal wire until a routed extraction
+and propagated-clock flow is implemented and independently validated.
 
 `rustroad-workspace` owns lock acquisition, strict schema validation, immutable
 revision directories and atomic HEAD replacement. The fixed 40-byte little-endian
@@ -51,6 +70,14 @@ table to the regenerated state. Repeated placement first removes generated
 fillers and rebuilds the same deterministic result; logical cells and inserted
 ties retain their ordering. Default Verilog export removes physical-only fillers,
 while `--include-power` exposes the full PG-connected view for physical checking.
+
+Tap/clock profiles use schema 4; schemas 1–3 remain readable. Schema 4 adds tap
+position records to `physical.rbin`, plus bounded tap and clock reports in the
+metadata. Taps are omitted from the logical Verilog view and included in the PG
+view. Inserted clock buffers remain in both. Re-placement removes generated taps
+and fillers, preserves the clock topology and original logical order, and
+rebuilds the same geometry. Older profiles without either feature still publish
+schema 3 snapshots.
 
 Readers hold shared locks for the lifetime of their mapped snapshot; a writer
 holds an exclusive lock through calculation and publication. This intentionally
@@ -88,14 +115,15 @@ independent of that storage order.
 1. **Broader technology and signoff requirements.** The LEF/mapped Verilog,
    boundary I/O, primary supply/tie network and N/FS rail-continuity paths are
    independently verified on the two baseline PDKs. Remaining scope includes DEF
-   import, well/tap placement, multi-height cells, richer orientations, complete
+   import, broader well/guard-ring policies, multi-height cells, richer orientations, complete
    design-rule interpretation, IR/EM and further PDK variants.
 2. **Legalization and global placement.** Keep fixed-order packing as a baseline.
    Define objective/QoR, displacement and density constraints; estimate memory
    for pin CSR, gradient and density buffers first. Deterministic `cpu_ref` and
    independent placement checks precede CUDA or Metal/Accelerate acceleration.
-3. **Clocking and routing.** Clock-aware edits require explicit SDC scope and
-   connectivity/formal checks. Routing owns integer geometry, a bounded frontier,
+3. **Clocking and routing.** The current clock topology has explicit port/cell
+   roles and passes connectivity/formal checks; SDC-derived clock constraints,
+   propagated-clock timing, skew-aware buffering and routing remain. Routing owns integer geometry, a bounded frontier,
    configurable expansion/memory caps and explicit no-route diagnostics.
 4. **Extraction and timing closure.** Corner-tagged SPEF must preserve net/pin
    identities, capacitance/resistance units and extracted topology. RustSTA needs

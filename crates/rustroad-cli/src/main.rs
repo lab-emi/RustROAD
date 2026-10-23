@@ -55,6 +55,11 @@ enum Command {
         #[arg(long)]
         base_rev: String,
     },
+    /// Build a bounded level-balanced clock-buffer topology, then replace placement.
+    ClockTree {
+        #[arg(long)]
+        base_rev: String,
+    },
     /// Read the current revision and honest analysis coverage.
     Inspect,
     /// Write placed DEF, including imported PINS/NETS when present.
@@ -130,6 +135,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::Place { base_rev } => {
             emit(&rustroad_workspace::place(&workspace, &base_rev, &limits)?)
         }
+        Command::ClockTree { base_rev } => emit(&rustroad_workspace::clock::synthesize(
+            &workspace, &base_rev, &limits,
+        )?),
         Command::Inspect => emit(&rustroad_workspace::read(&workspace, &limits)?.summary()),
         Command::ExportDef => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;

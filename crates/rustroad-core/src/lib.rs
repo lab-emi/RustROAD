@@ -8,6 +8,7 @@ pub mod connectivity;
 pub mod io;
 pub mod power;
 pub mod supply;
+pub mod tap;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Orientation {

@@ -88,7 +88,11 @@ def check_power_geometry(data, profile):
             if pin['name'] in primary:
                 boxes = [transformed(shape['rect'], inst) for shape in pin['shapes'] if shape['layer'] == profile['rail_layer']]
                 require(boxes, 'primary PG pin has no rail-layer shape')
-                bounding = (min(r[0] for r in boxes),min(r[1] for r in boxes),max(r[2] for r in boxes),max(r[3] for r in boxes))
+                # A tap primary pin can include well and metal geometry in one
+                # PORT. OpenDB's ITerm bbox covers all those shapes, whereas
+                # only routing-layer shapes belong in the conductor graph.
+                all_boxes = [transformed(shape['rect'], inst) for shape in pin['shapes']]
+                bounding = (min(r[0] for r in all_boxes),min(r[1] for r in all_boxes),max(r[2] for r in all_boxes),max(r[3] for r in all_boxes))
                 if pin.get('bbox') is not None:
                     require(tuple(pin['bbox']) == bounding, 'N/FS transform differs from OpenDB ITerm bbox')
                 for rect in boxes:

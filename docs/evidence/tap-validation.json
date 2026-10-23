@@ -1,0 +1,69 @@
+{
+  "schema": "rustroad.tap-validation.v1",
+  "date": "2026-10-23",
+  "version": "0.4.0",
+  "unit_integration": {
+    "passed": 74,
+    "failed": 0,
+    "wall_clock": "0:01.14",
+    "max_rss_kib": 264436,
+    "exit_status": 0
+  },
+  "real_lef_corpus": {
+    "passed": 2,
+    "wall_clock": "0:00.13",
+    "max_rss_kib": 35912,
+    "exit_status": 0
+  },
+  "clippy": {
+    "status": "passed",
+    "warnings": "denied",
+    "wall_clock": "0:00.49",
+    "max_rss_kib": 199632,
+    "exit_status": 0
+  },
+  "release": {
+    "status": "passed",
+    "wall_clock": "0:07.05",
+    "max_rss_kib": 395424,
+    "exit_status": 0
+  },
+  "dual_pdk": {
+    "status": "passed",
+    "receipts": 117,
+    "wall_clock": "0:16.56",
+    "max_rss_kib": 403524,
+    "exit_status": 0
+  },
+  "binary_sha256": "95f75e6816bc27ea1e92503bac648072d1e58fc4595c9682eddccc89a4a216a5",
+  "source_sha256": {
+    "Cargo.lock": "60fe6637e8d113b2fcd2a4ded151a24730778e0ef8f29a0c717999652d3a70f0",
+    "Cargo.toml": "5b247485880769316c7cdc52e6eb7406eac4b4caf2e6b2d4065fb8af05542c7d",
+    "crates/rustroad-cli/Cargo.toml": "47a11d1e4adab261825de57ef0d77e3a23eaa48f50486bf94055c28c4d7af3c8",
+    "crates/rustroad-cli/src/main.rs": "4e83744051d2564959ef1820bc22ec93f59196d1a5e88411b238c465c04022ce",
+    "crates/rustroad-core/Cargo.toml": "099c9f728a52198bae30c2adbcd3dad4fb9d6887165202ea82592867ae7126da",
+    "crates/rustroad-core/src/connectivity.rs": "d167c703e4ccb9ba7edec5490cf9f0dbd312e3a092bcd5d7aee075348e58aee0",
+    "crates/rustroad-core/src/io.rs": "56e82ac9596c61b1c8429ee397c693a63b5f8101ac2b3909670c5a2c55dab62e",
+    "crates/rustroad-core/src/lib.rs": "381285491f91ec9336e575f837183a4eda60468cf8c7a3457a526a0e119cad4b",
+    "crates/rustroad-core/src/power.rs": "bb0a4bcfae43b443444d057b270d59cfa1110a333e32436f29059ac3955085b3",
+    "crates/rustroad-core/src/supply.rs": "8279c03c91ab9687c4313296aa8b779729574024c7a0b464dda1eba758b68719",
+    "crates/rustroad-core/src/tap.rs": "2668a079b92b03b24e783f4b57eed3780c6ae0da1c08f08570fdce24d44642b9",
+    "crates/rustroad-flow/Cargo.toml": "63a2a7420a9c5f6aa0109c32de46098e9128c1b2956fab35f77d1e5c146aabae",
+    "crates/rustroad-flow/src/lib.rs": "f6b2b0a2cdaf5a3bfc8ae306bc926124c1334a260364ca1e2845cd334b7e1885",
+    "crates/rustroad-formats/Cargo.toml": "cb575b0c505bc6d78affcfa27b86247302ec99dd02bbff16f132b32462c93b48",
+    "crates/rustroad-formats/src/lef.rs": "8cd2988d143a458312a6d546acd2920948c23ebaa70054c0a369a66e508ae6ac",
+    "crates/rustroad-formats/src/lib.rs": "b6b712fb8b09b0ea176c42821480e808a0d89516073bfcc60781a1674e566132",
+    "crates/rustroad-formats/src/verilog.rs": "2c50f26e19f2864af4661d786b682d75b47aa5bb2ef9599dff97b73cb360d7dc",
+    "crates/rustroad-workspace/Cargo.toml": "bf3805316d5f793c5813e0557e1135c71e19463f9498d8383d0d77d8cef0891b",
+    "crates/rustroad-workspace/src/clock.rs": "0e92749c7fd6fd1f8a6b4e58213df9fc6a46b3c51177862b169e010ec95a3c31",
+    "crates/rustroad-workspace/src/lib.rs": "69a5cdf1103a30c8a2acf65e3fc17f6438bad8c54ff3cb0de5d690e7db3f883a",
+    "crates/rustroad-workspace/src/pdk.rs": "b299bfacdc5502d111f89e62591b14e78c09c19eb16b9459ef93e02f6eb28b56",
+    "crates/rustroad-workspace/src/physical.rs": "22bd056e1f1424e6a6029ff559c3a0ec47506dd21beb9c615b478435305f1aa7",
+    "crates/rustroad-workspace/src/ties.rs": "d771cf701d668f8d56b9cc25f51c76af5d54f03f019b6d26ca0d0921d3b9427e",
+    "crates/rustroad-workspace/tests/pdk_import.rs": "2fcc3d58f4b9342fda1d13c96b49b0c928eacead23df72adb7da2504e7531b8a",
+    "crates/rustroad-workspace/tests/physical_prepare.rs": "d26deb423ff6ae2b386ddac2f8d9fdd045d8cc8d933707a11a3168c104cc92c5",
+    "crates/rustroad-workspace/tests/robustness.rs": "08fac2391cb0400df72ee5e41948742e7b898feaa2e0c0b2e00890250e2e1a10"
+  },
+  "full_rtl_to_gds_status": "unverified",
+  "report_validation": "HTML source, local links, unique IDs and embedded JavaScript syntax checked; browser rendering unverified"
+}

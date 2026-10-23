@@ -1,0 +1,1818 @@
+{
+  "schema": "rustroad.tap-layout.v1",
+  "pdk": "gf180",
+  "units_per_micron": 2000,
+  "die": [
+    0,
+    0,
+    140000,
+    141120
+  ],
+  "core": {
+    "lx": 22400,
+    "ly": 39200,
+    "ux": 134400,
+    "uy": 101920
+  },
+  "rows": [
+    {
+      "x_start": 22400,
+      "x_end": 134400,
+      "y": 39200
+    },
+    {
+      "x_start": 22400,
+      "x_end": 134400,
+      "y": 47040
+    },
+    {
+      "x_start": 22400,
+      "x_end": 134400,
+      "y": 54880
+    },
+    {
+      "x_start": 22400,
+      "x_end": 134400,
+      "y": 62720
+    },
+    {
+      "x_start": 22400,
+      "x_end": 134400,
+      "y": 70560
+    },
+    {
+      "x_start": 22400,
+      "x_end": 134400,
+      "y": 78400
+    },
+    {
+      "x_start": 22400,
+      "x_end": 134400,
+      "y": 86240
+    },
+    {
+      "x_start": 22400,
+      "x_end": 134400,
+      "y": 94080
+    }
+  ],
+  "cells": [
+    {
+      "name": "g0",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__and2_1",
+      "x": 24640,
+      "y": 39200,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g1",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+      "x": 33600,
+      "y": 39200,
+      "width": 17920,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g2",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__and2_1",
+      "x": 61600,
+      "y": 39200,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g3",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+      "x": 70560,
+      "y": 39200,
+      "width": 17920,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g4",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__and2_1",
+      "x": 98560,
+      "y": 39200,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g5",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+      "x": 107520,
+      "y": 39200,
+      "width": 17920,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g6",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__and2_1",
+      "x": 24640,
+      "y": 47040,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "g7",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+      "x": 33600,
+      "y": 47040,
+      "width": 17920,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "g8",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__or2_4",
+      "x": 61600,
+      "y": 47040,
+      "width": 20160,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "g9",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__and3_4",
+      "x": 98560,
+      "y": 47040,
+      "width": 22400,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "g10",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__or2_4",
+      "x": 24640,
+      "y": 54880,
+      "width": 20160,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g11",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__and3_4",
+      "x": 61600,
+      "y": 54880,
+      "width": 22400,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g12",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__or2_4",
+      "x": 98560,
+      "y": 54880,
+      "width": 20160,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g13",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__and3_4",
+      "x": 24640,
+      "y": 62720,
+      "width": 22400,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "g14",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__or2_4",
+      "x": 61600,
+      "y": 62720,
+      "width": 20160,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "g15",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__and3_4",
+      "x": 98560,
+      "y": 62720,
+      "width": 22400,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "r0",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
+      "x": 24640,
+      "y": 70560,
+      "width": 32480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "r1",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
+      "x": 61600,
+      "y": 70560,
+      "width": 32480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "r2",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
+      "x": 98560,
+      "y": 70560,
+      "width": 32480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "r3",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
+      "x": 24640,
+      "y": 78400,
+      "width": 32480,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "r4",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
+      "x": 61600,
+      "y": 78400,
+      "width": 32480,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "r5",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
+      "x": 98560,
+      "y": 78400,
+      "width": 32480,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "rr_tie_cell_0",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+      "x": 24640,
+      "y": 86240,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tie"
+    },
+    {
+      "name": "rr_tie_cell_1",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+      "x": 29120,
+      "y": 86240,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tie"
+    },
+    {
+      "name": "rr_clkbuf_0",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+      "x": 33600,
+      "y": 86240,
+      "width": 6720,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "clock"
+    },
+    {
+      "name": "rr_clkbuf_1",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+      "x": 40320,
+      "y": 86240,
+      "width": 6720,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "clock"
+    },
+    {
+      "name": "rr_clkbuf_2",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+      "x": 47040,
+      "y": 86240,
+      "width": 6720,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "clock"
+    },
+    {
+      "name": "rr_clkbuf_3",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+      "x": 61600,
+      "y": 86240,
+      "width": 6720,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "clock"
+    },
+    {
+      "name": "rr_clkbuf_4",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+      "x": 68320,
+      "y": 86240,
+      "width": 6720,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "clock"
+    },
+    {
+      "name": "rr_clkbuf_5",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+      "x": 75040,
+      "y": 86240,
+      "width": 6720,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "clock"
+    },
+    {
+      "name": "rr_tap_0",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 22400,
+      "y": 39200,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_1",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 59360,
+      "y": 39200,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_2",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 96320,
+      "y": 39200,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_3",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 132160,
+      "y": 39200,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_4",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 22400,
+      "y": 47040,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_5",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 59360,
+      "y": 47040,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_6",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 96320,
+      "y": 47040,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_7",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 132160,
+      "y": 47040,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_8",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 22400,
+      "y": 54880,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_9",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 59360,
+      "y": 54880,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_10",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 96320,
+      "y": 54880,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_11",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 132160,
+      "y": 54880,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_12",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 22400,
+      "y": 62720,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_13",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 59360,
+      "y": 62720,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_14",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 96320,
+      "y": 62720,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_15",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 132160,
+      "y": 62720,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_16",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 22400,
+      "y": 70560,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_17",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 59360,
+      "y": 70560,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_18",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 96320,
+      "y": 70560,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_19",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 132160,
+      "y": 70560,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_20",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 22400,
+      "y": 78400,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_21",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 59360,
+      "y": 78400,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_22",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 96320,
+      "y": 78400,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_23",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 132160,
+      "y": 78400,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_24",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 22400,
+      "y": 86240,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_25",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 59360,
+      "y": 86240,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_26",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 96320,
+      "y": 86240,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_27",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 132160,
+      "y": 86240,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_28",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 22400,
+      "y": 94080,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_29",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 59360,
+      "y": 94080,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_30",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 96320,
+      "y": 94080,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_tap_31",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+      "x": 132160,
+      "y": 94080,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "tap"
+    },
+    {
+      "name": "rr_fill_0",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 51520,
+      "y": 39200,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_1",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 56000,
+      "y": 39200,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_2",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 58240,
+      "y": 39200,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_3",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 88480,
+      "y": 39200,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_4",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 92960,
+      "y": 39200,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_5",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 95200,
+      "y": 39200,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_6",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 125440,
+      "y": 39200,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_7",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 129920,
+      "y": 39200,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_8",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 51520,
+      "y": 47040,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_9",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 56000,
+      "y": 47040,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_10",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 58240,
+      "y": 47040,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_11",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 81760,
+      "y": 47040,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_12",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 90720,
+      "y": 47040,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_13",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 95200,
+      "y": 47040,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_14",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 120960,
+      "y": 47040,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_15",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 129920,
+      "y": 47040,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_16",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 44800,
+      "y": 54880,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_17",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 53760,
+      "y": 54880,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_18",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 58240,
+      "y": 54880,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_19",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 84000,
+      "y": 54880,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_20",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 92960,
+      "y": 54880,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_21",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 95200,
+      "y": 54880,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_22",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 118720,
+      "y": 54880,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_23",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 127680,
+      "y": 54880,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_24",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 47040,
+      "y": 62720,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_25",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 56000,
+      "y": 62720,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_26",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 58240,
+      "y": 62720,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_27",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 81760,
+      "y": 62720,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_28",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 90720,
+      "y": 62720,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_29",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 95200,
+      "y": 62720,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_30",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 120960,
+      "y": 62720,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_31",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 129920,
+      "y": 62720,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_32",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 57120,
+      "y": 70560,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_33",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 94080,
+      "y": 70560,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_34",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 131040,
+      "y": 70560,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_35",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 57120,
+      "y": 78400,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_36",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 94080,
+      "y": 78400,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_37",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 131040,
+      "y": 78400,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_38",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 53760,
+      "y": 86240,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_39",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 58240,
+      "y": 86240,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_40",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 81760,
+      "y": 86240,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_41",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 90720,
+      "y": 86240,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_42",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 95200,
+      "y": 86240,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_43",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+      "x": 98560,
+      "y": 86240,
+      "width": 17920,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_44",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 116480,
+      "y": 86240,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_45",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 125440,
+      "y": 86240,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_46",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 129920,
+      "y": 86240,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_47",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+      "x": 24640,
+      "y": 94080,
+      "width": 17920,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_48",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 42560,
+      "y": 94080,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_49",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 51520,
+      "y": 94080,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_50",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 56000,
+      "y": 94080,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_51",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 58240,
+      "y": 94080,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_52",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+      "x": 61600,
+      "y": 94080,
+      "width": 17920,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_53",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 79520,
+      "y": 94080,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_54",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 88480,
+      "y": 94080,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_55",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 92960,
+      "y": 94080,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_56",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+      "x": 95200,
+      "y": 94080,
+      "width": 1120,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_57",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+      "x": 98560,
+      "y": 94080,
+      "width": 17920,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_58",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+      "x": 116480,
+      "y": 94080,
+      "width": 8960,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_59",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+      "x": 125440,
+      "y": 94080,
+      "width": 4480,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_60",
+      "master": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+      "x": 129920,
+      "y": 94080,
+      "width": 2240,
+      "height": 7840,
+      "orientation": "MX",
+      "role": "filler"
+    }
+  ],
+  "wires": [
+    {
+      "net": "VDD",
+      "layer": "Metal2",
+      "rect": [
+        200,
+        0,
+        1000,
+        102700
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VDD",
+      "layer": "Metal1",
+      "rect": [
+        0,
+        46440,
+        135000,
+        47640
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VDD",
+      "layer": "Metal1",
+      "rect": [
+        0,
+        62120,
+        135000,
+        63320
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VDD",
+      "layer": "Metal1",
+      "rect": [
+        0,
+        77800,
+        135000,
+        79000
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VDD",
+      "layer": "Metal1",
+      "rect": [
+        0,
+        93480,
+        135000,
+        94680
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "Metal2",
+      "rect": [
+        3000,
+        0,
+        3800,
+        102700
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "Metal1",
+      "rect": [
+        2800,
+        38600,
+        135000,
+        39800
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "Metal1",
+      "rect": [
+        2800,
+        54280,
+        135000,
+        55480
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "Metal1",
+      "rect": [
+        2800,
+        69960,
+        135000,
+        71160
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "Metal1",
+      "rect": [
+        2800,
+        85640,
+        135000,
+        86840
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "Metal1",
+      "rect": [
+        2800,
+        101320,
+        135000,
+        102520
+      ],
+      "kind": "wire"
+    }
+  ],
+  "io": [
+    {
+      "name": "clk",
+      "net": "clk",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            0,
+            2400,
+            800,
+            3200
+          ]
+        }
+      ]
+    },
+    {
+      "name": "en",
+      "net": "en",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            139200,
+            2400,
+            140000,
+            3200
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a[3]",
+      "net": "a[3]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            2400,
+            0,
+            3200,
+            800
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a[2]",
+      "net": "a[2]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            2400,
+            140320,
+            3200,
+            141120
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a[1]",
+      "net": "a[1]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            0,
+            36280,
+            800,
+            37080
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a[0]",
+      "net": "a[0]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            139200,
+            36280,
+            140000,
+            37080
+          ]
+        }
+      ]
+    },
+    {
+      "name": "b[3]",
+      "net": "b[3]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            36000,
+            0,
+            36800,
+            800
+          ]
+        }
+      ]
+    },
+    {
+      "name": "b[2]",
+      "net": "b[2]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            36000,
+            140320,
+            36800,
+            141120
+          ]
+        }
+      ]
+    },
+    {
+      "name": "b[1]",
+      "net": "b[1]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            0,
+            70160,
+            800,
+            70960
+          ]
+        }
+      ]
+    },
+    {
+      "name": "b[0]",
+      "net": "b[0]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            139200,
+            70160,
+            140000,
+            70960
+          ]
+        }
+      ]
+    },
+    {
+      "name": "y[3]",
+      "net": "y[3]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            69600,
+            0,
+            70400,
+            800
+          ]
+        }
+      ]
+    },
+    {
+      "name": "y[2]",
+      "net": "y[2]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            69600,
+            140320,
+            70400,
+            141120
+          ]
+        }
+      ]
+    },
+    {
+      "name": "y[1]",
+      "net": "y[1]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            0,
+            104040,
+            800,
+            104840
+          ]
+        }
+      ]
+    },
+    {
+      "name": "y[0]",
+      "net": "y[0]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            139200,
+            104040,
+            140000,
+            104840
+          ]
+        }
+      ]
+    },
+    {
+      "name": "z[3]",
+      "net": "z[3]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            103200,
+            0,
+            104000,
+            800
+          ]
+        }
+      ]
+    },
+    {
+      "name": "z[2]",
+      "net": "z[2]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            103200,
+            140320,
+            104000,
+            141120
+          ]
+        }
+      ]
+    },
+    {
+      "name": "z[1]",
+      "net": "z[1]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            0,
+            137920,
+            800,
+            138720
+          ]
+        }
+      ]
+    },
+    {
+      "name": "z[0]",
+      "net": "z[0]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            139200,
+            137920,
+            140000,
+            138720
+          ]
+        }
+      ]
+    },
+    {
+      "name": "high_bit",
+      "net": "high_bit",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            136800,
+            0,
+            137600,
+            800
+          ]
+        }
+      ]
+    },
+    {
+      "name": "low_bit",
+      "net": "low_bit",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "Metal3",
+          "rect": [
+            136800,
+            140320,
+            137600,
+            141120
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VDD",
+      "net": "VDD",
+      "status": "FIRM",
+      "direction": "inout",
+      "use": "power",
+      "shapes": [
+        {
+          "layer": "Metal2",
+          "rect": [
+            200,
+            0,
+            1000,
+            800
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VSS",
+      "net": "VSS",
+      "status": "FIRM",
+      "direction": "inout",
+      "use": "ground",
+      "shapes": [
+        {
+          "layer": "Metal2",
+          "rect": [
+            3000,
+            0,
+            3800,
+            800
+          ]
+        }
+      ]
+    }
+  ],
+  "source": {
+    "path": "/mnt/data2/cgao/git/RustROAD/.work/tap-release-final/gf180_clock_power_geometry.json",
+    "sha256": "69e595981e03eee45ab2ea936d40de8f329936ca92cf7797a16c3f22a371d7a6",
+    "bytes": 369907
+  },
+  "routing_status": "not_run"
+}

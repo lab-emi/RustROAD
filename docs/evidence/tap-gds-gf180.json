@@ -1,0 +1,29 @@
+{
+  "schema": "rustroad.tap-gds.v1",
+  "status": "passed",
+  "tap_master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+  "tap_instances": 32,
+  "contact_counts_per_tap": {
+    "nwell": 3,
+    "substrate": 2
+  },
+  "body_components_contacted": {
+    "nwell": 4,
+    "substrate": 5
+  },
+  "distance_metric": "Manhattan contact-rectangle coverage of all active polygons within each body component",
+  "max_distance_dbu": 30000,
+  "dbu_per_micron": 2000,
+  "gds_scale": 2,
+  "source_shapes": 62,
+  "active_input_cells_checked": 28,
+  "work_units": 369,
+  "negative_controls": {
+    "missing_contact": "rejected",
+    "missing_taps": "rejected",
+    "end_only_taps": "rejected"
+  },
+  "latchup_signoff": "unchecked",
+  "drc_status": "unchecked",
+  "scope": "standard single-well core cells; no deep-well, IO guard-ring, IR/EM or full-deck claim"
+}

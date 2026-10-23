@@ -8,6 +8,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
+pub mod clock;
 pub mod pdk;
 pub mod physical;
 pub mod ties;
@@ -78,6 +79,10 @@ pub struct Summary {
     pub filler_cells: Option<usize>,
     pub rail_continuity_status: &'static str,
     pub body_bias_status: &'static str,
+    pub tap_cells: Option<usize>,
+    pub tap_placement_status: &'static str,
+    pub clock_buffers: Option<usize>,
+    pub clock_topology_status: &'static str,
 }
 impl Metadata {
     pub fn summary(&self) -> Summary {
@@ -134,10 +139,39 @@ impl Metadata {
             } else {
                 "unchecked"
             },
-            body_bias_status: if self.physical.as_ref().is_some_and(|p| p.config.is_some()) {
+            body_bias_status: if self
+                .physical
+                .as_ref()
+                .is_some_and(|p| p.state.as_ref().is_some_and(|s| s.tap.is_some()))
+            {
+                "tap_inserted_contact_unverified"
+            } else if self.physical.as_ref().is_some_and(|p| p.config.is_some()) {
                 "logically_connected"
             } else {
                 "unchecked"
+            },
+            tap_cells: self.physical.as_ref().map(|p| p.generated_taps.len()),
+            tap_placement_status: if self
+                .physical
+                .as_ref()
+                .is_some_and(|p| p.state.as_ref().is_some_and(|s| s.tap.is_some()))
+            {
+                "geometry_checked"
+            } else {
+                "unchecked"
+            },
+            clock_buffers: self
+                .physical
+                .as_ref()
+                .and_then(|p| p.clock_tree.as_ref().map(|t| t.buffers.len())),
+            clock_topology_status: if self
+                .physical
+                .as_ref()
+                .is_some_and(|p| p.clock_tree.is_some())
+            {
+                "unrouted_topology_checked"
+            } else {
+                "not_run"
             },
         }
     }
@@ -383,7 +417,7 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         &revision_dir.join("design.json"),
         MAX_METADATA_BYTES,
     )?)?;
-    if !matches!(metadata.format_version, 1..=3)
+    if !matches!(metadata.format_version, 1..=4)
         || metadata.revision != current
         || revision_number(&metadata.parent_revision)? >= revision_number(&current)?
     {
@@ -391,13 +425,22 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
     }
     metadata.design.validate(limits)?;
     if (metadata.format_version >= 2) != metadata.physical.is_some()
-        || (metadata.format_version == 3)
+        || (metadata.format_version >= 3)
             != metadata
                 .physical
                 .as_ref()
                 .is_some_and(|p| p.config.is_some())
     {
         return Err(Error::Invalid("connected schema/payload mismatch".into()));
+    }
+    if (metadata.format_version == 4)
+        != metadata.physical.as_ref().is_some_and(|p| {
+            p.config
+                .as_ref()
+                .is_some_and(|c| c.tap.is_some() || c.clock.is_some())
+        })
+    {
+        return Err(Error::Invalid("tap schema/configuration mismatch".into()));
     }
     let connections = if let Some(physical) = &metadata.physical {
         pdk::validate_bundle(physical, &metadata.design, &ConnectivityLimits::default())?;

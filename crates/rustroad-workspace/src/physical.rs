@@ -30,6 +30,15 @@ pub struct TieCell {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct TapConfig {
+    pub cell: String,
+    /// Maximum clear horizontal interval between reserved tap-cell edges.
+    pub max_gap: i64,
+    pub well_layer: String,
+    pub substrate_layer: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PhysicalConfig {
     pub power_net: String,
     pub ground_net: String,
@@ -57,9 +66,25 @@ pub struct PhysicalConfig {
     pub max_added_cells: usize,
     #[serde(default = "default_fanout")]
     pub max_tie_fanout: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tap: Option<TapConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock: Option<crate::clock::ClockConfig>,
 }
 impl PhysicalConfig {
     pub fn validate(&self) -> Result<()> {
+        if let Some(c) = &self.clock {
+            c.validate()?;
+        }
+        if let Some(t) = &self.tap
+            && (t.max_gap < 0
+                || t.well_layer == t.substrate_layer
+                || [&t.cell, &t.well_layer, &t.substrate_layer]
+                    .iter()
+                    .any(|n| !rustroad_core::valid_object_name(n)))
+        {
+            return Err(Error::Invalid("invalid tap policy".into()));
+        }
         if self.max_added_cells > 250_000
             || self.max_tie_fanout == 0
             || self.max_tie_fanout > 10_000
@@ -145,6 +170,57 @@ pub struct PhysicalState {
     pub rails: RailReport,
     pub supply: SupplyGrid,
     pub fillers_added: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tap: Option<rustroad_core::tap::TapReport>,
+}
+
+pub(super) fn validate_tap_master(bundle: &PhysicalBundle) -> Result<()> {
+    let Some(cfg) = bundle.config.as_ref() else {
+        return Ok(());
+    };
+    let Some(tap) = &cfg.tap else {
+        if !bundle.generated_taps.is_empty() {
+            return Err(Error::Invalid("tap instances without policy".into()));
+        }
+        return Ok(());
+    };
+    let m = bundle
+        .connectivity
+        .masters
+        .iter()
+        .find(|m| m.name == tap.cell)
+        .ok_or_else(|| Error::Invalid("tap master absent".into()))?;
+    if !m.class.as_deref().is_some_and(|c| {
+        c.split_whitespace()
+            .any(|s| s.eq_ignore_ascii_case("WELLTAP"))
+    }) || m.pins.iter().any(|p| !p.use_.is_supply())
+    {
+        return Err(Error::Invalid(
+            "tap master must be a signal-free LEF WELLTAP".into(),
+        ));
+    }
+    for (name, usage, body) in [
+        (&cfg.power_pin, PinUse::Power, &tap.well_layer),
+        (&cfg.ground_pin, PinUse::Ground, &tap.substrate_layer),
+    ] {
+        let p = m
+            .pins
+            .iter()
+            .find(|p| &p.name == name && p.use_ == usage)
+            .ok_or_else(|| Error::Invalid("tap primary pin missing or wrong use".into()))?;
+        let has = |name: &str| {
+            p.ports.iter().flatten().any(|g| match g {
+                rustroad_core::connectivity::Geometry::Rect { layer, .. }
+                | rustroad_core::connectivity::Geometry::Polygon { layer, .. } => layer == name,
+            })
+        };
+        if !has(body) || !has(&cfg.rail_layer) {
+            return Err(Error::Invalid(
+                "tap must expose both body and primary rail geometry on its supply pin".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn attach_supplies(
@@ -307,13 +383,14 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
 }
 
 pub(super) fn clear_fillers(design: &mut Design, bundle: &mut PhysicalBundle) -> Result<()> {
-    if bundle.generated_fillers.is_empty() {
+    if bundle.generated_fillers.is_empty() && bundle.generated_taps.is_empty() {
         bundle.state = None;
         return Ok(());
     }
     let names: HashSet<_> = bundle
         .generated_fillers
         .iter()
+        .chain(bundle.generated_taps.iter())
         .map(String::as_str)
         .collect();
     design.cells.retain(|c| !names.contains(c.name.as_str()));
@@ -322,6 +399,7 @@ pub(super) fn clear_fillers(design: &mut Design, bundle: &mut PhysicalBundle) ->
         .instances
         .retain(|c| !names.contains(c.name.as_str()));
     bundle.generated_fillers.clear();
+    bundle.generated_taps.clear();
     bundle.state = None;
     relink(bundle)?;
     Ok(())
@@ -379,6 +457,69 @@ pub(super) fn prepare(
         .config
         .clone()
         .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
+    validate_tap_master(bundle)?;
+    let mut tap_work = 0usize;
+    if let Some(tap) = &cfg.tap {
+        let m = bundle
+            .connectivity
+            .masters
+            .iter()
+            .find(|m| m.name == tap.cell)
+            .unwrap();
+        let width = m.size[0];
+        let remaining = cfg
+            .max_added_cells
+            .saturating_sub(bundle.ties.as_ref().map_or(0, |t| t.new_cells))
+            .saturating_sub(bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len()))
+            .min(limits.max_cells.saturating_sub(design.cells.len()));
+        let plan = rustroad_core::tap::place(
+            design,
+            width,
+            tap.max_gap,
+            &rustroad_core::tap::TapLimits {
+                max_taps: remaining,
+                max_work: limits.max_expansions,
+            },
+        )?;
+        tap_work = plan.report.work_units;
+        for (p, xy) in placed.iter_mut().zip(plan.cells) {
+            p.x = xy[0];
+            p.y = xy[1];
+        }
+        let mut used: HashSet<_> = design.cells.iter().map(|c| c.name.clone()).collect();
+        let mut next = 0usize;
+        for slot in plan.report.sites {
+            let name = loop {
+                if next > limits.max_cells.saturating_add(used.len()) {
+                    return Err(Error::Budget("tap name search exceeded".into()));
+                }
+                let n = format!("rr_tap_{next}");
+                next += 1;
+                if used.insert(n.clone()) {
+                    break n;
+                }
+            };
+            design.cells.push(Cell {
+                name: name.clone(),
+                master: tap.cell.clone(),
+                width,
+                height: design.site.height,
+            });
+            bundle.netlist.instances.push(verilog::Instance {
+                name: name.clone(),
+                cell: tap.cell.clone(),
+                connections: Vec::new(),
+            });
+            bundle.generated_taps.push(name);
+            placed.push(Placed {
+                id: 0,
+                x: slot.x,
+                y: slot.y,
+                width,
+                height: design.site.height,
+            });
+        }
+    }
     let by_name: HashMap<_, _> = bundle
         .connectivity
         .masters
@@ -428,6 +569,8 @@ pub(super) fn prepare(
                     .ok_or_else(|| Error::Invalid("unfillable row gap".into()))?;
                 if design.cells.len() >= limits.max_cells
                     || bundle.generated_fillers.len()
+                        + bundle.generated_taps.len()
+                        + bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len())
                         + bundle.ties.as_ref().map_or(0, |t| t.new_cells)
                         >= cfg.max_added_cells
                 {
@@ -482,7 +625,12 @@ pub(super) fn prepare(
         .connectivity
         .validate(design, &ConnectivityLimits::default())?;
     let state = layout(design, bundle, &placed)?;
-    let expansions = bundle.generated_fillers.len() + design.rows.len();
+    let expansions = bundle
+        .generated_fillers
+        .len()
+        .checked_add(design.rows.len())
+        .and_then(|v| v.checked_add(tap_work))
+        .ok_or_else(|| Error::Budget("physical work overflow".into()))?;
     bundle.state = Some(state);
     bundle.diagnostics.retain(|d| {
         !matches!(
@@ -520,6 +668,7 @@ pub(super) fn layout(
         .config
         .as_ref()
         .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
+    validate_tap_master(bundle)?;
     rustroad_core::validate_placement(design, placed, &Limits::default())?;
     let mut intervals: Vec<_> = placed
         .iter()
@@ -678,11 +827,53 @@ pub(super) fn layout(
         &SupplyLimits::default(),
     )
     .map_err(|e| Error::Invalid(e.to_string()))?;
+    let tap_report = if let Some(tap) = &cfg.tap {
+        let m = bundle
+            .connectivity
+            .masters
+            .iter()
+            .find(|m| m.name == tap.cell)
+            .unwrap();
+        let report = rustroad_core::tap::reserve(
+            design,
+            m.size[0],
+            tap.max_gap,
+            &rustroad_core::tap::TapLimits::default(),
+        )?;
+        let indices: HashMap<_, _> = design
+            .cells
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.name.as_str(), i))
+            .collect();
+        let mut actual = Vec::with_capacity(bundle.generated_taps.len());
+        for name in &bundle.generated_taps {
+            let i = *indices
+                .get(name.as_str())
+                .ok_or_else(|| Error::Invalid("tap instance missing".into()))?;
+            if design.cells[i].master != tap.cell {
+                return Err(Error::Invalid("tap master mismatch".into()));
+            }
+            actual.push((placed[i].y, placed[i].x));
+        }
+        actual.sort_unstable();
+        let mut expected: Vec<_> = report.sites.iter().map(|s| (s.y, s.x)).collect();
+        expected.sort_unstable();
+        if actual != expected {
+            return Err(Error::Invalid(
+                "tap placement/coverage differs from reserved policy".into(),
+            ));
+        }
+        Some(report)
+    } else {
+        None
+    };
     Ok(PhysicalState {
         io_pins,
         rails,
         supply,
         fillers_added: bundle.generated_fillers.len(),
+        tap: tap_report,
     })
 }
 
@@ -737,7 +928,11 @@ pub(super) fn export_verilog(
             }
         }
     } else {
-        let names: HashSet<_> = bundle.generated_fillers.iter().collect();
+        let names: HashSet<_> = bundle
+            .generated_fillers
+            .iter()
+            .chain(bundle.generated_taps.iter())
+            .collect();
         netlist.instances.retain(|i| !names.contains(&i.name));
     }
     verilog::write_verilog(&netlist, output).map_err(|e| Error::Invalid(e.to_string()))?;
@@ -890,6 +1085,7 @@ pub(super) fn table_bytes(state: &PhysicalState) -> Result<Vec<u8>> {
         .checked_add(state.supply.ports.len())
         .and_then(|n| n.checked_add(state.supply.wires.len()))
         .and_then(|n| n.checked_add(state.supply.vias.len()))
+        .and_then(|n| n.checked_add(state.tap.as_ref().map_or(0, |t| t.sites.len())))
         .ok_or_else(|| Error::Budget("physical table count overflow".into()))?;
     let bytes = count
         .checked_mul(64)
@@ -920,6 +1116,11 @@ pub(super) fn table_bytes(state: &PhysicalState) -> Result<Vec<u8>> {
     }
     for (i, v) in state.supply.vias.iter().enumerate() {
         record([4, i as i64, v.at[0], v.at[1], 0, 0, 0, 0]);
+    }
+    if let Some(tap) = &state.tap {
+        for (i, t) in tap.sites.iter().enumerate() {
+            record([5, i as i64, t.x, t.y, t.width, t.row as i64, 0, 0]);
+        }
     }
     Ok(out)
 }
