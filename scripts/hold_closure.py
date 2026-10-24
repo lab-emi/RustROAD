@@ -92,9 +92,9 @@ ROAD_LIMITS = {
 }
 # Native extraction work budget per recipe (comparisons; memory is bounded by
 # the shape/node caps, not by this count). The default 2e8 is the legacy
-# value; regfile-size track layouts need ~2e8 already, so the track recipe
-# uses the extractor's hard ceiling (8x the default).
-EXTRACT_LIMITS = {'legacy': [], 'track': ['--max-extract-work', '1600000000', '--max-coupling-caps', '8000000',
+# value; regfile-size track layouts need ~2e8 and SERV more than 1.6e9, so
+# the track recipe allows 1.28e10 (the extractor's hard ceiling, 64x).
+EXTRACT_LIMITS = {'legacy': [], 'track': ['--max-extract-work', '12800000000', '--max-coupling-caps', '8000000',
                                           '--max-rc-nodes', '4000000', '--max-spef-mib', '256']}
 # RustSTA SPEF import limits per recipe (legacy: this script's original
 # values; track: SERV-size blocks, below the engine's own hard limits).
