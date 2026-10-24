@@ -250,30 +250,43 @@ virtual clock (zero physical clock domains required).
 Each iteration is a complete layout (import, place, CTS, route, native
 extraction, RustSTA on native SPEF, native antenna check). Legacy recipe:
 unchanged (hold ECO while not closed, then antenna ECO). Track recipe
-(`sizing_profile` set), one decision per iteration:
+(`sizing_profile` set; details, estimates and bounds in `docs/closure.md`):
 
-1. setup < 0 or any DRV violation (RustSTA `drv` report) -> **gate-sizing
-   ECO** (`size_eco`): the driver of every net with a max-transition or
-   max-capacitance violation (one to three sizes up by the violation ratio)
-   and every cell on the worst setup path of up to 48 failing endpoints (one
-   size up) moves to a larger member of its Liberty drive family
-   (`fixtures/pdk/<pdk>-sizing.json`, `scripts/build_sizing_profile.py`: same
-   pins, directions, output functions and sequential description; policy
-   `synth_dont_use`/`pnr_exclude` excluded). Bounds: 256 resizes per
-   iteration, the tap clear gap for the new width, 70 % row utilization.
-   Applied by `rustroad apply-eco --sizing-profile` (`resize_cell`: name
-   and connections kept, master only within the family). CTS, hold, tie and
-   diode cells are never resized.
-2. hold below `hold_eco_target_margin_ns` -> hold ECO (as before). When
-   native SPEF is closed, OpenRCX on the same DEF is timed by RustSTA; a
-   reference hold below the gate margin raises the native target by the
+1. setup < 0 or any DRV violation (RustSTA `drv` report) -> **DRV/setup
+   ECO** (`closure_eco`): buffer insertion (`buffer_sinks`: repeaters on
+   overloaded or long nets, input-port buffering, critical-sink isolation;
+   sinks clustered by their DEF positions, a setup guard keeps critical
+   sinks on their driver) plus gate sizing decided by RustSTA `whatif` on
+   the layout's SPEF (resizes are exact there), applied as one plan by
+   `rustroad apply-eco --sizing-profile`; while setup fails, timing-driven
+   net weights for the next placement. Buffer masters and families come
+   from `fixtures/pdk/<pdk>-sizing.json` (Liberty-derived, cell policy
+   applied, now with per-corner drive data). CTS, hold, tie and diode cells
+   are never resized.
+2. hold below `hold_eco_target_margin_ns` -> **path-aware hold ECO**
+   (`hold-eco --pins-report`, partial plans): delay goes on the worst hold
+   path where the setup slack of every path through the point allows it
+   (a branch pin after the divergence, or one chain in front of all sinks
+   of a small net such as an input port), planned 0.03 ns above the target.
+   When native SPEF is closed, OpenRCX on the same DEF is timed by RustSTA;
+   a reference hold below the gate margin raises the native target by the
    shortfall + 10 ps for the next hold ECO (uart sky130 was 0.046 ns on
-   OpenRCX with 0.078 ns native).
+   OpenRCX with 0.078 ns native). After the first DRV/setup ECO, a layout
+   that needs both gets both (hold plan first, then the DRV/setup plan on
+   top of it).
 3. antenna violated on a setup- and DRV-clean layout -> antenna ECO.
 
-A hold ECO that is infeasible, or an ECO layout that cannot be built, ends
-the loop on the last complete layout (recorded); every oracle still runs on
-it and `hold_closure` reports the failure. Native extraction lists declared
+From the second layout on, placement is seeded from the previous one
+(`place --seed`: legalization from the previous positions, no global
+solve). DRV/setup ECOs stop after two consecutive layouts without progress.
+The loop's final layout is its best complete layout (fewest failing
+categories, then the smallest deficit; `selected_iteration` in the record
+when that is not the last one).
+
+A hold ECO with no feasible point at all, or an ECO layout that cannot be
+built, ends the loop (recorded, with the infeasible endpoints and the setup
+budget of each point of their hold paths); every oracle still runs on the
+selected layout and `hold_closure` reports the failure. Native extraction lists declared
 nets without any pin (`pinless_signal_nets`, dangling RustSys wires)
 separately from unannotated nets.
 

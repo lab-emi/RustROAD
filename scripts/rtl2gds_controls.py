@@ -204,8 +204,10 @@ def remove_chain(text: str, sink: str, prefix: str, buffers: dict[str, tuple[str
             continue
         if any(re.fullmatch(r"\s*wire\s+" + re.escape(n) + r"\s*;\s*", line) for n in nets):
             continue
-        if m and m[2] == inst:
-            line = line.replace(f".{pin}({nets[0]})", f".{pin}({net})")
+        # Every pin the chain drove (one sink, or every sink of a net-level
+        # path-aware point) goes back to the original net.
+        if m:
+            line = line.replace(f"({nets[0]})", f"({net})")
         out.append(line)
     return "".join(out), removed
 
@@ -224,6 +226,26 @@ def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
             continue
         worst = (hold, corner, ep)
         break
+    if worst is None:
+        # Path-aware hold ECO: the chain sits on the endpoint's worst hold
+        # path (a sink pin or a whole net upstream), recorded with the points.
+        points = [pt for rec in b["iterations"] for pt in ((rec.get("hold_eco") or {}).get("points") or [])
+                  if isinstance(rec.get("hold_eco"), dict)]
+        for hold, corner, ep in sorted((v["hold"], c, e) for c, rows in it0.items() for e, v in rows.items() if "/" in e):
+            for pt in points:
+                if ep not in pt.get("endpoints", []):
+                    continue
+                for sink in pt.get("sinks", []):
+                    try:
+                        text, removed = remove_chain(source, sink, "rr_eco_hold_", buffers)
+                    except GateError:
+                        continue
+                    worst = (hold, corner, ep)
+                    break
+                if worst:
+                    break
+            if worst:
+                break
     if worst is None:
         raise GateError("no hold chain feeds an iteration-0 hold endpoint; the control cannot be planted")
     work.mkdir(parents=True, exist_ok=True)

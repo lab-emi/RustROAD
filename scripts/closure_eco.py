@@ -1,0 +1,763 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Timing-closure ECO planners of the track-recipe closure loop (clean-room).
+
+Used by scripts/hold_closure.Flow (track recipe, `sizing_profile` set). Every
+planner reads RustSTA 0.4 JSON reports of the current layout (the timing
+oracle), the edited mapped netlist, the layout's DEF (integer DBU positions)
+and the Liberty-derived sizing profile (`drive` data per corner,
+scripts/build_sizing_profile.py), and returns typed `rustroad.eco-plan.v1`
+operations that `rustroad apply-eco` checks and applies. Nothing here edits a
+netlist itself, reads a reference tool's source or changes a constraint.
+
+* `plan_buffering` -- buffer insertion on nets with max_capacitance /
+  max_transition / max_fanout violations (any corner, 0.95 x limit planning
+  margin): the movable sinks (instance input pins and output ports read
+  through an `assign`) are split by location into clusters (recursive
+  bisection on DEF positions, integer DBU) whose estimated load lets one
+  buffer meet the transition target, each cluster is driven by one buffer
+  (`buffer_sinks`; the analytic placer pulls it towards its cluster), and a
+  second level is added when the driver would still see too many buffer
+  inputs. Input ports with many sinks are buffered the same way (port nets
+  cannot be resized). Nets on failing setup paths get critical-sink
+  isolation. A setup guard keeps every sink whose estimated slack would
+  drop (or that has < CRITICAL_SLACK_NS) on its driver and charges each
+  moved sink's estimated cost to its downstream cone, so two buffers of one
+  plan cannot spend one path's slack twice. Sizing is not planned here:
+  `hold_closure.Flow.whatif_sizing` decides resizes with RustSTA `whatif`.
+* `net_weights` -- timing-driven placement: nets whose driver pin is within a
+  window of the worst setup slack get a weight up to `MAX_WEIGHT` (milli-units,
+  `rustroad place --net-weights`).
+
+Estimates (linear load model between the profile's two Liberty points, wire
+capacitance per DBU from the net's own reported load) only choose the edit;
+the loop re-places, re-routes, re-extracts and re-times every ECO.
+
+Bounds: `MAX_BUFFER_OPS` buffers per call, `MAX_CLUSTERS` clusters per
+net, `MAX_CLUSTER_FANOUT` items per cluster, a two-level tree at most,
+`MAX_NET_ITEMS` items per net, `MAX_CONSUME_VISITS` pin visits of the guard
+walks; the bisection is linear in the items times log(items).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import json
+import re
+from pathlib import Path
+
+MAX_BUFFER_OPS = 512
+MAX_CLUSTERS = 32
+MAX_CLUSTER_FANOUT = 16
+MAX_NET_ITEMS = 4096
+MAX_TREE_LEVELS = 2
+# Transition target of a planned driver, as a fraction of the limit: the
+# re-placed, re-routed net differs from the estimate.
+TRANSITION_TARGET = 0.6
+# Nets above this fraction of a transition/capacitance limit are planned.
+DRV_PLAN_MARGIN = 0.95
+# A driver keeps (or gets resized to) a transition below this fraction.
+DRIVER_TARGET = 0.8
+CAPACITANCE_TARGET = 0.6
+# Bound of the downstream slack-consumption walks of one call (pin visits).
+MAX_CONSUME_VISITS = 2_000_000
+# Buffering estimate: a sink's delay grows by this much per ns of input slew.
+SLEW_SENSITIVITY = 0.35
+# A moved sink must keep this much estimated setup slack (or not get slower).
+SETUP_GUARD_NS = 0.15
+# Sinks with less setup slack (worst of the pins-report corners) stay on
+# their driver: a buffer in front of them would cost the path its delay.
+CRITICAL_SLACK_NS = 0.75
+# Critical-sink isolation: sinks at least this much above the net's worst
+# setup slack move behind a buffer (they absorb the buffer delay).
+ISOLATION_MARGIN_NS = 0.6
+ISOLATION_MIN_FANOUT = 3
+# Timing-driven weights: nets within WINDOW of the worst setup slack.
+WEIGHT_WINDOW_NS = 1.0
+MAX_WEIGHT = 5000
+OUTPUT_PORT_LOAD_PF = 0.01
+DEFAULT_PIN_CAP_PF = 0.005
+BUFFER_PREFIX = "rr_eco_buf_"
+# Hold-ECO cells are never resized (their delay is the hold fix): a weak one
+# driving a long wire gets a buffer behind it (more delay, which hold likes).
+HOLD_PREFIX = "rr_eco_hold_"
+
+INSTANCE_LINE = re.compile(r"^\s*(\S+)\s+(\S+)\s+\((.*)\);\s*$")
+CONNECTION = re.compile(r"\.(\w+)\(([^()]*)\)")
+PORT_DECL = re.compile(r"^\s*(input|output|inout)\s+(?:wire\s+)?(?:\[(-?\d+):(-?\d+)\]\s*)?(\\?\S+)\s*$")
+HEADER = re.compile(r"(?s)\bmodule\s+\S+\s*\((.*?)\)\s*;")
+ASSIGN_LINE = re.compile(r"^\s*assign\s+(.+?)\s*=\s*(.+?)\s*;\s*$")
+
+
+def key(net: str) -> str:
+    """Netlist/report net name without Verilog escape (`\\q[0] ` -> `q[0]`)."""
+    return net.strip().lstrip("\\").strip()
+
+
+@dataclass
+class Netlist:
+    """Flat structural view: drivers, sinks and output-port aliases per net."""
+    instances: dict = field(default_factory=dict)       # inst -> (master, {pin: net})
+    inputs: set = field(default_factory=set)             # input port bits
+    outputs: set = field(default_factory=set)            # output port bits
+    driver: dict = field(default_factory=dict)           # net -> "inst/pin" | port bit
+    sinks: dict = field(default_factory=dict)            # net -> [(inst, pin)]
+    port_alias: dict = field(default_factory=dict)       # net -> [output port bits read by assign]
+
+
+def parse_netlist(text: str, lef: dict) -> Netlist:
+    n = Netlist()
+    header = HEADER.search(text)
+    for decl in (header[1].split(",") if header else []):
+        m = PORT_DECL.match(decl)
+        if m:
+            name = key(m[4])
+            bits = [name] if m[2] is None else [f"{name}[{i}]" for i in range(min(int(m[2]), int(m[3])),
+                                                                              max(int(m[2]), int(m[3])) + 1)]
+            (n.inputs if m[1] == "input" else n.outputs).update(bits)
+    for line in text.splitlines():
+        m = ASSIGN_LINE.match(line)
+        if m:
+            lhs, rhs = key(m[1]), key(m[2])
+            if lhs in n.outputs:
+                n.port_alias.setdefault(rhs, []).append(lhs)
+            continue
+        m = INSTANCE_LINE.match(line)
+        if m and m[1] not in ("module", "input", "output", "wire", "assign", "inout"):
+            conns = {p: key(v) for p, v in CONNECTION.findall(m[3])}
+            n.instances[key(m[2])] = (m[1], conns)
+    for name, (master, conns) in n.instances.items():
+        pins = lef.get(master) or {}
+        for pin, net in conns.items():
+            if not net or net.startswith(("1'b", "0'", "{")):
+                continue
+            d = (pins.get(pin) or {}).get("direction") or ""
+            if d.startswith("OUTPUT"):
+                n.driver[net] = f"{name}/{pin}"
+            elif d == "INPUT":
+                n.sinks.setdefault(net, []).append((name, pin))
+    for bit in n.inputs:
+        n.driver.setdefault(bit, bit)
+    return n
+
+
+def def_positions(text: str) -> tuple[dict, dict]:
+    """(instance -> lower-left (x, y), port -> pin centre (x, y)) in DBU."""
+    comps, pins = {}, {}
+    sect = None
+    for line in text.splitlines():
+        if line.startswith("COMPONENTS "):
+            sect = "c"
+        elif line.startswith("PINS "):
+            sect = "p"
+        elif line.startswith("END "):
+            sect = None
+        elif sect == "c" and line.startswith("- "):
+            m = re.match(r"- (\S+) \S+ .*?\+ (?:PLACED|FIXED) \( (-?\d+) (-?\d+) \)", line)
+            if m:
+                comps[key(m[1])] = (int(m[2]), int(m[3]))
+        elif sect == "p" and line.startswith("- "):
+            m = re.match(r"- (\S+) .*?\( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \) \+ (?:FIXED|PLACED) \( (-?\d+) (-?\d+) \)", line)
+            if m:
+                pins[key(m[1])] = (int(m[6]) + (int(m[2]) + int(m[4])) // 2, int(m[7]) + (int(m[3]) + int(m[5])) // 2)
+    return comps, pins
+
+
+@dataclass
+class Buffer:
+    name: str
+    input_pin: str
+    width: int
+    cap: float          # input capacitance at the planning corner (pF)
+    loads: tuple        # (C1, C2) pF
+    slew: tuple         # (t1, t2) ns
+    delay: tuple        # (d1, d2) ns
+
+    def slew_at(self, c: float) -> float:
+        return interp(self.loads, self.slew, c)
+
+    def delay_at(self, c: float) -> float:
+        return interp(self.loads, self.delay, c)
+
+    def max_load(self, target: float) -> float:
+        (c1, c2), (t1, t2) = self.loads, self.slew
+        k = (t2 - t1) / (c2 - c1)
+        return c1 + (target - t1) / k if k > 0 else float("inf")
+
+
+def normalized_function(function: str) -> str:
+    """Liberty function without whitespace, quotes and fully enclosing
+    parentheses (the rule `rustroad apply-eco` checks buffers with)."""
+    s = "".join(c for c in function if not c.isspace() and c != '"')
+    while len(s) >= 2 and s[0] == "(" and s[-1] == ")":
+        depth = 0
+        for k, ch in enumerate(s):
+            depth += ch == "("
+            depth -= ch == ")"
+            if depth == 0 and k + 1 < len(s):
+                return s
+        s = s[1:-1]
+    return s
+
+
+def interp(xs, ys, x):
+    (x1, x2), (y1, y2) = xs, ys
+    return y1 + (y2 - y1) * (x - x1) / (x2 - x1)
+
+
+class Profile:
+    """Sizing profile view: families, widths and drive data at one corner."""
+
+    def __init__(self, data: dict, corner: str, max_width: int | None):
+        self.loads = tuple(data["drive_model"]["loads_pf"])
+        self.family, self.width, self.drive = {}, {}, {}
+        self.buffers: list[Buffer] = []
+        for f in data["families"]:
+            names = [c["name"] for c in f["cells"]]
+            for k, c in enumerate(f["cells"]):
+                self.family[c["name"]] = (f["id"], k, names)
+                self.width[c["name"]] = c["width_dbu"]
+                d = (c.get("drive") or {}).get(corner)
+                if d:
+                    self.drive[c["name"]] = d
+            ins = [p for p, d in f["pins"].items() if d == "input"]
+            outs = [p for p, d in f["pins"].items() if d == "output"]
+            if len(ins) == 1 and len(outs) == 1 and len(f["pins"]) == 2 and \
+                    normalized_function(f["functions"].get(outs[0], "")) == ins[0]:
+                for c in f["cells"]:
+                    d = self.drive.get(c["name"])
+                    if d and "slew_ns" in d and (max_width is None or c["width_dbu"] <= max_width):
+                        self.buffers.append(Buffer(c["name"], ins[0], c["width_dbu"], d["input_cap_pf"][ins[0]], self.loads,
+                                                   tuple(d["slew_ns"]), tuple(d["delay_ns"])))
+        self.buffers.sort(key=lambda b: (b.width, b.name))
+
+    def pin_cap(self, master: str, pin: str) -> float:
+        return float(((self.drive.get(master) or {}).get("input_cap_pf") or {}).get(pin, DEFAULT_PIN_CAP_PF))
+
+    def slew_at(self, master: str, c: float) -> float | None:
+        d = self.drive.get(master)
+        return interp(self.loads, d["slew_ns"], c) if d and "slew_ns" in d else None
+
+    def best_slew(self, master: str, c: float, max_width: int | None) -> float | None:
+        """Smallest output transition of any family member (within the
+        width bound) at load `c`."""
+        if master not in self.family:
+            return None
+        vals = [self.slew_at(m, c) for m in self.family[master][2]
+                if max_width is None or self.width[m] <= max_width]
+        vals = [v for v in vals if v is not None]
+        return min(vals) if vals else None
+
+    def delay_at(self, master: str, c: float) -> float | None:
+        d = self.drive.get(master)
+        return interp(self.loads, d["delay_ns"], c) if d and "delay_ns" in d else None
+
+    def delay_slope(self, master: str | None) -> float:
+        d = self.drive.get(master or "")
+        if not d or "delay_ns" not in d:
+            return 0.0
+        return (d["delay_ns"][1] - d["delay_ns"][0]) / (self.loads[1] - self.loads[0])
+
+    def upsize_for(self, master: str, c: float, target: float, max_width: int | None) -> str | None:
+        """The larger family member that meets `target` at load `c` with the
+        smallest delay at `c` (then the narrowest); None if none does."""
+        if master not in self.family:
+            return None
+        _, k, members = self.family[master]
+        ok = []
+        for m in members[k + 1:]:
+            if max_width is not None and self.width[m] > max_width:
+                continue
+            s, d = self.slew_at(m, c), self.delay_at(m, c)
+            if s is not None and d is not None and s <= target:
+                ok.append((d, self.width[m], m))
+        return min(ok)[2] if ok else None
+
+
+def hpwl(points) -> int:
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    return (max(xs) - min(xs)) + (max(ys) - min(ys)) if points else 0
+
+
+@dataclass
+class Item:
+    """A movable sink: an instance input pin (`inst/pin`) or an output port."""
+    name: str
+    pos: tuple
+    cap: float
+    slack: float | None
+    port: bool = False
+
+
+def bisect_clusters(items: list, limit_pf: float, cw: float, max_fanout: int, budget: list) -> list:
+    """Recursive bisection by position until every cluster's estimated load
+    (pin caps + cw * HPWL) is within `limit_pf` and its size within
+    `max_fanout` (deterministic: ties by name)."""
+    def load(group):
+        return sum(i.cap for i in group) + cw * hpwl([i.pos for i in group])
+    out, stack = [], [sorted(items, key=lambda i: i.name)]
+    while stack:
+        g = stack.pop()
+        budget[0] -= len(g)
+        if budget[0] < 0:
+            raise RuntimeError("closure ECO: clustering work budget exceeded")
+        if len(g) <= 1 or (len(g) <= max_fanout and load(g) <= limit_pf):
+            out.append(g)
+            continue
+        xs, ys = [i.pos[0] for i in g], [i.pos[1] for i in g]
+        axis = 0 if (max(xs) - min(xs)) >= (max(ys) - min(ys)) else 1
+        g = sorted(g, key=lambda i: (i.pos[axis], i.pos[1 - axis], i.name))
+        half = len(g) // 2
+        stack.extend([g[half:], g[:half]])
+    out.sort(key=lambda g: g[0].name)
+    if len(out) > MAX_CLUSTERS:
+        raise RuntimeError(f"closure ECO: more than {MAX_CLUSTERS} clusters on one net")
+    return out
+
+
+def centroid(group) -> tuple:
+    return (sum(i.pos[0] for i in group) // len(group), sum(i.pos[1] for i in group) // len(group))
+
+
+def pick_buffer(prof: Profile, load_pf: float, target_ns: float, driver_slope: float = 0.0,
+                max_cap_pf: float | None = None) -> Buffer:
+    """The buffer meeting the slew target at `load_pf` with the smallest
+    estimated delay: its own delay plus the driver's extra delay for its input
+    capacitance (`driver_slope`, ns/pF), among the buffers whose input
+    capacitance fits the driver's budget `max_cap_pf`. None meets the target:
+    the lowest output slew within the budget; none fits it: the smallest."""
+    fit = [b for b in prof.buffers if max_cap_pf is None or b.cap <= max_cap_pf] or prof.buffers[:1]
+    ok = [b for b in fit if b.slew_at(load_pf) <= target_ns]
+    if not ok:
+        return min(fit, key=lambda b: (b.slew_at(load_pf), b.width, b.name))
+    return min(ok, key=lambda b: (b.delay_at(load_pf) + driver_slope * b.cap, b.width, b.name))
+
+
+class Planner:
+    """One call of the DRV/setup buffering planner on one layout."""
+
+    def __init__(self, netlist: Netlist, comps: dict, ports: dict, prof: Profile, widths: dict, row_h: int,
+                 seq: int):
+        self.n, self.comps, self.ports, self.prof = netlist, comps, ports, prof
+        self.widths, self.row_h = widths, row_h
+        self.seq = seq
+        self.ops, self.resizes, self.records = [], {}, []
+        self.budget = [64 * MAX_NET_ITEMS * MAX_CLUSTERS]
+        self.added_width = 0
+        # Estimated setup slack already spent downstream of each pin by the
+        # buffers planned so far in this call (max over paths), so two
+        # buffers on one path cannot both spend the same slack.
+        self.consumed: dict[str, float] = {}
+        self.sequential: set[str] = set()
+        self.walk_budget = [MAX_CONSUME_VISITS]
+
+    def consume(self, pin: str, delta: float):
+        """Charge `delta` ns to `pin` and every pin downstream of it through
+        combinational cells (stops at sequential cells; bounded work)."""
+        stack = [(pin, delta)]
+        while stack:
+            p, d = stack.pop()
+            if d <= self.consumed.get(p, 0.0) + 1e-12:
+                continue
+            self.consumed[p] = d
+            self.walk_budget[0] -= 1
+            if self.walk_budget[0] < 0:
+                raise RuntimeError("closure ECO: slack-consumption walk budget exceeded")
+            inst = p.rsplit("/", 1)[0] if "/" in p else None
+            if inst is None or inst not in self.n.instances:
+                continue
+            master, conns = self.n.instances[inst]
+            if master in self.sequential:
+                continue
+            for out_pin, net in conns.items():
+                if self.n.driver.get(net) == f"{inst}/{out_pin}":
+                    for si, sp in self.n.sinks.get(net, []):
+                        stack.append((f"{si}/{sp}", d))
+
+    def pos_of(self, name: str) -> tuple | None:
+        if "/" in name:
+            inst = name.rsplit("/", 1)[0]
+            p = self.comps.get(inst)
+            if p is None:
+                return None
+            master = self.n.instances.get(inst, ("", {}))[0]
+            return (p[0] + self.widths.get(master, 0) // 2, p[1] + self.row_h // 2)
+        return self.ports.get(name)
+
+    def new_name(self) -> str:
+        name = f"{BUFFER_PREFIX}{self.seq}"
+        self.seq += 1
+        return name
+
+    def items_of(self, net: str) -> tuple[list, list]:
+        """(movable items, fixed output ports) of a net."""
+        movable, fixed = [], []
+        for inst, pin in sorted(self.n.sinks.get(net, [])):
+            master = self.n.instances[inst][0]
+            pos = self.pos_of(f"{inst}/{pin}")
+            if pos is None:
+                continue
+            movable.append(Item(f"{inst}/{pin}", pos, self.prof.pin_cap(master, pin), None))
+        for port in sorted(self.n.port_alias.get(net, [])):
+            pos = self.ports.get(port)
+            if pos is not None:
+                movable.append(Item(port, pos, OUTPUT_PORT_LOAD_PF, None, port=True))
+        if net in self.n.outputs:
+            fixed.append(net)
+        return movable, fixed
+
+    def emit(self, net_items: list, cell: Buffer) -> str:
+        name = self.new_name()
+        self.ops.append(dict(op="buffer_sinks", cell=cell.name, instance=name, net=f"{name}_n",
+                             sinks=[dict(instance=i.name.rsplit("/", 1)[0], pin=i.name.rsplit("/", 1)[1])
+                                    for i in net_items if not i.port],
+                             **({"ports": [i.name for i in net_items if i.port]} if any(i.port for i in net_items) else {})))
+        self.added_width += cell.width
+        return name
+
+    def buffer_net(self, net: str, why: str, items: list, fixed: list, total_pf: float, cw: float,
+                   driver_slew_target: float, cap_limit: float, driver_slope: float = 0.0,
+                   driver_cap_pf: float | None = None) -> dict:
+        """Clusters -> level-1 buffers -> (level 2 if the driver load stays
+        too big). `driver_cap_pf`: the load the driver can take within its
+        transition target (None: unbounded, e.g. an input port); the buffer
+        input capacitances share it."""
+        prof = self.prof
+        target = driver_slew_target
+        big = prof.buffers[-1]
+        limit = min(big.max_load(target), cap_limit)
+        driver_pos = self.pos_of(self.n.driver.get(net, "")) or centroid(items)
+        # Clusters as large as the strongest buffer can drive within the
+        # target (fewest buffer inputs on the driver); each cluster's buffer
+        # is then the fastest one whose input capacitance fits the driver's
+        # remaining budget.
+        groups = bisect_clusters(items, limit, cw, MAX_CLUSTER_FANOUT, self.budget)
+        per_group = None
+        if driver_cap_pf is not None:
+            trunk_est = cw * hpwl([driver_pos] + [centroid(g) for g in groups])
+            per_group = (driver_cap_pf - trunk_est - OUTPUT_PORT_LOAD_PF * len(fixed)) / len(groups)
+            if per_group < prof.buffers[0].cap:
+                per_group = None  # over budget anyway: the driver is resized next
+        level, made, cost, under = [], [], {}, {}
+        for g in groups:
+            load = sum(i.cap for i in g) + cw * hpwl([i.pos for i in g])
+            b = pick_buffer(prof, load, target, driver_slope, per_group)
+            inst = self.emit(g, b)
+            pin = f"{inst}/{b.input_pin}"
+            level.append(Item(pin, centroid(g), b.cap,
+                              min((i.slack for i in g if i.slack is not None), default=None)))
+            under[pin] = [i.name for i in g]
+            for i in g:
+                cost[i.name] = b.delay_at(load) + SLEW_SENSITIVITY * b.slew_at(load)
+            made.append(dict(instance=inst, cell=b.name, items=len(g), load_pf=round(load, 5),
+                             slew_ns=round(b.slew_at(load), 4)))
+        levels = 1
+        while len(level) > MAX_CLUSTER_FANOUT and levels < MAX_TREE_LEVELS:
+            groups = bisect_clusters(level, limit, cw, MAX_CLUSTER_FANOUT, self.budget)
+            nxt = []
+            for g in groups:
+                if len(g) == 1:
+                    nxt.append(g[0])
+                    continue
+                load = sum(i.cap for i in g) + cw * hpwl([i.pos for i in g])
+                b = pick_buffer(prof, load, target, driver_slope, per_group)
+                inst = self.emit(g, b)
+                pin = f"{inst}/{b.input_pin}"
+                nxt.append(Item(pin, centroid(g), b.cap, None))
+                under[pin] = [x for i in g for x in under.get(i.name, [i.name])]
+                for x in under[pin]:
+                    cost[x] = cost.get(x, 0.0) + b.delay_at(load)
+                made.append(dict(instance=inst, cell=b.name, items=len(g), load_pf=round(load, 5), level=levels + 1))
+            level, levels = nxt, levels + 1
+        trunk = [driver_pos] + [i.pos for i in level] + [self.ports[p] for p in fixed if p in self.ports]
+        new_load = sum(i.cap for i in level) + OUTPUT_PORT_LOAD_PF * len(fixed) + cw * hpwl(trunk)
+        rec = dict(net=net, why=why, items=len(items), load_before_pf=round(total_pf, 5),
+                   driver_load_after_pf=round(new_load, 5), buffers=made, levels=levels)
+        self.records.append(rec)
+        self.costs = cost
+        return rec
+
+    def mark(self) -> tuple:
+        return (len(self.ops), self.seq, self.added_width, len(self.records))
+
+    def rollback(self, m: tuple):
+        del self.ops[m[0]:]
+        self.seq, self.added_width = m[1], m[2]
+        del self.records[m[3]:]
+
+    def guarded(self, net: str, why: str, cand: list, kept: list, fixed: list, total: float, cw: float,
+                target: float, cap_limit: float, slope: float, drv_cap: float | None, delay, slew) -> dict | None:
+        """buffer_net, keeping on the driver every sink whose estimated
+        setup slack after the edit would drop below SETUP_GUARD_NS.
+
+        Estimate per moved sink: driver delay at its new load + the buffer
+        delay(s) + SLEW_SENSITIVITY x the buffer's output slew, against the
+        driver delay + SLEW_SENSITIVITY x slew at today's load (`delay`,
+        `slew`: the driver's load models). At most three passes."""
+        # Measured on the GF180 designs: a buffer in front of a sink with
+        # less than CRITICAL_SLACK_NS of setup slack lost more than the
+        # estimate promised; such sinks never move.
+        def room(i):
+            return None if i.slack is None else i.slack - self.consumed.get(i.name, 0.0)
+        kept = kept + [i for i in cand if room(i) is not None and room(i) < CRITICAL_SLACK_NS]
+        moving = [i for i in cand if i not in kept]
+        base = delay(total) + SLEW_SENSITIVITY * slew(total)
+        for _ in range(3):
+            if not moving:
+                return None
+            m = self.mark()
+            budget = None if drv_cap is None else max(drv_cap - sum(i.cap for i in kept), 0.0)
+            rec = self.buffer_net(net, why, moving, fixed, total, cw, target, cap_limit, slope, budget)
+            after = rec["driver_load_after_pf"] + sum(i.cap for i in kept)
+            bad, spend = [], {}
+            for i in moving:
+                d = delay(after) + self.costs.get(i.name, 0.0) - base
+                spend[i.name] = d
+                if d > 0 and room(i) is not None and room(i) - d < SETUP_GUARD_NS:
+                    bad.append(i)
+            if not bad:
+                rec["kept_on_driver"] = [i.name for i in kept]
+                rec["estimated_driver_delay_ns"] = dict(before=round(delay(total), 4), after=round(delay(after), 4))
+                for name, d in spend.items():
+                    if d > 0:
+                        self.consume(name, self.consumed.get(name, 0.0) + d)
+                return rec
+            self.rollback(m)
+            kept = kept + bad
+            moving = [i for i in moving if i not in bad]
+        return None
+
+
+def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, drv_rows: list, pins: dict,
+                   corner: str, max_width: int | None, seq: int, row_h: int, widths: dict,
+                   setup_critical: bool, frozen: set | frozenset = frozenset()) -> dict:
+    """Plan buffers (and driver resizes) for one layout.
+
+    drv_rows: RustSTA drv rows (every corner); pins: corner -> {pin: setup
+    slack} (pins reports); corner: the planning corner (drive data, worst
+    corner); frozen: `inst/pin` sinks another ECO of the same iteration
+    already moves (the hold ECO's chains), never moved here. Returns {ops,
+    resizes, records, skipped, added_width_dbu, next_seq}.
+    """
+    n = parse_netlist(netlist_text, lef)
+    comps, ports = def_positions(def_text)
+    prof = Profile(profile, corner, max_width)
+    if not prof.buffers:
+        return dict(ops=[], resizes={}, records=[], skipped={"*": "no buffer with drive data fits the tap gap"},
+                    added_width_dbu=0, next_seq=seq, nets_with_rows=0)
+    pl = Planner(n, comps, ports, prof, widths, row_h, seq)
+    pl.sequential = {c["name"] for f in profile["families"] if f.get("sequential") for c in f["cells"]}
+    # A moved sink gets at least one buffer delay: only sinks with that much
+    # setup room (plus CRITICAL_SLACK_NS) move.
+    critical = prof.buffers[0].delay_at(0.02) + CRITICAL_SLACK_NS
+    slack = pins.get(corner) or {}
+    other = [pins[c] for c in sorted(pins) if c != corner]
+
+    def setup_slack(pin):
+        vals = [s for s in [slack.get(pin)] + [o.get(pin) for o in other] if s is not None]
+        return min(vals) if vals else None
+
+    # Map a report pin to the edited netlist's net.
+    def net_of(pin: str) -> str | None:
+        if "/" in pin:
+            inst, p = pin.rsplit("/", 1)
+            conns = n.instances.get(inst, (None, {}))[1]
+            return conns.get(p)
+        if pin in n.inputs:
+            return pin
+        for net, aliases in n.port_alias.items():
+            if pin in aliases:
+                return net
+        return pin if pin in n.outputs else None
+
+    nets: dict[str, dict] = {}
+    for r in drv_rows:
+        net = net_of(key(r["pin"]))
+        if net is None or net not in n.driver:
+            continue
+        drv = n.driver[net]
+        if "/" in drv and drv.rsplit("/", 1)[0] not in n.instances:
+            continue
+        e = nets.setdefault(net, dict(kinds={}, cap={}, slew={}, drv_slew={}, fanout=0))
+        if r["kind"] == "max_capacitance" and key(r["pin"]) == drv:
+            e["cap"][r["corner"]] = max(e["cap"].get(r["corner"], 0.0), r["value"])
+            e["cap_limit"] = r["limit"]
+        if r["kind"] == "max_transition":
+            e["slew"][r["corner"]] = max(e["slew"].get(r["corner"], 0.0), r["value"])
+            e["slew_limit"] = r["limit"]
+            if key(r["pin"]) == drv:
+                e["drv_slew"][r["corner"]] = r["value"]
+        if r["kind"] == "max_fanout":
+            e["fanout"] = max(e["fanout"], int(r["value"]))
+            e["fanout_limit"] = r["limit"]
+        # Planning margin: a transition/capacitance within DRV_PLAN_MARGIN of
+        # its limit is repaired too (the next layout moves every wire).
+        margin = DRV_PLAN_MARGIN if r["kind"] in ("max_transition", "max_capacitance") else 1.0
+        if r["value"] > margin * r["limit"]:
+            e["kinds"][r["kind"]] = min(e["kinds"].get(r["kind"], 0.0), margin * r["limit"] - r["value"])
+    design_cap_limit = max((r["limit"] for r in drv_rows if r["kind"] == "max_capacitance"), default=0.3)
+    skipped, library_limited = {}, {}
+    for net in sorted(nets, key=lambda k: (min(nets[k]["kinds"].values(), default=0.0), k)):
+        e = nets[net]
+        violated = bool(e["kinds"])
+        drv = n.driver[net]
+        is_port = "/" not in drv
+        inst = None if is_port else drv.rsplit("/", 1)[0]
+        master = None if is_port else n.instances[inst][0]
+        items, fixed = pl.items_of(net)
+        items = [i for i in items if i.name not in frozen]
+        for i in items:
+            i.slack = setup_slack(i.name)
+        if len(items) > MAX_NET_ITEMS:
+            skipped[net] = f"{len(items)} sinks exceed {MAX_NET_ITEMS}"
+            continue
+        total = e["cap"].get(corner) or (sum(i.cap for i in items) + OUTPUT_PORT_LOAD_PF * len(fixed))
+        pts = [i.pos for i in items]
+        if pl.pos_of(drv) is not None:
+            pts.append(pl.pos_of(drv))
+        span = max(hpwl(pts), 1)
+        wire = max(0.0, total - sum(i.cap for i in items) - OUTPUT_PORT_LOAD_PF * len(fixed))
+        cw = wire / span
+        slew_limit = e.get("slew_limit", 1.0)
+        # A buffer output is bounded by the design-level capacitance limit
+        # (the largest limit any row states), not by the driver pin's own.
+        cap_limit = design_cap_limit
+        target = TRANSITION_TARGET * slew_limit
+        if len(pl.ops) >= MAX_BUFFER_OPS:
+            skipped[net] = "buffer budget per iteration reached"
+            continue
+        slope = 0.0 if is_port else prof.delay_slope(master)
+        obs = e["drv_slew"].get(corner)
+        drv_target = DRIVER_TARGET * slew_limit
+        drv_cap = None
+        if not is_port:
+            d = prof.drive.get(master)
+            if d and "slew_ns" in d:
+                (c1, c2), (t1, t2) = prof.loads, d["slew_ns"]
+                k = (t2 - t1) / (c2 - c1)
+                drv_cap = c1 + (drv_target - t1) / k if k > 0 else None
+            elif obs and total > 0:
+                # No drive data (e.g. a hold delay cell): proportional to what
+                # RustSTA observed at this load.
+                drv_cap = total * drv_target / obs
+                slope = 0.5 * obs / total
+        if not is_port and prof.delay_at(master, total) is not None:
+            def d_model(c, m=master):
+                return prof.delay_at(m, c)
+
+            def s_model(c, m=master):
+                return prof.slew_at(m, c)
+        else:
+            # Ports and cells without drive data: proportional to the
+            # observed transition (delay about half of it).
+            o = obs or 0.1
+
+            def d_model(c, o=o, t=max(total, 1e-6), port=is_port):
+                return 0.0 if port else 0.5 * o * c / t
+
+            def s_model(c, o=o, t=max(total, 1e-6)):
+                return o * c / t
+        if violated:
+            kinds = set(e["kinds"])
+            if not is_port and "max_transition" in kinds and master in prof.family:
+                floor = prof.best_slew(master, prof.loads[0], max_width)
+                if floor is not None and floor > slew_limit:
+                    # No member of the family meets the limit even at the
+                    # smallest characterized load: only a different cell
+                    # (synthesis) or another limit can fix this net.
+                    library_limited[net] = dict(driver=drv, master=master, min_family_slew_ns=round(floor, 4),
+                                                load_pf=prof.loads[0], limit_ns=slew_limit, corner=corner)
+                    skipped[net] = f"library-limited: no member of {master}'s family reaches {slew_limit} ns at {corner}"
+                    continue
+            if not items:
+                skipped[net] = "no movable sink"
+                continue
+            model = None if is_port else prof.slew_at(master, total)
+            if kinds == {"max_transition"} and model is not None and model <= DRIVER_TARGET * slew_limit:
+                # The driver meets the limit at its own load with a clean
+                # input: the transition comes from upstream (repaired there).
+                skipped[net] = (f"input-slew propagated: {master} drives {total:.4f} pF in {model:.3f} ns "
+                                f"(observed {obs})")
+                continue
+            if not is_port and kinds == {"max_transition"} and len(items) + len(fixed) <= 2 \
+                    and not inst.startswith(HOLD_PREFIX):
+                # Small fanout: a larger driver fixes it when one exists (the
+                # sizing step decides with RustSTA whatif); a buffer only when
+                # no family member meets the target at this load.
+                if prof.upsize_for(master, total, DRIVER_TARGET * slew_limit, max_width):
+                    skipped[net] = "fanout <= 2: left to whatif sizing"
+                    continue
+            # Setup-critical sinks never go behind a buffer (it would add its
+            # delay to their path); only the others move. A net whose sinks
+            # are all critical is left to sizing.
+            if not (kinds & {"max_capacitance", "max_fanout"}) and \
+                    all(i.name.startswith(BUFFER_PREFIX) for i in items):
+                # Already a buffer tree: another level would only add delay;
+                # the driver is resized instead (whatif sizing).
+                skipped[net] = "sinks are ECO buffers already: left to sizing"
+                continue
+            rec = pl.guarded(net, "drv:" + "/".join(sorted(kinds)), items, [], fixed, total, cw, target,
+                             CAPACITANCE_TARGET * cap_limit, slope, drv_cap, d_model, s_model)
+            if rec is None:
+                skipped[net] = f"every sink of {len(items)} would lose setup behind a buffer: left to sizing"
+                continue
+            if not is_port:
+                after = rec["driver_load_after_pf"] + sum(i.cap for i in items if i.name in rec["kept_on_driver"])
+                s_after = prof.slew_at(master, after)
+                rec["driver_slew_after_ns"] = None if s_after is None else round(s_after, 4)
+        elif setup_critical and not is_port and len(items) >= ISOLATION_MIN_FANOUT:
+            vals = [i.slack for i in items if i.slack is not None]
+            if not vals or min(vals) >= 0:
+                continue
+            worst = min(vals)
+            rest = [i for i in items if i.slack is not None and i.slack >= max(worst + ISOLATION_MARGIN_NS, critical)]
+            if len(rest) < 2 or sum(i.cap for i in rest) < 0.25 * total:
+                continue
+            kept = [i for i in items if i not in rest]
+            pl.guarded(net, "setup:critical-sink isolation", rest, kept, [], total, cw, target,
+                       CAPACITANCE_TARGET * cap_limit, slope, drv_cap, d_model, s_model)
+    return dict(ops=pl.ops, resizes=pl.resizes, records=pl.records, skipped=skipped, library_limited=library_limited,
+                added_width_dbu=pl.added_width, next_seq=pl.seq, nets_with_rows=len(nets))
+
+
+def next_sequence(text: str, prefix: str = BUFFER_PREFIX) -> int:
+    nums = [int(m) for m in re.findall(r"(?m)\b" + re.escape(prefix) + r"(\d+)", text)]
+    return max(nums) + 1 if nums else 0
+
+
+def net_weights(netlist_text: str, lef: dict, pins: dict, corners=("ss", "tt"), window_ns: float = WEIGHT_WINDOW_NS,
+                max_weight: int = MAX_WEIGHT) -> dict:
+    """rustroad.net-weights.v1 from setup slack of each net's driver pin:
+    w = 1000 + (max_weight - 1000) * crit^2, crit = clamp((worst + window -
+    slack) / window, 0, 1) at the worst of `corners`. Only nets of the edited
+    netlist with an instance driver; integer milli-units, sorted keys."""
+    n = parse_netlist(netlist_text, lef)
+    slack = {}
+    for c in corners:
+        for p, s in (pins.get(c) or {}).items():
+            if s is not None:
+                slack[p] = min(slack.get(p, s), s)
+    drv = {net: d for net, d in n.driver.items() if "/" in d}
+    vals = [slack[d] for d in drv.values() if d in slack]
+    if not vals:
+        return dict(schema="rustroad.net-weights.v1", source=dict(rule="no driver slack"), weights={})
+    worst = min(vals)
+    weights = {}
+    for net, d in sorted(drv.items()):
+        s = slack.get(d)
+        if s is None:
+            continue
+        crit = min(1.0, max(0.0, (worst + window_ns - s) / window_ns))
+        if crit > 0:
+            w = 1000 + int(round((max_weight - 1000) * crit * crit))
+            if w > 1000:
+                weights[net] = w
+    return dict(schema="rustroad.net-weights.v1",
+                source=dict(rule=f"1000 + {max_weight - 1000} * crit^2, crit = clamp((worst + {window_ns} - slack) / "
+                                 f"{window_ns}, 0, 1) of the net driver's setup slack, worst of {list(corners)}",
+                            worst_setup_ns=round(worst, 6)),
+                weights=weights)
+
+
+def write_json(path: Path, value) -> Path:
+    path.write_text(json.dumps(value, indent=1, sort_keys=False) + "\n")
+    return path
