@@ -9,9 +9,11 @@
 //! copied verbatim (byte-identical) from the PDK cell GDS; each used fixed LEF
 //! VIA becomes one structure `VIA_<name>`; the top structure holds one SREF per
 //! instance (N: none, FS: STRANS x-reflection at y + height), routed wires with
-//! DEF semantics (layer default width, half-width end extensions), routed and
-//! supply via SREFs, supply rails/spines, pin shapes with TEXT labels and the
-//! PR boundary. Dates are fixed, so identical inputs give identical bytes.
+//! DEF semantics (layer default width, half-width end extensions) merged into
+//! maximal collinear runs exactly as `export-def` writes them, routed and
+//! supply via SREFs, same-net routing patches (the DEF routing `RECT`s) on
+//! the layer's net purpose, supply rails/spines, pin shapes with TEXT labels
+//! and the PR boundary. Dates are fixed, so identical inputs give identical bytes.
 //!
 //! Units: coordinates are integer LEF DBU. When the LEF grid is finer than the
 //! cell-GDS grid (GF180: 2000/um vs 0.001 um), every coordinate is divided
@@ -93,8 +95,13 @@ pub struct FileIdentity {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct ElementCounts {
     pub instances: usize,
+    /// Maximal collinear runs written (one rectangle per run and target).
     pub routed_wires: usize,
+    /// Stored lattice wire records the runs were merged from.
+    pub stored_wire_records: usize,
     pub routed_vias: usize,
+    /// Same-net routing patches (DEF routing RECT).
+    pub routed_patches: usize,
     pub supply_wires: usize,
     pub supply_vias: usize,
     pub pin_shapes: usize,
@@ -639,30 +646,42 @@ pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) ->
     }
 
     let routing_status = if let Some(r) = &bundle.routing {
+        // Same export view as DEF: maximal collinear runs (identical metal
+        // union to the stored lattice records), then vias, then the same-net
+        // patches on the routing layer's net purpose.
+        let runs = crate::routing::export_runs(bundle, r)
+            .map_err(|e| fail("GDS_GEOMETRY", e.to_string()))?;
         let mut wires: HashMap<u32, Vec<&Wire>> = HashMap::new();
         let mut routed: HashMap<u32, Vec<&routing::Via>> = HashMap::new();
-        for wire in &r.routes.wires {
+        let mut patches: HashMap<u32, Vec<&routing::Patch>> = HashMap::new();
+        for wire in &runs {
             wires.entry(wire.net).or_default().push(wire);
         }
         for via in &r.routes.vias {
             routed.entry(via.net).or_default().push(via);
         }
+        for patch in &r.routes.patches {
+            patches.entry(patch.net).or_default().push(patch);
+        }
+        counts.stored_wire_records = r.routes.wires.len();
         // Resolve each routing layer's targets and DEF default width once.
         let mut resolved: HashMap<u32, (&[GdsLayer], i64)> = HashMap::new();
+        let mut resolve = |layer: u32| -> Result<(&[GdsLayer], i64)> {
+            if let Some(v) = resolved.get(&layer) {
+                return Ok(*v);
+            }
+            let name = r
+                .layers
+                .get(layer as usize)
+                .ok_or_else(|| fail("GDS_LAYER_UNMAPPED", "routed layer out of range"))?;
+            let v = (layers.targets(name, Purpose::Net)?, layers.width(name)?);
+            resolved.insert(layer, v);
+            Ok(v)
+        };
         for (ni, net) in model.nets.iter().enumerate() {
             let what = format!("net {}", net.name);
             for wire in wires.get(&(ni as u32)).map_or(&[][..], Vec::as_slice) {
-                let (targets, width) = match resolved.get(&wire.layer) {
-                    Some(v) => *v,
-                    None => {
-                        let name = r.layers.get(wire.layer as usize).ok_or_else(|| {
-                            fail("GDS_LAYER_UNMAPPED", "routed layer out of range")
-                        })?;
-                        let v = (layers.targets(name, Purpose::Net)?, layers.width(name)?);
-                        resolved.insert(wire.layer, v);
-                        v
-                    }
-                };
+                let (targets, width) = resolve(wire.layer)?;
                 let rect = scale.rect(wire_rect(wire.start, wire.end, width)?, &what)?;
                 for t in targets {
                     w.rectangle(t.0, t.1, rect)?;
@@ -673,6 +692,17 @@ pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) ->
                 let name = &r.via_names[via.kind as usize];
                 w.sref(&via_cells[name.as_str()], None, scale.point(via.at, &what)?)?;
                 counts.routed_vias += 1;
+            }
+            for patch in patches.get(&(ni as u32)).map_or(&[][..], Vec::as_slice) {
+                let (targets, _) = resolve(patch.layer)?;
+                if !(patch.rect.lx < patch.rect.ux && patch.rect.ly < patch.rect.uy) {
+                    return Err(fail("GDS_GEOMETRY", format!("{what}: empty patch")));
+                }
+                let rect = scale.rect(patch.rect, &what)?;
+                for t in targets {
+                    w.rectangle(t.0, t.1, rect)?;
+                }
+                counts.routed_patches += 1;
             }
         }
         "routed"

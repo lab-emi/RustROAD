@@ -743,6 +743,38 @@ pub(crate) fn validate_state(
     }
     Ok(())
 }
+/// Lower/upper routing-layer index of every stored via kind, re-derived from
+/// the imported technology; the stored names and lower layers must agree.
+pub(crate) fn via_layer_pairs(
+    bundle: &PhysicalBundle,
+    state: &RoutingState,
+) -> Result<Vec<(u32, u32)>> {
+    let (layers, vias, _) = route_technology(bundle, &state.config)?;
+    if state.layers != layers.iter().map(|l| l.name.clone()).collect::<Vec<_>>()
+        || state.via_names != vias.iter().map(|v| v.name.clone()).collect::<Vec<_>>()
+        || state.via_lower_layers != vias.iter().map(|v| v.lower).collect::<Vec<_>>()
+    {
+        return Err(fail("routing technology names changed"));
+    }
+    Ok(vias.iter().map(|v| (v.lower, v.upper)).collect())
+}
+/// Export view of the stored wires: maximal collinear same-net same-layer runs,
+/// split only at via landings, pin-access points and same-layer branches
+/// (`rustroad_core::wire_runs`). The metal union equals the stored records'.
+pub(crate) fn export_runs(
+    bundle: &PhysicalBundle,
+    state: &RoutingState,
+) -> Result<Vec<routing::Wire>> {
+    let pairs = via_layer_pairs(bundle, state)?;
+    let routes = &state.routes;
+    Ok(rustroad_core::wire_runs::collinear_runs(
+        &routes.wires.iter().collect::<Vec<_>>(),
+        &routes.vias.iter().collect::<Vec<_>>(),
+        &pairs,
+        &routes.access.iter().collect::<Vec<_>>(),
+        state.config.limits.max_comparisons,
+    )?)
+}
 pub(crate) fn table_bytes(state: &RoutingState) -> Result<Vec<u8>> {
     let n = state
         .routes

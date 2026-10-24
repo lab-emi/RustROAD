@@ -339,8 +339,9 @@ fn routed_workspace_streams_deterministically_and_read_only() {
     );
     assert_eq!(
         count(ElementKind::Boundary),
-        e.routed_wires + e.supply_wires + e.pin_shapes + 1
+        e.routed_wires + e.routed_patches + e.supply_wires + e.pin_shapes + 1
     );
+    assert!(e.routed_wires < e.stored_wire_records, "runs are merged");
     assert_eq!(count(ElementKind::Text), 6, "a, y, h, l, VDD, VSS");
     assert!(e.routed_wires > 0 && e.routed_vias > 0 && e.supply_vias > 0);
     // FS rows reflect about x at y + height; N rows have no STRANS.
@@ -424,6 +425,128 @@ fn routed_workspace_streams_deterministically_and_read_only() {
         })
         .count();
     assert_eq!(leftovers, 0);
+}
+
+/// Exact area of a union of rectangles by coordinate compression (test-only,
+/// independent of the export code).
+fn union_area(rects: &[[i64; 4]]) -> i128 {
+    let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r[0], r[2]]).collect();
+    let mut ys: Vec<i64> = rects.iter().flat_map(|r| [r[1], r[3]]).collect();
+    xs.sort_unstable();
+    xs.dedup();
+    ys.sort_unstable();
+    ys.dedup();
+    let mut area = 0i128;
+    for i in 0..xs.len().saturating_sub(1) {
+        for j in 0..ys.len().saturating_sub(1) {
+            if rects
+                .iter()
+                .any(|r| r[0] <= xs[i] && xs[i] < r[2] && r[1] <= ys[j] && ys[j] < r[3])
+            {
+                area += i128::from(xs[i + 1] - xs[i]) * i128::from(ys[j + 1] - ys[j]);
+            }
+        }
+    }
+    area
+}
+
+#[test]
+fn def_and_gds_write_merged_runs_with_the_stored_lattice_metal() {
+    let f = fixture(TECHNOLOGY, &same_name, 1000);
+    let snapshot = rustroad_workspace::read(&f.workspace, &limits()).unwrap();
+    let mut def = Vec::new();
+    snapshot.export_def(&mut def).unwrap();
+    let routing = snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .routing
+        .clone()
+        .unwrap();
+    let nets: Vec<String> = snapshot
+        .connectivity()
+        .unwrap()
+        .nets
+        .iter()
+        .map(|n| n.name.clone())
+        .collect();
+    drop(snapshot);
+    // All toy routing layers have WIDTH 0.2 um: half width 100 DBU.
+    let rect = |a: [i64; 2], b: [i64; 2]| {
+        [
+            a[0].min(b[0]) - 100,
+            a[1].min(b[1]) - 100,
+            a[0].max(b[0]) + 100,
+            a[1].max(b[1]) + 100,
+        ]
+    };
+    let mut stored = BTreeMap::<(String, String), Vec<[i64; 4]>>::new();
+    for w in &routing.routes.wires {
+        stored
+            .entry((
+                nets[w.net as usize].clone(),
+                routing.layers[w.layer as usize].clone(),
+            ))
+            .or_default()
+            .push(rect(w.start, w.end));
+    }
+    // Wire paths of the DEF NETS section, per (net, layer).
+    let text = String::from_utf8(def).unwrap();
+    let body = text.split("\nNETS ").nth(1).unwrap();
+    let body = body.split("\nEND NETS").next().unwrap();
+    let mut written = BTreeMap::<(String, String), Vec<[i64; 4]>>::new();
+    let mut net = String::new();
+    let mut paths = 0usize;
+    for line in body.lines() {
+        let t: Vec<&str> = line.split_whitespace().collect();
+        if t.first() == Some(&"-") {
+            net = t[1].to_string();
+            continue;
+        }
+        let at = match t.first() {
+            Some(&"NEW") => 1,
+            Some(&"+") if t.get(1) == Some(&"ROUTED") => 2,
+            _ => continue,
+        };
+        // `<layer> ( x y ) ( x y )` is a wire; vias and RECT patches differ.
+        if t.len() >= at + 9 && t[at + 1] == "(" && t[at + 5] == "(" {
+            let n = |i: usize| t[at + i].parse::<i64>().unwrap();
+            written
+                .entry((net.clone(), t[at].to_string()))
+                .or_default()
+                .push(rect([n(2), n(3)], [n(6), n(7)]));
+            paths += 1;
+        }
+    }
+    assert_eq!(
+        stored.keys().collect::<Vec<_>>(),
+        written.keys().collect::<Vec<_>>()
+    );
+    for (key, rects) in &stored {
+        let both: Vec<[i64; 4]> = rects.iter().chain(&written[key]).copied().collect();
+        let a = union_area(rects);
+        assert_eq!(a, union_area(&written[key]), "{key:?}");
+        assert_eq!(a, union_area(&both), "{key:?} unions differ");
+    }
+    assert!(paths < routing.routes.wires.len(), "{paths} paths");
+    // GDS writes the same runs: one rectangle per run (one net target here).
+    let cells = f.root.join("cells.gds");
+    cell_gds(&cells, "", &[]);
+    let map = f.root.join("map.json");
+    layer_map(&map, &|_| {});
+    let report = export_gds(
+        &f.workspace,
+        &ExportOptions::new(cells, map, f.root.join("runs.gds")),
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(report.elements.routed_wires, paths);
+    assert_eq!(
+        report.elements.stored_wire_records,
+        routing.routes.wires.len()
+    );
+    assert_eq!(report.elements.routed_patches, routing.routes.patches.len());
 }
 
 #[test]
