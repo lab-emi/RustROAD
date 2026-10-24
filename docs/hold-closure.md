@@ -27,18 +27,18 @@ python3 scripts/build_delay_cells.py            # --check verifies the tracked f
 # Hold ECO from RustSTA 0.4 reports (target margin 0.05 ns; setup kept >= 0.05 ns at ss)
 ruststa -w STA report --section hold_fix --target-margin 0.05 --limit 0 --format json > hold.json
 ruststa -w STA report --section endpoints --corner ss --limit 0 --format json > setup_ss.json
-rustroad hold-eco --netlist mapped.v --hold-report hold.json \
-  --setup-report setup_ss.json [--setup-report setup_tt.json ...] \
+rustroad hold-eco --netlist mapped.v --timed-netlist exported.v [--timed-netlist-sha256 HEX] \
+  --hold-report hold.json --setup-report setup_ss.json [--setup-report setup_tt.json ...] \
   --hold-corner tt --hold-corner ss --hold-corner ff --setup-corner ss \
-  --delay-cells fixtures/pdk/<pdk>-delay-cells.json --out eco.v --plan-out plan.json
+  --delay-cells fixtures/pdk/<pdk>-delay-cells.json [--cell-lef LEF] --out eco.v --plan-out plan.json
 
 # Native antenna check (read-only); optional what-if shapes for planted controls
-rustroad --workspace W check-antenna [--extra-shapes shapes.json] > antenna.json
+rustroad --workspace W check-antenna [--extra-shapes shapes.json] [--safety-margin 0.10] > antenna.json
 rustroad antenna-eco --netlist mapped.v --antenna-report antenna.json \
   --delay-cells fixtures/pdk/<pdk>-delay-cells.json --out eco.v --plan-out plan.json
 
 # Apply a given rustroad.eco-plan.v1 (used for the controls)
-rustroad apply-eco --netlist mapped.v --plan plan.json --delay-cells profile.json --out eco.v
+rustroad apply-eco --netlist mapped.v --plan plan.json --delay-cells profile.json [--cell-lef LEF] --out eco.v
 
 # Closure loop and evidence (pinned RustSTA copy in .work/tools/sta, see below)
 systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G /usr/bin/time -v -o run.time \
@@ -109,6 +109,62 @@ earlier black-box recon tables, for example `dlygate4sd1_1` at tt/ss/ff:
 - the setup corner has an endpoints report;
 - slacks that appear in more than one report agree;
 - each endpoint instance and pin exists in the netlist.
+
+**Report binding (hardening, stream gate).** RustSTA reports name their
+workspace and revision but carry no hash of the netlist they timed. That
+record is in the timing engine's own revision metadata, so `hold-eco` binds
+the reports to it and refuses a mismatch with `STALE_REPORT` (never
+`INVALID_WORKSPACE`; the file-only commands report their own codes):
+
+- **Provenance.** The revision the reports name
+  (`<workspace>/revisions/rev<NNNN>/meta.json`, schema
+  `rusteda.revision.v1`, read under a shared `flock` on the STA workspace's
+  `workspace.lock`) must record exactly one netlist source, and its xxh3-64
+  must equal that of the bytes `hold-eco` parses as `--timed-netlist`. The
+  hash is the binding; the recorded path is reported
+  (`source_path_matches`) but a copy with the same bytes is accepted. A
+  missing, unreadable, malformed or ambiguous record (no or several netlist
+  sources, a record of another revision, a revision handle other than
+  `rev<N>`) fails `REPORT_PROVENANCE`; a writer holding the lock for more
+  than about 2 s fails `STA_WORKSPACE_LOCKED`. Committed revisions are
+  immutable; nothing in the STA workspace is written.
+- `--timed-netlist` is the netlist the timing engine imported (the post-CTS
+  export). With `--timed-netlist-sha256` (scripts/hold_closure.py records the
+  hash when it hands the file to `rusteda import`) a different file is refused;
+- every hold_fix row must match the timed netlist: endpoint instance and
+  master, endpoint net, net driver and every worst-path stage pin/net
+  (assign aliases are merged);
+- every endpoints row must name a pin or port of the timed netlist, and all
+  reports must come from one STA workspace revision;
+- the edited netlist must be refined by the timed netlist: same instances and
+  masters, and every changed connection reaches the original net through
+  inserted buffers (clock tree) or tie cells. An ECO-prefixed instance present
+  only in the timed netlist means the reports belong to a later iteration.
+
+The phase-B1 counterexample (iteration-0 reports against the iteration-1
+netlist) fails with `STALE_REPORT`. So does the round-1 verifier's
+counterexample, which the content checks alone accepted: the iteration-1
+reports (whose rows also exist in the iteration-0 netlist) with the
+iteration-0 netlist and its own correct sha256. On the gate run's data:
+
+```text
+STALE_REPORT: the reports come from .../sky130_i1_sta_ws rev2, which timed
+.../sky130_i1_exported.v (xxh3:ccbbad2cbcf4f9d8); --timed-netlist
+.../sky130_i0_exported.v is xxh3:5e03463facbccb2b: the reports were not
+produced from this netlist
+```
+
+(gf180: `xxh3:3a80821eca7dfeba` vs `xxh3:7fada0d8136b8ec9`.) The matching
+pairing reproduces the gate's iteration-1 netlist byte for byte on both PDKs.
+The plan records the binding (`inputs.binding`: `sta_record` with the
+revision record, its sha256, the recorded netlist source and both xxh3
+values; revision; rows and stages bound; inserted instances).
+
+**Sink pins.** `insert_buffer` (hold-eco and apply-eco) accepts only a sink pin
+whose cell-LEF `DIRECTION` is `INPUT`. The directions come from the profile's
+`cell_lef` source, re-verified by sha256 (`--cell-lef` may only relocate the
+same file). An output, inout or unknown pin fails with `ECO_INVALID`; the
+phase-B1 `r0/Q` plan is now refused.
 
 **Chain selection.** For each sink below the margin the planner needs
 `margin - slack` at every hold corner where the sink is listed. It enumerates
@@ -222,6 +278,20 @@ For each component that touches a gate:
 pin areas make the verdict `partial`; none of these occurs in either PDK. Top
 ports carry no gate or diffusion area. Cell-internal metal beyond the pin
 shapes is not modeled.
+
+**Safety margin (hardening, stream gate).** The native ratio reads low against
+the deck: 445.6 vs Magic 470.866 on the natural sky130 clk/met3 violation
+(-5.4 %), and the phase-B1 length sweep put the deck threshold between native
+366.6 (Magic passes) and 379.5 (Magic fails), i.e. an under-read of 5.1-8.4 %.
+A row is therefore `violated` when `ratio > (1 - m) x limit` with
+`m = --safety-margin` (default 0.10, above the measured bound);
+`exceeds_lef_limit` keeps the raw comparison, `effective_limit` the
+threshold, and the report carries `safety_margin` and `lef_violations`.
+`antenna-eco` sizes diodes against the same effective limit and carries a
+`partial` input forward (status `partial`, `input_status`, diagnostic
+`ANTENNA_INPUT_PARTIAL`) instead of reporting `clean`. The foundry deck stays
+the signoff gate; scripts/rtl2gds.py re-measures the margin on a planted wire
+in every run (native/(1-m) vs the Magic ratio, docs/rtl2gds.md).
 
 **Budgets.** `max_shapes_per_net`, `max_pair_checks` and `max_union_cells`
 bound the work. One run takes 0.03 s and about 13 MiB.

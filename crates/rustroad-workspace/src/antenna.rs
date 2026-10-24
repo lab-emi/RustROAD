@@ -15,6 +15,15 @@
 //! the LEF states only that one. Cumulative rules, other oxide models and
 //! AREAMINUSDIFF are reported as unsupported (status partial), never ignored.
 //!
+//! Conservative verdict: the native model leaves out cell-internal metal and
+//! the foundry decks extract gate area from the layout, so the native ratio
+//! reads low against the deck (sky130 clk/met3: 445.6 native vs 470.866
+//! Magic, i.e. 5.4 % low; the phase-B1 length sweep bounds the under-read
+//! below 8.4 %). A row is therefore `violated` when its ratio exceeds
+//! `(1 - safety_margin) x limit` (default margin `DEFAULT_SAFETY_MARGIN` =
+//! 0.10, above the measured bound); `exceeds_lef_limit` keeps the raw LEF
+//! comparison. The foundry deck stays the signoff gate (docs/rtl2gds.md).
+//!
 //! Inputs are the workspace's own technology/cell LEF sources, re-read and
 //! verified by SHA-256, and the routed geometry: wires (LEF width), vias,
 //! same-net patches and the routing-layer pin shapes of every terminal.
@@ -37,6 +46,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 pub const ANTENNA_SCHEMA: &str = "rustroad.antenna-check.v1";
+/// Fraction of the LEF limit kept as margin for the native verdict; derived
+/// from the measured native-vs-deck under-read (module documentation).
+pub const DEFAULT_SAFETY_MARGIN: f64 = 0.10;
+pub const SAFETY_MARGIN_DERIVATION: &str = "native partial-net ratios read low against the \
+foundry deck: sky130 clk/met3 445.6 native vs 470.866 Magic (-5.4 %); planted met3 sweep: \
+native 379.5 already fails Magic, native 366.6 passes (-5.1 % .. -8.4 %). Margin 0.10 exceeds \
+the measured bound; the foundry deck remains the signoff gate.";
 
 fn fail(code: &str, m: impl std::fmt::Display) -> Error {
     Error::Invalid(format!("{code}: {m}"))
@@ -49,6 +65,8 @@ pub struct AntennaRequest {
     pub max_pair_checks: usize,
     pub max_union_cells: usize,
     pub max_rows: usize,
+    /// Fraction of each limit kept as margin (0 ..= 0.5).
+    pub safety_margin: f64,
 }
 impl Default for AntennaRequest {
     fn default() -> Self {
@@ -58,8 +76,18 @@ impl Default for AntennaRequest {
             max_pair_checks: 200_000_000,
             max_union_cells: 4_000_000,
             max_rows: 100_000,
+            safety_margin: DEFAULT_SAFETY_MARGIN,
         }
     }
+}
+
+/// The margin a report was produced with (also read back by antenna-eco).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SafetyMargin {
+    pub fraction: f64,
+    pub rule: String,
+    pub derivation: String,
 }
 
 /// What-if conductor added to a named net (planted control geometry), DBU.
@@ -171,9 +199,14 @@ pub struct CheckRow {
     pub denominator_um2: f64,
     pub ratio: f64,
     pub limit: f64,
+    /// `(1 - safety_margin) x limit`: the native verdict's threshold.
+    pub effective_limit: f64,
     pub rule: String,
     pub rules: RulePair,
+    /// Conservative native verdict: `ratio > effective_limit`.
     pub violated: bool,
+    /// Raw LEF comparison: `ratio > limit`.
+    pub exceeds_lef_limit: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -213,6 +246,9 @@ pub struct NetWorst {
 pub struct AntennaReport {
     pub schema: &'static str,
     pub status: &'static str,
+    pub safety_margin: SafetyMargin,
+    /// Rows above the raw LEF limit (subset of `violations`).
+    pub lef_violations: usize,
     pub workspace_revision: String,
     pub design: String,
     pub dbu_per_micron: u32,
@@ -378,6 +414,13 @@ pub fn check_antenna(
             "antenna budgets outside hard bounds",
         ));
     }
+    if !(request.safety_margin.is_finite() && (0.0..=0.5).contains(&request.safety_margin)) {
+        return Err(fail(
+            "INVALID_ARGUMENT",
+            "--safety-margin must be within 0 ..= 0.5",
+        ));
+    }
+    let keep = 1.0 - request.safety_margin;
     let snapshot = crate::read(workspace, limits)?;
     let metadata = snapshot.metadata();
     let design = &metadata.design;
@@ -801,7 +844,8 @@ pub fn check_antenna(
                     };
                     let denominator = rules.denominator(gate_um2, diff_um2);
                     let ratio = metal_um2 / denominator;
-                    let violated = ratio > limit;
+                    let effective_limit = limit * keep;
+                    let violated = ratio > effective_limit;
                     let w = worst.entry(net_name.clone()).or_insert((0.0, false));
                     w.0 = w.0.max(ratio / limit);
                     w.1 |= violated;
@@ -821,6 +865,7 @@ pub fn check_antenna(
                         denominator_um2: denominator,
                         ratio,
                         limit,
+                        effective_limit,
                         rule: if diff_um2 > 0.0 && rules.with_diff.is_some() {
                             format!("{keyword}@diffusion {diff_um2:.6}um2")
                         } else {
@@ -828,6 +873,7 @@ pub fn check_antenna(
                         },
                         rules,
                         violated,
+                        exceeds_lef_limit: ratio > limit,
                     });
                 }
             }
@@ -845,6 +891,7 @@ pub fn check_antenna(
             .then_with(|| a.kind.cmp(&b.kind))
     });
     let violations = rows.iter().filter(|r| r.violated).count();
+    let lef_violations = rows.iter().filter(|r| r.exceeds_lef_limit).count();
     if violations > request.max_rows {
         return Err(Error::Budget(format!(
             "ANTENNA: {violations} violations exceed max_rows"
@@ -864,6 +911,12 @@ pub fn check_antenna(
     Ok(AntennaReport {
         schema: ANTENNA_SCHEMA,
         status,
+        safety_margin: SafetyMargin {
+            fraction: request.safety_margin,
+            rule: "violated when ratio > (1 - fraction) x LEF limit; exceeds_lef_limit is the raw comparison".into(),
+            derivation: SAFETY_MARGIN_DERIVATION.into(),
+        },
+        lef_violations,
         workspace_revision: metadata.revision.clone(),
         design: design.name.clone(),
         dbu_per_micron: dbu,

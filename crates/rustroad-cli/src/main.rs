@@ -139,11 +139,26 @@ enum Command {
         manifest: PathBuf,
     },
     /// Plan and apply hold-fix delay cells on a mapped netlist from RustSTA
-    /// hold_fix/endpoints reports (files only; no workspace is read or written).
+    /// hold_fix/endpoints reports (files only; no RustROAD workspace is read or
+    /// written). Reports are bound to --timed-netlist through the revision
+    /// record of the STA workspace they name (read under a shared lock: its
+    /// netlist source must have the xxh3-64 of --timed-netlist); stale reports
+    /// fail STALE_REPORT, an unreadable record REPORT_PROVENANCE.
     HoldEco {
         /// Flat mapped Verilog netlist to edit (never overwritten).
         #[arg(long)]
         netlist: PathBuf,
+        /// The netlist the timing engine imported for these reports (the
+        /// post-CTS export of --netlist); --netlist must be refined by it and
+        /// the reports' STA revision must record it as its netlist source.
+        #[arg(long)]
+        timed_netlist: PathBuf,
+        /// SHA-256 recorded when --timed-netlist was handed to the timing engine.
+        #[arg(long)]
+        timed_netlist_sha256: Option<String>,
+        /// Override of the profile's cell-LEF path (same SHA-256 required).
+        #[arg(long)]
+        cell_lef: Option<PathBuf>,
         /// `ruststa report --section hold_fix --target-margin M --limit 0` JSON (repeatable).
         #[arg(long = "hold-report", required = true)]
         hold_reports: Vec<PathBuf>,
@@ -214,8 +229,13 @@ enum Command {
         max_union_cells: usize,
         #[arg(long, default_value_t = 100_000)]
         max_rows: usize,
+        /// Fraction of each LEF limit kept as margin for the native verdict
+        /// (default derived from the measured native-vs-deck under-read).
+        #[arg(long, default_value_t = rustroad_workspace::antenna::DEFAULT_SAFETY_MARGIN)]
+        safety_margin: f64,
     },
     /// Apply a typed rustroad.eco-plan.v1 to a mapped netlist (files only).
+    /// insert_buffer sinks must be cell-LEF INPUT pins.
     ApplyEco {
         #[arg(long)]
         netlist: PathBuf,
@@ -223,6 +243,9 @@ enum Command {
         plan: PathBuf,
         #[arg(long)]
         delay_cells: PathBuf,
+        /// Override of the profile's cell-LEF path (same SHA-256 required).
+        #[arg(long)]
+        cell_lef: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -242,6 +265,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match &cli.command {
         Command::HoldEco {
             netlist,
+            timed_netlist,
+            timed_netlist_sha256,
+            cell_lef,
             hold_reports,
             setup_reports,
             delay_cells,
@@ -274,6 +300,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     prefix: prefix.clone(),
                     out: out.clone(),
                     plan_out: plan_out.clone(),
+                    timed_netlist: timed_netlist.clone(),
+                    timed_netlist_sha256: timed_netlist_sha256.clone(),
+                    cell_lef: cell_lef.clone(),
                 },
             )?);
         }
@@ -281,12 +310,14 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             netlist,
             plan,
             delay_cells,
+            cell_lef,
             out,
         } => {
             return emit(&rustroad_workspace::eco::apply_plan(
                 netlist,
                 plan,
                 delay_cells,
+                cell_lef.as_deref(),
                 out,
             )?);
         }
@@ -497,6 +528,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             max_pair_checks,
             max_union_cells,
             max_rows,
+            safety_margin,
         } => emit(&rustroad_workspace::antenna::check_antenna(
             &workspace,
             &rustroad_workspace::antenna::AntennaRequest {
@@ -505,6 +537,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 max_pair_checks,
                 max_union_cells,
                 max_rows,
+                safety_margin,
             },
             &limits,
         )?),
