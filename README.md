@@ -1,8 +1,37 @@
 # RustROAD
 
 Clean-room, native Rust physical-design development for the RustEDA toolchain.
-Apache-2.0. This is an initial engineering baseline, **not a complete RTL-to-GDS
-implementation**. Current version: 0.5.0.
+Apache-2.0. Current version: 0.5.0.
+
+## Current capabilities (2026-10-25)
+
+RustROAD, RustSys (synthesis) and RustSTA (timing) together take small
+blocks from RTL to GDS on SKY130 (`sky130_fd_sc_hd`) and GF180
+(`gf180mcu_fd_sc_mcu7t5v0`), checked by one gate (`scripts/rtl2gds.py`) with
+independent oracles. **Report: [docs/rtl2gds.md](docs/rtl2gds.md)**
+(evidence `docs/evidence/rtl2gds-final2.json`).
+
+- Flow: RustSys synthesis under a tracked cell policy; RustROAD floorplan,
+  analytic placement, CTS, track routing, DRV/setup/hold closure ECOs
+  (buffering, RustSTA-`whatif`-verified sizing, path-aware hold) and
+  diode-free antenna repair; native min/nom/max extraction; native GDS.
+- Checks per PDK: RustSTA and OpenSTA at tt/ss/ff on native and OpenRCX
+  SPEF (1 ps parity gate), Magic/KLayout DRC, antenna deck, Netgen/KLayout
+  LVS, GDS XOR, RTL equivalence (RustSys + Yosys or exhaustive
+  co-simulation) and random co-simulation, artifact binding, a full
+  determinism rebuild, eleven negative controls.
+- Owner rules: per-design x PDK clock period from pre-layout ss timing
+  (`scripts/derive_clock_period.py`), GF180 dont_use of the cell families
+  that cannot meet 1.0 ns transition at ss (`scripts/derive_drv_dont_use.py`).
+- Status (8 designs x 2 PDKs): pipeline, dense, counter and uart_tx pass on
+  both PDKs, fifo on GF180 and alu on SKY130 (11 of 16 rows). fifo, regfile
+  and mult on SKY130 fail only RustSTA-vs-OpenSTA min-pulse-width parity
+  (1.3-1.9 ps); alu, regfile and mult on GF180 fail only `drv` (3-12 nets
+  above 1.0 ns at ss). Block level only; IR/EM/SI/OCV/CPPR unchecked; density
+  reported separately; SERV (stretch) not through. Details and what is not
+  claimed: the report.
+
+The sections below describe the engine's building blocks as they were added.
 
 Implemented:
 
@@ -43,11 +72,13 @@ Implemented:
 - Read-only pinned-tool/dual-PDK flow readiness and a guarded logic validation
   harness using existing RustSys/RustSTA and independent external tools.
 
-Not implemented: global placement optimization, timing-driven CTS optimization,
-industrial detailed routing, a native calibrated RC extractor, GDS streamout,
-full-deck DRC/LVS, IR/EM analysis, or GUI. Real-PDK connectivity
-and cell placement are not PDK signoff. Missing results always
-remain `unverified`, `not_run` or `unchecked`.
+Not implemented: timing-driven CTS optimization, industrial-scale detailed
+routing (the track router is bounded and qualified on blocks up to a few
+thousand cells), IR/EM/SI analysis, pad ring and chip assembly, or GUI.
+Since this list was first written, analytic placement, track routing, native
+extraction, native GDS export and foundry-deck DRC/LVS checking were added
+(see the report). Missing results always remain `unverified`, `not_run` or
+`unchecked`.
 
 ## Build and try
 

@@ -3,12 +3,12 @@
 The closure loop of `scripts/rtl2gds.py` (`hold_closure.Flow.close`, track
 recipe, `sizing_profile` set) repairs DRV, setup and hold on complete
 layouts: every iteration is import, place, CTS, route, native extraction
-and RustSTA (pinned 06b1c9f) at tt+nom / ss+max / ff+min. This page
+and RustSTA (pinned 0.4.3, 26bd6eb) at tt+nom / ss+max / ff+min. This page
 describes the ECOs added for the larger designs (buffer insertion,
 `whatif`-verified sizing, path-aware hold fixing, seeded timing-driven
-placement) and the loop order; results are in `docs/rtl2gds.md` (E6 table and the
-critical-path table; evidence `docs/evidence/rtl2gds-closure.json`,
-`docs/evidence/critical-path.json`).
+placement) and the loop order; results are in `docs/rtl2gds.md` (final2
+table; evidence `docs/evidence/rtl2gds-final2.json`; earlier rounds
+`docs/evidence/rtl2gds-closure.json`, `docs/evidence/critical-path.json`).
 
 Nothing here changes an SDC, Liberty, RC profile, threshold, deck or status
 rule. Every ECO is a typed `rustroad.eco-plan.v1` applied by
@@ -95,23 +95,29 @@ proves every inserted master with Yosys at each corner Liberty.
 ## Sizing with RustSTA `whatif` (`Flow.whatif_sizing`)
 
 A resize keeps every net, so `ruststa whatif` evaluates it exactly on the
-layout's SPEF (bit-identical to a full analysis). Candidates: drivers of
-(near-)violating nets (one or two sizes up), ECO buffers loading such a net
-(one size down), and the cells on the worst setup paths of up to 48 failing
-endpoints (one down, one and two up), within the tap gap and 70 % row
-utilization. Each round evaluates every candidate on top of the resizes
-accepted so far and accepts up to 12 improving ones on distinct instances:
-fewer DRV violations without losing worst setup (or keeping it >= 0), a
-better worst setup slack, or an equal worst and a better total; a resize
-may lower hold below the ECO target by at most 0.5 ns (the hold ECO repairs
-it next). The next round's base re-checks the accepted set as a whole and
-keeps only the single best edit of a round that made it worse. Bounds: 6
-rounds, 48 candidates per round, 96 candidates per layout and 320 per
-closure loop, both scaled by 200 / logic instances within 0.5x..4x
-(counter 384 per layout, mult 48): counts, never measured time, so the
-determinism rebuild evaluates exactly the same candidates (measured cost
-per candidate on this host: 0.13 s on counter, 1.1 s on regfile, 1.9 s on
-mult).
+layout's SPEF (bit-identical to a full analysis). First, one call evaluates
+two **bulk** candidates: every DRV driver (worst first) one size up, and two
+sizes up, within the tap gap and the utilization cap; the better one is
+accepted as a whole only under the same rule as a single resize (below).
+Then the single-resize rounds: candidates are drivers of (near-)violating
+nets (one or two sizes up, or one down: the largest member is not always
+the fastest edge at a light load, GF180 aoi22_4 vs aoi22_2), ECO buffers
+loading such a net (one size down), and the cells on the worst setup paths
+of up to 48 failing endpoints (one down, one and two up), within the tap gap
+and a 74 % standard-cell utilization of the rows that also bounds buffer
+insertion (a GF180 regfile netlist at 76 % failed CTS packing). Each round
+evaluates every candidate on top of the resizes accepted so far and accepts
+up to 12 improving ones on distinct instances: fewer DRV violations without
+losing worst setup (or keeping it >= 0), a better worst setup slack, or an
+equal worst and a better total; a resize may lower hold below the ECO target
+by at most 0.5 ns (the hold ECO repairs it next). The next round's base
+re-checks the accepted set as a whole and keeps only the single best edit of
+a round that made it worse. Bounds: 6 rounds, 48 candidates per round, 128
+candidates per layout and 640 per closure loop, both scaled by 200 / logic
+instances within 0.5x..4x (counter 512 per layout, mult 64): counts, never
+measured time, so the determinism rebuild evaluates exactly the same
+candidates (measured cost per candidate on this host: 0.13 s on counter,
+1.1 s on regfile, 1.9 s on mult).
 
 The earlier sizing step (one size up on every setup-path cell, model-free)
 is gone: on counter GF180 it took the netlist from +0.38 to -0.77 ns of
@@ -189,19 +195,21 @@ tt, the implied minimum period `period - worst slack`, and the worst path's
 end points. GF180 without SPEF is `ideal` (no wire-load table), SKY130 is
 `wireload_lumped` (Liberty default wire load, an upper bound of ideal).
 
-## What limits GF180 now (E6)
+## What limits GF180 now (final2, `docs/rtl2gds.md`)
 
-| Design | GF180 failing gating items | Cause |
+With the owner rules (per-PDK clock period, GF180 DRV dont_use) and the GF180
+floorplan at 0.35 utilization, counter, uart_tx and fifo close every GF180
+gating item; alu, regfile and mult close setup and hold on both SPEFs and
+keep only `drv` (3, 8 and 12 nets above 1.0 ns at ss on the selected
+layout). What is left there, from the final layouts:
+
+| Design | Remaining GF180 transition violations at ss | Why the loop did not remove them |
 |---|---|---|
-| counter | - | closed (setup +0.056, hold +0.102 ns at ss, DRV 0) |
-| uart_tx | drv, timing_accuracy | 18 nets above 1.0 ns at ss: 10 driven by library-limited cells (aoi/oai families below), the rest setup-guarded or propagated from them |
-| fifo | drv, timing_accuracy | 3 nets: 2 library-limited (oai221, oai31), 1 nor2_4 net whose buffer would break the +0.108 ns setup |
-| regfile | drv, timing_accuracy (OpenRCX timing unverified) | 39 nets: sinks already ECO buffers (23, driver resize not reached in the whatif budget), setup-guarded (11), 1 library-limited |
-| alu | hold_closure, timing_setup, drv, timing_accuracy | setup-infeasible: -3.07 ns at ss with ideal wires |
-| mult | hold_closure, timing_setup, drv, timing_accuracy | setup-infeasible: -12.05 ns at ss (and -0.83 ns at tt) with ideal wires |
+| alu | 3 nets (worst oai21_2 into one buf_2, 1.67 ns) | 8-layout bound reached while still improving (DRV 522 -> 6 pins) |
+| regfile | 8 nets: nor2_4 into four ECO buffers (2.03 ns), seven dlyb_1 hold cells into buf_8 ECO buffers (1.08-1.65 ns) | the driver cannot grow (largest member, or a delay cell), the ECO buffers behind it shrink only one size per layout; an extra buffer level was tried and made alu/mult worse (reverted) |
+| mult | 12 nets, aoi22_2/aoi22_4 into one ECO buffer (1.01-1.37 ns) | aoi22 is close to the limit at ss (best member 0.80 ns at the smallest sink with a 0.2 ns input, more with the real input slew); 8-layout bound |
 
-Library-limited GF180 7t families (no member reaches 1.0 ns output
-transition at ss, 5 fF, 0.2 ns input; best member): aoi211 1.15, aoi221
-1.57, aoi222 1.76, nor4 1.31, oai22 1.21, oai221 1.56, oai222 1.98, oai31
-1.11, oai32 1.96, oai33 2.42 ns. SKY130 hd has none. The planner reports
-their nets (`library_limited`) instead of spending layouts on them.
+The ten GF180 families that cannot reach 1.0 ns at all are excluded from
+synthesis by the owner's dont_use rule (`scripts/derive_drv_dont_use.py`,
+`fixtures/flow/gf180-drv-dont-use.json`). Earlier rounds (E6, 10 ns on every
+design and no dont_use) are in `docs/evidence/rtl2gds-closure.json`.

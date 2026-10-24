@@ -76,7 +76,7 @@ RECIPE = dict(utilization=0.5, aspect=1.0, margin_um=10.0, command="rustroad flo
 # needs room for its closure ECOs: measured on regfile/alu/mult at the
 # derived periods, DRV buffers, hold cells and resizes took the standard-cell
 # utilization from 0.50 to the 0.74 cap (0.76 failed CTS packing) with
-# violations left; from 0.35 they end at 0.50-0.63. SKY130 needs almost no
+# violations left; from 0.35 they end at 0.49-0.63. SKY130 needs almost no
 # ECO area (0-19 buffers per design) and keeps 0.5.
 PDK_RECIPE = {"gf180": dict(utilization=0.35)}
 

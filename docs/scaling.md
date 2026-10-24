@@ -396,7 +396,9 @@ docs/rtl2gds.md) pin the RTL, the clock SDC, the I/O SDC template, the
 profiles, the generated floorplan and physical configuration per PDK, the
 frozen PDK inputs (cell GDS/LEF, technology LEF, Liberty and OpenRCX rules
 per corner, RC profiles) and `recipe.floorplan` (utilization 0.5, aspect 1,
-margin 10 um) with `recipe.physical: track`. `scripts/scale_manifests.py`
+margin 10 um; GF180 overrides the utilization with 0.35 in
+`pdks.gf180.floorplan_recipe` since final2, room for its closure ECOs) with
+`recipe.physical: track`. `scripts/scale_manifests.py`
 regenerates them (`--refresh-manifest` re-reads the hashes only). Since the
 final round every track design also goes through `scripts/rtl2gds.py`
 (timing, closure, controls); the GF180 scale clock buffer is now clkbuf_8.

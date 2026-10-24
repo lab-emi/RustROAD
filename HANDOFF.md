@@ -1,5 +1,132 @@
 # RustROAD handoff
 
+## 2026-10-25 — final RTL-to-GDS integration (feat/rtl2gds-final2; read this first)
+
+Report: [docs/rtl2gds.md](docs/rtl2gds.md); evidence: `docs/evidence/rtl2gds-final2.json`.
+Lessons of every stream were in `.work/notes/*-lessons.md` (untracked); the load-bearing
+ones are consolidated below. Older sections further down are history.
+
+### State
+
+- Branch `feat/rtl2gds-final2` (worktree `.work/wt/final2`): owner rules, RustSTA 0.4.3
+  pin (`26bd6eb`, ruststa `472de8e8`, rusteda `c39dbde4`), GF180 floorplan headroom
+  (utilization 0.35), closure-loop changes, docs and evidence. Evidence runs
+  `.work/wt/final2/.work/runs/E-*` at `aafcbaa` (clean, binary `36a47edb`).
+- Gate (8 designs x 2 PDKs, controls + determinism): pass on both PDKs: pipeline, dense,
+  counter, uart_tx; also fifo GF180 and alu SKY130 (11/16 rows). Fail only
+  `timing_accuracy` (MPW parity 1.28-1.86 ps, owner RustSTA): fifo, regfile, mult SKY130.
+  Fail only `drv` (3/8/12 nets at ss, closure stream): alu, regfile, mult GF180.
+  Setup/hold close on all 16 rows in both engines and both SPEFs; DRC/LVS/antenna/XOR/CEC/
+  co-simulation/controls/determinism/binding pass on all 16.
+- Periods: every SKY130 design and GF180 pipeline/dense 10 ns; GF180 counter 13, uart_tx 12,
+  fifo 12, alu 18, regfile 12, mult 30 (SERV 14/42, rv_core 29/93, not through).
+- Independent re-run (git archive build in `.work/indep-final2`): counter and fifo identical
+  verdicts and artifacts (`scripts/compare_runs.py`).
+- SERV GF180: router `BUDGET_EXCEEDED: routing grid node count` (8 M) on the 0.35 floorplan.
+
+### Owner decisions in force (2026-10-24)
+
+- **Clock period rule**, per design x PDK, before any physical step:
+  `period = max(10 ns, ceil(1.25 x pre-layout ss critical-path delay, 1 ns))`.
+  `scripts/derive_clock_period.py --write` (RustSTA on the gate's mapped netlist, ss
+  Liberty, no SPEF, ideal clock; GF180 `ideal` wires, SKY130 the Liberty
+  `default_wire_load` because RustSTA cannot force ideal there; delay = 10 ns - worst
+  slack). Writes `fixtures/designs/<d>/<pdk>-cts.sdc` and `clock-period.json`; the
+  manifest freezes both; the gate's global `clock_period` re-checks the arithmetic, the
+  SDC and the tool/policy hashes. No post-route tuning of the period.
+- **GF180 DRV dont_use**: families that cannot reach 1.0 ns at ss_125C_3v00 with a 0.2 ns
+  input even at minimum load (one smallest synthesizable sink pin, 2.283 fF):
+  aoi211 aoi221 aoi222 nor4 oai22 oai221 oai222 oai31 oai32 oai33.
+  `scripts/derive_drv_dont_use.py` measures it from the pinned Liberty
+  (`fixtures/flow/gf180-drv-dont-use.json`); `cell_policy.py` recomputes and adds it;
+  `check_cell_policy.py` holds the owner's list and cross-checks. SDC
+  `set_max_transition 1.0` unchanged. oai31 is marginal: 1.012 ns at 2.283 fF, 0.964 ns at
+  the table's 1 fF index (below any real sink).
+
+### After changing anything upstream (order matters)
+
+1. cell policy / Liberty -> `derive_drv_dont_use.py`, `cell_policy.py generate
+   --producer-receipt .work/tools/rustsys-c5ec23c.build.json`, `build_sizing_profile.py`.
+2. synthesis inputs or RustSTA pin -> `derive_clock_period.py --work .work/x --write`.
+3. `scale_manifests.py --rustroad BIN --rustsys BIN --design ...` (regenerates floorplans;
+   `--refresh-manifest` only re-hashes), `--refresh-manifest --design pipeline`.
+4. Commit, then run gates on the clean tree (manifest provenance needs HEAD).
+
+### Pitfalls (process)
+
+- Never edit a worktree while its gate runs are in flight (`artifact_binding` records git
+  status incl. untracked files). Develop in a second worktree, fast-forward afterwards.
+- `.work/sta-signoff/bin` is replaced by the RustSTA stream (06b1c9f -> 0.4.2 -> 0.4.3 in
+  one day): copy the pair into `<worktree>/.work/tools/sta-gate`, check `SHA256SUMS` and
+  `fixtures/flow/rtl2gds-tools.json`. A relative tool path is relative to the checkout.
+- Rule 9: `systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G
+  --setenv=PATH=$PATH timeout ...`; `export PATH=/home/cgao/.cargo/bin:$PATH`
+  (`/usr/bin/rustc` is too old); git identity via `git -c user.name/-c user.email`.
+- Harness processes run under RLIMIT_FSIZE 64 MiB (SIGXFSZ, exit 153) unless a step has its
+  documented limit; `PhysicalHarness.run` refuses a reused receipt label;
+  `json_command` rewrites `--limit` for `report` (use `h.run`).
+- Shell: `tail -n 3` (not `tail -3`); `pkill -f` patterns that match your own command line
+  kill the shell (use `[r]uns/...`); no `rm -rf dir/*` after `cd`.
+- `/tmp` is RAM tmpfs: runs go under `<worktree>/.work/runs`.
+- Budgets must be counts, never wall time (the determinism rebuild must make the same
+  decisions); quote measured numbers only.
+- Independent check: `git archive <sha> | tar -x`, `git init && git add -A && git commit`
+  reproduces the same tree hash, so the gate's manifest provenance holds; build with its own
+  `CARGO_TARGET_DIR`.
+
+### Pitfalls (black-box tools)
+
+- Yosys 0.67 cannot read `module m import pkg::*; (` (alu, rv_core): ports from Verilator
+  XML, exhaustive co-simulation as second CEC oracle (combinational, <= 22 inputs); Yosys
+  aborts on SERV. Sequential equivalence needs `splitnets` (pairs `\q[0]`), `async2sync`,
+  `memory`, then `equiv_induct`.
+- Verilator 5.032 folds variables assigned in `initial` before the first delay: declaration
+  initialisers, `-O0`, and the printed cycle/check counts must match.
+- RustSTA: without SPEF GF180 is `ideal`, SKY130 `wireload_lumped`; `--require-wire-model`
+  asserts it. `report --section drv --limit 0` lists every pin; `whatif` resizes are exact on
+  SPEF (`insert_buffer` + SPEF is refused), evaluated sequentially (0.1-2 s per candidate).
+  The netlist a report timed is in `<ws>/revisions/rev<NNNN>/meta.json`.
+- RustSTA 0.4.3 (26bd6eb) accepts OpenRCX SPEF with resistor loops/disconnected components
+  (0.4.2 and older: T0070). Remaining parity residual: SKY130 min-pulse-width required
+  times on CTS clock pins at ss differ by 1.1-1.9 ps from OpenSTA (slew-dependent Liberty
+  `min_pulse_width`), so `timing_accuracy` fails there. Owner RustSTA.
+- OpenSTA 3.1.0: MPW only where a clock ends; strict parity flags `--pulse-groups last
+  --pulse-pins clock-ends`. OpenRCX: strip only `*DATE` for determinism.
+- Decks: sky130 `diode_2`/`conb_1` cannot pass the frozen LVS (device-less pins) — antenna
+  repair is diode-free (layer jumpers), constants use rail-input ties. Netgen fails on any
+  disconnected node (SERV's 35 unused inputs).
+
+### Pitfalls (flow and physics)
+
+- GF180 ss (125 C, 3.0 V) is the limiting corner: dffrnq clk->Q 2.6-3.5 ns, xor3 3-4 ns per
+  stage, _1 gates at the 1.0 ns transition limit with no wire, each buffer on a critical path
+  0.6-1.0 ns. The period rule gives 12-30 ns there.
+- GF180 closure ECOs need area: from the 0.5 floorplan the DRV buffers, hold cells and
+  resizes reached the 0.74 cap (a 0.76 netlist failed CTS packing). GF180 floorplans use
+  0.35 now (`pdks.gf180.floorplan_recipe`); SKY130 stays 0.5.
+- Closure loop: accept resizes only when `whatif` agrees; bulk DRV upsizing is one whatif
+  call; seed placement from the previous layout; never move sinks with < 0.75 ns setup
+  slack; keep the best complete layout. Adding a buffer level in front of ECO buffers made
+  alu/mult worse (tried, reverted).
+- Hold: most-downstream point first; delay cells are weak (<= 4 sinks per point); native
+  hold can be 20-30 ps optimistic vs OpenRCX (target raised by the shortfall + 10 ps).
+- Track router is chaotic near its budget: any netlist/placement/io-plan change is a
+  re-qualification (SERV sky130 does not route with port buffers).
+- Extraction: `--max-extract-candidates`, `--max-rc-elements` are CLI options; SERV needs
+  them raised (track recipe values in hold_closure.py).
+
+### Next steps
+
+1. RustSTA: MPW required-time parity on SKY130 CTS clock pins at ss (slew-dependent
+   `min_pulse_width`), then re-pin and re-run fifo/regfile/mult SKY130.
+2. Closure: remaining GF180 DRV nets (largest-member drivers into ECO buffers; hold delay cells
+   driving large ECO buffers; aoi22 at ss) - co-size driver and buffer, pick smaller buffers
+   behind delay cells, more layouts only if each still improves.
+3. SERV: a SERV-sized GF180 routing profile (grid nodes > 8 M; check route RSS against the
+   2 GiB per-tool limit first), owner decision on unused input ports for LVS, a second CEC
+   oracle (Yosys aborts).
+4. Fold `.work/notes/*` of future streams into this file at the end of each stream.
+
 ## 2026-10-23 — post-route timing with RustSTA 0.3 (current validation)
 
 - The strict 1 ps endpoint gate now passes with the nonlinear RC/effective-load/
