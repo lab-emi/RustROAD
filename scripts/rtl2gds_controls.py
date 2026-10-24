@@ -40,7 +40,7 @@ bound artifact) and runs the oracle that must catch it; the control is
                     edited -> artifact binding re-verification fails
   antenna_planted   a long wire on an input port pin without an antenna
                     diode (fewest sinks first; the first port/length, up to
-                    8 ports x 3 lengths, the native check flags: a pin whose
+                    64 ports x 3 lengths, the native check flags: a pin whose
                     route leaves upward has no gate on the I/O layer) ->
                     native check-antenna and the foundry deck both flag it
                     (margin evidence recorded)
@@ -262,7 +262,7 @@ def planted_hold_uncertainty(ctx, gate, b, work: Path) -> dict:
     netlist = Path(phys["paths"]["netlist"])
     hc = ctx.make_harness(work, ctx.budgets)
     rust = T.ruststa(hc, f"{gate.tag}_ctl_hold_unc", ctx.tool_paths, flow.libs, netlist, sdc, spefs,
-                     clock_model=flow.clock_model())
+                     clock_model=flow.clock_model(), rc_limits=flow.sta_rc_limits())
     ref = {c: T.opensta(hc, f"{gate.tag}_ctl_hold_unc_opensta_{c}", ctx.tool_paths["opensta"], flow.libs[c], netlist,
                         ctx.top, sdc, spefs[c]) for c in gate.corners}
     res = T.evaluate_source(rust, ref, gate.corners, ctx.budgets, clocked=ctx.clocked)["timing_hold"]
@@ -318,7 +318,7 @@ def tampered_spef(ctx, gate, b, work: Path) -> dict:
     hc = ctx.make_harness(work, ctx.budgets)
     try:
         rust = T.ruststa(hc, f"{gate.tag}_ctl_spef", ctx.tool_paths, b["flow"].libs, Path(phys["paths"]["netlist"]),
-                         b["flow"].sdc, spefs)
+                         b["flow"].sdc, spefs, clock_model=b["flow"].clock_model(), rc_limits=b["flow"].sta_rc_limits())
         ss = rust["gating"]["endpoints"]["ss"]
         effect = dict(worst_setup_ns=T.worst_of(ss, "setup"), worst_hold_ns=T.worst_of(ss, "hold"),
                       bound_worst_setup_ns=b["sta"]["corners"]["ss"]["worst_setup_ns"],
@@ -477,18 +477,24 @@ def antenna_planted(ctx, gate, b, work: Path) -> dict:
     # (a route that leaves the pin upward has no gate at that layer's etch):
     # the first candidate/length the native check flags is planted.
     base = flow.plant_shape(phys, port=candidates[0])["length_um"]
-    k, native, shape = 0, None, None
-    for port in candidates[:8]:
+    k, native, shape, hit = 0, None, None, False
+    for port in candidates[:64]:
         for length in (base, 2 * base, 4 * base):
             shape = flow.plant_shape(phys, port=port, length_um=length)
             extra = work / f"extra{k}.json"
             extra.write_text(json.dumps([{kk: shape[kk] for kk in ("net", "layer", "rect")}]))
             native = flow.check_antenna(f"{gate.tag}_ctl_antenna{k}", phys["workspace"], extra)
             k += 1
-            if native["status"] == "violated":
+            # Only a violation on the planted net counts (another net may
+            # already violate; that is antenna_native's verdict).
+            hit = any(v["net"] == shape["net"] for v in native["violated"])
+            if hit:
                 break
-        if native["status"] == "violated":
+        if hit:
             break
+    if not hit:
+        raise GateError(f"no input pin whose I/O-layer partial net reaches a gate ({k} plants tried): every route "
+                        "leaves its pin upward, so the planted strip has no gate at that layer's etch")
     planted = flow.plant_gds(f"{gate.tag}_ctl_antenna", b["gds"], b["gds_export"], shape)
     deck = flow.deck_antenna(f"{gate.tag}_ctl_antenna", planted, phys)
     report = json.loads(Path(native["report"]).read_text())

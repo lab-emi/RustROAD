@@ -94,7 +94,12 @@ ROAD_LIMITS = {
 # the shape/node caps, not by this count). The default 2e8 is the legacy
 # value; regfile-size track layouts need ~2e8 already, so the track recipe
 # uses the extractor's hard ceiling (8x the default).
-EXTRACT_LIMITS = {'legacy': [], 'track': ['--max-extract-work', '1600000000']}
+EXTRACT_LIMITS = {'legacy': [], 'track': ['--max-extract-work', '1600000000', '--max-coupling-caps', '8000000',
+                                          '--max-rc-nodes', '4000000', '--max-spef-mib', '256']}
+# RustSTA SPEF import limits per recipe (legacy: this script's original
+# values; track: SERV-size blocks, below the engine's own hard limits).
+STA_RC_LIMITS = {'legacy': ['--max-rc-nodes', '200000', '--max-rc-elements', '200000'],
+                 'track': ['--max-rc-nodes', '2000000', '--max-rc-elements', '4000000']}
 # Gate-sizing ECO bounds (size_eco): resizes per iteration, worst setup
 # endpoints traced per iteration, and the utilization the resized cells may
 # reach in the fixed core (taps/fillers excluded).
@@ -335,7 +340,7 @@ class Flow:
         argv += ['--netlist', str(timed), '--sdc', str(self.sdc)]
         for c in self.libs:
             argv += ['--spef', str((spefs or {}).get(c) or phys['spef'][c]['path']), '--spef-corner', c]
-        argv += ['--max-rc-nodes', '200000', '--max-rc-elements', '200000']
+        argv += STA_RC_LIMITS[self.design.recipe]
         a = h.json_command(f'{t}_import', argv, True)
         r = h.json_command(f'{t}_run', [ruststa, *common, 'run', '--base-rev', a['new_rev'], '--backend', 'cpu', '--precision', 'f64',
                                         '--max-paths', '16', '--max-state-gib', '1', '--require-wire-model', 'spef_rc'], True)
@@ -397,6 +402,9 @@ class Flow:
                     diagnostics=[d for d in r.get('diagnostics', []) if d.get('severity') != 'note'][:20],
                     corners=corners, closed=closed, files={k: str(v) for k, v in files.items()},
                     clocks_report=str(clocks['stdout']), constant_endpoints=constant_endpoints, drv=drv)
+
+    def sta_rc_limits(self) -> list[str]:
+        return list(STA_RC_LIMITS[self.design.recipe])
 
     def clock_model(self) -> str:
         """RustSTA scope the gate requires: propagated clocks through the

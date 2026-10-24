@@ -81,7 +81,7 @@ def spef_binding(spefs: dict[str, Path], expected: dict[str, str]) -> dict:
 # ----------------------------------------------------------------------------- RustSTA
 
 def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spefs: dict,
-            clock_model: str = "propagated") -> dict:
+            clock_model: str = "propagated", rc_limits: list[str] | None = None) -> dict:
     ws = h.root / f"{tag}_ws"
     common = ["--workspace", ws, "--threads", "2", "--format", "json", "--color", "never"]
     rusteda, sta = tools["rusteda"], tools["ruststa"]
@@ -92,7 +92,7 @@ def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spef
     argv += ["--netlist", netlist, "--sdc", sdc]
     for c in libs:
         argv += ["--spef", spefs[c], "--spef-corner", c]
-    argv += ["--max-rc-nodes", "200000", "--max-rc-elements", "200000"]
+    argv += rc_limits or ["--max-rc-nodes", "200000", "--max-rc-elements", "200000"]
     imp = run_json(h, f"{tag}_import", argv)
     out = dict(workspace=str(ws), import_metrics=imp.get("metrics"))
     base = imp["new_rev"]
