@@ -573,3 +573,24 @@ class Controls(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompareRuns(unittest.TestCase):
+    """Independent re-run check: only the documented normalizations are applied."""
+
+    def test_normalizations(self):
+        import compare_runs
+        with work_tmp() as d:
+            a, b = Path(d) / "a.spef", Path(d) / "b.spef"
+            a.write_bytes(b'*SPEF "x"\n*DATE "Mon"\n*D_NET n 1\n')
+            b.write_bytes(b'*SPEF "x"\n*DATE "Tue"\n*D_NET n 1\n')
+            self.assertEqual(compare_runs.normalized(a, "spef.openrcx.ss", "/p/"),
+                             compare_runs.normalized(b, "spef.openrcx.ss", "/q/"))
+            self.assertNotEqual(compare_runs.normalized(a, "spef.native.ss", "/p/"),
+                                compare_runs.normalized(b, "spef.native.ss", "/q/"))
+            j, k = Path(d) / "a.json", Path(d) / "b.json"
+            j.write_text('{"path": "/p/fixtures/x.json", "n": 1}')
+            k.write_text('{"path": "/q/fixtures/x.json", "n": 1}')
+            self.assertEqual(compare_runs.normalized(j, "routes", "/p/"), compare_runs.normalized(k, "routes", "/q/"))
+            k.write_text('{"path": "/q/fixtures/x.json", "n": 2}')
+            self.assertNotEqual(compare_runs.normalized(j, "routes", "/p/"), compare_runs.normalized(k, "routes", "/q/"))
