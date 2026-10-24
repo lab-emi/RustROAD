@@ -253,6 +253,37 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// The netlist output may not overwrite the input, and the netlist and plan
+/// outputs must be different files.
+fn check_outputs(input: &Path, out: &Path, plan: &Path) -> Result<()> {
+    if same_file(input, out) || same_file(input, plan) {
+        return Err(fail(
+            "OUTPUT_PATH",
+            "outputs must not overwrite the input netlist",
+        ));
+    }
+    let resolve = |p: &Path| {
+        p.parent()
+            .map(|d| {
+                if d.as_os_str().is_empty() {
+                    Path::new(".")
+                } else {
+                    d
+                }
+            })
+            .and_then(|d| fs::canonicalize(d).ok())
+            .zip(p.file_name())
+            .map(|(d, n)| d.join(n))
+    };
+    match (resolve(out), resolve(plan)) {
+        (Some(a), Some(b)) if a == b => {
+            Err(fail("OUTPUT_PATH", "--out and --plan-out must differ"))
+        }
+        (Some(_), Some(_)) => Ok(()),
+        _ => Err(fail("OUTPUT_PATH", "output directories must exist")),
+    }
+}
+
 // ----------------------------------------------------------------- reports
 
 #[derive(Debug, Deserialize)]
@@ -548,12 +579,7 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
             "ECO name prefix is not a shell-safe handle",
         ));
     }
-    if same_file(&r.netlist, &r.out) {
-        return Err(fail(
-            "OUTPUT_PATH",
-            "--out must not overwrite the input netlist",
-        ));
-    }
+    check_outputs(&r.netlist, &r.out, &r.plan_out)?;
     let (netlist, netlist_pin) = load_netlist(&r.netlist)?;
     let (profile, profile_pin) = load_profile(&r.profile)?;
     let cells = profile.eco_cells()?;
@@ -1069,12 +1095,7 @@ pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
             "ECO name prefix is not a shell-safe handle",
         ));
     }
-    if same_file(&r.netlist, &r.out) {
-        return Err(fail(
-            "OUTPUT_PATH",
-            "--out must not overwrite the input netlist",
-        ));
-    }
+    check_outputs(&r.netlist, &r.out, &r.plan_out)?;
     let (netlist, netlist_pin) = load_netlist(&r.netlist)?;
     let (profile, profile_pin) = load_profile(&r.profile)?;
     let cells = profile.eco_cells()?;

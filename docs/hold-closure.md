@@ -214,7 +214,9 @@ For each component that touches a gate:
   (gate area + GATEPLUSDIFF x diffusion area);
 - the limit is the DIFF rule evaluated at the connected diffusion area. With
   no diffusion, the non-DIFF rule applies, or the DIFF rule at zero when the
-  LEF states only that one (sky130 metals, gf180 Metal2 and above).
+  LEF states only that one (sky130 metals, gf180 Metal2 and above). With
+  diffusion but only a non-DIFF rule (gf180 Metal1), the non-DIFF rule
+  applies, which ignores the diode's protection and is conservative.
 
 **Verdict.** Cumulative or AREAMINUSDIFF rules, other oxides, or LAYER-qualified
 pin areas make the verdict `partial`; none of these occurs in either PDK. Top

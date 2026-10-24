@@ -343,6 +343,14 @@ fn closed_design_is_unchanged_and_inputs_are_validated() {
             .to_string()
             .contains("OUTPUT_PATH")
     );
+    let mut c = case(&[("tt", "r0/D", -0.01, 9.0)], 8.0, default_profile());
+    c.req.plan_out = c.req.out.clone();
+    assert!(
+        plan_hold(&c.req)
+            .unwrap_err()
+            .to_string()
+            .contains("--plan-out must differ")
+    );
 }
 
 #[test]
