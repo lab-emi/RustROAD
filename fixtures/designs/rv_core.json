@@ -1,7 +1,7 @@
 {
   "schema": "rustroad.design.v1",
   "name": "rv_core",
-  "description": "Single-cycle RV32I-subset core (RustSys fixture); stretch.",
+  "description": "Single-cycle RV32I-subset core (RustSys fixture); stretch. GF180 uses a 25.2 um tap gap for its 24.1 um cells (checked by KLayout DF.13/DF.14) and 5x the routing work budgets (2e9 expansions, 2e11 comparisons).",
   "top": "rv_core",
   "rtl": [
     {
@@ -51,9 +51,7 @@
     "command": "rustroad floorplan"
   },
   "stretch": true,
-  "pdks_unavailable": {
-    "gf180": "{\"code\":\"FLOORPLAN_TAP_GAP\",\"message\":\"FLOORPLAN_TAP_GAP: widest cell 48160 DBU (+ spacing 0) exceeds the tap clear gap 45920 DBU; widen tap.max_gap in the physical profile\",\"status\":\"error\"}\n"
-  },
+  "pdks_unavailable": {},
   "flow": {
     "harness": "scripts/scale_flow.py",
     "router": "track",
@@ -134,6 +132,82 @@
         "rc_profile_tt": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
         "routing_profile": "f1420e3afbce37e77ad3ad56b939c2c7b2874f0befdb0a13df4d7e754c476051",
         "technology_lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519"
+      }
+    },
+    "gf180": {
+      "floorplan": {
+        "path": "fixtures/designs/rv_core/gf180-floorplan.json",
+        "sha256": "41eaa49c9250c5c70795de6f0c25293088b8a693f438bd62b54914f873fe906b"
+      },
+      "physical_config": {
+        "path": "fixtures/designs/rv_core/gf180-physical.json",
+        "sha256": "a7921af9a4c012060da17b3444d3b3dfbee58ae9010cd08c7680c799067433ef"
+      },
+      "physical_profile": {
+        "path": "fixtures/pdk/gf180-scale-physical-wide.json",
+        "sha256": "ec8aed79cefefc239b099fbc77f584484dff97d5da85899a6be27f8eb02498de"
+      },
+      "routing_config": {
+        "path": "fixtures/pdk/gf180-scale-routing-large.json",
+        "sha256": "e5c12c7dddb90197dd273d9ed7d55bc259b4d52cb516725e41873df2abdbc4c6"
+      },
+      "delay_cells": {
+        "path": "fixtures/pdk/gf180-delay-cells.json",
+        "sha256": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9"
+      },
+      "gds_layer_map": {
+        "path": "fixtures/pdk/gf180-gds-map.json",
+        "sha256": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af"
+      },
+      "rc_profiles": {
+        "min": {
+          "path": "fixtures/pdk/gf180-rc-min.json",
+          "sha256": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c"
+        },
+        "nom": {
+          "path": "fixtures/pdk/gf180-rc-nom.json",
+          "sha256": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a"
+        },
+        "max": {
+          "path": "fixtures/pdk/gf180-rc-max.json",
+          "sha256": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635"
+        }
+      },
+      "corners": [
+        {
+          "name": "tt",
+          "liberty": "tt_025C_3v30",
+          "rc": "nom"
+        },
+        {
+          "name": "ss",
+          "liberty": "ss_125C_3v00",
+          "rc": "max"
+        },
+        {
+          "name": "ff",
+          "liberty": "ff_n40C_3v60",
+          "rc": "min"
+        }
+      ],
+      "frozen": {
+        "cell_gds": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "cell_lef": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "cell_policy": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "delay_cells": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "gds_layer_map": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "liberty_ff": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "liberty_ss": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "liberty_tt": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "openrcx_rules_ff": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "openrcx_rules_ss": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "openrcx_rules_tt": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "physical_config": "a7921af9a4c012060da17b3444d3b3dfbee58ae9010cd08c7680c799067433ef",
+        "rc_profile_ff": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+        "rc_profile_ss": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+        "rc_profile_tt": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+        "routing_profile": "e5c12c7dddb90197dd273d9ed7d55bc259b4d52cb516725e41873df2abdbc4c6",
+        "technology_lef": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd"
       }
     }
   },

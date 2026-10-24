@@ -52,7 +52,11 @@ DESIGNS = {
                  description="SERV bit-serial RV32I core with its register file (serv_rf_top, upstream "
                              "f200eb2, ISC); stretch."),
     "rv_core": dict(top="rv_core", rtl=["rv_core/rv_pkg.sv", "rv_core/rv_core.sv"], clock="clk_i",
-                    stretch=True, description="Single-cycle RV32I-subset core (RustSys fixture); stretch."),
+                    stretch=True, physical_profile={"gf180": "fixtures/pdk/gf180-scale-physical-wide.json"},
+                    routing_profile={"gf180": "fixtures/pdk/gf180-scale-routing-large.json"},
+                    description="Single-cycle RV32I-subset core (RustSys fixture); stretch. GF180 uses a "
+                                "25.2 um tap gap for its 24.1 um cells (checked by KLayout DF.13/DF.14) and "
+                                "5x the routing work budgets (2e9 expansions, 2e11 comparisons)."),
 }
 RECIPE = dict(utilization=0.5, aspect=1.0, margin_um=10.0, command="rustroad floorplan")
 CORNERS = {
@@ -138,8 +142,8 @@ def build(name: str, spec: dict, args) -> dict:
     policy = json.loads((ROOT / "fixtures/flow/cell-policy.json").read_text())
     for tag in ("sky130", "gf180"):
         p = pdk(tag)
-        profile = f"fixtures/pdk/{tag}-scale-physical.json"
-        routing = f"fixtures/pdk/{tag}-scale-routing.json"
+        profile = (spec.get("physical_profile") or {}).get(tag, f"fixtures/pdk/{tag}-scale-physical.json")
+        routing = (spec.get("routing_profile") or {}).get(tag, f"fixtures/pdk/{tag}-scale-routing.json")
         with tempfile.TemporaryDirectory(dir=ROOT / ".work") as tmp:
             tmp = Path(tmp)
             mapped = tmp / "mapped.v"

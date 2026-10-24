@@ -18,6 +18,7 @@
     {
       "design": "counter",
       "pdk": "sky130",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -44,7 +45,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/counter/sky130/a/signoff/density.json"
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s5/counter/sky130/a/signoff/density.json]"
       },
       "synth_cells": 43,
       "placed_cells": 264,
@@ -109,6 +110,7 @@
     {
       "design": "counter",
       "pdk": "gf180",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -135,7 +137,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/counter/gf180/a/signoff/density.json"
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s5/counter/gf180/a/signoff/density.json]"
       },
       "synth_cells": 46,
       "placed_cells": 306,
@@ -200,6 +202,7 @@
     {
       "design": "uart_tx",
       "pdk": "sky130",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -226,7 +229,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/uart_tx/sky130/a/signoff/density.json"
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s5/uart_tx/sky130/a/signoff/density.json]"
       },
       "synth_cells": 89,
       "placed_cells": 560,
@@ -291,6 +294,7 @@
     {
       "design": "uart_tx",
       "pdk": "gf180",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -317,7 +321,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/uart_tx/gf180/a/signoff/density.json"
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s5/uart_tx/gf180/a/signoff/density.json]"
       },
       "synth_cells": 100,
       "placed_cells": 600,
@@ -382,6 +386,7 @@
     {
       "design": "fifo",
       "pdk": "sky130",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -408,7 +413,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/fifo/sky130/a/signoff/density.json"
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s5/fifo/sky130/a/signoff/density.json]"
       },
       "synth_cells": 81,
       "placed_cells": 481,
@@ -473,6 +478,7 @@
     {
       "design": "fifo",
       "pdk": "gf180",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -499,7 +505,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/fifo/gf180/a/signoff/density.json"
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s5/fifo/gf180/a/signoff/density.json]"
       },
       "synth_cells": 114,
       "placed_cells": 820,
@@ -564,6 +570,7 @@
     {
       "design": "alu",
       "pdk": "sky130",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -590,7 +597,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/alu/sky130/a/signoff/density.json"
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s5/alu/sky130/a/signoff/density.json]"
       },
       "synth_cells": 253,
       "placed_cells": 1094,
@@ -655,6 +662,7 @@
     {
       "design": "alu",
       "pdk": "gf180",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -681,7 +689,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/alu/gf180/a/signoff/density.json"
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s5/alu/gf180/a/signoff/density.json]"
       },
       "synth_cells": 252,
       "placed_cells": 1001,
@@ -746,6 +754,7 @@
     {
       "design": "regfile",
       "pdk": "sky130",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -772,7 +781,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/regfile/sky130/a/signoff/density.json"
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s5/regfile/sky130/a/signoff/density.json]"
       },
       "synth_cells": 372,
       "placed_cells": 1479,
@@ -837,6 +846,7 @@
     {
       "design": "regfile",
       "pdk": "gf180",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -863,7 +873,7 @@
         "density": 7
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/regfile/gf180/a/signoff/density.json"
+        "density": "density deck: 7 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1} [.work/scale/runs/s5/regfile/gf180/a/signoff/density.json]"
       },
       "synth_cells": 358,
       "placed_cells": 1737,
@@ -928,6 +938,7 @@
     {
       "design": "mult",
       "pdk": "sky130",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -954,7 +965,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/mult/sky130/a/signoff/density.json"
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s5/mult/sky130/a/signoff/density.json]"
       },
       "synth_cells": 418,
       "placed_cells": 1651,
@@ -1019,6 +1030,7 @@
     {
       "design": "mult",
       "pdk": "gf180",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -1045,7 +1057,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/mult/gf180/a/signoff/density.json"
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s5/mult/gf180/a/signoff/density.json]"
       },
       "synth_cells": 414,
       "placed_cells": 1793,
@@ -1110,6 +1122,7 @@
     {
       "design": "dense",
       "pdk": "sky130",
+      "run": "s5",
       "status": "failed",
       "statuses": {
         "inputs": "passed",
@@ -1136,9 +1149,9 @@
         "density": null
       },
       "non_passed_reasons": {
-        "lvs_netgen": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/dense/sky130/a/signoff/lvs_netgen.json",
-        "lvs_klayout": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/dense/sky130/a/signoff/lvs_klayout.json",
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/dense/sky130/a/signoff/density.json"
+        "lvs_netgen": "Netgen: 4 disconnected nodes: sky130_fd_sc_hd__conb_1(0):VPB, sky130_fd_sc_hd__conb_1(0):VNB, sky130_fd_sc_hd__conb_1(1):VNB, sky130_fd_sc_hd__conb_1(1):VPB [.work/scale/runs/s5/dense/sky130/a/signoff/lvs_netgen.json]",
+        "lvs_klayout": "KLayout LVS: circuit lane_smoke|LANE_SMOKE status Skipped; circuit sky130_fd_sc_hd__conb_1|SKY130_FD_SC_HD__CONB_1 status NoMatch; only 0 of 22 top pins paired; labelled top-level layout nets not in the schematic (extra pins/labels): ['VDD', 'z[3]', 'a[3]', 'b[3]', 'y[3]', 'a[1]']; reference ports not paired with a layout pin: ['VDD', 'VSS', 'a[0]', 'a[1]', 'a[2]', 'a[3]'] [.work/scale/runs/s5/dense/sky130/a/signoff/lvs_klayout.json]",
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s5/dense/sky130/a/signoff/density.json]"
       },
       "synth_cells": null,
       "placed_cells": 258,
@@ -1203,6 +1216,7 @@
     {
       "design": "dense",
       "pdk": "gf180",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -1229,7 +1243,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/dense/gf180/a/signoff/density.json"
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s5/dense/gf180/a/signoff/density.json]"
       },
       "synth_cells": null,
       "placed_cells": 160,
@@ -1294,6 +1308,7 @@
     {
       "design": "pipeline_track",
       "pdk": "sky130",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -1320,7 +1335,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/pipeline_track/sky130/a/signoff/density.json"
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s5/pipeline_track/sky130/a/signoff/density.json]"
       },
       "synth_cells": 10,
       "placed_cells": 77,
@@ -1385,6 +1400,7 @@
     {
       "design": "pipeline_track",
       "pdk": "gf180",
+      "run": "s5",
       "status": "passed",
       "statuses": {
         "inputs": "passed",
@@ -1411,7 +1427,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/pipeline_track/gf180/a/signoff/density.json"
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s5/pipeline_track/gf180/a/signoff/density.json]"
       },
       "synth_cells": 10,
       "placed_cells": 132,

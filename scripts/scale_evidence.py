@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Assemble docs/evidence/scale.json and the results table from scale_flow runs.
 
-usage: scale_evidence.py --runs DIR [--design NAME ...] [--out docs/evidence/scale.json]
-DIR/<design>/summary.json are scripts/scale_flow.py outputs. Absolute paths
-are reduced to names; hashes, counts, verdicts and resources are kept.
+usage: scale_evidence.py --runs DIR [--runs DIR2 ...] [--design NAME ...] [--out docs/evidence/scale.json]
+DIR/<design>/summary.json are scripts/scale_flow.py outputs. With several
+--runs, a later directory's PDK entry replaces an earlier one (a rerun of one
+PDK with `--pdk`); each row names its run directory. Absolute paths are
+reduced to names; hashes, counts, verdicts and resources are kept.
 """
 from __future__ import annotations
 
@@ -17,17 +19,32 @@ ROOT = Path(__file__).resolve().parents[1]
 ORDER = ["counter", "uart_tx", "fifo", "alu", "regfile", "mult", "dense", "pipeline_track"]
 
 
-def row(design: str, tag: str, p: dict) -> dict:
+def detail(reason: str | None) -> str:
+    """Inline a signoff verdict's failures instead of its absolute path."""
+    reason = reason or ""
+    if reason.startswith("see "):
+        path = Path(reason[4:].strip())
+        try:
+            v = json.loads(path.read_text())
+            reason = "; ".join(v.get("failures", []) + v.get("unverified_reasons", [])) or reason
+        except (OSError, json.JSONDecodeError):
+            pass
+        rel = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path.name
+        reason = f"{reason} [{rel}]"
+    return reason.replace(str(ROOT) + "/", "")
+
+
+def row(design: str, tag: str, p: dict, run: str) -> dict:
     f = p.get("facts", {})
     st = {k: v["status"] for k, v in p["statuses"].items()}
     counts = {k: v.get("count") for k, v in p["statuses"].items() if "count" in v}
     pl = f.get("placement_after_cts") or f.get("placement") or {}
     steps = p.get("resources", {}).get("steps", {})
     route = next((v for k, v in steps.items() if k.endswith("_a_route0")), {})
-    reasons = {k: v.get("reason") for k, v in p["statuses"].items() if v["status"] != "passed"}
+    reasons = {k: detail(v.get("reason")) for k, v in p["statuses"].items() if v["status"] != "passed"}
     return dict(
-        design=design, pdk=tag, status=p.get("status"), statuses=st, counts=counts,
-        non_passed_reasons={k: (r or "")[:400] for k, r in reasons.items()},
+        design=design, pdk=tag, run=run, status=p.get("status"), statuses=st, counts=counts,
+        non_passed_reasons={k: r[:600] for k, r in reasons.items()},
         synth_cells=(f.get("synth") or {}).get("cells"),
         placed_cells=(f.get("route") or {}).get("cells"),
         routed_nets=(f.get("route") or {}).get("routed_nets"),
@@ -47,20 +64,28 @@ def row(design: str, tag: str, p: dict) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--runs", type=Path, required=True)
+    ap.add_argument("--runs", type=Path, action="append", required=True)
     ap.add_argument("--design", action="append")
     ap.add_argument("--out", type=Path, default=ROOT / "docs/evidence/scale.json")
     args = ap.parse_args()
     rows, tools = [], {}
     for d in args.design or ORDER:
-        path = args.runs / d / "summary.json"
-        if not path.is_file():
+        merged = {}
+        for runs in args.runs:
+            path = runs / d / "summary.json"
+            if not path.is_file():
+                continue
+            s = json.loads(path.read_text())
+            used = dict(rustroad=s["rustroad"]["sha256"], rustsys=s["rustsys"]["sha256"])
+            if tools and used != tools:
+                raise SystemExit(f"{path}: binaries differ from the other runs: {used} != {tools}")
+            tools = used
+            for tag, p in s["pdks"].items():
+                merged[tag] = (p, runs.name)
+        if not merged:
             rows.append(dict(design=d, status="missing"))
-            continue
-        s = json.loads(path.read_text())
-        tools = dict(rustroad=s["rustroad"]["sha256"], rustsys=s["rustsys"]["sha256"])
-        for tag, p in s["pdks"].items():
-            rows.append(row(d, tag, p))
+        for tag, (p, run) in merged.items():
+            rows.append(row(d, tag, p, run))
     out = dict(schema="rustroad.scale-evidence.v1", tools=tools,
                scope=dict(level="block", density="reported separately, not gating",
                           ir_drop="unchecked", electromigration="unchecked", signal_integrity="unchecked",

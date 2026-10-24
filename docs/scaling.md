@@ -194,16 +194,20 @@ before allocating and refuses a plan above `memory_mib` (default 2048).
 Limits in track mode may exceed the lattice defaults up to
 `RouteLimits::ceiling()` (64M nodes, 8M obstacles, 8M segments, 2e9
 expansions, 2^40 comparisons, 64M heap); the scale profiles use 8M nodes,
-4M obstacles, 2M segments, 4e8 expansions, 4e9 per search, 4e10
-comparisons. Every search counts expansions per search and in total;
-spatial queries count comparisons; every queue is capped.
+4M obstacles, 2M segments, 4e8 expansions, 4e6 per search, 4e10
+comparisons (`gf180-scale-routing-large.json`, used by rv_core only: 2e9
+expansions and 2e11 comparisons, same memory caps). Every search counts
+expansions per search and in total; spatial queries count comparisons;
+every queue is capped.
 
 Expected sizes by the formula above: the required designs have
 N <= 0.5M track nodes, G <= 10k GCells and S <= 50k shapes, i.e. an
 estimate below 20 MiB on top of the loaded workspace; SERV-size blocks
 (7-8k nets, ~25k placed instances) about 4-6M nodes and ~0.2-0.3 GiB. The
 measured values are in the results below (route RSS stays under 50 MiB for
-every required design).
+every required design). The estimate covers the router state only; on
+SERV/rv_core-size blocks the route process peaks at 2.2-2.8x the estimate
+(see Stretch designs), so the cgroup cap stays in place.
 
 Placer: O(cells + pins): positions and targets (32 B/cell), the B2B system
 (at most 2(2p-3) entries per p-pin net and axis, 16 B each) and the CSR copy;
@@ -239,6 +243,32 @@ configuration per PDK, the frozen PDK inputs (cell GDS/LEF, technology LEF,
 Liberty and OpenRCX rules per corner, RC profiles) and the
 `floorplan_recipe` (utilization 0.5, aspect 1, margin 10 um).
 `scripts/scale_manifests.py` regenerates them.
+
+## Reproduction
+
+```sh
+export PATH=/home/cgao/.cargo/bin:$PATH; free -h
+systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G --setenv=PATH=$PATH \
+  env CARGO_BUILD_JOBS=4 cargo build --release
+# manifests (only when RTL, profiles or the floorplan code change)
+python3 scripts/scale_manifests.py --rustroad target/release/rustroad \
+  --rustsys <RustROAD>/.work/tools/rustsys-target/release/rustsys
+# one design, both PDKs (signoff image 4c48415d8bd0 via podman)
+systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=2G \
+  /usr/bin/time -v timeout 5400 python3 scripts/scale_flow.py \
+  --design fixtures/designs/regfile.json --rustroad target/release/rustroad \
+  --rustsys <RustROAD>/.work/tools/rustsys-target/release/rustsys --out .work/scale/runs/regfile
+python3 scripts/scale_evidence.py --runs .work/scale/runs --out docs/evidence/scale.json
+```
+
+Stretch designs (SERV, rv_core) run behind `flock .work/scale.lock` with a
+14000 s flow timeout (Magic extraction for LVS alone takes ~25 min);
+`--pdk gf180` reruns one PDK, and the evidence merges run directories:
+
+```sh
+python3 scripts/scale_evidence.py --runs .work/scale/runs/x2 --runs .work/scale/runs/x3 \
+  --design serv --design rv_core --out docs/evidence/scale-stretch.json
+```
 
 ## Results (binary `a453e4ca…`, RustSys policy producer `3de13b3a…`)
 
@@ -316,6 +346,73 @@ masters, connectivity, output records: ~14-20 MiB for these sizes).
 `cargo test --workspace`: 160 passed, 4 ignored; each test binary peaks
 below 10 MiB RSS; the whole run 16 s.
 
+## Stretch designs (same binary)
+
+`docs/evidence/scale-stretch.json` (rows name their run directory: `x2`
+for SERV and rv_core sky130, `x3` for rv_core GF180 with the large routing
+profile). Both ran behind `flock .work/scale.lock` with a 14000 s flow
+timeout.
+
+| design | PDK | logic cells (placed) | routed nets | Magic | KLayout | antenna signoff / native | Netgen LVS | KLayout LVS | CEC | rerun | HPWL / fixed order | route s / MiB | flow s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| serv | sky130 | 7370 (24318) | 7959 | 0 | 0 | 29 / 102 | port errors | unverified | equivalent | identical | 0.19 | 108 / 514 | 1742 |
+| serv | gf180 | 6221 (26145) | 6481 | 0 | 0 | 45 / 13 | port errors | unverified | equivalent | identical | 0.18 | 115 / 536 | 680 |
+| rv_core | sky130 | 5047 (19290) | - | - | - | - | - | - | - | - | 0.24 | **failed** (337 s / 334) | - |
+| rv_core | gf180 | 7915 (35042) | 8128 | 0 | 0 | 17 / 4 | port errors | unverified | **unverified** (timeout) | identical | 0.21 | 290 / 860 | 3174 (1800 CEC) |
+
+* SERV is DRC-clean (Magic and KLayout 0, XOR 0) on both PDKs and its
+  routed netlist is equivalent to the RTL. Netgen reports "Netlists match
+  uniquely with port errors": SERV drives several output ports from one net
+  (`o_ext_rs1[i]`/`o_dbus_adr[i]`, `o_ext_rs2[i]`/`o_dbus_dat[i]`) and leaves
+  inputs unused (`i_ibus_rdt[1:0]`, `i_ext_rd`), so Magic flags shorted
+  ports and the pin lists differ; the KLayout check and the port-label check
+  are `unverified` because the reference netlist has aliased ports ("shorted
+  ports are unsupported"). Sky130 additionally lists the conb_1 `VPB`/`VNB`
+  nodes (as for `dense`). Fixing this needs a buffer per aliased output in
+  synthesis or the flow, not a routing change.
+* Antenna: the native check finds 102 (sky130: 47 on clock-tree nets, 55
+  on signal nets) and 13 (GF180: 1 clock, 12 signal) violations.
+  `antenna-eco` refuses the whole plan as soon as one violating net is a
+  clock-tree net (`ANTENNA_ECO_INFEASIBLE`: not a net of the mapped
+  netlist), so the signal-net violations stay unrepaired as well. Signoff:
+  sky130 Magic 29 (met3 23, met4 5, met1 1), GF180 KLayout
+  `ANT.16_ii_ANT.4` 45 (Magic secondary 7). GF180 density fails (7 items,
+  separate, no fill).
+* rv_core sky130 does not route: 19 nets fail the first detailed pass and
+  the repair loop exceeds the 4e10 comparison budget (`BUDGET_EXCEEDED`,
+  structured, after 337 s). Untracked experiments on the same placement:
+  5x work budgets stop at "net 1700 ripped up more than 24 times" (12 min);
+  5x budgets with 64 rip-ups exceed 2e11 comparisons (18.5 min, 396 MiB);
+  utilization 0.4 fails earlier with one pin that has "no legal access
+  after local repair". The root cause (a congestion hot spot the
+  negotiation cannot spread, or a pin-access corner case) is not isolated.
+* rv_core GF180 uses `gf180-scale-physical-wide.json` (25.2 um tap gap for
+  its 24.1 um cells) and `gf180-scale-routing-large.json`: with the default
+  profile it stops at the 4e8 expansion budget (`x2`); it needs 4.3e8. It
+  is then DRC-clean (Magic 0, KLayout 0 including the DF.13/DF.14 tap
+  distance rules, XOR 0) and byte-identical on the rerun. Netgen reports
+  port errors only (`dmem_addr_o[0]`/`[1]` share one net in the netlist);
+  the native antenna check finds 4 violations, all on clock-tree nets, and
+  KLayout 17 (`ANT.16_ii_ANT.4` 14, `ANT.5` 3). `rustsys check synth` did
+  not finish within the harness' 1800 s (killed, 2.2 GiB peak), so CEC is
+  `unverified`; the same check of the synthesized netlist before
+  floorplanning also runs past 1800 s, so this is the checker on rv_core's
+  logic, not the physical flow.
+
+Route memory estimate versus measurement on these blocks:
+
+| design | PDK | nodes N | GCells G | shapes S | estimate | route RSS |
+|---|---|---|---|---|---|---|
+| serv | sky130 | 4,756,800 | 22,350 | 798,177 | 232 MiB | 514 MiB |
+| serv | gf180 | 5,769,588 | 117,992 | 611,294 | 231 MiB | 536 MiB |
+| rv_core | sky130 | 4,278,176 | 20,164 | 606,639 | 191 MiB | 334 MiB (failed) |
+| rv_core | gf180 | 7,879,224 | 161,202 | 754,441 | 303 MiB | 860 MiB |
+
+The estimate covers the router state; per-net plans, spatial bins, the
+loaded design and the output records add 1.2-1.8x on top at this size.
+The 2048 MiB `memory_mib` default therefore bounds the process at roughly
+5-6 GiB, which is why the harness also runs under a cgroup cap.
+
 ## Limits and open issues
 
 * **Sky130 tie cells.** Designs that need constants on sky130 instantiate
@@ -327,17 +424,31 @@ below 10 MiB RSS; the whole run 16 s.
   (the 20 um of `gf180-routed-physical.json` cannot hold the 20.2-22.4 um
   flip-flops and AOI cells RustSys maps to); the KLayout DF.13/DF.14 tap
   distance rules pass at 23 um and fail at 60 um. rv_core needs a 24.1 um
-  cell and is refused by `floorplan` (`FLOORPLAN_TAP_GAP`) on GF180.
+  cell, which `floorplan` refuses (`FLOORPLAN_TAP_GAP`) with that profile;
+  its manifest uses `gf180-scale-physical-wide.json` (25.2 um), which the
+  KLayout main deck accepts on the routed rv_core (0 items).
 * **Antenna.** No required design needs a diode. `antenna-eco` cannot repair
-  clock-tree nets; large blocks (SERV) have antenna violations on long CTS
-  nets. Layer-hopping or CTS-aware diodes are not implemented.
+  clock-tree nets and refuses the whole plan when one violating net is a
+  clock-tree net, so SERV keeps its signal-net violations too (rv_core's
+  native violations are all on clock-tree nets). A partial ECO (repair
+  signal nets, report clock nets), layer hopping or CTS-aware diodes are
+  not implemented; on GF180 the native check reports fewer violations than
+  the KLayout deck has items (13 vs 45 on SERV, 4 vs 17 on rv_core).
+* **Aliased output ports.** SERV and rv_core drive several output ports from
+  one net (rv_core: `dmem_addr_o[0]`/`[1]`); Netgen then reports port errors
+  and the KLayout LVS is `unverified`. A buffer per aliased port (synthesis
+  or flow) is needed; the routing itself matches ("Netlists match uniquely").
 * **Timing.** Hold closure and multi-corner timing on these designs run in
   the unified gate after merge. The CTS profile here uses clkbuf_2 with
   fan-out 8; skew/hold are not optimized by the placer or router.
 * **Performance.** Detailed routing is one sequential A* per sink with
   Spatial checks per edge (`cpu_ref` only, no parallel batches yet):
-  ~1-2 s for the required designs, minutes for SERV-size blocks; the
-  repair loop and same-net pass are bounded but not tuned.
+  ~1-2 s for the required designs, 2-5 min for SERV/rv_core-size blocks;
+  the repair loop and same-net pass are bounded but not tuned, and rv_core
+  on sky130 does not converge within any budget tried (see Stretch designs).
+* **Memory estimate.** The pre-allocation estimate covers the router state;
+  the route process peaks at 2.2-2.8x of it on 20-35k-instance blocks. An
+  overhead term (per-net plans, spatial bins, output records) is missing.
 * **Extraction granularity.** Wires are stored as maximal runs split at
   junctions, so `extract` sees no interior nodes inside a straight run (the
   Elmore delay of a straight segment is unchanged; higher-order slew effects
