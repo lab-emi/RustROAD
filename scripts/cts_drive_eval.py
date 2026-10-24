@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -78,6 +79,15 @@ def main() -> int:
                          iteration0=iteration0(root / f'{pdk}-{name}', pdk))
             r = summary['pdks'][0] if summary['pdks'] else dict(status='failed', reason=summary.get('reason'))
             entry.update(status=r['status'], reason=r.get('reason'))
+            failed = re.match(r'(\S+): process exited', r.get('reason') or '')
+            if failed:
+                err = root / f'{pdk}-{name}' / 'receipts' / failed[1] / 'stderr.txt'
+                if err.is_file():
+                    try:
+                        e = json.loads(err.read_text().strip().splitlines()[-1])
+                        entry.update(failure=dict(step=failed[1], code=e.get('code'), message=e.get('message')))
+                    except (ValueError, IndexError):
+                        entry.update(failure=dict(step=failed[1], stderr_tail=err.read_text()[-300:]))
             if r.get('iterations'):
                 plans = [i['hold_eco'] for i in r['iterations'] if 'hold_eco' in i]
                 entry.update(iterations=len(r['iterations']), closed=r['closed'],

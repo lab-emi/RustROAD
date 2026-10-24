@@ -239,6 +239,31 @@ PDKs are in [docs/extraction.md](docs/extraction.md). The result is partial:
 total and per-net C meet their targets against a geometry-identical reference,
 but min/max resistance and ss+max slack do not.
 
+## Hold closure, CTS drive and antenna repair
+
+`hold-eco`, `antenna-eco` and `apply-eco` are file-only typed netlist ECOs:
+- a non-inverting buffer goes between one named sink pin and its net;
+- an antenna diode is attached to a named net;
+- new handles are shell-safe; no existing instance or Q-net is renamed.
+
+`check-antenna` is a read-only LEF partial-net antenna check of the routed
+HEAD. The clock profile may set per-level buffer masters (`clock.level_cells`).
+
+`scripts/hold_closure.py` iterates up to four times:
+ECO netlist -> place -> CTS -> route -> native extraction (min/nom/max) ->
+RustSTA tt/ss/ff -> hold-eco.
+
+On `pipeline.v` it closes hold >= +0.05 ns and setup >= 0 at tt+nom, ss+max
+and ff+min on both PDKs:
+- RustSTA/OpenSTA parity <= 1 ps on the native SPEF;
+- the final post-ECO, post-CTS netlist passes RustSys CEC, Yosys CEC and
+  512-vector simulation;
+- native-GDS DRC is no worse than before the ECO;
+- the planted antenna controls are flagged and then repaired, by both the
+  native check and the deck.
+
+See [docs/hold-closure.md](docs/hold-closure.md).
+
 ## Verification and research
 
 - [REA/OpenROAD study and placement evidence](docs/openroad-blackbox.md)
@@ -250,6 +275,7 @@ but min/max resistance and ss+max slack do not.
 - [Chinese tap and clock-topology report](docs/tap-report.html)
 - [Chinese CTS/routing/extraction report](docs/cts-routing-report.html)
 - [Native GDSII streamout and black-box acceptance](docs/gds-export.md)
+- [Hold closure, CTS drive selection and antenna repair](docs/hold-closure.md)
 - [Chinese physical-preparation report](docs/power-io-report.html)
 - [Earlier PDK integration report](docs/pdk-report.html)
 - [Earlier bootstrap report](docs/report.html)
