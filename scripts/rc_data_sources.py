@@ -9,7 +9,9 @@ native RC profiles, and tabulates side by side:
   interconnect corner models, and the per-length ``RESOVER`` value of every
   calibration-table variant shipped with the PDK, converted to ohm/sq at the
   table width (R_per_um * width);
-* contact (via) resistance per cut layer from the same sources;
+* contact (via) resistance per cut layer from the same sources, and per Magic
+  variant how many distinct values its contact block gives (a block that
+  gives every contact type one value is a placeholder, not corner data);
 * isolated-wire capacitance per um per routing layer: the calibration table
   the native extractor and the OpenRCX reference read (2 x the last OVER-0
   ground row, per side) against Magic's area + perimeter rules and the LEF
@@ -234,8 +236,15 @@ def collect(pdk: str) -> dict:
                                magic=mv / 1000.0 if mv is not None else None,
                                lef_nominal=lef.get(name, {}).get("cut_ohm"),
                                spice=spice[corner].get(spice_name) if spice_name else None))
+    blocks = {}
+    for variant, entries in sorted(magic.items()):
+        values = {k[1]: v / 1000.0 for k, v in entries.items() if k[0] == "contact"}
+        if values:
+            blocks[variant] = dict(contact_types=len(values), distinct_ohm=sorted(set(values.values())),
+                                   blanket=len(values) >= 3 and len(set(values.values())) == 1)
     return dict(pdk=pdk, sources=sources, sheet_resistance=rows_r, via_resistance=rows_v,
-                isolated_capacitance=rows_c, reference_table_variant=spec["reference_table"])
+                isolated_capacitance=rows_c, reference_table_variant=spec["reference_table"],
+                magic_contact_blocks=blocks)
 
 
 def markdown(data: dict) -> str:
@@ -253,6 +262,11 @@ def markdown(data: dict) -> str:
                 "| corner | cut | native | Magic | LEF (nom) | SPICE |", "|---|---|---|---|---|---|"]
         for r in p["via_resistance"]:
             out.append(f"| {r['corner']} | {r['cut']} | {f(r['native'])} | {f(r['magic'])} | {f(r['lef_nominal'])} | {f(r['spice'])} |")
+        out += ["", f"**{p['pdk']}: Magic contact blocks per variant**", "",
+                "| variant | contact types | distinct values (ohm) | one value for all |", "|---|---|---|---|"]
+        for v, b in p["magic_contact_blocks"].items():
+            vals = ", ".join(f(x) for x in b["distinct_ohm"][:8]) + (" ..." if len(b["distinct_ohm"]) > 8 else "")
+            out.append(f"| {v} | {b['contact_types']} | {vals} | {'yes' if b['blanket'] else 'no'} |")
         out += ["", f"**{p['pdk']}: isolated wire capacitance (aF/um, default width)**", "",
                 "| corner | layer | calibration table | Magic rules | LEF (nom) | table / Magic - 1 |", "|---|---|---|---|---|---|"]
         for r in p["isolated_capacitance"]:

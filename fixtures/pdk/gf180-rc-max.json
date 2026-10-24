@@ -2487,29 +2487,29 @@
    "name": "Via1",
    "lower": "Metal1",
    "upper": "Metal2",
-   "resistance_ohm_per_cut": 15.0,
-   "source": "magic contact m2c (hrhc)"
+   "resistance_ohm_per_cut": 4.5,
+   "source": "magic contact m2c () fallback (blanket (hrhc) block)"
   },
   {
    "name": "Via2",
    "lower": "Metal2",
    "upper": "Metal3",
-   "resistance_ohm_per_cut": 15.0,
-   "source": "magic contact m3c (hrhc)"
+   "resistance_ohm_per_cut": 4.5,
+   "source": "magic contact m3c () fallback (blanket (hrhc) block)"
   },
   {
    "name": "Via3",
    "lower": "Metal3",
    "upper": "Metal4",
-   "resistance_ohm_per_cut": 15.0,
-   "source": "magic contact via3 (hrhc)"
+   "resistance_ohm_per_cut": 4.5,
+   "source": "magic contact via3 () fallback (blanket (hrhc) block)"
   },
   {
    "name": "Via4",
    "lower": "Metal4",
    "upper": "Metal5",
-   "resistance_ohm_per_cut": 15.0,
-   "source": "magic contact via4 (hrhc)"
+   "resistance_ohm_per_cut": 4.5,
+   "source": "magic contact via4 () fallback (blanket (hrhc) block)"
   }
  ],
  "cross_checks": [
@@ -2572,7 +2572,11 @@
  "diagnostics": [
   "calibration column 4 is not used; resistance is taken from the Magic extract section",
   "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
-  "via cut and via landing-pad self capacitance are not modeled"
+  "via cut and via landing-pad self capacitance are not modeled",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for m2c",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for m3c",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for via3",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for via4"
  ],
  "generator": "scripts/build_rc_profile.py"
 }

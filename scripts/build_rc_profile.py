@@ -212,7 +212,7 @@ def parse_magic(text: str, variant: str, types: list[str], cut_types: list[str])
     except StopIteration:
         fail("magic extract section missing")
     active = {"*"}
-    out = dict(resist={}, contact={}, areacap={}, perimeter={}, sidewall={}, overlap={})
+    out = dict(resist={}, contact={}, areacap={}, perimeter={}, sidewall={}, overlap={}, all_contacts={})
     for raw in lines[start + 1:]:
         line = raw.split("#", 1)[0].strip()
         if line == "end":
@@ -230,8 +230,12 @@ def parse_magic(text: str, variant: str, types: list[str], cut_types: list[str])
             m = re.match(r"^\(([^)]*)\)/(\S+)$", tokens[1])
             if m and m[1] in types:
                 out["resist"][m[1]] = float(tokens[2])
-        elif key == "contact" and len(tokens) == 3 and tokens[1] in cut_types:
-            out["contact"][tokens[1]] = float(tokens[2])
+        elif key == "contact" and len(tokens) == 3:
+            # Every contact line of the variant (cuts, diffusion, poly, MIM):
+            # a block that gives all of them one value is not characterized.
+            out["all_contacts"][tokens[1]] = float(tokens[2])
+            if tokens[1] in cut_types:
+                out["contact"][tokens[1]] = float(tokens[2])
         elif key == "defaultareacap" and len(tokens) == 4 and tokens[1] in types:
             out["areacap"][tokens[1]] = float(tokens[3])
         elif key == "defaultperimeter" and len(tokens) == 4 and tokens[1] in types:
@@ -361,12 +365,21 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
         source = f"magic contact {ctype} {variant}"
         if value is None:
             fail(f"{tag}: magic contact resistance missing for {ctype} {variant}")
+        blanket = corner_contacts_blanket(magic, nominal)
         if value <= 0.0:
             fallback = nominal["contact"][ctype]
             diagnostics.append(
                 f"VIA_R_CORNER_UNAVAILABLE: magic {variant} lists {ctype} contact resistance {value:g} mOhm "
                 f"(all contacts are 0 in that block, i.e. no corner data); using nominal {fallback:g} mOhm")
             value, source = fallback, f"magic contact {ctype} () fallback"
+        elif blanket is not None:
+            fallback = nominal["contact"][ctype]
+            diagnostics.append(
+                f"VIA_R_CORNER_UNAVAILABLE: magic {variant} gives every one of its {blanket} contact types "
+                f"(diffusion, poly, via and MIM contacts alike) the same {value:g} mOhm while the nominal "
+                f"block distinguishes them, i.e. a placeholder, not corner data; using nominal "
+                f"{fallback:g} mOhm for {ctype}")
+            value, source = fallback, f"magic contact {ctype} () fallback (blanket {variant} block)"
         entry = dict(name=cut, lower=lower, upper=upper, resistance_ohm_per_cut=value / 1000.0, source=source)
         if spec["lef_rc_valid"] and "resistance" in by_name[cut]:
             entry["lef_resistance_ohm_nominal"] = by_name[cut]["resistance"]
@@ -408,6 +421,18 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
     )
 
 
+def corner_contacts_blanket(magic: dict, nominal: dict) -> int | None:
+    """Number of contact types when a corner variant gives every contact type
+    one and the same value although the nominal block distinguishes them (a
+    placeholder block, not corner data); None otherwise. A block of zeros is
+    handled separately (no data at all)."""
+    values = list(magic["all_contacts"].values())
+    nominal_values = set(nominal["all_contacts"].values())
+    if len(values) >= 3 and len(set(values)) == 1 and values[0] > 0.0 and len(nominal_values) > 1:
+        return len(values)
+    return None
+
+
 def isolated_side(rules: dict, metal: int, over: int) -> float | None:
     rows = rules["tables"].get((metal, over, None))
     return None if rows is None else rows[-1][2]
@@ -447,9 +472,21 @@ def render(profile: dict) -> str:
     return json.dumps(profile, indent=1) + "\n"
 
 
+# Field changes made on purpose since the reference revision, with the PDK
+# evidence for each (a regex over the reported field path). Everything else
+# must be unchanged; diagnostics may only gain entries.
+INTENTIONAL_CHANGES = {
+    r"^gf180-max\.cuts\[\d\]\.(resistance_ohm_per_cut|source)$":
+        "GF180 Magic (hrhc) gives all 10 contact types (diffusion, poly, via, MIM) one blanket 15000 mOhm "
+        "while the nominal block distinguishes them (and (lrlc) gives all of them 0): a placeholder, not "
+        "corner via data, so the max profile keeps the nominal 4.5 ohm per cut like the min profile",
+}
+
+
 def compare_ref(rev: str, out_dir: Path) -> int:
     """Fail unless every field of the profiles at git ``rev`` is unchanged in
-    the tracked profiles (fields may only have been added)."""
+    the tracked profiles (fields may only have been added), apart from the
+    listed intentional changes; diagnostics may only gain entries."""
     import subprocess
 
     def unchanged(old, new, where, bad):
@@ -462,6 +499,9 @@ def compare_ref(rev: str, out_dir: Path) -> int:
         elif isinstance(old, list) and isinstance(new, list) and where.endswith(".sources"):
             if new[:len(old)] != old:
                 bad.append(f"{where} changed")
+        elif isinstance(old, list) and isinstance(new, list) and where.endswith(".diagnostics"):
+            if any(d not in new for d in old):
+                bad.append(f"{where} lost entries")
         elif isinstance(old, list) and isinstance(new, list) and len(old) == len(new):
             for i, (a, b) in enumerate(zip(old, new)):
                 unchanged(a, b, f"{where}[{i}]", bad)
@@ -475,11 +515,14 @@ def compare_ref(rev: str, out_dir: Path) -> int:
             old = json.loads(subprocess.run(["git", "-C", str(ROOT), "show", f"{rev}:{rel_path}"],
                                             capture_output=True, check=True, text=True).stdout)
             new = json.loads((out_dir / f"{tag}-rc-{corner}.json").read_text())
-            bad: list[str] = []
-            unchanged(old, new, tag + "-" + corner, bad)
+            found: list[str] = []
+            unchanged(old, new, tag + "-" + corner, found)
+            intended = [b for b in found if any(re.match(k, b.rsplit(" ", 1)[0]) for k in INTENTIONAL_CHANGES)]
+            bad = [b for b in found if b not in intended]
             added = sorted({k for layer in new["layers"] for k in layer} - {k for layer in old["layers"] for k in layer})
             print(f"{tag} {corner}: {'unchanged' if not bad else 'CHANGED ' + ', '.join(bad)}; added layer fields: "
-                  f"{', '.join(added) or 'none'}")
+                  f"{', '.join(added) or 'none'}"
+                  + (f"; intentional: {', '.join(intended)}" if intended else ""))
             status |= bool(bad)
     return status
 
