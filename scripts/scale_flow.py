@@ -22,9 +22,17 @@ Per PDK the flow
   6. runs scripts/signoff on the native GDS against KLayout's reference
      streamout of the same DEF (XOR), Magic drc(full), the KLayout main deck,
      antenna, density (reported, never gating), Netgen and KLayout LVS;
-  7. proves RTL == final netlist with ``rustsys check synth``;
+  7. proves RTL == final netlist with ``rustsys check synth``; a planted
+     mutation of the same netlist (one 2-input AND/OR or NAND/NOR master
+     swapped for its dual with identical pins) must come back
+     ``not-equivalent``, otherwise the CEC verdict is ``unverified``;
   8. repeats steps 2-5 in a fresh directory and compares DEF, GDS and both
      Verilog exports byte for byte.
+
+A failing build step marks its own gating item ``failed`` (synth, floorplan
+-> floorplan_reproduced, import/place/clock-tree -> place, route/antenna ->
+route, exports -> export); the items after it are ``unverified`` (not run)
+and the PDK status is ``failed``.
 
 Every host command gets a receipt (argv, exit, wall seconds, peak RSS from
 wait4). Verdicts come from parsed outputs, never from exit codes alone.
@@ -51,8 +59,17 @@ import def2gds_reference  # noqa: E402
 import signoff as signoff_harness  # noqa: E402
 
 SCHEMA = "rustroad.scale-flow.v1"
-GATING = ("inputs", "synth", "floorplan_reproduced", "route", "gds_xor", "drc_magic", "drc_klayout",
-          "antenna", "lvs_netgen", "lvs_klayout", "cec", "determinism")
+GATING = ("inputs", "synth", "floorplan_reproduced", "place", "route", "export", "gds_xor", "drc_magic",
+          "drc_klayout", "antenna", "lvs_netgen", "lvs_klayout", "cec", "determinism")
+# Build-step label (``<pdk>_<a|b>_<step><n>``) -> gating item that owns it.
+STEP_ITEMS = (("synth", "synth"), ("floorplan", "floorplan_reproduced"), ("import", "place"),
+              ("place", "place"), ("cts", "place"), ("route", "route"), ("antenna", "route"),
+              ("export", "export"))
+SIGNOFF_ITEMS = ("gds_xor", "drc_magic", "drc_klayout", "antenna", "lvs_netgen", "lvs_klayout")
+# rustsys check synth verdicts (JSON ``verdict``): only these two are definitive.
+CEC_PASS, CEC_FAIL = "equivalent", "not-equivalent"
+# Planted-mutation control: dual masters with identical pin names.
+MUTATIONS = (("and2", "or2"), ("or2", "and2"), ("nand2", "nor2"), ("nor2", "nand2"))
 HOST_AS_BYTES = 8 * 1024 ** 3
 SITES = {"sky130": "unithd", "gf180": "GF018hv5v_mcu_sc7"}
 CELL_GDS = {"sky130": "libs.ref/sky130_fd_sc_hd/gds/sky130_fd_sc_hd.gds",
@@ -90,8 +107,19 @@ def worst(statuses) -> str:
     return "passed" if all(x == "passed" for x in s) else "unverified"
 
 
+PRLIMIT = shutil.which("prlimit")
+GNU_TIME = "/usr/bin/time" if Path("/usr/bin/time").is_file() else None
+
+
 class Runner:
-    """Host commands with receipts (wall time, peak RSS via wait4)."""
+    """Host commands with receipts (wall time, peak RSS).
+
+    Peak RSS comes from GNU time wrapped around the tool (``%M`` of its own
+    child): ``wait4`` on a child spawned from this interpreter records the
+    interpreter's resident pages at exec (Linux keeps the old address
+    space's high-water mark), ~15-25 MiB that the tool never used. The
+    address-space cap is applied by ``prlimit``. Without GNU time the
+    receipt says ``rss_source: wait4`` (an upper bound)."""
 
     def __init__(self, root: Path):
         self.root = root
@@ -103,14 +131,21 @@ class Runner:
         d = self.root / "receipts" / label
         d.mkdir(parents=True, exist_ok=True)
         out, err = d / "stdout.txt", d / "stderr.txt"
+        maxrss = d / "maxrss.txt"
+        if maxrss.exists():
+            maxrss.unlink()
 
         def limit():
             resource.setrlimit(resource.RLIMIT_AS, (HOST_AS_BYTES, HOST_AS_BYTES))
 
+        spawn = dict(preexec_fn=limit) if PRLIMIT is None else {}
+        command = argv if PRLIMIT is None else [PRLIMIT, f"--as={HOST_AS_BYTES}", "--", *argv]
+        if GNU_TIME:
+            command = [GNU_TIME, "-f", "%M", "-o", str(maxrss), *command]
         start = time.monotonic()
         with out.open("wb") as o, err.open("wb") as e:
-            proc = subprocess.Popen(argv, stdout=o, stderr=e, preexec_fn=limit,
-                                    env={**os.environ, **(env or {})})
+            proc = subprocess.Popen(command, stdout=o, stderr=e, env={**os.environ, **(env or {})},
+                                    start_new_session=True, **spawn)
             timed_out = False
             deadline = start + timeout
             status, usage = None, None
@@ -119,15 +154,21 @@ class Runner:
                 if pid:
                     break
                 if time.monotonic() > deadline:
-                    proc.kill()
+                    os.killpg(proc.pid, 9)
                     timed_out = True
                     _, status, usage = os.wait4(proc.pid, 0)
                     break
                 time.sleep(0.02)
         wall = time.monotonic() - start
         code = os.waitstatus_to_exitcode(status)
+        peak, source = usage.ru_maxrss, "wait4"
+        if GNU_TIME and not timed_out:
+            try:
+                peak, source = int(maxrss.read_text().split()[-1]), "gnu-time"
+            except (OSError, ValueError, IndexError):
+                pass
         receipt = dict(label=label, argv=argv, exit_code=code, timed_out=timed_out,
-                       wall_seconds=round(wall, 3), peak_rss_kib=usage.ru_maxrss,
+                       wall_seconds=round(wall, 3), peak_rss_kib=peak, rss_source=source,
                        stdout=str(out), stderr=str(err))
         (d / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         self.receipts.append(receipt)
@@ -137,7 +178,7 @@ class Runner:
         r = self.run(label, argv, **kw)
         if r["exit_code"] != 0:
             tail = Path(r["stderr"]).read_text(errors="replace")[-800:]
-            raise StepError(f"{label}: exit {r['exit_code']}: {tail}")
+            raise StepError(label, f"{label}: exit {r['exit_code']}: {tail}")
         return r
 
     def json(self, label: str, argv: list, **kw) -> dict:
@@ -146,7 +187,20 @@ class Runner:
 
 
 class StepError(RuntimeError):
-    pass
+    """A build step failed; ``label`` is its receipt label."""
+
+    def __init__(self, label: str, message: str):
+        super().__init__(message)
+        self.label = label
+
+
+def step_item(label: str) -> str:
+    """Gating item of a receipt label such as ``sky130_a_route0``."""
+    step = label.split("_", 2)[2] if label.count("_") >= 2 else label
+    for prefix, key in STEP_ITEMS:
+        if step.startswith(prefix):
+            return key
+    return "route"
 
 
 def deconflict(text: str) -> tuple[str, int]:
@@ -193,13 +247,17 @@ def verify_tracked(m: dict, tag: str) -> dict:
     return item("passed" if not bad else "failed", None if not bad else f"changed: {bad}", files=rows)
 
 
-def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str) -> dict:
-    """Steps 2-5 in run_dir; returns artifact paths and step facts."""
+def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str, facts: dict | None = None) -> dict:
+    """Steps 2-5 in run_dir; returns artifact paths and step facts.
+
+    ``facts`` (filled in place) keeps what finished before a StepError;
+    ``facts["completed"]`` lists the finished gating items in order."""
     spec = m["pdks"][tag]
     p = pdk_entry(tag)
     lib = Path(p["liberty"]["path"])
     run_dir.mkdir(parents=True, exist_ok=True)
-    facts: dict = {}
+    facts = {} if facts is None else facts
+    done = facts.setdefault("completed", [])
     mapped = run_dir / "mapped.v"
     if "netlist" in spec:
         shutil.copyfile(resolve(spec["netlist"]["path"]), mapped)
@@ -218,6 +276,7 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str) -> dict
     netlist = run_dir / "netlist.v"
     netlist.write_text(text)
     facts["renamed_escaped_wires"] = renamed
+    done.append("synth")
     fp = m["floorplan_recipe"]
     floor, phys = run_dir / "floorplan.json", run_dir / "physical.json"
     road = [args.rustroad]
@@ -238,6 +297,7 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str) -> dict
         shutil.copyfile(phys, tracked_phys)
     facts["floorplan_reproduced"] = (floor.read_bytes() == tracked_floor.read_bytes()
                                      and phys.read_bytes() == tracked_phys.read_bytes())
+    done.append("floorplan_reproduced")
     ws = run_dir / "ws"
     rr = [args.rustroad, "--workspace", ws, "--threads", "2", "--max-cells", "250000",
           "--max-rows", "100000", "--max-expansions", "100000000"]
@@ -257,11 +317,16 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str) -> dict
                                                   resolve(m["sdc"]["clock"]["path"])])
             facts["placement_after_cts"] = a.get("placement")
             facts["clock_buffers"] = a.get("clock_buffers")
+        if eco == 0:
+            done.append("place")
         a = r.json(f"{label}_route{eco}", rr + ["route", "--base-rev", a["revision"], "--scope", "all",
                                                 "--config", resolve(spec["routing_config"]["path"])],
                    env={"RUSTROAD_ROUTE_TRACE": "1"})
         facts["route"] = {k: a.get(k) for k in ("routed_nets", "routing_segments", "routing_expansions",
-                                                 "cells", "tap_cells", "filler_cells")}
+                                                 "cells", "tap_cells", "filler_cells", "route_memory")}
+        route_receipt = r.receipts[-1]
+        facts["route"]["peak_rss_kib"] = route_receipt["peak_rss_kib"]
+        facts["route"]["rss_source"] = route_receipt.get("rss_source")
         # Rows are sorted worst first and every violated row is kept; the
         # cap only bounds the report size for large blocks.
         ant = r.json(f"{label}_antenna{eco}", rr + ["check-antenna", "--max-rows", "5000"])
@@ -287,6 +352,7 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str) -> dict
         current = fixed
     facts["antenna_eco_iterations"] = eco
     facts["final_netlist"] = str(current)
+    done.append("route")
     outs = {}
     for name, extra in (("def", ["export-def"]), ("verilog", ["export-verilog"]),
                         ("powered", ["export-verilog", "--include-power"]),
@@ -307,6 +373,7 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str) -> dict
     routes = json.loads(outs["routes"].read_text())
     stats = (routes.get("routes") or routes).get("stats", {}) if isinstance(routes, dict) else {}
     facts["route_stats"] = stats
+    done.append("export")
     return dict(outputs=outs, facts=facts, workspace=ws)
 
 
@@ -337,23 +404,115 @@ def signoff_checks(run_dir: Path, tag: str, top: str, outs: dict, timeout: int =
                 container_wall_seconds=summary["resources"].get("wall_seconds"))
 
 
+def cec_verdict(res: dict) -> dict:
+    """Classify one ``rustsys check synth --print json`` receipt.
+
+    ``equivalent`` passes; ``not-equivalent`` - or any other verdict that
+    carries a mismatch with a counterexample - fails; everything else
+    (undecided, error, initial-state-refinement, timeout, unreadable JSON)
+    is unverified."""
+    try:
+        report = json.loads(Path(res["stdout"]).read_text())
+    except (json.JSONDecodeError, OSError):
+        report = {}
+    verdict = report.get("verdict") if isinstance(report, dict) else None
+    mismatches = report.get("mismatches") if isinstance(report, dict) else None
+    mismatches = mismatches if isinstance(mismatches, list) else []
+    extra = dict(verdict=verdict, exit_code=res["exit_code"], timed_out=res["timed_out"],
+                 mismatches=len(mismatches),
+                 first_mismatch=({k: mismatches[0].get(k) for k in ("kind", "name")}
+                                 if mismatches and isinstance(mismatches[0], dict) else None))
+    if verdict == CEC_PASS and not mismatches and not res["timed_out"]:
+        return item("passed", **extra)
+    if verdict == CEC_FAIL or (verdict != CEC_PASS and mismatches):
+        return item("failed", f"verdict {verdict} with {len(mismatches)} mismatch(es)", **extra)
+    return item("unverified", f"no definitive verdict ({verdict}, exit {res['exit_code']}"
+                + (", timed out" if res["timed_out"] else "") + ")", **extra)
+
+
+def liberty_pins(lib: Path) -> dict[str, frozenset]:
+    """Cell name -> pin names of a Liberty file (for the mutation table only)."""
+    out, cell, pins = {}, None, set()
+    head = re.compile(r'^\s*cell\s*\(\s*"?([\w$]+)"?\s*\)')
+    pin = re.compile(r'^\s*pin\s*\(\s*"?([\w$\[\]]+)"?\s*\)')
+    with lib.open(errors="replace") as f:
+        for line in f:
+            m = head.match(line)
+            if m:
+                if cell is not None:
+                    out[cell] = frozenset(pins)
+                cell, pins = m[1], set()
+                continue
+            m = pin.match(line)
+            if m and cell is not None:
+                pins.add(m[1])
+    if cell is not None:
+        out[cell] = frozenset(pins)
+    return out
+
+
+def plant_mutation(text: str, cells: dict[str, frozenset], skip: int = 0) -> tuple[str, dict] | None:
+    """Swap the master of the ``skip``-th eligible instance for its dual
+    (AND2<->OR2, NAND2<->NOR2, same drive and identical Liberty pins)."""
+    seen = 0
+    for m in re.finditer(r"^(\s*)([\w$]+)(\s+)(\\?\S+)(\s*\()", text, re.M):
+        master = m[2]
+        for a, b in MUTATIONS:
+            hit = re.fullmatch(r"(.*__)" + a + r"(_\d+)", master)
+            if not hit:
+                continue
+            dual = hit[1] + b + hit[2]
+            if master not in cells or cells.get(dual) != cells[master]:
+                continue
+            if seen < skip:
+                seen += 1
+                break
+            mutated = text[:m.start(2)] + dual + text[m.end(2):]
+            return mutated, dict(instance=m[4], master=master, mutated_to=dual)
+    return None
+
+
 def cec(r: Runner, m: dict, tag: str, netlist: Path, args) -> dict:
     lib = Path(pdk_entry(tag)["liberty"]["path"])
     rtl = [resolve(x["path"]) for x in m["rtl"]]
     v = m["verification"]
-    res = r.run(f"{tag}_cec", [args.rustsys, "--threads", "2", "--progress", "off", "check", "synth", "--top",
-                               m["top"], "--lib", lib, "--netlist", netlist, "--budget", v["rustsys_budget"],
-                               "--model-budget", v["rustsys_model_budget"], "--sweep-max-candidates",
-                               v["rustsys_sweep_max_candidates"], "--print", "json", *rtl])
-    try:
-        verdict = json.loads(Path(res["stdout"]).read_text()).get("verdict")
-    except (json.JSONDecodeError, OSError):
-        verdict = None
-    if verdict == "equivalent":
-        return item("passed", verdict=verdict)
-    if verdict in ("not_equivalent", "counterexample", "different"):
-        return item("failed", f"verdict {verdict}", verdict=verdict)
-    return item("unverified", f"no definitive verdict ({verdict}, exit {res['exit_code']})", verdict=verdict)
+
+    def check(label: str, path: Path) -> dict:
+        return r.run(label, [args.rustsys, "--threads", "2", "--progress", "off", "check", "synth", "--top",
+                             m["top"], "--lib", lib, "--netlist", path, "--budget", v["rustsys_budget"],
+                             "--model-budget", v["rustsys_model_budget"], "--sweep-max-candidates",
+                             v["rustsys_sweep_max_candidates"], "--print", "json", *rtl])
+
+    out = cec_verdict(check(f"{tag}_cec", netlist))
+    if out["status"] != "passed":
+        return out
+    if args.no_cec_control:
+        return item("unverified", "equivalent, but the planted-mutation control was skipped",
+                    verdict=out.get("verdict"), control=item("unverified", "not requested"))
+    # Planted-mutation control: the same check must reject a netlist with one
+    # dual master; up to three candidates (a swapped gate can be redundant).
+    cells = liberty_pins(lib)
+    text = netlist.read_text()
+    tries = []
+    for k in range(3):
+        planted = plant_mutation(text, cells, k)
+        if planted is None:
+            break
+        mutated, what = planted
+        path = netlist.parent / f"cec_control{k}.v"
+        path.write_text(mutated)
+        verdict = cec_verdict(check(f"{tag}_cec_control{k}", path))
+        tries.append(dict(what, status=verdict["status"], verdict=verdict.get("verdict")))
+        if verdict["status"] == "failed":
+            out["control"] = item("passed", "planted mutation detected", tries=tries)
+            return out
+        if verdict["status"] == "unverified":
+            break
+    out["control"] = item("failed" if tries else "unverified",
+                          "planted mutation not detected" if tries else "no eligible AND2/OR2/NAND2/NOR2 instance",
+                          tries=tries)
+    return item("unverified", f"CEC control {out['control']['status']}: the verdict is not trusted",
+                verdict=out.get("verdict"), control=out["control"])
 
 
 def flow(m: dict, tag: str, args, out: Path) -> dict:
@@ -363,28 +522,49 @@ def flow(m: dict, tag: str, args, out: Path) -> dict:
     result: dict = dict(pdk=tag, statuses={})
     st = result["statuses"]
     st["inputs"] = verify_tracked(m, tag)
-    try:
-        a = build(r, root / "a", m, tag, args, f"{tag}_a")
-    except StepError as e:
-        for k in GATING:
-            st.setdefault(k, item("failed" if k == "route" else "unverified", str(e)[:2000]))
-        result["error"] = str(e)[:4000]
-        result["receipts"] = r.receipts
-        return result
-    facts = a["facts"]
+    facts: dict = {}
     result["facts"] = facts
+    try:
+        a = build(r, root / "a", m, tag, args, f"{tag}_a", facts)
+    except StepError as e:
+        # The failing step owns the failure; finished steps keep their
+        # verdicts; everything after it was not run.
+        failed = step_item(e.label)
+        done = facts.get("completed", [])
+        if "synth" in done:
+            st["synth"] = item("passed", **({} if "cells" not in facts.get("synth", {}) else facts["synth"]))
+        if "floorplan_reproduced" in done:
+            st["floorplan_reproduced"] = item("passed" if facts["floorplan_reproduced"] else "failed")
+        for k in ("place", "route", "export"):
+            if k in done:
+                st[k] = item("passed")
+        st[failed] = item("failed", f"step {e.label} failed: " + str(e)[:2000], failed_step=e.label)
+        for k in GATING:
+            st.setdefault(k, item("unverified", f"not run: step {e.label} failed"))
+        result["error"] = str(e)[:4000]
+        result["failed_step"] = e.label
+        result["status"] = worst(st[k]["status"] for k in GATING)
+        result["resources"] = dict(wall_seconds=round(time.monotonic() - started, 3),
+                                   host_peak_rss_kib=max((x["peak_rss_kib"] for x in r.receipts), default=None),
+                                   steps={x["label"]: dict(wall_seconds=x["wall_seconds"],
+                                                           peak_rss_kib=x["peak_rss_kib"]) for x in r.receipts})
+        result["receipts"] = [dict(label=x["label"], exit_code=x["exit_code"], wall_seconds=x["wall_seconds"],
+                                   peak_rss_kib=x["peak_rss_kib"]) for x in r.receipts]
+        return result
     st["synth"] = item("passed", **({} if "cells" not in facts["synth"] else facts["synth"]))
     st["floorplan_reproduced"] = item("passed" if facts["floorplan_reproduced"] else "failed",
                                       None if facts["floorplan_reproduced"] else
                                       "regenerated floorplan/physical config differ from the tracked files")
+    st["place"] = item("passed", placement=facts.get("placement_after_cts") or facts.get("placement"))
     st["route"] = item("passed", **facts["route"])
+    st["export"] = item("passed")
     if not args.no_signoff:
         s = signoff_checks(root / "a", tag, m["top"], a["outputs"],
                            int(m["budgets"].get("container_timeout_s", 1800)))
         st.update(s["statuses"])
         result["signoff"] = {k: v for k, v in s.items() if k != "statuses"}
     else:
-        for k in ("gds_xor", "drc_magic", "drc_klayout", "antenna", "lvs_netgen", "lvs_klayout", "density"):
+        for k in SIGNOFF_ITEMS + ("density",):
             st[k] = item("unverified", "signoff not run (--no-signoff)")
     st["cec"] = cec(r, m, tag, a["outputs"]["verilog"], args)
     if not args.no_rerun:
@@ -396,7 +576,7 @@ def flow(m: dict, tag: str, args, out: Path) -> dict:
                                      None if all(same.values()) else f"differs: {same}",
                                      sha256={k: sha256(a["outputs"][k]) for k in same})
         except StepError as e:
-            st["determinism"] = item("failed", f"rerun failed: {e}"[:2000])
+            st["determinism"] = item("failed", f"rerun failed at {e.label}: {e}"[:2000], failed_step=e.label)
     else:
         st["determinism"] = item("unverified", "rerun not requested")
     host = [x for x in r.receipts]
@@ -422,6 +602,8 @@ def main(argv=None) -> int:
     ap.add_argument("--no-rerun", action="store_true")
     ap.add_argument("--no-signoff", action="store_true")
     ap.add_argument("--refresh-floorplan", action="store_true")
+    ap.add_argument("--no-cec-control", action="store_true",
+                    help="skip the planted-mutation control (the CEC item then stays unverified)")
     args = ap.parse_args(argv)
     m = json.loads(resolve(args.design).read_text())
     if m.get("schema") != "rustroad.design.v1":
@@ -430,7 +612,7 @@ def main(argv=None) -> int:
     started = time.monotonic()
     pdks = args.pdk or list(m["pdks"])
     per = {tag: flow(m, tag, args, args.out) for tag in pdks}
-    status = worst(p.get("status", "unverified") for p in per.values())
+    status = worst(p["status"] for p in per.values())
     summary = dict(schema=SCHEMA, design=m["name"], top=m["top"], status=status,
                    gating=list(GATING), rustroad=dict(path=str(args.rustroad), sha256=sha256(args.rustroad)),
                    rustsys=dict(path=str(args.rustsys), sha256=sha256(args.rustsys)),

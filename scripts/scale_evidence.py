@@ -42,6 +42,9 @@ def row(design: str, tag: str, p: dict, run: str) -> dict:
     steps = p.get("resources", {}).get("steps", {})
     route = next((v for k, v in steps.items() if k.endswith("_a_route0")), {})
     reasons = {k: detail(v.get("reason")) for k, v in p["statuses"].items() if v["status"] != "passed"}
+    memory = (f.get("route") or {}).get("route_memory") or {}
+    route_kib = route.get("peak_rss_kib")
+    cec = p["statuses"].get("cec", {})
     return dict(
         design=design, pdk=tag, run=run, status=p.get("status"), statuses=st, counts=counts,
         non_passed_reasons={k: r[:600] for k, r in reasons.items()},
@@ -54,7 +57,14 @@ def row(design: str, tag: str, p: dict, run: str) -> dict:
         route_stats=f.get("route_stats"),
         native_antenna=f.get("native_antenna"), antenna_eco_iterations=f.get("antenna_eco_iterations"),
         renamed_escaped_wires=f.get("renamed_escaped_wires"),
-        route_wall_seconds=route.get("wall_seconds"), route_peak_rss_kib=route.get("peak_rss_kib"),
+        route_wall_seconds=route.get("wall_seconds"), route_peak_rss_kib=route_kib,
+        route_rss_source=(f.get("route") or {}).get("rss_source"),
+        route_memory=memory or None,
+        estimate_bounds_route_rss=(memory.get("estimate_mib", 0) * 1024 >= route_kib
+                                   if memory and route_kib else None),
+        cec_verdict=cec.get("verdict"), cec_control=(cec.get("control") or {}).get("status"),
+        cec_control_tries=(cec.get("control") or {}).get("tries"),
+        failed_step=p.get("failed_step"),
         wall_seconds=p.get("resources", {}).get("wall_seconds"),
         host_peak_rss_kib=p.get("resources", {}).get("host_peak_rss_kib"),
         container_peak_rss_kib=p.get("resources", {}).get("container_peak_rss_kib"),
@@ -93,7 +103,7 @@ def main() -> int:
                rows=rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(out, indent=2) + "\n")
-    print("| design | PDK | cells (placed) | nets | XOR | Magic | KLayout | antenna | Netgen | KLayout LVS | density | CEC | rerun | HPWL vs fixed order | route s / MiB | flow s |")
+    print("| design | PDK | cells (placed) | nets | XOR | Magic | KLayout | antenna | Netgen | KLayout LVS | density | CEC (control) | rerun | HPWL vs fixed order | route s / peak MiB / estimate MiB | flow s |")
     print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         if r.get("status") == "missing":
@@ -109,8 +119,9 @@ def main() -> int:
         print(f"| {r['design']} | {r['pdk']} | {r['synth_cells']} ({r['placed_cells']}) | {r['routed_nets']} | "
               f"{cell('gds_xor')} | {cell('drc_magic', 'drc_magic')} | {cell('drc_klayout', 'drc_klayout')} | "
               f"{cell('antenna', 'antenna')} | {cell('lvs_netgen')} | {cell('lvs_klayout')} | "
-              f"{cell('density', 'density')} | {cell('cec')} | {cell('determinism')} | {ratio} | "
-              f"{r['route_wall_seconds']} / {round((r['route_peak_rss_kib'] or 0) / 1024)} | {r['wall_seconds']} |")
+              f"{cell('density', 'density')} | {cell('cec')} ({r['cec_control']}) | {cell('determinism')} | "
+              f"{ratio} | {r['route_wall_seconds']} / {round((r['route_peak_rss_kib'] or 0) / 1024)} / "
+              f"{(r['route_memory'] or {}).get('estimate_mib')} | {r['wall_seconds']} |")
     return 0
 
 
