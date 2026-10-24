@@ -1,0 +1,333 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Logic oracles of the RTL-to-GDS gate (W10): CEC and generic co-simulation.
+
+* RustSys ``check synth`` (native) and Yosys ``equiv_*`` (second oracle) prove
+  the RTL equivalent to a netlist: the mapped, final (post-CTS/ECO) and powered
+  netlists. For the powered netlist the LEF-only physical cells
+  (cell-policy ``physical_only`` masters with no output pin in the cell LEF:
+  taps, fillers, decaps, diodes) are removed and listed, RustSys gets the
+  supply ports with ``--supply-port`` and Yosys gets an unpowered view (supply
+  pin connections and supply ports removed, also listed).
+* A generic random co-simulation testbench is generated from the RTL port list
+  (Yosys JSON): every non-clock input is driven from a fixed-seed xorshift64
+  sequence, the clock port is toggled, and every output bit of the RTL and of
+  the gate model (Yosys model of the netlist with the Liberty functions) is
+  compared with ``!==`` before and after every clock edge, for N cycles. Both
+  models start from Verilator's zero-initialised state; nothing in it is
+  specific to a fixture.
+* ``bad_rtl`` builds a generic mutant: the top module is renamed in copies of
+  the RTL and a wrapper with the original name inverts bit 0 of the first
+  output port. Both CEC oracles must reject it.
+"""
+from __future__ import annotations
+
+from collections import Counter
+import fnmatch
+import json
+from pathlib import Path
+import re
+
+from rtl2gds_design import GateError, item
+
+MAX_LEF_BYTES = 64 * 1024 * 1024
+MAX_NETLIST_BYTES = 64 * 1024 * 1024
+
+
+def _text(path: Path, limit: int) -> str:
+    path = Path(path)
+    if path.stat().st_size > limit:
+        raise GateError(f"{path} exceeds {limit} bytes")
+    return path.read_text(errors="replace")
+
+
+def ystr(path: Path) -> str:
+    return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def run(h, label: str, argv: list) -> dict:
+    return h.run(label, [str(a) for a in argv])
+
+
+def out_text(receipt: dict) -> str:
+    return _text(Path(receipt["stdout"]), 64 * 1024 ** 2) + _text(Path(receipt["stderr"]), 64 * 1024 ** 2)
+
+
+# ----------------------------------------------------------------------------- LEF pins
+
+def lef_pins(path: Path) -> dict[str, dict[str, dict]]:
+    """MACRO -> PIN -> {direction, use} from a cell LEF (names only)."""
+    text = _text(path, MAX_LEF_BYTES)
+    out: dict[str, dict[str, dict]] = {}
+    macro = pin = None
+    for line in text.splitlines():
+        words = line.split()
+        if not words:
+            continue
+        if words[0] == "MACRO" and len(words) > 1:
+            macro, pin = words[1], None
+            out[macro] = {}
+        elif macro and words[0] == "PIN" and len(words) > 1:
+            pin = words[1]
+            out[macro][pin] = dict(direction=None, use=None)
+        elif macro and pin and words[0] == "DIRECTION" and len(words) > 1:
+            out[macro][pin]["direction"] = " ".join(w for w in words[1:] if w != ";")
+        elif macro and pin and words[0] == "USE" and len(words) > 1:
+            out[macro][pin]["use"] = words[1].rstrip(";")
+        elif words[0] == "END" and len(words) > 1:
+            if pin and words[1] == pin:
+                pin = None
+            elif macro and words[1] == macro:
+                macro = pin = None
+    return out
+
+
+# ----------------------------------------------------------------------------- netlist views
+
+INSTANCE = re.compile(r"^(\s*)(\S+)\s+(\S+)\s+\((.*)\);\s*$")
+CONN = re.compile(r"\.(\w+)\(([^()]*)\)")
+
+
+def physical_only_view(text: str, physical_globs: list[str], pins: dict) -> tuple[str, dict]:
+    """Remove instances of LEF-only physical masters (policy globs AND no output pin)."""
+    kept, removed, refused = [], Counter(), []
+    for line in text.splitlines(keepends=True):
+        m = INSTANCE.match(line)
+        if m and any(fnmatch.fnmatchcase(m[2], g) for g in physical_globs):
+            outputs = [p for p, d in (pins.get(m[2]) or {}).items() if (d["direction"] or "").startswith("OUTPUT")]
+            if m[2] not in pins or outputs:
+                refused.append(f"{m[3]} ({m[2]}): {'not in the cell LEF' if m[2] not in pins else 'has output pins ' + str(outputs)}")
+                kept.append(line)
+                continue
+            removed[m[2]] += 1
+            continue
+        kept.append(line)
+    if refused:
+        raise GateError(f"physical-only filter refused: {refused[:5]}")
+    return "".join(kept), dict(removed_instances=sum(removed.values()), by_master=dict(sorted(removed.items())),
+                              rule="cell-policy physical_only masters without any LEF OUTPUT pin")
+
+
+def unpowered_view(text: str, pins: dict, supply_ports: list[str]) -> tuple[str, dict]:
+    """Drop supply-pin connections (LEF USE POWER/GROUND) and the supply ports."""
+    lines, dropped, ports_removed = [], 0, []
+    for line in text.splitlines(keepends=True):
+        m = INSTANCE.match(line)
+        if m:
+            master = pins.get(m[2]) or {}
+            conns = CONN.findall(m[4])
+            keep = [(p, s) for p, s in conns if (master.get(p) or {}).get("use") not in ("POWER", "GROUND")]
+            dropped += len(conns) - len(keep)
+            lines.append(f"{m[1]}{m[2]} {m[3]} (" + ", ".join(f".{p}({s})" for p, s in keep) + ");\n")
+            continue
+        decl = re.match(r"^\s*inout\s+wire\s+(\S+?)\s*,?\s*$", line)
+        if decl and decl[1] in supply_ports:
+            ports_removed.append(decl[1])
+            continue
+        lines.append(line)
+    out = "".join(lines)
+    # The port list may now end with a comma before ');'.
+    out = re.sub(r",(\s*\n\);)", r"\1", out, count=1)
+    if sorted(ports_removed) != sorted(supply_ports):
+        raise GateError(f"supply ports {supply_ports} not all found (removed {ports_removed})")
+    return out, dict(supply_connections_removed=dropped, supply_ports_removed=ports_removed)
+
+
+# ----------------------------------------------------------------------------- RTL ports and mutants
+
+def rtl_module(h, label: str, yosys: Path, rtl: list[Path], top: str) -> dict:
+    out = h.root / f"{label}.json"
+    script = h.root / f"{label}.ys"
+    script.write_text("".join(f"read_verilog -sv {ystr(p)}\n" for p in rtl) +
+                      f"hierarchy -check -top {top}\nproc\nwrite_json {ystr(out)}\n")
+    r = run(h, label, [yosys, "-Q", "-T", "-s", script])
+    if r["exit_code"] != 0 or not out.is_file():
+        raise GateError(f"{label}: Yosys could not elaborate the RTL")
+    return json.loads(_text(out, 64 * 1024 ** 2))["modules"][top]
+
+
+def bad_rtl(rtl: list[Path], top: str, ports: list[dict], out_dir: Path) -> tuple[list[Path], dict]:
+    """Renamed-top copies + a wrapper that inverts bit 0 of the first output."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    renamed, files = 0, []
+    pattern = re.compile(r"\bmodule(\s+)" + re.escape(top) + r"\b")
+    for i, src in enumerate(rtl):
+        text, n = pattern.subn(r"module\g<1>" + top + "__rr_orig", _text(src, 16 * 1024 ** 2))
+        renamed += n
+        dst = out_dir / f"{i}_{src.name}"
+        dst.write_text(text)
+        files.append(dst)
+    if renamed != 1:
+        raise GateError(f"bad-RTL control: module {top} defined {renamed} times")
+    outputs = [p for p in ports if p["direction"] == "output"]
+    if not outputs:
+        raise GateError("bad-RTL control: the top has no output")
+    victim = outputs[0]
+
+    def decl(p):
+        rng = f" [{p['msb']}:{p['lsb']}]" if p["vector"] else ""
+        return f"  {p['direction']} wire{rng} {p['name']}"
+    body = [f"module {top}(\n" + ",\n".join(decl(p) for p in ports) + "\n);"]
+    rng = f" [{victim['msb']}:{victim['lsb']}]" if victim["vector"] else ""
+    body.append(f"  wire{rng} rr_mutant_{victim['name']};")
+    conns = ", ".join(f".{p['name']}({'rr_mutant_' + p['name'] if p is victim else p['name']})" for p in ports)
+    body.append(f"  {top}__rr_orig rr_orig ({conns});")
+    if victim["vector"]:
+        lsb = min(victim["msb"], victim["lsb"])
+        body.append(f"  assign {victim['name']} = rr_mutant_{victim['name']} ^ {victim['width']}'d1;")
+        flipped = f"{victim['name']}[{lsb}]"
+    else:
+        body.append(f"  assign {victim['name']} = ~rr_mutant_{victim['name']};")
+        flipped = victim["name"]
+    body.append("endmodule\n")
+    wrapper = out_dir / "rr_mutant_top.v"
+    wrapper.write_text("\n".join(body))
+    return files + [wrapper], dict(mutation=f"output bit {flipped} inverted by a wrapper around the renamed top",
+                                   files=[str(f) for f in files + [wrapper]])
+
+
+# ----------------------------------------------------------------------------- CEC oracles
+
+def rustsys_check(h, label: str, rustsys: Path, lib: Path, rtl: list[Path], top: str, netlist: Path,
+                  verification: dict, supply_ports: list[str] = ()) -> dict:
+    argv = [rustsys, "--threads", "2", "--progress", "off", "check", "synth", "--top", top, "--lib", lib,
+            "--netlist", netlist, "--budget", verification["rustsys_budget"],
+            "--model-budget", verification["rustsys_model_budget"],
+            "--sweep-max-candidates", verification["rustsys_sweep_max_candidates"], "--print", "json"]
+    for p in supply_ports:
+        argv += ["--supply-port", p]
+    r = run(h, label, argv + list(rtl))
+    text = _text(Path(r["stdout"]), 64 * 1024 ** 2)
+    try:
+        verdict = json.loads(text).get("verdict")
+    except json.JSONDecodeError:
+        verdict = None
+    status = {"equivalent": "passed", "not-equivalent": "failed"}.get(verdict, "unverified")
+    return item(status, None if status == "passed" else f"RustSys check synth verdict {verdict!r} (exit {r['exit_code']})",
+                verdict=verdict, exit_code=r["exit_code"], receipt=label, supply_ports=list(supply_ports))
+
+
+def yosys_equiv(h, label: str, yosys: Path, lib: Path, rtl: list[Path], top: str, netlist: Path, seq: int) -> dict:
+    script = h.root / f"{label}.ys"
+    script.write_text(
+        f"read_liberty -ignore_miss_func -ignore_miss_dir -ignore_miss_data_latch {ystr(lib)}\n"
+        f"read_verilog {ystr(netlist)}\nhierarchy -top {top}\nproc\nflatten\nopt\nrename {top} gate\n"
+        "design -stash gate\ndesign -reset\n" +
+        "".join(f"read_verilog -sv {ystr(p)}\n" for p in rtl) +
+        f"hierarchy -top {top}\nproc\nopt\nrename {top} gold\ndesign -stash gold\n"
+        "design -copy-from gold -as gold gold\ndesign -copy-from gate -as gate gate\n"
+        f"equiv_make gold gate equiv\nhierarchy -top equiv\nequiv_simple -seq {int(seq)} -undef\nequiv_status -assert\n")
+    r = run(h, label, [yosys, "-Q", "-T", "-s", script])
+    stdout, stderr = _text(Path(r["stdout"]), 64 * 1024 ** 2), _text(Path(r["stderr"]), 64 * 1024 ** 2)
+    if r["exit_code"] == 0 and "Equivalence successfully proven!" in stdout:
+        return item("passed", receipt=label)
+    if r["exit_code"] == 1 and "unproven $equiv cells" in stderr:
+        m = re.search(r"Found (\d+) unproven \$equiv cells", stderr)
+        return item("failed", f"Yosys equiv: {m[1] if m else '?'} unproven $equiv cells", receipt=label)
+    return item("unverified", f"Yosys equiv did not reach a verdict (exit {r['exit_code']})", receipt=label)
+
+
+def cec_pair(h, tag: str, tools: dict, lib: Path, rtl: list[Path], top: str, netlist: Path, verification: dict,
+             supply_ports: list[str] = (), yosys_netlist: Path | None = None) -> dict:
+    return dict(rustsys=rustsys_check(h, f"{tag}_rustsys", tools["rustsys"], lib, rtl, top, netlist, verification,
+                                      supply_ports),
+                yosys=yosys_equiv(h, f"{tag}_yosys", tools["yosys"], lib, rtl, top, yosys_netlist or netlist,
+                                  verification["yosys_equiv_seq"]))
+
+
+# ----------------------------------------------------------------------------- co-simulation
+
+def xorshift_tb(top: str, ports: list[dict], clock: str | None, vectors: int, seed: int) -> str:
+    """Generic random RTL-vs-gate testbench (SystemVerilog, Verilator --timing).
+
+    Every variable is initialised in its declaration and the loop is a
+    ``repeat``: Verilator 5.032 with its default optimisation constant-folds
+    variables that an initial block assigns before its first delay (observed:
+    a counter incremented 4096 times reads 0 afterwards), which would make a
+    comparison vacuous. The testbench therefore also prints how many cycles
+    ran, how many port comparisons it made and the final simulation time; the
+    harness requires all three to match (and builds with -O0).
+    """
+    if any(p["direction"] == "inout" for p in ports):
+        raise GateError("co-simulation: inout ports are not supported")
+    ins = [p for p in ports if p["direction"] == "input" and p["name"] != clock]
+    outs = [p for p in ports if p["direction"] == "output"]
+    if not outs:
+        raise GateError("co-simulation: the top has no output")
+    rng = lambda p: f"[{p['width'] - 1}:0] " if p["width"] > 1 else ""  # noqa: E731
+    lines = ["module rr_cosim_tb;"]
+    if clock:
+        lines.append(f"  reg {clock} = 1'b0;")
+    lines += [f"  reg {rng(p)}{p['name']} = '0;" for p in ins]
+    lines += [f"  wire {rng(p)}gold_{p['name']}, gate_{p['name']};" for p in outs]
+
+    def conns(prefix):
+        return ", ".join(f".{p['name']}({prefix + p['name'] if p['direction'] == 'output' else p['name']})"
+                         for p in ports)
+    lines.append(f"  {top} gold ({conns('gold_')});")
+    lines.append(f"  gate dut ({conns('gate_')});")
+    lines += [f"  reg [63:0] s = 64'h{seed:016x};", "  integer errors = 0;", "  integer checks = 0;",
+              "  integer cycle = 0;", "  integer phase = 0;"]
+    compare = []
+    for p in outs:
+        compare.append(f"      checks = checks + 1; if (gold_{p['name']} !== gate_{p['name']}) begin errors = errors + 1; "
+                       f"if (errors <= 8) $display(\"RR_COSIM_MISMATCH cycle=%0d phase=%0d port={p['name']} "
+                       f"gold=%b gate=%b\", cycle, phase, gold_{p['name']}, gate_{p['name']}); end")
+    lines += ["  initial begin", f"    repeat ({int(vectors)}) begin"]
+    for p in ins:
+        for k in range((p["width"] + 63) // 64):
+            hi = min(p["width"], (k + 1) * 64) - 1
+            lo = k * 64
+            sel = f"[{hi}:{lo}]" if p["width"] > 1 else ""
+            lines.append("      s = s ^ (s << 13); s = s ^ (s >> 7); s = s ^ (s << 17);")
+            lines.append(f"      {p['name']}{sel} = s[{hi - lo}:0];")
+    lines.append("      #1; phase = 0;")
+    lines += compare
+    if clock:
+        lines.append(f"      {clock} = 1'b1; #1; phase = 1;")
+        lines += compare
+        lines.append(f"      {clock} = 1'b0; #1;")
+    lines += ["      cycle = cycle + 1;", "    end",
+              "    $display(\"RR_COSIM_DONE cycles=%0d checks=%0d errors=%0d time=%0t\", cycle, checks, errors, $time);",
+              "    if (errors == 0) $display(\"RR_COSIM_PASS\");", "    else $display(\"RR_COSIM_FAIL\");",
+              "    $finish;", "  end", "endmodule", ""]
+    return "\n".join(lines)
+
+
+def expected_counts(ports: list[dict], clock: str | None, vectors: int) -> dict:
+    outs = sum(1 for p in ports if p["direction"] == "output")
+    phases = 2 if clock else 1
+    return dict(cycles=vectors, checks=vectors * phases * outs, time=vectors * (3 if clock else 1))
+
+
+def cosim(h, tag: str, tools: dict, lib: Path, rtl: list[Path], top: str, netlist: Path, ports: list[dict],
+          clock: str | None, vectors: int, seed: int) -> dict:
+    model = h.root / f"{tag}_gate_model.v"
+    script = h.root / f"{tag}_gate_model.ys"
+    script.write_text(f"read_liberty -ignore_miss_func -ignore_miss_dir -ignore_miss_data_latch {ystr(lib)}\n"
+                      f"read_verilog {ystr(netlist)}\nhierarchy -top {top}\nproc\nflatten\nrename {top} gate\n"
+                      f"write_verilog -noattr {ystr(model)}\n")
+    r = run(h, f"{tag}_gate_model", [tools["yosys"], "-Q", "-T", "-s", script])
+    if r["exit_code"] != 0:
+        return item("unverified", "Yosys gate model failed")
+    tb = h.root / f"{tag}_cosim_tb.sv"
+    tb.write_text(xorshift_tb(top, ports, clock, vectors, seed))
+    build = h.root / f"{tag}_cosim_build"
+    r = run(h, f"{tag}_cosim_build", [tools["verilator"], "--binary", "--timing", "-O0", "-Wno-fatal", "-j", "2",
+                                      "--top-module", "rr_cosim_tb", "--Mdir", build, *rtl, model, tb])
+    if r["exit_code"] != 0:
+        return item("unverified", "Verilator build failed")
+    r = run(h, f"{tag}_cosim_run", [build / "Vrr_cosim_tb"])
+    text = out_text(r)
+    want = expected_counts(ports, clock, int(vectors))
+    done = re.search(r"RR_COSIM_DONE cycles=(\d+) checks=(\d+) errors=(\d+) time=(\d+)", text)
+    got = dict(cycles=int(done[1]), checks=int(done[2]), time=int(done[4])) if done else None
+    common = dict(vectors=int(vectors), seed=f"0x{seed:016x}", expected=want, observed=got,
+                  compared_outputs=[p["name"] for p in ports if p["direction"] == "output"],
+                  initial_state="Verilator zero-initialised state in both models", testbench=str(tb))
+    if r["exit_code"] != 0 or got != want:
+        return item("unverified", f"co-simulation incomplete: ran {got}, expected {want} (exit {r['exit_code']})",
+                    **common)
+    if int(done[3]) == 0 and "RR_COSIM_PASS" in text:
+        return item("passed", **common)
+    return item("failed", f"RTL and gate outputs differ in {done[3]} comparisons",
+                mismatches=re.findall(r"RR_COSIM_MISMATCH.*", text)[:8], **common)

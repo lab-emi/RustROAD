@@ -1,0 +1,42 @@
+{
+  "schema": "rustroad.rtl2gds-tools.v1",
+  "note": "Pinned black-box and sibling tools of scripts/rtl2gds.py. Relative paths are relative to the RustROAD checkout. The RustSTA pair is a private copy of /mnt/data2/cgao/git/RustROAD/.work/sta-signoff/bin (RustSTA feat/signoff-checks 78ea7cc, cold release build) because that shared directory is replaced by later rounds: populate .work/tools/sta-gate with cp and check the sha256 below. The signoff image is pinned by fixtures/flow/signoff-pinned.json and verified by scripts/signoff.",
+  "tools": {
+    "rustsys": {
+      "path": "/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target/release/rustsys",
+      "sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+      "provenance": "policy producer RustSys c5ec23c (fixtures/flow/cell-policy.json)"
+    },
+    "rusteda": {
+      "path": ".work/tools/sta-gate/rusteda",
+      "sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
+      "provenance": "RustSTA 0.4.0 78ea7cc (feat/signoff-checks), .work/sta-signoff/bin"
+    },
+    "ruststa": {
+      "path": ".work/tools/sta-gate/ruststa",
+      "sha256": "c407c7423dbda69661825ad06db0b10f66bd8eae7e27b181ac40a5cca85b8f44",
+      "provenance": "RustSTA 0.4.0 78ea7cc (feat/signoff-checks), .work/sta-signoff/bin"
+    },
+    "yosys": {
+      "path": "/mnt/data2/cgao/git/RustSys/.work/lec-verification/tools/yosys",
+      "sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+      "provenance": "Yosys 0.67 (fixtures/flow/local-pinned.json)"
+    },
+    "verilator": {
+      "path": "/usr/bin/verilator",
+      "sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+      "provenance": "Verilator 5.032 (fixtures/flow/local-pinned.json)"
+    },
+    "opensta": {
+      "path": "/home/cgao/.local/share/containers/storage/overlay/c2cc5a7e2baaa2c6bdac6951f759273edbb27a34c710ea4593e43ef22d00e4b8/diff/foss/tools/openroad/bin/sta",
+      "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+      "provenance": "OpenSTA 3.1.0 (fixtures/flow/local-pinned.json)"
+    },
+    "openroad": {
+      "image": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+      "executable": "/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad",
+      "sha256": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+      "provenance": "OpenROAD/OpenRCX image f152917ebc45 (black box)"
+    }
+  }
+}
