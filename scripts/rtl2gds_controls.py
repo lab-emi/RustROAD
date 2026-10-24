@@ -22,9 +22,15 @@ bound artifact) and runs the oracle that must catch it; the control is
   tampered_sdc      the rendered SDC edited -> frozen-input hash check fails
   tampered_spef     resistances of the native ss SPEF scaled x1000 -> SPEF
                     identity (extraction receipt) fails; re-timing reported
-  bad_rtl           RTL mutant (an output bit inverted) -> RustSys check
-                    synth AND Yosys equiv reject it against the final netlist
-                    AND the random co-simulation reports mismatches
+  inverted_output   the final netlist with bit 0 of the first output port
+                    driven through an inserted PDK inverter (every other
+                    reader keeps the original value; instance and register
+                    names unchanged) -> RustSys check synth AND the second
+                    oracle (Yosys equiv, or the exhaustive co-simulation)
+                    reject it against the RTL AND the random co-simulation
+                    reports mismatches. (An RTL wrapper mutant moves every
+                    register under a hierarchy prefix, so name-based state
+                    matching cannot even start: not a usable control.)
   missing_tool      the gate run with a pinned tool path that does not exist
                     -> exit 3, tools_identity unverified (never passed)
   relaxed_manifest  an untracked copy of the design manifest with the parity
@@ -32,8 +38,12 @@ bound artifact) and runs the oracle that must catch it; the control is
                     (owner floor) AND manifest_provenance unverified
   tampered_artifact a bound GDS byte flipped, and separately a recorded hash
                     edited -> artifact binding re-verification fails
-  antenna_planted   a long wire on an input pin -> native check-antenna and
-                    the foundry deck both flag it (margin evidence recorded)
+  antenna_planted   a long wire on an input port pin without an antenna
+                    diode (fewest sinks first; the first port/length, up to
+                    8 ports x 3 lengths, the native check flags: a pin whose
+                    route leaves upward has no gate on the I/O layer) ->
+                    native check-antenna and the foundry deck both flag it
+                    (margin evidence recorded)
 """
 from __future__ import annotations
 
@@ -202,12 +212,20 @@ def remove_chain(text: str, sink: str, prefix: str, buffers: dict[str, tuple[str
 
 def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
     it0 = b["iterations"][0]["timing"]["endpoints"]
-    worst = min(((v["hold"], c, e) for c, rows in it0.items() for e, v in rows.items() if "/" in e), default=None)
-    if worst is None or not any(r.get("hold_eco") for r in b["iterations"]):
-        raise GateError("no hold ECO was needed; the control cannot be planted")
     profile = json.loads(Path(b["flow"].delay_cells).read_text())
     buffers = {x["name"]: (x["input_pin"], x["output_pin"]) for x in profile["buffers"]}
-    text, removed = remove_chain(Path(b["final_mapped"]).read_text(), worst[2], "rr_eco_hold_", buffers)
+    source = Path(b["final_mapped"]).read_text()
+    # The worst iteration-0 hold endpoint whose sink a hold chain feeds now.
+    worst, text, removed = None, None, None
+    for hold, corner, ep in sorted((v["hold"], c, e) for c, rows in it0.items() for e, v in rows.items() if "/" in e):
+        try:
+            text, removed = remove_chain(source, ep, "rr_eco_hold_", buffers)
+        except GateError:
+            continue
+        worst = (hold, corner, ep)
+        break
+    if worst is None:
+        raise GateError("no hold chain feeds an iteration-0 hold endpoint; the control cannot be planted")
     work.mkdir(parents=True, exist_ok=True)
     netlist = work / "no_hold_cell_mapped.v"
     netlist.write_text(text)
@@ -229,7 +247,8 @@ def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
 
 
 def hold_cells_inserted(b) -> bool:
-    return any(r.get("hold_eco") for r in b["iterations"])
+    """Hold cells are in the final netlist (a failed or empty hold ECO counts not)."""
+    return bool(re.search(r"(?m)^\s*\S+\s+\\?rr_eco_hold_\d+", Path(b["final_mapped"]).read_text()))
 
 
 def planted_hold_uncertainty(ctx, gate, b, work: Path) -> dict:
@@ -311,20 +330,55 @@ def tampered_spef(ctx, gate, b, work: Path) -> dict:
                    peak_rss_kib=max((r["peak_rss_kib"] for r in hc.receipts if r.get("peak_rss_kib")), default=None))
 
 
-def bad_rtl(ctx, gate, b, work: Path) -> dict:
-    files, info = L.bad_rtl(ctx.rtl, ctx.top, ctx.ports, work)
+def invert_output(text: str, bit: str, cell: str, pins: tuple[str, str]) -> str:
+    """Drive output port bit `bit` through an inverter; all other uses of the
+    bit (its driver and internal readers) move to a new wire."""
+    esc = re.escape(bit)
+    new = "rr_mut_n"
+    if re.search(r"\b" + re.escape(new) + r"\b", text):
+        raise GateError("netlist already contains rr_mut_n")
+    count = 0
+
+    def conn(m):
+        nonlocal count
+        count += 1
+        return f".{m[1]}({new})"
+    out = re.sub(r"\.(\w+)\(\s*" + esc + r"\s*\)", conn, text)
+    out, n1 = re.subn(r"(?m)^(\s*assign\s+)" + esc + r"(\s*=)", r"\g<1>" + new + r"\2", out)
+    out, n2 = re.subn(r"(?m)^(\s*assign\s+\S+\s*=\s*)" + esc + r"(\s*;)", r"\g<1>" + new + r"\2", out)
+    if count + n1 + n2 == 0:
+        raise GateError(f"output bit {bit} is neither connected nor assigned in the netlist")
+    out, n = re.subn(r"(?m)^endmodule\s*$", f"  wire {new};\n  {cell} rr_mut ( .{pins[0]}({new}), .{pins[1]}({bit}) );\n"
+                     "endmodule", out, count=1)
+    if n != 1:
+        raise GateError("no endmodule in the netlist")
+    return out
+
+
+def inverted_output(ctx, gate, b, work: Path) -> dict:
+    work.mkdir(parents=True, exist_ok=True)
+    outputs = [p for p in ctx.ports if p["direction"] == "output"]
+    if not outputs:
+        raise GateError("the top has no output")
+    bit = outputs[0]["bits"][0]
+    profile = json.loads(Path(b["flow"].delay_cells).read_text())
+    cell = f"{profile['library']}__inv_1"
+    pins = ("A", "Y") if gate.tag == "sky130" else ("I", "ZN")
     final = Path(b["phys"]["paths"]["netlist"])
+    mutant = work / "inverted_output.v"
+    mutant.write_text(invert_output(final.read_text(), bit, cell, pins))
     lib = b["flow"].libs["tt"]
-    pair = L.cec_pair(ctx.h, f"{gate.tag}_ctl_bad_rtl", ctx.tool_paths, lib, files, ctx.top, final, ctx.verification,
-                      exhaustive=ctx.exhaustive)
-    sim = L.cosim(ctx.h, f"{gate.tag}_ctl_bad_rtl", ctx.tool_paths, lib, files, ctx.top, final, ctx.ports,
+    pair = L.cec_pair(ctx.h, f"{gate.tag}_ctl_inverted_output", ctx.tool_paths, lib, ctx.rtl, ctx.top, mutant,
+                      ctx.verification, exhaustive=ctx.exhaustive)
+    sim = L.cosim(ctx.h, f"{gate.tag}_ctl_inverted_output", ctx.tool_paths, lib, ctx.rtl, ctx.top, mutant, ctx.ports,
                   ctx.clock["port"], int(ctx.verification["cosim_vectors"]), int(str(ctx.verification["cosim_seed"]), 0))
     second = L.second_oracle(pair)
     return control(f"RustSys check synth, {second['oracle']} and the random co-simulation",
                    pair["rustsys"]["status"] == "failed" and second["status"] == "failed"
                    and sim["status"] == "failed", rustsys=pair["rustsys"], yosys=pair["yosys"],
                    exhaustive=pair.get("exhaustive"),
-                   cosim=dict(status=sim["status"], mismatches=(sim.get("mismatches") or [])[:3]), **info)
+                   cosim=dict(status=sim["status"], mismatches=(sim.get("mismatches") or [])[:3]),
+                   mutation=f"output bit {bit} driven through {cell} rr_mut")
 
 
 def sub_gate(ctx, gate, work: Path, design: Path, *extra: str) -> tuple[int, dict, int | None]:
@@ -396,14 +450,45 @@ def tampered_artifact(ctx, gate, b, record: dict, work: Path) -> dict:
                    untouched_record=untouched["status"])
 
 
+def antenna_candidates(netlist_text: str, bits: list[str]) -> list[str]:
+    """Input port bits ordered by sink count (fewest first), without the bits
+    that carry an antenna diode (their deck verdict would be the diode's)."""
+    loads, diode = {b: 0 for b in bits}, set()
+    for line in netlist_text.splitlines():
+        m = INSTANCE.match(line)
+        if not m:
+            continue
+        for _pin, net in L.CONN.findall(m[3]):
+            net = net.strip()
+            if net in loads:
+                loads[net] += 1
+                if m[2].lstrip("\\").startswith("rr_eco_ant"):
+                    diode.add(net)
+    return sorted((b for b in bits if b not in diode and loads[b] > 0), key=lambda b: (loads[b], bits.index(b)))
+
+
 def antenna_planted(ctx, gate, b, work: Path) -> dict:
     flow, phys = b["flow"], b["phys"]
-    bits = input_bits(ctx)
-    shape = flow.plant_shape(phys, port=bits[-1])
-    extra = work / "extra.json"
     work.mkdir(parents=True, exist_ok=True)
-    extra.write_text(json.dumps([{k: shape[k] for k in ("net", "layer", "rect")}]))
-    native = flow.check_antenna(f"{gate.tag}_ctl_antenna", phys["workspace"], extra)
+    candidates = antenna_candidates(Path(phys["paths"]["netlist"]).read_text(), input_bits(ctx))
+    if not candidates:
+        raise GateError("no input port bit without an antenna diode")
+    # The strip must join a partial net that reaches a gate on the I/O layer
+    # (a route that leaves the pin upward has no gate at that layer's etch):
+    # the first candidate/length the native check flags is planted.
+    base = flow.plant_shape(phys, port=candidates[0])["length_um"]
+    k, native, shape = 0, None, None
+    for port in candidates[:8]:
+        for length in (base, 2 * base, 4 * base):
+            shape = flow.plant_shape(phys, port=port, length_um=length)
+            extra = work / f"extra{k}.json"
+            extra.write_text(json.dumps([{kk: shape[kk] for kk in ("net", "layer", "rect")}]))
+            native = flow.check_antenna(f"{gate.tag}_ctl_antenna{k}", phys["workspace"], extra)
+            k += 1
+            if native["status"] == "violated":
+                break
+        if native["status"] == "violated":
+            break
     planted = flow.plant_gds(f"{gate.tag}_ctl_antenna", b["gds"], b["gds_export"], shape)
     deck = flow.deck_antenna(f"{gate.tag}_ctl_antenna", planted, phys)
     report = json.loads(Path(native["report"]).read_text())
@@ -422,6 +507,7 @@ def antenna_planted(ctx, gate, b, work: Path) -> dict:
     return control("native check-antenna and the foundry antenna deck",
                    native["status"] == "violated" and bool(rows) and deck["status"] == "failed",
                    port=shape["net"], layer=shape["layer"], length_um=shape["length_um"],
+                   candidates=candidates[:4],
                    native=dict(status=native["status"], violated=native["violated"][:3]),
                    deck=dict(status=deck["status"], count=deck["count"], by_rule=deck["by_rule"]),
                    margin_check=check, peak_rss_kib=deck_summary["resources"]["peak_rss_kib"])
@@ -434,7 +520,7 @@ def run_all(ctx, gate, b, record) -> dict:
         ("planted_hold_uncertainty", planted_hold_uncertainty)
     plan = [("drc_spacing", drc_spacing), ("label_swap", label_swap), ("removed_via", removed_via),
             hold_control, ("tampered_sdc", tampered_sdc), ("tampered_spef", tampered_spef),
-            ("bad_rtl", bad_rtl), ("missing_tool", missing_tool), ("relaxed_manifest", relaxed_manifest),
+            ("inverted_output", inverted_output), ("missing_tool", missing_tool), ("relaxed_manifest", relaxed_manifest),
             ("antenna_planted", antenna_planted)]
     results = {}
     if not hold_cells_inserted(b):

@@ -461,6 +461,20 @@ class Controls(unittest.TestCase):
                       "  NEW met2 ( 20 60 ) M1M2_PR ;\nEND NETS\n")
         self.assertEqual(C.two_terminal_via("x\n" + definition, {"M1M2_PR"}, 2, {"clk"}), ("z", "M1M2_PR", 10, 30))
 
+    def test_inverted_output_and_antenna_candidates(self):
+        text = ("module t (input wire a, output wire [1:0] y, output wire z);\n  wire n1;\n"
+                "  assign y[1] = n1;\n  DFF r0 (.D(a), .CLK(a), .Q(y[0]));\n  AND2 g1 (.A(y[0]), .B(a), .X(n1));\n"
+                "  BUF g2 (.A(a), .X(z));\n  DIODE rr_eco_ant_0 (.D(a));\nendmodule\n")
+        out = C.invert_output(text, "y[0]", "INV", ("A", "Y"))
+        self.assertIn("DFF r0 (.D(a), .CLK(a), .Q(rr_mut_n));", out)
+        self.assertIn("AND2 g1 (.A(rr_mut_n), .B(a), .X(n1));", out)
+        self.assertIn("INV rr_mut ( .A(rr_mut_n), .Y(y[0]) );", out)
+        out = C.invert_output(text, "y[1]", "INV", ("A", "Y"))
+        self.assertIn("assign rr_mut_n = n1;", out)
+        with self.assertRaises(D.GateError):
+            C.invert_output(text, "q", "INV", ("A", "Y"))
+        self.assertEqual(C.antenna_candidates(text + "  BUF g3 (.A(b), .X());\n", ["a", "b"]), ["b"])
+
     def test_scaled_spef_resistance(self):
         with tempfile.TemporaryDirectory() as d:
             src, dst = Path(d) / "a.spef", Path(d) / "b.spef"

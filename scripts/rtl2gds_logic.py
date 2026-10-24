@@ -329,7 +329,7 @@ def yosys_equiv(h, label: str, yosys: Path, lib: Path, rtl: list[Path], top: str
         # splitnets: the netlist names register bits ``\\q[0]``; splitting the
         # RTL's multi-bit wires gives the same names, so equiv_make pairs the
         # state bits and equiv_induct can prove them by induction.
-        f"hierarchy -top {top}\nproc\nmemory\nopt\nsplitnets\nrename {top} gold\ndesign -stash gold\n"
+        f"hierarchy -top {top}\nproc\nflatten\nmemory\nopt\nsplitnets\nrename {top} gold\ndesign -stash gold\n"
         "design -copy-from gold -as gold gold\ndesign -copy-from gate -as gate gate\n"
         # async2sync on both sides: the SAT models have no asynchronous
         # set/reset flip-flop; the same transformation of gold and gate models

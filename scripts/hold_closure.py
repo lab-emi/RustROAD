@@ -576,8 +576,8 @@ class Flow:
         require(r['exit_code'] == 0, f'{label}: antenna-eco failed: ' + bounded_text(Path(r['stderr']))[-600:])
         return result
 
-    def plant_shape(self, phys: dict, port: str | None = None) -> dict:
-        cfg = dict(PLANT[self.tag], **({'port': port} if port else {}))
+    def plant_shape(self, phys: dict, port: str | None = None, length_um: int | None = None) -> dict:
+        cfg = dict(PLANT[self.tag], **({'port': port} if port else {}), **({'length_um': length_um} if length_um else {}))
         text = bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2)
         die = re.search(r'(?m)^DIEAREA \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \) ;', text)
         pin = re.search(r'(?m)^- ' + re.escape(cfg['port']) + r' \+ NET \S+ .*?\+ LAYER (\S+) \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \) '
@@ -594,15 +594,21 @@ class Flow:
         length = cfg['length_um'] * dbu
         require(width <= min(ux - lx, uy - ly), f'{self.tag}: planted wire wider than the pin')
         d = [int(v) for v in die.groups()]
+        # The strip runs through the pin centre (where routes land on the
+        # track floorplans' I/O pins), on a 10-DBU grid (GDS divisor 2).
+        cx = ((lx + ux) // 2 - width // 2) // 10 * 10
+        cy = ((ly + uy) // 2 - width // 2) // 10 * 10
+        require(lx <= cx and cx + width <= ux and ly <= cy and cy + width <= uy,
+                f'{self.tag}: planted strip does not fit the pin')
         if ly == d[1]:
-            rect = [lx, ly - length, lx + width, uy]
+            rect = [cx, ly - length, cx + width, uy]
         elif uy == d[3]:
-            rect = [lx, ly, lx + width, uy + length]
+            rect = [cx, ly, cx + width, uy + length]
         elif lx == d[0]:
-            rect = [lx - length, ly, ux, ly + width]
+            rect = [lx - length, cy, ux, cy + width]
         else:
             require(ux == d[2], f'{self.tag}: port pin is not on the die boundary')
-            rect = [lx, ly, ux + length, ly + width]
+            rect = [lx, cy, ux + length, cy + width]
         return dict(net=cfg['port'], layer=layer, rect=rect, length_um=cfg['length_um'], width_dbu=width, pin_rect=[lx, ly, ux, uy])
 
     def export_gds(self, label: str, phys: dict) -> tuple[Path, dict]:
@@ -966,7 +972,8 @@ exit
         try:
             for c in self.libs:
                 spefs[c], _ = compare_spef.openrcx(self.h, f'{self.tag}_i{it}_ref', self.tag, self.rc[c],
-                                                   Path(phys['paths']['def']), f'{self.tag}_i{it}_ref_{self.rc[c]}')
+                                                   Path(phys['paths']['def']), f'{self.tag}_i{it}_ref_{self.rc[c]}',
+                                                   timeout_s=max(25, self.h.args.timeout_seconds - 30))
             ref = self.sta(it, phys, label='sta_ref', spefs=spefs)
         except (RuntimeError, OSError, KeyError, ValueError) as error:
             return dict(status='unverified', reason=str(error)[-600:], shortfall_ns=None)

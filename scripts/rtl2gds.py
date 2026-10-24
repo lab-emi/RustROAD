@@ -180,7 +180,7 @@ class PdkGate:
 
     # ------------------------------------------------------------------ build
     def build(self, h, label: str = "") -> dict:
-        tag, steps = self.tag, self.ctx.steps
+        tag, steps, ctx = self.tag, self.ctx.steps, self.ctx
         flow = self.flow(h)
         out = dict(flow=flow, frozen_before=flow.frozen())
         with steps(h, tag, f"{label}synthesis"):
@@ -198,7 +198,8 @@ class PdkGate:
             for c in self.corners:
                 rc = self.rc[c]
                 spef, info = compare_spef.openrcx(h, f"{tag}_final", tag, rc, Path(phys["paths"]["def"]),
-                                                  f"{tag}_openrcx_{rc}")
+                                                  f"{tag}_openrcx_{rc}",
+                                                  timeout_s=max(25, int(ctx.budgets["process_timeout_s"]) - 30))
                 out["openrcx"][c] = dict(path=spef, sha256=info["spef"]["sha256"], rules=info["rules"])
                 extra.append(info["container_peak_rss_kib"])
         with steps(h, tag, f"{label}gds_export"):
