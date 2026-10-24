@@ -243,11 +243,15 @@ Pins, obstructions and supply metal that a routed wire crosses count their own
 cut, and non-plate overlaps on other layers couple over their area. The SPEF
 imports into RustSTA 0.3/0.4 (`wire_model=spef_rc`). The model, SPEF naming,
 budgets and the three-way comparison (native, OpenRCX, Magic) at min/nom/max on
-both PDKs are in [docs/extraction.md](docs/extraction.md). The result is
-partial: total and per-net C meet their targets against OpenRCX on pipeline.v,
-the slack target is met on the hold-closed design at every corner but missed at
-ss+max on the pre-hold design and on the larger regfile design, and min/max
-resistance follows different PDK data than OpenRCX.
+both PDKs are in [docs/extraction.md](docs/extraction.md), with a 3-D field
+solver (`scripts/field_solver.py`) for wire crossings. The result is partial:
+total and per-net C meet their targets against OpenRCX on pipeline.v; the
+10 ps slack target is met on the hold-closed design at every corner (RustSTA
+`09bf9f85` and `c407c742`, OpenRCX at its flow and lossless coupling
+thresholds) but missed at GF180 ss+max on the pre-hold design (10.05 ps) and on
+the larger regfile and mult designs; OpenRCX extracts no cell pin, obstruction
+or via-pad metal, and min/max resistance follows different PDK data than
+OpenRCX.
 
 ## Hold closure, CTS drive and antenna repair
 

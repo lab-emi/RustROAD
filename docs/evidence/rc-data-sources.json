@@ -188,6 +188,106 @@
      "width_um": 1.6
     }
    ],
+   "magic_contact_blocks": {
+    "()": {
+     "blanket": false,
+     "contact_types": 26,
+     "distinct_ohm": [
+      0.006,
+      0.38,
+      3.41,
+      4.5,
+      9.3,
+      152.0,
+      185.0,
+      585.0
+     ]
+    },
+    "(hrhc)": {
+     "blanket": false,
+     "contact_types": 26,
+     "distinct_ohm": [
+      0.006,
+      0.891,
+      8.0,
+      15.0,
+      23.0,
+      252.0,
+      280.0,
+      840.0
+     ]
+    },
+    "(hrlc)": {
+     "blanket": false,
+     "contact_types": 26,
+     "distinct_ohm": [
+      0.006,
+      0.891,
+      8.0,
+      15.0,
+      23.0,
+      252.0,
+      280.0,
+      840.0
+     ]
+    },
+    "(lrhc)": {
+     "blanket": false,
+     "contact_types": 26,
+     "distinct_ohm": [
+      0.006,
+      0.012,
+      0.5,
+      1.6,
+      2.0,
+      52.0,
+      95.0,
+      345.0
+     ]
+    },
+    "(lrlc)": {
+     "blanket": false,
+     "contact_types": 26,
+     "distinct_ohm": [
+      0.006,
+      0.012,
+      0.5,
+      1.6,
+      2.0,
+      52.0,
+      95.0,
+      345.0
+     ]
+    },
+    "(orig)": {
+     "blanket": false,
+     "contact_types": 26,
+     "distinct_ohm": [
+      0.006,
+      0.38,
+      3.41,
+      4.5,
+      9.3,
+      152.0,
+      185.0,
+      585.0
+     ]
+    },
+    "(si)": {
+     "blanket": false,
+     "contact_types": 26,
+     "distinct_ohm": [
+      0.006,
+      0.38,
+      3.41,
+      4.5,
+      9.3,
+      152.0,
+      185.0,
+      585.0
+     ]
+    }
+   },
    "pdk": "sky130",
    "reference_table_variant": "calibre",
    "sheet_resistance": [
@@ -718,6 +818,46 @@
      "width_um": 0.44
     }
    ],
+   "magic_contact_blocks": {
+    "()": {
+     "blanket": false,
+     "contact_types": 20,
+     "distinct_ohm": [
+      4.5,
+      5.2,
+      6.3,
+      8.0
+     ]
+    },
+    "(hrhc)": {
+     "blanket": true,
+     "contact_types": 20,
+     "distinct_ohm": [
+      15.0
+     ]
+    },
+    "(hrlc)": {
+     "blanket": true,
+     "contact_types": 20,
+     "distinct_ohm": [
+      15.0
+     ]
+    },
+    "(lrhc)": {
+     "blanket": true,
+     "contact_types": 20,
+     "distinct_ohm": [
+      0.0
+     ]
+    },
+    "(lrlc)": {
+     "blanket": true,
+     "contact_types": 20,
+     "distinct_ohm": [
+      0.0
+     ]
+    }
+   },
    "pdk": "gf180",
    "reference_table_variant": "plain",
    "sheet_resistance": [
@@ -897,7 +1037,7 @@
     "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/librelane/rules.openrcx.gf180mcuD.nom.magic": "ad430c26f39a60cbcd1bf70c447203ba28b2582d9dfaaa83543067aa74be7308",
     "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/magic/gf180mcuD.tech": "f0c3a445aa0a2a9b7a1f10530a6c011800a41fcad36c12d8bb9b792a59c74f44",
     "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/ngspice/sm141064.ngspice": "f6f4a96e18fc5ad11270ad3451aaecc7ac37fc81eb61e15b0d7d94c7bc594a24",
-    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-max.json": "0f8190a3871b5eb8d767e49009a67ae3f68d19096f22039911f3a2446ad0d003",
+    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-max.json": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
     "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-min.json": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
     "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-nom.json": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4"
    },
@@ -979,7 +1119,7 @@
      "cut": "Via1",
      "lef_nominal": 4.5,
      "magic": 15.0,
-     "native": 15.0,
+     "native": 4.5,
      "pdk": "gf180",
      "spice": null
     },
@@ -988,7 +1128,7 @@
      "cut": "Via2",
      "lef_nominal": 4.5,
      "magic": 15.0,
-     "native": 15.0,
+     "native": 4.5,
      "pdk": "gf180",
      "spice": null
     },
@@ -997,7 +1137,7 @@
      "cut": "Via3",
      "lef_nominal": 4.5,
      "magic": 15.0,
-     "native": 15.0,
+     "native": 4.5,
      "pdk": "gf180",
      "spice": null
     },
@@ -1006,7 +1146,7 @@
      "cut": "Via4",
      "lef_nominal": 4.5,
      "magic": 15.0,
-     "native": 15.0,
+     "native": 4.5,
      "pdk": "gf180",
      "spice": null
     }

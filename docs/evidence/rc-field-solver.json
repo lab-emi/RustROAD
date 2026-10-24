@@ -1,0 +1,1398 @@
+{
+ "dielectric": "homogeneous, eps_r = 1 (ratios are independent of eps_r)",
+ "grid_convergence": {
+  "coarse": {
+   "coupling_per_crossing": 40.373775775858576,
+   "increment_per_crossing": 16.198947572561327,
+   "neighbour_centre_um": null,
+   "nodes": 35190,
+   "pitch_um": 2.0,
+   "seconds": 1.461079656961374,
+   "upper_alone_per_um": 15.558545304292517
+  },
+  "default": {
+   "coupling_per_crossing": 40.13197283412167,
+   "increment_per_crossing": 16.054446473572863,
+   "neighbour_centre_um": null,
+   "nodes": 60690,
+   "pitch_um": 2.0,
+   "seconds": 5.261015793017577,
+   "upper_alone_per_um": 15.523106196715316
+  },
+  "fine": {
+   "coupling_per_crossing": 40.011486549265264,
+   "increment_per_crossing": 15.990173557061478,
+   "neighbour_centre_um": null,
+   "nodes": 105000,
+   "pitch_um": 2.0,
+   "seconds": 5.8979843959677964,
+   "upper_alone_per_um": 15.494244748861751
+  },
+  "larger domain": {
+   "coupling_per_crossing": 40.39839690178248,
+   "increment_per_crossing": 15.356010130820422,
+   "neighbour_centre_um": null,
+   "nodes": 78120,
+   "pitch_um": 2.0,
+   "seconds": 9.45121539797401,
+   "upper_alone_per_um": 16.02922186068593
+  }
+ },
+ "pdks": {
+  "gf180": {
+   "pairs": [
+    {
+     "grid": [
+      {
+       "coupling_per_crossing": 12.940537180663844,
+       "increment_per_crossing": 4.785297951441699,
+       "neighbour_centre_um": null,
+       "nodes": 37620,
+       "pitch_um": 0.46,
+       "ratio_to_two_cut": 1.018951047309361,
+       "seconds": 0.9006009389995597,
+       "two_cut_increment_per_crossing": 4.696298182408018,
+       "upper_alone_per_um": 17.729239371473156
+      },
+      {
+       "coupling_per_crossing": 4.6432147249585904,
+       "increment_per_crossing": 0.7952719433140629,
+       "neighbour_centre_um": 0.56,
+       "nodes": 54450,
+       "pitch_um": 0.46,
+       "ratio_to_two_cut": 0.28213657098142597,
+       "seconds": 1.5713997760321945,
+       "two_cut_increment_per_crossing": 2.818748170602876,
+       "upper_alone_per_um": 58.76003287968735
+      },
+      {
+       "coupling_per_crossing": 6.917933010357949,
+       "increment_per_crossing": 1.7012505095815929,
+       "neighbour_centre_um": 1.0,
+       "nodes": 59400,
+       "pitch_um": 0.46,
+       "ratio_to_two_cut": 0.5163329086307651,
+       "seconds": 1.9869201119872741,
+       "two_cut_increment_per_crossing": 3.2948713536254073,
+       "upper_alone_per_um": 32.71514640850912
+      },
+      {
+       "coupling_per_crossing": 9.771314841248433,
+       "increment_per_crossing": 3.1645307882007216,
+       "neighbour_centre_um": 2.0,
+       "nodes": 63360,
+       "pitch_um": 0.46,
+       "ratio_to_two_cut": 0.7831126187580223,
+       "seconds": 2.316372914996464,
+       "two_cut_increment_per_crossing": 4.040965133749869,
+       "upper_alone_per_um": 22.669355162156684
+      },
+      {
+       "coupling_per_crossing": 11.10694382341911,
+       "increment_per_crossing": 3.8491832560498533,
+       "neighbour_centre_um": 3.0,
+       "nodes": 65340,
+       "pitch_um": 0.46,
+       "ratio_to_two_cut": 0.8789486577564162,
+       "seconds": 2.5906196249998175,
+       "two_cut_increment_per_crossing": 4.379303867276149,
+       "upper_alone_per_um": 20.32564574202854
+      },
+      {
+       "coupling_per_crossing": 26.332736881193007,
+       "increment_per_crossing": 8.98078142446342,
+       "neighbour_centre_um": null,
+       "nodes": 58140,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 1.9123107340383017,
+       "seconds": 3.0500069839763455,
+       "two_cut_increment_per_crossing": 4.696298182408018,
+       "upper_alone_per_um": 17.729239371469596
+      },
+      {
+       "coupling_per_crossing": 9.041969244077988,
+       "increment_per_crossing": 1.36899245370617,
+       "neighbour_centre_um": 0.56,
+       "nodes": 84150,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 0.48567391297441403,
+       "seconds": 6.304999224026687,
+       "two_cut_increment_per_crossing": 2.818748170602876,
+       "upper_alone_per_um": 58.760032879686506
+      },
+      {
+       "coupling_per_crossing": 13.448615802258203,
+       "increment_per_crossing": 2.9540502777667115,
+       "neighbour_centre_um": 1.0,
+       "nodes": 91800,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 0.8965601265482842,
+       "seconds": 7.556659558031242,
+       "two_cut_increment_per_crossing": 3.2948713536254073,
+       "upper_alone_per_um": 32.71514640850834
+      },
+      {
+       "coupling_per_crossing": 19.250063680918466,
+       "increment_per_crossing": 5.689207016530226,
+       "neighbour_centre_um": 2.0,
+       "nodes": 97920,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 1.407883222998969,
+       "seconds": 8.397407092968933,
+       "two_cut_increment_per_crossing": 4.040965133749869,
+       "upper_alone_per_um": 22.66935516215615
+      },
+      {
+       "coupling_per_crossing": 22.139220645884965,
+       "increment_per_crossing": 7.046767598081139,
+       "neighbour_centre_um": 3.0,
+       "nodes": 100980,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 1.6091067922318225,
+       "seconds": 3.2588891810155474,
+       "two_cut_increment_per_crossing": 4.379303867276149,
+       "upper_alone_per_um": 20.325645742028044
+      },
+      {
+       "coupling_per_crossing": 42.58066650332613,
+       "increment_per_crossing": 13.259033602138985,
+       "neighbour_centre_um": null,
+       "nodes": 78660,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 2.82329466468001,
+       "seconds": 7.7699544510105625,
+       "two_cut_increment_per_crossing": 4.696298182408018,
+       "upper_alone_per_um": 17.7292393714658
+      },
+      {
+       "coupling_per_crossing": 13.621863719780725,
+       "increment_per_crossing": 1.8050212207783716,
+       "neighbour_centre_um": 0.56,
+       "nodes": 113850,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 0.640362711221667,
+       "seconds": 5.229718339978717,
+       "two_cut_increment_per_crossing": 2.818748170602876,
+       "upper_alone_per_um": 58.76003287968657
+      },
+      {
+       "coupling_per_crossing": 20.030486684830112,
+       "increment_per_crossing": 3.8741546067518584,
+       "neighbour_centre_um": 1.0,
+       "nodes": 124200,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 1.175813617878906,
+       "seconds": 5.337923789978959,
+       "two_cut_increment_per_crossing": 3.2948713536254073,
+       "upper_alone_per_um": 32.715146408507856
+      },
+      {
+       "coupling_per_crossing": 29.082550459492246,
+       "increment_per_crossing": 7.769866568784451,
+       "neighbour_centre_um": 2.0,
+       "nodes": 132480,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 1.9227749588560041,
+       "seconds": 6.0845828839810565,
+       "two_cut_increment_per_crossing": 4.040965133749869,
+       "upper_alone_per_um": 22.669355162155387
+      },
+      {
+       "coupling_per_crossing": 34.17744345293712,
+       "increment_per_crossing": 9.906678450183108,
+       "neighbour_centre_um": 3.0,
+       "nodes": 136620,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 2.2621582677122816,
+       "seconds": 6.695468766032718,
+       "two_cut_increment_per_crossing": 4.379303867276149,
+       "upper_alone_per_um": 20.325645742026808
+      },
+      {
+       "coupling_per_crossing": 54.25074570705778,
+       "increment_per_crossing": 15.832444498731675,
+       "neighbour_centre_um": null,
+       "nodes": 92340,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 3.3712604872575658,
+       "seconds": 12.53877757396549,
+       "two_cut_increment_per_crossing": 4.696298182408018,
+       "upper_alone_per_um": 17.72923937146543
+      },
+      {
+       "coupling_per_crossing": 16.2276070764637,
+       "increment_per_crossing": 1.9998690141143527,
+       "neighbour_centre_um": 0.56,
+       "nodes": 133650,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 0.7094883590422407,
+       "seconds": 9.433698926994111,
+       "two_cut_increment_per_crossing": 2.818748170602876,
+       "upper_alone_per_um": 58.76003287968687
+      },
+      {
+       "coupling_per_crossing": 23.390475637512534,
+       "increment_per_crossing": 4.173644452726535,
+       "neighbour_centre_um": 1.0,
+       "nodes": 145800,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 1.2667093809699725,
+       "seconds": 9.392405698949005,
+       "two_cut_increment_per_crossing": 3.2948713536254073,
+       "upper_alone_per_um": 32.71514640850795
+      },
+      {
+       "coupling_per_crossing": 33.8728185319456,
+       "increment_per_crossing": 8.519662016611278,
+       "neighbour_centre_um": 2.0,
+       "nodes": 155520,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 2.108323564946313,
+       "seconds": 11.87673989700852,
+       "two_cut_increment_per_crossing": 4.040965133749869,
+       "upper_alone_per_um": 22.669355162155362
+      },
+      {
+       "coupling_per_crossing": 40.608658558182114,
+       "increment_per_crossing": 11.12207888918563,
+       "neighbour_centre_um": 3.0,
+       "nodes": 160380,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 2.539691061927468,
+       "seconds": 1.1452152649872005,
+       "two_cut_increment_per_crossing": 4.379303867276149,
+       "upper_alone_per_um": 20.325645742023575
+      },
+      {
+       "coupling_per_crossing": 58.450822059419835,
+       "increment_per_crossing": 16.593292917295457,
+       "neighbour_centre_um": null,
+       "nodes": 109440,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 3.5332707321380683,
+       "seconds": 7.859549278975464,
+       "two_cut_increment_per_crossing": 4.696298182408018,
+       "upper_alone_per_um": 17.72923937146556
+      },
+      {
+       "coupling_per_crossing": 16.964687364037772,
+       "increment_per_crossing": 2.095782455521146,
+       "neighbour_centre_um": 0.56,
+       "nodes": 158400,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 0.7435153226451224,
+       "seconds": 1.0365155980107374,
+       "two_cut_increment_per_crossing": 2.818748170602876,
+       "upper_alone_per_um": 58.76003287968575
+      },
+      {
+       "coupling_per_crossing": 24.189612332477733,
+       "increment_per_crossing": 4.180271274998972,
+       "neighbour_centre_um": 1.0,
+       "nodes": 172800,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 1.2687206346916529,
+       "seconds": 1.1423653590027243,
+       "two_cut_increment_per_crossing": 3.2948713536254073,
+       "upper_alone_per_um": 32.71514640850706
+      },
+      {
+       "coupling_per_crossing": 34.734105716188566,
+       "increment_per_crossing": 8.546686428418099,
+       "neighbour_centre_um": 2.0,
+       "nodes": 184320,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 2.1150111781556213,
+       "seconds": 1.2734667779877782,
+       "two_cut_increment_per_crossing": 4.040965133749869,
+       "upper_alone_per_um": 22.6693551621535
+      },
+      {
+       "coupling_per_crossing": 41.85178541623515,
+       "increment_per_crossing": 11.244837015514975,
+       "neighbour_centre_um": 3.0,
+       "nodes": 190080,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 2.5677224865670416,
+       "seconds": 1.4070296570425853,
+       "two_cut_increment_per_crossing": 4.379303867276149,
+       "upper_alone_per_um": 20.325645742023813
+      }
+     ],
+     "lower": "Metal1",
+     "lower_width_um": 0.23,
+     "minimum_neighbour_centre_um": 0.56,
+     "minimum_pitch_um": 0.46,
+     "two_cut": {
+      "0.56": {
+       "increment_per_crossing": 2.818748170602876,
+       "lower_alone_per_um": 24.458757500936493,
+       "lower_under_plate_per_um": 33.09865563303778,
+       "upper_alone_per_um": 58.73989361677486,
+       "upper_over_plate_per_um": 60.47718358901188
+      },
+      "1.0": {
+       "increment_per_crossing": 3.2948713536254073,
+       "lower_alone_per_um": 24.458757500936493,
+       "lower_under_plate_per_um": 33.09865563303778,
+       "upper_alone_per_um": 32.839574671774216,
+       "upper_over_plate_per_um": 36.646965439761374
+      },
+      "2.0": {
+       "increment_per_crossing": 4.040965133749869,
+       "lower_alone_per_um": 24.458757500936493,
+       "lower_under_plate_per_um": 33.09865563303778,
+       "upper_alone_per_um": 22.951575522630556,
+       "upper_over_plate_per_um": 30.002852291158852
+      },
+      "3.0": {
+       "increment_per_crossing": 4.379303867276149,
+       "lower_alone_per_um": 24.458757500936493,
+       "lower_under_plate_per_um": 33.09865563303778,
+       "upper_alone_per_um": 20.63107951274806,
+       "upper_over_plate_per_um": 29.153394253129747
+      },
+      "None": {
+       "increment_per_crossing": 4.696298182408018,
+       "lower_alone_per_um": 24.458757500936493,
+       "lower_under_plate_per_um": 33.09865563303778,
+       "upper_alone_per_um": 18.94111815703268,
+       "upper_over_plate_per_um": 28.841669050161624
+      }
+     },
+     "upper": "Metal2",
+     "upper_width_um": 0.28
+    },
+    {
+     "grid": [
+      {
+       "coupling_per_crossing": 15.707778253922704,
+       "increment_per_crossing": 7.534033561472661,
+       "neighbour_centre_um": null,
+       "nodes": 52440,
+       "pitch_um": 0.56,
+       "ratio_to_two_cut": 1.1127150731218467,
+       "seconds": 1.6393127290066332,
+       "two_cut_increment_per_crossing": 6.770856029059701,
+       "upper_alone_per_um": 14.596806711944183
+      },
+      {
+       "coupling_per_crossing": 5.622246577187555,
+       "increment_per_crossing": 1.085227748721735,
+       "neighbour_centre_um": 0.56,
+       "nodes": 75900,
+       "pitch_um": 0.56,
+       "ratio_to_two_cut": 0.2816636260044135,
+       "seconds": 3.454642052995041,
+       "two_cut_increment_per_crossing": 3.852921174510229,
+       "upper_alone_per_um": 58.52902035992082
+      },
+      {
+       "coupling_per_crossing": 8.3763216470127,
+       "increment_per_crossing": 2.3016192383609457,
+       "neighbour_centre_um": 1.0,
+       "nodes": 82800,
+       "pitch_um": 0.56,
+       "ratio_to_two_cut": 0.5124449217565635,
+       "seconds": 3.922364434984047,
+       "two_cut_increment_per_crossing": 4.491447062196331,
+       "upper_alone_per_um": 32.25900322586258
+      },
+      {
+       "coupling_per_crossing": 11.840452723284619,
+       "increment_per_crossing": 4.365877313819279,
+       "neighbour_centre_um": 2.0,
+       "nodes": 88320,
+       "pitch_um": 0.56,
+       "ratio_to_two_cut": 0.7871840952769655,
+       "seconds": 4.651762260997202,
+       "two_cut_increment_per_crossing": 5.546196042341498,
+       "upper_alone_per_um": 21.683028788816767
+      },
+      {
+       "coupling_per_crossing": 13.465394191327533,
+       "increment_per_crossing": 5.454536922256791,
+       "neighbour_centre_um": 3.0,
+       "nodes": 91080,
+       "pitch_um": 0.56,
+       "ratio_to_two_cut": 0.8962204678080602,
+       "seconds": 4.504943724023178,
+       "two_cut_increment_per_crossing": 6.086155268911987,
+       "upper_alone_per_um": 18.87316131391586
+      },
+      {
+       "coupling_per_crossing": 26.805876951368607,
+       "increment_per_crossing": 12.335219564531577,
+       "neighbour_centre_um": null,
+       "nodes": 66424,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 1.8218109366954927,
+       "seconds": 3.8995589290279895,
+       "two_cut_increment_per_crossing": 6.770856029059701,
+       "upper_alone_per_um": 14.59680671193944
+      },
+      {
+       "coupling_per_crossing": 9.268429504698421,
+       "increment_per_crossing": 1.6533217230943649,
+       "neighbour_centre_um": 0.56,
+       "nodes": 96140,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 0.4291086290662382,
+       "seconds": 7.078979500045534,
+       "two_cut_increment_per_crossing": 3.852921174510229,
+       "upper_alone_per_um": 58.52902035992071
+      },
+      {
+       "coupling_per_crossing": 13.791364926867194,
+       "increment_per_crossing": 3.5219875734116215,
+       "neighbour_centre_um": 1.0,
+       "nodes": 104880,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 0.7841543103236219,
+       "seconds": 3.0056643949938007,
+       "two_cut_increment_per_crossing": 4.491447062196331,
+       "upper_alone_per_um": 32.2590032258624
+      },
+      {
+       "coupling_per_crossing": 19.70167147878942,
+       "increment_per_crossing": 6.8581037073050695,
+       "neighbour_centre_um": 2.0,
+       "nodes": 111872,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 1.2365418847346963,
+       "seconds": 3.2135506800259463,
+       "two_cut_increment_per_crossing": 5.546196042341498,
+       "upper_alone_per_um": 21.683028788816287
+      },
+      {
+       "coupling_per_crossing": 22.61190922331409,
+       "increment_per_crossing": 8.700035242044649,
+       "neighbour_centre_um": 3.0,
+       "nodes": 115368,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 1.4294796727392631,
+       "seconds": 3.3624189629917964,
+       "two_cut_increment_per_crossing": 6.086155268911987,
+       "upper_alone_per_um": 18.873161313915233
+      },
+      {
+       "coupling_per_crossing": 46.22187671863996,
+       "increment_per_crossing": 19.832131500637377,
+       "neighbour_centre_um": null,
+       "nodes": 87400,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 2.929043449679073,
+       "seconds": 9.14350118796574,
+       "two_cut_increment_per_crossing": 6.770856029059701,
+       "upper_alone_per_um": 14.596806711936312
+      },
+      {
+       "coupling_per_crossing": 14.857210117309304,
+       "increment_per_crossing": 2.3336037280446362,
+       "neighbour_centre_um": 0.56,
+       "nodes": 126500,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 0.6056712874073465,
+       "seconds": 5.593181952019222,
+       "two_cut_increment_per_crossing": 3.852921174510229,
+       "upper_alone_per_um": 58.52902035992058
+      },
+      {
+       "coupling_per_crossing": 21.85742856066287,
+       "increment_per_crossing": 4.929139024391731,
+       "neighbour_centre_um": 1.0,
+       "nodes": 138000,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 1.0974500992963652,
+       "seconds": 6.916279852972366,
+       "two_cut_increment_per_crossing": 4.491447062196331,
+       "upper_alone_per_um": 32.25900322586203
+      },
+      {
+       "coupling_per_crossing": 31.69490249680259,
+       "increment_per_crossing": 9.986213990147164,
+       "neighbour_centre_um": 2.0,
+       "nodes": 147200,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 1.8005519303517397,
+       "seconds": 7.033005660981871,
+       "two_cut_increment_per_crossing": 5.546196042341498,
+       "upper_alone_per_um": 21.683028788815705
+      },
+      {
+       "coupling_per_crossing": 37.18963319064791,
+       "increment_per_crossing": 13.081705482767433,
+       "neighbour_centre_um": 3.0,
+       "nodes": 151800,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 2.149420266944,
+       "seconds": 9.120133943972178,
+       "two_cut_increment_per_crossing": 6.086155268911987,
+       "upper_alone_per_um": 18.87316131391406
+      },
+      {
+       "coupling_per_crossing": 66.46552620623937,
+       "increment_per_crossing": 26.705629361487176,
+       "neighbour_centre_um": null,
+       "nodes": 101384,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 3.9442028078679896,
+       "seconds": 4.470193356042728,
+       "two_cut_increment_per_crossing": 6.770856029059701,
+       "upper_alone_per_um": 14.596806711935349
+      },
+      {
+       "coupling_per_crossing": 19.641357244742437,
+       "increment_per_crossing": 2.7901204942237996,
+       "neighbour_centre_um": 0.56,
+       "nodes": 146740,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 0.7241571700668054,
+       "seconds": 8.63643095898442,
+       "two_cut_increment_per_crossing": 3.852921174510229,
+       "upper_alone_per_um": 58.529020359920715
+      },
+      {
+       "coupling_per_crossing": 28.155554414274945,
+       "increment_per_crossing": 5.704421975443694,
+       "neighbour_centre_um": 1.0,
+       "nodes": 160080,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 1.2700632772579568,
+       "seconds": 8.831299759971444,
+       "two_cut_increment_per_crossing": 4.491447062196331,
+       "upper_alone_per_um": 32.25900322586165
+      },
+      {
+       "coupling_per_crossing": 40.594947867973026,
+       "increment_per_crossing": 11.74044999362603,
+       "neighbour_centre_um": 2.0,
+       "nodes": 170752,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 2.1168472776648253,
+       "seconds": 0.8562375600449741,
+       "two_cut_increment_per_crossing": 5.546196042341498,
+       "upper_alone_per_um": 21.68302878881337
+      },
+      {
+       "coupling_per_crossing": 48.792889447368395,
+       "increment_per_crossing": 15.862112413650792,
+       "neighbour_centre_um": 3.0,
+       "nodes": 176088,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 2.6062615416130255,
+       "seconds": 0.9639830060186796,
+       "two_cut_increment_per_crossing": 6.086155268911987,
+       "upper_alone_per_um": 18.873161313910884
+      },
+      {
+       "coupling_per_crossing": 78.19409172921254,
+       "increment_per_crossing": 30.28356449860331,
+       "neighbour_centre_um": null,
+       "nodes": 118864,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 4.472634533747268,
+       "seconds": 8.126370443962514,
+       "two_cut_increment_per_crossing": 6.770856029059701,
+       "upper_alone_per_um": 14.596806711934718
+      },
+      {
+       "coupling_per_crossing": 21.890694243561782,
+       "increment_per_crossing": 3.0169003685653024,
+       "neighbour_centre_um": 0.56,
+       "nodes": 172040,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 0.7830163743095007,
+       "seconds": 0.8914317620219663,
+       "two_cut_increment_per_crossing": 3.852921174510229,
+       "upper_alone_per_um": 58.52902035991999
+      },
+      {
+       "coupling_per_crossing": 30.73113492711275,
+       "increment_per_crossing": 5.906860998073398,
+       "neighbour_centre_um": 1.0,
+       "nodes": 187680,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 1.315135393176587,
+       "seconds": 1.055935392039828,
+       "two_cut_increment_per_crossing": 4.491447062196331,
+       "upper_alone_per_um": 32.259003225860745
+      },
+      {
+       "coupling_per_crossing": 43.489767065513185,
+       "increment_per_crossing": 12.091667968768945,
+       "neighbour_centre_um": 2.0,
+       "nodes": 200192,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 2.1801731991543654,
+       "seconds": 1.101281012990512,
+       "two_cut_increment_per_crossing": 5.546196042341498,
+       "upper_alone_per_um": 21.683028788813502
+      },
+      {
+       "coupling_per_crossing": 52.68060237942455,
+       "increment_per_crossing": 16.520047188631423,
+       "neighbour_centre_um": 3.0,
+       "nodes": 206448,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 2.714365056214658,
+       "seconds": 1.2034288569702767,
+       "two_cut_increment_per_crossing": 6.086155268911987,
+       "upper_alone_per_um": 18.873161313910927
+      }
+     ],
+     "lower": "Metal2",
+     "lower_width_um": 0.28,
+     "minimum_neighbour_centre_um": 0.56,
+     "minimum_pitch_um": 0.56,
+     "two_cut": {
+      "0.56": {
+       "increment_per_crossing": 3.852921174510229,
+       "lower_alone_per_um": 18.94111815703268,
+       "lower_under_plate_per_um": 30.765617575258258,
+       "upper_alone_per_um": 58.54110246119986,
+       "upper_over_plate_per_um": 60.477035809082246
+      },
+      "1.0": {
+       "increment_per_crossing": 4.491447062196331,
+       "lower_alone_per_um": 18.94111815703268,
+       "lower_under_plate_per_um": 30.765617575258258,
+       "upper_alone_per_um": 32.430246535681036,
+       "upper_over_plate_per_um": 36.64662948244235
+      },
+      "2.0": {
+       "increment_per_crossing": 5.546196042341498,
+       "lower_alone_per_um": 18.94111815703268,
+       "lower_under_plate_per_um": 30.765617575258258,
+       "upper_alone_per_um": 22.018770123762923,
+       "upper_over_plate_per_um": 30.00211371389984
+      },
+      "3.0": {
+       "increment_per_crossing": 6.086155268911987,
+       "lower_alone_per_um": 18.94111815703268,
+       "lower_under_plate_per_um": 30.765617575258258,
+       "upper_alone_per_um": 19.240643729077988,
+       "upper_over_plate_per_um": 29.152413128395217
+      },
+      "None": {
+       "increment_per_crossing": 6.770856029059701,
+       "lower_alone_per_um": 18.94111815703268,
+       "lower_under_plate_per_um": 30.765617575258258,
+       "upper_alone_per_um": 16.483232808368594,
+       "upper_over_plate_per_um": 28.84036206535623
+      }
+     },
+     "upper": "Metal3",
+     "upper_width_um": 0.28
+    }
+   ],
+   "stack_source": {
+    "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/klayout/tech/d25/gf180mcu.lyd25",
+    "sha256": "ca022f9ced6d4d3f4585122b40f201becb583f438c9c9d879de0fc36c0db9d4b"
+   },
+   "stack_um": {
+    "Metal1": [
+     0.86,
+     1.4100000000000001
+    ],
+    "Metal2": [
+     2.01,
+     2.5599999999999996
+    ],
+    "Metal3": [
+     3.16,
+     3.71
+    ],
+    "Metal4": [
+     4.31,
+     4.859999999999999
+    ],
+    "Metal5": [
+     5.76,
+     6.9525
+    ]
+   }
+  },
+  "sky130": {
+   "pairs": [
+    {
+     "grid": [
+      {
+       "coupling_per_crossing": 8.753506827732794,
+       "increment_per_crossing": 4.407069694043786,
+       "neighbour_centre_um": null,
+       "nodes": 20230,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 1.0378594335137814,
+       "seconds": 0.28533675899961963,
+       "two_cut_increment_per_crossing": 4.2463069195441925,
+       "upper_alone_per_um": 15.523106196728518
+      },
+      {
+       "coupling_per_crossing": 3.057835484061269,
+       "increment_per_crossing": 0.6370310493745883,
+       "neighbour_centre_um": 0.28,
+       "nodes": 28560,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 0.26307961687459014,
+       "seconds": 0.49600056803319603,
+       "two_cut_increment_per_crossing": 2.421438258663196,
+       "upper_alone_per_um": 69.66048046290479
+      },
+      {
+       "coupling_per_crossing": 6.606454041163665,
+       "increment_per_crossing": 2.6096592623236976,
+       "neighbour_centre_um": 1.0,
+       "nodes": 33320,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 0.760432166537081,
+       "seconds": 0.6391079280292615,
+       "two_cut_increment_per_crossing": 3.4318107218001837,
+       "upper_alone_per_um": 23.58751821083645
+      },
+      {
+       "coupling_per_crossing": 7.928630788037114,
+       "increment_per_crossing": 3.655354425322736,
+       "neighbour_centre_um": 2.0,
+       "nodes": 34510,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 0.9254974845459275,
+       "seconds": 0.7130955890170299,
+       "two_cut_increment_per_crossing": 3.949610329968801,
+       "upper_alone_per_um": 18.385149180654437
+      },
+      {
+       "coupling_per_crossing": 8.335773371370239,
+       "increment_per_crossing": 3.998345589443768,
+       "neighbour_centre_um": 3.0,
+       "nodes": 36295,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 0.9712963264989491,
+       "seconds": 0.7823059899965301,
+       "two_cut_increment_per_crossing": 4.116504387343726,
+       "upper_alone_per_um": 17.06047140797243
+      },
+      {
+       "coupling_per_crossing": 26.33980019490849,
+       "increment_per_crossing": 11.660065828514641,
+       "neighbour_centre_um": null,
+       "nodes": 43350,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 2.745931005327862,
+       "seconds": 2.35740535199875,
+       "two_cut_increment_per_crossing": 4.2463069195441925,
+       "upper_alone_per_um": 15.523106196717924
+      },
+      {
+       "coupling_per_crossing": 8.158623513716755,
+       "increment_per_crossing": 1.3248227874870224,
+       "neighbour_centre_um": 0.28,
+       "nodes": 61200,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 0.5471222661768043,
+       "seconds": 3.8425940120359883,
+       "two_cut_increment_per_crossing": 2.421438258663196,
+       "upper_alone_per_um": 69.66048046290427
+      },
+      {
+       "coupling_per_crossing": 18.098470891450205,
+       "increment_per_crossing": 5.984154382517318,
+       "neighbour_centre_um": 1.0,
+       "nodes": 71400,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 1.7437308953269666,
+       "seconds": 5.901409108948428,
+       "two_cut_increment_per_crossing": 3.4318107218001837,
+       "upper_alone_per_um": 23.58751821083218
+      },
+      {
+       "coupling_per_crossing": 22.823577113335872,
+       "increment_per_crossing": 9.109193956336167,
+       "neighbour_centre_um": 2.0,
+       "nodes": 73950,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 2.3063525753965006,
+       "seconds": 6.2714838439715095,
+       "two_cut_increment_per_crossing": 3.949610329968801,
+       "upper_alone_per_um": 18.38514918065306
+      },
+      {
+       "coupling_per_crossing": 24.4973541501193,
+       "increment_per_crossing": 10.249446543907325,
+       "neighbour_centre_um": 3.0,
+       "nodes": 77775,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 2.4898422495113697,
+       "seconds": 6.463748601963744,
+       "two_cut_increment_per_crossing": 4.116504387343726,
+       "upper_alone_per_um": 17.060471407968983
+      },
+      {
+       "coupling_per_crossing": 40.13197283412167,
+       "increment_per_crossing": 16.054446473572863,
+       "neighbour_centre_um": null,
+       "nodes": 60690,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 3.780802183582194,
+       "seconds": 5.283093561010901,
+       "two_cut_increment_per_crossing": 4.2463069195441925,
+       "upper_alone_per_um": 15.523106196715316
+      },
+      {
+       "coupling_per_crossing": 11.330571290850683,
+       "increment_per_crossing": 1.5681569172654974,
+       "neighbour_centre_um": 0.28,
+       "nodes": 85680,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 0.647613835147393,
+       "seconds": 10.333655957016163,
+       "two_cut_increment_per_crossing": 2.421438258663196,
+       "upper_alone_per_um": 69.66048046290423
+      },
+      {
+       "coupling_per_crossing": 24.48894140022284,
+       "increment_per_crossing": 7.146813156389079,
+       "neighbour_centre_um": 1.0,
+       "nodes": 99960,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 2.082519618867605,
+       "seconds": 5.060441699984949,
+       "two_cut_increment_per_crossing": 3.4318107218001837,
+       "upper_alone_per_um": 23.587518210832314
+      },
+      {
+       "coupling_per_crossing": 32.215380829613856,
+       "increment_per_crossing": 11.602494090837453,
+       "neighbour_centre_um": 2.0,
+       "nodes": 103530,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 2.9376300752507665,
+       "seconds": 5.609046250989195,
+       "two_cut_increment_per_crossing": 3.949610329968801,
+       "upper_alone_per_um": 18.385149180652345
+      },
+      {
+       "coupling_per_crossing": 35.679097055947594,
+       "increment_per_crossing": 13.489167852659797,
+       "neighbour_centre_um": 3.0,
+       "nodes": 108885,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 3.276850109557155,
+       "seconds": 5.639114258985501,
+       "two_cut_increment_per_crossing": 4.116504387343726,
+       "upper_alone_per_um": 17.06047140796855
+      },
+      {
+       "coupling_per_crossing": 50.92138685006075,
+       "increment_per_crossing": 18.776759105587928,
+       "neighbour_centre_um": null,
+       "nodes": 72250,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 4.421903423693986,
+       "seconds": 9.841740839998238,
+       "two_cut_increment_per_crossing": 4.2463069195441925,
+       "upper_alone_per_um": 15.523106196714473
+      },
+      {
+       "coupling_per_crossing": 13.472817342829124,
+       "increment_per_crossing": 1.6703092134833923,
+       "neighbour_centre_um": 0.28,
+       "nodes": 102000,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 0.6898004553729652,
+       "seconds": 5.645377277978696,
+       "two_cut_increment_per_crossing": 2.421438258663196,
+       "upper_alone_per_um": 69.6604804629043
+      },
+      {
+       "coupling_per_crossing": 27.852031830643675,
+       "increment_per_crossing": 7.467984261561625,
+       "neighbour_centre_um": 1.0,
+       "nodes": 119000,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 2.1761061046059775,
+       "seconds": 10.521408158994745,
+       "two_cut_increment_per_crossing": 3.4318107218001837,
+       "upper_alone_per_um": 23.587518210835107
+      },
+      {
+       "coupling_per_crossing": 37.030787960700145,
+       "increment_per_crossing": 12.489929384040806,
+       "neighbour_centre_um": 2.0,
+       "nodes": 123250,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 3.162319403833306,
+       "seconds": 10.966437336988747,
+       "two_cut_increment_per_crossing": 3.949610329968801,
+       "upper_alone_per_um": 18.385149180651975
+      },
+      {
+       "coupling_per_crossing": 42.18197381689117,
+       "increment_per_crossing": 14.903954096016605,
+       "neighbour_centre_um": 3.0,
+       "nodes": 129625,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 3.6205364293644644,
+       "seconds": 13.930841633002274,
+       "two_cut_increment_per_crossing": 4.116504387343726,
+       "upper_alone_per_um": 17.06047140796862
+      },
+      {
+       "coupling_per_crossing": 55.72537494491014,
+       "increment_per_crossing": 19.747881818597378,
+       "neighbour_centre_um": null,
+       "nodes": 86700,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 4.650601615183567,
+       "seconds": 18.53099540399853,
+       "two_cut_increment_per_crossing": 4.2463069195441925,
+       "upper_alone_per_um": 15.523106196714766
+      },
+      {
+       "coupling_per_crossing": 14.329463636312495,
+       "increment_per_crossing": 1.6758253893593746,
+       "neighbour_centre_um": 0.28,
+       "nodes": 122400,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 0.6920785129927484,
+       "seconds": 13.55111521796789,
+       "two_cut_increment_per_crossing": 2.421438258663196,
+       "upper_alone_per_um": 69.66048046290437
+      },
+      {
+       "coupling_per_crossing": 28.926154716986932,
+       "increment_per_crossing": 7.4245469045706045,
+       "neighbour_centre_um": 1.0,
+       "nodes": 142800,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 2.163448833995133,
+       "seconds": 1.853526383987628,
+       "two_cut_increment_per_crossing": 3.4318107218001837,
+       "upper_alone_per_um": 23.587518210827934
+      },
+      {
+       "coupling_per_crossing": 38.26440923427644,
+       "increment_per_crossing": 12.554721786090823,
+       "neighbour_centre_um": 2.0,
+       "nodes": 147900,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 3.178724161932703,
+       "seconds": 0.7840398209518753,
+       "two_cut_increment_per_crossing": 3.949610329968801,
+       "upper_alone_per_um": 18.385149180650618
+      },
+      {
+       "coupling_per_crossing": 43.963039852504544,
+       "increment_per_crossing": 15.114592128326223,
+       "neighbour_centre_um": 3.0,
+       "nodes": 155550,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 3.671705579810952,
+       "seconds": 0.8280874849879183,
+       "two_cut_increment_per_crossing": 4.116504387343726,
+       "upper_alone_per_um": 17.06047140796672
+      }
+     ],
+     "lower": "met1",
+     "lower_width_um": 0.14,
+     "minimum_neighbour_centre_um": 0.28,
+     "minimum_pitch_um": 0.28,
+     "two_cut": {
+      "0.28": {
+       "increment_per_crossing": 2.421438258663196,
+       "lower_alone_per_um": 18.255619979194783,
+       "lower_under_plate_per_um": 33.16874707111156,
+       "upper_alone_per_um": 69.42389318164987,
+       "upper_over_plate_per_um": 71.80675365161306
+      },
+      "1.0": {
+       "increment_per_crossing": 3.4318107218001837,
+       "lower_alone_per_um": 18.255619979194783,
+       "lower_under_plate_per_um": 33.16874707111156,
+       "upper_alone_per_um": 23.68448894798027,
+       "upper_over_plate_per_um": 33.28429558320766
+      },
+      "2.0": {
+       "increment_per_crossing": 3.949610329968801,
+       "lower_alone_per_um": 18.255619979194783,
+       "lower_under_plate_per_um": 33.16874707111156,
+       "upper_alone_per_um": 18.638626988232208,
+       "upper_over_plate_per_um": 31.937002253235434
+      },
+      "3.0": {
+       "increment_per_crossing": 4.116504387343726,
+       "lower_alone_per_um": 18.255619979194783,
+       "lower_under_plate_per_um": 33.16874707111156,
+       "upper_alone_per_um": 17.314553133821256,
+       "upper_over_plate_per_um": 31.805028808645375
+      },
+      "None": {
+       "increment_per_crossing": 4.2463069195441925,
+       "lower_alone_per_um": 18.255619979194783,
+       "lower_under_plate_per_um": 33.16874707111156,
+       "upper_alone_per_um": 16.358625902743004,
+       "upper_over_plate_per_um": 31.776262521856165
+      }
+     },
+     "upper": "met2",
+     "upper_width_um": 0.14
+    },
+    {
+     "grid": [
+      {
+       "coupling_per_crossing": 10.003028958801073,
+       "increment_per_crossing": 5.3790974330779004,
+       "neighbour_centre_um": null,
+       "nodes": 23940,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 0.9000621098272065,
+       "seconds": 0.3416780380066484,
+       "two_cut_increment_per_crossing": 5.976362491373598,
+       "upper_alone_per_um": 16.51413253540208
+      },
+      {
+       "coupling_per_crossing": 3.873103085485501,
+       "increment_per_crossing": 1.051684273023529,
+       "neighbour_centre_um": 0.6,
+       "nodes": 37170,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 0.2631861780288366,
+       "seconds": 0.6486557789612561,
+       "two_cut_increment_per_crossing": 3.9959707644992615,
+       "upper_alone_per_um": 73.65580772223512
+      },
+      {
+       "coupling_per_crossing": 5.497016869139189,
+       "increment_per_crossing": 1.9613426957959277,
+       "neighbour_centre_um": 1.0,
+       "nodes": 39060,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 0.43944669086281746,
+       "seconds": 0.7377935399999842,
+       "two_cut_increment_per_crossing": 4.463209614674746,
+       "upper_alone_per_um": 40.685042915448555
+      },
+      {
+       "coupling_per_crossing": 7.656939785893098,
+       "increment_per_crossing": 3.440565549828179,
+       "neighbour_centre_um": 2.0,
+       "nodes": 41580,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 0.6606438603171526,
+       "seconds": 0.8109675599844195,
+       "two_cut_increment_per_crossing": 5.207897562502859,
+       "upper_alone_per_um": 25.47029726008678
+      },
+      {
+       "coupling_per_crossing": 8.636545755446136,
+       "increment_per_crossing": 4.154759933182018,
+       "neighbour_centre_um": 3.0,
+       "nodes": 42840,
+       "pitch_um": 0.28,
+       "ratio_to_two_cut": 0.7472911737058452,
+       "seconds": 0.9385012339917012,
+       "two_cut_increment_per_crossing": 5.559760478072297,
+       "upper_alone_per_um": 21.66954372852314
+      },
+      {
+       "coupling_per_crossing": 31.398038233954235,
+       "increment_per_crossing": 15.58762343974739,
+       "neighbour_centre_um": null,
+       "nodes": 51300,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 2.6082125142587786,
+       "seconds": 2.5625602420186624,
+       "two_cut_increment_per_crossing": 5.976362491373598,
+       "upper_alone_per_um": 16.514132535379368
+      },
+      {
+       "coupling_per_crossing": 10.995798363730549,
+       "increment_per_crossing": 2.4914510008071744,
+       "neighbour_centre_um": 0.6,
+       "nodes": 79650,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 0.6234907980162313,
+       "seconds": 5.492260091006756,
+       "two_cut_increment_per_crossing": 3.9959707644992615,
+       "upper_alone_per_um": 73.65580772223453
+      },
+      {
+       "coupling_per_crossing": 15.749595784634264,
+       "increment_per_crossing": 4.830501096834681,
+       "neighbour_centre_um": 1.0,
+       "nodes": 83700,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 1.0822931284590138,
+       "seconds": 6.111495479999576,
+       "two_cut_increment_per_crossing": 4.463209614674746,
+       "upper_alone_per_um": 40.685042915447355
+      },
+      {
+       "coupling_per_crossing": 22.705371307607738,
+       "increment_per_crossing": 9.134769703402952,
+       "neighbour_centre_um": 2.0,
+       "nodes": 89100,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 1.7540225386101642,
+       "seconds": 7.382837051991373,
+       "two_cut_increment_per_crossing": 5.207897562502859,
+       "upper_alone_per_um": 25.4702972600848
+      },
+      {
+       "coupling_per_crossing": 26.173155395322617,
+       "increment_per_crossing": 11.418908948040418,
+       "neighbour_centre_um": 3.0,
+       "nodes": 91800,
+       "pitch_um": 1.0,
+       "ratio_to_two_cut": 2.05384908092293,
+       "seconds": 8.588511237001512,
+       "two_cut_increment_per_crossing": 5.559760478072297,
+       "upper_alone_per_um": 21.669543728520317
+      },
+      {
+       "coupling_per_crossing": 50.105646537290475,
+       "increment_per_crossing": 23.263235569835643,
+       "neighbour_centre_um": null,
+       "nodes": 71820,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 3.8925409232479233,
+       "seconds": 6.402605542039964,
+       "two_cut_increment_per_crossing": 5.976362491373598,
+       "upper_alone_per_um": 16.514132535374547
+      },
+      {
+       "coupling_per_crossing": 15.73832698753004,
+       "increment_per_crossing": 3.1010393757979955,
+       "neighbour_centre_um": 0.6,
+       "nodes": 111510,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 0.7760415574978786,
+       "seconds": 5.361680840025656,
+       "two_cut_increment_per_crossing": 3.9959707644992615,
+       "upper_alone_per_um": 73.65580772223426
+      },
+      {
+       "coupling_per_crossing": 22.372477373236027,
+       "increment_per_crossing": 6.068749267163511,
+       "neighbour_centre_um": 1.0,
+       "nodes": 117180,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 1.3597275931674493,
+       "seconds": 5.878399691020604,
+       "two_cut_increment_per_crossing": 4.463209614674746,
+       "upper_alone_per_um": 40.685042915447106
+      },
+      {
+       "coupling_per_crossing": 33.058271852624685,
+       "increment_per_crossing": 12.152052399267376,
+       "neighbour_centre_um": 2.0,
+       "nodes": 124740,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 2.333389290673227,
+       "seconds": 6.798856835986953,
+       "two_cut_increment_per_crossing": 5.207897562502859,
+       "upper_alone_per_um": 25.470297260084443
+      },
+      {
+       "coupling_per_crossing": 39.24565209304595,
+       "increment_per_crossing": 15.78800040912268,
+       "neighbour_centre_um": 3.0,
+       "nodes": 128520,
+       "pitch_um": 2.0,
+       "ratio_to_two_cut": 2.839690751317539,
+       "seconds": 6.500438112008851,
+       "two_cut_increment_per_crossing": 5.559760478072297,
+       "upper_alone_per_um": 21.669543728519074
+      },
+      {
+       "coupling_per_crossing": 66.84064081916303,
+       "increment_per_crossing": 29.22712837629514,
+       "neighbour_centre_um": null,
+       "nodes": 85500,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 4.890454422482265,
+       "seconds": 10.946451684983913,
+       "two_cut_increment_per_crossing": 5.976362491373598,
+       "upper_alone_per_um": 16.514132535373378
+      },
+      {
+       "coupling_per_crossing": 19.02436345164944,
+       "increment_per_crossing": 3.383434010772305,
+       "neighbour_centre_um": 0.6,
+       "nodes": 132750,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 0.846711402603639,
+       "seconds": 8.08540791895939,
+       "two_cut_increment_per_crossing": 3.9959707644992615,
+       "upper_alone_per_um": 73.65580772223468
+      },
+      {
+       "coupling_per_crossing": 26.482200444078888,
+       "increment_per_crossing": 6.539279999072676,
+       "neighbour_centre_um": 1.0,
+       "nodes": 139500,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 1.4651518892529591,
+       "seconds": 10.231319429993164,
+       "two_cut_increment_per_crossing": 4.463209614674746,
+       "upper_alone_per_um": 40.685042915446914
+      },
+      {
+       "coupling_per_crossing": 38.971173573104295,
+       "increment_per_crossing": 13.41288035296968,
+       "neighbour_centre_um": 2.0,
+       "nodes": 148500,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 2.5754885137417323,
+       "seconds": 0.7921720640151761,
+       "two_cut_increment_per_crossing": 5.207897562502859,
+       "upper_alone_per_um": 25.47029726008175
+      },
+      {
+       "coupling_per_crossing": 47.42475974986514,
+       "increment_per_crossing": 17.956683679051977,
+       "neighbour_centre_um": 3.0,
+       "nodes": 153000,
+       "pitch_um": 4.0,
+       "ratio_to_two_cut": 3.229758503063785,
+       "seconds": 0.9357648800360039,
+       "two_cut_increment_per_crossing": 5.559760478072297,
+       "upper_alone_per_um": 21.6695437285157
+      },
+      {
+       "coupling_per_crossing": 75.2861400202306,
+       "increment_per_crossing": 31.893725203781713,
+       "neighbour_centre_um": null,
+       "nodes": 102600,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 5.336645032796749,
+       "seconds": 9.019727231003344,
+       "two_cut_increment_per_crossing": 5.976362491373598,
+       "upper_alone_per_um": 16.514132535373594
+      },
+      {
+       "coupling_per_crossing": 20.35520639440159,
+       "increment_per_crossing": 3.464560791881013,
+       "neighbour_centre_um": 0.6,
+       "nodes": 159300,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 0.8670135484124745,
+       "seconds": 1.0718666919856332,
+       "two_cut_increment_per_crossing": 3.9959707644992615,
+       "upper_alone_per_um": 73.65580772223342
+      },
+      {
+       "coupling_per_crossing": 27.930838843024375,
+       "increment_per_crossing": 6.5769818072112685,
+       "neighbour_centre_um": 1.0,
+       "nodes": 167400,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 1.4735991304523488,
+       "seconds": 0.9546771379536949,
+       "two_cut_increment_per_crossing": 4.463209614674746,
+       "upper_alone_per_um": 40.685042915445706
+      },
+      {
+       "coupling_per_crossing": 40.504967749076975,
+       "increment_per_crossing": 13.565193967746893,
+       "neighbour_centre_um": 2.0,
+       "nodes": 178200,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 2.6047351747885776,
+       "seconds": 0.9879907569848001,
+       "two_cut_increment_per_crossing": 5.207897562502859,
+       "upper_alone_per_um": 25.470297260082127
+      },
+      {
+       "coupling_per_crossing": 49.57747985936195,
+       "increment_per_crossing": 18.32828271350448,
+       "neighbour_centre_um": 3.0,
+       "nodes": 183600,
+       "pitch_um": 8.0,
+       "ratio_to_two_cut": 3.29659574109195,
+       "seconds": 1.1022041229880415,
+       "two_cut_increment_per_crossing": 5.559760478072297,
+       "upper_alone_per_um": 21.669543728515787
+      }
+     ],
+     "lower": "met2",
+     "lower_width_um": 0.14,
+     "minimum_neighbour_centre_um": 0.6,
+     "minimum_pitch_um": 0.28,
+     "two_cut": {
+      "0.6": {
+       "increment_per_crossing": 3.9959707644992615,
+       "lower_alone_per_um": 16.358625902743004,
+       "lower_under_plate_per_um": 27.906686340659512,
+       "upper_alone_per_um": 73.6555520292053,
+       "upper_over_plate_per_um": 77.45235655152179
+      },
+      "1.0": {
+       "increment_per_crossing": 4.463209614674746,
+       "lower_alone_per_um": 16.358625902743004,
+       "lower_under_plate_per_um": 27.906686340659512,
+       "upper_alone_per_um": 40.830795571906194,
+       "upper_over_plate_per_um": 47.965020452619
+      },
+      "2.0": {
+       "increment_per_crossing": 5.207897562502859,
+       "lower_alone_per_um": 16.358625902743004,
+       "lower_under_plate_per_um": 27.906686340659512,
+       "upper_alone_per_um": 25.797594360594363,
+       "upper_over_plate_per_um": 38.25101886865084
+      },
+      "3.0": {
+       "increment_per_crossing": 5.559760478072297,
+       "lower_alone_per_um": 16.358625902743004,
+       "lower_under_plate_per_um": 27.906686340659512,
+       "upper_alone_per_um": 22.046822508308967,
+       "upper_over_plate_per_um": 37.013553556147144
+      },
+      "None": {
+       "increment_per_crossing": 5.976362491373598,
+       "lower_alone_per_um": 16.358625902743004,
+       "lower_under_plate_per_um": 27.906686340659512,
+       "upper_alone_per_um": 18.605505613854923,
+       "upper_over_plate_per_um": 36.54796532813096
+      }
+     },
+     "upper": "met3",
+     "upper_width_um": 0.3
+    }
+   ],
+   "stack_source": {
+    "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/klayout/tech/xsect/sky130.xs",
+    "sha256": "1f7c273005ff4b9c4ac7e8961b0005888156c7d8f5b73a337c222ca9b7de2b33"
+   },
+   "stack_um": {
+    "li1": [
+     0.94,
+     1.04
+    ],
+    "met1": [
+     1.3699999999999999,
+     1.73
+    ],
+    "met2": [
+     2.0,
+     2.36
+    ],
+    "met3": [
+     2.7800000000000002,
+     3.625
+    ],
+    "met4": [
+     4.015000000000001,
+     4.86
+    ],
+    "met5": [
+     5.365,
+     6.625
+    ]
+   }
+  }
+ },
+ "peak_rss_kib": 2220052,
+ "schema": "rustroad.rc-field-solver.v2",
+ "units": "aF at eps_r = 1"
+}
