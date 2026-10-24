@@ -73,16 +73,29 @@ pub struct PhysicalBundle {
     pub routing: Option<crate::routing::RoutingState>,
     #[serde(default)]
     pub state: Option<crate::physical::PhysicalState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<crate::physical::PlacementReport>,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Floorplan {
-    name: String,
-    units_per_micron: u32,
-    die_area: Rect,
-    core_area: Rect,
-    site: Site,
-    rows: Vec<Row>,
+pub(crate) struct Floorplan {
+    pub(crate) name: String,
+    pub(crate) units_per_micron: u32,
+    pub(crate) die_area: Rect,
+    pub(crate) core_area: Rect,
+    pub(crate) site: Site,
+    pub(crate) rows: Vec<Row>,
+}
+pub(crate) type FloorplanSpec = Floorplan;
+/// `select_technology` for the file-only floorplan command.
+pub(crate) fn select_technology_for(
+    tech: &lef::LefDocument,
+    cells: &lef::LefDocument,
+    floor: &Floorplan,
+    netlist: &verilog::Netlist,
+    extra: &[String],
+) -> Result<(Technology, Vec<Master>)> {
+    select_technology(tech, cells, floor, netlist, extra)
 }
 
 pub(crate) fn read_input(path: &Path, limit: u64, role: &str) -> Result<(String, SourcePin)> {
@@ -332,12 +345,39 @@ pub fn import_pdk_with_config(
                 .find(|m| m.name == name)
                 .ok_or_else(|| invalid(format!("missing tie master {name}")))
         };
-        let (updated, report) = crate::ties::materialize_constants(
+        let specs = cfg
+            .constant_cells
+            .iter()
+            .map(|c| {
+                Ok(crate::ties::ConstantCellSpec {
+                    cell: find(&c.cell)?,
+                    high: &c.high,
+                    low: &c.low,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let high = crate::ties::TieSpec {
+            cell: find(&cfg.tie_high.cell)?,
+            pin: &cfg.tie_high.pin,
+            rail: cfg.tie_high.rail(),
+        };
+        let low = crate::ties::TieSpec {
+            cell: find(&cfg.tie_low.cell)?,
+            pin: &cfg.tie_low.pin,
+            rail: cfg.tie_low.rail(),
+        };
+        let (dissolved, count) = crate::ties::dissolve_constant_cells(
             &netlist,
-            find(&cfg.tie_high.cell)?,
-            &cfg.tie_high.pin,
-            find(&cfg.tie_low.cell)?,
-            &cfg.tie_low.pin,
+            &specs,
+            high,
+            low,
+            &crate::ties::TieLimits::default(),
+        )
+        .map_err(|e| invalid(e.to_string()))?;
+        let (updated, mut report) = crate::ties::materialize_constants_with(
+            &dissolved,
+            high,
+            low,
             &crate::ties::TieLimits {
                 max_new_cells: cfg
                     .max_added_cells
@@ -346,6 +386,7 @@ pub fn import_pdk_with_config(
             },
         )
         .map_err(|e| invalid(e.to_string()))?;
+        report.dissolved_cells = count;
         netlist = updated;
         tie_report = Some(report);
     }
@@ -479,6 +520,7 @@ pub fn import_pdk_with_config(
         clock_tree: None,
         routing: None,
         state: None,
+        placement: None,
     };
     validate_bundle(&physical, &design, connection_limits)?;
     let records = DesignDb::new(&design, limits)?.unplaced_records();
@@ -912,6 +954,10 @@ pub(super) fn link(
                         "explicit supply pin wiring requires a supply-network importer",
                     ));
                 }
+                None
+            } else if expr.is_none() && spec.direction == Some(Direction::Output) {
+                // An omitted output pin is unconnected (e.g. the unused output
+                // of a two-output tie cell); omitted inputs stay an error.
                 None
             } else {
                 let expr = expr.ok_or_else(|| {

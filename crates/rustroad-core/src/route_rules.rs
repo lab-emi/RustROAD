@@ -61,8 +61,23 @@ pub(crate) enum Violation {
         layer: u32,
         rect: Rect,
     },
+    /// Small hole enclosed by same-net metal (track router only); `rect` is
+    /// its bounding box.
+    Hole {
+        net: u32,
+        layer: u32,
+        rect: Rect,
+    },
 }
 impl Violation {
+    pub(crate) fn net(&self) -> u32 {
+        match self {
+            Self::Spacing { net, .. }
+            | Self::Area { net, .. }
+            | Self::Floating { net, .. }
+            | Self::Hole { net, .. } => *net,
+        }
+    }
     pub(crate) fn describe(&self) -> String {
         let r = |r: &Rect| format!("({},{})-({},{})", r.lx, r.ly, r.ux, r.uy);
         match self {
@@ -84,6 +99,9 @@ impl Violation {
             ),
             Self::Floating { net, layer, rect } => {
                 format!("floating patch net {net} layer {layer} {}", r(rect))
+            }
+            Self::Hole { net, layer, rect } => {
+                format!("enclosed hole net {net} layer {layer} {}", r(rect))
             }
         }
     }
@@ -304,6 +322,147 @@ pub(crate) fn fill_for(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
     r
 }
 
+/// Track-router patch: like `fill_for`, but a corner/point bridge overlaps
+/// each shape by at least the layer width (or the shape's full extent) in
+/// both axes, so the union never forms a sub-width neck at the junction.
+pub(crate) fn fill_for_robust(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
+    let (ox, oy) = (overlap_x(a, b), overlap_y(a, b));
+    // Facing spans of at least one width: the legacy gap fill already has
+    // full-width contact with both shapes.
+    if ox >= i128::from(width) || oy >= i128::from(width) {
+        return fill_for(a, b, width, grid);
+    }
+    // Corner or narrow facing span: the bounding box of the parts of each
+    // shape within two widths of the other. It contains both facing corners,
+    // so the union has no sub-width step or diagonal neck there.
+    let reach = 2 * width;
+    let near = |s: Rect, o: Rect| Rect {
+        lx: s.lx.max(o.lx - reach),
+        ly: s.ly.max(o.ly - reach),
+        ux: s.ux.min(o.ux + reach),
+        uy: s.uy.min(o.uy + reach),
+    };
+    let (pa, pb) = (near(a, b), near(b, a));
+    let r = Rect {
+        lx: pa.lx.min(pb.lx),
+        ly: pa.ly.min(pb.ly),
+        ux: pa.ux.max(pb.ux),
+        uy: pa.uy.max(pb.uy),
+    };
+    Rect {
+        lx: floor_to(r.lx, grid),
+        ly: floor_to(r.ly, grid),
+        ux: ceil_to(r.ux, grid),
+        uy: ceil_to(r.uy, grid),
+    }
+}
+
+/// Bounding boxes of holes enclosed by a rectangle union (compressed grid
+/// flood fill from the outside). Work is O(cells) with cells <= (2n)^2.
+pub(crate) fn holes(rects: &[Rect], work: &mut usize, cap: usize) -> Result<Vec<Rect>> {
+    let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r.lx, r.ux]).collect();
+    let mut ys: Vec<i64> = rects.iter().flat_map(|r| [r.ly, r.uy]).collect();
+    xs.sort_unstable();
+    xs.dedup();
+    ys.sort_unstable();
+    ys.dedup();
+    if xs.len() < 2 || ys.len() < 2 {
+        return Ok(Vec::new());
+    }
+    let (nx, ny) = (xs.len() - 1, ys.len() - 1);
+    charge(work, nx.saturating_mul(ny), cap)?;
+    let mut covered = vec![false; nx * ny];
+    for r in rects {
+        let (x0, x1) = (
+            xs.binary_search(&r.lx).unwrap(),
+            xs.binary_search(&r.ux).unwrap(),
+        );
+        let (y0, y1) = (
+            ys.binary_search(&r.ly).unwrap(),
+            ys.binary_search(&r.uy).unwrap(),
+        );
+        charge(work, (x1 - x0) * (y1 - y0), cap)?;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                covered[y * nx + x] = true;
+            }
+        }
+    }
+    // 0 = unvisited free, 1 = outside, 2.. = hole label.
+    let mut label = vec![0u32; nx * ny];
+    let mut stack = Vec::new();
+    for y in 0..ny {
+        for x in 0..nx {
+            if (x == 0 || y == 0 || x + 1 == nx || y + 1 == ny) && !covered[y * nx + x] {
+                label[y * nx + x] = 1;
+                stack.push(y * nx + x);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut next = 1u32;
+    let mut seed = 0usize;
+    loop {
+        while let Some(c) = stack.pop() {
+            let (x, y) = (c % nx, c / nx);
+            let visit = |n: usize, stack: &mut Vec<usize>, label: &mut [u32], l: u32| {
+                if !covered[n] && label[n] == 0 {
+                    label[n] = l;
+                    stack.push(n);
+                }
+            };
+            let l = label[c];
+            if x > 0 {
+                visit(c - 1, &mut stack, &mut label, l);
+            }
+            if x + 1 < nx {
+                visit(c + 1, &mut stack, &mut label, l);
+            }
+            if y > 0 {
+                visit(c - nx, &mut stack, &mut label, l);
+            }
+            if y + 1 < ny {
+                visit(c + nx, &mut stack, &mut label, l);
+            }
+        }
+        while seed < nx * ny && (covered[seed] || label[seed] != 0) {
+            seed += 1;
+        }
+        if seed == nx * ny {
+            break;
+        }
+        next += 1;
+        label[seed] = next;
+        stack.push(seed);
+        out.push(next);
+    }
+    let mut boxes: BTreeMap<u32, Rect> = BTreeMap::new();
+    for y in 0..ny {
+        for x in 0..nx {
+            let l = label[y * nx + x];
+            if l >= 2 {
+                let cell = Rect {
+                    lx: xs[x],
+                    ly: ys[y],
+                    ux: xs[x + 1],
+                    uy: ys[y + 1],
+                };
+                boxes
+                    .entry(l)
+                    .and_modify(|b| {
+                        b.lx = b.lx.min(cell.lx);
+                        b.ly = b.ly.min(cell.ly);
+                        b.ux = b.ux.max(cell.ux);
+                        b.uy = b.uy.max(cell.uy);
+                    })
+                    .or_insert(cell);
+            }
+        }
+    }
+    let _ = out;
+    Ok(boxes.into_values().collect())
+}
+
 /// Exact area of a rectangle union by x slabs.
 pub(crate) fn union_area(rects: &[Rect], work: &mut usize, cap: usize) -> Result<i128> {
     let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r.lx, r.ux]).collect();
@@ -516,6 +675,25 @@ pub(crate) fn check(
                 }
                 continue;
             }
+            if input.tracks.is_some()
+                && list.len() >= 3
+                && let Some(min) = rule.min_area
+            {
+                // Holes below four times the AREA rule are filled (the LEF
+                // MINENCLOSEDAREA is not retained; every same-net hole of
+                // this size can only be filled, never routed through).
+                let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
+                for h in holes(&rects, work, cap)? {
+                    let a = i128::from(h.ux - h.lx) * i128::from(h.uy - h.ly);
+                    if a < 4 * i128::from(min) {
+                        out.push(Violation::Hole {
+                            net,
+                            layer,
+                            rect: h,
+                        });
+                    }
+                }
+            }
             if let Some(min) = rule.min_area {
                 let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
                 let area = union_area(&rects, work, cap)?;
@@ -612,5 +790,77 @@ mod tests {
         assert!(!local_ok(pad, &[leg, bar], 230, &mut w, 10_000).unwrap());
         let inside = r(760, 1200, 1020, 1580);
         assert!(local_ok(inside, &[leg, bar], 230, &mut w, 10_000).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod scale_tests {
+    use super::*;
+    fn r(lx: i64, ly: i64, ux: i64, uy: i64) -> Rect {
+        Rect { lx, ly, ux, uy }
+    }
+    #[test]
+    fn enclosed_holes_are_found_and_open_regions_are_not() {
+        let mut w = 0;
+        // A ring of four rectangles around a 20 x 20 hole.
+        let ring = [
+            r(0, 0, 60, 20),
+            r(0, 40, 60, 60),
+            r(0, 20, 20, 40),
+            r(40, 20, 60, 40),
+        ];
+        assert_eq!(
+            holes(&ring, &mut w, 10_000).unwrap(),
+            vec![r(20, 20, 40, 40)]
+        );
+        // A U shape has no hole.
+        assert!(holes(&ring[..3], &mut w, 10_000).unwrap().is_empty());
+        assert!(holes(&ring, &mut 0, 1).is_err());
+    }
+    #[test]
+    fn robust_corner_bridge_overlaps_both_shapes_by_a_width() {
+        // Pin corner (2000, 259260) and via pad corner (2420, 259560).
+        let pin = r(0, 257260, 2000, 259260);
+        let pad = r(2420, 259560, 3180, 260120);
+        let f = fill_for_robust(pin, pad, 560, 10);
+        let ov = |a: Rect, b: Rect| {
+            (
+                a.ux.min(b.ux) - a.lx.max(b.lx),
+                a.uy.min(b.uy) - a.ly.max(b.ly),
+            )
+        };
+        // The fill holds both facing corners and overlaps each shape by at
+        // least the layer width or that shape's extent near the other.
+        let inside = |p: [i64; 2]| f.lx <= p[0] && p[0] <= f.ux && f.ly <= p[1] && p[1] <= f.uy;
+        assert!(inside([2000, 259260]) && inside([2420, 259560]), "{f:?}");
+        let (x, y) = ov(f, pad);
+        assert!(x > 0 && y > 0, "{f:?}");
+        assert!(f.ux - f.lx >= 560 && f.uy - f.ly >= 560, "{f:?}");
+        // The legacy corner bridge overlaps by less than a width (a neck).
+        let g = fill_for(pin, pad, 560, 10);
+        let (x, _) = ov(g, pin);
+        assert!(x < 560);
+        // Facing spans of at least a width keep the legacy gap fill.
+        let a = r(0, 0, 100, 20);
+        let b = r(10, 30, 90, 50);
+        assert_eq!(fill_for_robust(a, b, 20, 5), fill_for(a, b, 20, 5));
+        // Two pads facing over less than a width: the fill covers both
+        // facing corners (no step narrower than the width).
+        let p1 = r(31350, 197410, 31670, 197670);
+        let p2 = r(31810, 197240, 32130, 197500);
+        let f = fill_for_robust(p1, p2, 140, 5);
+        assert!(f.ly <= 197410 && f.uy >= 197500 && f.lx <= 31670 - 140 && f.ux >= 31810 + 140);
+        // A short facing span of a pad at a long wire stays local.
+        let wire = r(0, 0, 10_000, 140);
+        let pad = r(9_950, 200, 10_270, 460);
+        let f = fill_for_robust(wire, pad, 140, 5);
+        assert!(
+            f.lx >= 9_950 - 2 * 140 - 5 && f.ux <= 10_270 && f.ly == 0,
+            "{f:?}"
+        );
+        assert!(
+            f.lx <= 9_950 && f.ux >= 10_000 && f.uy >= 200 + 140,
+            "{f:?}"
+        );
     }
 }

@@ -27,6 +27,39 @@ fn default_fanout() -> usize {
 pub struct TieCell {
     pub cell: String,
     pub pin: String,
+    /// A logic cell used as the constant source (e.g. sky130 `inv_1` with
+    /// `A` on ground for a logic 1) instead of a dedicated tie master: its
+    /// one input is joined to the cell's own `supply` rail by the track
+    /// router. Absent: `cell` has only outputs and supply pins (`conb_1`,
+    /// `tieh`/`tiel`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rail_input: Option<TieRailInput>,
+}
+/// A dedicated constant cell the input netlist may contain (e.g. sky130
+/// `conb_1` from synthesis): the import dissolves its instances into
+/// literals, which the `tie_high`/`tie_low` policy then implements.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstantCell {
+    pub cell: String,
+    #[serde(default)]
+    pub high: Vec<String>,
+    #[serde(default)]
+    pub low: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TieRailInput {
+    pub pin: String,
+    pub supply: RailPolarity,
+}
+impl TieCell {
+    /// Rail input pin and whether it is tied to power.
+    pub fn rail(&self) -> Option<(&str, bool)> {
+        self.rail_input
+            .as_ref()
+            .map(|r| (r.pin.as_str(), r.supply == RailPolarity::Power))
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -52,6 +85,9 @@ pub struct PhysicalConfig {
     pub io_layer: String,
     pub tie_high: TieCell,
     pub tie_low: TieCell,
+    /// Constant cells of the input netlist to rebuild with the tie policy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constant_cells: Vec<ConstantCell>,
     pub filler_cells: Vec<String>,
     pub alternating_rows: bool,
     #[serde(default)]
@@ -75,6 +111,26 @@ pub struct PhysicalConfig {
     pub tap: Option<TapConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<crate::clock::ClockConfig>,
+    /// Analytic placer (`rustroad_core::place`); absent keeps fixed-order
+    /// packing, the deterministic baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placer: Option<rustroad_core::place::PlaceConfig>,
+    /// Explicit I/O assignment (connectivity-aware order from `floorplan`);
+    /// absent keeps round-robin side assignment in port order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub io_plan: Option<rustroad_core::io::IoPlan>,
+}
+/// Wirelength record of the last placement (centre-to-centre HPWL, DBU).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlacementReport {
+    pub mode: String,
+    pub hpwl_dbu: u64,
+    /// Fixed-order packing of the same cells into the same intervals.
+    pub baseline_hpwl_dbu: u64,
+    pub global_hpwl_dbu: u64,
+    pub work: u64,
+    pub status: String,
 }
 impl PhysicalConfig {
     pub fn validate(&self) -> Result<()> {
@@ -96,6 +152,13 @@ impl PhysicalConfig {
             return Err(Error::Invalid("invalid tap policy".into()));
         }
         if self.max_added_cells > 250_000
+            || self.constant_cells.len() > 16
+            || self.constant_cells.iter().any(|c| {
+                c.high.len() + c.low.len() == 0
+                    || c.high.len() + c.low.len() > 64
+                    || c.cell == self.tie_high.cell
+                    || c.cell == self.tie_low.cell
+            })
             || self.max_tie_fanout == 0
             || self.max_tie_fanout > 10_000
             || self.filler_cells.is_empty()
@@ -120,6 +183,16 @@ impl PhysicalConfig {
             &self.tie_low.pin,
         ]
         .into_iter()
+        .chain(
+            [&self.tie_high, &self.tie_low]
+                .into_iter()
+                .filter_map(|t| t.rail_input.as_ref().map(|r| &r.pin)),
+        )
+        .chain(
+            self.constant_cells
+                .iter()
+                .flat_map(|c| std::iter::once(&c.cell).chain(&c.high).chain(&c.low)),
+        )
         .chain(self.filler_cells.iter())
         .chain(self.body_power_pins.iter())
         .chain(self.body_ground_pins.iter())
@@ -165,10 +238,25 @@ impl PhysicalConfig {
         if power.iter().any(|p| ground.contains(p)) {
             return Err(Error::Invalid("ambiguous power/ground pin role".into()));
         }
-        if self.tie_high.cell == self.tie_low.cell && self.tie_high.pin == self.tie_low.pin {
+        // One master may serve both values only through rail inputs of
+        // opposite supplies (same input pin, different rail).
+        if self.tie_high.cell == self.tie_low.cell
+            && self.tie_high.pin == self.tie_low.pin
+            && !matches!(
+                (&self.tie_high.rail_input, &self.tie_low.rail_input),
+                (Some(h), Some(l)) if h.pin == l.pin && h.supply != l.supply
+            )
+        {
             return Err(Error::Invalid(
                 "high/low tie outputs must be distinct".into(),
             ));
+        }
+        for t in [&self.tie_high, &self.tie_low] {
+            if t.rail_input.as_ref().is_some_and(|r| r.pin == t.pin) {
+                return Err(Error::Invalid(
+                    "tie rail input and output must be different pins".into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -275,7 +363,7 @@ pub(super) fn attach_supplies(
             net: Some(nets.len() as u32 - 1),
         });
     }
-    for pin in pins {
+    for pin in pins.iter_mut() {
         if let PinOwner::Instance { instance, terminal } = pin.owner {
             let spec =
                 &masters[instance_masters[instance as usize] as usize].pins[terminal as usize];
@@ -296,7 +384,93 @@ pub(super) fn attach_supplies(
             }
         }
     }
+    fold_tie_rails(masters, instance_masters, nets, pins, first)
+}
+
+/// The reserved rail-input tie wires (`ties::RAIL_*_WIRE`) are the supply
+/// nets: their pins (tie-cell inputs only) move to the power/ground net and
+/// the wire nets are removed (net indices above them shift down).
+fn fold_tie_rails(
+    masters: &[rustroad_core::connectivity::Master],
+    instance_masters: &[u32],
+    nets: &mut Vec<Net>,
+    pins: &mut [Connection],
+    first: u32,
+) -> Result<()> {
+    let mut fold: Vec<(u32, u32)> = Vec::new();
+    for (wire, target) in [
+        (crate::ties::RAIL_POWER_WIRE, first),
+        (crate::ties::RAIL_GROUND_WIRE, first + 1),
+    ] {
+        if let Some(i) = nets
+            .iter()
+            .position(|n| n.aliases.iter().any(|a| a == wire))
+        {
+            if nets[i].aliases.len() != 1 || i as u32 >= first {
+                return Err(Error::Invalid(format!("tie rail wire {wire} is aliased")));
+            }
+            fold.push((i as u32, target));
+        }
+    }
+    if fold.is_empty() {
+        return Ok(());
+    }
+    for pin in pins.iter_mut() {
+        let Some(n) = pin.net else { continue };
+        let Some(&(_, target)) = fold.iter().find(|(r, _)| *r == n) else {
+            continue;
+        };
+        let input = match pin.owner {
+            PinOwner::Instance { instance, terminal } => {
+                let spec =
+                    &masters[instance_masters[instance as usize] as usize].pins[terminal as usize];
+                !spec.use_.is_supply() && spec.direction == Some(Direction::Input)
+            }
+            PinOwner::Port { .. } => false,
+        };
+        if !input {
+            return Err(Error::Invalid(
+                "tie rail wire drives something other than a cell input".into(),
+            ));
+        }
+        pin.net = Some(target);
+    }
+    let mut removed: Vec<u32> = fold.iter().map(|(r, _)| *r).collect();
+    removed.sort_unstable();
+    let mut index = 0u32;
+    nets.retain(|_| {
+        let keep = removed.binary_search(&index).is_err();
+        index += 1;
+        keep
+    });
+    for pin in pins.iter_mut() {
+        if let Some(n) = pin.net {
+            pin.net = Some(n - removed.partition_point(|&r| r < n) as u32);
+        }
+    }
     Ok(())
+}
+
+/// Instance signal pins tied to a supply net (rail-input tie cells), in
+/// connectivity pin order: (pin index, supply net). The track router joins
+/// each to the instance's own rail; exports report them on the supply net.
+pub(crate) fn rail_tie_pins(bundle: &PhysicalBundle) -> Vec<(u32, u32)> {
+    let model = &bundle.connectivity;
+    model
+        .pins
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| {
+            let net = p.net?;
+            let PinOwner::Instance { instance, terminal } = p.owner else {
+                return None;
+            };
+            let spec = &model.masters[model.instance_masters[instance as usize] as usize].pins
+                [terminal as usize];
+            (model.nets[net as usize].use_.is_supply() && !spec.use_.is_supply())
+                .then_some((i as u32, net))
+        })
+        .collect()
 }
 
 pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
@@ -371,6 +545,27 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
         };
         if bundle.netlist.instances[i].cell != spec.cell || binding.pin != spec.pin {
             return Err(Error::Invalid("tie report binding mismatch".into()));
+        }
+        if let Some((rail_pin, power)) = spec.rail() {
+            let terminal = *terminal_names[model.instance_masters[i] as usize]
+                .get(rail_pin)
+                .ok_or_else(|| Error::Invalid("tie rail input absent".into()))?;
+            let net = pin_nets
+                .get(&PinOwner::Instance {
+                    instance: i as u32,
+                    terminal: terminal as u32,
+                })
+                .copied()
+                .flatten()
+                .ok_or_else(|| Error::Invalid("tie rail input unconnected".into()))?;
+            let want = if power {
+                &cfg.power_net
+            } else {
+                &cfg.ground_net
+            };
+            if &model.nets[net as usize].name != want {
+                return Err(Error::Invalid("tie rail input on the wrong supply".into()));
+            }
         }
         let terminal = *terminal_names[model.instance_masters[i] as usize]
             .get(binding.pin.as_str())
@@ -470,6 +665,14 @@ pub(super) fn prepare(
         .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
     validate_tap_master(bundle)?;
     let mut tap_work = 0usize;
+    let gap = i64::from(cfg.cell_spacing_sites)
+        .checked_mul(design.site.width)
+        .ok_or_else(|| Error::Budget("cell spacing overflow".into()))?;
+    bundle.placement = if cfg.placer.is_some() {
+        Some(analytic(design, bundle, &mut placed, gap, limits)?)
+    } else {
+        None
+    };
     if let Some(tap) = &cfg.tap {
         let m = bundle
             .connectivity
@@ -487,18 +690,18 @@ pub(super) fn prepare(
             design,
             width,
             tap.max_gap,
-            i64::from(cfg.cell_spacing_sites)
-                .checked_mul(design.site.width)
-                .ok_or_else(|| Error::Budget("cell spacing overflow".into()))?,
+            gap,
             &rustroad_core::tap::TapLimits {
                 max_taps: remaining,
                 max_work: limits.max_expansions,
             },
         )?;
         tap_work = plan.report.work_units;
-        for (p, xy) in placed.iter_mut().zip(plan.cells) {
-            p.x = xy[0];
-            p.y = xy[1];
+        if cfg.placer.is_none() {
+            for (p, xy) in placed.iter_mut().zip(plan.cells) {
+                p.x = xy[0];
+                p.y = xy[1];
+            }
         }
         let mut used: HashSet<_> = design.cells.iter().map(|c| c.name.clone()).collect();
         let mut next = 0usize;
@@ -760,53 +963,7 @@ pub(super) fn layout(
     let grid = bundle.technology.manufacturing_grid.ok_or_else(|| {
         Error::Invalid("manufacturing grid required for physical preparation".into())
     })?;
-    let io_layer = layer(&bundle.technology, &cfg.io_layer)?;
-    // Smallest grid-aligned square side whose area meets the LEF AREA rule.
-    let area_side = match (cfg.io_min_area, io_layer.min_area) {
-        (true, Some(area)) => {
-            let area =
-                u128::try_from(area).map_err(|_| Error::Invalid("I/O layer area rule".into()))?;
-            let mut side = area.isqrt();
-            if side * side < area {
-                side += 1;
-            }
-            let g = u128::try_from(grid).map_err(|_| Error::Invalid("grid".into()))?;
-            i64::try_from(side.div_ceil(g) * g)
-                .map_err(|_| Error::Invalid("I/O area side overflow".into()))?
-        }
-        (true, None) => {
-            return Err(Error::Invalid(
-                "io_min_area requires a LEF AREA rule on the I/O layer".into(),
-            ));
-        }
-        _ => 0,
-    };
-    let io_constraints = IoConstraints {
-        die: design.die_area,
-        core: design.core_area,
-        grid,
-        layer: cfg.io_layer.clone(),
-        min_width: cfg
-            .io_width
-            .or(io_layer.width)
-            .ok_or_else(|| Error::Invalid("I/O minimum width missing".into()))?
-            .max(io_layer.width.unwrap_or(0))
-            .max(area_side),
-        min_spacing: cfg
-            .io_spacing
-            .or(io_layer.spacing)
-            .ok_or_else(|| Error::Invalid("I/O minimum spacing missing".into()))?
-            .max(io_layer.spacing.unwrap_or(0)),
-    };
-    let names = bundle
-        .connectivity
-        .ports
-        .iter()
-        .filter(|p| !p.use_.is_supply())
-        .flat_map(|p| p.bits.iter().cloned())
-        .collect::<Vec<_>>();
-    let io_pins = place_boundary_io(&names, &io_constraints, &IoLimits::default())
-        .map_err(|e| Error::Invalid(e.to_string()))?;
+    let io_pins = io_pins(design, bundle)?;
     let rail_layer = layer(&bundle.technology, &cfg.rail_layer)?;
     let strap_layer = layer(&bundle.technology, &cfg.strap_layer)?;
     let via = bundle
@@ -912,6 +1069,214 @@ pub(super) fn layout(
     })
 }
 
+/// Signal I/O pin geometry (round-robin, or the explicit `io_plan`).
+pub(crate) fn io_pins(design: &Design, bundle: &PhysicalBundle) -> Result<Vec<IoPin>> {
+    let cfg = bundle
+        .config
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
+    let grid = bundle.technology.manufacturing_grid.ok_or_else(|| {
+        Error::Invalid("manufacturing grid required for physical preparation".into())
+    })?;
+    let io_layer = layer(&bundle.technology, &cfg.io_layer)?;
+    // Smallest grid-aligned square side whose area meets the LEF AREA rule.
+    let area_side = match (cfg.io_min_area, io_layer.min_area) {
+        (true, Some(area)) => {
+            let area =
+                u128::try_from(area).map_err(|_| Error::Invalid("I/O layer area rule".into()))?;
+            let mut side = area.isqrt();
+            if side * side < area {
+                side += 1;
+            }
+            let g = u128::try_from(grid).map_err(|_| Error::Invalid("grid".into()))?;
+            i64::try_from(side.div_ceil(g) * g)
+                .map_err(|_| Error::Invalid("I/O area side overflow".into()))?
+        }
+        (true, None) => {
+            return Err(Error::Invalid(
+                "io_min_area requires a LEF AREA rule on the I/O layer".into(),
+            ));
+        }
+        _ => 0,
+    };
+    let io_constraints = IoConstraints {
+        die: design.die_area,
+        core: design.core_area,
+        grid,
+        layer: cfg.io_layer.clone(),
+        min_width: cfg
+            .io_width
+            .or(io_layer.width)
+            .ok_or_else(|| Error::Invalid("I/O minimum width missing".into()))?
+            .max(io_layer.width.unwrap_or(0))
+            .max(area_side),
+        min_spacing: cfg
+            .io_spacing
+            .or(io_layer.spacing)
+            .ok_or_else(|| Error::Invalid("I/O minimum spacing missing".into()))?
+            .max(io_layer.spacing.unwrap_or(0)),
+    };
+    let names = bundle
+        .connectivity
+        .ports
+        .iter()
+        .filter(|p| !p.use_.is_supply())
+        .flat_map(|p| p.bits.iter().cloned())
+        .collect::<Vec<_>>();
+    match &cfg.io_plan {
+        Some(plan) => {
+            rustroad_core::io::place_planned_io(&names, plan, &io_constraints, &IoLimits::default())
+        }
+        None => place_boundary_io(&names, &io_constraints, &IoLimits::default()),
+    }
+    .map_err(|e| Error::Invalid(e.to_string()))
+}
+
+/// Free row intervals between reserved taps (whole rows without taps).
+pub(crate) fn free_intervals(
+    design: &Design,
+    bundle: &PhysicalBundle,
+) -> Result<Vec<rustroad_core::place::Interval>> {
+    let cfg = bundle
+        .config
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
+    let mut out = Vec::new();
+    if let Some(tap) = &cfg.tap {
+        let m = bundle
+            .connectivity
+            .masters
+            .iter()
+            .find(|m| m.name == tap.cell)
+            .ok_or_else(|| Error::Invalid("tap master absent".into()))?;
+        let report = rustroad_core::tap::reserve(
+            design,
+            m.size[0],
+            tap.max_gap,
+            &rustroad_core::tap::TapLimits::default(),
+        )?;
+        for pair in report.sites.windows(2) {
+            if pair[0].row == pair[1].row {
+                let x = pair[0].x + pair[0].width;
+                if x < pair[1].x {
+                    out.push(rustroad_core::place::Interval {
+                        y: pair[0].y,
+                        lx: x,
+                        ux: pair[1].x,
+                    });
+                }
+            }
+        }
+    } else {
+        for r in &design.rows {
+            out.push(rustroad_core::place::Interval {
+                y: r.y,
+                lx: r.x_start,
+                ux: r.x_end,
+            });
+        }
+    }
+    out.sort_unstable_by_key(|v| (v.y, v.lx));
+    Ok(out)
+}
+
+/// Analytic placement of every current instance (logic, ties and clock
+/// buffers; taps and fillers are added afterwards) plus the fixed-order
+/// baseline on the same intervals for the HPWL report.
+fn analytic(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    placed: &mut [Placed],
+    gap: i64,
+    limits: &Limits,
+) -> Result<PlacementReport> {
+    let cfg = bundle.config.as_ref().unwrap();
+    let pc = cfg.placer.as_ref().unwrap();
+    let model = &bundle.connectivity;
+    let io = io_pins(design, bundle)?;
+    let centre: HashMap<&str, [i64; 2]> = io
+        .iter()
+        .map(|p| {
+            (
+                p.name.as_str(),
+                [(p.rect.lx + p.rect.ux) / 2, (p.rect.ly + p.rect.uy) / 2],
+            )
+        })
+        .collect();
+    let mut nets: Vec<Vec<rustroad_core::place::PinRef>> = vec![Vec::new(); model.nets.len()];
+    for pin in &model.pins {
+        let Some(n) = pin.net else { continue };
+        if model.nets[n as usize].use_.is_supply() {
+            continue;
+        }
+        match pin.owner {
+            PinOwner::Instance { instance, terminal } => {
+                let m = &model.masters[model.instance_masters[instance as usize] as usize];
+                if m.pins[terminal as usize].use_.is_supply() {
+                    continue;
+                }
+                if (instance as usize) < placed.len() {
+                    nets[n as usize].push(rustroad_core::place::PinRef::Cell(instance));
+                }
+            }
+            PinOwner::Port { port, bit } => {
+                let name = &model.ports[port as usize].bits[bit as usize];
+                if let Some(c) = centre.get(name.as_str()) {
+                    nets[n as usize].push(rustroad_core::place::PinRef::Fixed(*c));
+                }
+            }
+        }
+    }
+    nets.retain(|n| n.len() >= 2);
+    let problem = rustroad_core::place::PlaceProblem {
+        widths: placed.iter().map(|p| p.width).collect(),
+        row_height: design.site.height,
+        site: design.site.width,
+        gap,
+        nets,
+        intervals: free_intervals(design, bundle)?,
+    };
+    let result = rustroad_core::place::place(
+        &problem,
+        pc,
+        &rustroad_core::place::PlaceLimits {
+            max_cells: limits.max_cells,
+            ..Default::default()
+        },
+    )?;
+    for (p, xy) in placed.iter_mut().zip(&result.positions) {
+        p.x = xy[0];
+        p.y = xy[1];
+    }
+    // Baseline: fixed netlist-order packing into the same free intervals.
+    let mut baseline = Vec::with_capacity(placed.len());
+    let mut iv = 0usize;
+    let mut x = problem.intervals[0].lx;
+    for w in &problem.widths {
+        loop {
+            let v = problem
+                .intervals
+                .get(iv)
+                .ok_or_else(|| Error::Invalid("baseline packing ran out of intervals".into()))?;
+            if x + w <= v.ux {
+                baseline.push([x, v.y]);
+                x += w + gap;
+                break;
+            }
+            iv += 1;
+            x = problem.intervals.get(iv).map_or(0, |v| v.lx);
+        }
+    }
+    Ok(PlacementReport {
+        mode: "analytic_b2b_bisection".into(),
+        hpwl_dbu: result.hpwl,
+        baseline_hpwl_dbu: rustroad_core::place::hpwl(&problem, &baseline),
+        global_hpwl_dbu: result.global_hpwl,
+        work: result.work,
+        status: "legal_checked".into(),
+    })
+}
+
 pub(super) fn validate_state(
     design: &Design,
     bundle: &PhysicalBundle,
@@ -930,13 +1295,174 @@ pub(super) fn validate_state(
     Ok(())
 }
 
+/// LVS netlist only: an `assign w = x;` between an internal scalar wire `w`
+/// (driven by nothing else) and a scalar signal `x` is folded away by
+/// renaming every use of `w` to `x` (e.g. tie-cell nets). Port-bit targets
+/// and vector aliases are kept, so netlists without such assigns are
+/// unchanged.
+fn fold_internal_aliases(netlist: &mut verilog::Netlist) {
+    let ports: HashSet<&str> = netlist.ports.iter().map(|p| p.name.as_str()).collect();
+    let scalar_ports: HashSet<&str> = netlist
+        .ports
+        .iter()
+        .filter(|p| p.range.is_none())
+        .map(|p| p.name.as_str())
+        .collect();
+    let scalar_wires: HashSet<&str> = netlist
+        .wires
+        .iter()
+        .filter(|w| w.range.is_none())
+        .map(|w| w.name.as_str())
+        .collect();
+    let mut lhs_count: HashMap<&str, usize> = HashMap::new();
+    for a in &netlist.assigns {
+        if let verilog::Expr::Ident(l) = &a.lhs {
+            *lhs_count.entry(l.as_str()).or_default() += 1;
+        }
+    }
+    let mut map: HashMap<String, String> = HashMap::new();
+    for a in &netlist.assigns {
+        if let (verilog::Expr::Ident(l), verilog::Expr::Ident(r)) = (&a.lhs, &a.rhs)
+            && scalar_wires.contains(l.as_str())
+            && !ports.contains(l.as_str())
+            && lhs_count[l.as_str()] == 1
+            && (scalar_wires.contains(r.as_str()) || scalar_ports.contains(r.as_str()))
+            && l != r
+        {
+            map.insert(l.clone(), r.clone());
+        }
+    }
+    if map.is_empty() {
+        return;
+    }
+    let resolve = |name: &str| -> String {
+        let mut cur = name.to_string();
+        for _ in 0..=map.len() {
+            match map.get(&cur) {
+                Some(next) if next != name => cur = next.clone(),
+                _ => break,
+            }
+        }
+        cur
+    };
+    // A cycle of aliases resolves to itself; keep those assigns.
+    let folded: HashMap<String, String> = map
+        .keys()
+        .map(|k| (k.clone(), resolve(k)))
+        .filter(|(k, v)| k != v && !map.contains_key(v))
+        .collect();
+    netlist.assigns.retain(|a| match &a.lhs {
+        verilog::Expr::Ident(l) => !folded.contains_key(l),
+        _ => true,
+    });
+    let rename = |e: &mut verilog::Expr| {
+        if let verilog::Expr::Ident(n) = e
+            && let Some(r) = folded.get(n)
+        {
+            *n = r.clone();
+        }
+    };
+    for a in &mut netlist.assigns {
+        rename(&mut a.rhs);
+        if let verilog::Expr::Concat(items) = &mut a.rhs {
+            items.iter_mut().for_each(rename);
+        }
+    }
+    for inst in &mut netlist.instances {
+        for c in &mut inst.connections {
+            rename(&mut c.signal);
+            if let verilog::Expr::Concat(items) = &mut c.signal {
+                items.iter_mut().for_each(rename);
+            }
+        }
+    }
+    netlist.wires.retain(|w| !folded.contains_key(&w.name));
+}
+
+/// Replace the reserved tie-rail wires by `power`/`ground` (supply port
+/// names in the powered export, `1'b1`/`1'b0` in the logical one) and drop
+/// their declarations.
+fn bind_tie_rails(netlist: &mut verilog::Netlist, power: &verilog::Expr, ground: &verilog::Expr) {
+    use crate::ties::{RAIL_GROUND_WIRE, RAIL_POWER_WIRE};
+    let bind = |e: &mut verilog::Expr| {
+        if let verilog::Expr::Ident(name) = e {
+            if name == RAIL_POWER_WIRE {
+                *e = power.clone();
+            } else if name == RAIL_GROUND_WIRE {
+                *e = ground.clone();
+            }
+        }
+    };
+    for inst in &mut netlist.instances {
+        for c in &mut inst.connections {
+            bind(&mut c.signal);
+        }
+    }
+    netlist
+        .wires
+        .retain(|w| w.name != RAIL_POWER_WIRE && w.name != RAIL_GROUND_WIRE);
+}
+
 pub(super) fn export_verilog(
     bundle: &PhysicalBundle,
     include_power: bool,
     output: &mut impl Write,
 ) -> Result<()> {
     let mut netlist = bundle.netlist.clone();
+    if let Some(cfg) = bundle.config.as_ref().filter(|_| include_power) {
+        bind_tie_rails(
+            &mut netlist,
+            &verilog::Expr::Ident(cfg.power_net.clone()),
+            &verilog::Expr::Ident(cfg.ground_net.clone()),
+        );
+    } else {
+        bind_tie_rails(
+            &mut netlist,
+            &verilog::Expr::Constant("1'b1".into()),
+            &verilog::Expr::Constant("1'b0".into()),
+        );
+    }
     if include_power {
+        fold_internal_aliases(&mut netlist);
+        // An open signal pin (`.PIN()` or omitted, e.g. the unused output of
+        // a two-output tie cell) gets its own one-pin net `rr_open_N`: the
+        // same connectivity, in the form every LVS reader takes.
+        let mut used: HashSet<String> = netlist
+            .ports
+            .iter()
+            .map(|p| p.name.clone())
+            .chain(netlist.wires.iter().map(|w| w.name.clone()))
+            .collect();
+        let mut next = 0usize;
+        let mut opened = Vec::new();
+        for (i, inst) in netlist.instances.iter_mut().enumerate() {
+            let m = &bundle.connectivity.masters[bundle.connectivity.instance_masters[i] as usize];
+            for pin in m.pins.iter().filter(|p| !p.use_.is_supply()) {
+                let open = match inst.connections.iter().position(|c| c.pin == pin.name) {
+                    Some(k) => matches!(inst.connections[k].signal, verilog::Expr::Unconnected)
+                        .then_some(k),
+                    None => {
+                        inst.connections.push(verilog::Connection {
+                            pin: pin.name.clone(),
+                            signal: verilog::Expr::Unconnected,
+                        });
+                        Some(inst.connections.len() - 1)
+                    }
+                };
+                if let Some(k) = open {
+                    let name = loop {
+                        let n = format!("rr_open_{next}");
+                        next += 1;
+                        if used.insert(n.clone()) {
+                            break n;
+                        }
+                    };
+                    inst.connections[k].signal = verilog::Expr::Ident(name.clone());
+                    opened.push(verilog::Wire { name, range: None });
+                }
+            }
+        }
+        netlist.wires.extend(opened);
         if let Some(cfg) = &bundle.config {
             for name in [&cfg.power_net, &cfg.ground_net] {
                 netlist.ports.push(verilog::Port {
@@ -1054,31 +1580,64 @@ pub(super) fn export_def(
         }
         None => Vec::new(),
     };
+    // Rail ties are supply metal: their regular wiring is written under
+    // the supply net's own NETS entry (the net is in both sections).
+    let export = crate::routing::ExportNets::new(bundle);
     if let Some(routing) = &bundle.routing {
         for wire in &runs {
-            routed_wires.entry(wire.net).or_default().push(wire);
+            routed_wires
+                .entry(export.of(wire.net)?)
+                .or_default()
+                .push(wire);
         }
         for via in &routing.routes.vias {
-            routed_vias.entry(via.net).or_default().push(via);
+            routed_vias
+                .entry(export.of(via.net)?)
+                .or_default()
+                .push(via);
         }
         for patch in &routing.routes.patches {
-            routed_patches.entry(patch.net).or_default().push(patch);
+            routed_patches
+                .entry(export.of(patch.net)?)
+                .or_default()
+                .push(patch);
         }
     }
+    let tied: HashSet<u32> = routed_wires
+        .keys()
+        .chain(routed_vias.keys())
+        .copied()
+        .filter(|&n| model.nets[n as usize].use_.is_supply())
+        .collect();
+    let signal_pin = |pi: u32| match model.pins[pi as usize].owner {
+        PinOwner::Instance { instance, terminal } => !model.masters
+            [model.instance_masters[instance as usize] as usize]
+            .pins[terminal as usize]
+            .use_
+            .is_supply(),
+        PinOwner::Port { .. } => false,
+    };
     for special in [false, true] {
         let count = model
             .nets
             .iter()
-            .filter(|n| n.use_.is_supply() == special)
+            .enumerate()
+            .filter(|(i, n)| {
+                n.use_.is_supply() == special || (!special && tied.contains(&(*i as u32)))
+            })
             .count();
         let section = if special { "SPECIALNETS" } else { "NETS" };
         writeln!(output, "{section} {count} ;")?;
         for (ni, net) in model.nets.iter().enumerate() {
-            if net.use_.is_supply() != special {
+            let tie_entry = !special && tied.contains(&(ni as u32));
+            if net.use_.is_supply() != special && !tie_entry {
                 continue;
             }
             write!(output, "- {}", def_name(&net.name))?;
             for &pi in &csr.pin_indices[csr.offsets[ni] as usize..csr.offsets[ni + 1] as usize] {
+                if tie_entry && !signal_pin(pi) {
+                    continue;
+                }
                 match model.pins[pi as usize].owner {
                     PinOwner::Instance { instance, terminal } => write!(
                         output,

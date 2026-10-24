@@ -654,14 +654,21 @@ pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) ->
         let mut wires: HashMap<u32, Vec<&Wire>> = HashMap::new();
         let mut routed: HashMap<u32, Vec<&routing::Via>> = HashMap::new();
         let mut patches: HashMap<u32, Vec<&routing::Patch>> = HashMap::new();
+        // Rail ties are drawn with their supply net (net purpose, as DEF NETS).
+        let export = crate::routing::ExportNets::new(bundle);
+        let net_of = |n: u32| {
+            export
+                .of(n)
+                .map_err(|e| fail("GDS_GEOMETRY", e.to_string()))
+        };
         for wire in &runs {
-            wires.entry(wire.net).or_default().push(wire);
+            wires.entry(net_of(wire.net)?).or_default().push(wire);
         }
         for via in &r.routes.vias {
-            routed.entry(via.net).or_default().push(via);
+            routed.entry(net_of(via.net)?).or_default().push(via);
         }
         for patch in &r.routes.patches {
-            patches.entry(patch.net).or_default().push(patch);
+            patches.entry(net_of(patch.net)?).or_default().push(patch);
         }
         counts.stored_wire_records = r.routes.wires.len();
         // Resolve each routing layer's targets and DEF default width once.

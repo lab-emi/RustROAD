@@ -1,0 +1,63 @@
+{
+  "grid_step": 1120,
+  "access_layer": "Metal2",
+  "layers": [
+    {
+      "name": "Metal1",
+      "spacing": 460
+    },
+    {
+      "name": "Metal2",
+      "spacing": 560
+    },
+    {
+      "name": "Metal3",
+      "spacing": 560
+    },
+    {
+      "name": "Metal4",
+      "spacing": 560
+    }
+  ],
+  "vias": [
+    {
+      "name": "Via1_HV",
+      "cut_spacing": 520
+    },
+    {
+      "name": "Via2_HV",
+      "cut_spacing": 520
+    },
+    {
+      "name": "Via3_HV",
+      "cut_spacing": 520
+    }
+  ],
+  "lef_rules": true,
+  "max_skew_ns": 1.0,
+  "limits": {
+    "max_axis": 1048576,
+    "max_grid_nodes": 8000000,
+    "max_obstacles": 4000000,
+    "max_bin_entries": 32000000,
+    "max_segments": 2000000,
+    "max_expansions": 2000000000,
+    "max_search_expansions": 4000000,
+    "max_comparisons": 200000000000,
+    "max_heap": 8000000
+  },
+  "track_router": {
+    "gcell": 3920,
+    "via_cost": 2240,
+    "tracks": [
+      {
+        "layer": "Metal2",
+        "offset": 560
+      },
+      {
+        "layer": "Metal4",
+        "offset": 560
+      }
+    ]
+  }
+}

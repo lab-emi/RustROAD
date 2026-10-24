@@ -87,11 +87,14 @@ fn config() -> PhysicalConfig {
         tie_high: TieCell {
             cell: "HI".into(),
             pin: "Y".into(),
+            rail_input: None,
         },
         tie_low: TieCell {
             cell: "LO".into(),
             pin: "Y".into(),
+            rail_input: None,
         },
+        constant_cells: Vec::new(),
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,
         cell_spacing_sites: 0,
@@ -114,6 +117,8 @@ fn config() -> PhysicalConfig {
             max_work: 1000,
             level_cells: Vec::new(),
         }),
+        placer: None,
+        io_plan: None,
     }
 }
 

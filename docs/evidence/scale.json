@@ -1,0 +1,1923 @@
+{
+  "schema": "rustroad.scale-evidence.v1",
+  "tools": {
+    "rustroad": "0988dce91e0a0d109dfc43cae0ea943515e62d05c554a7effb49a3d584caf148",
+    "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae"
+  },
+  "scope": {
+    "level": "block",
+    "density": "reported separately, not gating",
+    "ir_drop": "unchecked",
+    "electromigration": "unchecked",
+    "signal_integrity": "unchecked",
+    "ocv": "unchecked",
+    "cppr": "unchecked",
+    "timing": "not part of this flow"
+  },
+  "rows": [
+    {
+      "design": "counter",
+      "pdk": "sky130",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "unverified",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": null
+      },
+      "non_passed_reasons": {
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s8/counter/sky130/a/signoff/density.json]"
+      },
+      "synth_cells": 43,
+      "placed_cells": 264,
+      "routed_nets": 53,
+      "routing_segments": 1002,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 61180,
+          "uy": 62560
+        },
+        "core_area": {
+          "lx": 10120,
+          "ly": 10880,
+          "ux": 51060,
+          "uy": 51680
+        },
+        "rows": 15,
+        "estimated_utilization": 0.32790697674418606,
+        "io_pins": 13,
+        "io_side_counts": [
+          7,
+          6,
+          0,
+          0
+        ],
+        "io_width_dbu": 990,
+        "clock_buffers_estimate": 1,
+        "cell_area_um2": 529.2576
+      },
+      "hpwl_dbu": 1058865,
+      "baseline_hpwl_dbu": 1460185,
+      "route_stats": {
+        "grid_nodes": 110032,
+        "expansions": 183169,
+        "comparisons": 5064516,
+        "wire_length_dbu": 1425790
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.121,
+      "route_peak_rss_kib": 12652,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 16,
+        "memory_mib": 2048,
+        "workspace_bytes": 300721,
+        "held_mib": 10,
+        "search_mib": 3,
+        "spatial_mib": 1,
+        "routed_mib": 2,
+        "check_mib": 2
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g7",
+          "master": "sky130_fd_sc_hd__nand2_1",
+          "mutated_to": "sky130_fd_sc_hd__nor2_1",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 17.076,
+      "host_peak_rss_kib": 62400,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 500132,
+      "artifacts": {
+        "def": "d215471f5cd595c022e1313bf9da9d15393d93561541f3cf7a65864feb504975",
+        "verilog": "1ebe0449d34fa69c59608918d2ed18d0a0269ca16faca4c892aa16108c0001f7",
+        "powered": "a06306c326a1d34b39db3f2e74b3235ad48ad6dc96811a9b0ebcbcc66cd0249b",
+        "routes": "15c208e9aba96efdde0817a09aa645527854eb3dd50c360770548c9982d93eb6",
+        "gds": "68f1c979707b404bffb9f2975a7780590eb2b073949437a45f6e228d2b0d6285"
+      }
+    },
+    {
+      "design": "counter",
+      "pdk": "gf180",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "failed",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": 8
+      },
+      "non_passed_reasons": {
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s8/counter/gf180/a/signoff/density.json]"
+      },
+      "synth_cells": 46,
+      "placed_cells": 306,
+      "routed_nets": 51,
+      "routing_segments": 1115,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 187040,
+          "uy": 196000
+        },
+        "core_area": {
+          "lx": 20160,
+          "ly": 23520,
+          "ux": 166880,
+          "uy": 172480
+        },
+        "rows": 19,
+        "estimated_utilization": 0.35772357723577236,
+        "io_pins": 13,
+        "io_side_counts": [
+          1,
+          4,
+          3,
+          5
+        ],
+        "io_width_dbu": 1700,
+        "clock_buffers_estimate": 1,
+        "cell_area_um2": 1835.1871999999998
+      },
+      "hpwl_dbu": 3439670,
+      "baseline_hpwl_dbu": 6483270,
+      "route_stats": {
+        "grid_nodes": 116232,
+        "expansions": 129061,
+        "comparisons": 3066186,
+        "wire_length_dbu": 4769390
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.08,
+      "route_peak_rss_kib": 13140,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 17,
+        "memory_mib": 2048,
+        "workspace_bytes": 334661,
+        "held_mib": 10,
+        "search_mib": 3,
+        "spatial_mib": 2,
+        "routed_mib": 2,
+        "check_mib": 2
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g5",
+          "master": "gf180mcu_fd_sc_mcu7t5v0__and2_2",
+          "mutated_to": "gf180mcu_fd_sc_mcu7t5v0__or2_2",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 19.35,
+      "host_peak_rss_kib": 106944,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 452528,
+      "artifacts": {
+        "def": "8580232410207eb24ff480bb47f42b1b82dde1c0c4aa93dad1993be43b1669fd",
+        "verilog": "05890c9ba6ff3d2dccd94a1140ad0f98771bf6ccad09f5747a70eba98010f78c",
+        "powered": "b9cad59a0ed18f7bfb4df6b336071c2eab6add8fdde62607b42213519e7e761f",
+        "routes": "b4415b79d22ca0ac0f13460a9b325de1c3140603101ad1736d79fb408573cb1e",
+        "gds": "b2829a6263aa27479f63ede289b9768ee0d12aa4a57690f8e1feb7344e203eb1"
+      }
+    },
+    {
+      "design": "uart_tx",
+      "pdk": "sky130",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "unverified",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": null
+      },
+      "non_passed_reasons": {
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s8/uart_tx/sky130/a/signoff/density.json]"
+      },
+      "synth_cells": 89,
+      "placed_cells": 560,
+      "routed_nets": 107,
+      "routing_segments": 2038,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 81420,
+          "uy": 81600
+        },
+        "core_area": {
+          "lx": 10120,
+          "ly": 10880,
+          "ux": 71300,
+          "uy": 70720
+        },
+        "rows": 22,
+        "estimated_utilization": 0.2808315715292459,
+        "io_pins": 13,
+        "io_side_counts": [
+          0,
+          8,
+          2,
+          3
+        ],
+        "io_width_dbu": 990,
+        "clock_buffers_estimate": 3,
+        "cell_area_um2": 997.2064
+      },
+      "hpwl_dbu": 2041345,
+      "baseline_hpwl_dbu": 3688215,
+      "route_stats": {
+        "grid_nodes": 191040,
+        "expansions": 448528,
+        "comparisons": 12272023,
+        "wire_length_dbu": 3135360
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.261,
+      "route_peak_rss_kib": 16304,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 23,
+        "memory_mib": 2048,
+        "workspace_bytes": 518207,
+        "held_mib": 11,
+        "search_mib": 5,
+        "spatial_mib": 2,
+        "routed_mib": 3,
+        "check_mib": 3
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g4",
+          "master": "sky130_fd_sc_hd__nor2_2",
+          "mutated_to": "sky130_fd_sc_hd__nand2_2",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 23.811,
+      "host_peak_rss_kib": 62668,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 502480,
+      "artifacts": {
+        "def": "ed151cf12645bdf57341d9e90665dab2c354c510dc6be16eb3bf49e6a50198b8",
+        "verilog": "69bffa114e1325660aac378e8ffdd8908916e9f3074ee7daa069afc4c88f3f92",
+        "powered": "058a9226be6273ed7c274b3b92924adf6c97d82f75dde579c9dc59d670313f96",
+        "routes": "3011765a22b903c3efa785ee52125656a99fab5e09da4b1437b2216521ffb790",
+        "gds": "bf87b25af53918053d73f722f5309636fc6985e8e3717c76a3858e9010c8471e"
+      }
+    },
+    {
+      "design": "uart_tx",
+      "pdk": "gf180",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "failed",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": 8
+      },
+      "non_passed_reasons": {
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s8/uart_tx/gf180/a/signoff/density.json]"
+      },
+      "synth_cells": 100,
+      "placed_cells": 600,
+      "routed_nets": 114,
+      "routing_segments": 2341,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 235200,
+          "uy": 243040
+        },
+        "core_area": {
+          "lx": 20160,
+          "ly": 23520,
+          "ux": 215040,
+          "uy": 219520
+        },
+        "rows": 25,
+        "estimated_utilization": 0.41317073170731705,
+        "io_pins": 13,
+        "io_side_counts": [
+          0,
+          6,
+          3,
+          4
+        ],
+        "io_width_dbu": 1700,
+        "clock_buffers_estimate": 3,
+        "cell_area_um2": 3718.6688
+      },
+      "hpwl_dbu": 6661910,
+      "baseline_hpwl_dbu": 14104310,
+      "route_stats": {
+        "grid_nodes": 181440,
+        "expansions": 262424,
+        "comparisons": 6053689,
+        "wire_length_dbu": 10031630
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.161,
+      "route_peak_rss_kib": 17032,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 24,
+        "memory_mib": 2048,
+        "workspace_bytes": 563550,
+        "held_mib": 11,
+        "search_mib": 5,
+        "spatial_mib": 3,
+        "routed_mib": 3,
+        "check_mib": 3
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g12",
+          "master": "gf180mcu_fd_sc_mcu7t5v0__nor2_4",
+          "mutated_to": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 23.867,
+      "host_peak_rss_kib": 106468,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 462216,
+      "artifacts": {
+        "def": "db8833e6e48fee19507cd7f245c6af60381c5149c46b0b4dff095878bb6da1f7",
+        "verilog": "f2537a8f48974a9a2dc01a850037d99d9197c857dc62cb4ff04dcee987c44688",
+        "powered": "1b544772fcb3807e7fe2fbafc80157aad4f752c242f64b910a28be6989072edc",
+        "routes": "a6a834664d517f263e4dbc355705972ce68f698ebdf14bb68e80c9407dee72a7",
+        "gds": "39ef8259c941709e9b66c54ff8ceb14feb3d9bb32cbd36b329e9ca98b80c0388"
+      }
+    },
+    {
+      "design": "fifo",
+      "pdk": "sky130",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "unverified",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": null
+      },
+      "non_passed_reasons": {
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s8/fifo/sky130/a/signoff/density.json]"
+      },
+      "synth_cells": 81,
+      "placed_cells": 481,
+      "routed_nets": 102,
+      "routing_segments": 2104,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 81420,
+          "uy": 81600
+        },
+        "core_area": {
+          "lx": 10120,
+          "ly": 10880,
+          "ux": 71300,
+          "uy": 70720
+        },
+        "rows": 22,
+        "estimated_utilization": 0.4630021141649049,
+        "io_pins": 25,
+        "io_side_counts": [
+          4,
+          8,
+          4,
+          9
+        ],
+        "io_width_dbu": 990,
+        "clock_buffers_estimate": 6,
+        "cell_area_um2": 1644.0768
+      },
+      "hpwl_dbu": 2453885,
+      "baseline_hpwl_dbu": 5582095,
+      "route_stats": {
+        "grid_nodes": 191040,
+        "expansions": 376128,
+        "comparisons": 10088430,
+        "wire_length_dbu": 3371480
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.221,
+      "route_peak_rss_kib": 16836,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 23,
+        "memory_mib": 2048,
+        "workspace_bytes": 461414,
+        "held_mib": 11,
+        "search_mib": 5,
+        "spatial_mib": 3,
+        "routed_mib": 3,
+        "check_mib": 3
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g13",
+          "master": "sky130_fd_sc_hd__nor2_4",
+          "mutated_to": "sky130_fd_sc_hd__nand2_4",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 25.815,
+      "host_peak_rss_kib": 62432,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 497556,
+      "artifacts": {
+        "def": "cf77bb2f45fe374fcfc1ea0fca81f7c029c33a28e1fffd90632c0d6bb2da3b4f",
+        "verilog": "64aef07056c20641b61b8c882ae43e877a5b37ca8115fb7cacab340b15f6b564",
+        "powered": "89695b65f9362394badcd6ac56776495bfadaf0ba68aa635e1ebe16a885e91e1",
+        "routes": "21e13ca0713659bc20235e9fef2ee0ad7f0906cacbd4bafb8251f9f7ba74c039",
+        "gds": "592c6b99d32314939379c2f2d7f362f56596764926fe2788d947da37d85d43f1"
+      }
+    },
+    {
+      "design": "fifo",
+      "pdk": "gf180",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "failed",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": 8
+      },
+      "non_passed_reasons": {
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s8/fifo/gf180/a/signoff/density.json]"
+      },
+      "synth_cells": 114,
+      "placed_cells": 820,
+      "routed_nets": 132,
+      "routing_segments": 2574,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 283360,
+          "uy": 290080
+        },
+        "core_area": {
+          "lx": 20160,
+          "ly": 23520,
+          "ux": 263200,
+          "uy": 266560
+        },
+        "rows": 31,
+        "estimated_utilization": 0.40896931549960663,
+        "io_pins": 25,
+        "io_side_counts": [
+          4,
+          5,
+          7,
+          9
+        ],
+        "io_width_dbu": 1700,
+        "clock_buffers_estimate": 6,
+        "cell_area_um2": 5705.324799999999
+      },
+      "hpwl_dbu": 9833070,
+      "baseline_hpwl_dbu": 26013150,
+      "route_stats": {
+        "grid_nodes": 261096,
+        "expansions": 351437,
+        "comparisons": 7023798,
+        "wire_length_dbu": 13338800
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.181,
+      "route_peak_rss_kib": 20140,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 29,
+        "memory_mib": 2048,
+        "workspace_bytes": 708537,
+        "held_mib": 12,
+        "search_mib": 7,
+        "spatial_mib": 4,
+        "routed_mib": 4,
+        "check_mib": 4
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g11",
+          "master": "gf180mcu_fd_sc_mcu7t5v0__nor2_4",
+          "mutated_to": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 25.572,
+      "host_peak_rss_kib": 107200,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 460056,
+      "artifacts": {
+        "def": "20680d7def05168013b89f5ef0628ec4dc035f7c964cc100d61ff54cd160257e",
+        "verilog": "40fea241cb6d2f66a3a64d91f0a59747d9bfc3def2ac063e1bcadbdb4a02c959",
+        "powered": "d89bfeaf5480e8b88c699801aece35656393f1b992e41591c586a9dd2982ff4d",
+        "routes": "01dd37d648ff5b1ff97ff671e2f981ff5ec1124d45b7f61e6bc0b5dbf66f4cae",
+        "gds": "7bb62afea40efc520fafa34bf3966652b3c625584b3dd8fa782825b501d86694"
+      }
+    },
+    {
+      "design": "alu",
+      "pdk": "sky130",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "unverified",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": null
+      },
+      "non_passed_reasons": {
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s8/alu/sky130/a/signoff/density.json]"
+      },
+      "synth_cells": 253,
+      "placed_cells": 1094,
+      "routed_nets": 272,
+      "routing_segments": 5019,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 101660,
+          "uy": 103360
+        },
+        "core_area": {
+          "lx": 10120,
+          "ly": 10880,
+          "ux": 91540,
+          "uy": 92480
+        },
+        "rows": 30,
+        "estimated_utilization": 0.35426356589147284,
+        "io_pins": 29,
+        "io_side_counts": [
+          9,
+          7,
+          7,
+          6
+        ],
+        "io_width_dbu": 990,
+        "clock_buffers_estimate": 0,
+        "cell_area_um2": 2287.1936
+      },
+      "hpwl_dbu": 6109595,
+      "baseline_hpwl_dbu": 11361425,
+      "route_stats": {
+        "grid_nodes": 302176,
+        "expansions": 889518,
+        "comparisons": 29028203,
+        "wire_length_dbu": 7618810
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.522,
+      "route_peak_rss_kib": 24180,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 35,
+        "memory_mib": 2048,
+        "workspace_bytes": 965101,
+        "held_mib": 13,
+        "search_mib": 7,
+        "spatial_mib": 4,
+        "routed_mib": 6,
+        "check_mib": 5
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g18",
+          "master": "sky130_fd_sc_hd__nand2_1",
+          "mutated_to": "sky130_fd_sc_hd__nor2_1",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 45.621,
+      "host_peak_rss_kib": 62372,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 528052,
+      "artifacts": {
+        "def": "3e0b4249586e8ca9e9323ab1386352575cc84ca64281292ea000916176078b43",
+        "verilog": "9a5641f58acfa069a0ceef2f58e5a84f3c7b96690696ffa8980374a182fb7cef",
+        "powered": "9bb4ed02ab4b6d11bb061ee8c011daa5e14a0b14247576fd08561efeca8770bd",
+        "routes": "6490f7fb0e7e4e27b791a8ee511500e810a056a20eb21dd5d5d97bc2ab946308",
+        "gds": "5f3571f3cd6bd3abccb13d1843c45caa9029a802b819c7886213cbb7decfce20"
+      }
+    },
+    {
+      "design": "alu",
+      "pdk": "gf180",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "failed",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": 8
+      },
+      "non_passed_reasons": {
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s8/alu/gf180/a/signoff/density.json]"
+      },
+      "synth_cells": 252,
+      "placed_cells": 1001,
+      "routed_nets": 271,
+      "routing_segments": 5757,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 283360,
+          "uy": 290080
+        },
+        "core_area": {
+          "lx": 20160,
+          "ly": 23520,
+          "ux": 263200,
+          "uy": 266560
+        },
+        "rows": 31,
+        "estimated_utilization": 0.45900865460267504,
+        "io_pins": 29,
+        "io_side_counts": [
+          8,
+          5,
+          6,
+          10
+        ],
+        "io_width_dbu": 1700,
+        "clock_buffers_estimate": 0,
+        "cell_area_um2": 6403.3984
+      },
+      "hpwl_dbu": 18496230,
+      "baseline_hpwl_dbu": 45149430,
+      "route_stats": {
+        "grid_nodes": 261096,
+        "expansions": 745790,
+        "comparisons": 18006558,
+        "wire_length_dbu": 23984960
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.422,
+      "route_peak_rss_kib": 24300,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 34,
+        "memory_mib": 2048,
+        "workspace_bytes": 912737,
+        "held_mib": 13,
+        "search_mib": 7,
+        "spatial_mib": 5,
+        "routed_mib": 6,
+        "check_mib": 6
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g17",
+          "master": "gf180mcu_fd_sc_mcu7t5v0__nand2_1",
+          "mutated_to": "gf180mcu_fd_sc_mcu7t5v0__nor2_1",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 32.973,
+      "host_peak_rss_kib": 106944,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 466372,
+      "artifacts": {
+        "def": "fdf61760c84b3497543dfce874b21dd183cb583481ad23a24ac686c890861014",
+        "verilog": "a74ee0a705ff3c964d5c47e93713c53b0fc714b5db71a022bdde6d273574e202",
+        "powered": "6a5be42407e5bb1e85e8e42973df06e09c83ccbadfc88aaac682aca5cb8d8327",
+        "routes": "6477d36ed505d97a3076a21c4c69592c7827f5a5bfc4d61c1f4b9c62e6e339eb",
+        "gds": "b9da5ab12752b6ae936d1a00dc4c8b8d0db283c0d5458b5867dc2450941bd463"
+      }
+    },
+    {
+      "design": "regfile",
+      "pdk": "sky130",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "unverified",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": null
+      },
+      "non_passed_reasons": {
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s8/regfile/sky130/a/signoff/density.json]"
+      },
+      "synth_cells": 372,
+      "placed_cells": 1479,
+      "routed_nets": 425,
+      "routing_segments": 9069,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 121900,
+          "uy": 122400
+        },
+        "core_area": {
+          "lx": 10120,
+          "ly": 10880,
+          "ux": 111780,
+          "uy": 111520
+        },
+        "rows": 37,
+        "estimated_utilization": 0.49340037712130735,
+        "io_pins": 36,
+        "io_side_counts": [
+          10,
+          8,
+          8,
+          10
+        ],
+        "io_width_dbu": 990,
+        "clock_buffers_estimate": 9,
+        "cell_area_um2": 4910.96
+      },
+      "hpwl_dbu": 8917390,
+      "baseline_hpwl_dbu": 21173080,
+      "route_stats": {
+        "grid_nodes": 429120,
+        "expansions": 2188444,
+        "comparisons": 62688780,
+        "wire_length_dbu": 14572730
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 1.204,
+      "route_peak_rss_kib": 34892,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 51,
+        "memory_mib": 2048,
+        "workspace_bytes": 1236915,
+        "held_mib": 15,
+        "search_mib": 10,
+        "spatial_mib": 7,
+        "routed_mib": 10,
+        "check_mib": 9
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g38",
+          "master": "sky130_fd_sc_hd__nor2_8",
+          "mutated_to": "sky130_fd_sc_hd__nand2_8",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 79.065,
+      "host_peak_rss_kib": 62448,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 499532,
+      "artifacts": {
+        "def": "63c40ffdfdb244a7340f178db31a33f5238eadf66e05f4719767f77378987af3",
+        "verilog": "d27bf2a07cc178d4cca28efe06e998cdf2c85b1e93eeb3f24b08cc61f72acb62",
+        "powered": "856ac3056552c4ce2732bd417f43bd8a1816a61378111233450689898ed53736",
+        "routes": "aba0d5fe22a51713c12322f7e63983edf4304fa89e532d9b0a6d8fcced79d63c",
+        "gds": "ef0dac441176904a0d6bd4f51e44461e7e4deb55fc505577a48f45a43b2cfc87"
+      }
+    },
+    {
+      "design": "regfile",
+      "pdk": "gf180",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "failed",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": 7
+      },
+      "non_passed_reasons": {
+        "density": "density deck: 7 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1} [.work/scale/runs/s8/regfile/gf180/a/signoff/density.json]"
+      },
+      "synth_cells": 358,
+      "placed_cells": 1737,
+      "routed_nets": 387,
+      "routing_segments": 8795,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 379680,
+          "uy": 384160
+        },
+        "core_area": {
+          "lx": 20160,
+          "ly": 23520,
+          "ux": 359520,
+          "uy": 360640
+        },
+        "rows": 43,
+        "estimated_utilization": 0.49801474758933634,
+        "io_pins": 36,
+        "io_side_counts": [
+          6,
+          9,
+          10,
+          11
+        ],
+        "io_width_dbu": 1700,
+        "clock_buffers_estimate": 9,
+        "cell_area_um2": 13491.6992
+      },
+      "hpwl_dbu": 29933320,
+      "baseline_hpwl_dbu": 79705560,
+      "route_stats": {
+        "grid_nodes": 463752,
+        "expansions": 3436921,
+        "comparisons": 75554357,
+        "wire_length_dbu": 51183960
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 1.745,
+      "route_peak_rss_kib": 35080,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 52,
+        "memory_mib": 2048,
+        "workspace_bytes": 1390308,
+        "held_mib": 15,
+        "search_mib": 12,
+        "spatial_mib": 8,
+        "routed_mib": 10,
+        "check_mib": 10
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g60",
+          "master": "gf180mcu_fd_sc_mcu7t5v0__nor2_4",
+          "mutated_to": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 44.492,
+      "host_peak_rss_kib": 106944,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 474828,
+      "artifacts": {
+        "def": "6061b2723e4d0e6fc9fdbcd902a7ff8e3c70cfc9d6a83c93dfc08a462765df61",
+        "verilog": "ae432e26d8ef6a75d50ad3716d1975f5cfcda7e95674f05d93a8130a29521c62",
+        "powered": "056839ee8adb8e71a95558434257e8b4447c8b6bad334446a51b3908d38efdb2",
+        "routes": "f0c0ebecd174fdb9099eae9808bc1074aef37b0591a33d9b30ac0ec5e9177e9f",
+        "gds": "48984d3e90cc0e5dbd0ee8e1405c29f0d2bda48e8edcf4b08e411c888373becc"
+      }
+    },
+    {
+      "design": "mult",
+      "pdk": "sky130",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "unverified",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": null
+      },
+      "non_passed_reasons": {
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s8/mult/sky130/a/signoff/density.json]"
+      },
+      "synth_cells": 418,
+      "placed_cells": 1651,
+      "routed_nets": 440,
+      "routing_segments": 7879,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 121900,
+          "uy": 122400
+        },
+        "core_area": {
+          "lx": 10120,
+          "ly": 10880,
+          "ux": 111780,
+          "uy": 111520
+        },
+        "rows": 37,
+        "estimated_utilization": 0.41571338780641104,
+        "io_pins": 43,
+        "io_side_counts": [
+          5,
+          11,
+          15,
+          12
+        ],
+        "io_width_dbu": 990,
+        "clock_buffers_estimate": 3,
+        "cell_area_um2": 4137.7184
+      },
+      "hpwl_dbu": 7750665,
+      "baseline_hpwl_dbu": 19114745,
+      "route_stats": {
+        "grid_nodes": 429120,
+        "expansions": 1298738,
+        "comparisons": 41766369,
+        "wire_length_dbu": 10140500
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 36,
+      "route_wall_seconds": 0.743,
+      "route_peak_rss_kib": 33540,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 49,
+        "memory_mib": 2048,
+        "workspace_bytes": 1395965,
+        "held_mib": 16,
+        "search_mib": 10,
+        "spatial_mib": 7,
+        "routed_mib": 10,
+        "check_mib": 9
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g4",
+          "master": "sky130_fd_sc_hd__nor2_1",
+          "mutated_to": "sky130_fd_sc_hd__nand2_1",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 64.911,
+      "host_peak_rss_kib": 62412,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 531984,
+      "artifacts": {
+        "def": "ae6de1aadd25e83a91000a87de00db0857306ec3c7298b47faebb428789f1308",
+        "verilog": "ed2d03049955d22a43034712c990b9a253a1b9e5d23335a2535bdab97a00a818",
+        "powered": "8bd80b1a3081dec2b97a9cb9d21462824740ca866f930fd2f000380d4d0703bc",
+        "routes": "c961c5e62cef34be01a659e0f8fa41b8c59a5834a7c51119b225e269b2f40170",
+        "gds": "b763e4c9cbe7128dbb81c9f8c7ebc5163048ed1a2d669b7bf937d8a79f0e4691"
+      }
+    },
+    {
+      "design": "mult",
+      "pdk": "gf180",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "failed",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": 8
+      },
+      "non_passed_reasons": {
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s8/mult/gf180/a/signoff/density.json]"
+      },
+      "synth_cells": 414,
+      "placed_cells": 1793,
+      "routed_nets": 436,
+      "routing_segments": 8134,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 379680,
+          "uy": 384160
+        },
+        "core_area": {
+          "lx": 20160,
+          "ly": 23520,
+          "ux": 359520,
+          "uy": 360640
+        },
+        "rows": 43,
+        "estimated_utilization": 0.4366744996353618,
+        "io_pins": 43,
+        "io_side_counts": [
+          9,
+          14,
+          11,
+          9
+        ],
+        "io_width_dbu": 1700,
+        "clock_buffers_estimate": 3,
+        "cell_area_um2": 11829.9328
+      },
+      "hpwl_dbu": 29141130,
+      "baseline_hpwl_dbu": 71138890,
+      "route_stats": {
+        "grid_nodes": 463752,
+        "expansions": 1526323,
+        "comparisons": 31421028,
+        "wire_length_dbu": 37733410
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 36,
+      "route_wall_seconds": 0.743,
+      "route_peak_rss_kib": 34288,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 51,
+        "memory_mib": 2048,
+        "workspace_bytes": 1474597,
+        "held_mib": 15,
+        "search_mib": 12,
+        "spatial_mib": 8,
+        "routed_mib": 10,
+        "check_mib": 9
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g0",
+          "master": "gf180mcu_fd_sc_mcu7t5v0__and2_1",
+          "mutated_to": "gf180mcu_fd_sc_mcu7t5v0__or2_1",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 42.314,
+      "host_peak_rss_kib": 107200,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 482864,
+      "artifacts": {
+        "def": "52672e17c34f66fbcf57e8ebc88f4c370778fb10a27e38a2daa9604af6242fdc",
+        "verilog": "a292f39f134745c0e456f16ce6dd0883dbdc5d1b1b8f95e81c44401e5751c9af",
+        "powered": "e7469d104120311deeb0ba206d8264e4882140d22d9b1b73de9159fca4300b5b",
+        "routes": "321cb0a52b7af3f02152a2f518470b25a9407bf4884ad85dd8c8372cc50d567f",
+        "gds": "5042908c6dee9ddeea36205364a28ae19c0dfa9f601aef0e09a165c7a1cf3583"
+      }
+    },
+    {
+      "design": "dense",
+      "pdk": "sky130",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "unverified",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": null
+      },
+      "non_passed_reasons": {
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s8/dense/sky130/a/signoff/density.json]"
+      },
+      "synth_cells": null,
+      "placed_cells": 258,
+      "routed_nets": 33,
+      "routing_segments": 400,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 61180,
+          "uy": 62560
+        },
+        "core_area": {
+          "lx": 10120,
+          "ly": 10880,
+          "ux": 51060,
+          "uy": 51680
+        },
+        "rows": 15,
+        "estimated_utilization": 0.17209302325581396,
+        "io_pins": 20,
+        "io_side_counts": [
+          6,
+          7,
+          4,
+          3
+        ],
+        "io_width_dbu": 990,
+        "clock_buffers_estimate": 1,
+        "cell_area_um2": 277.76640000000003
+      },
+      "hpwl_dbu": 750150,
+      "baseline_hpwl_dbu": 1232770,
+      "route_stats": {
+        "grid_nodes": 110032,
+        "expansions": 100460,
+        "comparisons": 2269894,
+        "wire_length_dbu": 820570
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.06,
+      "route_peak_rss_kib": 11208,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 15,
+        "memory_mib": 2048,
+        "workspace_bytes": 208608,
+        "held_mib": 9,
+        "search_mib": 3,
+        "spatial_mib": 1,
+        "routed_mib": 2,
+        "check_mib": 1
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g0",
+          "master": "sky130_fd_sc_hd__and2_2",
+          "mutated_to": "sky130_fd_sc_hd__or2_2",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 12.963,
+      "host_peak_rss_kib": 62432,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 475248,
+      "artifacts": {
+        "def": "8471f9e5a8a726414c02b230c81ec22418a724f8aee270340ecb34ac29a0bf1e",
+        "verilog": "be6c4a6e4313f6197f758c236d60753df794d551cb4cbe841f3cd6573913fa2a",
+        "powered": "669a3d72198dd6dc4215b451d8536e0b382354a2ee7b1bd3d9d5cbd25dff1117",
+        "routes": "74dab1f484f14b1736d529f4b47bf8298678ef26b82771fd40e5f5abfd400cc8",
+        "gds": "2a8a338255bbbcc35e933287e944a27364833c8cd05b50d7069cc9d42687ea66"
+      }
+    },
+    {
+      "design": "dense",
+      "pdk": "gf180",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "failed",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": 8
+      },
+      "non_passed_reasons": {
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s8/dense/gf180/a/signoff/density.json]"
+      },
+      "synth_cells": null,
+      "placed_cells": 160,
+      "routed_nets": 35,
+      "routing_segments": 441,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 138880,
+          "uy": 148960
+        },
+        "core_area": {
+          "lx": 20160,
+          "ly": 23520,
+          "ux": 118720,
+          "uy": 125440
+        },
+        "rows": 13,
+        "estimated_utilization": 0.41088180112570355,
+        "io_pins": 20,
+        "io_side_counts": [
+          4,
+          6,
+          5,
+          5
+        ],
+        "io_width_dbu": 1700,
+        "clock_buffers_estimate": 1,
+        "cell_area_um2": 961.4975999999999
+      },
+      "hpwl_dbu": 1929000,
+      "baseline_hpwl_dbu": 3090440,
+      "route_stats": {
+        "grid_nodes": 65472,
+        "expansions": 47829,
+        "comparisons": 1077299,
+        "wire_length_dbu": 2242900
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.04,
+      "route_peak_rss_kib": 10332,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 13,
+        "memory_mib": 2048,
+        "workspace_bytes": 185657,
+        "held_mib": 9,
+        "search_mib": 2,
+        "spatial_mib": 1,
+        "routed_mib": 1,
+        "check_mib": 1
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g0",
+          "master": "gf180mcu_fd_sc_mcu7t5v0__and2_1",
+          "mutated_to": "gf180mcu_fd_sc_mcu7t5v0__or2_1",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 16.229,
+      "host_peak_rss_kib": 106908,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 451696,
+      "artifacts": {
+        "def": "0225a4372fe6c26dd6aa6f4f1ecf0a22155b1937a075db25f236c57a64ce8467",
+        "verilog": "8d80c2c5c7c4d50ac432cf573b1be21c842ce3293acb4147fb5228a1a8842491",
+        "powered": "28ff245c186f8a62fc5972a0429766d956a426fe8520b0ecb9a20a042162203e",
+        "routes": "564f1d35fcc61af6252d2a6f8dcd97a103f4fa3fa4f257cd00958bce35d90680",
+        "gds": "a28cddb8f31c7ef1b41addcd41d2ca311f6f22369a43a220461de3f495b40ed9"
+      }
+    },
+    {
+      "design": "pipeline_track",
+      "pdk": "sky130",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "unverified",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": null
+      },
+      "non_passed_reasons": {
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/s8/pipeline_track/sky130/a/signoff/density.json]"
+      },
+      "synth_cells": 10,
+      "placed_cells": 77,
+      "routed_nets": 17,
+      "routing_segments": 163,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 40940,
+          "uy": 43520
+        },
+        "core_area": {
+          "lx": 10120,
+          "ly": 10880,
+          "ux": 30820,
+          "uy": 32640
+        },
+        "rows": 8,
+        "estimated_utilization": 0.3430232558139535,
+        "io_pins": 10,
+        "io_side_counts": [
+          6,
+          3,
+          0,
+          1
+        ],
+        "io_width_dbu": 990,
+        "clock_buffers_estimate": 1,
+        "cell_area_um2": 147.6416
+      },
+      "hpwl_dbu": 279170,
+      "baseline_hpwl_dbu": 389730,
+      "route_stats": {
+        "grid_nodes": 51200,
+        "expansions": 33986,
+        "comparisons": 929850,
+        "wire_length_dbu": 285915
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.04,
+      "route_peak_rss_kib": 9384,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 11,
+        "memory_mib": 2048,
+        "workspace_bytes": 95932,
+        "held_mib": 9,
+        "search_mib": 2,
+        "spatial_mib": 1,
+        "routed_mib": 1,
+        "check_mib": 1
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g0",
+          "master": "sky130_fd_sc_hd__and2_4",
+          "mutated_to": "sky130_fd_sc_hd__or2_4",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 11.795,
+      "host_peak_rss_kib": 62732,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 473716,
+      "artifacts": {
+        "def": "e73ebe227a290a060a02910bc8f818c1c095811f33afea429f1256cfe5cc136a",
+        "verilog": "9b517f68203c0b78b5c212828218cffc0fc94e7881b933d7c1025c7a1a819956",
+        "powered": "cd33db8bbf5b5ca615d8da785a7573d1a6f80862257016c9bc037b8d745aa194",
+        "routes": "9efcb0ceee65447d84a986daacb405c6ce08feca991c604c54bad84c18cb4416",
+        "gds": "eceb3cf72b4db0473e05090f8cd2fb6b88f6e7c9f1b41fe22079eef9e715512e"
+      }
+    },
+    {
+      "design": "pipeline_track",
+      "pdk": "gf180",
+      "run": "s8",
+      "status": "passed",
+      "statuses": {
+        "inputs": "passed",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
+        "route": "passed",
+        "export": "passed",
+        "gds_xor": "passed",
+        "drc_magic": "passed",
+        "drc_klayout": "passed",
+        "antenna": "passed",
+        "lvs_netgen": "passed",
+        "lvs_klayout": "passed",
+        "density": "failed",
+        "cec": "passed",
+        "determinism": "passed"
+      },
+      "counts": {
+        "gds_xor": 0,
+        "drc_magic": 0,
+        "drc_klayout": 0,
+        "antenna": 0,
+        "lvs_netgen": 0,
+        "lvs_klayout": 0,
+        "density": 8
+      },
+      "non_passed_reasons": {
+        "density": "density deck: 8 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1, 'PL.8': 1} [.work/scale/runs/s8/pipeline_track/gf180/a/signoff/density.json]"
+      },
+      "synth_cells": 10,
+      "placed_cells": 132,
+      "routed_nets": 17,
+      "routing_segments": 164,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 138880,
+          "uy": 148960
+        },
+        "core_area": {
+          "lx": 20160,
+          "ly": 23520,
+          "ux": 118720,
+          "uy": 125440
+        },
+        "rows": 13,
+        "estimated_utilization": 0.18386491557223264,
+        "io_pins": 10,
+        "io_side_counts": [
+          3,
+          4,
+          1,
+          2
+        ],
+        "io_width_dbu": 1700,
+        "clock_buffers_estimate": 1,
+        "cell_area_um2": 430.2592
+      },
+      "hpwl_dbu": 1025260,
+      "baseline_hpwl_dbu": 1622220,
+      "route_stats": {
+        "grid_nodes": 65472,
+        "expansions": 20021,
+        "comparisons": 407955,
+        "wire_length_dbu": 1117730
+      },
+      "native_antenna": [
+        {
+          "status": "passed",
+          "violations": 0,
+          "checks": null
+        }
+      ],
+      "antenna_eco_iterations": 0,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 0.02,
+      "route_peak_rss_kib": 9604,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 12,
+        "memory_mib": 2048,
+        "workspace_bytes": 154134,
+        "held_mib": 9,
+        "search_mib": 2,
+        "spatial_mib": 1,
+        "routed_mib": 1,
+        "check_mib": 1
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g0",
+          "master": "gf180mcu_fd_sc_mcu7t5v0__and2_2",
+          "mutated_to": "gf180mcu_fd_sc_mcu7t5v0__or2_2",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 15.548,
+      "host_peak_rss_kib": 106848,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 451660,
+      "artifacts": {
+        "def": "dc4b71991c3a9d1916f692f1b29a078f228d6a101d980625a7d047048d1b41ef",
+        "verilog": "989673694156d6d9297104350a4bd15bacf760a9db1126227dbc86415dc7b780",
+        "powered": "a645198d376c42fcdf4b6a4867b342be6680486bdacd4c82489d19c9425c60d7",
+        "routes": "317fee6a674fe99c119c71ae985d621ed29fd88204c6d5ef12d3474cb8e5a001",
+        "gds": "8c0e8a402a18f6a055f9d1a971cb440ba278680560e98d301e310a831a732bfb"
+      }
+    }
+  ]
+}

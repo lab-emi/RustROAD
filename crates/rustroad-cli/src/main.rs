@@ -234,6 +234,41 @@ enum Command {
         #[arg(long, default_value_t = rustroad_workspace::antenna::DEFAULT_SAFETY_MARGIN)]
         safety_margin: f64,
     },
+    /// Derive die/core/rows and a connectivity-aware I/O plan from cell area,
+    /// utilization and aspect (files only; writes a floorplan and a physical
+    /// configuration for import-pdk).
+    Floorplan {
+        #[arg(long)]
+        tech_lef: PathBuf,
+        #[arg(long)]
+        cell_lef: PathBuf,
+        #[arg(long)]
+        netlist: PathBuf,
+        /// Physical profile (tap/tie/filler/clock/I/O roles).
+        #[arg(long)]
+        physical_config: PathBuf,
+        /// Routing profile (track pitches for I/O landing and snapping).
+        #[arg(long)]
+        routing_config: PathBuf,
+        #[arg(long)]
+        site: String,
+        #[arg(long, default_value_t = 0.5)]
+        utilization: f64,
+        #[arg(long, default_value_t = 1.0)]
+        aspect: f64,
+        #[arg(long, default_value_t = 10.0)]
+        margin_um: f64,
+        #[arg(long)]
+        clock_port: Option<String>,
+        #[arg(long)]
+        no_clock: bool,
+        #[arg(long)]
+        fixed_order: bool,
+        #[arg(long)]
+        out_floorplan: PathBuf,
+        #[arg(long)]
+        out_physical_config: PathBuf,
+    },
     /// Apply a typed rustroad.eco-plan.v1 to a mapped netlist (files only).
     /// insert_buffer sinks must be cell-LEF INPUT pins.
     ApplyEco {
@@ -303,6 +338,41 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     timed_netlist: timed_netlist.clone(),
                     timed_netlist_sha256: timed_netlist_sha256.clone(),
                     cell_lef: cell_lef.clone(),
+                },
+            )?);
+        }
+        Command::Floorplan {
+            tech_lef,
+            cell_lef,
+            netlist,
+            physical_config,
+            routing_config,
+            site,
+            utilization,
+            aspect,
+            margin_um,
+            clock_port,
+            no_clock,
+            fixed_order,
+            out_floorplan,
+            out_physical_config,
+        } => {
+            return emit(&rustroad_workspace::floorplan::floorplan(
+                &rustroad_workspace::floorplan::FloorplanRequest {
+                    tech_lef: tech_lef.clone(),
+                    cell_lef: cell_lef.clone(),
+                    netlist: netlist.clone(),
+                    physical_config: physical_config.clone(),
+                    routing_config: routing_config.clone(),
+                    site: site.clone(),
+                    utilization: *utilization,
+                    aspect: *aspect,
+                    margin_um: *margin_um,
+                    clock_port: clock_port.clone(),
+                    no_clock: *no_clock,
+                    fixed_order: *fixed_order,
+                    out_floorplan: out_floorplan.clone(),
+                    out_physical_config: out_physical_config.clone(),
                 },
             )?);
         }
@@ -541,7 +611,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             },
             &limits,
         )?),
-        Command::HoldEco { .. } | Command::ApplyEco { .. } | Command::AntennaEco { .. } => {
+        Command::HoldEco { .. }
+        | Command::ApplyEco { .. }
+        | Command::AntennaEco { .. }
+        | Command::Floorplan { .. } => {
             unreachable!("file-only commands return before the workspace check")
         }
     }

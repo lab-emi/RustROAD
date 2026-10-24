@@ -1,0 +1,61 @@
+{
+  "grid_step": 680,
+  "access_layer": "met2",
+  "layers": [
+    {
+      "name": "li1",
+      "spacing": 170
+    },
+    {
+      "name": "met1",
+      "spacing": 140
+    },
+    {
+      "name": "met2",
+      "spacing": 140
+    },
+    {
+      "name": "met3",
+      "spacing": 300
+    },
+    {
+      "name": "met4",
+      "spacing": 300
+    }
+  ],
+  "vias": [
+    {
+      "name": "L1M1_PR",
+      "cut_spacing": 190
+    },
+    {
+      "name": "M1M2_PR",
+      "cut_spacing": 170
+    },
+    {
+      "name": "M2M3_PR",
+      "cut_spacing": 200
+    },
+    {
+      "name": "M3M4_PR",
+      "cut_spacing": 200
+    }
+  ],
+  "lef_rules": true,
+  "max_skew_ns": 0.5,
+  "limits": {
+    "max_axis": 1048576,
+    "max_grid_nodes": 8000000,
+    "max_obstacles": 4000000,
+    "max_bin_entries": 32000000,
+    "max_segments": 2000000,
+    "max_expansions": 400000000,
+    "max_search_expansions": 4000000,
+    "max_comparisons": 40000000000,
+    "max_heap": 8000000
+  },
+  "track_router": {
+    "gcell": 2720,
+    "via_cost": 1360
+  }
+}

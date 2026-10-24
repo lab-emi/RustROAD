@@ -336,8 +336,18 @@ pub fn export_access_test(
         terminals,
         rules: config.lef_rules,
         access_classes: classes,
+        tracks: None,
+        ties: Vec::new(),
+        held_bytes: 0,
     };
-    let routes = routing::route_cpu_ref(&input, &config.limits)?;
+    // The access test always uses the lattice router; a track-router profile
+    // may carry limits above the lattice caps.
+    let limits = if config.track_router.is_some() {
+        routing::RouteLimits::default()
+    } else {
+        config.limits.clone()
+    };
+    let routes = routing::route_cpu_ref(&input, &limits)?;
     // DEF
     let names: Vec<String> = input.layers.iter().map(|l| l.name.clone()).collect();
     let via_names: Vec<String> = input.vias.iter().map(|v| v.name.clone()).collect();
