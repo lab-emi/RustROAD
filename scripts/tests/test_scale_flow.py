@@ -83,6 +83,21 @@ class Mutation(unittest.TestCase):
         self.assertEqual(what["mutated_to"], "gf180mcu_fd_sc_mcu7t5v0__nor2_1")
 
 
+class Receipts(unittest.TestCase):
+    def test_peak_rss_is_the_tool_and_timeouts_are_unmeasured(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = scale_flow.Runner(Path(d))
+            ok = r.run("true", ["true"])
+            self.assertEqual(ok["exit_code"], 0)
+            if scale_flow.GNU_TIME:
+                self.assertEqual(ok["rss_source"], "gnu-time")
+                self.assertLess(ok["peak_rss_kib"], 10 * 1024)
+            slow = r.run("sleep", ["sleep", "5"], timeout=1)
+            self.assertTrue(slow["timed_out"])
+            self.assertIsNone(slow["peak_rss_kib"])
+            self.assertEqual(slow["rss_source"], "unmeasured (timed out)")
+
+
 class StepFailure(unittest.TestCase):
     def test_step_items(self):
         for label, key in (("sky130_a_synth", "synth"), ("gf180_a_floorplan", "floorplan_reproduced"),

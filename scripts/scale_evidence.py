@@ -34,7 +34,26 @@ def detail(reason: str | None) -> str:
     return reason.replace(str(ROOT) + "/", "")
 
 
-def row(design: str, tag: str, p: dict, run: str) -> dict:
+def measured_host_peak(p: dict, run_dir: Path) -> tuple[int | None, list]:
+    """Host peak RSS over the steps whose peak was measured.
+
+    A step killed at its timeout has no measurement (the wrapper's rusage
+    is not the tool's); older runs recorded wait4 there, so the receipt
+    files' `timed_out` flag is honoured here too."""
+    peaks, unmeasured = [], []
+    for x in p.get("receipts", []):
+        receipt = run_dir / p["pdk"] / "receipts" / x["label"] / "receipt.json"
+        timed_out = False
+        if receipt.is_file():
+            timed_out = json.loads(receipt.read_text()).get("timed_out", False)
+        if timed_out or x.get("peak_rss_kib") is None:
+            unmeasured.append(x["label"])
+        else:
+            peaks.append(x["peak_rss_kib"])
+    return (max(peaks) if peaks else None), unmeasured
+
+
+def row(design: str, tag: str, p: dict, run: str, run_dir: Path | None = None) -> dict:
     f = p.get("facts", {})
     st = {k: v["status"] for k, v in p["statuses"].items()}
     counts = {k: v.get("count") for k, v in p["statuses"].items() if "count" in v}
@@ -45,6 +64,8 @@ def row(design: str, tag: str, p: dict, run: str) -> dict:
     memory = (f.get("route") or {}).get("route_memory") or {}
     route_kib = route.get("peak_rss_kib")
     cec = p["statuses"].get("cec", {})
+    host_peak, unmeasured = (measured_host_peak(p, run_dir) if run_dir else
+                             (p.get("resources", {}).get("host_peak_rss_kib"), []))
     return dict(
         design=design, pdk=tag, run=run, status=p.get("status"), statuses=st, counts=counts,
         non_passed_reasons={k: r[:600] for k, r in reasons.items()},
@@ -66,7 +87,7 @@ def row(design: str, tag: str, p: dict, run: str) -> dict:
         cec_control_tries=(cec.get("control") or {}).get("tries"),
         failed_step=p.get("failed_step"),
         wall_seconds=p.get("resources", {}).get("wall_seconds"),
-        host_peak_rss_kib=p.get("resources", {}).get("host_peak_rss_kib"),
+        host_peak_rss_kib=host_peak, unmeasured_steps=unmeasured,
         container_peak_rss_kib=p.get("resources", {}).get("container_peak_rss_kib"),
         artifacts={k: v["sha256"] for k, v in p.get("artifacts", {}).items()},
     )
@@ -91,11 +112,11 @@ def main() -> int:
                 raise SystemExit(f"{path}: binaries differ from the other runs: {used} != {tools}")
             tools = used
             for tag, p in s["pdks"].items():
-                merged[tag] = (p, runs.name)
+                merged[tag] = (p, runs.name, runs / d)
         if not merged:
             rows.append(dict(design=d, status="missing"))
-        for tag, (p, run) in merged.items():
-            rows.append(row(d, tag, p, run))
+        for tag, (p, run, run_dir) in merged.items():
+            rows.append(row(d, tag, p, run, run_dir))
     out = dict(schema="rustroad.scale-evidence.v1", tools=tools,
                scope=dict(level="block", density="reported separately, not gating",
                           ir_drop="unchecked", electromigration="unchecked", signal_integrity="unchecked",

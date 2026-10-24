@@ -1,7 +1,7 @@
 {
   "schema": "rustroad.scale-evidence.v1",
   "tools": {
-    "rustroad": "a453e4ca10b44a900ddbb3c13b2fc5b51bd53524002d5f3b04635896ffa4f143",
+    "rustroad": "0988dce91e0a0d109dfc43cae0ea943515e62d05c554a7effb49a3d584caf148",
     "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae"
   },
   "scope": {
@@ -18,13 +18,15 @@
     {
       "design": "serv",
       "pdk": "sky130",
-      "run": "x2",
+      "run": "x6",
       "status": "failed",
       "statuses": {
         "inputs": "passed",
         "synth": "passed",
         "floorplan_reproduced": "passed",
+        "place": "passed",
         "route": "passed",
+        "export": "passed",
         "gds_xor": "passed",
         "drc_magic": "passed",
         "drc_klayout": "passed",
@@ -45,15 +47,15 @@
         "density": null
       },
       "non_passed_reasons": {
-        "antenna": "Magic antenna: 29 violations {'metal3': 23, 'metal1': 1, 'metal4': 5} [.work/scale/runs/x2/serv/sky130/a/signoff/antenna.json]",
-        "lvs_netgen": "Magic extraction: ports electrically shorted [['o_ext_rs1[6]', 'o_dbus_adr[6]'], ['o_ext_rs1[15]', 'o_dbus_adr[15]'], ['o_ext_rs1[20]', 'o_dbus_adr[20]'], ['o_ext_rs1[19]', 'o_dbus_adr[19]'], ['o_ext_rs1[16]', 'o_dbus_adr[16]'], ['o_ext_rs1[18]', 'o_dbus_adr[18]']]; Netgen: serv_rf_top: pin lists differ; final result 'Top level cell failed pin matching.'; comp.out reports port errors ('Netlists match uniquely with port errors.'); 74 disconnected nodes: sky130_fd_sc_hd__conb_1(0):VPB, sky130_fd_sc_hd__conb_1(0):VNB, sky130_fd_sc_hd__conb_1(1):VNB, sky130_fd_sc_hd__conb_1(1):VPB, serv_rf_top(0):",
-        "lvs_klayout": "port-label check: reference netlist unsupported: ports o_dbus_adr[0] and o_dbus_adr[1] alias net n6288: shorted ports are unsupported; reference netlist unsupported: ports o_dbus_adr[0] and o_dbus_adr[1] alias net n6288: shorted ports are unsupported [.work/scale/runs/x2/serv/sky130/a/signoff/lvs_klayout.json]",
-        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/x2/serv/sky130/a/signoff/density.json]"
+        "antenna": "Magic antenna: 29 violations {'metal3': 23, 'metal1': 1, 'metal4': 5} [.work/scale/runs/x6/serv/sky130/a/signoff/antenna.json]",
+        "lvs_netgen": "Magic extraction: ports electrically shorted [['o_ext_rs1[6]', 'o_dbus_adr[6]'], ['o_ext_rs1[15]', 'o_dbus_adr[15]'], ['o_ext_rs1[20]', 'o_dbus_adr[20]'], ['o_ext_rs1[19]', 'o_dbus_adr[19]'], ['o_ext_rs1[16]', 'o_dbus_adr[16]'], ['o_ext_rs1[18]', 'o_dbus_adr[18]']]; Netgen: serv_rf_top: pin lists differ; final result 'Top level cell failed pin matching.'; comp.out reports port errors ('Netlists match uniquely with port errors.'); 70 disconnected nodes: serv_rf_top(0):i_ibus_rdt[1], serv_rf_top(0):i_ibus_rdt[0], serv_rf_top(0):i_ext_rd[31], serv_rf_top(0):i_ext_rd[30], serv_rf_top(0):i_ext_rd[2",
+        "lvs_klayout": "port-label check: reference netlist unsupported: ports o_dbus_adr[0] and o_dbus_adr[1] alias net n6288: shorted ports are unsupported; reference netlist unsupported: ports o_dbus_adr[0] and o_dbus_adr[1] alias net n6288: shorted ports are unsupported [.work/scale/runs/x6/serv/sky130/a/signoff/lvs_klayout.json]",
+        "density": "windowed density: layout smaller than the 700 um density window; minimum-density (fill) compliance is chip-level and unchecked here [.work/scale/runs/x6/serv/sky130/a/signoff/density.json]"
       },
       "synth_cells": 7370,
       "placed_cells": 24318,
-      "routed_nets": 7959,
-      "routing_segments": 189258,
+      "routed_nets": 7960,
+      "routing_segments": 189270,
       "floorplan": {
         "die_area": {
           "lx": 0,
@@ -84,9 +86,9 @@
       "baseline_hpwl_dbu": 1618186570,
       "route_stats": {
         "grid_nodes": 4756800,
-        "expansions": 149057600,
-        "comparisons": 5247490473,
-        "wire_length_dbu": 424042975
+        "expansions": 149057999,
+        "comparisons": 5247506173,
+        "wire_length_dbu": 424045360
       },
       "native_antenna": [
         {
@@ -97,29 +99,56 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
-      "route_wall_seconds": 108.22,
-      "route_peak_rss_kib": 526088,
-      "wall_seconds": 1742.404,
-      "host_peak_rss_kib": 526864,
-      "container_peak_rss_kib": 1495068,
+      "route_wall_seconds": 101.053,
+      "route_peak_rss_kib": 440848,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 635,
+        "memory_mib": 2048,
+        "workspace_bytes": 19478939,
+        "held_mib": 109,
+        "search_mib": 110,
+        "spatial_mib": 114,
+        "routed_mib": 153,
+        "check_mib": 150
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g506",
+          "master": "sky130_fd_sc_hd__nor2_1",
+          "mutated_to": "sky130_fd_sc_hd__nand2_1",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 1822.176,
+      "host_peak_rss_kib": 440848,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 1494472,
       "artifacts": {
-        "def": "fdffc40eb778c8d9bda8d48df1092e22505374569b9a5455324cf6d31d14f501",
-        "verilog": "726a7fb3dd8badc9c97def2c6f029788492bfdbd76b0c0df0261c7b2099cceb7",
-        "powered": "f9d70be61f77282fba780635e3142cb826a344e9f62bdea3bf0d12110029fa83",
-        "routes": "154c3b256a41f5805774031f352333a3cafc86a0a91443dcc3b09aac627dfa99",
-        "gds": "f9d36fe85749abffa9ee4180ff63f43a66bc4cf3b58eb41ccff8b36e2f911050"
+        "def": "0f07cb73768a178663952c4a3aea45fdfb374e4d5a78a8f6fa4bc2852daa3d72",
+        "verilog": "e1222b63575aa1f4d9fe0d25cbb75e90ab839ea67b659fee3ef3557a9ad13996",
+        "powered": "c65060b3b27444d7b90b4b8e18d6fe00f0f1e02b25c68641ea184d86f7e1b356",
+        "routes": "abf36fbba444a32eaa8c6adda86f24aab571e5f0637e57ec054d5333f2763f6c",
+        "gds": "5deae31cfd69c952d7a183e46c7d44a6a82970a18dee506ac07da185e9513975"
       }
     },
     {
       "design": "serv",
       "pdk": "gf180",
-      "run": "x2",
+      "run": "x6",
       "status": "failed",
       "statuses": {
         "inputs": "passed",
         "synth": "passed",
         "floorplan_reproduced": "passed",
+        "place": "passed",
         "route": "passed",
+        "export": "passed",
         "gds_xor": "passed",
         "drc_magic": "passed",
         "drc_klayout": "passed",
@@ -140,10 +169,10 @@
         "density": 7
       },
       "non_passed_reasons": {
-        "antenna": "KLayout antenna: 45 items {'ANT.16_ii_ANT.4': 45}; secondary Magic antenna check reports 7 violations [.work/scale/runs/x2/serv/gf180/a/signoff/antenna.json]",
+        "antenna": "KLayout antenna: 45 items {'ANT.16_ii_ANT.4': 45}; secondary Magic antenna check reports 7 violations [.work/scale/runs/x6/serv/gf180/a/signoff/antenna.json]",
         "lvs_netgen": "Magic extraction: ports electrically shorted [['o_ext_rs2[0]', 'o_dbus_dat[0]'], ['o_ext_rs2[16]', 'o_dbus_dat[16]'], ['o_ext_rs2[28]', 'o_dbus_dat[28]'], ['o_ext_rs2[27]', 'o_dbus_dat[27]'], ['o_ext_rs2[26]', 'o_dbus_dat[26]'], ['o_ext_rs2[25]', 'o_dbus_dat[25]']]; Netgen: serv_rf_top: pin lists differ; final result 'Top level cell failed pin matching.'; comp.out reports port errors ('Netlists match uniquely with port errors.'); 70 disconnected nodes: serv_rf_top(0):i_ibus_rdt[1], serv_rf_top(0):i_ibus_rdt[0], serv_rf_top(0):i_ext_rd[31], serv_rf_top(0):i_ext_rd[30], serv_rf_top(0):i_ext_rd[2",
-        "lvs_klayout": "port-label check: reference netlist unsupported: ports o_dbus_adr[0] and o_dbus_adr[1] alias net n4545: shorted ports are unsupported; reference netlist unsupported: ports o_dbus_adr[0] and o_dbus_adr[1] alias net n4545: shorted ports are unsupported [.work/scale/runs/x2/serv/gf180/a/signoff/lvs_klayout.json]",
-        "density": "density deck: 7 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1} [.work/scale/runs/x2/serv/gf180/a/signoff/density.json]"
+        "lvs_klayout": "port-label check: reference netlist unsupported: ports o_dbus_adr[0] and o_dbus_adr[1] alias net n4545: shorted ports are unsupported; reference netlist unsupported: ports o_dbus_adr[0] and o_dbus_adr[1] alias net n4545: shorted ports are unsupported [.work/scale/runs/x6/serv/gf180/a/signoff/lvs_klayout.json]",
+        "density": "density deck: 7 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1} [.work/scale/runs/x6/serv/gf180/a/signoff/density.json]"
       },
       "synth_cells": 6221,
       "placed_cells": 26145,
@@ -192,11 +221,36 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
-      "route_wall_seconds": 114.522,
-      "route_peak_rss_kib": 548876,
-      "wall_seconds": 679.666,
-      "host_peak_rss_kib": 561380,
-      "container_peak_rss_kib": 1195528,
+      "route_wall_seconds": 98.011,
+      "route_peak_rss_kib": 484408,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 623,
+        "memory_mib": 2048,
+        "workspace_bytes": 19772795,
+        "held_mib": 95,
+        "search_mib": 138,
+        "spatial_mib": 110,
+        "routed_mib": 141,
+        "check_mib": 140
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": "equivalent",
+      "cec_control": "passed",
+      "cec_control_tries": [
+        {
+          "instance": "g265",
+          "master": "gf180mcu_fd_sc_mcu7t5v0__and2_1",
+          "mutated_to": "gf180mcu_fd_sc_mcu7t5v0__or2_1",
+          "status": "failed",
+          "verdict": "not-equivalent"
+        }
+      ],
+      "failed_step": null,
+      "wall_seconds": 657.263,
+      "host_peak_rss_kib": 484408,
+      "unmeasured_steps": [],
+      "container_peak_rss_kib": 1195280,
       "artifacts": {
         "def": "7305ef8b236c1a008be71cd4fa5058f4efa85a8324fc21e190c213c692d81828",
         "verilog": "edea6b8ffcb6119a45fcc3618de2a26805fe2b6a8e2d1992f9b2663a01e7dd1e",
@@ -208,13 +262,15 @@
     {
       "design": "rv_core",
       "pdk": "sky130",
-      "run": "x2",
-      "status": null,
+      "run": "x6",
+      "status": "failed",
       "statuses": {
         "inputs": "passed",
-        "synth": "unverified",
-        "floorplan_reproduced": "unverified",
+        "synth": "passed",
+        "floorplan_reproduced": "passed",
+        "place": "passed",
         "route": "failed",
+        "export": "unverified",
         "gds_xor": "unverified",
         "drc_magic": "unverified",
         "drc_klayout": "unverified",
@@ -226,46 +282,80 @@
       },
       "counts": {},
       "non_passed_reasons": {
-        "synth": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "floorplan_reproduced": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "route": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "gds_xor": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "drc_magic": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "drc_klayout": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "antenna": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "lvs_netgen": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "lvs_klayout": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "cec": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n",
-        "determinism": "sky130_a_route0: exit 2: [troute] estimate 0.000s nodes 4278176 gcells 20164 shapes 606639 bytes 200706336 (cap 2048 MiB)\n[troute] access 2.677s terminals 21302 work 242139009 exp 3669328\n[troute] global 2.900s nets 5304 work 244861954 exp 5653530\n[troute] detailed 49.603s failed 19 work 2453356675 exp 83948064\n{\"code\":\"BUDGET_EXCEEDED\",\"message\":\"BUDGET_EXCEEDED: routing comparison limit\",\"status\":\"error\"}\n"
+        "route": "step sky130_a_route0 failed: sky130_a_route0: exit 2: 4 nodes 4278176 gcells 20164 held 93918538\n[troute] estimate inputs grid_cells 80940 layers 10 fixed_entries 817994 obstacles 264209 terminals 21404 nodes 4278176 gcells 20164 held 93918538\n[troute] estimate 0.002s rss 70 MiB peak 70 MiB nodes 4278176 gcells 20164 obstacles 264209 terminals 21404 MemoryEstimate { held: 93918538, search: 103644096, spatial: 91266720, routed: 121896192, check: 118663840 } total 504 MiB (cap 2048 MiB)\n[troute] access 2.696s rss 174 MiB peak 174 MiB terminals 21304 work 242150185 exp 3669584\n[troute] global 2.9",
+        "export": "not run: step sky130_a_route0 failed",
+        "gds_xor": "not run: step sky130_a_route0 failed",
+        "drc_magic": "not run: step sky130_a_route0 failed",
+        "drc_klayout": "not run: step sky130_a_route0 failed",
+        "antenna": "not run: step sky130_a_route0 failed",
+        "lvs_netgen": "not run: step sky130_a_route0 failed",
+        "lvs_klayout": "not run: step sky130_a_route0 failed",
+        "cec": "not run: step sky130_a_route0 failed",
+        "determinism": "not run: step sky130_a_route0 failed"
       },
-      "synth_cells": null,
+      "synth_cells": 5047,
       "placed_cells": null,
       "routed_nets": null,
       "routing_segments": null,
-      "floorplan": null,
-      "hpwl_dbu": null,
-      "baseline_hpwl_dbu": null,
+      "floorplan": {
+        "die_area": {
+          "lx": 0,
+          "ly": 0,
+          "ux": 385020,
+          "uy": 386240
+        },
+        "core_area": {
+          "lx": 10120,
+          "ly": 10880,
+          "ux": 374900,
+          "uy": 375360
+        },
+        "rows": 134,
+        "estimated_utilization": 0.48864206101276564,
+        "io_pins": 167,
+        "io_side_counts": [
+          129,
+          1,
+          32,
+          5
+        ],
+        "io_width_dbu": 990,
+        "clock_buffers_estimate": 147,
+        "cell_area_um2": 63410.816
+      },
+      "hpwl_dbu": 243753680,
+      "baseline_hpwl_dbu": 1001708020,
       "route_stats": null,
       "native_antenna": null,
       "antenna_eco_iterations": null,
-      "renamed_escaped_wires": null,
-      "route_wall_seconds": null,
-      "route_peak_rss_kib": null,
-      "wall_seconds": null,
-      "host_peak_rss_kib": null,
+      "renamed_escaped_wires": 0,
+      "route_wall_seconds": 370.998,
+      "route_peak_rss_kib": 295932,
+      "route_rss_source": null,
+      "route_memory": null,
+      "estimate_bounds_route_rss": null,
+      "cec_verdict": null,
+      "cec_control": null,
+      "cec_control_tries": null,
+      "failed_step": "sky130_a_route0",
+      "wall_seconds": 373.111,
+      "host_peak_rss_kib": 295932,
+      "unmeasured_steps": [],
       "container_peak_rss_kib": null,
       "artifacts": {}
     },
     {
       "design": "rv_core",
       "pdk": "gf180",
-      "run": "x3",
+      "run": "x6",
       "status": "failed",
       "statuses": {
         "inputs": "passed",
         "synth": "passed",
         "floorplan_reproduced": "passed",
+        "place": "passed",
         "route": "passed",
+        "export": "passed",
         "gds_xor": "passed",
         "drc_magic": "passed",
         "drc_klayout": "passed",
@@ -286,11 +376,11 @@
         "density": 7
       },
       "non_passed_reasons": {
-        "antenna": "KLayout antenna: 17 items {'ANT.16_ii_ANT.4': 14, 'ANT.16_ii_ANT.5': 3}; secondary Magic antenna check reports 1 violations [.work/scale/runs/x3/rv_core/gf180/a/signoff/antenna.json]",
-        "lvs_netgen": "Netgen: rv_core: pin lists differ; final result 'Top level cell failed pin matching.'; comp.out reports port errors ('Netlists match uniquely with port errors.'); port-label check: reference netlist unsupported: ports dmem_addr_o[0] and dmem_addr_o[1] alias net n7061: shorted ports are unsupported [.work/scale/runs/x3/rv_core/gf180/a/signoff/lvs_netgen.json]",
-        "lvs_klayout": "port-label check: reference netlist unsupported: ports dmem_addr_o[0] and dmem_addr_o[1] alias net n7061: shorted ports are unsupported; reference netlist unsupported: ports dmem_addr_o[0] and dmem_addr_o[1] alias net n7061: shorted ports are unsupported [.work/scale/runs/x3/rv_core/gf180/a/signoff/lvs_klayout.json]",
-        "density": "density deck: 7 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1} [.work/scale/runs/x3/rv_core/gf180/a/signoff/density.json]",
-        "cec": "no definitive verdict (None, exit -9)"
+        "antenna": "KLayout antenna: 17 items {'ANT.16_ii_ANT.4': 14, 'ANT.16_ii_ANT.5': 3}; secondary Magic antenna check reports 1 violations [.work/scale/runs/x6/rv_core/gf180/a/signoff/antenna.json]",
+        "lvs_netgen": "Netgen: rv_core: pin lists differ; final result 'Top level cell failed pin matching.'; comp.out reports port errors ('Netlists match uniquely with port errors.'); port-label check: reference netlist unsupported: ports dmem_addr_o[0] and dmem_addr_o[1] alias net n7061: shorted ports are unsupported [.work/scale/runs/x6/rv_core/gf180/a/signoff/lvs_netgen.json]",
+        "lvs_klayout": "port-label check: reference netlist unsupported: ports dmem_addr_o[0] and dmem_addr_o[1] alias net n7061: shorted ports are unsupported; reference netlist unsupported: ports dmem_addr_o[0] and dmem_addr_o[1] alias net n7061: shorted ports are unsupported [.work/scale/runs/x6/rv_core/gf180/a/signoff/lvs_klayout.json]",
+        "density": "density deck: 7 items {'DCF.1b': 1, 'M1.4': 1, 'M2.4': 1, 'M3.4': 1, 'M4.4': 1, 'M5.4': 1, 'MT.3': 1} [.work/scale/runs/x6/rv_core/gf180/a/signoff/density.json]",
+        "cec": "no definitive verdict (None, exit -9, timed out)"
       },
       "synth_cells": 7915,
       "placed_cells": 35042,
@@ -339,11 +429,30 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
-      "route_wall_seconds": 289.523,
-      "route_peak_rss_kib": 880964,
-      "wall_seconds": 3174.112,
-      "host_peak_rss_kib": 2310060,
-      "container_peak_rss_kib": 1621180,
+      "route_wall_seconds": 276.582,
+      "route_peak_rss_kib": 607992,
+      "route_rss_source": "gnu-time",
+      "route_memory": {
+        "estimate_mib": 809,
+        "memory_mib": 2048,
+        "workspace_bytes": 26031154,
+        "held_mib": 123,
+        "search_mib": 188,
+        "spatial_mib": 141,
+        "routed_mib": 180,
+        "check_mib": 178
+      },
+      "estimate_bounds_route_rss": true,
+      "cec_verdict": null,
+      "cec_control": null,
+      "cec_control_tries": null,
+      "failed_step": null,
+      "wall_seconds": 2951.645,
+      "host_peak_rss_kib": 607992,
+      "unmeasured_steps": [
+        "gf180_cec"
+      ],
+      "container_peak_rss_kib": 1621760,
       "artifacts": {
         "def": "c7255d02da3799d6c5dedd66e797ee672d29b77c97c4b885cd54b5f62ef4c01f",
         "verilog": "cfb68739b13479d005fda3666d80c62839979cde57d047371a4f66e98fe90993",

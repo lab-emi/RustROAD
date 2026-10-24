@@ -162,7 +162,10 @@ class Runner:
         wall = time.monotonic() - start
         code = os.waitstatus_to_exitcode(status)
         peak, source = usage.ru_maxrss, "wait4"
-        if GNU_TIME and not timed_out:
+        if timed_out:
+            # The killed wrapper's own rusage says nothing about the tool.
+            peak, source = None, "unmeasured (timed out)"
+        elif GNU_TIME:
             try:
                 peak, source = int(maxrss.read_text().split()[-1]), "gnu-time"
             except (OSError, ValueError, IndexError):
@@ -545,7 +548,9 @@ def flow(m: dict, tag: str, args, out: Path) -> dict:
         result["failed_step"] = e.label
         result["status"] = worst(st[k]["status"] for k in GATING)
         result["resources"] = dict(wall_seconds=round(time.monotonic() - started, 3),
-                                   host_peak_rss_kib=max((x["peak_rss_kib"] for x in r.receipts), default=None),
+                                   host_peak_rss_kib=max((x["peak_rss_kib"] for x in r.receipts
+                                                          if x["peak_rss_kib"] is not None), default=None),
+                                   unmeasured_steps=[x["label"] for x in r.receipts if x["peak_rss_kib"] is None],
                                    steps={x["label"]: dict(wall_seconds=x["wall_seconds"],
                                                            peak_rss_kib=x["peak_rss_kib"]) for x in r.receipts})
         result["receipts"] = [dict(label=x["label"], exit_code=x["exit_code"], wall_seconds=x["wall_seconds"],
@@ -582,7 +587,8 @@ def flow(m: dict, tag: str, args, out: Path) -> dict:
     host = [x for x in r.receipts]
     result["resources"] = dict(
         wall_seconds=round(time.monotonic() - started, 3),
-        host_peak_rss_kib=max(x["peak_rss_kib"] for x in host),
+        host_peak_rss_kib=max((x["peak_rss_kib"] for x in host if x["peak_rss_kib"] is not None), default=None),
+        unmeasured_steps=[x["label"] for x in host if x["peak_rss_kib"] is None],
         steps={x["label"]: dict(wall_seconds=x["wall_seconds"], peak_rss_kib=x["peak_rss_kib"]) for x in host},
         container_peak_rss_kib=(result.get("signoff") or {}).get("container_peak_rss_kib"))
     result["artifacts"] = {k: dict(path=str(v), sha256=sha256(v)) for k, v in a["outputs"].items()}
