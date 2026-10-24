@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Native RustROAD extraction vs OpenRCX (black box) at min/nom/max on both PDKs.
 
+The three-way campaign (native, OpenRCX and Magic, with ablation and per-net
+attribution) is scripts/rc_oracles.py; it reuses the SPEF reader, the OpenRCX
+and RustSTA runners and the controls defined here. ``unmodeled_metal_estimate``
+below predates the via-pad and end-extension model and is kept only for the
+historical campaign.
+
 Subcommands:
   spef      --native A.spef --reference B.spef        per-net C/R and totals vs targets
   merge-def --def IN.def --routes ROUTES.json --out OUT.def
