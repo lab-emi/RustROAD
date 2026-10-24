@@ -63,6 +63,9 @@ from verify_physical import PhysicalHarness, fingerprint, require  # noqa: E402
 ROOT = HERE.parent
 TARGETS = cs.TARGETS
 CORNERS = ("min", "nom", "max")
+# Attribution runs one STA per net; larger designs cap it at the nets with
+# the largest |native - oracle| capacitance (--attribution-max-nets).
+ATTRIBUTION_MAX_NETS = None
 
 
 def per_net_spef(path: Path) -> dict:
@@ -109,6 +112,42 @@ def strip_lef_obs(src: Path, dst: Path) -> int:
         out.append(line)
     dst.write_text("".join(out))
     return removed
+
+
+def open_loops(src: Path, dst: Path) -> dict:
+    """Copy a SPEF for RustSTA (which rejects RC meshes), dropping every *RES
+    record that closes a loop in its net (union-find in record order; the
+    remaining records are renumbered). Capacitance records are unchanged."""
+    out, parent, section, kept = [], {}, None, 0
+    removed, nets = [], set()
+    net = None
+
+    def find(x):
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for line in bounded_text(src, cs.MAX_SPEF_BYTES).splitlines(keepends=True):
+        tokens = line.split()
+        key = tokens[0] if tokens else ""
+        if key == "*D_NET":
+            net, parent, section, kept = tokens[1], {}, None, 0
+        elif key in ("*CONN", "*CAP", "*RES", "*END"):
+            section = key
+        elif section == "*RES" and len(tokens) == 4:
+            a, b = find(tokens[1]), find(tokens[2])
+            if a == b:
+                removed.append(dict(net=net, a=tokens[1], b=tokens[2], ohm=float(tokens[3])))
+                nets.add(net)
+                continue
+            parent[a] = b
+            kept += 1
+            if tokens[0] != str(kept):
+                line = f"{kept} {tokens[1]} {tokens[2]} {tokens[3]}\n"
+        out.append(line)
+    dst.write_text("".join(out))
+    return dict(resistors_removed=len(removed), nets=len(nets), removed=removed[:32],
+                max_removed_ohm=max((r["ohm"] for r in removed), default=0.0))
 
 
 def design_total(spef: dict) -> float:
@@ -381,8 +420,14 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict, legacy: set) ->
         projected = h.root / f"{pdk}_{c}_ideal.lib"
         libs[c] = dict(projection=ideal_projection(source, projected), path=projected, source=fingerprint(source))
     result["sta"] = {}
+    # RustSTA rejects RC meshes: an OpenRCX SPEF with loop-closing resistors is
+    # timed with those resistors opened (counted; capacitance unchanged).
+    rcx_sta = {}
+    for corner in CORNERS:
+        rcx_sta[corner] = h.root / f"{pdk}_rcx_tree_{corner}.spef"
+        result["openrcx"][corner]["loops_opened_for_sta"] = open_loops(rcx[corner], rcx_sta[corner])
     for sta_corner, rc in cs.STA_CORNERS.items():
-        spefs = dict(native=native[rc], openrcx=rcx[rc], magic_ba=magic_ba[rc], openrcx_ba=rcx_ba[rc])
+        spefs = dict(native=native[rc], openrcx=rcx_sta[rc], magic_ba=magic_ba[rc], openrcx_ba=rcx_ba[rc])
         for vname in old:
             spefs[f"variant_{vname}"] = old[vname][rc]
         runs = sta_set(h, f"{tag}_{sta_corner}", libs[sta_corner]["path"], sta_corner, netlist, sdc, spefs)
@@ -413,7 +458,12 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict, legacy: set) ->
             kind = "setup" if abs(worst["setup_slack_delta_ns"]) >= abs(worst["hold_slack_delta_ns"]) else "hold"
             base_slack = runs["native"]["endpoints"][worst["endpoint"]][f"{kind}_slack_ns"]
             rows = []
-            for net in sorted(native_nets):
+            candidates = sorted(native_nets)
+            if ATTRIBUTION_MAX_NETS is not None and len(candidates) > ATTRIBUTION_MAX_NETS:
+                candidates = sorted(sorted(candidates, key=lambda n: -abs(native_nets[n]["c_pf"]
+                                                                          - oracle_nets[ref][n]["c_pf"]))
+                                    [:ATTRIBUTION_MAX_NETS])
+            for net in candidates:
                 one = {n: dict(native_nets[n]) for n in native_nets}
                 one[net] = oracle_nets[ref][net]
                 spef = h.root / f"{pdk}_attr_{sta_corner}_{ref}_{len(rows)}.spef"
@@ -427,7 +477,7 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict, legacy: set) ->
                 spef.unlink()
             rows.sort(key=lambda r: -abs(r["slack_move_ns"]))
             entry[f"attribution_{ref}"] = dict(
-                endpoint=worst["endpoint"], check=kind,
+                endpoint=worst["endpoint"], check=kind, attributed_nets=len(rows), nets_total=len(native_nets),
                 measured_delta_ns=-worst[f"{kind}_slack_delta_ns"],
                 sum_of_moves_ns=math.fsum(r["slack_move_ns"] for r in rows),
                 sum_abs_moves_ns=math.fsum(abs(r["slack_move_ns"]) for r in rows), nets=rows)
@@ -476,6 +526,8 @@ def campaign(args) -> int:
     (root / "HEAD").write_text("rev0\n")
     resource.setrlimit(resource.RLIMIT_AS, (8192 * 1024 ** 2, 8192 * 1024 ** 2))
     os.environ.update(GOMAXPROCS="2", OMP_NUM_THREADS="2")
+    global ATTRIBUTION_MAX_NETS
+    ATTRIBUTION_MAX_NETS = args.attribution_max_nets
     cs.RUSTSTA_BIN = args.sta_bin.resolve()
     h = PhysicalHarness(root, argparse.Namespace(threads=2, memory_mib=2048, timeout_seconds=60,
                                                  tolerance_ns=0.001))
@@ -647,7 +699,9 @@ def report(summary_path: Path) -> str:
     return "\n".join(out) + "\n"
 
 
-def evidence(summary_path: Path) -> dict:
+def evidence(summary_path: Path, compact: bool = False) -> dict:
+    """Evidence record of a campaign; ``compact`` leaves out the per-net and
+    per-endpoint tables (larger designs)."""
     d = json.loads(bounded_text(summary_path, 256 * 1024 ** 2))
     cases = []
     for c in d["cases"]:
@@ -655,9 +709,10 @@ def evidence(summary_path: Path) -> dict:
         for corner, e in c["spef"].items():
             spef[corner] = {k: ({x: y for x, y in v.items() if x != "nets"} if isinstance(v, dict) else v)
                             for k, v in e.items()}
-            spef[corner]["vs_magic_nets"] = e["vs_magic"]["nets"]
-            spef[corner]["vs_openrcx_nets"] = e["vs_openrcx_totals"]["nets"]
-            spef[corner]["magic_r_terminal_nets"] = e["magic_r_terminals"]["nets"]
+            if not compact:
+                spef[corner]["vs_magic_nets"] = e["vs_magic"]["nets"]
+                spef[corner]["vs_openrcx_nets"] = e["vs_openrcx_totals"]["nets"]
+                spef[corner]["magic_r_terminal_nets"] = e["magic_r_terminals"]["nets"]
         cases.append(dict(pdk=c["pdk"], inputs=c["inputs"], native=c["native"], read_only=c["read_only"],
                           resistance_accounting=c["resistance_accounting"], openrcx=c["openrcx"],
                           magic=c["magic"], spef=spef,
@@ -666,12 +721,12 @@ def evidence(summary_path: Path) -> dict:
                           sta={k: dict(rc_corner=v["rc_corner"], liberty=v["liberty"], runs=v["runs"],
                                        **{r: strip_endpoints(v[r]) for r in v if isinstance(v[r], dict)
                                           and "max_abs_setup_delta_ns" in v[r]},
-                                       endpoints=v["endpoints"])
+                                       **({} if compact else dict(endpoints=v["endpoints"])))
                                for k, v in c["sta"].items()},
                           attribution={k: {r: v[r] for r in v if r.startswith("attribution_")}
                                        for k, v in c["sta"].items()},
                           controls=c["controls"]))
-    return dict(schema="rustroad.rc-oracles-evidence.v1", design=d.get("design"), status=d["status"],
+    return dict(schema="rustroad.rc-oracles-evidence.v1", compact=compact, design=d.get("design"), status=d["status"],
                 reason=d.get("reason"), targets=d["targets"], sta_corners=d["sta_corners"], scope=d["scope"],
                 tools=d["tools"], verdicts=d.get("verdicts"), wall_seconds=d["wall_seconds"],
                 peak_child_rss_kib=d["peak_rss_kib"], receipts=len(d["receipts"]), cases=cases)
@@ -689,17 +744,20 @@ def main() -> int:
                    help="other extractor binary measured on the same inputs (ablation); :legacy gives it "
                         "profiles without the overlap-area fields")
     c.add_argument("--sta-bin", type=Path, required=True)
+    c.add_argument("--attribution-max-nets", type=int, default=None,
+                   help="attribute a missed slack target only over this many nets (largest C difference first)")
     r = sub.add_parser("report")
     r.add_argument("--summary", type=Path, required=True)
     e = sub.add_parser("evidence")
     e.add_argument("--summary", type=Path, required=True)
     e.add_argument("--out", type=Path, required=True)
+    e.add_argument("--compact", action="store_true", help="leave out per-net and per-endpoint tables")
     args = parser.parse_args()
     if args.command == "report":
         print(report(args.summary), end="")
         return 0
     if args.command == "evidence":
-        write_json(args.out, evidence(args.summary))
+        write_json(args.out, evidence(args.summary, args.compact))
         return 0
     return campaign(args)
 

@@ -62,6 +62,7 @@ def main_checkout() -> Path:
 
 READY_DEFAULT = main_checkout() / ".work/rc-timing/ready"
 RUSTSTA_BIN = Path("/mnt/data2/cgao/git/RustSTA/.work/rc-wave/target/release")
+STA_REPORT_LIMIT = 100_000
 MAX_SPEF_BYTES = 32 * 1024 * 1024
 MAX_SPEF_NETS = 100_000
 MAX_SPEF_LINES = 4_000_000
@@ -472,8 +473,15 @@ def sta_run(h, tag, lib, corner, netlist, sdc, spef, expect="ok"):
             and scope.get("clock_model") == "propagated" and scope.get("corner") == corner,
             f"{tag}: wrong extracted timing scope {scope}")
     require(r["completeness"]["unconstrained_endpoints"] == 0, f"{tag}: unconstrained endpoints")
-    rep = h.json_command(f"{tag}_report", [ruststa, *common, "report", "--rev", r["new_rev"], "--section",
-                                           "checks", "--section", "paths", "--limit", "128"], True)
+    # Every endpoint row (the harness's json_command would cap --limit at 128,
+    # which truncates larger designs differently per SPEF).
+    report = h.run(f"{tag}_report", [ruststa, *common, "report", "--rev", r["new_rev"], "--section", "checks",
+                                     "--section", "paths", "--limit", str(STA_REPORT_LIMIT)])
+    require(report["exit_code"] == 0, f"{tag}: RustSTA report failed")
+    rep = json.loads(bounded_text(Path(report["stdout"]), 256 * 1024 ** 2))
+    require(rep.get("schema") == "rusteda.v1" and rep.get("ok") is True and rep.get("error") is None,
+            f"{tag}: unsuccessful rusteda.v1 envelope")
+    require(len(rep["sections"]["checks"]["rows"]) < STA_REPORT_LIMIT, f"{tag}: endpoint rows reached the limit")
     paths = {p["handle"]: p for p in rep["sections"]["paths"]["rows"]}
     endpoints = {}
     for row in rep["sections"]["checks"]["rows"]:
@@ -517,26 +525,80 @@ def sta_delta(native, reference):
 def resistance_accounting(routes_path: Path, connectivity_path: Path, profile_path: Path,
                           spef_path: Path, dbu: float) -> dict:
     """Independent re-computation of each net's total wire + via resistance from
-    the stored route records and the profile (not from the extractor's tree)."""
+    the stored route records and the profile (not from the extractor's tree).
+
+    Collinear records of a net are merged per layer and line, so repeated
+    metal counts once. A net whose record graph has a loop is left out and
+    counted: the extractor keeps a tree and opens the loop-closing conductor,
+    so its SPEF total is lower by design."""
     routes = json.loads(bounded_text(routes_path))
     names = [n["name"] for n in json.loads(bounded_text(connectivity_path))["nets"]]
     profile = json.loads(bounded_text(profile_path))
     layers = {l["name"]: l for l in profile["layers"]}
     cuts = {c["lower"]: c["resistance_ohm_per_cut"] for c in profile["cuts"]}
     route_layers = routes["layers"]
-    expected = defaultdict(float)
+    lines = defaultdict(list)  # (net, layer, horizontal, fixed) -> [(lo, hi)]
+    keys = defaultdict(set)    # net -> {(layer, x, y)}
+    via_edges = defaultdict(list)
     for w in routes["routes"]["wires"]:
-        layer = layers[route_layers[w["layer"]]]
-        length = abs(w["start"][0] - w["end"][0]) + abs(w["start"][1] - w["end"][1])
-        expected[names[w["net"]]] += layer["sheet_resistance_ohm_per_square"] * (length / dbu) / layer["width_um"]
+        horizontal = w["start"][1] == w["end"][1]
+        fixed, a, b = (w["start"][1], w["start"][0], w["end"][0]) if horizontal else \
+            (w["start"][0], w["start"][1], w["end"][1])
+        lines[(w["net"], w["layer"], horizontal, fixed)].append((min(a, b), max(a, b)))
+        keys[w["net"]].update({(w["layer"], *w["start"]), (w["layer"], *w["end"])})
+    expected = defaultdict(float)
     for v in routes["routes"]["vias"]:
         expected[names[v["net"]]] += cuts[route_layers[routes["via_lower_layers"][v["kind"]]]]
+        lo, hi = routes["via_lower_layers"][v["kind"]], None
+        # Upper layer of the via: the next routing layer in the routes' order.
+        hi = route_layers.index(route_layers[lo]) + 1
+        keys[v["net"]].update({(lo, *v["at"]), (hi, *v["at"])})
+        via_edges[v["net"]].append(((lo, *v["at"]), (hi, *v["at"])))
+    for a in routes["routes"]["access"]:
+        keys[a["net"]].add((a["layer"], *a["at"]))
+    edges = defaultdict(list)
+    for (net, layer, horizontal, fixed), spans in lines.items():
+        spans.sort()
+        merged = []
+        for lo, hi in spans:
+            if merged and lo <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], hi)
+            else:
+                merged.append([lo, hi])
+        model = layers[route_layers[layer]]
+        for lo, hi in merged:
+            expected[names[net]] += model["sheet_resistance_ohm_per_square"] * ((hi - lo) / dbu) / model["width_um"]
+            stops = sorted({(k[1] if horizontal else k[2]) for k in keys[net] if k[0] == layer
+                            and (k[2] if horizontal else k[1]) == fixed
+                            and lo <= (k[1] if horizontal else k[2]) <= hi})
+            for c0, c1 in zip(stops, stops[1:]):
+                p0 = (layer, c0, fixed) if horizontal else (layer, fixed, c0)
+                p1 = (layer, c1, fixed) if horizontal else (layer, fixed, c1)
+                edges[net].append((p0, p1))
+    loops = set()
+    for net in keys:
+        parent = {}
+
+        def find(x):
+            while parent.setdefault(x, x) != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        for a, b in edges[net] + via_edges[net]:
+            ra, rb = find(a), find(b)
+            if ra == rb:
+                loops.add(names[net])
+                break
+            parent[ra] = rb
     spef = parse_spef(spef_path)
     require(set(spef["nets"]) == set(expected), "accounting net coverage")
-    errors = {n: abs(sum(r for _, _, r in spef["nets"][n]["res"]) - want) / want for n, want in expected.items()}
+    errors = {n: abs(sum(r for _, _, r in spef["nets"][n]["res"]) - want) / want
+              for n, want in expected.items() if n not in loops}
     worst = max(errors.values())
-    return dict(status="passed" if worst < 1e-5 else "failed", nets=len(errors), max_rel_error=worst,
-                method="per net: sum of stored lattice wires Rs*L/W plus vias, against the SPEF resistors")
+    return dict(status="passed" if worst < 1e-5 else "failed", nets=len(errors), nets_with_loops=sorted(loops),
+                max_rel_error=worst,
+                method="per net: merged stored wires Rs*L/W plus vias, against the SPEF resistors; nets whose "
+                       "record graph has a loop are left out (the extractor opens the loop)")
 
 
 def unmodeled_metal_estimate(definition: Path, design_json: Path, profile_path: Path) -> dict:
