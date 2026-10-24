@@ -518,7 +518,8 @@ class CellPolicyTest(unittest.TestCase):
         lef.mkdir(parents=True)
         (lef / "gf180mcu_fd_sc_mcu7t5v0.lef").write_text("VERSION 5.7 ;\n" + "".join(
             f"MACRO gf180mcu_fd_sc_mcu7t5v0__{c}\n  CLASS CORE ;\nEND gf180mcu_fd_sc_mcu7t5v0__{c}\n"
-            for c in ("and2_2", "and2_4", "clkbuf_1", "filltie", "mux2_1", "sdffq_1", "dlyb_1")) + "END LIBRARY\n")
+            for c in ("and2_2", "and2_4", "clkbuf_1", "filltie", "mux2_1", "sdffq_1", "dlyb_1", "oai31_4", "oai211_1"))
+            + "END LIBRARY\n")
         self.root = root
         p = "gf180mcu_fd_sc_mcu7t5v0__"
         self.mapped = root / "mapped.v"
@@ -539,6 +540,18 @@ class CellPolicyTest(unittest.TestCase):
         r = check_cell_policy.check("gf180", "synth", [bad], None, None, self.root)
         self.assertEqual(r["status"], "failed")
         self.assertEqual({v["rule"] for v in r["violations"]}, {"pnr_exclude", "synth_exclude_or_reserved"})
+
+    def test_gf180_drv_limited_families_are_synthesis_dont_use(self):
+        # Owner decision 2026-10-24: oai31 (and nine other families) cannot meet 1.0 ns at ss.
+        drv = self.root / "drv.v"
+        drv.write_text(self.mapped.read_text().replace("and2_2", "oai31_4"))
+        r = check_cell_policy.check("gf180", "synth", [drv], None, None, self.root)
+        self.assertEqual(r["status"], "failed", r)
+        self.assertEqual(r["violations"][0]["glob"], "gf180mcu_fd_sc_mcu7t5v0__oai31_*")
+        ok = self.root / "oai211.v"  # oai211 is not DRV-limited (no glob may over-match)
+        ok.write_text(self.mapped.read_text().replace("and2_2", "oai211_1"))
+        self.assertEqual(check_cell_policy.check("gf180", "synth", [ok], None, None, self.root)["status"], "passed")
+        self.assertEqual(check_cell_policy.OWNER_DRV_LIMITED["sky130"], [])
 
     def test_physical_stage_allows_inserted_cts_and_tap_cells_only(self):
         r = check_cell_policy.check("gf180", "physical", [self.final], self.mapped, None, self.root)

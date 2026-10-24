@@ -17,8 +17,11 @@ scripts/scale_flow.py regenerate the floorplans and require identical bytes.
 
 ``--refresh-manifest`` rewrites only the SDC files and manifest JSON of
 existing designs (floorplans and physical configurations are kept byte for
-byte; their hashes are re-read). The SDC is fixed here, before any timing
-closure, and is never edited to make timing pass.
+byte; their hashes are re-read). The reference clock SDC (10 ns) is fixed
+here; the per-PDK clock SDCs carry the period of the owner rule and come from
+scripts/derive_clock_period.py --write, which must run first (after any cell
+policy change, since synthesis changes). The SDC is fixed before any timing
+closure and is never edited to make timing pass.
 """
 from __future__ import annotations
 
@@ -224,9 +227,9 @@ def write_sdc(name: str, spec: dict) -> None:
             raise RuntimeError(f"{path} differs from the template in this script")
 
 
-def rendered_sdc(m: dict) -> str:
-    """The signoff SDC exactly as scripts/rtl2gds.py renders it (pinned Yosys
-    port list, Verilator XML when Yosys cannot elaborate the RTL)."""
+def rendered_sdc(m: dict, tag: str) -> str:
+    """The signoff SDC of one PDK exactly as scripts/rtl2gds.py renders it (pinned
+    Yosys port list, Verilator XML when Yosys cannot elaborate the RTL)."""
     import argparse as _argparse
     import rtl2gds_logic as L
     from verify_physical import PhysicalHarness
@@ -240,9 +243,19 @@ def rendered_sdc(m: dict) -> str:
         h = PhysicalHarness(Path(tmp), _argparse.Namespace(threads=2, memory_mib=2048, timeout_seconds=120,
                                                           tolerance_ns=0.001))
         ports, _ = L.rtl_ports(h, paths, [ROOT / r["path"] for r in m["rtl"]], m["top"])
-    return D.render_sdc((ROOT / m["sdc"]["clock"]["path"]).read_text(),
+    return D.render_sdc((ROOT / m["pdks"][tag]["sdc_clock"]["path"]).read_text(),
                         (ROOT / m["sdc"]["io_template"]["path"]).read_text(), ports,
                         m["clock"]["port"], m["clock"]["name"])
+
+
+def period_files(name: str, tags) -> dict:
+    """The owner clock-period rule's outputs (scripts/derive_clock_period.py --write)."""
+    out = dict(period_derivation=f"fixtures/designs/{name}/clock-period.json")
+    out.update({tag: f"fixtures/designs/{name}/{tag}-cts.sdc" for tag in tags})
+    missing = [p for p in out.values() if not (ROOT / p).is_file()]
+    if missing:
+        raise RuntimeError(f"{name}: run scripts/derive_clock_period.py --write first (missing {missing})")
+    return out
 
 
 def finish(m: dict, spec: dict) -> dict:
@@ -250,17 +263,20 @@ def finish(m: dict, spec: dict) -> dict:
     name = m["name"]
     sdc_rel = f"fixtures/designs/{name}/cts.sdc"
     tmpl = "fixtures/designs/postroute-io.sdc.tmpl" if spec["clock"] else "fixtures/designs/postroute-io-virtual.sdc.tmpl"
+    periods = period_files(name, m["pdks"])
     out = dict(schema=D.DESIGN_SCHEMA, name=name, description=m["description"], top=m["top"], rtl=m["rtl"],
                clock=dict(port=spec["clock"] or None, name="core"),
-               sdc=dict(clock=entry(sdc_rel), io_template=entry(tmpl),
-                        note=("signoff SDC = clock SDC + io_template filled from the RTL port list; the CTS reads "
-                              "the clock SDC") if spec["clock"] else
-                             ("combinational: a virtual clock times the I/O; no clock port, no CTS")),
+               sdc=dict(reference_clock=entry(sdc_rel), io_template=entry(tmpl),
+                        period_derivation=entry(periods["period_derivation"]),
+                        note=("signoff SDC per PDK = pdks.<tag>.sdc_clock (reference_clock with the period of the "
+                              "owner rule, period_derivation) + io_template filled from the RTL port list; the CTS "
+                              "reads the clock SDC") if spec["clock"] else
+                             ("combinational: a virtual clock times the I/O; no clock port, no CTS; per-PDK "
+                              "period as above")),
                recipe=dict(physical="track", floorplan={k: RECIPE[k] for k in D.FLOORPLAN_RECIPE_KEYS}),
                stretch=bool(spec.get("stretch")), pdks_unavailable=m.get("pdks_unavailable") or {},
                pdk_profiles=entry(PROFILES), cell_policy=entry("fixtures/flow/cell-policy.json"),
                signoff_manifest=entry("fixtures/flow/signoff-pinned.json"), tools=entry(TOOLS))
-    out["sdc"]["rendered_sha256"] = hashlib.sha256(rendered_sdc(out).encode()).hexdigest()
     pdks = {}
     for tag, e in m["pdks"].items():
         e = {k: v for k, v in e.items()}
@@ -270,8 +286,10 @@ def finish(m: dict, spec: dict) -> dict:
             if key in e:
                 e[key] = entry(e[key]["path"])
         e["rc_profiles"] = {rc: entry(v["path"]) for rc, v in e["rc_profiles"].items()}
+        e["sdc_clock"] = entry(periods[tag])
+        rendered = hashlib.sha256(rendered_sdc(dict(out, pdks={tag: e}), tag).encode()).hexdigest()
         e["frozen"] = dict(frozen(tag, e["physical_config"]["path"], e["routing_config"]["path"]),
-                           sdc_cts=sha256(ROOT / sdc_rel), sdc_postroute=out["sdc"]["rendered_sha256"],
+                           sdc_cts=e["sdc_clock"]["sha256"], sdc_postroute=rendered,
                            sizing_profile=e["sizing_profile"]["sha256"])
         e["frozen"] = dict(sorted(e["frozen"].items()))
         pdks[tag] = e
@@ -295,16 +313,29 @@ def finish(m: dict, spec: dict) -> dict:
 
 def refresh_hashes(name: str) -> dict:
     """Legacy-recipe manifest (pipeline): re-read every tracked and frozen hash;
-    nothing else changes (its SDC and floorplans are the fixtures' own)."""
+    nothing else changes (its reference SDC and floorplans are the fixtures'
+    own). A v2 manifest is converted to v3 (per-PDK clock SDC of the owner
+    clock-period rule)."""
     m = json.loads((ROOT / "fixtures/designs" / f"{name}.json").read_text())
     if m["recipe"]["physical"] != "legacy":
         raise RuntimeError(f"{name}: not a legacy-recipe manifest")
+    periods = period_files(name, m["pdks"])
+    if "clock" in m["sdc"]:
+        old = m["sdc"]
+        m["schema"] = D.DESIGN_SCHEMA
+        m["sdc"] = dict(reference_clock=old["clock"], io_template=old["io_template"],
+                        period_derivation=dict(path=periods["period_derivation"]),
+                        note="signoff SDC per PDK = pdks.<tag>.sdc_clock (reference_clock with the period of the "
+                             "owner rule, period_derivation) + io_template filled from the RTL port list; the CTS "
+                             "reads the clock SDC")
+        for tag, e in m["pdks"].items():
+            e["sdc_clock"] = dict(path=periods[tag])
     for key, e in D.tracked_entries(m).items():
         e["sha256"] = sha256(ROOT / e["path"])
-    m["sdc"]["rendered_sha256"] = hashlib.sha256(rendered_sdc(m).encode()).hexdigest()
     for tag, e in m["pdks"].items():
+        rendered = hashlib.sha256(rendered_sdc(m, tag).encode()).hexdigest()
         fresh = dict(frozen(tag, e["physical_config"]["path"], e["routing_config"]["path"]),
-                     sdc_cts=sha256(ROOT / m["sdc"]["clock"]["path"]), sdc_postroute=m["sdc"]["rendered_sha256"])
+                     sdc_cts=e["sdc_clock"]["sha256"], sdc_postroute=rendered)
         if set(fresh) != set(e["frozen"]):
             raise RuntimeError(f"{name} {tag}: frozen keys differ {sorted(set(fresh) ^ set(e['frozen']))}")
         e["frozen"] = dict(sorted(fresh.items()))

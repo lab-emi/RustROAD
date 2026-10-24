@@ -63,37 +63,37 @@
   },
   "io_plan": {
     "west": [
-      "data_i[2]",
-      "data_o[2]",
-      "data_o[7]",
-      "data_i[7]"
+      "data_o[6]",
+      "data_i[6]",
+      "data_i[7]",
+      "data_o[7]"
     ],
     "east": [
+      "data_i[5]",
       "data_o[1]",
-      "data_i[0]",
       "data_i[1]",
+      "data_i[0]",
       "data_o[0]",
+      "full_o",
       "empty_o"
     ],
     "south": [
-      "data_o[4]",
       "data_i[4]",
-      "data_i[6]",
-      "data_o[6]",
+      "data_o[4]",
+      "data_o[2]",
+      "data_i[2]",
       "clk_i",
-      "data_o[5]",
-      "data_i[5]"
+      "data_o[5]"
     ],
     "north": [
       "data_o[3]",
       "data_i[3]",
-      "rst_ni",
       "push_i",
+      "rst_ni",
       "count_o[0]",
       "count_o[2]",
-      "count_o[1]",
-      "full_o",
-      "pop_i"
+      "pop_i",
+      "count_o[1]"
     ],
     "x_track": [
       1120,

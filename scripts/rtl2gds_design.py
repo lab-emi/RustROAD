@@ -44,7 +44,7 @@ from string import Template
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-DESIGN_SCHEMA = "rustroad.design.v2"
+DESIGN_SCHEMA = "rustroad.design.v3"
 RECIPES = ("legacy", "track")
 TOOLS_SCHEMA = "rustroad.rtl2gds-tools.v1"
 SUMMARY_SCHEMA = "rustroad.rtl2gds.v1"
@@ -145,7 +145,8 @@ def overall(per_pdk: dict[str, dict[str, dict]], gating: list[str], global_items
 REQUIRED_KEYS = ("schema", "name", "top", "rtl", "clock", "sdc", "recipe", "stretch", "pdks_unavailable",
                  "pdk_profiles", "cell_policy", "signoff_manifest", "tools", "pdks", "verification", "budgets")
 PDK_KEYS = ("floorplan", "physical_config", "routing_config", "delay_cells", "gds_layer_map",
-            "rc_profiles", "corners", "frozen")
+            "rc_profiles", "corners", "frozen", "sdc_clock")
+SDC_KEYS = ("reference_clock", "io_template", "period_derivation")
 # Optional per-PDK tracked files: the track recipe's physical profile (input of
 # ``rustroad floorplan``), a literal mapped netlist that replaces synthesis,
 # and the sizing profile that enables the gate-sizing ECO in the closure loop.
@@ -252,7 +253,9 @@ def manifest_problems(m: dict) -> list[str]:
             not (clock.get("port") is None or isinstance(clock.get("port"), str)):
         problems.append("clock must be {name, port} (port null: virtual I/O clock of a combinational design)")
     sdc = m.get("sdc") or {}
-    problems += [f"sdc: missing {k}" for k in ("clock", "io_template", "rendered_sha256") if k not in sdc]
+    problems += [f"sdc: missing {k}" for k in SDC_KEYS if k not in sdc]
+    problems += [f"sdc: {k} is per PDK since v3 (pdks.<tag>.sdc_clock, frozen.sdc_postroute)"
+                 for k in ("clock", "rendered_sha256") if k in sdc]
     recipe = m.get("recipe") or {}
     physical = recipe.get("physical")
     if physical not in RECIPES:
@@ -300,12 +303,13 @@ def tracked_entries(m: dict) -> dict[str, dict]:
     out = {}
     for i, r in enumerate(m["rtl"]):
         out[f"rtl.{i}"] = r
-    out["sdc.clock"] = m["sdc"]["clock"]
-    out["sdc.io_template"] = m["sdc"]["io_template"]
+    for key in SDC_KEYS:
+        out[f"sdc.{key}"] = m["sdc"][key]
     for key in ("pdk_profiles", "cell_policy", "signoff_manifest", "tools"):
         out[key] = m[key]
     for tag, spec in m["pdks"].items():
-        for key in ("floorplan", "physical_config", "routing_config", "delay_cells", "gds_layer_map") + PDK_OPTIONAL:
+        for key in ("floorplan", "physical_config", "routing_config", "delay_cells", "gds_layer_map",
+                    "sdc_clock") + PDK_OPTIONAL:
             if key in spec:
                 out[f"pdks.{tag}.{key}"] = spec[key]
         for rc, entry in spec["rc_profiles"].items():
@@ -325,6 +329,65 @@ def verify_tracked(m: dict) -> dict:
             bad.append(key)
     return item("passed" if not bad else "failed", None if not bad else f"changed or missing: {bad}",
                 files=rows, changed=bad)
+
+
+CLOCK_PERIOD_FLOOR_NS, CLOCK_PERIOD_FACTOR = 10, 1.25
+
+
+def clock_period_rule(delay_ns: float) -> int:
+    """Owner rule: max(10 ns, round_up(1.25 x pre-layout ss critical-path delay, 1 ns))."""
+    return max(CLOCK_PERIOD_FLOOR_NS, math.ceil(round(CLOCK_PERIOD_FACTOR * delay_ns, 6) - 1e-9))
+
+
+def sdc_period(text: str) -> float | None:
+    m = re.findall(r"(?m)^\s*create_clock\b[^\n]*-period\s+([0-9.]+)", text)
+    return float(m[0]) if len(m) == 1 else None
+
+
+def clock_period_status(m: dict, tools: dict[str, dict]) -> dict:
+    """The per-PDK clock SDCs carry the period the tracked derivation computed.
+
+    Re-checks (no timing run) the derivation record of
+    ``scripts/derive_clock_period.py`` against the manifest: the rule's
+    arithmetic, each clock SDC's period and hash, the reference SDC differing
+    only in -period/-waveform, and that the record was made with the pinned
+    RustSys/RustSTA and the manifest's cell policy. ``--check`` of that script
+    re-runs the timing.
+    """
+    try:
+        rec = json.loads(resolve(m["sdc"]["period_derivation"]["path"]).read_text())
+        ref = resolve(m["sdc"]["reference_clock"]["path"]).read_text()
+    except (OSError, ValueError, KeyError) as error:
+        return item("unverified", f"clock-period record unreadable: {error!r}")
+    problems, rows = [], {}
+    if rec.get("schema") != "rustroad.clock-period.v1" or rec.get("design") != m["name"]:
+        problems.append("record schema/design mismatch")
+    if (rec.get("inputs") or {}).get("reference_clock_sdc", {}).get("sha256") != m["sdc"]["reference_clock"]["sha256"]:
+        problems.append("record was derived from another reference clock SDC")
+    if (rec.get("inputs") or {}).get("cell_policy", {}).get("sha256") != m["cell_policy"]["sha256"]:
+        problems.append("record was derived with another cell policy")
+    for name in ("rustsys", "rusteda", "ruststa"):
+        want = (tools.get(name) or {}).get("expected_sha256") or (tools.get(name) or {}).get("sha256")
+        if ((rec.get("inputs") or {}).get("tools") or {}).get(name) != want:
+            problems.append(f"record was derived with another {name} than the pinned one")
+    for tag, spec in m["pdks"].items():
+        r = (rec.get("pdks") or {}).get(tag) or {}
+        delay, period = r.get("critical_path_delay_ns"), r.get("period_ns")
+        text = resolve(spec["sdc_clock"]["path"]).read_text()
+        got = sdc_period(text)
+        normalized = re.sub(r"-period\s+[0-9.]+", "-period P", re.sub(r"-waveform\s+\{[^}]*\}", "-waveform W", text))
+        reference = re.sub(r"-period\s+[0-9.]+", "-period P", re.sub(r"-waveform\s+\{[^}]*\}", "-waveform W", ref))
+        ok = (isinstance(delay, (int, float)) and period == clock_period_rule(delay) and got == period
+              and (r.get("clock_sdc") or {}).get("sha256") == spec["sdc_clock"]["sha256"]
+              and normalized == reference and (r.get("self_check") or {}).get("status") == "passed")
+        rows[tag] = dict(critical_path_delay_ns=delay, period_ns=period, sdc_period_ns=got,
+                         wire_model=(r.get("prelayout") or {}).get("wire_model"),
+                         startpoint=(r.get("prelayout") or {}).get("startpoint"),
+                         endpoint=(r.get("prelayout") or {}).get("endpoint"), status="passed" if ok else "failed")
+        if not ok:
+            problems.append(f"{tag}: period/SDC/record inconsistent")
+    return item("passed" if not problems else "failed", None if not problems else "; ".join(problems),
+                rule=rec.get("rule"), pdks=rows)
 
 
 def compare_frozen(expected: dict[str, str], fingerprints: dict[str, dict]) -> dict:

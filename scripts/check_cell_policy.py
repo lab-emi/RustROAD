@@ -7,7 +7,8 @@ usage: check_cell_policy.py --pdk sky130|gf180 --stage synth|physical --netlist 
                             [--pdk-root DIR] [--out REPORT.json]
 
 * synth: no instance may use a cell matching the PDK synthesis exclusion list,
-  the PDK PnR/DRC exclusion list, or the owner-reserved CTS/hold cells.
+  the PDK PnR/DRC exclusion list, the owner-reserved CTS/hold cells or (GF180)
+  the owner's DRV-limited families (cannot meet 1.0 ns max_transition at ss).
 * physical (CTS'd / final / powered netlists): no instance may use a PnR/DRC
   excluded cell; an instance that already exists in ``--mapped`` must still
   obey the synthesis rule; an instance added after synthesis may use an
@@ -47,6 +48,15 @@ FILES = {
 MAX_MACROS = 100_000
 # Owner decision (W4): GF180 delay/clock cells are reserved for CTS and hold repair.
 OWNER_RESERVED = {"sky130": [], "gf180": ["dly*", "clkbuf*", "clkinv*"]}
+# Owner decision (2026-10-24, GF180 DRV / cell policy): synthesis must not use the
+# families that cannot meet the SDC 1.0 ns max_transition at ss_125C_3v00 even at
+# minimum load with a 0.2 ns input. This is the owner's list as decided; the
+# generator derives it from Liberty (scripts/derive_drv_dont_use.py) and a policy
+# whose derived list differs is reported inconsistent (unverified).
+OWNER_DRV_LIMITED = {"sky130": [],
+                     "gf180": ["aoi211_*", "aoi221_*", "aoi222_*", "nor4_*", "oai22_*", "oai221_*", "oai222_*",
+                               "oai31_*", "oai32_*", "oai33_*"]}
+DRV_LIBERTY = {"gf180": "libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib"}
 # Cells the physical flow may add after synthesis (suffixes after the library prefix).
 PHYSICAL_ONLY = {"sky130": ["tap*", "decap*", "fill*", "diode*"],
                  "gf180": ["filltie", "fill_*", "fillcap_*", "endcap", "antenna"]}
@@ -261,21 +271,32 @@ def check(tag: str, stage: str, netlists: list[Path], mapped: Path | None, polic
         report["sources"][key] = dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
     report["library_cells"] = len(library)
     reserved = [spec["prefix"] + g for g in OWNER_RESERVED[tag]]
+    drv_limited = [spec["prefix"] + g for g in OWNER_DRV_LIMITED[tag]]
     physical_only = [spec["prefix"] + g for g in PHYSICAL_ONLY[tag]]
     cts_hold = [spec["prefix"] + g for g in CTS_HOLD[tag]]
-    synth_forbidden = synth + pnr + reserved
+    synth_forbidden = synth + pnr + reserved + drv_limited
     report["rules"] = dict(synth_forbidden=synth_forbidden, pnr_forbidden=pnr,
                            post_synthesis_allowed=physical_only + cts_hold)
     if policy is not None:
         data = json.loads(policy.read_text())["pdks"][tag]
         consistency = []
         if set(data["synth_dont_use"]) != set(synth_forbidden):
-            consistency.append(f"policy synth_dont_use differs from PDK lists + owner reservation: "
+            consistency.append(f"policy synth_dont_use differs from PDK lists + owner reservation + DRV rule: "
                                f"missing {sorted(set(synth_forbidden) - set(data['synth_dont_use']))} "
                                f"extra {sorted(set(data['synth_dont_use']) - set(synth_forbidden))}")
         if set(data["pnr_exclude"]) != set(pnr):
             consistency.append("policy pnr_exclude differs from the PDK file")
         for src in data["sources"]:
+            if src["role"] == "owner_drv_limit":
+                if sorted(src.get("entries") or []) != sorted(drv_limited):
+                    consistency.append(f"policy DRV-limited families {src.get('entries')} differ from the owner's "
+                                       f"{drv_limited}")
+                lib = root / DRV_LIBERTY.get(tag, "")
+                got = hashlib.sha256(lib.read_bytes()).hexdigest() if tag in DRV_LIBERTY and lib.is_file() else None
+                if got is None or got != src.get("liberty_sha256"):
+                    consistency.append(f"policy DRV rule Liberty sha256 {str(src.get('liberty_sha256'))[:12]} != "
+                                       f"PDK {str(got)[:12]}")
+                continue
             got = report["sources"].get(src["role"], {}).get("sha256")
             if got != src["sha256"]:
                 consistency.append(f"policy source {src['role']} sha256 {src['sha256'][:12]} != PDK {str(got)[:12]}")

@@ -1,5 +1,5 @@
 {
-  "schema": "rustroad.design.v2",
+  "schema": "rustroad.design.v3",
   "name": "mult",
   "description": "6x6 signed registered and unsigned combinational multipliers (RustSys fixture).",
   "top": "mult",
@@ -14,7 +14,7 @@
     "name": "core"
   },
   "sdc": {
-    "clock": {
+    "reference_clock": {
       "path": "fixtures/designs/mult/cts.sdc",
       "sha256": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550"
     },
@@ -22,8 +22,11 @@
       "path": "fixtures/designs/postroute-io.sdc.tmpl",
       "sha256": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07"
     },
-    "note": "signoff SDC = clock SDC + io_template filled from the RTL port list; the CTS reads the clock SDC",
-    "rendered_sha256": "c98b448e60d8a78bb3a3a938785335f939e6b6a753ec764db666d746cf6014a2"
+    "period_derivation": {
+      "path": "fixtures/designs/mult/clock-period.json",
+      "sha256": "c9eeef5ea6e6ae35bcc80fa49f26ea1e193a0ae5db673b7b48ffd3d9bebd0f19"
+    },
+    "note": "signoff SDC per PDK = pdks.<tag>.sdc_clock (reference_clock with the period of the owner rule, period_derivation) + io_template filled from the RTL port list; the CTS reads the clock SDC"
   },
   "recipe": {
     "physical": "track",
@@ -41,7 +44,7 @@
   },
   "cell_policy": {
     "path": "fixtures/flow/cell-policy.json",
-    "sha256": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61"
+    "sha256": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37"
   },
   "signoff_manifest": {
     "path": "fixtures/flow/signoff-pinned.json",
@@ -49,7 +52,7 @@
   },
   "tools": {
     "path": "fixtures/flow/rtl2gds-tools.json",
-    "sha256": "f1b01f01eb282866515cca7b7a18917461088dfa5fb3f6f3405da05c7d1fb117"
+    "sha256": "bc76b72c5523e0955193946448e3e91284a79c0861f8674efd1eb64c74534fde"
   },
   "pdks": {
     "sky130": {
@@ -111,7 +114,7 @@
       "frozen": {
         "cell_gds": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
         "cell_lef": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
-        "cell_policy": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "cell_policy": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37",
         "delay_cells": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
         "gds_layer_map": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
         "liberty_ff": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
@@ -127,12 +130,16 @@
         "routing_profile": "f1420e3afbce37e77ad3ad56b939c2c7b2874f0befdb0a13df4d7e754c476051",
         "sdc_cts": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550",
         "sdc_postroute": "c98b448e60d8a78bb3a3a938785335f939e6b6a753ec764db666d746cf6014a2",
-        "sizing_profile": "f1a5110cf84f5597f9cb3425782e30cd9b61d50fb8c915e831a76d99c360e6a5",
+        "sizing_profile": "5aa6a24c24e62cecabf7f46bc7be5493c769f562d6d9a76aa9a38332137cc90f",
         "technology_lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519"
       },
       "sizing_profile": {
         "path": "fixtures/pdk/sky130-sizing.json",
-        "sha256": "f1a5110cf84f5597f9cb3425782e30cd9b61d50fb8c915e831a76d99c360e6a5"
+        "sha256": "5aa6a24c24e62cecabf7f46bc7be5493c769f562d6d9a76aa9a38332137cc90f"
+      },
+      "sdc_clock": {
+        "path": "fixtures/designs/mult/sky130-cts.sdc",
+        "sha256": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550"
       }
     },
     "gf180": {
@@ -142,7 +149,7 @@
       },
       "physical_config": {
         "path": "fixtures/designs/mult/gf180-physical.json",
-        "sha256": "21f8e62986beadd3b5aa873f73bbb6552a212cee0bd56c6d990da3e69a743473"
+        "sha256": "6badf4301b1d9b134ac0265534d485231ed9ade9951b254967c1cf199f0c8343"
       },
       "physical_profile": {
         "path": "fixtures/pdk/gf180-scale-physical.json",
@@ -194,7 +201,7 @@
       "frozen": {
         "cell_gds": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
         "cell_lef": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
-        "cell_policy": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "cell_policy": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37",
         "delay_cells": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
         "gds_layer_map": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
         "liberty_ff": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
@@ -203,19 +210,23 @@
         "openrcx_rules_ff": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
         "openrcx_rules_ss": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
         "openrcx_rules_tt": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
-        "physical_config": "21f8e62986beadd3b5aa873f73bbb6552a212cee0bd56c6d990da3e69a743473",
+        "physical_config": "6badf4301b1d9b134ac0265534d485231ed9ade9951b254967c1cf199f0c8343",
         "rc_profile_ff": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
         "rc_profile_ss": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
         "rc_profile_tt": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
         "routing_profile": "2e895962d5de944c4015aa2392f350567758b54239c4472072b515efe979f103",
-        "sdc_cts": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550",
-        "sdc_postroute": "c98b448e60d8a78bb3a3a938785335f939e6b6a753ec764db666d746cf6014a2",
-        "sizing_profile": "e6f63c52aea5ff8dc8d29240f734ef1352efbbee3f4ae9a9f4f9505685e5667f",
+        "sdc_cts": "c2da6f902581ac1ca4e238eae045d7fcfb37009f03de1028b065d74dadad3c5e",
+        "sdc_postroute": "01d57a6789c1e3097689e5d1990cf7056695cb5c63903a91409943f7b6a5bcf4",
+        "sizing_profile": "2f433b3497c100b6ec75b79570afd7b384e6428f01be8da2fa0f3918825f88da",
         "technology_lef": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd"
       },
       "sizing_profile": {
         "path": "fixtures/pdk/gf180-sizing.json",
-        "sha256": "e6f63c52aea5ff8dc8d29240f734ef1352efbbee3f4ae9a9f4f9505685e5667f"
+        "sha256": "2f433b3497c100b6ec75b79570afd7b384e6428f01be8da2fa0f3918825f88da"
+      },
+      "sdc_clock": {
+        "path": "fixtures/designs/mult/gf180-cts.sdc",
+        "sha256": "c2da6f902581ac1ca4e238eae045d7fcfb37009f03de1028b065d74dadad3c5e"
       }
     }
   },

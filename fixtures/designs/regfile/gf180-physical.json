@@ -63,48 +63,48 @@
   },
   "io_plan": {
     "west": [
-      "wdata[5]",
+      "waddr[1]",
       "waddr[0]",
       "we",
-      "waddr[1]",
       "waddr[2]",
-      "wdata[7]",
-      "rdata_a[7]",
-      "rdata_b[7]"
+      "wdata[0]",
+      "rdata_b[0]",
+      "rdata_a[0]",
+      "raddr_b[0]",
+      "wdata[3]",
+      "rdata_a[3]",
+      "rdata_b[3]"
     ],
     "east": [
-      "wdata[0]",
-      "clk",
-      "rst_n",
-      "rdata_a[0]",
-      "rdata_b[0]",
-      "raddr_b[1]",
-      "raddr_b[0]",
-      "raddr_b[2]",
-      "wdata[6]",
-      "rdata_a[6]",
-      "rdata_b[6]"
+      "wdata[4]",
+      "rdata_b[4]",
+      "rdata_a[4]",
+      "raddr_a[1]",
+      "wdata[2]",
+      "rdata_a[2]",
+      "rdata_b[2]",
+      "rdata_a[6]"
     ],
     "south": [
+      "wdata[5]",
       "rdata_a[5]",
-      "rdata_b[5]",
       "wdata[1]",
-      "rdata_a[1]",
+      "rdata_b[5]",
       "rdata_b[1]",
-      "rdata_a[4]",
-      "rdata_b[4]",
-      "wdata[4]"
+      "rdata_a[1]"
     ],
     "north": [
-      "rdata_a[3]",
-      "wdata[3]",
-      "rdata_b[3]",
+      "rdata_b[7]",
+      "wdata[7]",
+      "rdata_a[7]",
       "raddr_a[0]",
+      "raddr_b[2]",
       "raddr_a[2]",
-      "raddr_a[1]",
-      "rdata_a[2]",
-      "wdata[2]",
-      "rdata_b[2]"
+      "clk",
+      "rst_n",
+      "raddr_b[1]",
+      "rdata_b[6]",
+      "wdata[6]"
     ],
     "x_track": [
       1120,

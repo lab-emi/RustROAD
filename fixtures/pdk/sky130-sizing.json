@@ -18,9 +18,9 @@
   },
   {
    "role": "cell_policy",
-   "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure/fixtures/flow/cell-policy.json",
-   "sha256": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
-   "bytes": 10704
+   "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/final2/fixtures/flow/cell-policy.json",
+   "sha256": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37",
+   "bytes": 13337
   },
   {
    "role": "liberty_ss",

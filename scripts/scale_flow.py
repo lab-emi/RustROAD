@@ -325,10 +325,9 @@ def pdk_entry(tag: str) -> dict:
 def verify_tracked(m: dict, tag: str) -> dict:
     rows, bad = {}, []
     entries = {f"rtl.{i}": r for i, r in enumerate(m["rtl"])}
-    entries["sdc.clock"] = m["sdc"]["clock"]
     entries["cell_policy"] = m["cell_policy"]
     spec = m["pdks"][tag]
-    for key in ("floorplan", "physical_config", "routing_config", "gds_layer_map"):
+    for key in ("floorplan", "physical_config", "routing_config", "gds_layer_map", "sdc_clock"):
         entries[f"pdks.{tag}.{key}"] = spec[key]
     for key in ("netlist", "physical_profile"):
         if key in spec:
@@ -411,7 +410,7 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str, facts: 
         facts["placement"] = a.get("placement")
         if m["clock"]["port"] is not None:
             a = r.json(f"{label}_cts{eco}", rr + ["clock-tree", "--base-rev", a["revision"], "--sdc",
-                                                  resolve(m["sdc"]["clock"]["path"])])
+                                                  resolve(spec["sdc_clock"]["path"])])
             facts["placement_after_cts"] = a.get("placement")
             facts["clock_buffers"] = a.get("clock_buffers")
         if eco == 0:

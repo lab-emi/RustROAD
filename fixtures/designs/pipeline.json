@@ -1,5 +1,5 @@
 {
-  "schema": "rustroad.design.v2",
+  "schema": "rustroad.design.v3",
   "name": "pipeline",
   "description": "Two-stage registered pipeline (fixtures/flow/pipeline.v): 4 flip-flops, XOR/AND datapath, one clock.",
   "top": "lane_smoke",
@@ -14,7 +14,7 @@
     "name": "core"
   },
   "sdc": {
-    "clock": {
+    "reference_clock": {
       "path": "fixtures/flow/cts.sdc",
       "sha256": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c"
     },
@@ -22,8 +22,11 @@
       "path": "fixtures/designs/postroute-io.sdc.tmpl",
       "sha256": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07"
     },
-    "rendered_sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
-    "note": "signoff SDC = clock SDC + io_template filled from the RTL port list; the CTS reads the clock SDC"
+    "period_derivation": {
+      "path": "fixtures/designs/pipeline/clock-period.json",
+      "sha256": "aa06ab8eb7845464628bc084aff085666b7cb0b9b791fb8f908fdbc91d1297f2"
+    },
+    "note": "signoff SDC per PDK = pdks.<tag>.sdc_clock (reference_clock with the period of the owner rule, period_derivation) + io_template filled from the RTL port list; the CTS reads the clock SDC"
   },
   "recipe": {
     "physical": "legacy",
@@ -37,7 +40,7 @@
   },
   "cell_policy": {
     "path": "fixtures/flow/cell-policy.json",
-    "sha256": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61"
+    "sha256": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37"
   },
   "signoff_manifest": {
     "path": "fixtures/flow/signoff-pinned.json",
@@ -45,7 +48,7 @@
   },
   "tools": {
     "path": "fixtures/flow/rtl2gds-tools.json",
-    "sha256": "f1b01f01eb282866515cca7b7a18917461088dfa5fb3f6f3405da05c7d1fb117"
+    "sha256": "bc76b72c5523e0955193946448e3e91284a79c0861f8674efd1eb64c74534fde"
   },
   "pdks": {
     "sky130": {
@@ -103,7 +106,7 @@
       "frozen": {
         "cell_gds": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
         "cell_lef": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
-        "cell_policy": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "cell_policy": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37",
         "delay_cells": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
         "gds_layer_map": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
         "liberty_ff": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
@@ -120,6 +123,10 @@
         "sdc_cts": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
         "sdc_postroute": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
         "technology_lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519"
+      },
+      "sdc_clock": {
+        "path": "fixtures/designs/pipeline/sky130-cts.sdc",
+        "sha256": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c"
       }
     },
     "gf180": {
@@ -177,7 +184,7 @@
       "frozen": {
         "cell_gds": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
         "cell_lef": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
-        "cell_policy": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "cell_policy": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37",
         "delay_cells": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
         "gds_layer_map": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
         "liberty_ff": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
@@ -194,6 +201,10 @@
         "sdc_cts": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
         "sdc_postroute": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
         "technology_lef": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd"
+      },
+      "sdc_clock": {
+        "path": "fixtures/designs/pipeline/gf180-cts.sdc",
+        "sha256": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c"
       }
     }
   },

@@ -8,8 +8,10 @@ usage: cell_policy.py generate [--manifest fixtures/flow/signoff-pinned.json]
 
 The synthesis ``--dont-use`` globs per PDK are exactly the union of the PDK
 files (pinned by sha256 in the signoff manifest) plus the owner's reserved
-CTS/hold cells for GF180 (dly*, clkbuf*, clkinv*); sky130's synthesis list
-already reserves its clock/delay cells. ``pnr_exclude`` cells must never
+CTS/hold cells for GF180 (dly*, clkbuf*, clkinv*) plus, for GF180, the
+owner's DRV-limited families derived from Liberty (fixtures/flow/
+gf180-drv-dont-use.json, recomputed and required identical); sky130's
+synthesis list already reserves its clock/delay cells. ``pnr_exclude`` cells must never
 appear in any netlist. The independent checker is scripts/check_cell_policy.py.
 """
 from __future__ import annotations
@@ -22,6 +24,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts/signoff"))
+sys.path.insert(0, str(ROOT / "scripts"))
 import manifest as manifest_mod  # noqa: E402
 
 RESERVED = {
@@ -29,6 +32,10 @@ RESERVED = {
     "gf180": ["gf180mcu_fd_sc_mcu7t5v0__dly*", "gf180mcu_fd_sc_mcu7t5v0__clkbuf*",
               "gf180mcu_fd_sc_mcu7t5v0__clkinv*"],
 }
+# Owner decision 2026-10-24 (GF180 DRV / cell policy): families that cannot
+# meet the SDC max_transition at ss even at minimum load, derived from Liberty
+# by scripts/derive_drv_dont_use.py (tracked result, recomputed here).
+DRV_DONT_USE = {"gf180": "fixtures/flow/gf180-drv-dont-use.json"}
 # Cells RustROAD itself may insert after synthesis (never chosen by synthesis).
 POST_SYNTHESIS_INSERTABLE = {
     "sky130": dict(physical_only=["sky130_fd_sc_hd__tap*", "sky130_fd_sc_hd__decap*", "sky130_fd_sc_hd__fill*",
@@ -51,22 +58,48 @@ def read_cells(path: Path) -> list[str]:
     return out
 
 
+def base_lists(m: dict, tag: str) -> tuple[list, list, list]:
+    """PDK exclusion files (verified against the signoff manifest) -> (sources, synth globs, pnr globs)."""
+    spec = m["pdks"][tag]
+    sources, synth, pnr = [], [], []
+    for key in ("synth_exclude", "pnr_exclude"):
+        path = manifest_mod.pdk_host_path(m, tag, key)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != spec["files"][key]["sha256"]:
+            raise SystemExit(f"{path} differs from the signoff manifest")
+        cells = read_cells(path)
+        sources.append(dict(role=key, path=spec["files"][key]["path"], sha256=digest, entries=cells))
+        (synth if key == "synth_exclude" else pnr).extend(cells)
+    return sources, synth, pnr
+
+
+def drv_limited(m: dict, tag: str) -> tuple[dict | None, list]:
+    """Owner DRV rule (GF180): the tracked Liberty derivation, recomputed and required identical."""
+    if tag not in DRV_DONT_USE:
+        return None, []
+    import derive_drv_dont_use as drv
+    path = ROOT / DRV_DONT_USE[tag]
+    fresh = json.dumps(drv.derive(tag, m), indent=1) + "\n"
+    if not path.is_file() or path.read_text() != fresh:
+        raise SystemExit(f"{path} is missing or stale: rerun scripts/derive_drv_dont_use.py")
+    data = json.loads(fresh)
+    source = dict(role="owner_drv_limit", path=DRV_DONT_USE[tag],
+                  sha256=hashlib.sha256(fresh.encode()).hexdigest(), entries=data["dont_use"],
+                  liberty_sha256=data["liberty"]["sha256"], rule=data["rule"])
+    return source, data["dont_use"]
+
+
 def generate(manifest_path: Path, producer_receipt: Path | None) -> dict:
     m = manifest_mod.load(manifest_path)
     pdks = {}
     for tag in ("sky130", "gf180"):
         spec = m["pdks"][tag]
-        sources, synth, pnr = [], [], []
-        for key in ("synth_exclude", "pnr_exclude"):
-            path = manifest_mod.pdk_host_path(m, tag, key)
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            if digest != spec["files"][key]["sha256"]:
-                raise SystemExit(f"{path} differs from the signoff manifest")
-            cells = read_cells(path)
-            sources.append(dict(role=key, path=spec["files"][key]["path"], sha256=digest, entries=cells))
-            (synth if key == "synth_exclude" else pnr).extend(cells)
+        sources, synth, pnr = base_lists(m, tag)
+        drv_source, drv_globs = drv_limited(m, tag)
+        if drv_source is not None:
+            sources.append(drv_source)
         dont_use = []
-        for glob in synth + pnr + RESERVED[tag]:
+        for glob in synth + pnr + RESERVED[tag] + drv_globs:
             if glob not in dont_use:
                 dont_use.append(glob)
         pdks[tag] = dict(library=spec["library"], pdk_version=spec["version"], sources=sources,
