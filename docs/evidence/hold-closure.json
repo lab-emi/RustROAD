@@ -72,7 +72,7 @@
    "path": "/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target/release/rustsys"
   },
   "rustroad": {
-   "sha256": "261f5bb4c02195baf36bf8df0aa7cf50c4db302fee74ee4052b2897846fa4ad5",
+   "sha256": "a8e57fc64fa4c2925e13f839f12edd85899ab768bb2b92a39ab3df2ec655ba98",
    "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/hold/target/release/rustroad"
   },
   "rusteda": {
@@ -85,8 +85,8 @@
   }
  },
  "receipts": 282,
- "wall_seconds": 146.089,
- "peak_child_rss_kib": 290016,
+ "wall_seconds": 145.507,
+ "peak_child_rss_kib": 290084,
  "pdks": [
   {
    "pdk": "sky130",
@@ -712,7 +712,7 @@
     "dropped_patch_lines": 5,
     "note": "OpenRCX ignores DEF RECT patches (router stream); the b0 stream owns DEF merging"
    },
-   "wall_seconds": 56.795,
+   "wall_seconds": 56.719,
    "reason": null
   },
   {
@@ -1261,13 +1261,13 @@
     "dropped_patch_lines": 1,
     "note": "OpenRCX ignores DEF RECT patches (router stream); the b0 stream owns DEF merging"
    },
-   "wall_seconds": 88.959,
+   "wall_seconds": 88.435,
    "reason": null
   }
  ],
  "driver": {
-  "wall": "2:26.20",
-  "peak_rss_kib": 290016
+  "wall": "2:25.62",
+  "peak_rss_kib": 290084
  },
  "cts_drive_evaluation": [
   {

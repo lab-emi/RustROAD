@@ -326,8 +326,9 @@ The b0 stream owns DEF merging and patch export.
 
 **Runs**
 
-- Full run: 282 receipts, 2:26 wall time. The largest host process peaked at
-  290,016 KiB RSS (the Verilator build); the largest RustSTA import used
+- Full run: 282 receipts, 2:26 wall time, rustroad sha256
+  `a8e57fc64fa4c2925e13f839f12edd85899ab768bb2b92a39ab3df2ec655ba98`. The
+  largest host process peaked at 290,084 KiB RSS (the Verilator build); the largest RustSTA import used
   231,844 KiB. The largest signoff container peaked at 475,460 KiB (sky130
   Netgen LVS). The harness fails any process above 2 GiB.
 - A second full run in a different directory gave byte-identical netlists,
