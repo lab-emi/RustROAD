@@ -80,7 +80,9 @@ Notes for other streams:
 - OpenRCX reads DEF `RECT` patches without error but leaves them out of the
   SPEF. A patch is at most a few tenths of a um^2 (sky130: 9 patches; gf180:
   1), so the missing C is negligible, but it is not zero. A native extractor
-  should include `routes.patches`.
+  should include `routes.patches`. (Done in stream b0: `extract` and
+  `export-gds` include patches, and `export-def` writes merged runs; see
+  `docs/requalification.md`.)
 - The OpenDB route probe ignores RECT shapes.
 
 ## Exact invocations

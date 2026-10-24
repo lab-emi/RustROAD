@@ -32,8 +32,9 @@ rustroad --workspace W export-gds \
   {path, sha256, bytes}`, `records`, `cell_gds`/`layer_map`/`cell_lef`
   identities, `foreign_bindings_checked`, `lef_dbu_per_micron`,
   `gds_dbu_per_micron`, `coordinate_divisor`, `pdk_structures`,
-  `via_structures`, `elements {instances, routed_wires, routed_vias,
-  supply_wires, supply_vias, pin_shapes, labels, boundary}`, `routing_status`,
+  `via_structures`, `elements {instances, routed_wires (merged runs),
+  stored_wire_records, routed_vias, routed_patches, supply_wires,
+  supply_vias, pin_shapes, labels, boundary}`, `routing_status`,
   `drc_status: "unchecked"`, `lvs_status: "unchecked"`, `scope:
   "block_level_no_pad_or_seal_ring"`, `workspace_mutated: false`.
 - Errors exit 2 with `{"status":"error","code":...}`. GDS codes:
@@ -53,8 +54,9 @@ rustroad --workspace W export-gds \
 | PDK cells | Every used master plus its SREF/AREF closure (iterative DFS, depth cap 64, cycle guard), copied **byte-identically** from the cell GDS in library order. Missing structure: `GDS_CELL_MISSING`. |
 | `VIA_<name>` | One structure per used fixed LEF VIA (routed + supply), its RECT/POLYGON shapes on the map's `via` targets. Name collisions with any cell-GDS structure or the top: `GDS_NAME_COLLISION`. |
 | Instances | SREF per instance in instance order. Row `N`: no STRANS at (x, y). Row `FS`: STRANS x-reflection at (x, y + height). |
-| Routed wires | DEF NETS semantics: layer default `WIDTH`, half-width extension at both ends (exact `wire_rect`), one BOUNDARY per segment on `net` targets. |
-| Routed / supply vias | SREF to `VIA_<name>` at the via point. |
+| Routed wires | DEF NETS semantics: layer default `WIDTH`, half-width extension at both ends (exact `wire_rect`). One BOUNDARY per maximal collinear same-net run on `net` targets, the same runs `export-def` writes (`rustroad_core::wire_runs`): stored lattice records that touch or overlap on one track line are merged, and a run is split only at a strictly interior via landing (lower or upper metal), pin-access point or same-layer branch. The metal union equals the stored records'. |
+| Routed / supply vias | SREF to `VIA_<name>` at the via point. Every used LEF via variant (LEF-rule routing, e.g. `M1M2_PR_MR`, `Via1_VH`, `Via2_HH`) gets its own structure. |
+| Routing patches | Every `Routes.patches` rectangle (DEF routing `RECT`, same-net notch/corner fill) as one BOUNDARY on the routing layer's `net` targets. |
 | Supply rails/spines | SPECIALNETS geometry (explicit width, half-width extension) on `special_net` targets. |
 | Pins | I/O and supply pin rectangles on every `pin` target; one TEXT per pin at the rectangle centre on the `label` target. Bus bits are labelled `a[1]`; supply ports `VDD`/`VSS`. Escaped/non-printable names: `GDS_LABEL_UNSUPPORTED`. |
 | PR boundary | Die area on the map's boundary layer (SKY130 235/4, GF180 0/0). |

@@ -219,8 +219,13 @@ rustroad export-gds --workspace .work/chip \
 GF180 LEF coordinates (2000 DBU/um) are divided exactly onto the 0.001 um GDS
 grid; an odd coordinate is an explicit error. On both PDKs the native stream is
 XOR-identical to an independent KLayout LEF/DEF reference and gets the same
-Magic/KLayout DRC counts and Netgen/KLayout LVS verdicts. It is not a DRC
-signoff: the known router defects remain. See [the GDS export guide](docs/gds-export.md).
+Magic/KLayout DRC counts and Netgen/KLayout LVS verdicts. Wires are written as
+maximal collinear runs (the same runs `export-def` writes) and the router's
+same-net patches are streamed. On the integrated LEF-rule flow both PDKs give
+Magic 0 / KLayout 0 DRC items and LVS matches in both tools; the Sky130 block
+still has one Magic metal3 antenna violation (clock input net) for the antenna
+ECO. See [the GDS export guide](docs/gds-export.md) and
+[the requalification report](docs/requalification.md).
 
 ## Native RC extraction
 
@@ -233,7 +238,8 @@ rustroad extract --workspace .work/chip --rc-profile fixtures/pdk/sky130-rc-max.
   --corner max --out .work/routed_max.spef
 ```
 
-The SPEF imports into RustSTA 0.3 (`wire_model=spef_rc`). The model, SPEF
+Routing patches add capacitance at the node of the conductor they overlap.
+The SPEF imports into RustSTA 0.3/0.4 (`wire_model=spef_rc`). The model, SPEF
 naming, budgets and the black-box OpenRCX comparison at min/nom/max on both
 PDKs are in [docs/extraction.md](docs/extraction.md). The result is partial:
 total and per-net C meet their targets against a geometry-identical reference,
@@ -250,6 +256,7 @@ but min/max resistance and ss+max slack do not.
 - [Chinese tap and clock-topology report](docs/tap-report.html)
 - [Chinese CTS/routing/extraction report](docs/cts-routing-report.html)
 - [Native GDSII streamout and black-box acceptance](docs/gds-export.md)
+- [Integration fixes and dual-PDK requalification on the native GDS](docs/requalification.md)
 - [Chinese physical-preparation report](docs/power-io-report.html)
 - [Earlier PDK integration report](docs/pdk-report.html)
 - [Earlier bootstrap report](docs/report.html)

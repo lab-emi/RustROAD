@@ -1,0 +1,538 @@
+{
+ "cases": [
+  {
+   "control": {
+    "deleted": "NEW met3 ( 245 1410 ) ( 54010 1410 )",
+    "length_dbu": 53765,
+    "status": "detected",
+    "xor": {
+     "counts": {
+      "by_rule": {
+       "70/20": 1
+      },
+      "geometry": 1,
+      "labels": 0,
+      "total": 1,
+      "unit": "XOR difference shapes per layer + label records that differ"
+     },
+     "failures": [
+      "XOR differences: {'70/20': 1}"
+     ],
+     "labels": "passed",
+     "status": "failed",
+     "unverified_reasons": [],
+     "verdict": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/seg2/sky130/xor_control/xor.json"
+    }
+   },
+   "extraction": {
+    "max": {
+     "new_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 0.008458957430874306,
+      "max_abs_net_r_rel": 0.0030727149614341,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "passed",
+       "net_r": "passed",
+       "total_c": "passed"
+      },
+      "total_c_rel": 0.0003889921988260419
+     },
+     "old_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 2.509071410861624,
+      "max_abs_net_r_rel": 1.0451473428757032,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "failed",
+       "net_r": "failed",
+       "total_c": "failed"
+      },
+      "total_c_rel": 1.4397771019074863
+     },
+     "openrcx": {
+      "new": {
+       "peak_rss_kib": 104384,
+       "spef_sha256": "45b7be0a8806ca8f328bb0bb6c121fcfd34eaf27b1c4dfc3b2e19b75768889dc"
+      },
+      "old": {
+       "peak_rss_kib": 105716,
+       "spef_sha256": "5efead9f820cd6a638fe8ff84bda91894e416ad9a572a2d60a0d08641b16f6a7"
+      },
+      "old_merged": {
+       "peak_rss_kib": 104252,
+       "spef_sha256": "d4be6eb2794287fb39313a53973a36823d3c57ee6349f43102a6f6b86aab6347"
+      }
+     },
+     "totals": {
+      "new": {
+       "coupling_pf": 0.01333783243,
+       "ground_pf": 0.0645123543,
+       "resistance_ohm": 1178.437801,
+       "total_pf": 0.07785018673
+      },
+      "old": {
+       "coupling_pf": 0.0367239834609,
+       "ground_pf": 0.15313926417999998,
+       "resistance_ohm": 1920.1544719,
+       "total_pf": 0.18986324764089998
+      },
+      "old_merged": {
+       "coupling_pf": 0.013334962589999999,
+       "ground_pf": 0.0644849528,
+       "resistance_ohm": 1178.204743,
+       "total_pf": 0.07781991539
+      }
+     }
+    },
+    "min": {
+     "new_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 0.007339777585191573,
+      "max_abs_net_r_rel": 0.002060299378194081,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "passed",
+       "net_r": "passed",
+       "total_c": "passed"
+      },
+      "total_c_rel": 0.00031640377870178815
+     },
+     "old_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 2.4892353538216025,
+      "max_abs_net_r_rel": 0.8026476723442553,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "failed",
+       "net_r": "failed",
+       "total_c": "failed"
+      },
+      "total_c_rel": 1.4174066193927453
+     },
+     "openrcx": {
+      "new": {
+       "peak_rss_kib": 103900,
+       "spef_sha256": "b45edf0353c28692443569d27388ac67721b12b982520b8a7ec024202c780485"
+      },
+      "old": {
+       "peak_rss_kib": 105416,
+       "spef_sha256": "69510ce172fdf981ab6a3c679435e3e2febe16d66afe5190fb30d556fa7875a0"
+      },
+      "old_merged": {
+       "peak_rss_kib": 104152,
+       "spef_sha256": "c54bed225e33a307ed930eb97a33842ec14f2976fc6d81ed4409f6a6fa978af3"
+      }
+     },
+     "totals": {
+      "new": {
+       "coupling_pf": 0.01168735848,
+       "ground_pf": 0.05576477713,
+       "resistance_ohm": 895.7967671,
+       "total_pf": 0.06745213560999999
+      },
+      "old": {
+       "coupling_pf": 0.0321406823853,
+       "ground_pf": 0.13086698049,
+       "resistance_ohm": 1310.6130873,
+       "total_pf": 0.1630076628753
+      },
+      "old_merged": {
+       "coupling_pf": 0.01168427882,
+       "ground_pf": 0.05574652143,
+       "resistance_ohm": 895.6656291,
+       "total_pf": 0.06743080025
+      }
+     }
+    },
+    "nom": {
+     "new_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 0.007411345784550812,
+      "max_abs_net_r_rel": 0.0025217943962953363,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "passed",
+       "net_r": "passed",
+       "total_c": "passed"
+      },
+      "total_c_rel": 0.0003339143300617043
+     },
+     "old_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 2.493503155065027,
+      "max_abs_net_r_rel": 0.9224826560894371,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "failed",
+       "net_r": "failed",
+       "total_c": "failed"
+      },
+      "total_c_rel": 1.4238108233668765
+     },
+     "openrcx": {
+      "new": {
+       "peak_rss_kib": 104100,
+       "spef_sha256": "2d3f4aefdc61922898d6e3dfa60301511c5cfa999cd12b217d96ad1f50ef235f"
+      },
+      "old": {
+       "peak_rss_kib": 105656,
+       "spef_sha256": "c2c620896f7a316c4545fdf344aa4c2e7d4b1f76a3ee28b410f0d1f27bcd7674"
+      },
+      "old_merged": {
+       "peak_rss_kib": 103408,
+       "spef_sha256": "77de541b2c5625761e17e7c12138127bf6f957d87852a36bb97bdbb5376f2ce0"
+      }
+     },
+     "totals": {
+      "new": {
+       "coupling_pf": 0.01344235908,
+       "ground_pf": 0.06028393965,
+       "resistance_ohm": 1012.783663,
+       "total_pf": 0.07372629873
+      },
+      "old": {
+       "coupling_pf": 0.036927707913,
+       "ground_pf": 0.14171124281,
+       "resistance_ohm": 1563.0149658,
+       "total_pf": 0.178638950723
+      },
+      "old_merged": {
+       "coupling_pf": 0.01343944363,
+       "ground_pf": 0.06026224505,
+       "resistance_ohm": 1012.610403,
+       "total_pf": 0.07370168868
+      }
+     }
+    }
+   },
+   "merge_def": {
+    "new": {
+     "merged_wire_paths": 100,
+     "original_wire_paths": 104,
+     "rect_patches": 8
+    },
+    "old": {
+     "merged_wire_paths": 100,
+     "original_wire_paths": 4898,
+     "rect_patches": 8
+    }
+   },
+   "new": {
+    "bytes": 29814,
+    "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/r2/sky130.def",
+    "sha256": "cb94ea927e9ea7892a0bb5b5a6bef1b0cadac6942492f0b56a15ce8c4eb28424"
+   },
+   "old": {
+    "bytes": 234172,
+    "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/r2-old/sky130.def",
+    "sha256": "e7dba8e6d75516cadef2e2f8ae90244f055835a86c194002b9391520eefe303d"
+   },
+   "pdk": "sky130",
+   "status": "passed",
+   "streamouts": {
+    "new": {
+     "sha256": "edeb4d55bf5e57051de2a5881f32177e7f980451d277171576ba10fc37bceb5d",
+     "status": "passed"
+    },
+    "old": {
+     "sha256": "d8300d431c2f77d4e2c2be836c19cd16613e32a09075bbc83ea8ee77b85f3850",
+     "status": "passed"
+    }
+   },
+   "text": {
+    "nets": 19,
+    "new_wire_paths": 104,
+    "old_wire_paths": 4898,
+    "problems": [],
+    "rect_patches": 8,
+    "status": "passed",
+    "vias": 88
+   },
+   "xor": {
+    "counts": {
+     "by_rule": {},
+     "geometry": 0,
+     "labels": 0,
+     "total": 0,
+     "unit": "XOR difference shapes per layer + label records that differ"
+    },
+    "failures": [],
+    "labels": "passed",
+    "status": "passed",
+    "unverified_reasons": [],
+    "verdict": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/seg2/sky130/xor_new_vs_old/xor.json"
+   }
+  },
+  {
+   "control": {
+    "deleted": "NEW Metal3 ( 400 2600 ) ( 118270 2600 )",
+    "length_dbu": 117870,
+    "status": "detected",
+    "xor": {
+     "counts": {
+      "by_rule": {
+       "42/0": 1
+      },
+      "geometry": 1,
+      "labels": 0,
+      "total": 1,
+      "unit": "XOR difference shapes per layer + label records that differ"
+     },
+     "failures": [
+      "XOR differences: {'42/0': 1}"
+     ],
+     "labels": "passed",
+     "status": "failed",
+     "unverified_reasons": [],
+     "verdict": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/seg2/gf180/xor_control/xor.json"
+    }
+   },
+   "extraction": {
+    "max": {
+     "new_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 0.0,
+      "max_abs_net_r_rel": 0.0,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "passed",
+       "net_r": "passed",
+       "total_c": "passed"
+      },
+      "total_c_rel": 0.0
+     },
+     "old_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 2.6192037354231403,
+      "max_abs_net_r_rel": 1.0909503999727581,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "failed",
+       "net_r": "failed",
+       "total_c": "failed"
+      },
+      "total_c_rel": 1.3492032341998508
+     },
+     "openrcx": {
+      "new": {
+       "peak_rss_kib": 118800,
+       "spef_sha256": "b1528c7185b177eefa845aefe7d02f44a9312920f4f025d33120f643cfc69240"
+      },
+      "old": {
+       "peak_rss_kib": 120392,
+       "spef_sha256": "103c70001a4a25fdc40816fd0874c7d47d2e78bd8855722020509248f0c53539"
+      },
+      "old_merged": {
+       "peak_rss_kib": 118880,
+       "spef_sha256": "4d9fcbd940f2851edbb1b6068579cbf80d8f097dc2d8b7f2c3e59ac8298fc2fa"
+      }
+     },
+     "totals": {
+      "new": {
+       "coupling_pf": 0.0362945157,
+       "ground_pf": 0.0702335456,
+       "resistance_ohm": 884.120812,
+       "total_pf": 0.1065280613
+      },
+      "old": {
+       "coupling_pf": 0.089736807044,
+       "ground_pf": 0.160519259095,
+       "resistance_ohm": 1597.469197,
+       "total_pf": 0.250256066139
+      },
+      "old_merged": {
+       "coupling_pf": 0.0362945157,
+       "ground_pf": 0.0702335456,
+       "resistance_ohm": 884.120812,
+       "total_pf": 0.1065280613
+      }
+     }
+    },
+    "min": {
+     "new_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 0.0,
+      "max_abs_net_r_rel": 0.0,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "passed",
+       "net_r": "passed",
+       "total_c": "passed"
+      },
+      "total_c_rel": 0.0
+     },
+     "old_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 2.5963079154418662,
+      "max_abs_net_r_rel": 0.8652473368518921,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "failed",
+       "net_r": "failed",
+       "total_c": "failed"
+      },
+      "total_c_rel": 1.3326318393336303
+     },
+     "openrcx": {
+      "new": {
+       "peak_rss_kib": 119096,
+       "spef_sha256": "ce81366520b08b461cc939e04c48b98b6b08a1cc55cf34f33e8723abaf695f11"
+      },
+      "old": {
+       "peak_rss_kib": 120500,
+       "spef_sha256": "b4978002d32fc95185d73ec58e79c5bcce143fed45862e616d3c13ee07dbe114"
+      },
+      "old_merged": {
+       "peak_rss_kib": 118100,
+       "spef_sha256": "c5484bce2bd0ff36bb18d72a81d531fff9e201450dcad0a061c1ef33acace06a"
+      }
+     },
+     "totals": {
+      "new": {
+       "coupling_pf": 0.029804739179999998,
+       "ground_pf": 0.05873309948,
+       "resistance_ohm": 578.9762368,
+       "total_pf": 0.08853783866
+      },
+      "old": {
+       "coupling_pf": 0.0738549890656,
+       "ground_pf": 0.1326711923785,
+       "resistance_ohm": 890.8005437,
+       "total_pf": 0.2065261814441
+      },
+      "old_merged": {
+       "coupling_pf": 0.029804739179999998,
+       "ground_pf": 0.05873309948,
+       "resistance_ohm": 578.9762368,
+       "total_pf": 0.08853783866
+      }
+     }
+    },
+    "nom": {
+     "new_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 0.0,
+      "max_abs_net_r_rel": 0.0,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "passed",
+       "net_r": "passed",
+       "total_c": "passed"
+      },
+      "total_c_rel": 0.0
+     },
+     "old_vs_old_merged": {
+      "coverage": "passed",
+      "max_abs_net_c_rel": 2.6074120561346628,
+      "max_abs_net_r_rel": 0.9519305481243089,
+      "targets": {
+       "coverage": "passed",
+       "net_c": "failed",
+       "net_r": "failed",
+       "total_c": "failed"
+      },
+      "total_c_rel": 1.3401793540474474
+     },
+     "openrcx": {
+      "new": {
+       "peak_rss_kib": 118876,
+       "spef_sha256": "f1c13d7dd8f22bb4dd22aa73aaf0a0858ccc482a0e50b010bfeb87a20cc05454"
+      },
+      "old": {
+       "peak_rss_kib": 119676,
+       "spef_sha256": "09b0302cfaeac99a807b3477bd40382a71b46676fb62a5be46f81c61af295403"
+      },
+      "old_merged": {
+       "peak_rss_kib": 118544,
+       "spef_sha256": "f1c13d7dd8f22bb4dd22aa73aaf0a0858ccc482a0e50b010bfeb87a20cc05454"
+      }
+     },
+     "totals": {
+      "new": {
+       "coupling_pf": 0.03292592383,
+       "ground_pf": 0.0637683072,
+       "resistance_ohm": 683.37208,
+       "total_pf": 0.09669423103
+      },
+      "old": {
+       "coupling_pf": 0.08151036827500001,
+       "ground_pf": 0.1447714748369,
+       "resistance_ohm": 1132.5651274,
+       "total_pf": 0.22628184311190003
+      },
+      "old_merged": {
+       "coupling_pf": 0.03292592383,
+       "ground_pf": 0.0637683072,
+       "resistance_ohm": 683.37208,
+       "total_pf": 0.09669423103
+      }
+     }
+    }
+   },
+   "merge_def": {
+    "new": {
+     "merged_wire_paths": 72,
+     "original_wire_paths": 77,
+     "rect_patches": 1
+    },
+    "old": {
+     "merged_wire_paths": 72,
+     "original_wire_paths": 5014,
+     "rect_patches": 1
+    }
+   },
+   "new": {
+    "bytes": 29240,
+    "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/r2/gf180.def",
+    "sha256": "3a07101cc6cd5d74e51daed680bb157b3ba07693e4e46ace9f7f864b4b45876c"
+   },
+   "old": {
+    "bytes": 255061,
+    "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/r2-old/gf180.def",
+    "sha256": "7d2c89c94e40dff1591e4b7d66f432070caf86afb34e4ff2197bfe2412092a43"
+   },
+   "pdk": "gf180",
+   "status": "passed",
+   "streamouts": {
+    "new": {
+     "sha256": "84a3bc586e10f2587d5e240ba12cc2d325a51d037a800f2f24435adfae18399e",
+     "status": "passed"
+    },
+    "old": {
+     "sha256": "0c7f2ba7c5dc65e1cf94f5a9d119fbeebff3c820d4d61b1eddbe8dd74b93f66d",
+     "status": "passed"
+    }
+   },
+   "text": {
+    "nets": 19,
+    "new_wire_paths": 77,
+    "old_wire_paths": 5014,
+    "problems": [],
+    "rect_patches": 1,
+    "status": "passed",
+    "vias": 76
+   },
+   "xor": {
+    "counts": {
+     "by_rule": {},
+     "geometry": 0,
+     "labels": 0,
+     "total": 0,
+     "unit": "XOR difference shapes per layer + label records that differ"
+    },
+    "failures": [],
+    "labels": "passed",
+    "status": "passed",
+    "unverified_reasons": [],
+    "verdict": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/seg2/gf180/xor_new_vs_old/xor.json"
+   }
+  }
+ ],
+ "peak_rss_kib": 45748,
+ "receipts": 18,
+ "schema": "rustroad.def-segmentation.v1",
+ "scope": "same routed workspace; OLD = per-lattice-edge paths, NEW = merged collinear runs",
+ "status": "passed",
+ "wall_seconds": 46.52
+}
