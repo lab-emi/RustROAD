@@ -1,0 +1,5014 @@
+{
+ "density_status": {
+  "gf180": "failed",
+  "sky130": "unverified"
+ },
+ "design": {
+  "manifest": "pipeline.json",
+  "manifest_sha256": "0552304acf38c04a4d6883640c5322c83ee55e0c11fe1d196301fa84ef577353",
+  "name": "pipeline",
+  "top": "lane_smoke"
+ },
+ "exit_code": 1,
+ "failed_items": [
+  "gf180:timing_accuracy"
+ ],
+ "gating": [
+  "inputs_frozen",
+  "implementation",
+  "cell_policy",
+  "cec_prelayout",
+  "hold_closure",
+  "antenna_native",
+  "extraction",
+  "timing_setup",
+  "timing_hold",
+  "mpw_min_period",
+  "drv",
+  "timing_accuracy",
+  "gds_xor",
+  "drc_magic",
+  "drc_klayout",
+  "antenna_deck",
+  "lvs_netgen",
+  "lvs_klayout",
+  "cec_final",
+  "cec_powered",
+  "simulation",
+  "cell_proofs",
+  "artifact_binding",
+  "determinism",
+  "controls"
+ ],
+ "global_statuses": {
+  "design_manifest": {
+   "changed": [],
+   "files": {
+    "cell_policy": {
+     "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+     "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+     "status": "passed"
+    },
+    "pdk_profiles": {
+     "actual": "057a44b6061fada1dfb0222cee426e2498e890ce235794df2e68a1481c23dbfd",
+     "expected": "057a44b6061fada1dfb0222cee426e2498e890ce235794df2e68a1481c23dbfd",
+     "status": "passed"
+    },
+    "pdks.gf180.delay_cells": {
+     "actual": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+     "expected": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+     "status": "passed"
+    },
+    "pdks.gf180.floorplan": {
+     "actual": "272ce90fd7f536149830d4ebcdc397bf53ff0a93d890ba1c50a27f9c1b374ebf",
+     "expected": "272ce90fd7f536149830d4ebcdc397bf53ff0a93d890ba1c50a27f9c1b374ebf",
+     "status": "passed"
+    },
+    "pdks.gf180.gds_layer_map": {
+     "actual": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+     "expected": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+     "status": "passed"
+    },
+    "pdks.gf180.physical_config": {
+     "actual": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+     "expected": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+     "status": "passed"
+    },
+    "pdks.gf180.rc_profiles.max": {
+     "actual": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+     "expected": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+     "status": "passed"
+    },
+    "pdks.gf180.rc_profiles.min": {
+     "actual": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+     "expected": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+     "status": "passed"
+    },
+    "pdks.gf180.rc_profiles.nom": {
+     "actual": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+     "expected": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+     "status": "passed"
+    },
+    "pdks.gf180.routing_config": {
+     "actual": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+     "expected": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+     "status": "passed"
+    },
+    "pdks.sky130.delay_cells": {
+     "actual": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+     "expected": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+     "status": "passed"
+    },
+    "pdks.sky130.floorplan": {
+     "actual": "0e6db14b53fc631975645e6c6833792740e7ac16194e946c0a835cb098c91529",
+     "expected": "0e6db14b53fc631975645e6c6833792740e7ac16194e946c0a835cb098c91529",
+     "status": "passed"
+    },
+    "pdks.sky130.gds_layer_map": {
+     "actual": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+     "expected": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+     "status": "passed"
+    },
+    "pdks.sky130.physical_config": {
+     "actual": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+     "expected": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+     "status": "passed"
+    },
+    "pdks.sky130.rc_profiles.max": {
+     "actual": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+     "expected": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+     "status": "passed"
+    },
+    "pdks.sky130.rc_profiles.min": {
+     "actual": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+     "expected": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+     "status": "passed"
+    },
+    "pdks.sky130.rc_profiles.nom": {
+     "actual": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+     "expected": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+     "status": "passed"
+    },
+    "pdks.sky130.routing_config": {
+     "actual": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+     "expected": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+     "status": "passed"
+    },
+    "rtl.0": {
+     "actual": "1239bbd086f74052a8f27bdd70db0cdf0e9caf2f7454c72f4b794ab409e3f6f5",
+     "expected": "1239bbd086f74052a8f27bdd70db0cdf0e9caf2f7454c72f4b794ab409e3f6f5",
+     "status": "passed"
+    },
+    "sdc.clock": {
+     "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+     "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+     "status": "passed"
+    },
+    "sdc.io_template": {
+     "actual": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07",
+     "expected": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07",
+     "status": "passed"
+    },
+    "signoff_manifest": {
+     "actual": "446347653af195e1337997f57309fa4d8efec1c31be55b9b3a41067ea8775c24",
+     "expected": "446347653af195e1337997f57309fa4d8efec1c31be55b9b3a41067ea8775c24",
+     "status": "passed"
+    },
+    "tools": {
+     "actual": "fbccb5609e2a633930718c1cfcd23adb1df9b086bc5d251a0f14f807a441be6a",
+     "expected": "fbccb5609e2a633930718c1cfcd23adb1df9b086bc5d251a0f14f807a441be6a",
+     "status": "passed"
+    }
+   },
+   "status": "passed"
+  },
+  "openroad_image": {
+   "image": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+   "status": "passed"
+  },
+  "sdc_rendering": {
+   "sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+   "status": "passed"
+  },
+  "tools_identity": {
+   "status": "passed",
+   "tools": {
+    "openroad": "passed",
+    "opensta": "passed",
+    "rusteda": "passed",
+    "rustroad": "passed",
+    "ruststa": "passed",
+    "rustsys": "passed",
+    "verilator": "passed",
+    "yosys": "passed"
+   }
+  }
+ },
+ "pdks": [
+  {
+   "binding": {
+    "artifacts": 53,
+    "digest": "a405035a37ef05c0c340227ad0de018429f435cb04538bb734236fc48f7e4e91",
+    "revision": {
+     "branch": "feat/rtl2gds-gate",
+     "dirty": false,
+     "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+     "dirty_paths": 0,
+     "head": "cf111eb06af6e9b9a54aa750367859dfb5009baf",
+     "rustroad_sha256": "b6b30c9011921b18d957b6199a75be3273f81ea43c841e55d2d34117eb4df9b8"
+    }
+   },
+   "details": {
+    "reference_streamout": {
+     "output": {
+      "bytes": 74354,
+      "sha256": "db746e82500712fefb6c5cb0e13c9a524ff5b03d9c9dd85da913e32414e94803"
+     },
+     "problems": [],
+     "status": "passed"
+    },
+    "signoff_summary": "signoff.json",
+    "timing_matrix": {
+     "native": {
+      "ff": {
+       "opensta": {
+        "worst_hold_ns": 0.114743828773,
+        "worst_setup_ns": 9.330951690674
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.11482004310524119,
+        "worst_setup_ns": 9.331024335334105
+       }
+      },
+      "ss": {
+       "opensta": {
+        "worst_hold_ns": 0.066504999995,
+        "worst_setup_ns": 8.501899719238
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.06668937367053535,
+        "worst_setup_ns": 8.502194665719463
+       }
+      },
+      "tt": {
+       "opensta": {
+        "worst_hold_ns": 0.081645108759,
+        "worst_setup_ns": 9.092730522156
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.08168690202739198,
+        "worst_setup_ns": 9.092872351548378
+       }
+      }
+     },
+     "openrcx": {
+      "ff": {
+       "opensta": {
+        "worst_hold_ns": 0.111468963325,
+        "worst_setup_ns": 9.33039855957
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.11155408069300132,
+        "worst_setup_ns": 9.33054703505653
+       }
+      },
+      "ss": {
+       "opensta": {
+        "worst_hold_ns": 0.055679488927,
+        "worst_setup_ns": 8.495097160339
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.05577862255691668,
+        "worst_setup_ns": 8.494655904591973
+       }
+      },
+      "tt": {
+       "opensta": {
+        "worst_hold_ns": 0.075775668025,
+        "worst_setup_ns": 9.091998100281
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.07583042777715937,
+        "worst_setup_ns": 9.092171164487516
+       }
+      }
+     }
+    },
+    "timing_sources": {
+     "native": {
+      "metrics": {
+       "drv_status": "met",
+       "hold_violating_endpoints": 0,
+       "max_capacitance_status": "met",
+       "max_capacitance_violating": 0,
+       "max_fanout_status": "met",
+       "max_fanout_violating": 0,
+       "max_transition_status": "met",
+       "max_transition_violating": 0,
+       "min_period_violating": null,
+       "min_pulse_width_violating": 0,
+       "pulse_width_status": "met",
+       "ths_ns": 0.0,
+       "tns_ns": 0.0,
+       "violating_endpoints": 0,
+       "whs_ns": 0.0,
+       "wns_ns": 0.0,
+       "worst_hold_slack_ns": 0.06668937367053535,
+       "worst_max_capacitance_slack_pf": 0.05315841041572,
+       "worst_max_fanout_slack": 0.0,
+       "worst_max_transition_slack_ns": 0.7476626252074932,
+       "worst_min_period_slack_ns": null,
+       "worst_min_pulse_width_slack_ns": 4.264822626819572,
+       "worst_setup_slack_ns": 8.502194665719463
+      },
+      "scope": {
+       "backend": "cpu",
+       "clock_model": "propagated",
+       "corner": "tt",
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "coupling": "grounded_factor_1",
+       "cppr": "off",
+       "delay_calculator": "nldm_ceff_ramp",
+       "drc_status": "unchecked",
+       "drv_rules": {
+        "clock_limits": "paths"
+       },
+       "parasitics": "spef",
+       "physical_clock_domains": 1,
+       "precision": "f64",
+       "pulse_rules": {
+        "groups": "worst",
+        "pins": "all"
+       },
+       "wire_load": null,
+       "wire_model": "spef_rc"
+      }
+     },
+     "openrcx": {
+      "metrics": {
+       "drv_status": "met",
+       "hold_violating_endpoints": 0,
+       "max_capacitance_status": "met",
+       "max_capacitance_violating": 0,
+       "max_fanout_status": "met",
+       "max_fanout_violating": 0,
+       "max_transition_status": "met",
+       "max_transition_violating": 0,
+       "min_period_violating": null,
+       "min_pulse_width_violating": 0,
+       "pulse_width_status": "met",
+       "ths_ns": 0.0,
+       "tns_ns": 0.0,
+       "violating_endpoints": 0,
+       "whs_ns": 0.0,
+       "wns_ns": 0.0,
+       "worst_hold_slack_ns": 0.05577862255691668,
+       "worst_max_capacitance_slack_pf": 0.0528722931,
+       "worst_max_fanout_slack": 0.0,
+       "worst_max_transition_slack_ns": 0.7444503596363543,
+       "worst_min_period_slack_ns": null,
+       "worst_min_pulse_width_slack_ns": 4.247837886909442,
+       "worst_setup_slack_ns": 8.494655904591973
+      },
+      "scope": {
+       "backend": "cpu",
+       "clock_model": "propagated",
+       "corner": "tt",
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "coupling": "grounded_factor_1",
+       "cppr": "off",
+       "delay_calculator": "nldm_ceff_ramp",
+       "drc_status": "unchecked",
+       "drv_rules": {
+        "clock_limits": "paths"
+       },
+       "parasitics": "spef",
+       "physical_clock_domains": 1,
+       "precision": "f64",
+       "pulse_rules": {
+        "groups": "worst",
+        "pins": "all"
+       },
+       "wire_load": null,
+       "wire_model": "spef_rc"
+      }
+     }
+    }
+   },
+   "pdk": "sky130",
+   "rerun_receipts": 79,
+   "status": "passed",
+   "statuses": {
+    "antenna_deck": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed",
+     "tools": {
+      "primary": {
+       "by_plane": {},
+       "tool": "magic antennacheck",
+       "violations": 0
+      },
+      "secondary": {
+       "reason": "the sky130 KLayout DRC decks contain no antenna rules",
+       "status": "not_available",
+       "tool": "klayout"
+      }
+     }
+    },
+    "antenna_native": {
+     "margin": {
+      "derivation": "native partial-net ratios read low against the foundry deck: sky130 clk/met3 445.6 native vs 470.866 Magic (-5.4 %); planted met3 sweep: native 379.5 already fails Magic, native 366.6 passes (-5.1 % .. -8.4 %). Margin 0.10 exceeds the measured bound; the foundry deck remains the signoff gate.",
+      "fraction": 0.1,
+      "rule": "violated when ratio > (1 - fraction) x LEF limit; exceeds_lef_limit is the raw comparison"
+     },
+     "status": "passed",
+     "violations": 0,
+     "worst": [
+      {
+       "layer": "met3",
+       "limit": 400.0,
+       "net": "en",
+       "ratio": 161.079
+      },
+      {
+       "layer": "met3",
+       "limit": 400.0,
+       "net": "clk",
+       "ratio": 149.7
+      },
+      {
+       "layer": "met3",
+       "limit": 2736.24,
+       "net": "rr_eco_hold_1_n",
+       "ratio": 524.19
+      }
+     ]
+    },
+    "artifact_binding": {
+     "artifacts": 53,
+     "changed": [],
+     "digest": "a405035a37ef05c0c340227ad0de018429f435cb04538bb734236fc48f7e4e91",
+     "status": "passed"
+    },
+    "cec_final": {
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": []
+     },
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cec_powered": {
+     "filtering": {
+      "physical_only": {
+       "by_master": {
+        "sky130_fd_sc_hd__fill_1": 3,
+        "sky130_fd_sc_hd__fill_2": 11,
+        "sky130_fd_sc_hd__fill_4": 2,
+        "sky130_fd_sc_hd__fill_8": 75,
+        "sky130_fd_sc_hd__tapvpwrvgnd_1": 32
+       },
+       "removed_instances": 123,
+       "rule": "cell-policy physical_only masters without any LEF OUTPUT pin"
+      },
+      "supply_ports": [
+       "VDD",
+       "VSS"
+      ],
+      "unpowered_view": {
+       "supply_connections_removed": 68,
+       "supply_ports_removed": [
+        "VDD",
+        "VSS"
+       ]
+      }
+     },
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": [
+       "VDD",
+       "VSS"
+      ]
+     },
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cec_prelayout": {
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": []
+     },
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cell_policy": {
+     "checks": {
+      "physical": {
+       "status": "passed",
+       "violations": []
+      },
+      "synth": {
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    },
+    "cell_proofs": {
+     "cells": [
+      "sky130_fd_sc_hd__buf_1"
+     ],
+     "clock_cells": [
+      "sky130_fd_sc_hd__clkbuf_1"
+     ],
+     "native_wrong_polarity": {
+      "cell": "sky130_fd_sc_hd__clkinv_1",
+      "code": "ECO_NOT_BUFFER",
+      "liberty_function": "(!A)",
+      "status": "rejected"
+     },
+     "proofs": {
+      "sky130_fd_sc_hd__buf_1@ff": "proved",
+      "sky130_fd_sc_hd__buf_1@ss": "proved",
+      "sky130_fd_sc_hd__buf_1@tt": "proved",
+      "sky130_fd_sc_hd__clkbuf_1@ff": "proved",
+      "sky130_fd_sc_hd__clkbuf_1@ss": "proved",
+      "sky130_fd_sc_hd__clkbuf_1@tt": "proved"
+     },
+     "status": "passed"
+    },
+    "controls": {
+     "controls": {
+      "antenna_planted": {
+       "deck": {
+        "by_rule": {
+         "metal3": 1
+        },
+        "count": 1,
+        "status": "failed"
+       },
+       "detected": true,
+       "expected": "failed",
+       "layer": "met3",
+       "length_um": 600,
+       "margin_check": {
+        "conservative": true,
+        "magic_max_ratio": 856.207,
+        "native_ratio": 810.5179797979797,
+        "native_ratio_over_keep": 900.5755331088664
+       },
+       "native": {
+        "status": "violated",
+        "violated": [
+         {
+          "kind": "side_area",
+          "layer": "met3",
+          "limit": 400.0,
+          "net": "b[1]",
+          "ratio": 810.5179797979797,
+          "rule": "ANTENNADIFFSIDEAREARATIO"
+         }
+        ]
+       },
+       "oracle": "native check-antenna and the foundry antenna deck",
+       "peak_rss_kib": 72132,
+       "port": "b[1]"
+      },
+      "bad_rtl": {
+       "cosim": {
+        "mismatches": [
+         "RR_COSIM_MISMATCH cycle=0 phase=0 port=y gold=01 gate=00",
+         "RR_COSIM_MISMATCH cycle=0 phase=1 port=y gold=01 gate=00",
+         "RR_COSIM_MISMATCH cycle=1 phase=0 port=y gold=01 gate=00"
+        ],
+        "status": "failed"
+       },
+       "detected": true,
+       "expected": "failed",
+       "files": [
+        "0_pipeline.v",
+        "rr_mutant_top.v"
+       ],
+       "mutation": "output bit y[0] inverted by a wrapper around the renamed top",
+       "oracle": "RustSys check synth, Yosys equiv and the random co-simulation",
+       "rustsys": {
+        "exit_code": 3,
+        "reason": "RustSys check synth verdict 'not-equivalent' (exit 3)",
+        "status": "failed",
+        "supply_ports": []
+       },
+       "yosys": {
+        "reason": "Yosys equiv: 1 unproven $equiv cells",
+        "status": "failed"
+       }
+      },
+      "drc_spacing": {
+       "by_rule": {
+        "drc-klayout": {
+         "m1.2": 1
+        },
+        "drc-magic": {
+         "met1.2": 2
+        }
+       },
+       "counts": {
+        "drc-klayout": 1,
+        "drc-magic": 2
+       },
+       "detected": true,
+       "expected": "failed",
+       "gap_um": 0.1,
+       "oracle": "Magic DRC and KLayout DRC",
+       "peak_rss_kib": 411080,
+       "planted": [
+        "(20000,2000;20600,3000)",
+        "(20700,2000;21300,3000)"
+       ],
+       "statuses": {
+        "drc_klayout": "failed",
+        "drc_magic": "failed"
+       }
+      },
+      "label_swap": {
+       "detected": true,
+       "expected": "failed",
+       "labels_swapped": {
+        "a[0]": 1,
+        "en": 1
+       },
+       "oracle": "Netgen LVS, KLayout LVS (own results) and the XOR label comparison",
+       "own_problems": {
+        "klayout": [
+         "top pin names swapped/mismatched (layout<->schematic) a[0]<->EN, en<->A[0]",
+         "labelled top-level nets paired with a different or non-matching schematic net: [['a[0]', 'EN', 'Match'], ['en', 'A[0]', 'Match']]"
+        ],
+        "netgen": [
+         "lane_smoke: pin lists differ",
+         "final result 'Top level cell failed pin matching.'"
+        ]
+       },
+       "peak_rss_kib": 407216,
+       "statuses": {
+        "lvs_klayout": "failed",
+        "lvs_netgen": "failed",
+        "xor": "failed"
+       },
+       "swapped": "en,a[0]"
+      },
+      "missing_tool": {
+       "detected": true,
+       "exit_code": 3,
+       "expected": "failed",
+       "oracle": "tool identity preflight (missing -> unverified, exit 3)",
+       "pdk_items_run": 0,
+       "peak_rss_kib": 41696,
+       "status": "unverified",
+       "tools_identity": {
+        "reason": "tool identity: {'yosys': 'missing'}",
+        "status": "unverified",
+        "tools": {
+         "openroad": "passed",
+         "opensta": "passed",
+         "rusteda": "passed",
+         "rustroad": "passed",
+         "ruststa": "passed",
+         "rustsys": "passed",
+         "verilator": "passed",
+         "yosys": "missing"
+        }
+       }
+      },
+      "removed_hold_cell": {
+       "detected": true,
+       "expected": "failed",
+       "iteration0_hold_ns": -0.09978928425284511,
+       "margin_ns": 0.05,
+       "opensta_worst_hold_ns": -0.0898758322,
+       "oracle": "RustSTA and OpenSTA hold gate on a fresh layout",
+       "peak_rss_kib": 120500,
+       "processes": 24,
+       "removed": [
+        "rr_eco_hold_0"
+       ],
+       "ruststa_worst_hold_ns": {
+        "ff": 0.06135925410347859,
+        "ss": -0.08976051683696268,
+        "tt": 0.003348758333624413
+       },
+       "sink": "r0/D",
+       "worst_corner": "ss"
+      },
+      "removed_via": {
+       "at_gds": [
+        47070,
+        16830
+       ],
+       "detected": true,
+       "expected": "failed",
+       "net": "y[1]",
+       "oracle": "Netgen LVS and KLayout LVS (own results)",
+       "own_problems": {
+        "klayout": [
+         "top pin count layout 11 != schematic 12",
+         "unnamed top pin pairs [[None, 'Y[1]']]",
+         "labelled top-level layout nets not in the schematic (extra pins/labels): ['y[1]']",
+         "reference ports not paired with a layout pin: ['y[1]']"
+        ],
+        "netgen": [
+         "lane_smoke: pin lists differ",
+         "final result 'Top level cell failed pin matching.'",
+         "comp.out reports port errors ('Netlists match uniquely with port errors.')",
+         "1 pins without a matching pin: ['layout-only y[1]']"
+        ]
+       },
+       "peak_rss_kib": 406368,
+       "removed": "VIA_L1M1_PR",
+       "statuses": {
+        "lvs_klayout": "failed",
+        "lvs_netgen": "failed"
+       },
+       "via": "L1M1_PR"
+      },
+      "tampered_artifact": {
+       "detected": true,
+       "edited_hash": {
+        "reason": "binding record digest does not match its contents (recorded hash tampered); 1 artifact(s) differ from their bound sha256: ['def']",
+        "status": "failed"
+       },
+       "expected": "failed",
+       "flipped_byte": {
+        "reason": "1 artifact(s) differ from their bound sha256: ['gds']",
+        "status": "failed"
+       },
+       "oracle": "artifact binding re-verification",
+       "untouched_record": "passed"
+      },
+      "tampered_sdc": {
+       "changed": [
+        "sdc_postroute"
+       ],
+       "detected": true,
+       "expected": "failed",
+       "expected_sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+       "oracle": "frozen-input SHA-256 check",
+       "tampered_sha256": "bae115c87105d4cd7f9c983e667c7e33270d1b6d25ac0e2c65361e3f2e1d1313"
+      },
+      "tampered_spef": {
+       "binding": {
+        "ss": {
+         "actual": "bef5be0b1d46cdd162a34c25796e531bee3f62dd91723c32b954dd2a35e1222a",
+         "expected": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03"
+        }
+       },
+       "detected": true,
+       "expected": "failed",
+       "factor": 1000.0,
+       "oracle": "SPEF identity against the extraction receipt",
+       "peak_rss_kib": 120440,
+       "resistors_scaled": 229,
+       "timing_effect": {
+        "bound_worst_hold_ns": 0.06668937367053535,
+        "bound_worst_setup_ns": 8.502194665719463,
+        "worst_hold_ns": 0.20706344269052757,
+        "worst_setup_ns": 7.017652404317654
+       }
+      }
+     },
+     "status": "passed"
+    },
+    "density": {
+     "by_rule": null,
+     "count": null,
+     "reason": "see density.json",
+     "status": "unverified"
+    },
+    "determinism": {
+     "artifacts": {
+      "def": {
+       "normalization": [],
+       "other_sha256": "d4116afea4124a53c999309f95e41233b69a17f45bb4186c6cdc000ac77b7b69",
+       "sha256": "d4116afea4124a53c999309f95e41233b69a17f45bb4186c6cdc000ac77b7b69",
+       "status": "passed"
+      },
+      "gds": {
+       "normalization": [],
+       "other_sha256": "08ad175aa97093a6d8c769336184ed31085f2746c3561df9fc59d7340e4768df",
+       "sha256": "08ad175aa97093a6d8c769336184ed31085f2746c3561df9fc59d7340e4768df",
+       "status": "passed"
+      },
+      "netlist.final": {
+       "normalization": [],
+       "other_sha256": "c8bf19f2008eb78ab7719ba83857c422e7b0ff57adcbad0ff1412a57f152d4e5",
+       "sha256": "c8bf19f2008eb78ab7719ba83857c422e7b0ff57adcbad0ff1412a57f152d4e5",
+       "status": "passed"
+      },
+      "netlist.final_mapped": {
+       "normalization": [],
+       "other_sha256": "8d386d5fd8ab115edb6319541ded889b5d54b457767c7e76cee5c71f96633fb6",
+       "sha256": "8d386d5fd8ab115edb6319541ded889b5d54b457767c7e76cee5c71f96633fb6",
+       "status": "passed"
+      },
+      "netlist.i0": {
+       "normalization": [],
+       "other_sha256": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+       "sha256": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+       "status": "passed"
+      },
+      "netlist.i1": {
+       "normalization": [],
+       "other_sha256": "045f7efa7ad1ae5199ee45f607a34064c1ebbc913522e87a6e5d48eacbd241cb",
+       "sha256": "045f7efa7ad1ae5199ee45f607a34064c1ebbc913522e87a6e5d48eacbd241cb",
+       "status": "passed"
+      },
+      "netlist.i2": {
+       "normalization": [],
+       "other_sha256": "8d386d5fd8ab115edb6319541ded889b5d54b457767c7e76cee5c71f96633fb6",
+       "sha256": "8d386d5fd8ab115edb6319541ded889b5d54b457767c7e76cee5c71f96633fb6",
+       "status": "passed"
+      },
+      "netlist.mapped": {
+       "normalization": [],
+       "other_sha256": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+       "sha256": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+       "status": "passed"
+      },
+      "netlist.powered": {
+       "normalization": [],
+       "other_sha256": "f46eb77a6f695f7366ae0ebdb271eb3cd19a66b22c0dc61c8de7f2434d48a698",
+       "sha256": "f46eb77a6f695f7366ae0ebdb271eb3cd19a66b22c0dc61c8de7f2434d48a698",
+       "status": "passed"
+      },
+      "routes": {
+       "normalization": [],
+       "other_sha256": "0aae964c1c1b84d6acdfb77e31b40f1a506f101832d123e80fc711a066f78232",
+       "sha256": "0aae964c1c1b84d6acdfb77e31b40f1a506f101832d123e80fc711a066f78232",
+       "status": "passed"
+      },
+      "spef.native.ff": {
+       "normalization": [],
+       "other_sha256": "696da4d6167fe9eeba30e375e6c8d0db0663ee13b820cffebed9aa0f334ed3dd",
+       "sha256": "696da4d6167fe9eeba30e375e6c8d0db0663ee13b820cffebed9aa0f334ed3dd",
+       "status": "passed"
+      },
+      "spef.native.ss": {
+       "normalization": [],
+       "other_sha256": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03",
+       "sha256": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03",
+       "status": "passed"
+      },
+      "spef.native.tt": {
+       "normalization": [],
+       "other_sha256": "186878729bcc79a9ce65b5ea2f2af7481ec75ed9805f8a316829f46bb7e2d50d",
+       "sha256": "186878729bcc79a9ce65b5ea2f2af7481ec75ed9805f8a316829f46bb7e2d50d",
+       "status": "passed"
+      },
+      "spef.openrcx.ff": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "3ad5d65d64009be85ba274c127333a2982a75538eceaa189024e1cad7cb6f623",
+       "sha256": "3ad5d65d64009be85ba274c127333a2982a75538eceaa189024e1cad7cb6f623",
+       "status": "passed"
+      },
+      "spef.openrcx.ss": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "d62f9bb8028d923a015620474146e46713ac828bc4d7e41bbb1c1c3fd1f9ab25",
+       "sha256": "d62f9bb8028d923a015620474146e46713ac828bc4d7e41bbb1c1c3fd1f9ab25",
+       "status": "passed"
+      },
+      "spef.openrcx.tt": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "d7c612a298a928e8e20e582d6122eee87213806cc2584aae7d6cac313d874ca5",
+       "sha256": "d7c612a298a928e8e20e582d6122eee87213806cc2584aae7d6cac313d874ca5",
+       "status": "passed"
+      }
+     },
+     "compared": 16,
+     "status": "passed"
+    },
+    "drc_klayout": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed"
+    },
+    "drc_magic": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed"
+    },
+    "drv": {
+     "by_spef": {
+      "native": {
+       "limits": [
+        {
+         "checked": 54,
+         "corner": "tt",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.8434940049685569
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.10181263644149
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ss",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.7476626252074932
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.05315841041572
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ff",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.8860755018824966
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.14444376201965
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        }
+       ],
+       "status": "passed"
+      },
+      "openrcx": {
+       "limits": [
+        {
+         "checked": 54,
+         "corner": "tt",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.8421751150831369
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.101595088
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ss",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.7444503596363543
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0528722931
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ff",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.885322887397457
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.1442606203
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        }
+       ],
+       "status": "passed"
+      }
+     },
+     "status": "passed"
+    },
+    "extraction": {
+     "native": {
+      "binding": {
+       "files": {
+        "ff": {
+         "actual": "696da4d6167fe9eeba30e375e6c8d0db0663ee13b820cffebed9aa0f334ed3dd",
+         "expected": "696da4d6167fe9eeba30e375e6c8d0db0663ee13b820cffebed9aa0f334ed3dd"
+        },
+        "ss": {
+         "actual": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03",
+         "expected": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03"
+        },
+        "tt": {
+         "actual": "186878729bcc79a9ce65b5ea2f2af7481ec75ed9805f8a316829f46bb7e2d50d",
+         "expected": "186878729bcc79a9ce65b5ea2f2af7481ec75ed9805f8a316829f46bb7e2d50d"
+        }
+       },
+       "status": "passed"
+      },
+      "diagnostics": {
+       "ff": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled"
+       ],
+       "ss": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled"
+       ],
+       "tt": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled"
+       ]
+      },
+      "rc_profiles": {
+       "ff": "min",
+       "ss": "max",
+       "tt": "nom"
+      }
+     },
+     "openrcx": {
+      "binding": {
+       "files": {
+        "ff": {
+         "actual": "a5108eec08203ba736df77b3fdb3432a54e1ebbe83fee7bcb5b07bd1290a885c",
+         "expected": "a5108eec08203ba736df77b3fdb3432a54e1ebbe83fee7bcb5b07bd1290a885c"
+        },
+        "ss": {
+         "actual": "b5bcc2a1fc0ada45c5f62bf02bc2deb8137ec22bc89c2a77a1b70f7e20772846",
+         "expected": "b5bcc2a1fc0ada45c5f62bf02bc2deb8137ec22bc89c2a77a1b70f7e20772846"
+        },
+        "tt": {
+         "actual": "c7f74dfae141baa4ce3df3d26651ee19a6440f3b0972d20fd52f1431759441f9",
+         "expected": "c7f74dfae141baa4ce3df3d26651ee19a6440f3b0972d20fd52f1431759441f9"
+        }
+       },
+       "status": "passed"
+      },
+      "rules": {
+       "ff": {
+        "bytes": 45435,
+        "sha256": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63"
+       },
+       "ss": {
+        "bytes": 45404,
+        "sha256": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220"
+       },
+       "tt": {
+        "bytes": 45409,
+        "sha256": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757"
+       }
+      }
+     },
+     "status": "passed"
+    },
+    "gds_xor": {
+     "by_rule": {},
+     "count": 0,
+     "native_gds": {
+      "export": {
+       "bytes": 70362,
+       "sha256": "08ad175aa97093a6d8c769336184ed31085f2746c3561df9fc59d7340e4768df"
+      }
+     },
+     "status": "passed"
+    },
+    "hold_closure": {
+     "decision_spef": "native rustroad extract",
+     "iterations": [
+      {
+       "antenna": "violated",
+       "antenna_eco": null,
+       "closed": false,
+       "hold_eco": {
+        "area_um2": 11.2608,
+        "cells": 3,
+        "planned_sinks": 3,
+        "violating_sinks": 3
+       },
+       "iteration": 0,
+       "worst": {
+        "ff": {
+         "hold_ns": 0.05735932066806454,
+         "setup_ns": 9.339369659157182
+        },
+        "ss": {
+         "hold_ns": -0.09978928425284511,
+         "setup_ns": 8.531039603787493
+        },
+        "tt": {
+         "hold_ns": -0.004488460950211437,
+         "setup_ns": 9.108091438990504
+        }
+       }
+      },
+      {
+       "antenna": "passed",
+       "antenna_eco": null,
+       "closed": false,
+       "hold_eco": {
+        "area_um2": 3.7536,
+        "cells": 1,
+        "planned_sinks": 1,
+        "violating_sinks": 1
+       },
+       "iteration": 1,
+       "worst": {
+        "ff": {
+         "hold_ns": 0.09299096803448881,
+         "setup_ns": 9.327346413538992
+        },
+        "ss": {
+         "hold_ns": 0.029940836171536034,
+         "setup_ns": 8.487163684374442
+        },
+        "tt": {
+         "hold_ns": 0.06410080779536032,
+         "setup_ns": 9.087608219627477
+        }
+       }
+      },
+      {
+       "antenna": "passed",
+       "antenna_eco": null,
+       "closed": true,
+       "hold_eco": null,
+       "iteration": 2,
+       "worst": {
+        "ff": {
+         "hold_ns": 0.11482004310524119,
+         "setup_ns": 9.331024335334105
+        },
+        "ss": {
+         "hold_ns": 0.06668937367053535,
+         "setup_ns": 8.502194665719463
+        },
+        "tt": {
+         "hold_ns": 0.08168690202739198,
+         "setup_ns": 9.092872351548378
+        }
+       }
+      }
+     ],
+     "max_iterations": 4,
+     "status": "passed",
+     "target_margin_ns": 0.05
+    },
+    "implementation": {
+     "final_iteration": 2,
+     "iterations": 3,
+     "patches": 5,
+     "routed_nets": 23,
+     "status": "passed",
+     "vias": 109,
+     "wires": 6157
+    },
+    "inputs_frozen": {
+     "after": {
+      "changed": [],
+      "files": {
+       "cell_gds": {
+        "actual": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "expected": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "status": "passed"
+       },
+       "cell_lef": {
+        "actual": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "expected": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "status": "passed"
+       },
+       "cell_policy": {
+        "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "status": "passed"
+       },
+       "delay_cells": {
+        "actual": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "expected": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "status": "passed"
+       },
+       "gds_layer_map": {
+        "actual": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "expected": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "status": "passed"
+       },
+       "liberty_ff": {
+        "actual": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "expected": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "status": "passed"
+       },
+       "liberty_ss": {
+        "actual": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "expected": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "status": "passed"
+       },
+       "liberty_tt": {
+        "actual": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "expected": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "status": "passed"
+       },
+       "openrcx_rules_ff": {
+        "actual": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "expected": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "status": "passed"
+       },
+       "openrcx_rules_ss": {
+        "actual": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "expected": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "status": "passed"
+       },
+       "openrcx_rules_tt": {
+        "actual": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "expected": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "status": "passed"
+       },
+       "physical_config": {
+        "actual": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+        "expected": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+        "status": "passed"
+       },
+       "rc_profile_ff": {
+        "actual": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+        "expected": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+        "status": "passed"
+       },
+       "rc_profile_ss": {
+        "actual": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+        "expected": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+        "status": "passed"
+       },
+       "rc_profile_tt": {
+        "actual": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+        "expected": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+        "status": "passed"
+       },
+       "routing_profile": {
+        "actual": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+        "expected": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+        "status": "passed"
+       },
+       "sdc_cts": {
+        "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "status": "passed"
+       },
+       "sdc_postroute": {
+        "actual": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "expected": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "status": "passed"
+       },
+       "technology_lef": {
+        "actual": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "expected": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "status": "passed"
+       }
+      },
+      "status": "passed"
+     },
+     "before": {
+      "changed": [],
+      "files": {
+       "cell_gds": {
+        "actual": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "expected": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "status": "passed"
+       },
+       "cell_lef": {
+        "actual": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "expected": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "status": "passed"
+       },
+       "cell_policy": {
+        "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "status": "passed"
+       },
+       "delay_cells": {
+        "actual": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "expected": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "status": "passed"
+       },
+       "gds_layer_map": {
+        "actual": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "expected": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "status": "passed"
+       },
+       "liberty_ff": {
+        "actual": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "expected": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "status": "passed"
+       },
+       "liberty_ss": {
+        "actual": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "expected": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "status": "passed"
+       },
+       "liberty_tt": {
+        "actual": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "expected": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "status": "passed"
+       },
+       "openrcx_rules_ff": {
+        "actual": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "expected": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "status": "passed"
+       },
+       "openrcx_rules_ss": {
+        "actual": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "expected": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "status": "passed"
+       },
+       "openrcx_rules_tt": {
+        "actual": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "expected": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "status": "passed"
+       },
+       "physical_config": {
+        "actual": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+        "expected": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+        "status": "passed"
+       },
+       "rc_profile_ff": {
+        "actual": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+        "expected": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+        "status": "passed"
+       },
+       "rc_profile_ss": {
+        "actual": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+        "expected": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+        "status": "passed"
+       },
+       "rc_profile_tt": {
+        "actual": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+        "expected": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+        "status": "passed"
+       },
+       "routing_profile": {
+        "actual": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+        "expected": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+        "status": "passed"
+       },
+       "sdc_cts": {
+        "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "status": "passed"
+       },
+       "sdc_postroute": {
+        "actual": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "expected": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "status": "passed"
+       },
+       "technology_lef": {
+        "actual": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "expected": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "status": "passed"
+       }
+      },
+      "status": "passed"
+     },
+     "status": "passed"
+    },
+    "lvs_klayout": {
+     "by_rule": {
+      "mismatch": 0
+     },
+     "count": 0,
+     "status": "passed"
+    },
+    "lvs_netgen": {
+     "by_rule": {
+      "mismatch": 0
+     },
+     "count": 0,
+     "status": "passed"
+    },
+    "mpw_min_period": {
+     "by_spef": {
+      "native": {
+       "min_period_note": "no Liberty minimum_period constraint on the clocked cells (both engines report none)",
+       "min_period_rows": {
+        "opensta": 0,
+        "ruststa": 0
+       },
+       "pulse_width_rows": 24,
+       "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
+       "status": "passed",
+       "worst_min_period_slack_ns": null,
+       "worst_min_pulse_width_slack_ns": 4.264822626819572
+      },
+      "openrcx": {
+       "min_period_note": "no Liberty minimum_period constraint on the clocked cells (both engines report none)",
+       "min_period_rows": {
+        "opensta": 0,
+        "ruststa": 0
+       },
+       "pulse_width_rows": 24,
+       "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
+       "status": "passed",
+       "worst_min_period_slack_ns": null,
+       "worst_min_pulse_width_slack_ns": 4.247837886909442
+      }
+     },
+     "status": "passed"
+    },
+    "simulation": {
+     "compared_outputs": [
+      "y",
+      "z"
+     ],
+     "expected": {
+      "checks": 16384,
+      "cycles": 4096,
+      "time": 12288
+     },
+     "initial_state": "Verilator zero-initialised state in both models",
+     "observed": {
+      "checks": 16384,
+      "cycles": 4096,
+      "time": 12288
+     },
+     "seed": "0x5eed2026c0ffee01",
+     "status": "passed",
+     "vectors": 4096
+    },
+    "timing_accuracy": {
+     "by_spef": {
+      "native": {
+       "corners": {
+        "ff": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 8.079338653044221e-05,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 8.079338653044221e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 0.541753351688,
+            "ruststa_ns": 0.5416725583014695
+           },
+           {
+            "difference_ns": 7.621433224118401e-05,
+            "endpoint": "r0/D",
+            "kind": "hold",
+            "opensta_ns": 0.114743828773,
+            "ruststa_ns": 0.11482004310524119
+           },
+           {
+            "difference_ns": 7.264466010425963e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 9.330951690674,
+            "ruststa_ns": 9.331024335334105
+           },
+           {
+            "difference_ns": 7.237274094151758e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.405314445496,
+            "ruststa_ns": 9.405386818236941
+           },
+           {
+            "difference_ns": 6.195010485932073e-05,
+            "endpoint": "r3/D",
+            "kind": "setup",
+            "opensta_ns": 9.521611213684,
+            "ruststa_ns": 9.521549263579141
+           },
+           {
+            "difference_ns": 6.013507784108363e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.466151744127,
+            "ruststa_ns": 0.4660916090491589
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 2.5770444493922184e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 2.5770444493922184e-05,
+            "opensta_required_ns": 0.203198224306,
+            "opensta_slack_ns": 4.790590286255,
+            "ruststa_required_ns": 0.20317254293884765,
+            "ruststa_slack_ns": 4.790616056699494
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 2.5681367152391443e-05,
+            "opensta_required_ns": 0.203198224306,
+            "opensta_slack_ns": 4.790591239929,
+            "ruststa_required_ns": 0.20317254293884762,
+            "ruststa_slack_ns": 4.79061656611472
+           },
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.6905989037668823e-05,
+            "opensta_required_ns": 0.179502055049,
+            "opensta_slack_ns": 4.819356918335,
+            "ruststa_required_ns": 0.17948514905996232,
+            "ruststa_slack_ns": 4.8193717909922285
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.6905989037668823e-05,
+            "opensta_required_ns": 0.179502055049,
+            "opensta_slack_ns": 4.819356441498,
+            "ruststa_required_ns": 0.17948514905996232,
+            "ruststa_slack_ns": 4.819371487189828
+           }
+          ]
+         }
+        },
+        "ss": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.0002999425141851919,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.0002999425141851919,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.29941868782,
+            "ruststa_ns": 1.2991187453058148
+           },
+           {
+            "difference_ns": 0.0002949464814623326,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 8.501899719238,
+            "ruststa_ns": 8.502194665719463
+           },
+           {
+            "difference_ns": 0.0002749320196386851,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.278207421303,
+            "ruststa_ns": 1.2779324892833612
+           },
+           {
+            "difference_ns": 0.00027200943743110884,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 8.516094207764,
+            "ruststa_ns": 8.51582219832657
+           },
+           {
+            "difference_ns": 0.0002341881181244787,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 8.535998344421,
+            "ruststa_ns": 8.536232532539124
+           },
+           {
+            "difference_ns": 0.00020758752426153215,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.648664355278,
+            "ruststa_ns": 0.6484567677537385
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 0.0001300672001531833,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 0.0001300672001531833,
+            "opensta_required_ns": 0.690106987953,
+            "opensta_slack_ns": 4.264697551727,
+            "ruststa_required_ns": 0.6899769207528468,
+            "ruststa_slack_ns": 4.264822626819572
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 0.0001300672001531833,
+            "opensta_required_ns": 0.690106987953,
+            "opensta_slack_ns": 4.264698505402,
+            "ruststa_required_ns": 0.6899769207528468,
+            "ruststa_slack_ns": 4.264823206360162
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 0.00012483614176428404,
+            "opensta_required_ns": 0.635318934917,
+            "opensta_slack_ns": 4.409875869751,
+            "ruststa_required_ns": 0.6351991669942286,
+            "ruststa_slack_ns": 4.410000705892764
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 0.00012446200835292132,
+            "opensta_required_ns": 0.635319232941,
+            "opensta_slack_ns": 4.409876823425,
+            "ruststa_required_ns": 0.6351991669942286,
+            "ruststa_slack_ns": 4.410001285433353
+           }
+          ]
+         }
+        },
+        "tt": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00030487959774028184,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00030487959774028184,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 9.25480556488,
+            "ruststa_ns": 9.25450068528226
+           },
+           {
+            "difference_ns": 0.00015959106100082998,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 0.762570261955,
+            "ruststa_ns": 0.7624106708939992
+           },
+           {
+            "difference_ns": 0.0001418293923780567,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 9.092730522156,
+            "ruststa_ns": 9.092872351548378
+           },
+           {
+            "difference_ns": 9.748651557339727e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 0.751321911812,
+            "ruststa_ns": 0.7512244252964266
+           },
+           {
+            "difference_ns": 9.232783973267544e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 9.113451957703,
+            "ruststa_ns": 9.113544285542734
+           },
+           {
+            "difference_ns": 8.490530979621269e-05,
+            "endpoint": "z[1]",
+            "kind": "setup",
+            "opensta_ns": 9.353057861328,
+            "ruststa_ns": 9.353142766637797
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 4.549369294415406e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 4.549369294415406e-05,
+            "opensta_required_ns": 0.337587565184,
+            "opensta_slack_ns": 4.637257099152,
+            "ruststa_required_ns": 0.33754207149105586,
+            "ruststa_slack_ns": 4.637299916524268
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 4.53148789441582e-05,
+            "opensta_required_ns": 0.33758738637,
+            "opensta_slack_ns": 4.637257575989,
+            "ruststa_required_ns": 0.33754207149105586,
+            "ruststa_slack_ns": 4.637300574418851
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 3.8676950461891124e-05,
+            "opensta_required_ns": 0.281418979168,
+            "opensta_slack_ns": 4.743736743927,
+            "ruststa_required_ns": 0.281382591107214,
+            "ruststa_slack_ns": 4.743775420877462
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 3.8495892879630844e-05,
+            "opensta_required_ns": 0.281418800354,
+            "opensta_slack_ns": 4.74373626709,
+            "ruststa_required_ns": 0.281382591107214,
+            "ruststa_slack_ns": 4.74377476298288
+           }
+          ]
+         }
+        }
+       },
+       "failing": [],
+       "status": "passed"
+      },
+      "openrcx": {
+       "corners": {
+        "ff": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00018132734071277246,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00018132734071277246,
+            "endpoint": "r1/D",
+            "kind": "hold",
+            "opensta_ns": 0.133793726563,
+            "ruststa_ns": 0.13397505390371278
+           },
+           {
+            "difference_ns": 0.0001793543057075908,
+            "endpoint": "r1/D",
+            "kind": "setup",
+            "opensta_ns": 9.640700340271,
+            "ruststa_ns": 9.640520985965292
+           },
+           {
+            "difference_ns": 0.00016281434474552103,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 0.542036116123,
+            "ruststa_ns": 0.5418733017782544
+           },
+           {
+            "difference_ns": 0.00015076046887330108,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.404908180237,
+            "ruststa_ns": 9.405058940705873
+           },
+           {
+            "difference_ns": 0.00014847548652952014,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 9.33039855957,
+            "ruststa_ns": 9.33054703505653
+           },
+           {
+            "difference_ns": 0.00011797962521747918,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.466782748699,
+            "ruststa_ns": 0.4666647690737825
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 8.319068165871246e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 8.319068165871246e-05,
+            "opensta_required_ns": 0.209535181522,
+            "opensta_slack_ns": 4.782690525055,
+            "ruststa_required_ns": 0.2094519908403413,
+            "ruststa_slack_ns": 4.782771068685732
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 8.292246065869091e-05,
+            "opensta_required_ns": 0.209534913301,
+            "opensta_slack_ns": 4.782691001892,
+            "ruststa_required_ns": 0.2094519908403413,
+            "ruststa_slack_ns": 4.782771538390344
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 5.543308668620739e-05,
+            "opensta_required_ns": 0.149990260601,
+            "opensta_slack_ns": 4.85778427124,
+            "ruststa_required_ns": 0.14993723614724072,
+            "ruststa_slack_ns": 4.857839704326686
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 5.4486545074894366e-05,
+            "opensta_required_ns": 0.149989888072,
+            "opensta_slack_ns": 4.857784748077,
+            "ruststa_required_ns": 0.14993723614724072,
+            "ruststa_slack_ns": 4.857839234622075
+           }
+          ]
+         }
+        },
+        "ss": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00044125574702746917,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00044125574702746917,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 8.495097160339,
+            "ruststa_ns": 8.494655904591973
+           },
+           {
+            "difference_ns": 0.0002016904423476351,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.301212668419,
+            "ruststa_ns": 1.3010109779766523
+           },
+           {
+            "difference_ns": 0.00019701463305032973,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 8.499221801758,
+            "ruststa_ns": 8.499418816391051
+           },
+           {
+            "difference_ns": 0.00019550886935293388,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.649560987949,
+            "ruststa_ns": 0.649365479079647
+           },
+           {
+            "difference_ns": 0.00017875222521190892,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.198483467102,
+            "ruststa_ns": 9.198662219327211
+           },
+           {
+            "difference_ns": 0.00015419010868655825,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.279332518578,
+            "ruststa_ns": 1.2791783284693135
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 0.0005699599090451812,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 0.0005699599090451812,
+            "opensta_required_ns": 0.64264190197,
+            "opensta_slack_ns": 4.405473232269,
+            "ruststa_required_ns": 0.6432118618790452,
+            "ruststa_slack_ns": 4.404911660317316
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 0.0005699599090451812,
+            "opensta_required_ns": 0.64264190197,
+            "opensta_slack_ns": 4.405473232269,
+            "ruststa_required_ns": 0.6432118618790452,
+            "ruststa_slack_ns": 4.404910995457575
+           },
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 0.00018504191780399637,
+            "opensta_required_ns": 0.704223632812,
+            "opensta_slack_ns": 4.247660636902,
+            "ruststa_required_ns": 0.704038590894196,
+            "ruststa_slack_ns": 4.247837886909442
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 0.00018504191780399637,
+            "opensta_required_ns": 0.704223632812,
+            "opensta_slack_ns": 4.247661590576,
+            "ruststa_required_ns": 0.704038590894196,
+            "ruststa_slack_ns": 4.247838551769183
+           }
+          ]
+         }
+        },
+        "tt": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.0004179028706730037,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.0004179028706730037,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 9.243569374084,
+            "ruststa_ns": 9.243151471213327
+           },
+           {
+            "difference_ns": 0.000195815692856538,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 0.762865006924,
+            "ruststa_ns": 0.7626691912311435
+           },
+           {
+            "difference_ns": 0.00017306420651586052,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 9.091998100281,
+            "ruststa_ns": 9.092171164487516
+           },
+           {
+            "difference_ns": 0.00011424492059564084,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 0.751348674297,
+            "ruststa_ns": 0.7512344293764044
+           },
+           {
+            "difference_ns": 0.00010974396816720855,
+            "endpoint": "z[1]",
+            "kind": "setup",
+            "opensta_ns": 9.352476119995,
+            "ruststa_ns": 9.352585863963167
+           },
+           {
+            "difference_ns": 0.00010852958227403064,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 9.113196372986,
+            "ruststa_ns": 9.113304902568274
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 8.314818848975669e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 8.314818848975669e-05,
+            "opensta_required_ns": 0.345206081867,
+            "opensta_slack_ns": 4.627610206604,
+            "ruststa_required_ns": 0.34512293367851027,
+            "ruststa_slack_ns": 4.62768776713199
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 8.28501654897007e-05,
+            "opensta_required_ns": 0.345205783844,
+            "opensta_slack_ns": 4.627611160278,
+            "ruststa_required_ns": 0.3451229336785103,
+            "ruststa_slack_ns": 4.627688428307944
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 5.282758586666603e-05,
+            "opensta_required_ns": 0.284873425961,
+            "opensta_slack_ns": 4.742310523987,
+            "ruststa_required_ns": 0.2848259476166335,
+            "ruststa_slack_ns": 4.742363351572867
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 5.2166409910903155e-05,
+            "opensta_required_ns": 0.28487315774,
+            "opensta_slack_ns": 4.742310523987,
+            "ruststa_required_ns": 0.2848259476166335,
+            "ruststa_slack_ns": 4.742362690396911
+           }
+          ]
+         }
+        }
+       },
+       "failing": [],
+       "status": "passed"
+      }
+     },
+     "status": "passed"
+    },
+    "timing_hold": {
+     "by_spef": {
+      "native": {
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "status": "passed",
+       "violations": []
+      },
+      "openrcx": {
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    },
+    "timing_setup": {
+     "by_spef": {
+      "native": {
+       "corners": [
+        "tt",
+        "ss"
+       ],
+       "status": "passed",
+       "violations": []
+      },
+      "openrcx": {
+       "corners": [
+        "tt",
+        "ss"
+       ],
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    }
+   },
+   "wall_seconds": 55.152
+  },
+  {
+   "binding": {
+    "artifacts": 52,
+    "digest": "ec2b2b63ca9290e261756830a9e4755ec3832167cd61b64cfc0e558ddcc42cee",
+    "revision": {
+     "branch": "feat/rtl2gds-gate",
+     "dirty": false,
+     "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+     "dirty_paths": 0,
+     "head": "cf111eb06af6e9b9a54aa750367859dfb5009baf",
+     "rustroad_sha256": "b6b30c9011921b18d957b6199a75be3273f81ea43c841e55d2d34117eb4df9b8"
+    }
+   },
+   "details": {
+    "reference_streamout": {
+     "output": {
+      "bytes": 56278,
+      "sha256": "c1b2eddc2659f4d14bd773f16ea4102e3169bcc7b92c2dba395455133039bc15"
+     },
+     "problems": [],
+     "status": "passed"
+    },
+    "signoff_summary": "signoff.json",
+    "timing_matrix": {
+     "native": {
+      "ff": {
+       "opensta": {
+        "worst_hold_ns": 0.196170866489,
+        "worst_setup_ns": 8.549168586731
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.1961917416231851,
+        "worst_setup_ns": 8.54919346352558
+       }
+      },
+      "ss": {
+       "opensta": {
+        "worst_hold_ns": 0.370532512665,
+        "worst_setup_ns": 4.852761268616
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.3706765838579389,
+        "worst_setup_ns": 4.852929142063824
+       }
+      },
+      "tt": {
+       "opensta": {
+        "worst_hold_ns": 0.244502753019,
+        "worst_setup_ns": 7.463591575623
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.2445227435302908,
+        "worst_setup_ns": 7.463826732605014
+       }
+      }
+     },
+     "openrcx": {
+      "ff": {
+       "opensta": {
+        "worst_hold_ns": 0.193814083934,
+        "worst_setup_ns": 8.549252510071
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.1938359303315127,
+        "worst_setup_ns": 8.549306116900645
+       }
+      },
+      "ss": {
+       "opensta": {
+        "worst_hold_ns": 0.361523151398,
+        "worst_setup_ns": 4.85221862793
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.3637132849481477,
+        "worst_setup_ns": 4.852335175696501
+       }
+      },
+      "tt": {
+       "opensta": {
+        "worst_hold_ns": 0.24055197835,
+        "worst_setup_ns": 7.463933467865
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.24057538664274536,
+        "worst_setup_ns": 7.464313803450789
+       }
+      }
+     }
+    },
+    "timing_sources": {
+     "native": {
+      "metrics": {
+       "drv_status": "met",
+       "hold_violating_endpoints": 0,
+       "max_capacitance_status": "met",
+       "max_capacitance_violating": 0,
+       "max_fanout_status": "met",
+       "max_fanout_violating": 0,
+       "max_transition_status": "met",
+       "max_transition_violating": 0,
+       "min_period_violating": 0,
+       "min_pulse_width_violating": 0,
+       "pulse_width_status": "met",
+       "ths_ns": 0.0,
+       "tns_ns": 0.0,
+       "violating_endpoints": 0,
+       "whs_ns": 0.0,
+       "wns_ns": 0.0,
+       "worst_hold_slack_ns": 0.1961917416231851,
+       "worst_max_capacitance_slack_pf": 0.276715239083436,
+       "worst_max_fanout_slack": 0.0,
+       "worst_max_transition_slack_ns": 0.07123714852676988,
+       "worst_min_period_slack_ns": 6.438000000000001,
+       "worst_min_pulse_width_slack_ns": 3.247887058368783,
+       "worst_setup_slack_ns": 4.852929142063824
+      },
+      "scope": {
+       "backend": "cpu",
+       "clock_model": "propagated",
+       "corner": "tt",
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "coupling": "grounded_factor_1",
+       "cppr": "off",
+       "delay_calculator": "nldm_ceff_ramp",
+       "drc_status": "unchecked",
+       "drv_rules": {
+        "clock_limits": "paths"
+       },
+       "parasitics": "spef",
+       "physical_clock_domains": 1,
+       "precision": "f64",
+       "pulse_rules": {
+        "groups": "worst",
+        "pins": "all"
+       },
+       "wire_load": null,
+       "wire_model": "spef_rc"
+      }
+     },
+     "openrcx": {
+      "metrics": {
+       "drv_status": "met",
+       "hold_violating_endpoints": 0,
+       "max_capacitance_status": "met",
+       "max_capacitance_violating": 0,
+       "max_fanout_status": "met",
+       "max_fanout_violating": 0,
+       "max_transition_status": "met",
+       "max_transition_violating": 0,
+       "min_period_violating": 0,
+       "min_pulse_width_violating": 0,
+       "pulse_width_status": "met",
+       "ths_ns": 0.0,
+       "tns_ns": 0.0,
+       "violating_endpoints": 0,
+       "whs_ns": 0.0,
+       "wns_ns": 0.0,
+       "worst_hold_slack_ns": 0.1938359303315127,
+       "worst_max_capacitance_slack_pf": 0.2758997427,
+       "worst_max_fanout_slack": 0.0,
+       "worst_max_transition_slack_ns": 0.04997956891570743,
+       "worst_min_period_slack_ns": 6.438000000000001,
+       "worst_min_pulse_width_slack_ns": 3.248451880259017,
+       "worst_setup_slack_ns": 4.852335175696501
+      },
+      "scope": {
+       "backend": "cpu",
+       "clock_model": "propagated",
+       "corner": "tt",
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "coupling": "grounded_factor_1",
+       "cppr": "off",
+       "delay_calculator": "nldm_ceff_ramp",
+       "drc_status": "unchecked",
+       "drv_rules": {
+        "clock_limits": "paths"
+       },
+       "parasitics": "spef",
+       "physical_clock_domains": 1,
+       "precision": "f64",
+       "pulse_rules": {
+        "groups": "worst",
+        "pins": "all"
+       },
+       "wire_load": null,
+       "wire_model": "spef_rc"
+      }
+     }
+    }
+   },
+   "pdk": "gf180",
+   "rerun_receipts": 54,
+   "status": "failed",
+   "statuses": {
+    "antenna_deck": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed",
+     "tools": {
+      "primary": {
+       "by_rule": {},
+       "tool": "klayout gf180mcu.drc decks=antenna",
+       "total": 0
+      },
+      "secondary": {
+       "by_plane": {},
+       "note": "gf180mcuD.tech antenna section is marked incomplete; a clean result is not evidence",
+       "status": "secondary_incomplete_rules",
+       "tool": "magic antennacheck",
+       "violations": 0
+      }
+     }
+    },
+    "antenna_native": {
+     "margin": {
+      "derivation": "native partial-net ratios read low against the foundry deck: sky130 clk/met3 445.6 native vs 470.866 Magic (-5.4 %); planted met3 sweep: native 379.5 already fails Magic, native 366.6 passes (-5.1 % .. -8.4 %). Margin 0.10 exceeds the measured bound; the foundry deck remains the signoff gate.",
+      "fraction": 0.1,
+      "rule": "violated when ratio > (1 - fraction) x LEF limit; exceeds_lef_limit is the raw comparison"
+     },
+     "status": "passed",
+     "violations": 0,
+     "worst": [
+      {
+       "layer": "Metal3",
+       "limit": 400.0,
+       "net": "clk",
+       "ratio": 60.289
+      },
+      {
+       "layer": "Metal2",
+       "limit": 400.0,
+       "net": "a[0]",
+       "ratio": 53.789
+      },
+      {
+       "layer": "Metal2",
+       "limit": 400.0,
+       "net": "clk",
+       "ratio": 47.726
+      }
+     ]
+    },
+    "artifact_binding": {
+     "artifacts": 52,
+     "changed": [],
+     "digest": "ec2b2b63ca9290e261756830a9e4755ec3832167cd61b64cfc0e558ddcc42cee",
+     "status": "passed"
+    },
+    "cec_final": {
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": []
+     },
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cec_powered": {
+     "filtering": {
+      "physical_only": {
+       "by_master": {
+        "gf180mcu_fd_sc_mcu7t5v0__fill_1": 14,
+        "gf180mcu_fd_sc_mcu7t5v0__fill_16": 14,
+        "gf180mcu_fd_sc_mcu7t5v0__fill_2": 26,
+        "gf180mcu_fd_sc_mcu7t5v0__fill_4": 17,
+        "gf180mcu_fd_sc_mcu7t5v0__fill_8": 16,
+        "gf180mcu_fd_sc_mcu7t5v0__filltie": 32
+       },
+       "removed_instances": 119,
+       "rule": "cell-policy physical_only masters without any LEF OUTPUT pin"
+      },
+      "supply_ports": [
+       "VDD",
+       "VSS"
+      ],
+      "unpowered_view": {
+       "supply_connections_removed": 68,
+       "supply_ports_removed": [
+        "VDD",
+        "VSS"
+       ]
+      }
+     },
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": [
+       "VDD",
+       "VSS"
+      ]
+     },
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cec_prelayout": {
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": []
+     },
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cell_policy": {
+     "checks": {
+      "physical": {
+       "status": "passed",
+       "violations": []
+      },
+      "synth": {
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    },
+    "cell_proofs": {
+     "cells": [
+      "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+     ],
+     "clock_cells": [
+      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1"
+     ],
+     "native_wrong_polarity": {
+      "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_1",
+      "code": "ECO_NOT_BUFFER",
+      "liberty_function": "(!I)",
+      "status": "rejected"
+     },
+     "proofs": {
+      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1@ff": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1@ss": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1@tt": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__dlya_1@ff": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__dlya_1@ss": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__dlya_1@tt": "proved"
+     },
+     "status": "passed"
+    },
+    "controls": {
+     "controls": {
+      "antenna_planted": {
+       "deck": {
+        "by_rule": {
+         "ANT.16_ii_ANT.4": 6
+        },
+        "count": 6,
+        "status": "failed"
+       },
+       "detected": true,
+       "expected": "failed",
+       "layer": "Metal3",
+       "length_um": 2000,
+       "margin_check": {
+        "conservative": true,
+        "magic_max_ratio": 883.109,
+        "native_ratio": 867.1520218792734,
+        "native_ratio_over_keep": 963.502246532526
+       },
+       "native": {
+        "status": "violated",
+        "violated": [
+         {
+          "kind": "side_area",
+          "layer": "Metal3",
+          "limit": 400.0,
+          "net": "b[1]",
+          "ratio": 867.1520218792734,
+          "rule": "ANTENNADIFFSIDEAREARATIO"
+         }
+        ]
+       },
+       "oracle": "native check-antenna and the foundry antenna deck",
+       "peak_rss_kib": 421004,
+       "port": "b[1]"
+      },
+      "bad_rtl": {
+       "cosim": {
+        "mismatches": [
+         "RR_COSIM_MISMATCH cycle=0 phase=0 port=y gold=01 gate=00",
+         "RR_COSIM_MISMATCH cycle=0 phase=1 port=y gold=01 gate=00",
+         "RR_COSIM_MISMATCH cycle=1 phase=0 port=y gold=01 gate=00"
+        ],
+        "status": "failed"
+       },
+       "detected": true,
+       "expected": "failed",
+       "files": [
+        "0_pipeline.v",
+        "rr_mutant_top.v"
+       ],
+       "mutation": "output bit y[0] inverted by a wrapper around the renamed top",
+       "oracle": "RustSys check synth, Yosys equiv and the random co-simulation",
+       "rustsys": {
+        "exit_code": 3,
+        "reason": "RustSys check synth verdict 'not-equivalent' (exit 3)",
+        "status": "failed",
+        "supply_ports": []
+       },
+       "yosys": {
+        "reason": "Yosys equiv: 1 unproven $equiv cells",
+        "status": "failed"
+       }
+      },
+      "drc_spacing": {
+       "by_rule": {
+        "drc-klayout": {
+         "M1.2a": 1
+        },
+        "drc-magic": {
+         "M1.2a": 1
+        }
+       },
+       "counts": {
+        "drc-klayout": 1,
+        "drc-magic": 1
+       },
+       "detected": true,
+       "expected": "failed",
+       "gap_um": 0.12,
+       "oracle": "Magic DRC and KLayout DRC",
+       "peak_rss_kib": 410180,
+       "planted": [
+        "(43000,3000;43600,4000)",
+        "(43720,3000;44320,4000)"
+       ],
+       "statuses": {
+        "drc_klayout": "failed",
+        "drc_magic": "failed"
+       }
+      },
+      "label_swap": {
+       "detected": true,
+       "expected": "failed",
+       "labels_swapped": {
+        "a[0]": 1,
+        "en": 1
+       },
+       "oracle": "Netgen LVS, KLayout LVS (own results) and the XOR label comparison",
+       "own_problems": {
+        "klayout": [
+         "top pin names swapped/mismatched (layout<->schematic) a[0]<->EN, en<->A[0]",
+         "labelled top-level nets paired with a different or non-matching schematic net: [['a[0]', 'EN', 'Match'], ['en', 'A[0]', 'Match']]"
+        ],
+        "netgen": [
+         "lane_smoke: pin lists differ",
+         "final result 'Top level cell failed pin matching.'"
+        ]
+       },
+       "peak_rss_kib": 407340,
+       "statuses": {
+        "lvs_klayout": "failed",
+        "lvs_netgen": "failed",
+        "xor": "failed"
+       },
+       "swapped": "en,a[0]"
+      },
+      "missing_tool": {
+       "detected": true,
+       "exit_code": 3,
+       "expected": "failed",
+       "oracle": "tool identity preflight (missing -> unverified, exit 3)",
+       "pdk_items_run": 0,
+       "peak_rss_kib": 42124,
+       "status": "unverified",
+       "tools_identity": {
+        "reason": "tool identity: {'yosys': 'missing'}",
+        "status": "unverified",
+        "tools": {
+         "openroad": "passed",
+         "opensta": "passed",
+         "rusteda": "passed",
+         "rustroad": "passed",
+         "ruststa": "passed",
+         "rustsys": "passed",
+         "verilator": "passed",
+         "yosys": "missing"
+        }
+       }
+      },
+      "removed_hold_cell": {
+       "detected": true,
+       "expected": "failed",
+       "iteration0_hold_ns": -0.898712112964649,
+       "margin_ns": 0.05,
+       "opensta_worst_hold_ns": -0.794514894485,
+       "oracle": "RustSTA and OpenSTA hold gate on a fresh layout",
+       "peak_rss_kib": 231700,
+       "processes": 24,
+       "removed": [
+        "rr_eco_hold_3"
+       ],
+       "ruststa_worst_hold_ns": {
+        "ff": -0.15371426957945383,
+        "ss": -0.7944396149178612,
+        "tt": -0.34444110400925987
+       },
+       "sink": "r3/D",
+       "worst_corner": "ss"
+      },
+      "removed_via": {
+       "at_gds": [
+        46460,
+        28435
+       ],
+       "detected": true,
+       "expected": "failed",
+       "net": "y[1]",
+       "oracle": "Netgen LVS and KLayout LVS (own results)",
+       "own_problems": {
+        "klayout": [
+         "top pin count layout 11 != schematic 12",
+         "unnamed top pin pairs [[None, 'Y[1]']]",
+         "labelled top-level layout nets not in the schematic (extra pins/labels): ['y[1]']",
+         "reference ports not paired with a layout pin: ['y[1]']"
+        ],
+        "netgen": [
+         "lane_smoke: pin lists differ",
+         "final result 'Top level cell failed pin matching.'",
+         "comp.out reports port errors ('Netlists match uniquely with port errors.')",
+         "1 pins without a matching pin: ['layout-only y[1]']"
+        ]
+       },
+       "peak_rss_kib": 408288,
+       "removed": "VIA_Via1_HV",
+       "statuses": {
+        "lvs_klayout": "failed",
+        "lvs_netgen": "failed"
+       },
+       "via": "Via1_HV"
+      },
+      "tampered_artifact": {
+       "detected": true,
+       "edited_hash": {
+        "reason": "binding record digest does not match its contents (recorded hash tampered); 1 artifact(s) differ from their bound sha256: ['def']",
+        "status": "failed"
+       },
+       "expected": "failed",
+       "flipped_byte": {
+        "reason": "1 artifact(s) differ from their bound sha256: ['gds']",
+        "status": "failed"
+       },
+       "oracle": "artifact binding re-verification",
+       "untouched_record": "passed"
+      },
+      "tampered_sdc": {
+       "changed": [
+        "sdc_postroute"
+       ],
+       "detected": true,
+       "expected": "failed",
+       "expected_sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+       "oracle": "frozen-input SHA-256 check",
+       "tampered_sha256": "bae115c87105d4cd7f9c983e667c7e33270d1b6d25ac0e2c65361e3f2e1d1313"
+      },
+      "tampered_spef": {
+       "binding": {
+        "ss": {
+         "actual": "9299dc13751fd7673297c42543ed61f7a58cf1fdc75eb756d1710a6a7cb763fb",
+         "expected": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828"
+        }
+       },
+       "detected": true,
+       "expected": "failed",
+       "factor": 1000.0,
+       "oracle": "SPEF identity against the extraction receipt",
+       "peak_rss_kib": 231032,
+       "resistors_scaled": 210,
+       "timing_effect": {
+        "bound_worst_hold_ns": 0.3706765838579389,
+        "bound_worst_setup_ns": 4.852929142063824,
+        "worst_hold_ns": 0.652331519154612,
+        "worst_setup_ns": 4.080520516140552
+       }
+      }
+     },
+     "status": "passed"
+    },
+    "density": {
+     "by_rule": {
+      "DCF.1b": 1,
+      "M1.4": 1,
+      "M2.4": 1,
+      "M3.4": 1,
+      "M4.4": 1,
+      "M5.4": 1,
+      "MT.3": 1,
+      "PL.8": 1
+     },
+     "count": 8,
+     "reason": "see density.json",
+     "status": "failed"
+    },
+    "determinism": {
+     "artifacts": {
+      "def": {
+       "normalization": [],
+       "other_sha256": "310cd74d1dee55117fd38f1e1a3fbdce8da67ddaf29207dc16392ede8523d1d5",
+       "sha256": "310cd74d1dee55117fd38f1e1a3fbdce8da67ddaf29207dc16392ede8523d1d5",
+       "status": "passed"
+      },
+      "gds": {
+       "normalization": [],
+       "other_sha256": "b5c59883ef5d94b0b0aea8ae22f4b1ee694d6be2452817d44ea2e7968aad8b68",
+       "sha256": "b5c59883ef5d94b0b0aea8ae22f4b1ee694d6be2452817d44ea2e7968aad8b68",
+       "status": "passed"
+      },
+      "netlist.final": {
+       "normalization": [],
+       "other_sha256": "c865b9dbdf8f0a507ef70ea5a8792b1ae8990ce2ee8e75a6abe72ec604db3a28",
+       "sha256": "c865b9dbdf8f0a507ef70ea5a8792b1ae8990ce2ee8e75a6abe72ec604db3a28",
+       "status": "passed"
+      },
+      "netlist.final_mapped": {
+       "normalization": [],
+       "other_sha256": "6b114fa4f7d136a5610ae42b1a529cd5dd133f49302aa3d49560ed0d75a85c30",
+       "sha256": "6b114fa4f7d136a5610ae42b1a529cd5dd133f49302aa3d49560ed0d75a85c30",
+       "status": "passed"
+      },
+      "netlist.i0": {
+       "normalization": [],
+       "other_sha256": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+       "sha256": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+       "status": "passed"
+      },
+      "netlist.i1": {
+       "normalization": [],
+       "other_sha256": "6b114fa4f7d136a5610ae42b1a529cd5dd133f49302aa3d49560ed0d75a85c30",
+       "sha256": "6b114fa4f7d136a5610ae42b1a529cd5dd133f49302aa3d49560ed0d75a85c30",
+       "status": "passed"
+      },
+      "netlist.mapped": {
+       "normalization": [],
+       "other_sha256": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+       "sha256": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+       "status": "passed"
+      },
+      "netlist.powered": {
+       "normalization": [],
+       "other_sha256": "6eafab55ab219db66d18c6b182e33f649ca42ec0afdab85381073773c8ec0773",
+       "sha256": "6eafab55ab219db66d18c6b182e33f649ca42ec0afdab85381073773c8ec0773",
+       "status": "passed"
+      },
+      "routes": {
+       "normalization": [],
+       "other_sha256": "16fd5c39aab40e665fd82ec1437872e3743787260df48194a59fd1dd21723e32",
+       "sha256": "16fd5c39aab40e665fd82ec1437872e3743787260df48194a59fd1dd21723e32",
+       "status": "passed"
+      },
+      "spef.native.ff": {
+       "normalization": [],
+       "other_sha256": "06688e3b6e6eacf45ca67da1e1708acd858fc60423319d43bd121ed407c9c796",
+       "sha256": "06688e3b6e6eacf45ca67da1e1708acd858fc60423319d43bd121ed407c9c796",
+       "status": "passed"
+      },
+      "spef.native.ss": {
+       "normalization": [],
+       "other_sha256": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828",
+       "sha256": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828",
+       "status": "passed"
+      },
+      "spef.native.tt": {
+       "normalization": [],
+       "other_sha256": "b791d7023bcf4fa4ca982214629baf765cf0f4e86e7627d9597ead92eb588706",
+       "sha256": "b791d7023bcf4fa4ca982214629baf765cf0f4e86e7627d9597ead92eb588706",
+       "status": "passed"
+      },
+      "spef.openrcx.ff": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "55d9dabb247017c9139c39104be05d1fa98e49809dda9fc1efc34044ecd9e8c6",
+       "sha256": "55d9dabb247017c9139c39104be05d1fa98e49809dda9fc1efc34044ecd9e8c6",
+       "status": "passed"
+      },
+      "spef.openrcx.ss": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "03bb47d6f49406290294e8d99040cdef53f6c68f22a62514723fd158afbca589",
+       "sha256": "03bb47d6f49406290294e8d99040cdef53f6c68f22a62514723fd158afbca589",
+       "status": "passed"
+      },
+      "spef.openrcx.tt": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "892095427292ac44fb4d66fcb418b970eb59a8b700e7c5671e03d2333d598322",
+       "sha256": "892095427292ac44fb4d66fcb418b970eb59a8b700e7c5671e03d2333d598322",
+       "status": "passed"
+      }
+     },
+     "compared": 15,
+     "status": "passed"
+    },
+    "drc_klayout": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed"
+    },
+    "drc_magic": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed"
+    },
+    "drv": {
+     "by_spef": {
+      "native": {
+       "limits": [
+        {
+         "checked": 54,
+         "corner": "tt",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.5144105578292218
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.277956914072703
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ss",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.07123714852676988
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.276715239083436
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ff",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.7127705620812277
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.278841089826367
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        }
+       ],
+       "status": "passed"
+      },
+      "openrcx": {
+       "limits": [
+        {
+         "checked": 54,
+         "corner": "tt",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.505313776248267
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.2772984659
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ss",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.04997956891570743
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.2758997427
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ff",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.7082407576873602
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.27829181154
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        }
+       ],
+       "status": "passed"
+      }
+     },
+     "status": "passed"
+    },
+    "extraction": {
+     "native": {
+      "binding": {
+       "files": {
+        "ff": {
+         "actual": "06688e3b6e6eacf45ca67da1e1708acd858fc60423319d43bd121ed407c9c796",
+         "expected": "06688e3b6e6eacf45ca67da1e1708acd858fc60423319d43bd121ed407c9c796"
+        },
+        "ss": {
+         "actual": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828",
+         "expected": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828"
+        },
+        "tt": {
+         "actual": "b791d7023bcf4fa4ca982214629baf765cf0f4e86e7627d9597ead92eb588706",
+         "expected": "b791d7023bcf4fa4ca982214629baf765cf0f4e86e7627d9597ead92eb588706"
+        }
+       },
+       "status": "passed"
+      },
+      "diagnostics": {
+       "ff": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled",
+        "VIA_R_CORNER_UNAVAILABLE: magic (lrlc) lists m2c contact resistance 0 mOhm (all contacts are 0 in that block, i.e. no corner data); using nominal 4500 mOhm",
+        "VIA_R_CORNER_UNAVAILABLE: magic (lrlc) lists m3c contact resistance 0 mOhm (all contacts are 0 in that block, i.e. no corner data); using nominal 4500 mOhm",
+        "VIA_R_CORNER_UNAVAILABLE: magic (lrlc) lists via3 contact resistance 0 mOhm (all contacts are 0 in that block, i.e. no corner data); using nominal 4500 mOhm",
+        "VIA_R_CORNER_UNAVAILABLE: magic (lrlc) lists via4 contact resistance 0 mOhm (all contacts are 0 in that block, i.e. no corner data); using nominal 4500 mOhm"
+       ],
+       "ss": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled"
+       ],
+       "tt": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled"
+       ]
+      },
+      "rc_profiles": {
+       "ff": "min",
+       "ss": "max",
+       "tt": "nom"
+      }
+     },
+     "openrcx": {
+      "binding": {
+       "files": {
+        "ff": {
+         "actual": "f50b99060b11b1aa5bfcccbbabdfc25f079b0027ce5e44a9cf1337e5f5f39d54",
+         "expected": "f50b99060b11b1aa5bfcccbbabdfc25f079b0027ce5e44a9cf1337e5f5f39d54"
+        },
+        "ss": {
+         "actual": "b3977fd9347a135e53a260f1b880a357839b0ae8280a8759dd49b00507def1bd",
+         "expected": "b3977fd9347a135e53a260f1b880a357839b0ae8280a8759dd49b00507def1bd"
+        },
+        "tt": {
+         "actual": "36e3e7ca45c0e87898203f8b7cfe1b1f84de844f883322561eb77bc1a029fa39",
+         "expected": "36e3e7ca45c0e87898203f8b7cfe1b1f84de844f883322561eb77bc1a029fa39"
+        }
+       },
+       "status": "passed"
+      },
+      "rules": {
+       "ff": {
+        "bytes": 31290,
+        "sha256": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00"
+       },
+       "ss": {
+        "bytes": 31286,
+        "sha256": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f"
+       },
+       "tt": {
+        "bytes": 31291,
+        "sha256": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf"
+       }
+      }
+     },
+     "status": "passed"
+    },
+    "gds_xor": {
+     "by_rule": {},
+     "count": 0,
+     "native_gds": {
+      "export": {
+       "bytes": 52578,
+       "sha256": "b5c59883ef5d94b0b0aea8ae22f4b1ee694d6be2452817d44ea2e7968aad8b68"
+      }
+     },
+     "status": "passed"
+    },
+    "hold_closure": {
+     "decision_spef": "native rustroad extract",
+     "iterations": [
+      {
+       "antenna": "passed",
+       "antenna_eco": null,
+       "closed": false,
+       "hold_eco": {
+        "area_um2": 96.5888,
+        "cells": 4,
+        "planned_sinks": 4,
+        "violating_sinks": 4
+       },
+       "iteration": 0,
+       "worst": {
+        "ff": {
+         "hold_ns": -0.18047936911969076,
+         "setup_ns": 8.571855516049729
+        },
+        "ss": {
+         "hold_ns": -0.898712112964649,
+         "setup_ns": 5.660602286410041
+        },
+        "tt": {
+         "hold_ns": -0.3944506589585728,
+         "setup_ns": 7.702045602444236
+        }
+       }
+      },
+      {
+       "antenna": "passed",
+       "antenna_eco": null,
+       "closed": true,
+       "hold_eco": null,
+       "iteration": 1,
+       "worst": {
+        "ff": {
+         "hold_ns": 0.1961917416231851,
+         "setup_ns": 8.54919346352558
+        },
+        "ss": {
+         "hold_ns": 0.3706765838579389,
+         "setup_ns": 4.852929142063824
+        },
+        "tt": {
+         "hold_ns": 0.2445227435302908,
+         "setup_ns": 7.463826732605014
+        }
+       }
+      }
+     ],
+     "max_iterations": 4,
+     "status": "passed",
+     "target_margin_ns": 0.05
+    },
+    "implementation": {
+     "final_iteration": 1,
+     "iterations": 2,
+     "patches": 1,
+     "routed_nets": 23,
+     "status": "passed",
+     "vias": 83,
+     "wires": 5622
+    },
+    "inputs_frozen": {
+     "after": {
+      "changed": [],
+      "files": {
+       "cell_gds": {
+        "actual": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "expected": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "status": "passed"
+       },
+       "cell_lef": {
+        "actual": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "expected": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "status": "passed"
+       },
+       "cell_policy": {
+        "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "status": "passed"
+       },
+       "delay_cells": {
+        "actual": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "expected": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "status": "passed"
+       },
+       "gds_layer_map": {
+        "actual": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "expected": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "status": "passed"
+       },
+       "liberty_ff": {
+        "actual": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "expected": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "status": "passed"
+       },
+       "liberty_ss": {
+        "actual": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "expected": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "status": "passed"
+       },
+       "liberty_tt": {
+        "actual": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "expected": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "status": "passed"
+       },
+       "openrcx_rules_ff": {
+        "actual": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "expected": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "status": "passed"
+       },
+       "openrcx_rules_ss": {
+        "actual": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "expected": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "status": "passed"
+       },
+       "openrcx_rules_tt": {
+        "actual": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "expected": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "status": "passed"
+       },
+       "physical_config": {
+        "actual": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+        "expected": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+        "status": "passed"
+       },
+       "rc_profile_ff": {
+        "actual": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+        "expected": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+        "status": "passed"
+       },
+       "rc_profile_ss": {
+        "actual": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+        "expected": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+        "status": "passed"
+       },
+       "rc_profile_tt": {
+        "actual": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+        "expected": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+        "status": "passed"
+       },
+       "routing_profile": {
+        "actual": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+        "expected": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+        "status": "passed"
+       },
+       "sdc_cts": {
+        "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "status": "passed"
+       },
+       "sdc_postroute": {
+        "actual": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "expected": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "status": "passed"
+       },
+       "technology_lef": {
+        "actual": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "expected": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "status": "passed"
+       }
+      },
+      "status": "passed"
+     },
+     "before": {
+      "changed": [],
+      "files": {
+       "cell_gds": {
+        "actual": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "expected": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "status": "passed"
+       },
+       "cell_lef": {
+        "actual": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "expected": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "status": "passed"
+       },
+       "cell_policy": {
+        "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "status": "passed"
+       },
+       "delay_cells": {
+        "actual": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "expected": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "status": "passed"
+       },
+       "gds_layer_map": {
+        "actual": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "expected": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "status": "passed"
+       },
+       "liberty_ff": {
+        "actual": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "expected": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "status": "passed"
+       },
+       "liberty_ss": {
+        "actual": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "expected": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "status": "passed"
+       },
+       "liberty_tt": {
+        "actual": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "expected": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "status": "passed"
+       },
+       "openrcx_rules_ff": {
+        "actual": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "expected": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "status": "passed"
+       },
+       "openrcx_rules_ss": {
+        "actual": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "expected": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "status": "passed"
+       },
+       "openrcx_rules_tt": {
+        "actual": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "expected": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "status": "passed"
+       },
+       "physical_config": {
+        "actual": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+        "expected": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+        "status": "passed"
+       },
+       "rc_profile_ff": {
+        "actual": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+        "expected": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+        "status": "passed"
+       },
+       "rc_profile_ss": {
+        "actual": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+        "expected": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+        "status": "passed"
+       },
+       "rc_profile_tt": {
+        "actual": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+        "expected": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+        "status": "passed"
+       },
+       "routing_profile": {
+        "actual": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+        "expected": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+        "status": "passed"
+       },
+       "sdc_cts": {
+        "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "status": "passed"
+       },
+       "sdc_postroute": {
+        "actual": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "expected": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "status": "passed"
+       },
+       "technology_lef": {
+        "actual": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "expected": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "status": "passed"
+       }
+      },
+      "status": "passed"
+     },
+     "status": "passed"
+    },
+    "lvs_klayout": {
+     "by_rule": {
+      "mismatch": 0
+     },
+     "count": 0,
+     "status": "passed"
+    },
+    "lvs_netgen": {
+     "by_rule": {
+      "mismatch": 0
+     },
+     "count": 0,
+     "status": "passed"
+    },
+    "mpw_min_period": {
+     "by_spef": {
+      "native": {
+       "min_period_note": null,
+       "min_period_rows": {
+        "opensta": 12,
+        "ruststa": 12
+       },
+       "pulse_width_rows": 24,
+       "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
+       "status": "passed",
+       "worst_min_period_slack_ns": 6.438000000000001,
+       "worst_min_pulse_width_slack_ns": 3.247887058368783
+      },
+      "openrcx": {
+       "min_period_note": null,
+       "min_period_rows": {
+        "opensta": 12,
+        "ruststa": 12
+       },
+       "pulse_width_rows": 24,
+       "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
+       "status": "passed",
+       "worst_min_period_slack_ns": 6.438000000000001,
+       "worst_min_pulse_width_slack_ns": 3.248451880259017
+      }
+     },
+     "status": "passed"
+    },
+    "simulation": {
+     "compared_outputs": [
+      "y",
+      "z"
+     ],
+     "expected": {
+      "checks": 16384,
+      "cycles": 4096,
+      "time": 12288
+     },
+     "initial_state": "Verilator zero-initialised state in both models",
+     "observed": {
+      "checks": 16384,
+      "cycles": 4096,
+      "time": 12288
+     },
+     "seed": "0x5eed2026c0ffee01",
+     "status": "passed",
+     "vectors": 4096
+    },
+    "timing_accuracy": {
+     "by_spef": {
+      "native": {
+       "corners": {
+        "ff": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 8.304012662563309e-05,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 8.304012662563309e-05,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 8.569366455078,
+            "ruststa_ns": 8.569449495204626
+           },
+           {
+            "difference_ns": 7.272747934838897e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.214918136597,
+            "ruststa_ns": 1.2148454091176517
+           },
+           {
+            "difference_ns": 7.112432888511933e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 8.593006134033,
+            "ruststa_ns": 8.593077258361886
+           },
+           {
+            "difference_ns": 6.92427479185298e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.590206563473,
+            "ruststa_ns": 0.5901373207250815
+           },
+           {
+            "difference_ns": 6.752833075651665e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.290086746216,
+            "ruststa_ns": 9.290154274546756
+           },
+           {
+            "difference_ns": 5.1730785957104786e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 8.617486953735,
+            "ruststa_ns": 8.617538684520957
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 1.4225734603634521e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.4225734603634521e-05,
+            "opensta_required_ns": 0.324000000954,
+            "opensta_slack_ns": 4.677847862244,
+            "ruststa_required_ns": 0.324,
+            "ruststa_slack_ns": 4.677862087978603
+           },
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.3928188603351543e-05,
+            "opensta_required_ns": 0.388999998569,
+            "opensta_slack_ns": 4.60915184021,
+            "ruststa_required_ns": 0.389,
+            "ruststa_slack_ns": 4.609137912021397
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.3928188603351543e-05,
+            "opensta_required_ns": 0.388999998569,
+            "opensta_slack_ns": 4.60915184021,
+            "ruststa_required_ns": 0.389,
+            "ruststa_slack_ns": 4.609137912021397
+           },
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 1.381805015032711e-05,
+            "opensta_required_ns": 0.388999998569,
+            "opensta_slack_ns": 4.608811855316,
+            "ruststa_required_ns": 0.389,
+            "ruststa_slack_ns": 4.608798037265849
+           }
+          ]
+         }
+        },
+        "ss": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.0004547113795183577,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.0004547113795183577,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 4.960721492767,
+            "ruststa_ns": 4.961176204146518
+           },
+           {
+            "difference_ns": 0.00019324961591049572,
+            "endpoint": "r1/D",
+            "kind": "setup",
+            "opensta_ns": 7.600592136383,
+            "ruststa_ns": 7.600398886767089
+           },
+           {
+            "difference_ns": 0.00019082179595919513,
+            "endpoint": "r0/D",
+            "kind": "setup",
+            "opensta_ns": 7.53519487381,
+            "ruststa_ns": 7.535004052014041
+           },
+           {
+            "difference_ns": 0.0001779574762243996,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 3.728322982788,
+            "ruststa_ns": 3.7281450253117754
+           },
+           {
+            "difference_ns": 0.00017358319007332312,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 5.744966030121,
+            "ruststa_ns": 5.745139613311073
+           },
+           {
+            "difference_ns": 0.00016787344782454028,
+            "endpoint": "r3/D",
+            "kind": "setup",
+            "opensta_ns": 4.852761268616,
+            "ruststa_ns": 4.852929142063824
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 3.939138635455919e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 3.939138635455919e-05,
+            "opensta_required_ns": 1.473999977112,
+            "opensta_slack_ns": 3.491814851761,
+            "ruststa_required_ns": 1.474,
+            "ruststa_slack_ns": 3.4917754603746456
+           },
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 3.891454935445182e-05,
+            "opensta_required_ns": 1.473999977112,
+            "opensta_slack_ns": 3.491814374924,
+            "ruststa_required_ns": 1.474,
+            "ruststa_slack_ns": 3.4917754603746456
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 3.884016235433663e-05,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.780185699463,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.780224539625354
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 3.8601744354327394e-05,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.780185937881,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.780224539625354
+           }
+          ]
+         }
+        },
+        "tt": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.0002604420901781146,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.0002604420901781146,
+            "endpoint": "r2/D",
+            "kind": "hold",
+            "opensta_ns": 0.287925750017,
+            "ruststa_ns": 0.2876653079268219
+           },
+           {
+            "difference_ns": 0.00023515698201403978,
+            "endpoint": "r3/D",
+            "kind": "setup",
+            "opensta_ns": 7.463591575623,
+            "ruststa_ns": 7.463826732605014
+           },
+           {
+            "difference_ns": 0.0001359512559959697,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 7.502439022064,
+            "ruststa_ns": 7.502574973319996
+           },
+           {
+            "difference_ns": 8.330369531783788e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.737409174442,
+            "ruststa_ns": 0.7373258707466822
+           },
+           {
+            "difference_ns": 7.55700331587228e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.969297885895,
+            "ruststa_ns": 1.9692223158618414
+           },
+           {
+            "difference_ns": 7.300788104114275e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 7.741646766663,
+            "ruststa_ns": 7.741719774544041
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 1.7199717753157984e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.7199717753157984e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.283400535583,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.283383335865246
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.662369875443659e-05,
+            "opensta_required_ns": 0.597000002861,
+            "opensta_slack_ns": 4.412600040436,
+            "ruststa_required_ns": 0.597,
+            "ruststa_slack_ns": 4.412616664134754
+           },
+           {
+            "check": "r3/CLK:low",
+            "difference_ns": 1.6623698752660232e-05,
+            "opensta_required_ns": 0.597000002861,
+            "opensta_slack_ns": 4.412600040436,
+            "ruststa_required_ns": 0.597,
+            "ruststa_slack_ns": 4.412616664134752
+           },
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.624604375383143e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.283399581909,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.283383335865246
+           }
+          ]
+         }
+        }
+       },
+       "failing": [],
+       "status": "passed"
+      },
+      "openrcx": {
+       "corners": {
+        "ff": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 7.842255746837168e-05,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 7.842255746837168e-05,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 8.570183753967,
+            "ruststa_ns": 8.570262176524468
+           },
+           {
+            "difference_ns": 7.150774432118645e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.22286772728,
+            "ruststa_ns": 1.2227962195356787
+           },
+           {
+            "difference_ns": 6.893765916515804e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 8.584024429321,
+            "ruststa_ns": 8.584093366980165
+           },
+           {
+            "difference_ns": 6.6318268168164e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.590572535992,
+            "ruststa_ns": 0.5905062177238318
+           },
+           {
+            "difference_ns": 6.528953564455264e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.289699554443,
+            "ruststa_ns": 9.289764843978645
+           },
+           {
+            "difference_ns": 5.3606829645502785e-05,
+            "endpoint": "r3/D",
+            "kind": "setup",
+            "opensta_ns": 8.549252510071,
+            "ruststa_ns": 8.549306116900645
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 1.563570105123091e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r3/CLK:low",
+            "difference_ns": 1.563570105123091e-05,
+            "opensta_required_ns": 0.324000000954,
+            "opensta_slack_ns": 4.678115844727,
+            "ruststa_required_ns": 0.324,
+            "ruststa_slack_ns": 4.678131480428052
+           },
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.533815505272429e-05,
+            "opensta_required_ns": 0.388999998569,
+            "opensta_slack_ns": 4.608883857727,
+            "ruststa_required_ns": 0.389,
+            "ruststa_slack_ns": 4.608868519571947
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.533815505183611e-05,
+            "opensta_required_ns": 0.388999998569,
+            "opensta_slack_ns": 4.608883857727,
+            "ruststa_required_ns": 0.389,
+            "ruststa_slack_ns": 4.608868519571948
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.4682027052792535e-05,
+            "opensta_required_ns": 0.324000000954,
+            "opensta_slack_ns": 4.678116798401,
+            "ruststa_required_ns": 0.324,
+            "ruststa_slack_ns": 4.6781314804280525
+           }
+          ]
+         }
+        },
+        "ss": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.002722564062263011,
+          "missing": [],
+          "status": "failed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.002722564062263011,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 3.767025947571,
+            "ruststa_ns": 3.764303383508737
+           },
+           {
+            "difference_ns": 0.0027167857821499553,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 5.701058864594,
+            "ruststa_ns": 5.70377565037615
+           },
+           {
+            "difference_ns": 0.0026808386981294063,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 5.790239810944,
+            "ruststa_ns": 5.792920649642129
+           },
+           {
+            "difference_ns": 0.0026793373429496725,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 3.713957071304,
+            "ruststa_ns": 3.7112777339610505
+           },
+           {
+            "difference_ns": 0.0025919942334995394,
+            "endpoint": "r0/D",
+            "kind": "hold",
+            "opensta_ns": 0.444480806589,
+            "ruststa_ns": 0.44707280082249956
+           },
+           {
+            "difference_ns": 0.0025862081124029546,
+            "endpoint": "r3/D",
+            "kind": "hold",
+            "opensta_ns": 0.394048810005,
+            "ruststa_ns": 0.396635018117403
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 0.0025069581771886007,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "failed",
+          "worst_rows": [
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 0.0025069581771886007,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.782307863235,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.779800905057811
+           },
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 0.0025068837911885744,
+            "opensta_required_ns": 1.473999977112,
+            "opensta_slack_ns": 3.489692211151,
+            "ruststa_required_ns": 1.474,
+            "ruststa_slack_ns": 3.4921990949421886
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 0.0025064813401889374,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.782307386398,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.779800905057811
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 0.002506406954188467,
+            "opensta_required_ns": 1.473999977112,
+            "opensta_slack_ns": 3.489692687988,
+            "ruststa_required_ns": 1.474,
+            "ruststa_slack_ns": 3.4921990949421886
+           }
+          ]
+         }
+        },
+        "tt": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00038033558578920434,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00038033558578920434,
+            "endpoint": "r3/D",
+            "kind": "setup",
+            "opensta_ns": 7.463933467865,
+            "ruststa_ns": 7.464313803450789
+           },
+           {
+            "difference_ns": 0.0002532543516098329,
+            "endpoint": "r2/D",
+            "kind": "hold",
+            "opensta_ns": 0.279413342476,
+            "ruststa_ns": 0.2791600881243902
+           },
+           {
+            "difference_ns": 0.00012790751125280053,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 7.504493236542,
+            "ruststa_ns": 7.504621144053253
+           },
+           {
+            "difference_ns": 9.224494819226603e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.738226830959,
+            "ruststa_ns": 0.7381345860108077
+           },
+           {
+            "difference_ns": 8.270996635162398e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.985266923904,
+            "ruststa_ns": 1.9851842139376483
+           },
+           {
+            "difference_ns": 7.968113710354885e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 7.723526954651,
+            "ruststa_ns": 7.723606635788103
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 1.879718561692556e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.879718561692556e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.28277349472,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.282754697534383
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.879718561692556e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.28277349472,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.282754697534383
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 1.8641426326126975e-05,
+            "opensta_required_ns": 0.597000002861,
+            "opensta_slack_ns": 4.413713932037,
+            "ruststa_required_ns": 0.597,
+            "ruststa_slack_ns": 4.413732573463326
+           },
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 1.8263771325521816e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.282285690308,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.2822674265366745
+           }
+          ]
+         }
+        }
+       },
+       "failing": [
+        "ss:endpoints",
+        "ss:pulse"
+       ],
+       "reason": "parity outside 1 ps: ['ss:endpoints', 'ss:pulse']",
+       "status": "failed"
+      }
+     },
+     "reason": "openrcx: parity outside 1 ps: ['ss:endpoints', 'ss:pulse']",
+     "status": "failed"
+    },
+    "timing_hold": {
+     "by_spef": {
+      "native": {
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "status": "passed",
+       "violations": []
+      },
+      "openrcx": {
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    },
+    "timing_setup": {
+     "by_spef": {
+      "native": {
+       "corners": [
+        "tt",
+        "ss"
+       ],
+       "status": "passed",
+       "violations": []
+      },
+      "openrcx": {
+       "corners": [
+        "tt",
+        "ss"
+       ],
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    }
+   },
+   "wall_seconds": 65.447
+  }
+ ],
+ "ports": [
+  {
+   "bits": [
+    "clk"
+   ],
+   "direction": "input",
+   "lsb": 0,
+   "msb": 0,
+   "name": "clk",
+   "vector": false,
+   "width": 1
+  },
+  {
+   "bits": [
+    "en"
+   ],
+   "direction": "input",
+   "lsb": 0,
+   "msb": 0,
+   "name": "en",
+   "vector": false,
+   "width": 1
+  },
+  {
+   "bits": [
+    "a[0]",
+    "a[1]"
+   ],
+   "direction": "input",
+   "lsb": 0,
+   "msb": 1,
+   "name": "a",
+   "vector": true,
+   "width": 2
+  },
+  {
+   "bits": [
+    "b[0]",
+    "b[1]"
+   ],
+   "direction": "input",
+   "lsb": 0,
+   "msb": 1,
+   "name": "b",
+   "vector": true,
+   "width": 2
+  },
+  {
+   "bits": [
+    "y[0]",
+    "y[1]"
+   ],
+   "direction": "output",
+   "lsb": 0,
+   "msb": 1,
+   "name": "y",
+   "vector": true,
+   "width": 2
+  },
+  {
+   "bits": [
+    "z[0]",
+    "z[1]"
+   ],
+   "direction": "output",
+   "lsb": 0,
+   "msb": 1,
+   "name": "z",
+   "vector": true,
+   "width": 2
+  }
+ ],
+ "reported": [
+  "density"
+ ],
+ "requested_pdks": [
+  "sky130",
+  "gf180"
+ ],
+ "resources": {
+  "guards": {
+   "gate_process_address_space_mib": 8192,
+   "single_tool_process_rss_limit_kib": 2097152,
+   "tool_process_address_space_mib": 2048,
+   "tool_timeout_s": 120
+  },
+  "peak_rss_kib": 475012,
+  "processes": 290,
+  "steps": [
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 61632,
+    "processes": 1,
+    "step": "synthesis",
+    "wall_seconds": 0.141
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 120760,
+    "processes": 74,
+    "step": "place_cts_route_closure",
+    "wall_seconds": 3.325
+   },
+   {
+    "nested_peaks": 3,
+    "pdk": "sky130",
+    "peak_rss_kib": 126684,
+    "processes": 3,
+    "step": "openrcx",
+    "wall_seconds": 1.257
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 17744,
+    "processes": 1,
+    "step": "gds_export",
+    "wall_seconds": 0.03
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": null,
+    "processes": 0,
+    "step": "cell_policy",
+    "wall_seconds": 0.026
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 62456,
+    "processes": 2,
+    "step": "cec_prelayout",
+    "wall_seconds": 0.168
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 120532,
+    "processes": 42,
+    "step": "timing",
+    "wall_seconds": 1.982
+   },
+   {
+    "nested_peaks": 2,
+    "pdk": "sky130",
+    "peak_rss_kib": 474888,
+    "processes": 0,
+    "step": "signoff",
+    "wall_seconds": 13.215
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 62788,
+    "processes": 2,
+    "step": "cec_final",
+    "wall_seconds": 0.163
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 61888,
+    "processes": 2,
+    "step": "cec_powered",
+    "wall_seconds": 0.178
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 287884,
+    "processes": 3,
+    "step": "simulation",
+    "wall_seconds": 1.822
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 61500,
+    "processes": 20,
+    "step": "cell_proofs",
+    "wall_seconds": 0.742
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 61888,
+    "processes": 1,
+    "step": "rerun_synthesis",
+    "wall_seconds": 0.141
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 120740,
+    "processes": 74,
+    "step": "rerun_place_cts_route_closure",
+    "wall_seconds": 3.262
+   },
+   {
+    "nested_peaks": 3,
+    "pdk": "sky130",
+    "peak_rss_kib": 126196,
+    "processes": 3,
+    "step": "rerun_openrcx",
+    "wall_seconds": 1.233
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 17060,
+    "processes": 1,
+    "step": "rerun_gds_export",
+    "wall_seconds": 0.039
+   },
+   {
+    "nested_peaks": 79,
+    "pdk": "sky130",
+    "peak_rss_kib": 120740,
+    "processes": 0,
+    "step": "determinism_rerun",
+    "wall_seconds": 4.697
+   },
+   {
+    "nested_peaks": 10,
+    "pdk": "sky130",
+    "peak_rss_kib": 475012,
+    "processes": 6,
+    "step": "controls",
+    "wall_seconds": 27.106
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 103904,
+    "processes": 1,
+    "step": "synthesis",
+    "wall_seconds": 0.281
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 231020,
+    "processes": 49,
+    "step": "place_cts_route_closure",
+    "wall_seconds": 2.343
+   },
+   {
+    "nested_peaks": 3,
+    "pdk": "gf180",
+    "peak_rss_kib": 136012,
+    "processes": 3,
+    "step": "openrcx",
+    "wall_seconds": 1.543
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 11628,
+    "processes": 1,
+    "step": "gds_export",
+    "wall_seconds": 0.019
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": null,
+    "processes": 0,
+    "step": "cell_policy",
+    "wall_seconds": 0.012
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 107452,
+    "processes": 2,
+    "step": "cec_prelayout",
+    "wall_seconds": 0.251
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 231068,
+    "processes": 42,
+    "step": "timing",
+    "wall_seconds": 3.089
+   },
+   {
+    "nested_peaks": 2,
+    "pdk": "gf180",
+    "peak_rss_kib": 446292,
+    "processes": 0,
+    "step": "signoff",
+    "wall_seconds": 16.732
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 106448,
+    "processes": 2,
+    "step": "cec_final",
+    "wall_seconds": 0.248
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 106688,
+    "processes": 2,
+    "step": "cec_powered",
+    "wall_seconds": 0.25
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 288080,
+    "processes": 3,
+    "step": "simulation",
+    "wall_seconds": 1.701
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 79344,
+    "processes": 20,
+    "step": "cell_proofs",
+    "wall_seconds": 0.93
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 104912,
+    "processes": 1,
+    "step": "rerun_synthesis",
+    "wall_seconds": 0.23
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 230880,
+    "processes": 49,
+    "step": "rerun_place_cts_route_closure",
+    "wall_seconds": 2.228
+   },
+   {
+    "nested_peaks": 3,
+    "pdk": "gf180",
+    "peak_rss_kib": 123500,
+    "processes": 3,
+    "step": "rerun_openrcx",
+    "wall_seconds": 1.571
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 11512,
+    "processes": 1,
+    "step": "rerun_gds_export",
+    "wall_seconds": 0.018
+   },
+   {
+    "nested_peaks": 54,
+    "pdk": "gf180",
+    "peak_rss_kib": 230880,
+    "processes": 0,
+    "step": "determinism_rerun",
+    "wall_seconds": 4.076
+   },
+   {
+    "nested_peaks": 10,
+    "pdk": "gf180",
+    "peak_rss_kib": 448104,
+    "processes": 6,
+    "step": "controls",
+    "wall_seconds": 33.648
+   }
+  ],
+  "wall_seconds": 121.222
+ },
+ "revision": {
+  "branch": "feat/rtl2gds-gate",
+  "dirty": false,
+  "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+  "dirty_paths": 0,
+  "head": "cf111eb06af6e9b9a54aa750367859dfb5009baf",
+  "rustroad_sha256": "b6b30c9011921b18d957b6199a75be3273f81ea43c841e55d2d34117eb4df9b8"
+ },
+ "schema": "rustroad.rtl2gds.v1",
+ "scope": {
+  "antenna": "native check-antenna with a 0.10 safety margin + foundry deck (deck is the signoff gate)",
+  "clocks": "propagated, RustROAD CTS",
+  "cppr": "unchecked",
+  "density": "reported separately (density_status); not part of the gate (owner decision)",
+  "electromigration": "unchecked",
+  "ir_drop": "unchecked",
+  "level": "block/macro",
+  "ocv": "unchecked",
+  "pad_ring": "not_applicable (block level, no pad ring)",
+  "seal_ring": "not_applicable (block level, no seal ring)",
+  "signal_integrity": "unchecked (coupling grounded)"
+ },
+ "status": "failed",
+ "timing_accuracy_failures": [
+  {
+   "check": "endpoints",
+   "corner": "ss",
+   "max_difference_ns": 0.002722564062263011,
+   "missing": null,
+   "pdk": "gf180",
+   "spef": "openrcx",
+   "tolerance_ns": 0.001,
+   "worst_rows": [
+    {
+     "difference_ns": 0.002722564062263011,
+     "endpoint": "y[0]",
+     "kind": "hold",
+     "opensta_ns": 3.767025947571,
+     "ruststa_ns": 3.764303383508737
+    },
+    {
+     "difference_ns": 0.0027167857821499553,
+     "endpoint": "y[0]",
+     "kind": "setup",
+     "opensta_ns": 5.701058864594,
+     "ruststa_ns": 5.70377565037615
+    },
+    {
+     "difference_ns": 0.0026808386981294063,
+     "endpoint": "y[1]",
+     "kind": "setup",
+     "opensta_ns": 5.790239810944,
+     "ruststa_ns": 5.792920649642129
+    },
+    {
+     "difference_ns": 0.0026793373429496725,
+     "endpoint": "y[1]",
+     "kind": "hold",
+     "opensta_ns": 3.713957071304,
+     "ruststa_ns": 3.7112777339610505
+    },
+    {
+     "difference_ns": 0.0025919942334995394,
+     "endpoint": "r0/D",
+     "kind": "hold",
+     "opensta_ns": 0.444480806589,
+     "ruststa_ns": 0.44707280082249956
+    },
+    {
+     "difference_ns": 0.0025862081124029546,
+     "endpoint": "r3/D",
+     "kind": "hold",
+     "opensta_ns": 0.394048810005,
+     "ruststa_ns": 0.396635018117403
+    }
+   ]
+  },
+  {
+   "check": "pulse",
+   "corner": "ss",
+   "max_difference_ns": 0.0025069581771886007,
+   "missing": [],
+   "pdk": "gf180",
+   "spef": "openrcx",
+   "tolerance_ns": 0.001,
+   "worst_rows": [
+    {
+     "check": "r1/CLK:low",
+     "difference_ns": 0.0025069581771886007,
+     "opensta_required_ns": 1.253999948502,
+     "opensta_slack_ns": 3.782307863235,
+     "ruststa_required_ns": 1.254,
+     "ruststa_slack_ns": 3.779800905057811
+    },
+    {
+     "check": "r0/CLK:high",
+     "difference_ns": 0.0025068837911885744,
+     "opensta_required_ns": 1.473999977112,
+     "opensta_slack_ns": 3.489692211151,
+     "ruststa_required_ns": 1.474,
+     "ruststa_slack_ns": 3.4921990949421886
+    },
+    {
+     "check": "r0/CLK:low",
+     "difference_ns": 0.0025064813401889374,
+     "opensta_required_ns": 1.253999948502,
+     "opensta_slack_ns": 3.782307386398,
+     "ruststa_required_ns": 1.254,
+     "ruststa_slack_ns": 3.779800905057811
+    },
+    {
+     "check": "r1/CLK:high",
+     "difference_ns": 0.002506406954188467,
+     "opensta_required_ns": 1.473999977112,
+     "opensta_slack_ns": 3.489692687988,
+     "ruststa_required_ns": 1.474,
+     "ruststa_slack_ns": 3.4921990949421886
+    }
+   ]
+  }
+ ],
+ "timing_accuracy_status": "failed",
+ "tools": {
+  "openroad": {
+   "executable": "openroad",
+   "image": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+   "note": "image identity verified by its own harness",
+   "provenance": "OpenROAD/OpenRCX image f152917ebc45 (black box)",
+   "sha256": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+   "status": "passed"
+  },
+  "opensta": {
+   "actual_sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+   "expected_sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+   "overridden": false,
+   "provenance": "OpenSTA 3.1.0 (fixtures/flow/local-pinned.json)",
+   "reason": null,
+   "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+   "status": "passed"
+  },
+  "rusteda": {
+   "actual_sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
+   "expected_sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
+   "overridden": false,
+   "provenance": "RustSTA 0.4.0 78ea7cc (feat/signoff-checks), .work/sta-signoff/bin",
+   "reason": null,
+   "sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
+   "status": "passed"
+  },
+  "rustroad": {
+   "actual_sha256": "b6b30c9011921b18d957b6199a75be3273f81ea43c841e55d2d34117eb4df9b8",
+   "note": "the binary under test: bound by sha256 with the git revision, not pinned",
+   "status": "passed"
+  },
+  "ruststa": {
+   "actual_sha256": "c407c7423dbda69661825ad06db0b10f66bd8eae7e27b181ac40a5cca85b8f44",
+   "expected_sha256": "c407c7423dbda69661825ad06db0b10f66bd8eae7e27b181ac40a5cca85b8f44",
+   "overridden": false,
+   "provenance": "RustSTA 0.4.0 78ea7cc (feat/signoff-checks), .work/sta-signoff/bin",
+   "reason": null,
+   "sha256": "c407c7423dbda69661825ad06db0b10f66bd8eae7e27b181ac40a5cca85b8f44",
+   "status": "passed"
+  },
+  "rustsys": {
+   "actual_sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "expected_sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "overridden": false,
+   "provenance": "policy producer RustSys c5ec23c (fixtures/flow/cell-policy.json)",
+   "reason": null,
+   "sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "status": "passed"
+  },
+  "verilator": {
+   "actual_sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+   "expected_sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+   "overridden": false,
+   "provenance": "Verilator 5.032 (fixtures/flow/local-pinned.json)",
+   "reason": null,
+   "sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+   "status": "passed"
+  },
+  "yosys": {
+   "actual_sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "expected_sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "overridden": false,
+   "provenance": "Yosys 0.67 (fixtures/flow/local-pinned.json)",
+   "reason": null,
+   "sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "status": "passed"
+  }
+ },
+ "unverified_items": []
+}

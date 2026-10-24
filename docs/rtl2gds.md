@@ -48,10 +48,12 @@ passes on both PDKs, and the same layout timed with the native SPEF agrees
 within 0.46 ps. The exact rows are in `timing_accuracy_failures` of the
 summary.
 
-Three complete gate runs (`.work/runs/final-a`, `final`, `final-c`), each with a
-`git archive` build of the committed tree, gave byte-identical netlists, DEF,
-GDS and native SPEF to each other and to a run with the worktree build; the
-OpenRCX SPEF differ only in OpenRCX's wall-clock `*DATE` line.
+Three complete gate runs (`.work/runs/final-c` is the evidence run; the
+summaries and binding records of the other two are kept in
+`.work/runs/keep-final-a` and `keep-final`), each with a `git archive` build of
+the committed tree, gave byte-identical netlists, DEF, GDS and native SPEF to
+each other and to a run with the worktree build; the OpenRCX SPEF differ only
+in OpenRCX's wall-clock `*DATE` line.
 
 ## How to run
 
@@ -220,6 +222,14 @@ Tests: `crates/rustroad-formats/src/eco.rs`
 reproduces every netlist, DEF and native SPEF of the run before the change
 byte for byte.
 
+Checks on the branch: `cargo test --release --workspace` 153 passed, 4
+ignored (22 s, 730 MiB); `cargo clippy --all-targets -- -D warnings` and
+`cargo fmt --check` clean; `python3 -m unittest discover -s scripts/tests`
+65 tests (`scripts/tests/test_rtl2gds.py` covers the status algebra, SDC
+rendering, binding, determinism compare, powered-netlist views, bad-RTL
+wrapper, testbench generator, OpenSTA parser, parity and the controls'
+netlist/DEF/SPEF edits).
+
 ## Resources (rule 9)
 
 Memory estimate before the runs: the pipeline has < 150 instances and 25
@@ -229,24 +239,26 @@ largest single process: a signoff container (KLayout/Magic/Netgen, capped at
 limit and a 120 s timeout, the gate itself under 8 GiB, the whole command in
 a `systemd-run` scope with MemoryMax=8G.
 
-Measured (final run, both PDKs): **128.4 s** end to end (`/usr/bin/time`:
-2:08.5), 290 guarded processes, peak RSS **475,720 KiB** (sky130 signoff
-container); the largest host process was the Verilator co-simulation build
-(289,068 KiB). Per step (wall s / peak RSS KiB):
+Measured (evidence run `.work/runs/final-c`, both PDKs): **121.2 s** end to
+end (`/usr/bin/time`: 2:01.3), 290 guarded processes, peak RSS **475,012 KiB**
+(a sky130 signoff container in the controls); the largest host process was
+the Verilator co-simulation build (288,080 KiB). The two earlier complete runs
+took 109.8 s and 128.4 s with the same results. Per step (wall s / peak RSS
+KiB):
 
 | Step | SKY130 | GF180 |
 |---|---|---|
-| synthesis | 0.14 / 61,924 | 0.25 / 104,164 |
-| place, CTS, route, closure | 3.16 / 120,920 | 2.54 / 231,200 |
-| OpenRCX (3 corners) | 1.26 / 107,784 | 1.67 / 122,256 |
-| GDS export | 0.03 / 17,880 | 0.02 / 11,256 |
-| CEC pre-layout / final / powered | 0.17 / 0.16 / 0.17 (<= 63,380) | 0.26 / 0.26 / 0.27 (<= 107,216) |
-| timing (2 SPEFs x RustSTA + 6 OpenSTA) | 1.84 / 120,160 | 3.23 / 230,888 |
-| signoff (reference streamout + 7 checks) | 13.35 / 475,720 | 17.62 / 447,676 |
-| co-simulation | 1.79 / 289,068 | 1.91 / 288,164 |
-| cell proofs | 0.78 / 61,980 | 1.09 / 79,236 |
-| determinism rerun | 4.73 / 121,064 | 4.80 / 230,956 |
-| controls (10) | 27.69 / 475,280 | 37.94 / 446,520 |
+| synthesis | 0.14 / 61,632 | 0.28 / 103,904 |
+| place, CTS, route, closure | 3.33 / 120,760 | 2.34 / 231,020 |
+| OpenRCX (3 corners) | 1.26 / 126,684 | 1.54 / 136,012 |
+| GDS export | 0.03 / 17,744 | 0.02 / 11,628 |
+| CEC pre-layout / final / powered | 0.17 / 0.16 / 0.18 (<= 62,788) | 0.25 / 0.25 / 0.25 (<= 107,452) |
+| timing (2 SPEFs x RustSTA + 6 OpenSTA) | 1.98 / 120,532 | 3.09 / 231,068 |
+| signoff (reference streamout + 7 checks) | 13.21 / 474,888 | 16.73 / 446,292 |
+| co-simulation | 1.82 / 287,884 | 1.70 / 288,080 |
+| cell proofs | 0.74 / 61,500 | 0.93 / 79,344 |
+| determinism rerun | 4.70 / 120,740 | 4.08 / 230,880 |
+| controls (10) | 27.11 / 475,012 | 33.65 / 448,104 |
 
 ## Open issues
 
