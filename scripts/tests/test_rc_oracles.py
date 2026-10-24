@@ -225,6 +225,100 @@ class CampaignHelpersTest(unittest.TestCase):
         self.assertEqual(rc_oracles.position(0.5, 3.0, 1.0), "below_both")
         self.assertEqual(rc_oracles.position(4.0, 3.0, 1.0), "above_both")
 
+    def test_signal_pins_shrink_to_dots_and_supply_and_obs_stay(self):
+        lef = """MACRO a
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER li1 ;
+        RECT 0.000 0.000 1.000 0.200 ;
+    END
+  END A
+  PIN VGND
+    USE GROUND ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 -0.240 5.000 0.240 ;
+    END
+  END VGND
+  OBS
+    LAYER li1 ;
+      RECT 2.000 2.000 3.000 3.000 ;
+  END
+END a
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst = Path(tmp) / "in.lef", Path(tmp) / "out.lef"
+            src.write_text(lef)
+            self.assertEqual(rc_oracles.shrink_lef_pins(src, dst), 1)
+            text = dst.read_text()
+        self.assertIn("RECT 0.4950 0.0950 0.5050 0.1050 ;", text)
+        self.assertIn("RECT 0.000 -0.240 5.000 0.240 ;", text)
+        self.assertIn("RECT 2.000 2.000 3.000 3.000 ;", text)
+        self.assertNotIn("RECT 0.000 0.000 1.000 0.200", text)
+
+    def test_report_renders_fidelity_with_its_own_bound(self):
+        delta = lambda s, h, status="passed": dict(max_abs_setup_delta_ns=s, max_abs_hold_delta_ns=h,  # noqa: E731
+                                                    status=status, bound_ns=0.01)
+        sta = dict(rc_corner="max", vs_openrcx=delta(0.004, 0.003), vs_openrcx_threshold0=delta(0.002, 0.001),
+                   openrcx_threshold_effect=delta(0.003, 0.002), vs_magic=delta(0.03, 0.02, "failed"),
+                   openrcx_vs_magic=delta(0.03, 0.02, "failed"), backannotation_fidelity=delta(0.00456, 0.003))
+        text = "\n".join(rc_oracles.sta_rows(dict(pdk="gf180", sta=dict(ss=sta))))
+        rows = [l for l in text.splitlines() if "fidelity" in l]
+        self.assertTrue(rows and rows[0].endswith("| 4.56 / 3.00 | 1.00 | failed |"), rows)
+        rows = [l for l in text.splitlines() if "threshold 0, lossless" in l]
+        self.assertTrue(rows and rows[0].endswith("| 2.00 / 1.00 | 10.00 | passed |"), rows)
+
+
+class ProfileDataTest(unittest.TestCase):
+    def test_blanket_corner_contact_block_is_not_corner_data(self):
+        import build_rc_profile as brp
+        nominal = dict(all_contacts=dict(ndc=6300.0, pc=8000.0, m2c=4500.0, m3c=4500.0))
+        blanket = dict(all_contacts=dict(ndc=15000.0, pc=15000.0, m2c=15000.0, m3c=15000.0))
+        distinct = dict(all_contacts=dict(ndc=280000.0, pc=252000.0, m2c=15000.0, m3c=8000.0))
+        zeros = dict(all_contacts=dict(ndc=0.0, pc=0.0, m2c=0.0, m3c=0.0))
+        self.assertEqual(brp.corner_contacts_blanket(blanket, nominal), 4)
+        self.assertIsNone(brp.corner_contacts_blanket(distinct, nominal))
+        self.assertIsNone(brp.corner_contacts_blanket(zeros, nominal))  # handled as "no data" separately
+
+    def test_tracked_gf180_max_keeps_nominal_via_resistance(self):
+        root = SCRIPTS.parent / "fixtures/pdk"
+        mx = json.loads((root / "gf180-rc-max.json").read_text())
+        nom = json.loads((root / "gf180-rc-nom.json").read_text())
+        self.assertEqual([c["resistance_ohm_per_cut"] for c in mx["cuts"]],
+                         [c["resistance_ohm_per_cut"] for c in nom["cuts"]])
+        self.assertTrue(any("blanket" in c["source"] for c in mx["cuts"]))
+        sky = json.loads((root / "sky130-rc-max.json").read_text())
+        self.assertFalse(any("fallback" in c["source"] for c in sky["cuts"]))
+
+
+class FieldSolverTest(unittest.TestCase):
+    def test_parallel_plate_symmetry_and_monotone_totals(self):
+        import field_solver
+        self.assertEqual(field_solver.selftest(), 0)
+
+    def test_stacks_parse_from_pdk_files(self):
+        import field_solver
+        if not field_solver.PDK_ROOT.is_dir():
+            self.skipTest("PDK not installed")
+        sky, _ = field_solver.load_stack("sky130")
+        for got, want in ((sky["met1"], (1.37, 1.73)), (sky["met2"], (2.0, 2.36))):
+            self.assertAlmostEqual(got[0], want[0])
+            self.assertAlmostEqual(got[1], want[1])
+        gf, _ = field_solver.load_stack("gf180")
+        self.assertAlmostEqual(gf["Metal2"][0], 2.01)
+        self.assertAlmostEqual(gf["Metal2"][1], 2.56)
+
+    def test_two_d_grid_matches_quarter_three_d_for_a_long_wire(self):
+        import field_solver as f
+        w = ("A", -0.07, 0.07, 1.37, 1.73)
+        c2 = f.solver_2d([w], half_width=4.0, height=6.0, hmin=0.02, hmax=0.4).row("A")["A"]
+        s3 = f.solver_quarter([("A", -100, 100, -0.07, 0.07, 1.37, 1.73)], 1.0, 4.0, height=6.0,
+                              hmin=0.02, hmax=0.4)
+        c3 = 4.0 * s3.row("A")["A"] / 2.0
+        self.assertLess(abs(c3 / c2 - 1.0), 0.01, (c2, c3))
+
 
 if __name__ == "__main__":
     unittest.main()

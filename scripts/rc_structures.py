@@ -20,7 +20,18 @@ Structures (A is the upper or studied wire):
 * an upper-layer wire running along such a rail (aligned, the rail slightly
   wider) and along a 3x wider rail;
 * a wire over dense crossings (minimum pitch) and over sparse crossings;
+* the same sparse crossings under a wire with minimum-space neighbours on
+  both sides (a sandwiched wire);
 * parallel stacked wires on other layers (aligned; offset by most of a width).
+
+Every structure that only adds conductors next to the studied wire must not
+lower that wire's total capacitance (with all other conductors at 0 V, the
+capacitance is an energy minimum over a smaller admissible set when a
+conductor is added); ``monotonicity`` lists any extractor that does.
+
+OpenRCX-only probes (DEF level, one net): a wire, the same wire split into two
+paths at its middle, and with a via or a via stack at that point; the via
+metal's capacitance is the difference to the split wire.
 
 The point is a calibration-free comparison of the three models on structures
 whose geometry is unambiguous. Nothing is fitted.
@@ -47,9 +58,11 @@ LENGTH = 40.0
 CORNER = "nom"
 SPEC = {
     "sky130": dict(dbu=1000, lo="met1", hi="met2", top="met3", magic=dict(met1="m1", met2="m2", met3="m3"),
-                   space=0.14, rail=0.48, vertical={"met2", "met4"}),
+                   space=0.14, space_top=0.3, rail=0.48, vertical={"met2", "met4"},
+                   via=dict(single="M1M2_PR", stack="M2M3_PR")),
     "gf180": dict(dbu=2000, lo="Metal1", hi="Metal2", top="Metal3", magic=dict(Metal1="m1", Metal2="m2", Metal3="m3"),
-                  space=0.28, rail=0.6, vertical={"Metal2", "Metal4"}),
+                  space=0.28, space_top=0.28, rail=0.6, vertical={"Metal2", "Metal4"},
+                  via=dict(single="Via1_HV", stack="Via2_VH")),
 }
 GROUND = "VSS"
 
@@ -74,6 +87,8 @@ def structures(pdk: str) -> dict:
     T = LENGTH
     dense = [(f"X{i}", hi, 12 + pitch_hi * i, 5, 12 + pitch_hi * i, 15) for i in range(int(36 / pitch_hi))]
     sparse = [(f"Y{i}", hi, 12 + 2.0 * i, 5, 12 + 2.0 * i, 15) for i in range(18)]
+    p_top = w_top + s["space_top"]
+    beside = [("B", top, 10, 10 + p_top, 10 + T, 10 + p_top), ("C", top, 10, 10 - p_top, 10 + T, 10 - p_top)]
     return {
         "isolated": [("A", hi, 10, 10, 10 + T, 10)],
         "pair_min_space": [("A", hi, 10, 10, 10 + T, 10), ("B", hi, 10, 10 + pitch_hi, 10 + T, 10 + pitch_hi)],
@@ -88,6 +103,8 @@ def structures(pdk: str) -> dict:
         "top_along_rail_3x": [("A", top, 10, 30, 10 + T, 30), (GROUND, lo, 5, 30, 15 + T, 30, 3 * rail)],
         "top_over_sparse_crossings": [("A", top, 10, 10, 10 + T, 10)] + sparse,
         "top_over_dense_crossings": [("A", top, 10, 10, 10 + T, 10)] + dense,
+        "top_sandwiched": [("A", top, 10, 10, 10 + T, 10)] + beside,
+        "top_sandwiched_over_sparse_crossings": [("A", top, 10, 10, 10 + T, 10)] + beside + sparse,
         "stacked_aligned": [("A", hi, 10, 10, 10 + T, 10), ("B", lo, 10, 10, 10 + T, 10)],
         "stacked_offset": [("A", top, 10, 10, 10 + T, 10),
                            ("B", lo, 10, 10 + (w_top + w_lo) / 2 - 0.085, 10 + T,
@@ -210,12 +227,71 @@ def increments(table: dict) -> None:
         table[f"{name}_increment"] = dict(A=dict(total_af=total(name, "A") - total("upper_alone", "A")))
     for name in ("top_along_rail", "top_along_rail_3x", "top_over_sparse_crossings", "top_over_dense_crossings"):
         table[f"{name}_increment"] = dict(A=dict(total_af=total(name, "A") - total("top_alone", "A")))
+    table["top_sandwiched_over_sparse_crossings_increment"] = dict(A=dict(
+        total_af=total("top_sandwiched_over_sparse_crossings", "A") - total("top_sandwiched", "A")))
+
+
+# (structure with added conductors, reference structure, studied wire)
+MONOTONE = [("crossing", "upper_alone", "A"), ("crossing", "lower_alone", "B"),
+            ("crossing_rail", "upper_alone", "A"), ("crossing_rail_3x", "upper_alone", "A"),
+            ("crossing_plane", "upper_alone", "A"), ("top_along_rail", "top_alone", "A"),
+            ("top_along_rail_3x", "top_alone", "A"), ("top_over_sparse_crossings", "top_alone", "A"),
+            ("top_over_dense_crossings", "top_alone", "A"), ("top_sandwiched", "top_alone", "A"),
+            ("top_sandwiched_over_sparse_crossings", "top_sandwiched", "A")]
+
+
+def monotonicity(table: dict) -> list:
+    """Structures where adding conductors lowered the studied wire's total."""
+    out = []
+    for added, ref, net in MONOTONE:
+        d = table[added][net]["total_af"] - table[ref][net]["total_af"]
+        if d < -1e-6:
+            out.append(dict(structure=added, reference=ref, wire=net, change_af=d))
+    return out
+
+
+def via_probe_def(pdk: str, lines: list[str]) -> str:
+    d = SPEC[pdk]["dbu"]
+    lo = SPEC[pdk]["lo"]
+    return "\n".join(["VERSION 5.8 ;", 'DIVIDERCHAR "/" ;', 'BUSBITCHARS "[]" ;', "DESIGN syn ;",
+                      f"UNITS DISTANCE MICRONS {d} ;", f"DIEAREA ( 0 0 ) ( {100 * d} {100 * d} ) ;", "PINS 1 ;",
+                      f"- A_p + NET A + DIRECTION INPUT + USE SIGNAL + PORT + LAYER {lo} ( -10 -10 ) ( 10 10 )"
+                      f" + FIXED ( {10 * d} {10 * d} ) N ;", "END PINS", "NETS 1 ;", "- A ( PIN A_p ) + USE SIGNAL"]
+                     + lines + ["END NETS", "END DESIGN"]) + "\n"
+
+
+def openrcx_via_probe(h, out: Path, pdk: str) -> dict:
+    """OpenRCX per-net C of one lower-layer wire, the same wire split at its
+    middle, and with a via / a via stack at that point (DEF level)."""
+    s, d = SPEC[pdk], SPEC[pdk]["dbu"]
+    lo, hi = s["lo"], s["hi"]
+    a, m, b, y = 10 * d, 30 * d, 50 * d, 10 * d
+    cases = {
+        "wire": [f"  + ROUTED {lo} ( {a} {y} ) ( {b} {y} ) ;"],
+        "split": [f"  + ROUTED {lo} ( {a} {y} ) ( {m} {y} )", f"  NEW {lo} ( {m} {y} ) ( {b} {y} ) ;"],
+        "via": [f"  + ROUTED {lo} ( {a} {y} ) ( {b} {y} )", f"  NEW {lo} ( {m} {y} ) {s['via']['single']} ;"],
+        "via_stack": [f"  + ROUTED {lo} ( {a} {y} ) ( {b} {y} )", f"  NEW {lo} ( {m} {y} ) {s['via']['single']}",
+                      f"  NEW {hi} ( {m} {y} ) {s['via']['stack']} ;"],
+    }
+    result = {}
+    for name, lines in cases.items():
+        path = out / f"{pdk}_via_probe_{name}.def"
+        path.write_text(via_probe_def(pdk, lines))
+        spef, _ = cs.openrcx(h, f"{pdk}_via_probe_{name}", pdk, CORNER, path, f"{pdk}_via_probe_{name}_{CORNER}",
+                             threshold="0")
+        net = cs.parse_spef(spef)["nets"]["A"]
+        result[name] = dict(total_af=(sum(net["ground"].values()) + sum(c for _, _, c in net["coupling"])) * 1e6,
+                            r_ohm=sum(r for _, _, r in net["res"]))
+    result["via_metal_af"] = result["via"]["total_af"] - result["split"]["total_af"]
+    result["via_stack_metal_af"] = result["via_stack"]["total_af"] - result["split"]["total_af"]
+    result["split_af"] = result["split"]["total_af"] - result["wire"]["total_af"]
+    return result
 
 
 def run(out: Path, binary: Path) -> dict:
     out.mkdir(parents=True, exist_ok=False)
     h = PhysicalHarness(out, argparse.Namespace(threads=2, memory_mib=2048, timeout_seconds=60, tolerance_ns=0.001))
-    result = dict(schema="rustroad.rc-structures.v2", length_um=LENGTH, corner=CORNER,
+    result = dict(schema="rustroad.rc-structures.v3", length_um=LENGTH, corner=CORNER,
                   native_model="extract_cpu_ref via crates/rustroad-core/examples/extract_structures.rs",
                   pdks={})
     for pdk in SPEC:
@@ -243,7 +319,10 @@ def run(out: Path, binary: Path) -> dict:
         for table in (rcx, mag, nat):
             increments(table)
         result["pdks"][pdk] = dict(structures={k: [list(w) for w in v] for k, v in cases.items()},
-                                   openrcx=rcx, magic=mag, native=nat)
+                                   openrcx=rcx, magic=mag, native=nat,
+                                   monotonicity={t: monotonicity(x) for t, x in
+                                                 (("openrcx", rcx), ("magic", mag), ("native", nat))},
+                                   openrcx_via_probe=openrcx_via_probe(h, out, pdk))
     (out / "structures.json").write_text(json.dumps(result, indent=1, sort_keys=True) + "\n")
     return result
 
@@ -261,6 +340,8 @@ ROWS = [
     ("top_along_rail_3x_increment", "A", "total_af", "upper-layer wire along a 3x rail, increment aF"),
     ("top_over_sparse_crossings_increment", "A", "total_af", "over 2 um-pitch crossings, increment aF"),
     ("top_over_dense_crossings_increment", "A", "total_af", "over minimum-pitch crossings, increment aF"),
+    ("top_sandwiched_over_sparse_crossings_increment", "A", "total_af",
+     "over 2 um-pitch crossings with minimum-space neighbours on both sides, increment aF"),
     ("stacked_aligned", "A", "coupling_af", "stacked aligned, coupling aF"),
     ("stacked_aligned", "B", "total_af", "stacked aligned, lower wire total aF"),
     ("stacked_offset", "A", "coupling_af", "stacked offset, coupling aF"),
@@ -273,6 +354,17 @@ def markdown(result: dict) -> str:
         for name, net, key, label in ROWS:
             vals = [d[t].get(name, {}).get(net, {}).get(key) for t in ("native", "openrcx", "magic")]
             out.append(f"| {pdk} | {label} | " + " | ".join("-" if v is None else f"{v:.1f}" for v in vals) + " |")
+    out += ["", "| PDK | extractor | structures where adding conductors lowered the studied wire's total |",
+            "|---|---|---|"]
+    for pdk, d in result["pdks"].items():
+        for tool, rows in d["monotonicity"].items():
+            text = "; ".join(f"{r['structure']} ({r['change_af']:+.1f} aF)" for r in rows) or "none"
+            out.append(f"| {pdk} | {tool} | {text} |")
+    out += ["", "| PDK | OpenRCX: wire split at its middle, aF | via at that point, aF | via stack, aF |",
+            "|---|---|---|---|"]
+    for pdk, d in result["pdks"].items():
+        v = d["openrcx_via_probe"]
+        out.append(f"| {pdk} | {v['split_af']:+.2f} | {v['via_metal_af']:+.2f} | {v['via_stack_metal_af']:+.2f} |")
     return "\n".join(out) + "\n"
 
 
