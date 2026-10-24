@@ -200,7 +200,8 @@ class PdkGate:
                 rc = self.rc[c]
                 spef, info = compare_spef.openrcx(h, f"{tag}_final", tag, rc, Path(phys["paths"]["def"]),
                                                   f"{tag}_openrcx_{rc}",
-                                                  timeout_s=max(25, int(ctx.budgets["process_timeout_s"]) - 30))
+                                                  timeout_s=max(25, int(ctx.budgets["process_timeout_s"]) - 30),
+                                                  file_limit_bytes=flow.sta_file_limit())
                 out["openrcx"][c] = dict(path=spef, sha256=info["spef"]["sha256"], rules=info["rules"])
                 extra.append(info["container_peak_rss_kib"])
         with steps(h, tag, f"{label}gds_export"):
@@ -269,7 +270,7 @@ class PdkGate:
                 try:
                     rust = T.ruststa(h, f"{tag}_final_{src}", ctx.tool_paths, flow.libs, final, flow.sdc, spefs,
                                      clock_model=flow.clock_model(), rc_limits=flow.sta_rc_limits(),
-                         state_gib=flow.sta_state_gib())
+                         state_gib=flow.sta_state_gib(), file_limit_bytes=flow.sta_file_limit())
                     ref = {c: T.opensta(h, f"{tag}_final_{src}_opensta_{c}", ctx.tool_paths["opensta"], flow.libs[c],
                                         final, ctx.top, flow.sdc, spefs[c]) for c in self.corners}
                 except GateError as error:

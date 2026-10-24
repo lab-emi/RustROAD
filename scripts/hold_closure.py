@@ -121,6 +121,10 @@ STA_RC_LIMITS = {'legacy': ['--max-rc-nodes', '200000', '--max-rc-elements', '20
 # RustSTA `run --max-state-gib` per recipe (it also bounds the RC numeric
 # work: SERV GF180 needs 3.2e10 > 8.6e9 of 1 GiB; measured 13 s, 408 MiB).
 STA_STATE_GIB = {'legacy': '1', 'track': '4'}
+# File-size limit of RustSTA import/run (they write the workspace tables:
+# SERV GF180 parasitics.rbin is 283 MB for three 94 MB SPEFs) and of the
+# OpenRCX container (its SPEF); None keeps the harness's 64 MiB log cap.
+STA_FILE_LIMIT = {'legacy': None, 'track': 1024 * 1024 ** 2}
 # Gate-sizing ECO bounds (size_eco): resizes per iteration, worst setup
 # endpoints traced per iteration, and the utilization the resized cells may
 # reach in the fixed core (taps/fillers excluded).
@@ -377,8 +381,8 @@ class Flow:
         for c in self.libs:
             argv += ['--spef', str((spefs or {}).get(c) or phys['spef'][c]['path']), '--spef-corner', c]
         argv += STA_RC_LIMITS[self.design.recipe]
-        a = h.json_command(f'{t}_import', argv, True)
-        r = h.json_command(f'{t}_run', [ruststa, *common, 'run', '--base-rev', a['new_rev'], '--backend', 'cpu', '--precision', 'f64',
+        a = self.sta_json(f'{t}_import', argv)
+        r = self.sta_json(f'{t}_run', [ruststa, *common, 'run', '--base-rev', a['new_rev'], '--backend', 'cpu', '--precision', 'f64',
                                         '--max-paths', '16', '--max-state-gib', STA_STATE_GIB[self.design.recipe],
                                         '--require-wire-model', 'spef_rc'], True)
         require(r['scope'].get('clock_model') == self.clock_model() and r['scope'].get('wire_model') == 'spef_rc'
@@ -445,6 +449,21 @@ class Flow:
 
     def sta_state_gib(self) -> str:
         return STA_STATE_GIB[self.design.recipe]
+
+    def sta_file_limit(self) -> int | None:
+        return STA_FILE_LIMIT[self.design.recipe]
+
+    def sta_json(self, label: str, argv: list) -> dict:
+        """A rusteda.v1 JSON command under the recipe's RustSTA file limit."""
+        limit = self.sta_file_limit()
+        if limit is None:
+            return self.h.json_command(label, argv, True)
+        r = self.h.run(label, [str(a) for a in argv], file_limit_bytes=limit)
+        require(r['exit_code'] == 0, f'{label}: process exited {r["exit_code"]}; see receipt')
+        value = json.loads(bounded_text(Path(r['stdout'])))
+        require(value.get('schema') == 'rusteda.v1' and value.get('ok') is True and value.get('error') is None,
+                f'{label}: unsuccessful rusteda.v1 envelope')
+        return value
 
     def clock_model(self) -> str:
         """RustSTA scope the gate requires: propagated clocks through the
@@ -1023,7 +1042,8 @@ exit
             for c in self.libs:
                 spefs[c], _ = compare_spef.openrcx(self.h, f'{self.tag}_i{it}_ref', self.tag, self.rc[c],
                                                    Path(phys['paths']['def']), f'{self.tag}_i{it}_ref_{self.rc[c]}',
-                                                   timeout_s=max(25, self.h.args.timeout_seconds - 30))
+                                                   timeout_s=max(25, self.h.args.timeout_seconds - 30),
+                                                   file_limit_bytes=self.sta_file_limit())
             ref = self.sta(it, phys, label='sta_ref', spefs=spefs)
         except (RuntimeError, OSError, KeyError, ValueError) as error:
             return dict(status='unverified', reason=str(error)[-600:], shortfall_ns=None)
