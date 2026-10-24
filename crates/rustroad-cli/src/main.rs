@@ -139,14 +139,18 @@ enum Command {
         manifest: PathBuf,
     },
     /// Plan and apply hold-fix delay cells on a mapped netlist from RustSTA
-    /// hold_fix/endpoints reports (files only; no workspace is read or written).
-    /// Reports are bound to --timed-netlist; stale reports fail STALE_REPORT.
+    /// hold_fix/endpoints reports (files only; no RustROAD workspace is read or
+    /// written). Reports are bound to --timed-netlist through the revision
+    /// record of the STA workspace they name (read under a shared lock: its
+    /// netlist source must have the xxh3-64 of --timed-netlist); stale reports
+    /// fail STALE_REPORT, an unreadable record REPORT_PROVENANCE.
     HoldEco {
         /// Flat mapped Verilog netlist to edit (never overwritten).
         #[arg(long)]
         netlist: PathBuf,
         /// The netlist the timing engine imported for these reports (the
-        /// post-CTS export of --netlist); --netlist must be refined by it.
+        /// post-CTS export of --netlist); --netlist must be refined by it and
+        /// the reports' STA revision must record it as its netlist source.
         #[arg(long)]
         timed_netlist: PathBuf,
         /// SHA-256 recorded when --timed-netlist was handed to the timing engine.

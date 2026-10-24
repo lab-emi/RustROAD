@@ -521,6 +521,10 @@ def main(argv=None) -> int:
                                      note="the binary under test: bound by sha256 with the git revision, not pinned")
         g = summary["global_statuses"]
         g["tools_identity"] = D.tools_status(tools)
+        pins = D.tool_pins_frozen(args.tools, manifest)
+        if pins["status"] != "passed":
+            g["tools_identity"] = item("failed", pins["reason"], tools=g["tools_identity"].get("tools"),
+                                       pin_file=pins)
         if tools.get("openroad", {}).get("status") == "passed":
             r = h.run("openroad_identity", ["podman", "run", "--rm", "--pull=never", "--network=none", "--read-only",
                                             "--memory=2g", "--memory-swap=2g", "--entrypoint=/usr/bin/sha256sum", IMAGE, OPENROAD])
@@ -532,11 +536,15 @@ def main(argv=None) -> int:
         else:
             g["openroad_image"] = item("unverified", "OpenROAD image entry missing from the tool pins")
         g["design_manifest"] = D.verify_tracked(manifest)
+        g["budget_floors"] = D.budget_floors(manifest["budgets"], manifest["verification"])
         summary["tools"] = tools
         policy = json.loads(D.resolve(manifest["cell_policy"]["path"]).read_text())
         if policy["producer"]["binary"]["sha256"] != tools.get("rustsys", {}).get("expected_sha256"):
             g["design_manifest"] = item("failed", "cell-policy producer sha256 differs from the rustsys tool pin")
         ready = all(v["status"] == "passed" for v in g.values())
+        # An uncommitted or untracked manifest still runs (development), but
+        # its verdict can never be passed.
+        g["manifest_provenance"] = D.manifest_provenance(args.design)
         if ready and not args.preflight_only:
             tool_paths = {n: Path(t["path"]) for n, t in tools.items() if "path" in t}
             module = L.rtl_module(h, "rtl_ports", tool_paths["yosys"], [D.resolve(r["path"]) for r in manifest["rtl"]],

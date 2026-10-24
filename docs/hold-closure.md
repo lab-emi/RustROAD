@@ -111,10 +111,23 @@ earlier black-box recon tables, for example `dlygate4sd1_1` at tt/ss/ff:
 - each endpoint instance and pin exists in the netlist.
 
 **Report binding (hardening, stream gate).** RustSTA reports name their
-workspace and revision but not the netlist they timed, so `hold-eco` binds
-them itself and refuses a mismatch with `STALE_REPORT` (never
-`INVALID_WORKSPACE`; the file-only commands now report their own codes):
+workspace and revision but carry no hash of the netlist they timed. That
+record is in the timing engine's own revision metadata, so `hold-eco` binds
+the reports to it and refuses a mismatch with `STALE_REPORT` (never
+`INVALID_WORKSPACE`; the file-only commands report their own codes):
 
+- **Provenance.** The revision the reports name
+  (`<workspace>/revisions/rev<NNNN>/meta.json`, schema
+  `rusteda.revision.v1`, read under a shared `flock` on the STA workspace's
+  `workspace.lock`) must record exactly one netlist source, and its xxh3-64
+  must equal that of the bytes `hold-eco` parses as `--timed-netlist`. The
+  hash is the binding; the recorded path is reported
+  (`source_path_matches`) but a copy with the same bytes is accepted. A
+  missing, unreadable, malformed or ambiguous record (no or several netlist
+  sources, a record of another revision, a revision handle other than
+  `rev<N>`) fails `REPORT_PROVENANCE`; a writer holding the lock for more
+  than about 2 s fails `STA_WORKSPACE_LOCKED`. Committed revisions are
+  immutable; nothing in the STA workspace is written.
 - `--timed-netlist` is the netlist the timing engine imported (the post-CTS
   export). With `--timed-netlist-sha256` (scripts/hold_closure.py records the
   hash when it hands the file to `rusteda import`) a different file is refused;
@@ -129,9 +142,23 @@ them itself and refuses a mismatch with `STALE_REPORT` (never
   only in the timed netlist means the reports belong to a later iteration.
 
 The phase-B1 counterexample (iteration-0 reports against the iteration-1
-netlist) now fails with `STALE_REPORT: endpoint r0/D: report net n2, timed
-netlist net rr_eco_hold_0_n`. The plan records the binding
-(`inputs.binding`: revision, rows and stages bound, inserted instances).
+netlist) fails with `STALE_REPORT`. So does the round-1 verifier's
+counterexample, which the content checks alone accepted: the iteration-1
+reports (whose rows also exist in the iteration-0 netlist) with the
+iteration-0 netlist and its own correct sha256. On the gate run's data:
+
+```text
+STALE_REPORT: the reports come from .../sky130_i1_sta_ws rev2, which timed
+.../sky130_i1_exported.v (xxh3:ccbbad2cbcf4f9d8); --timed-netlist
+.../sky130_i0_exported.v is xxh3:5e03463facbccb2b: the reports were not
+produced from this netlist
+```
+
+(gf180: `xxh3:3a80821eca7dfeba` vs `xxh3:7fada0d8136b8ec9`.) The matching
+pairing reproduces the gate's iteration-1 netlist byte for byte on both PDKs.
+The plan records the binding (`inputs.binding`: `sta_record` with the
+revision record, its sha256, the recorded netlist source and both xxh3
+values; revision; rows and stages bound; inserted instances).
 
 **Sink pins.** `insert_buffer` (hold-eco and apply-eco) accepts only a sink pin
 whose cell-LEF `DIRECTION` is `INPUT`. The directions come from the profile's

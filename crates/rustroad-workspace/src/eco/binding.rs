@@ -1,32 +1,52 @@
 //! Binding of RustSTA reports to the netlist they timed (hold-eco).
 //!
-//! RustSTA reports name their workspace and revision but not the source
-//! netlist. hold-eco therefore binds them in three independent ways and
-//! refuses any mismatch with `STALE_REPORT`:
-//! 1. identity: the timed netlist's SHA-256 equals the hash the caller
+//! RustSTA reports name their workspace and revision but carry no hash of the
+//! netlist they timed. That record lives in the timing engine's own revision
+//! metadata: `<workspace>/revisions/rev<NNNN>/meta.json` lists the source file
+//! of every table with its path and xxh3-64 hash (`sources[table=netlist]`).
+//! hold-eco binds the reports in four independent ways and refuses any
+//! mismatch with `STALE_REPORT`:
+//! 1. provenance: the revision every report names records, as its netlist
+//!    source, a file whose xxh3-64 equals that of `--timed-netlist` (read
+//!    under a shared lock on the STA workspace; an unreadable or ambiguous
+//!    record is `REPORT_PROVENANCE`, a held writer lock `STA_WORKSPACE_LOCKED`);
+//! 2. identity: the timed netlist's SHA-256 equals the hash the caller
 //!    recorded when it handed that file to the timing engine (optional);
-//! 2. content: every hold_fix row (endpoint instance, master, endpoint net,
+//! 3. content: every hold_fix row (endpoint instance, master, endpoint net,
 //!    net driver and every path stage pin/net) and every endpoints row must
 //!    exist in the timed netlist, and all reports must come from one
 //!    workspace revision;
-//! 3. refinement: the netlist being edited must equal the timed netlist up
+//! 4. refinement: the netlist being edited must equal the timed netlist up
 //!    to inserted buffer trees (clock tree) and tie cells; an instance with
 //!    the ECO prefix that only the timed netlist has means the reports belong
 //!    to a later netlist.
 //!
 //! Memory/work: one union-find over net keys (one entry per wire, port bit
-//! and connection) per netlist, one pin index, and per edited connection a
-//! backward walk of at most `MAX_BUFFER_WALK` inserted buffers. Nothing is
+//! and connection) per netlist, one pin index, per edited connection a
+//! backward walk of at most `MAX_BUFFER_WALK` inserted buffers, and one
+//! revision record of at most `MAX_REVISION_RECORD_BYTES`. Nothing is
 //! enumerated beyond the report rows.
 use super::fail;
 use crate::Result;
 use rustroad_formats::eco::PinDirections;
 use rustroad_formats::verilog::{Expr, Netlist};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
+use std::fs::{File, TryLockError};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Inserted-buffer chain depth followed back from a redirected pin.
 pub const MAX_BUFFER_WALK: usize = 64;
+/// Size cap of one RustSTA revision record (`meta.json`).
+pub const MAX_REVISION_RECORD_BYTES: u64 = 4 * 1024 * 1024;
+/// Shared-lock attempts on the STA workspace, `LOCK_RETRY` apart (~2 s).
+pub const LOCK_ATTEMPTS: u32 = 40;
+const LOCK_RETRY: Duration = Duration::from_millis(50);
+/// Schema of a RustSTA revision record.
+pub const STA_REVISION_SCHEMA: &str = "rusteda.revision.v1";
 
 pub fn expr_key(e: &Expr) -> String {
     match e {
@@ -114,11 +134,28 @@ impl NetIndex {
     }
 }
 
+/// What the timing engine's own revision record says it timed.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct StaRecord {
+    /// `<workspace>/revisions/rev<NNNN>/meta.json` as read.
+    pub revision_record: String,
+    pub revision_record_sha256: String,
+    /// Netlist source path and xxh3-64 recorded by the timing engine.
+    pub netlist_source: String,
+    pub netlist_source_xxh3: String,
+    /// xxh3-64 of the `--timed-netlist` bytes hold-eco parsed.
+    pub timed_netlist_xxh3: String,
+    /// Informational: both paths name the same file (the hash is the binding).
+    pub source_path_matches: bool,
+    pub lock: &'static str,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct BindingSummary {
     pub method: &'static str,
     pub sta_workspace: String,
     pub sta_revision: String,
+    pub sta_record: Option<StaRecord>,
     pub timed_netlist_sha256: String,
     pub expected_sha256: Option<String>,
     pub hold_rows_bound: usize,
@@ -130,6 +167,157 @@ pub struct BindingSummary {
 
 fn stale(m: impl std::fmt::Display) -> crate::Error {
     fail("STALE_REPORT", m)
+}
+
+fn provenance(m: impl std::fmt::Display) -> crate::Error {
+    fail("REPORT_PROVENANCE", m)
+}
+
+/// `xxh3:<16 lowercase hex digits>` of `bytes` (the timing engine's notation).
+pub fn xxh3_text(bytes: &[u8]) -> String {
+    format!("xxh3:{:016x}", xxhash_rust::xxh3::xxh3_64(bytes))
+}
+
+/// `rev<N>` -> the record directory name `rev<N zero-padded to 4 digits>`.
+fn revision_dir(rev: &str) -> Option<String> {
+    let digits = rev.strip_prefix("rev")?;
+    if digits.is_empty() || digits.len() > 10 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let n: u32 = digits.parse().ok()?;
+    (format!("rev{n}") == rev).then(|| format!("rev{n:04}"))
+}
+
+/// Shared `flock` on `<workspace>/workspace.lock` (the timing engine's lock
+/// protocol; bounded wait; the file is never created).
+fn lock_shared(workspace: &Path) -> Result<File> {
+    let path = workspace.join("workspace.lock");
+    let file = File::open(&path).map_err(|e| {
+        provenance(format!(
+            "cannot open the STA workspace lock {}: {e}",
+            path.display()
+        ))
+    })?;
+    for attempt in 0..LOCK_ATTEMPTS {
+        match file.try_lock_shared() {
+            Ok(()) => return Ok(file),
+            Err(TryLockError::WouldBlock) => {
+                if attempt + 1 < LOCK_ATTEMPTS {
+                    std::thread::sleep(LOCK_RETRY);
+                }
+            }
+            Err(TryLockError::Error(e)) => {
+                return Err(provenance(format!("cannot lock {}: {e}", path.display())));
+            }
+        }
+    }
+    Err(fail(
+        "STA_WORKSPACE_LOCKED",
+        format!(
+            "{} is held exclusively by a writer; retry when the timing run has finished",
+            path.display()
+        ),
+    ))
+}
+
+fn read_record(path: &Path) -> Result<Vec<u8>> {
+    let file = File::open(path).map_err(|e| {
+        provenance(format!(
+            "cannot read the STA revision record {}: {e}",
+            path.display()
+        ))
+    })?;
+    let mut bytes = Vec::new();
+    file.take(MAX_REVISION_RECORD_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| provenance(format!("cannot read {}: {e}", path.display())))?;
+    if bytes.len() as u64 > MAX_REVISION_RECORD_BYTES {
+        return Err(provenance(format!(
+            "{} exceeds {MAX_REVISION_RECORD_BYTES} bytes",
+            path.display()
+        )));
+    }
+    Ok(bytes)
+}
+
+/// Provenance binding: the STA revision the reports name must record, as its
+/// netlist source, a file with the xxh3-64 of `timed_bytes` (the exact bytes
+/// hold-eco parsed as `--timed-netlist`).
+pub fn bind_sta_record(
+    workspace: &str,
+    rev: &str,
+    timed_path: &Path,
+    timed_bytes: &[u8],
+    b: &mut BindingSummary,
+) -> Result<()> {
+    let dir = revision_dir(rev)
+        .ok_or_else(|| provenance(format!("report revision {rev:?} is not rev<N>")))?;
+    // A relative workspace is resolved like the timing engine resolved it
+    // (from the current directory); any wrong resolution fails the hash check.
+    let ws = PathBuf::from(workspace);
+    let _lock = lock_shared(&ws)?;
+    let record = ws.join("revisions").join(&dir).join("meta.json");
+    let bytes = read_record(&record)?;
+    let meta: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|e| provenance(format!("{}: {e}", record.display())))?;
+    if s(&meta, "schema") != Some(STA_REVISION_SCHEMA) || s(&meta, "rev") != Some(rev) {
+        return Err(provenance(format!(
+            "{} is not the {STA_REVISION_SCHEMA} record of {rev}",
+            record.display()
+        )));
+    }
+    if meta.get("tables").and_then(|t| t.get("netlist")).is_none() {
+        return Err(provenance(format!(
+            "{rev} of {workspace} holds no netlist table",
+            workspace = ws.display()
+        )));
+    }
+    let sources: Vec<&serde_json::Value> = meta
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|x| s(x, "table") == Some("netlist"))
+        .collect();
+    let [source] = sources.as_slice() else {
+        return Err(provenance(format!(
+            "{} records {} netlist sources; exactly one is required",
+            record.display(),
+            sources.len()
+        )));
+    };
+    let (Some(src), Some(recorded)) = (s(source, "path"), s(source, "hash")) else {
+        return Err(provenance(format!(
+            "{}: the netlist source lacks path/hash",
+            record.display()
+        )));
+    };
+    let actual = xxh3_text(timed_bytes);
+    if recorded != actual {
+        return Err(stale(format!(
+            "the reports come from {} {rev}, which timed {src} ({recorded}); --timed-netlist {} \
+             is {actual}: the reports were not produced from this netlist",
+            ws.display(),
+            timed_path.display()
+        )));
+    }
+    let same_path = match (
+        std::fs::canonicalize(src),
+        std::fs::canonicalize(timed_path),
+    ) {
+        (Ok(a), Ok(c)) => a == c,
+        _ => false,
+    };
+    b.sta_record = Some(StaRecord {
+        revision_record: record.display().to_string(),
+        revision_record_sha256: format!("{:x}", Sha256::digest(&bytes)),
+        netlist_source: src.to_string(),
+        netlist_source_xxh3: recorded.to_string(),
+        timed_netlist_xxh3: actual,
+        source_path_matches: same_path,
+        lock: "shared flock on workspace.lock",
+    });
+    Ok(())
 }
 
 fn s<'a>(v: &'a serde_json::Value, k: &str) -> Option<&'a str> {
@@ -364,4 +552,24 @@ pub fn check_refinement(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xxh3_matches_the_reference_vector() {
+        // XXH3-64 of the empty input, seed 0 (xxHash specification test vector).
+        assert_eq!(xxh3_text(b""), "xxh3:2d06800538d394c2");
+    }
+
+    #[test]
+    fn revision_directories_are_canonical() {
+        assert_eq!(revision_dir("rev2").as_deref(), Some("rev0002"));
+        assert_eq!(revision_dir("rev12345").as_deref(), Some("rev12345"));
+        for bad in ["rev", "rev02", "r2", "rev-1", "rev2 ", "rev99999999999"] {
+            assert_eq!(revision_dir(bad), None, "{bad}");
+        }
+    }
 }

@@ -22,6 +22,9 @@ bound artifact) and runs the oracle that must catch it; the control is
                     AND the random co-simulation reports mismatches
   missing_tool      the gate run with a pinned tool path that does not exist
                     -> exit 3, tools_identity unverified (never passed)
+  relaxed_manifest  an untracked copy of the design manifest with the parity
+                    tolerance relaxed to 3 ps -> exit 1, budget_floors failed
+                    (owner floor) AND manifest_provenance unverified
   tampered_artifact a bound GDS byte flipped, and separately a recorded hash
                     edited -> artifact binding re-verification fails
   antenna_planted   a long wire on an input pin -> native check-antenna and
@@ -289,12 +292,12 @@ def bad_rtl(ctx, gate, b, work: Path) -> dict:
                    cosim=dict(status=sim["status"], mismatches=(sim.get("mismatches") or [])[:3]), **info)
 
 
-def missing_tool(ctx, gate, b, work: Path) -> dict:
+def sub_gate(ctx, gate, work: Path, design: Path, *extra: str) -> tuple[int, dict, int | None]:
+    """Run the gate itself (no controls, no determinism) into work/run."""
     run = work / "run"
-    missing = work / "absent" / "yosys"
-    cmd = [sys.executable, str(ROOT / "scripts/rtl2gds.py"), "--design", str(ctx.args.design), "--pdk", gate.tag,
+    cmd = [sys.executable, str(ROOT / "scripts/rtl2gds.py"), "--design", str(design), "--pdk", gate.tag,
            "--run", str(run), "--base-rev", "empty", "--rustroad", str(ctx.args.rustroad), "--tools", str(ctx.args.tools),
-           "--tool", f"yosys={missing}", "--no-controls", "--no-determinism"]
+           "--no-controls", "--no-determinism", *extra]
     work.mkdir(parents=True, exist_ok=True)
     timing = work / "time.txt"
     p = subprocess.run(["/usr/bin/time", "-v", "-o", str(timing), *cmd], capture_output=True, text=True,
@@ -303,12 +306,37 @@ def missing_tool(ctx, gate, b, work: Path) -> dict:
     (work / "stderr.txt").write_text(p.stderr)
     m = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", timing.read_text()) if timing.is_file() else None
     summary = json.loads((run / "summary.json").read_text()) if (run / "summary.json").is_file() else {}
+    return p.returncode, summary, int(m[1]) if m else None
+
+
+def missing_tool(ctx, gate, b, work: Path) -> dict:
+    missing = work / "absent" / "yosys"
+    code, summary, rss = sub_gate(ctx, gate, work, ctx.args.design, "--tool", f"yosys={missing}")
     tools = (summary.get("global_statuses") or {}).get("tools_identity") or {}
-    detected = (p.returncode == 3 and summary.get("status") == "unverified" and tools.get("status") == "unverified"
+    detected = (code == 3 and summary.get("status") == "unverified" and tools.get("status") == "unverified"
                 and "yosys" in (tools.get("reason") or ""))
-    return control("tool identity preflight (missing -> unverified, exit 3)", detected, exit_code=p.returncode,
+    return control("tool identity preflight (missing -> unverified, exit 3)", detected, exit_code=code,
                    status=summary.get("status"), tools_identity=tools, pdk_items_run=len(summary.get("pdks", [])),
-                   peak_rss_kib=int(m[1]) if m else None)
+                   peak_rss_kib=rss)
+
+
+def relaxed_manifest(ctx, gate, b, work: Path) -> dict:
+    """Round-1 verifier F2: a relaxed, untracked manifest copy must not pass."""
+    work.mkdir(parents=True, exist_ok=True)
+    m = json.loads(Path(ctx.args.design).read_text())
+    m["budgets"]["parity_ns"] = 0.003
+    copy = work / "relaxed-design.json"
+    copy.write_text(json.dumps(m, indent=1) + "\n")
+    code, summary, rss = sub_gate(ctx, gate, work, copy, "--preflight-only")
+    g = summary.get("global_statuses") or {}
+    floors, prov = g.get("budget_floors") or {}, g.get("manifest_provenance") or {}
+    detected = (code == 1 and summary.get("status") == "failed" and floors.get("status") == "failed"
+                and "budgets.parity_ns" in (floors.get("reason") or "") and prov.get("status") == "unverified")
+    return control("budget floors (owner thresholds) and manifest provenance (git-tracked at HEAD)", detected,
+                   exit_code=code, status=summary.get("status"), failed_items=summary.get("failed_items"),
+                   budget_floors=dict(status=floors.get("status"), reason=floors.get("reason")),
+                   manifest_provenance=dict(status=prov.get("status"), reason=prov.get("reason")),
+                   pdk_items_run=len(summary.get("pdks", [])), peak_rss_kib=rss)
 
 
 def tampered_artifact(ctx, gate, b, record: dict, work: Path) -> dict:
@@ -369,7 +397,8 @@ def run_all(ctx, gate, b, record) -> dict:
     root.mkdir(exist_ok=True)
     plan = [("drc_spacing", drc_spacing), ("label_swap", label_swap), ("removed_via", removed_via),
             ("removed_hold_cell", removed_hold_cell), ("tampered_sdc", tampered_sdc), ("tampered_spef", tampered_spef),
-            ("bad_rtl", bad_rtl), ("missing_tool", missing_tool), ("antenna_planted", antenna_planted)]
+            ("bad_rtl", bad_rtl), ("missing_tool", missing_tool), ("relaxed_manifest", relaxed_manifest),
+            ("antenna_planted", antenna_planted)]
     results = {}
     for name, fn in plan:
         try:

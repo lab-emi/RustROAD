@@ -57,6 +57,71 @@ class Statuses(unittest.TestCase):
             D.item("ok")
 
 
+def work_tmp():
+    work = SCRIPTS.parent / ".work"
+    return tempfile.TemporaryDirectory(dir=work) if work.is_dir() else tempfile.TemporaryDirectory()
+
+
+class ManifestFreeze(unittest.TestCase):
+    """Round-1 verifier F2: a manifest cannot loosen the fixed thresholds, and
+    only the git-tracked manifest unchanged at HEAD can yield a pass."""
+
+    def test_budget_floors(self):
+        m = D.load_manifest(D.ROOT / "fixtures/designs/pipeline.json")
+        self.assertEqual(D.budget_floors(m["budgets"], m["verification"])["status"], "passed")
+        tight = dict(m["budgets"], hold_margin_ns=0.08, setup_margin_ns=0.01, parity_ns=0.0005)
+        self.assertEqual(D.budget_floors(tight, m["verification"])["status"], "passed")
+        for key, value in (("parity_ns", 0.003), ("hold_margin_ns", 0.049), ("setup_margin_ns", -0.01),
+                           ("parity_ns", float("nan")), ("hold_margin_ns", "0.05"), ("parity_ns", None),
+                           ("hold_margin_ns", True)):
+            r = D.budget_floors(dict(m["budgets"], **{key: value}), m["verification"])
+            self.assertEqual(r["status"], "failed", (key, value))
+            self.assertIn(f"budgets.{key}", r["reason"])
+        r = D.budget_floors(m["budgets"], dict(m["verification"], cosim_vectors=16))
+        self.assertEqual((r["status"], r["floors"]["verification.cosim_vectors"]["status"]), ("failed", "failed"))
+        missing = {k: v for k, v in m["budgets"].items() if k != "parity_ns"}
+        self.assertEqual(D.budget_floors(missing, m["verification"])["status"], "failed")
+
+    def test_manifest_provenance(self):
+        with work_tmp() as d:
+            repo = Path(d) / "repo"
+            (repo / "fixtures").mkdir(parents=True)
+            design = repo / "fixtures" / "design.json"
+            design.write_text('{"a": 1}\n')
+            git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+            import subprocess
+            subprocess.run([*git, "init", "-q"], check=True)
+            # Untracked (never committed) -> unverified, never passed.
+            self.assertEqual(D.manifest_provenance(design, repo)["status"], "unverified")
+            subprocess.run([*git, "add", "fixtures/design.json"], check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "x"], check=True)
+            r = D.manifest_provenance(design, repo)
+            self.assertEqual(r["status"], "passed", r)
+            self.assertEqual(r["head_blob"], r["worktree_blob"])
+            design.write_text('{"a": 2}\n')
+            self.assertIn("differs from HEAD", D.manifest_provenance(design, repo)["reason"])
+            subprocess.run([*git, "add", "fixtures/design.json"], check=True)  # staged edit is not HEAD either
+            self.assertEqual(D.manifest_provenance(design, repo)["status"], "unverified")
+            copy = repo / "copy.json"
+            copy.write_text('{"a": 1}\n')
+            self.assertIn("not tracked", D.manifest_provenance(copy, repo)["reason"])
+            outside = Path(d) / "outside.json"
+            outside.write_text("{}")
+            self.assertIn("outside the repository", D.manifest_provenance(outside, repo)["reason"])
+
+    def test_tool_pin_file_must_be_the_frozen_one(self):
+        m = D.load_manifest(D.ROOT / "fixtures/designs/pipeline.json")
+        pins = D.resolve(m["tools"]["path"])
+        self.assertEqual(D.tool_pins_frozen(pins, m)["status"], "passed")
+        with work_tmp() as d:
+            other = Path(d) / "tools.json"
+            data = json.loads(pins.read_text())
+            data["tools"]["ruststa"]["sha256"] = "0" * 64
+            other.write_text(json.dumps(data))
+            self.assertEqual(D.tool_pins_frozen(other, m)["status"], "failed")
+            self.assertEqual(D.tool_pins_frozen(Path(d) / "absent.json", m)["status"], "failed")
+
+
 class SdcAndPorts(unittest.TestCase):
     def test_ports_and_rendering_reproduce_the_pipeline_sdc(self):
         ports = D.ports_from_yosys_json(PORTS_JSON)

@@ -9,22 +9,27 @@
 //! primitive (`rustroad_formats::eco`). Ordering is deterministic.
 //!
 //! Reports are bound to the netlist they timed (`--timed-netlist`, see
-//! `binding`): stale reports, reports of another revision and an edited
-//! netlist that the timed netlist does not refine are refused with
-//! STALE_REPORT. Sink pins must be cell-LEF INPUT pins; directions come from
-//! the profile's `cell_lef` source, re-verified by SHA-256.
+//! `binding`): the STA revision the reports name must record that file (by
+//! xxh3-64) as its netlist source; stale reports, reports of another netlist
+//! or revision and an edited netlist that the timed netlist does not refine
+//! are refused with STALE_REPORT. Sink pins must be cell-LEF INPUT pins;
+//! directions come from the profile's `cell_lef` source, re-verified by
+//! SHA-256.
 //!
 //! Errors of these file-only commands carry their own code (STALE_REPORT,
-//! TIMING_REPORT, ECO_APPLY, ...), never INVALID_WORKSPACE.
+//! REPORT_PROVENANCE, TIMING_REPORT, ECO_APPLY, ...), never INVALID_WORKSPACE.
+//! No RustROAD workspace is read or written; hold-eco reads one revision
+//! record of the STA workspace the reports name, under a shared lock.
 //!
 //! Memory/work preflight (Rule 9): reports and profiles are capped at 64 MiB /
 //! 4 MiB, the cell LEF at 64 MiB (one parse; only the touched masters' pin
-//! directions are kept); per sink the chain search evaluates at most
-//! `max_combinations` multisets (default 200,000, each O(max_chain x
-//! corners)); at most `max_sinks` sinks are planned. Peak memory is two
-//! netlist ASTs, the LEF document and the parsed reports (well below 512 MiB
-//! at the input caps). No timing graph, path or cone is built here; slacks
-//! come from the timing engine.
+//! directions are kept), the STA revision record at 4 MiB; per sink the chain
+//! search evaluates at most `max_combinations` multisets (default 200,000,
+//! each O(max_chain x corners)); at most `max_sinks` sinks are planned. Peak
+//! memory is two netlist ASTs plus the timed netlist text (16 MiB cap), the
+//! LEF document and the parsed reports (well below 512 MiB at the input
+//! caps). No timing graph, path or cone is built here; slacks come from the
+//! timing engine.
 mod binding;
 pub use binding::BindingSummary;
 
@@ -298,10 +303,16 @@ fn masters_of(netlists: &[&Netlist], profile: &DelayCellProfile) -> BTreeSet<Str
 }
 
 pub fn load_netlist(path: &Path) -> Result<(Netlist, Artifact)> {
+    let (netlist, artifact, _) = load_netlist_text(path)?;
+    Ok((netlist, artifact))
+}
+
+/// `load_netlist` that also returns the exact text it parsed.
+fn load_netlist_text(path: &Path) -> Result<(Netlist, Artifact, String)> {
     let (text, pin) = read_file(path, MAX_NETLIST_BYTES, "mapped_verilog")?;
     let netlist = verilog::parse_verilog(&text, &VerilogLimits::default())
         .map_err(|e| fail("ECO_NETLIST", e))?;
-    Ok((netlist, artifact_of(&pin)))
+    Ok((netlist, artifact_of(&pin), text))
 }
 
 /// Write `bytes` to `out` atomically (temp file in the same directory, fsync, rename).
@@ -689,7 +700,7 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
     }
     check_outputs(&[&r.netlist, &r.timed_netlist], &r.out, &r.plan_out)?;
     let (netlist, netlist_pin) = load_netlist(&r.netlist)?;
-    let (timed, timed_pin) = load_netlist(&r.timed_netlist)?;
+    let (timed, timed_pin, timed_text) = load_netlist_text(&r.timed_netlist)?;
     let (profile, profile_pin) = load_profile(&r.profile)?;
     let (directions, lef_pin) = load_pin_directions(
         &profile,
@@ -699,9 +710,11 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
     let mut cells = profile.eco_cells()?;
     cells.pin_directions = directions;
     let mut bind = BindingSummary {
-        method: "sha256 of the timed netlist (when given) + report rows and path stages \
-                 present in the timed netlist + one STA revision + edited netlist refined \
-                 by the timed netlist up to inserted buffers/ties",
+        method: "the STA revision the reports name records the timed netlist as its netlist \
+                 source (xxh3-64, from <workspace>/revisions/<rev>/meta.json under a shared \
+                 lock) + sha256 of the timed netlist (when given) + report rows and path \
+                 stages present in the timed netlist + one STA revision + edited netlist \
+                 refined by the timed netlist up to inserted buffers/ties",
         timed_netlist_sha256: timed_pin.sha256.clone(),
         expected_sha256: r.timed_netlist_sha256.clone(),
         ..BindingSummary::default()
@@ -728,7 +741,12 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
         &mut bind,
     )?;
     let mut revision: Option<(String, String)> = None;
-    let mut same_revision = |env: &Envelope, path: &Path| -> Result<()> {
+    // The first report fixes the revision; its record must name the timed
+    // netlist before any row is bound (provenance first, content second).
+    let mut same_revision = |env: &Envelope,
+                             path: &Path,
+                             bind: &mut BindingSummary|
+     -> Result<()> {
         let (Some(w), Some(v)) = (env.workspace.clone(), env.rev.clone()) else {
             return Err(fail(
                 "TIMING_REPORT",
@@ -737,6 +755,7 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
         };
         match &revision {
             None => {
+                binding::bind_sta_record(&w, &v, &r.timed_netlist, timed_text.as_bytes(), bind)?;
                 revision = Some((w, v));
                 Ok(())
             }
@@ -757,7 +776,7 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
     let mut hold_seen = BTreeSet::new();
     for path in &r.hold_reports {
         let (env, artifact) = read_envelope(path)?;
-        same_revision(&env, path)?;
+        same_revision(&env, path, &mut bind)?;
         let (wire, clock) = scope_models(&env);
         if wire != "spef_rc" || clock != "propagated" {
             return Err(fail(
@@ -830,7 +849,7 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
     let mut setup_seen = BTreeSet::new();
     for path in &r.setup_reports {
         let (env, artifact) = read_envelope(path)?;
-        same_revision(&env, path)?;
+        same_revision(&env, path, &mut bind)?;
         let (wire, clock) = scope_models(&env);
         if wire != "spef_rc" || clock != "propagated" {
             return Err(fail(

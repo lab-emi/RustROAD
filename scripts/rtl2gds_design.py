@@ -10,6 +10,13 @@ PDK file the closure engine derives (Liberty per corner, LEFs, cell GDS, OpenRCX
 rules) are frozen by hash as well. Tool binaries are pinned in a separate tool
 file (``fixtures/flow/rtl2gds-tools.json``).
 
+The gating thresholds cannot be loosened by a manifest: ``OWNER_FLOORS``
+(hold >= +0.05 ns, setup >= 0 ns, RustSTA-vs-OpenSTA parity <= 1 ps, owner
+decisions) and ``GATE_FLOORS`` (co-simulation vectors) are fixed here, and a
+budget that loosens one fails ``budget_floors``. The manifest itself must be
+the git-tracked file unchanged at HEAD (``manifest_provenance``), and the tool
+pin file must be the one the manifest freezes; otherwise the gate cannot pass.
+
 Statuses are ``passed`` / ``failed`` / ``unverified`` (``missing`` counts as
 unverified). A definitive failure of any gating item fails the gate (exit 1);
 otherwise any unproven gating item leaves it unverified (exit 3); exit 0 only
@@ -20,9 +27,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 from string import Template
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 DESIGN_SCHEMA = "rustroad.design.v1"
@@ -113,6 +122,79 @@ BUDGET_KEYS = ("hold_margin_ns", "setup_margin_ns", "hold_eco_setup_margin_ns", 
                "container_memory", "container_timeout_s")
 VERIFICATION_KEYS = ("cosim_vectors", "cosim_seed", "rustsys_budget", "rustsys_model_budget",
                      "rustsys_sweep_max_candidates", "yosys_equiv_seq")
+
+
+# Owner-fixed gate thresholds: a manifest may tighten them, never loosen them.
+OWNER_FLOORS = {
+    "hold_margin_ns": (">=", 0.05, "hold >= +0.05 ns at tt/ss/ff (owner decision)"),
+    "setup_margin_ns": (">=", 0.0, "setup >= 0 at ss+max and tt (owner decision)"),
+    "parity_ns": ("<=", 0.001, "RustSTA-vs-OpenSTA endpoint parity <= 1 ps (owner decision)"),
+}
+# Gate policy floors on the verification block (not owner-fixed, same rule).
+GATE_FLOORS = {
+    "cosim_vectors": (">=", 1024, "random co-simulation of at least 1024 cycles (gate policy)"),
+}
+
+
+def budget_floors(budgets: dict, verification: dict) -> dict:
+    """Every owner/gate threshold of the manifest against its fixed floor.
+
+    A non-numeric, non-finite or loosened value fails; tightening passes.
+    """
+    rows, loosened = {}, []
+    for block, floors, values in (("budgets", OWNER_FLOORS, budgets), ("verification", GATE_FLOORS, verification)):
+        for key, (op, floor, rule) in floors.items():
+            value = values.get(key)
+            numeric = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+            ok = numeric and (value >= floor if op == ">=" else value <= floor)
+            rows[f"{block}.{key}"] = dict(value=value, required=f"{op} {floor}", rule=rule,
+                                          status="passed" if ok else "failed")
+            if not ok:
+                loosened.append(f"{block}.{key}={value!r} (required {op} {floor})")
+    return item("passed" if not loosened else "failed",
+                None if not loosened else f"manifest loosens fixed thresholds: {loosened}", floors=rows)
+
+
+def manifest_provenance(path: Path, root: Path = ROOT) -> dict:
+    """The design manifest must be git-tracked and unchanged at HEAD.
+
+    Its budgets and frozen hashes define what the gate checks, so a copy or an
+    uncommitted edit can never yield a pass (unverified, never passed).
+    """
+    path = Path(path).resolve()
+    try:
+        rel = path.relative_to(Path(root).resolve())
+    except ValueError:
+        return item("unverified", f"design manifest {path} is outside the repository {root}", path=str(path))
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=60)
+    try:
+        head = git("rev-parse", "--verify", "--quiet", "HEAD")
+        at_head = git("rev-parse", "--verify", "--quiet", f"HEAD:{rel.as_posix()}")
+        work = git("hash-object", "--", str(path))
+    except (OSError, subprocess.SubprocessError) as error:
+        return item("unverified", f"git unavailable: {error!r}", path=str(rel))
+    if head.returncode != 0 or work.returncode != 0:
+        return item("unverified", "not a git checkout: the manifest cannot be bound to a revision", path=str(rel))
+    head_blob, work_blob = at_head.stdout.strip(), work.stdout.strip()
+    if at_head.returncode != 0:
+        return item("unverified", f"{rel} is not tracked at HEAD", path=str(rel), head=head.stdout.strip(),
+                    worktree_blob=work_blob)
+    ok = head_blob == work_blob
+    return item("passed" if ok else "unverified",
+                None if ok else f"{rel} differs from HEAD (uncommitted edit)", path=str(rel),
+                head=head.stdout.strip(), head_blob=head_blob, worktree_blob=work_blob)
+
+
+def tool_pins_frozen(tools_file: Path, manifest: dict) -> dict:
+    """The tool pin file in use must be the one the manifest freezes (by sha256)."""
+    want = manifest["tools"]["sha256"]
+    got = sha256_file(tools_file) if Path(tools_file).is_file() else None
+    ok = got == want
+    return item("passed" if ok else "failed",
+                None if ok else f"tool pin file {tools_file} (sha256 {got}) is not the manifest's frozen pin file "
+                                f"{manifest['tools']['path']} ({want})", path=str(tools_file), sha256=got)
 
 
 def load_manifest(path: Path) -> dict:

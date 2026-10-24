@@ -1,8 +1,11 @@
 //! Self-authored hold-ECO planner fixtures: a 4-register netlist, synthetic
-//! RustSTA-shaped reports, a toy cell LEF (pin directions) and a three-cell
-//! profile. Each test writes < 64 KiB; no PDK, timing engine or path
-//! enumeration is involved. Real-PDK closure is verified separately by
-//! scripts/hold_closure.py and scripts/rtl2gds.py with extracted parasitics.
+//! RustSTA-shaped reports with the revision records of a synthetic STA
+//! workspace (`sta_ws/revisions/rev<NNNN>/meta.json`, the shape the timing
+//! engine writes), a toy cell LEF (pin directions) and a three-cell profile.
+//! Each test writes < 64 KiB; no PDK, timing engine or path enumeration is
+//! involved. Real-PDK closure (and the provenance binding against records the
+//! timing engine itself wrote) is verified separately by scripts/hold_closure.py
+//! and scripts/rtl2gds.py with extracted parasitics.
 
 use rustroad_workspace::eco::{HoldEcoRequest, apply_plan, plan_hold};
 use serde_json::{Value, json};
@@ -182,10 +185,48 @@ struct Case {
     d: PathBuf,
     req: HoldEcoRequest,
 }
+/// Reports name the synthetic STA workspace of their test directory.
+const STA_WS: &str = "/sta/ws";
 fn write(d: &Path, name: &str, v: &Value) -> PathBuf {
     let p = d.join(name);
-    fs::write(&p, serde_json::to_vec_pretty(v).unwrap()).unwrap();
+    let mut v = v.clone();
+    if v["workspace"] == STA_WS {
+        v["workspace"] = json!(d.join("sta_ws"));
+    }
+    fs::write(&p, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
     p
+}
+fn xxh3(path: &Path) -> String {
+    format!(
+        "xxh3:{:016x}",
+        xxhash_rust::xxh3::xxh3_64(&fs::read(path).unwrap())
+    )
+}
+/// The revision record the timing engine writes for `rev`: `sources` lists
+/// each netlist source (path, xxh3-64) of the netlist table.
+fn record_sources(d: &Path, rev: &str, meta_rev: &str, netlists: &[&Path]) {
+    let ws = d.join("sta_ws");
+    let n: u32 = rev.trim_start_matches("rev").parse().unwrap();
+    let dir = ws.join("revisions").join(format!("rev{n:04}"));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(ws.join("workspace.lock"), b"").unwrap();
+    let sources: Vec<Value> = netlists
+        .iter()
+        .map(|p| json!({"table": "netlist", "path": p, "hash": xxh3(p)}))
+        .chain([json!({"table": "constraints", "path": d.join("x.sdc"), "hash": "xxh3:0000000000000001"})])
+        .collect();
+    let meta = json!({"schema": "rusteda.revision.v1", "rev": meta_rev, "parent": "rev1",
+        "tables": {"netlist": {"path": "netlist.rbin", "hash": "xxh3:00000000000000aa", "upstream": {}}},
+        "sources": sources});
+    fs::write(
+        dir.join("meta.json"),
+        serde_json::to_vec_pretty(&meta).unwrap(),
+    )
+    .unwrap();
+}
+/// The timing engine timed `netlist` in revision `rev` of the test's STA workspace.
+fn record(d: &Path, rev: &str, netlist: &Path) {
+    record_sources(d, rev, rev, &[netlist]);
 }
 fn case(rows: &[(&str, &str, f64, f64)], setup_ss: f64, profile: Value) -> Case {
     let d = dir();
@@ -211,6 +252,7 @@ fn case(rows: &[(&str, &str, f64, f64)], setup_ss: f64, profile: Value) -> Case 
         &setup_report("tt", &[("r0/D", 9.0), ("r1/D", 9.0), ("r2/D", 9.0)]),
     );
     let prof = write(&d, "profile.json", &with_cell_lef(&d, profile));
+    record(&d, "rev2", &netlist);
     let req = HoldEcoRequest {
         timed_netlist: netlist.clone(),
         timed_netlist_sha256: None,
@@ -358,6 +400,7 @@ fn existing_chain_is_extended_and_capped() {
     ];
     second.out = c.d.join("out_b.v");
     second.plan_out = c.d.join("plan_b.json");
+    record(&c.d, "rev4", &second.timed_netlist);
     let plan = plan_hold(&second).unwrap();
     assert_eq!(plan.sinks[0].existing_chain, ["rr_eco_hold_0"]);
     let out = fs::read_to_string(&second.out).unwrap();
@@ -388,6 +431,7 @@ fn existing_chain_is_extended_and_capped() {
     third.out = c.d.join("out_c.v");
     third.plan_out = c.d.join("plan_c.json");
     third.max_total_chain = 2;
+    record(&c.d, "rev6", &third.timed_netlist);
     let e = plan_hold(&third).unwrap_err().to_string();
     assert!(e.contains("existing chain 2"), "{e}");
 }
@@ -711,11 +755,40 @@ fn stale_reports_are_refused_with_their_own_code() {
         r.plan_out = c.d.join(format!("{name}.json"));
         r
     };
-    // Iteration-0 reports against the iteration-1 netlist (verifier NB4).
+    // Iteration-0 reports against the iteration-1 netlist (verifier NB4):
+    // the STA record of rev2 names in.v, not the ECO netlist.
     let mut r = fresh("stale_i1");
     r.netlist = eco.clone();
     r.timed_netlist = eco.clone();
     expect_stale(&r, "old reports, new netlist");
+    let e = plan_hold(&r).unwrap_err().to_string();
+    assert!(e.contains("were not produced from this netlist"), "{e}");
+    // The same pairing with a record forged to name the ECO netlist is still
+    // refused by the content binding (r0/D sits on another net there).
+    record(&c.d, "rev3", &eco);
+    let mut r = fresh("stale_i1_forged");
+    r.netlist = eco.clone();
+    r.timed_netlist = eco.clone();
+    r.hold_reports = vec![write(
+        &c.d,
+        "hold_rev3.json",
+        &hold_report_rev(0.05, &rows, "spef_rc", "rev3", None),
+    )];
+    r.setup_reports = vec![
+        write(
+            &c.d,
+            "ss_rev3.json",
+            &setup_report_rev("ss", &[("r0/D", 8.0)], "rev3"),
+        ),
+        write(
+            &c.d,
+            "tt_rev3.json",
+            &setup_report_rev("tt", &[("r0/D", 9.0)], "rev3"),
+        ),
+    ];
+    expect_stale(&r, "forged record, old rows");
+    let e = plan_hold(&r).unwrap_err().to_string();
+    assert!(e.contains("report net n0"), "{e}");
     // New netlist paired with the old timed netlist.
     let mut r = fresh("stale_pair");
     r.netlist = eco.clone();
@@ -779,6 +852,129 @@ fn stale_reports_are_refused_with_their_own_code() {
 }
 
 #[test]
+fn later_reports_on_an_earlier_netlist_are_refused_by_the_sta_record() {
+    // Phase-B1/round-1 verifier F1: reports of a later STA run (timed on the
+    // ECO netlist) whose rows also exist in the earlier netlist were accepted
+    // with the earlier netlist and its own (correct) sha256, and produced a
+    // wrong plan. The STA revision record names the netlist it timed.
+    let rows = [("ss", "r0/D", -0.10, 8.0), ("ss", "r1/D", -0.10, 8.0)];
+    let c = case(&rows, 8.0, default_profile());
+    assert_eq!(plan_hold(&c.req).unwrap().sinks.len(), 2);
+    let eco = c.req.out.clone();
+    // rev4: the STA run on the ECO netlist still lists r2/D (a direct path,
+    // identical in both netlists) and nothing else.
+    record(&c.d, "rev4", &eco);
+    let later = [("ss", "r2/D", -0.02, 8.0)];
+    let hold4 = write(
+        &c.d,
+        "hold_rev4.json",
+        &hold_report_rev(0.05, &later, "spef_rc", "rev4", None),
+    );
+    let ss4 = write(
+        &c.d,
+        "ss_rev4.json",
+        &setup_report_rev("ss", &[("r0/D", 8.0), ("r1/D", 8.0), ("r2/D", 8.0)], "rev4"),
+    );
+    let tt4 = write(
+        &c.d,
+        "tt_rev4.json",
+        &setup_report_rev("tt", &[("r0/D", 9.0), ("r1/D", 9.0), ("r2/D", 9.0)], "rev4"),
+    );
+    let with = |netlist: &Path, timed: &Path, name: &str| {
+        let mut r = c.req.clone();
+        r.netlist = netlist.to_path_buf();
+        r.timed_netlist = timed.to_path_buf();
+        r.timed_netlist_sha256 = Some(format!("{:x}", Sha256::digest(fs::read(timed).unwrap())));
+        r.hold_reports = vec![hold4.clone()];
+        r.setup_reports = vec![ss4.clone(), tt4.clone()];
+        r.out = c.d.join(format!("{name}.v"));
+        r.plan_out = c.d.join(format!("{name}.json"));
+        r
+    };
+    // The counterexample: earlier netlist + its own hash + later reports.
+    let r = with(&c.req.netlist, &c.req.netlist, "foreign");
+    let e = plan_hold(&r).unwrap_err().to_string();
+    assert!(
+        e.starts_with("STALE_REPORT:") && e.contains("were not produced from this netlist"),
+        "{e}"
+    );
+    assert!(
+        e.contains(&xxh3(&eco)) && e.contains(&xxh3(&c.req.netlist)),
+        "{e}"
+    );
+    assert!(!r.out.exists() && !r.plan_out.exists());
+    // The matching pair is accepted and records what the STA record says.
+    let r = with(&eco, &eco, "matching");
+    let plan = plan_hold(&r).unwrap();
+    assert_eq!(plan.status, "planned");
+    let sta = plan.inputs.binding.sta_record.as_ref().unwrap();
+    assert_eq!(sta.netlist_source, eco.display().to_string());
+    assert_eq!(sta.timed_netlist_xxh3, xxh3(&eco));
+    assert!(sta.source_path_matches);
+    assert!(sta.revision_record.ends_with("revisions/rev0004/meta.json"));
+    let saved: Value = serde_json::from_slice(&fs::read(&r.plan_out).unwrap()).unwrap();
+    assert_eq!(
+        saved["inputs"]["binding"]["sta_record"]["netlist_source_xxh3"],
+        json!(xxh3(&eco))
+    );
+    // The hash is the binding: the same bytes under another name are accepted.
+    let copy = c.d.join("eco_copy.v");
+    fs::copy(&eco, &copy).unwrap();
+    let plan = plan_hold(&with(&eco, &copy, "copy")).unwrap();
+    assert!(!plan.inputs.binding.sta_record.unwrap().source_path_matches);
+}
+
+#[test]
+fn unreadable_or_ambiguous_sta_records_are_refused() {
+    let rows = [("ss", "r0/D", -0.10, 8.0)];
+    let netlist_of = |c: &Case| c.req.netlist.clone();
+    let expect = |c: &Case, code: &str, what: &str| {
+        let e = plan_hold(&c.req).unwrap_err().to_string();
+        assert!(e.starts_with(&format!("{code}:")), "{what}: {e}");
+        assert!(!e.contains("INVALID_WORKSPACE"), "{what}: {e}");
+        assert!(!c.req.out.exists(), "{what}");
+    };
+    // No revision record at all.
+    let c = case(&rows, 8.0, default_profile());
+    fs::remove_dir_all(c.d.join("sta_ws/revisions")).unwrap();
+    expect(&c, "REPORT_PROVENANCE", "missing record");
+    // No workspace lock (not a timing-engine workspace).
+    let c = case(&rows, 8.0, default_profile());
+    fs::remove_file(c.d.join("sta_ws/workspace.lock")).unwrap();
+    expect(&c, "REPORT_PROVENANCE", "missing lock");
+    // A record of another revision in the directory of rev2.
+    let c = case(&rows, 8.0, default_profile());
+    record_sources(&c.d, "rev2", "rev5", &[&netlist_of(&c)]);
+    expect(&c, "REPORT_PROVENANCE", "record of another revision");
+    // No netlist source, or two of them.
+    let c = case(&rows, 8.0, default_profile());
+    record_sources(&c.d, "rev2", "rev2", &[]);
+    expect(&c, "REPORT_PROVENANCE", "no netlist source");
+    let c = case(&rows, 8.0, default_profile());
+    let n = netlist_of(&c);
+    record_sources(&c.d, "rev2", "rev2", &[&n, &n]);
+    expect(&c, "REPORT_PROVENANCE", "two netlist sources");
+    // Malformed record and a report revision that is not rev<N>.
+    let c = case(&rows, 8.0, default_profile());
+    fs::write(c.d.join("sta_ws/revisions/rev0002/meta.json"), b"{").unwrap();
+    expect(&c, "REPORT_PROVENANCE", "malformed record");
+    let mut c = case(&rows, 8.0, default_profile());
+    c.req.hold_reports = vec![write(
+        &c.d,
+        "hold_badrev.json",
+        &hold_report_rev(0.05, &rows, "spef_rc", "rev02", None),
+    )];
+    expect(&c, "REPORT_PROVENANCE", "non-canonical revision");
+    // A writer holding the workspace lock: bounded wait, then its own code.
+    let c = case(&rows, 8.0, default_profile());
+    let lock = fs::File::open(c.d.join("sta_ws/workspace.lock")).unwrap();
+    lock.lock().unwrap();
+    expect(&c, "STA_WORKSPACE_LOCKED", "writer lock");
+    lock.unlock().unwrap();
+    assert_eq!(plan_hold(&c.req).unwrap().status, "planned");
+}
+
+#[test]
 fn cts_buffered_timed_netlist_refines_the_mapped_netlist() {
     let rows = [("ss", "r0/D", -0.10, 8.0)];
     let mut c = case(&rows, 8.0, default_profile());
@@ -792,12 +988,16 @@ fn cts_buffered_timed_netlist_refines_the_mapped_netlist() {
     fs::write(&timed, &cts).unwrap();
     c.req.timed_netlist = timed.clone();
     c.req.timed_netlist_sha256 = Some(format!("{:x}", Sha256::digest(cts.as_bytes())));
+    record(&c.d, "rev2", &timed);
     let plan = plan_hold(&c.req).unwrap();
     let b = &plan.inputs.binding;
     assert_eq!(b.inserted_instances, ["rr_clkbuf_0"]);
     assert_eq!(b.redirected_pins, 3);
     assert_eq!((b.hold_rows_bound, b.path_stages_bound), (1, 2));
     assert_eq!(b.sta_revision, "rev2");
+    let sta = b.sta_record.as_ref().unwrap();
+    assert_eq!(sta.netlist_source_xxh3, xxh3(&timed));
+    assert!(sta.source_path_matches);
     // An inserted instance that is not a buffer (or tie) is not a refinement.
     let foreign = cts.replace(
         "  wire n0;\n",

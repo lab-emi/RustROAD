@@ -73,10 +73,11 @@ systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G /usr/bin/time -v 
 python3 scripts/rtl2gds.py --evidence-from .work/runs/NEW/summary.json --evidence docs/evidence/rtl2gds.json
 ```
 
-Options: `--rustroad BIN` (default `target/release/rustroad`), `--tools FILE`,
-`--tool NAME=PATH` (override one pinned path; a missing or different binary
-is never a pass), `--no-controls`, `--no-determinism` (both then report
-`unverified`), `--preflight-only`. `--run` must not exist and `--base-rev`
+Options: `--rustroad BIN` (default `target/release/rustroad`), `--tools FILE`
+(must be byte-identical to the manifest's frozen pin file, else
+`tools_identity` fails), `--tool NAME=PATH` (override one pinned path; a
+missing or different binary is never a pass), `--no-controls`,
+`--no-determinism` (both then report `unverified`), `--preflight-only`. `--run` must not exist and `--base-rev`
 must be `empty` (`REVISION_CONFLICT` otherwise); the run directory is locked
 and its HEAD moves from `rev0` to `rev1`. Exit 0 = every gating status passed,
 1 = at least one failed, 3 = none failed but at least one is unverified.
@@ -108,6 +109,17 @@ preflight).
 - `budgets`: hold margin 0.05 ns, setup margin 0, hold-ECO setup margin
   0.05 ns, parity 1 ps, at most 4 hold iterations, 120 s / 2 GiB address
   space per tool process, 4 GiB / 900 s per signoff container, 3600 s wall.
+
+**The manifest cannot loosen the gate.** The owner-fixed thresholds are
+fixed in `scripts/rtl2gds_design.py` (`OWNER_FLOORS`: `hold_margin_ns >=
+0.05`, `setup_margin_ns >= 0`, `parity_ns <= 0.001`; `GATE_FLOORS`:
+`cosim_vectors >= 1024`). A manifest may tighten them; a looser, missing or
+non-numeric value fails the global status `budget_floors` before any step
+runs. The manifest itself must be the git-tracked file unchanged at HEAD
+(`manifest_provenance`: blob at `HEAD:<path>` equals the working file);
+an untracked copy or an uncommitted edit still runs (development) but is
+`unverified`, so the gate can never exit 0 on it. The `relaxed_manifest`
+control checks both on every run.
 
 `fixtures/flow/rtl2gds-tools.json` pins RustSys (policy producer), rusteda,
 ruststa, Yosys, Verilator, OpenSTA and the OpenROAD image by sha256.
@@ -144,8 +156,9 @@ separately per PDK (`pdks[].statuses`). Gating statuses:
 | `controls` | ten planted defects | each rejected by its own oracle |
 
 Reported only: `density` (`density_status`; owner decision: not part of the
-block DRC verdict). Global statuses: `tools_identity`, `openroad_image`,
-`design_manifest`, `sdc_rendering`. `timing_accuracy_status` is also given at
+block DRC verdict). Global statuses: `tools_identity` (pinned binaries and the
+frozen pin file), `openroad_image`, `design_manifest` (every tracked input by
+sha256), `budget_floors`, `manifest_provenance`, `sdc_rendering`. `timing_accuracy_status` is also given at
 the top level together with `timing_accuracy_failures` (every failing
 corner/check with its worst rows).
 
@@ -185,6 +198,7 @@ RustROAD clock tree.
 | `tampered_spef` | every R of the native ss SPEF x1000 (229 / 210 resistors) | SPEF sha256 vs extraction receipt; re-timing moves ss setup 8.50 -> 7.02 ns (sky130) |
 | `bad_rtl` | wrapper inverting `y[0]` around the renamed top | RustSys `not-equivalent`, Yosys 1 unproven `$equiv`, co-simulation mismatches |
 | `missing_tool` | `--tool yosys=<absent>` | exit 3, `tools_identity` unverified (`yosys: missing`) |
+| `relaxed_manifest` | untracked manifest copy with `parity_ns` 0.003 | exit 1, `budget_floors` failed (`budgets.parity_ns`), `manifest_provenance` unverified |
 | `tampered_artifact` | one GDS byte flipped; separately one recorded hash edited | binding re-verification names `gds`; digest mismatch |
 | `antenna_planted` | 600 um met3 / 2000 um Metal3 wire on `b[1]` | native 810.5 / 867.2 > 360; Magic metal3 x1 / KLayout ANT.16_ii_ANT.4 x6 |
 
@@ -199,10 +213,12 @@ Detailed in `docs/hold-closure.md` (sections "Report binding", "Sink pins",
 
 - `apply-eco`/`hold-eco` refuse an `insert_buffer` sink that is not a cell-LEF
   `INPUT` pin (`ECO_INVALID`); the phase-B1 `r0/Q` plan is refused.
-- `hold-eco` binds reports to `--timed-netlist` (and its recorded sha256),
-  to one STA revision, row by row and stage by stage, and checks that the
-  edited netlist is refined by the timed netlist; stale reports fail
-  `STALE_REPORT`.
+- `hold-eco` binds reports to `--timed-netlist` through the timing engine's
+  own record: the STA revision the reports name must list that file (by
+  xxh3-64) as its netlist source (`REPORT_PROVENANCE` when the record cannot
+  be read). It also checks the recorded sha256, one STA revision, every row
+  and path stage, and that the edited netlist is refined by the timed
+  netlist; stale or foreign reports fail `STALE_REPORT`.
 - `check-antenna` keeps a derived 0.10 margin and `antenna-eco` sizes diodes
   against it; a `partial` input is carried forward as `partial`.
 - File-only commands report their own codes (`STALE_REPORT`, `ECO_APPLY`,
@@ -213,6 +229,8 @@ Tests: `crates/rustroad-formats/src/eco.rs`
 `crates/rustroad-workspace/tests/hold_eco.rs`
 (`apply_eco_refuses_an_output_pin_sink_and_a_foreign_cell_lef`,
 `stale_reports_are_refused_with_their_own_code`,
+`later_reports_on_an_earlier_netlist_are_refused_by_the_sta_record`,
+`unreadable_or_ambiguous_sta_records_are_refused`,
 `cts_buffered_timed_netlist_refines_the_mapped_netlist`,
 `antenna_eco_carries_a_partial_input_status_forward`,
 `antenna_eco_sizes_diodes_against_the_safety_margin`) and
