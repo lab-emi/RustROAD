@@ -41,6 +41,35 @@
   "controls"
  ],
  "global_statuses": {
+  "budget_floors": {
+   "floors": {
+    "budgets.hold_margin_ns": {
+     "required": ">= 0.05",
+     "rule": "hold >= +0.05 ns at tt/ss/ff (owner decision)",
+     "status": "passed",
+     "value": 0.05
+    },
+    "budgets.parity_ns": {
+     "required": "<= 0.001",
+     "rule": "RustSTA-vs-OpenSTA endpoint parity <= 1 ps (owner decision)",
+     "status": "passed",
+     "value": 0.001
+    },
+    "budgets.setup_margin_ns": {
+     "required": ">= 0.0",
+     "rule": "setup >= 0 at ss+max and tt (owner decision)",
+     "status": "passed",
+     "value": 0.0
+    },
+    "verification.cosim_vectors": {
+     "required": ">= 1024",
+     "rule": "random co-simulation of at least 1024 cycles (gate policy)",
+     "status": "passed",
+     "value": 4096
+    }
+   },
+   "status": "passed"
+  },
   "design_manifest": {
    "changed": [],
    "files": {
@@ -162,6 +191,12 @@
    },
    "status": "passed"
   },
+  "manifest_provenance": {
+   "head": "05fca8dce3a1b68182f0b065bf52350931671c8a",
+   "head_blob": "b5e6d329357c141a475054b8939131ac71339c36",
+   "status": "passed",
+   "worktree_blob": "b5e6d329357c141a475054b8939131ac71339c36"
+  },
   "openroad_image": {
    "image": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
    "status": "passed"
@@ -188,14 +223,14 @@
   {
    "binding": {
     "artifacts": 53,
-    "digest": "a405035a37ef05c0c340227ad0de018429f435cb04538bb734236fc48f7e4e91",
+    "digest": "23132cc6a2f1b94c9e5510b6c760540f63c644a0a32837347bb2e62095092d83",
     "revision": {
      "branch": "feat/rtl2gds-gate",
      "dirty": false,
      "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
      "dirty_paths": 0,
-     "head": "cf111eb06af6e9b9a54aa750367859dfb5009baf",
-     "rustroad_sha256": "b6b30c9011921b18d957b6199a75be3273f81ea43c841e55d2d34117eb4df9b8"
+     "head": "05fca8dce3a1b68182f0b065bf52350931671c8a",
+     "rustroad_sha256": "2f7254d6196e420a558ddad300ff9137cc066014dce54b29209648a0b8a3cb37"
     }
    },
    "details": {
@@ -436,7 +471,7 @@
     "artifact_binding": {
      "artifacts": 53,
      "changed": [],
-     "digest": "a405035a37ef05c0c340227ad0de018429f435cb04538bb734236fc48f7e4e91",
+     "digest": "23132cc6a2f1b94c9e5510b6c760540f63c644a0a32837347bb2e62095092d83",
      "status": "passed"
     },
     "cec_final": {
@@ -569,7 +604,7 @@
         ]
        },
        "oracle": "native check-antenna and the foundry antenna deck",
-       "peak_rss_kib": 72132,
+       "peak_rss_kib": 71712,
        "port": "b[1]"
       },
       "bad_rtl": {
@@ -617,7 +652,7 @@
        "expected": "failed",
        "gap_um": 0.1,
        "oracle": "Magic DRC and KLayout DRC",
-       "peak_rss_kib": 411080,
+       "peak_rss_kib": 413300,
        "planted": [
         "(20000,2000;20600,3000)",
         "(20700,2000;21300,3000)"
@@ -645,7 +680,7 @@
          "final result 'Top level cell failed pin matching.'"
         ]
        },
-       "peak_rss_kib": 407216,
+       "peak_rss_kib": 407588,
        "statuses": {
         "lvs_klayout": "failed",
         "lvs_netgen": "failed",
@@ -659,7 +694,7 @@
        "expected": "failed",
        "oracle": "tool identity preflight (missing -> unverified, exit 3)",
        "pdk_items_run": 0,
-       "peak_rss_kib": 41696,
+       "peak_rss_kib": 43064,
        "status": "unverified",
        "tools_identity": {
         "reason": "tool identity: {'yosys': 'missing'}",
@@ -676,6 +711,26 @@
         }
        }
       },
+      "relaxed_manifest": {
+       "budget_floors": {
+        "reason": "manifest loosens fixed thresholds: ['budgets.parity_ns=0.003 (required <= 0.001)']",
+        "status": "failed"
+       },
+       "detected": true,
+       "exit_code": 1,
+       "expected": "failed",
+       "failed_items": [
+        "*:budget_floors"
+       ],
+       "manifest_provenance": {
+        "reason": ".work/runs/r1-a/sky130_controls/relaxed_manifest/relaxed-design.json is not tracked at HEAD",
+        "status": "unverified"
+       },
+       "oracle": "budget floors (owner thresholds) and manifest provenance (git-tracked at HEAD)",
+       "pdk_items_run": 0,
+       "peak_rss_kib": 42288,
+       "status": "failed"
+      },
       "removed_hold_cell": {
        "detected": true,
        "expected": "failed",
@@ -683,7 +738,7 @@
        "margin_ns": 0.05,
        "opensta_worst_hold_ns": -0.0898758322,
        "oracle": "RustSTA and OpenSTA hold gate on a fresh layout",
-       "peak_rss_kib": 120500,
+       "peak_rss_kib": 120284,
        "processes": 24,
        "removed": [
         "rr_eco_hold_0"
@@ -719,7 +774,7 @@
          "1 pins without a matching pin: ['layout-only y[1]']"
         ]
        },
-       "peak_rss_kib": 406368,
+       "peak_rss_kib": 407332,
        "removed": "VIA_L1M1_PR",
        "statuses": {
         "lvs_klayout": "failed",
@@ -762,7 +817,7 @@
        "expected": "failed",
        "factor": 1000.0,
        "oracle": "SPEF identity against the extraction receipt",
-       "peak_rss_kib": 120440,
+       "peak_rss_kib": 120140,
        "resistors_scaled": 229,
        "timing_effect": {
         "bound_worst_hold_ns": 0.06668937367053535,
@@ -1175,16 +1230,16 @@
       "binding": {
        "files": {
         "ff": {
-         "actual": "a5108eec08203ba736df77b3fdb3432a54e1ebbe83fee7bcb5b07bd1290a885c",
-         "expected": "a5108eec08203ba736df77b3fdb3432a54e1ebbe83fee7bcb5b07bd1290a885c"
+         "actual": "1e8d1bbf694c509cfe7d010f2db11acf56259b259d0d915cb525965e70f36ba9",
+         "expected": "1e8d1bbf694c509cfe7d010f2db11acf56259b259d0d915cb525965e70f36ba9"
         },
         "ss": {
-         "actual": "b5bcc2a1fc0ada45c5f62bf02bc2deb8137ec22bc89c2a77a1b70f7e20772846",
-         "expected": "b5bcc2a1fc0ada45c5f62bf02bc2deb8137ec22bc89c2a77a1b70f7e20772846"
+         "actual": "c1af9f8f8e16cac531a9a1ae3a1b82241e9ae649a94f6b7bf5d7a0a55c539501",
+         "expected": "c1af9f8f8e16cac531a9a1ae3a1b82241e9ae649a94f6b7bf5d7a0a55c539501"
         },
         "tt": {
-         "actual": "c7f74dfae141baa4ce3df3d26651ee19a6440f3b0972d20fd52f1431759441f9",
-         "expected": "c7f74dfae141baa4ce3df3d26651ee19a6440f3b0972d20fd52f1431759441f9"
+         "actual": "18532c29812c0e4ab4381f2597463786b8076e787f5d59b77f130f2cd257d374",
+         "expected": "18532c29812c0e4ab4381f2597463786b8076e787f5d59b77f130f2cd257d374"
         }
        },
        "status": "passed"
@@ -2315,19 +2370,19 @@
      "status": "passed"
     }
    },
-   "wall_seconds": 55.152
+   "wall_seconds": 48.808
   },
   {
    "binding": {
     "artifacts": 52,
-    "digest": "ec2b2b63ca9290e261756830a9e4755ec3832167cd61b64cfc0e558ddcc42cee",
+    "digest": "5dabc6169812f994e5b261eb88d5f6f02138a98c4ee00e87e4ccbec25da8ac45",
     "revision": {
      "branch": "feat/rtl2gds-gate",
      "dirty": false,
      "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
      "dirty_paths": 0,
-     "head": "cf111eb06af6e9b9a54aa750367859dfb5009baf",
-     "rustroad_sha256": "b6b30c9011921b18d957b6199a75be3273f81ea43c841e55d2d34117eb4df9b8"
+     "head": "05fca8dce3a1b68182f0b065bf52350931671c8a",
+     "rustroad_sha256": "2f7254d6196e420a558ddad300ff9137cc066014dce54b29209648a0b8a3cb37"
     }
    },
    "details": {
@@ -2570,7 +2625,7 @@
     "artifact_binding": {
      "artifacts": 52,
      "changed": [],
-     "digest": "ec2b2b63ca9290e261756830a9e4755ec3832167cd61b64cfc0e558ddcc42cee",
+     "digest": "5dabc6169812f994e5b261eb88d5f6f02138a98c4ee00e87e4ccbec25da8ac45",
      "status": "passed"
     },
     "cec_final": {
@@ -2704,7 +2759,7 @@
         ]
        },
        "oracle": "native check-antenna and the foundry antenna deck",
-       "peak_rss_kib": 421004,
+       "peak_rss_kib": 423296,
        "port": "b[1]"
       },
       "bad_rtl": {
@@ -2752,7 +2807,7 @@
        "expected": "failed",
        "gap_um": 0.12,
        "oracle": "Magic DRC and KLayout DRC",
-       "peak_rss_kib": 410180,
+       "peak_rss_kib": 411320,
        "planted": [
         "(43000,3000;43600,4000)",
         "(43720,3000;44320,4000)"
@@ -2780,7 +2835,7 @@
          "final result 'Top level cell failed pin matching.'"
         ]
        },
-       "peak_rss_kib": 407340,
+       "peak_rss_kib": 406008,
        "statuses": {
         "lvs_klayout": "failed",
         "lvs_netgen": "failed",
@@ -2794,7 +2849,7 @@
        "expected": "failed",
        "oracle": "tool identity preflight (missing -> unverified, exit 3)",
        "pdk_items_run": 0,
-       "peak_rss_kib": 42124,
+       "peak_rss_kib": 42676,
        "status": "unverified",
        "tools_identity": {
         "reason": "tool identity: {'yosys': 'missing'}",
@@ -2811,6 +2866,26 @@
         }
        }
       },
+      "relaxed_manifest": {
+       "budget_floors": {
+        "reason": "manifest loosens fixed thresholds: ['budgets.parity_ns=0.003 (required <= 0.001)']",
+        "status": "failed"
+       },
+       "detected": true,
+       "exit_code": 1,
+       "expected": "failed",
+       "failed_items": [
+        "*:budget_floors"
+       ],
+       "manifest_provenance": {
+        "reason": ".work/runs/r1-a/gf180_controls/relaxed_manifest/relaxed-design.json is not tracked at HEAD",
+        "status": "unverified"
+       },
+       "oracle": "budget floors (owner thresholds) and manifest provenance (git-tracked at HEAD)",
+       "pdk_items_run": 0,
+       "peak_rss_kib": 43092,
+       "status": "failed"
+      },
       "removed_hold_cell": {
        "detected": true,
        "expected": "failed",
@@ -2818,7 +2893,7 @@
        "margin_ns": 0.05,
        "opensta_worst_hold_ns": -0.794514894485,
        "oracle": "RustSTA and OpenSTA hold gate on a fresh layout",
-       "peak_rss_kib": 231700,
+       "peak_rss_kib": 230876,
        "processes": 24,
        "removed": [
         "rr_eco_hold_3"
@@ -2854,7 +2929,7 @@
          "1 pins without a matching pin: ['layout-only y[1]']"
         ]
        },
-       "peak_rss_kib": 408288,
+       "peak_rss_kib": 406056,
        "removed": "VIA_Via1_HV",
        "statuses": {
         "lvs_klayout": "failed",
@@ -2897,7 +2972,7 @@
        "expected": "failed",
        "factor": 1000.0,
        "oracle": "SPEF identity against the extraction receipt",
-       "peak_rss_kib": 231032,
+       "peak_rss_kib": 230104,
        "resistors_scaled": 210,
        "timing_effect": {
         "bound_worst_hold_ns": 0.3706765838579389,
@@ -3317,16 +3392,16 @@
       "binding": {
        "files": {
         "ff": {
-         "actual": "f50b99060b11b1aa5bfcccbbabdfc25f079b0027ce5e44a9cf1337e5f5f39d54",
-         "expected": "f50b99060b11b1aa5bfcccbbabdfc25f079b0027ce5e44a9cf1337e5f5f39d54"
+         "actual": "fefeca907d730faf573fbe001e83f4453b7640fbe154fce4b8111d69ba03f99a",
+         "expected": "fefeca907d730faf573fbe001e83f4453b7640fbe154fce4b8111d69ba03f99a"
         },
         "ss": {
-         "actual": "b3977fd9347a135e53a260f1b880a357839b0ae8280a8759dd49b00507def1bd",
-         "expected": "b3977fd9347a135e53a260f1b880a357839b0ae8280a8759dd49b00507def1bd"
+         "actual": "49aeacb87079ebb0810c61dd28608d6ea5ac81942f4c428ef028a9f7b91c705c",
+         "expected": "49aeacb87079ebb0810c61dd28608d6ea5ac81942f4c428ef028a9f7b91c705c"
         },
         "tt": {
-         "actual": "36e3e7ca45c0e87898203f8b7cfe1b1f84de844f883322561eb77bc1a029fa39",
-         "expected": "36e3e7ca45c0e87898203f8b7cfe1b1f84de844f883322561eb77bc1a029fa39"
+         "actual": "47685afc75f7b55a02edf1d86e7e9f17eb98a6bac5972f6c54f9866b77a2a0fe",
+         "expected": "47685afc75f7b55a02edf1d86e7e9f17eb98a6bac5972f6c54f9866b77a2a0fe"
         }
        },
        "status": "passed"
@@ -4436,7 +4511,7 @@
      "status": "passed"
     }
    },
-   "wall_seconds": 65.447
+   "wall_seconds": 61.197
   }
  ],
  "ports": [
@@ -4525,40 +4600,40 @@
    "tool_process_address_space_mib": 2048,
    "tool_timeout_s": 120
   },
-  "peak_rss_kib": 475012,
+  "peak_rss_kib": 475468,
   "processes": 290,
   "steps": [
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 61632,
+    "peak_rss_kib": 61916,
     "processes": 1,
     "step": "synthesis",
-    "wall_seconds": 0.141
+    "wall_seconds": 0.134
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 120760,
+    "peak_rss_kib": 120732,
     "processes": 74,
     "step": "place_cts_route_closure",
-    "wall_seconds": 3.325
+    "wall_seconds": 3.046
    },
    {
     "nested_peaks": 3,
     "pdk": "sky130",
-    "peak_rss_kib": 126684,
+    "peak_rss_kib": 111800,
     "processes": 3,
     "step": "openrcx",
-    "wall_seconds": 1.257
+    "wall_seconds": 0.97
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 17744,
+    "peak_rss_kib": 17220,
     "processes": 1,
     "step": "gds_export",
-    "wall_seconds": 0.03
+    "wall_seconds": 0.029
    },
    {
     "nested_peaks": 0,
@@ -4566,143 +4641,143 @@
     "peak_rss_kib": null,
     "processes": 0,
     "step": "cell_policy",
-    "wall_seconds": 0.026
+    "wall_seconds": 0.023
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 62456,
+    "peak_rss_kib": 62684,
     "processes": 2,
     "step": "cec_prelayout",
-    "wall_seconds": 0.168
+    "wall_seconds": 0.154
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 120532,
+    "peak_rss_kib": 120268,
     "processes": 42,
     "step": "timing",
-    "wall_seconds": 1.982
+    "wall_seconds": 1.801
    },
    {
     "nested_peaks": 2,
     "pdk": "sky130",
-    "peak_rss_kib": 474888,
+    "peak_rss_kib": 474468,
     "processes": 0,
     "step": "signoff",
-    "wall_seconds": 13.215
+    "wall_seconds": 11.31
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 62788,
+    "peak_rss_kib": 63180,
     "processes": 2,
     "step": "cec_final",
-    "wall_seconds": 0.163
+    "wall_seconds": 0.151
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 61888,
+    "peak_rss_kib": 62740,
     "processes": 2,
     "step": "cec_powered",
-    "wall_seconds": 0.178
+    "wall_seconds": 0.162
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 287884,
+    "peak_rss_kib": 287224,
     "processes": 3,
     "step": "simulation",
-    "wall_seconds": 1.822
+    "wall_seconds": 1.666
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 61500,
+    "peak_rss_kib": 61788,
     "processes": 20,
     "step": "cell_proofs",
-    "wall_seconds": 0.742
+    "wall_seconds": 0.72
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 61888,
+    "peak_rss_kib": 61964,
     "processes": 1,
     "step": "rerun_synthesis",
-    "wall_seconds": 0.141
+    "wall_seconds": 0.132
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 120740,
+    "peak_rss_kib": 120812,
     "processes": 74,
     "step": "rerun_place_cts_route_closure",
-    "wall_seconds": 3.262
+    "wall_seconds": 3.048
    },
    {
     "nested_peaks": 3,
     "pdk": "sky130",
-    "peak_rss_kib": 126196,
+    "peak_rss_kib": 112116,
     "processes": 3,
     "step": "rerun_openrcx",
-    "wall_seconds": 1.233
+    "wall_seconds": 0.989
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 17060,
+    "peak_rss_kib": 18032,
     "processes": 1,
     "step": "rerun_gds_export",
-    "wall_seconds": 0.039
+    "wall_seconds": 0.028
    },
    {
     "nested_peaks": 79,
     "pdk": "sky130",
-    "peak_rss_kib": 120740,
+    "peak_rss_kib": 120812,
     "processes": 0,
     "step": "determinism_rerun",
-    "wall_seconds": 4.697
+    "wall_seconds": 4.219
    },
    {
-    "nested_peaks": 10,
+    "nested_peaks": 11,
     "pdk": "sky130",
-    "peak_rss_kib": 475012,
+    "peak_rss_kib": 475468,
     "processes": 6,
     "step": "controls",
-    "wall_seconds": 27.106
+    "wall_seconds": 24.14
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 103904,
+    "peak_rss_kib": 104400,
     "processes": 1,
     "step": "synthesis",
-    "wall_seconds": 0.281
+    "wall_seconds": 0.223
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 231020,
+    "peak_rss_kib": 231596,
     "processes": 49,
     "step": "place_cts_route_closure",
-    "wall_seconds": 2.343
+    "wall_seconds": 2.217
    },
    {
     "nested_peaks": 3,
     "pdk": "gf180",
-    "peak_rss_kib": 136012,
+    "peak_rss_kib": 126232,
     "processes": 3,
     "step": "openrcx",
-    "wall_seconds": 1.543
+    "wall_seconds": 1.305
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 11628,
+    "peak_rss_kib": 11488,
     "processes": 1,
     "step": "gds_export",
-    "wall_seconds": 0.019
+    "wall_seconds": 0.021
    },
    {
     "nested_peaks": 0,
@@ -4710,122 +4785,122 @@
     "peak_rss_kib": null,
     "processes": 0,
     "step": "cell_policy",
-    "wall_seconds": 0.012
+    "wall_seconds": 0.013
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 107452,
+    "peak_rss_kib": 106944,
     "processes": 2,
     "step": "cec_prelayout",
-    "wall_seconds": 0.251
+    "wall_seconds": 0.258
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 231068,
+    "peak_rss_kib": 231144,
     "processes": 42,
     "step": "timing",
-    "wall_seconds": 3.089
+    "wall_seconds": 3.055
    },
    {
     "nested_peaks": 2,
     "pdk": "gf180",
-    "peak_rss_kib": 446292,
+    "peak_rss_kib": 445076,
     "processes": 0,
     "step": "signoff",
-    "wall_seconds": 16.732
+    "wall_seconds": 14.884
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 106448,
+    "peak_rss_kib": 106468,
     "processes": 2,
     "step": "cec_final",
-    "wall_seconds": 0.248
+    "wall_seconds": 0.245
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 106688,
+    "peak_rss_kib": 106896,
     "processes": 2,
     "step": "cec_powered",
-    "wall_seconds": 0.25
+    "wall_seconds": 0.252
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 288080,
+    "peak_rss_kib": 288844,
     "processes": 3,
     "step": "simulation",
-    "wall_seconds": 1.701
+    "wall_seconds": 1.743
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 79344,
+    "peak_rss_kib": 79120,
     "processes": 20,
     "step": "cell_proofs",
-    "wall_seconds": 0.93
+    "wall_seconds": 1.003
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 104912,
+    "peak_rss_kib": 103840,
     "processes": 1,
     "step": "rerun_synthesis",
-    "wall_seconds": 0.23
+    "wall_seconds": 0.228
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 230880,
+    "peak_rss_kib": 231056,
     "processes": 49,
     "step": "rerun_place_cts_route_closure",
-    "wall_seconds": 2.228
+    "wall_seconds": 2.362
    },
    {
     "nested_peaks": 3,
     "pdk": "gf180",
-    "peak_rss_kib": 123500,
+    "peak_rss_kib": 127276,
     "processes": 3,
     "step": "rerun_openrcx",
-    "wall_seconds": 1.571
+    "wall_seconds": 1.308
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 11512,
+    "peak_rss_kib": 11552,
     "processes": 1,
     "step": "rerun_gds_export",
-    "wall_seconds": 0.018
+    "wall_seconds": 0.019
    },
    {
     "nested_peaks": 54,
     "pdk": "gf180",
-    "peak_rss_kib": 230880,
+    "peak_rss_kib": 231056,
     "processes": 0,
     "step": "determinism_rerun",
-    "wall_seconds": 4.076
+    "wall_seconds": 3.947
    },
    {
-    "nested_peaks": 10,
+    "nested_peaks": 11,
     "pdk": "gf180",
-    "peak_rss_kib": 448104,
+    "peak_rss_kib": 448584,
     "processes": 6,
     "step": "controls",
-    "wall_seconds": 33.648
+    "wall_seconds": 31.704
    }
   ],
-  "wall_seconds": 121.222
+  "wall_seconds": 110.49
  },
  "revision": {
   "branch": "feat/rtl2gds-gate",
   "dirty": false,
   "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
   "dirty_paths": 0,
-  "head": "cf111eb06af6e9b9a54aa750367859dfb5009baf",
-  "rustroad_sha256": "b6b30c9011921b18d957b6199a75be3273f81ea43c841e55d2d34117eb4df9b8"
+  "head": "05fca8dce3a1b68182f0b065bf52350931671c8a",
+  "rustroad_sha256": "2f7254d6196e420a558ddad300ff9137cc066014dce54b29209648a0b8a3cb37"
  },
  "schema": "rustroad.rtl2gds.v1",
  "scope": {
@@ -4969,7 +5044,7 @@
    "status": "passed"
   },
   "rustroad": {
-   "actual_sha256": "b6b30c9011921b18d957b6199a75be3273f81ea43c841e55d2d34117eb4df9b8",
+   "actual_sha256": "2f7254d6196e420a558ddad300ff9137cc066014dce54b29209648a0b8a3cb37",
    "note": "the binary under test: bound by sha256 with the git revision, not pinned",
    "status": "passed"
   },

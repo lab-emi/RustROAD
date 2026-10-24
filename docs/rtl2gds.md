@@ -35,25 +35,31 @@ the RustROAD commit recorded in the evidence (`revision.head`, clean tree), Rust
 | Co-simulation | 4096 cycles, 16384 port comparisons, 0 mismatches | same |
 | Density (reported, not gated) | unverified (block smaller than the windowed deck) | failed (8 coverage rules, no fill) |
 | Artifact binding / determinism | 53 files re-verified / 16 artifacts byte-identical | 52 / 15 |
-| Negative controls | 10 of 10 rejected by their oracle | 10 of 10 |
+| Negative controls | 11 of 11 rejected by their oracle | 11 of 11 |
 
 The gate exits 1 because the only failing gating status is RustSTA-vs-OpenSTA
 parity at GF180 ss+max on the OpenRCX SPEF. The worst rows are `y[0]` hold
 (RustSTA 3.764303 ns, OpenSTA 3.767026 ns) and setup, `y[1]`, `r0/D` and
 `r3/D` hold, all 2.6-2.7 ps, and the min-pulse-width slack of the flops'
-clock pins (2.51 ps). This is the known `rr_clkbuf_2` slew difference
-(RustSTA 0.5279 ns vs OpenSTA 0.5424 ns on net `rr_clock_2`) owned by the
-RustSTA stream; nothing is special-cased for it. Every other gating status
+clock pins (2.51 ps). This is the known `rr_clkbuf_2` slew difference owned
+by the RustSTA stream; nothing is special-cased for it. Measured on this
+gate's GF180 final layout (OpenRCX SPEF, ss corner, evidence run): the slew
+at `rr_clkbuf_2/Z` is 0.5379 ns in RustSTA (`ruststa report --section pins
+--corner ss`, `slew_late_ns`) and 0.5529 ns in OpenSTA (rise,
+`report_checks -path_delay min -to r0/D -format full_clock_expanded -fields
+{slew}`); the downstream `rr_clkbuf_0/Z` slews agree (0.6356 vs 0.6364 ns). Every other gating status
 passes on both PDKs, and the same layout timed with the native SPEF agrees
 within 0.46 ps. The exact rows are in `timing_accuracy_failures` of the
 summary.
 
-Three complete gate runs (`.work/runs/final-c` is the evidence run; the
-summaries and binding records of the other two are kept in
-`.work/runs/keep-final-a` and `keep-final`), each with a `git archive` build of
-the committed tree, gave byte-identical netlists, DEF, GDS and native SPEF to
-each other and to a run with the worktree build; the OpenRCX SPEF differ only
-in OpenRCX's wall-clock `*DATE` line.
+The evidence run (`.work/runs/r1-a`, commit `05fca8d`, clean tree, `git
+archive` build `2f7254d6`) and the three complete runs of the previous round
+(`final-c` at `cf111eb` and two more; their summaries and binding records
+are kept in `.work/runs/keep-final-c`, `keep-final-a` and `keep-final`)
+gave byte-identical netlists, DEF, GDS and native SPEF; the OpenRCX SPEF
+differ only in OpenRCX's wall-clock `*DATE` line. Of the 53 / 52 bound
+artifacts only the harness scripts, the rustroad binary and that line
+changed between `final-c` and `r1-a`.
 
 ## How to run
 
@@ -153,7 +159,7 @@ separately per PDK (`pdks[].statuses`). Gating statuses:
 | `cell_proofs` | inserted hold and clock cells | Yosys sat proof per corner, wrong polarity rejected, native ECO refuses an inverter |
 | `artifact_binding` | sha256 of every artifact, tool and input + RustROAD revision | re-hashed after every oracle and control |
 | `determinism` | a second full build in `<pdk>_rerun/` | byte compare (OpenRCX `*DATE` line removed, listed) |
-| `controls` | ten planted defects | each rejected by its own oracle |
+| `controls` | eleven planted defects | each rejected by its own oracle |
 
 Reported only: `density` (`density_status`; owner decision: not part of the
 block DRC verdict). Global statuses: `tools_identity` (pinned binaries and the
@@ -240,13 +246,17 @@ Tests: `crates/rustroad-formats/src/eco.rs`
 reproduces every netlist, DEF and native SPEF of the run before the change
 byte for byte.
 
-Checks on the branch: `cargo test --release --workspace` 153 passed, 4
-ignored (22 s, 730 MiB); `cargo clippy --all-targets -- -D warnings` and
+Checks on the branch: `cargo test --release --workspace` 157 passed, 4
+ignored (19 s, 702 MiB); `cargo clippy --all-targets -- -D warnings` and
 `cargo fmt --check` clean; `python3 -m unittest discover -s scripts/tests`
-65 tests (`scripts/tests/test_rtl2gds.py` covers the status algebra, SDC
-rendering, binding, determinism compare, powered-netlist views, bad-RTL
-wrapper, testbench generator, OpenSTA parser, parity and the controls'
-netlist/DEF/SPEF edits).
+68 tests (`scripts/tests/test_rtl2gds.py` covers the status algebra, budget
+floors, manifest provenance, the frozen tool pin file, SDC rendering,
+binding, determinism compare, powered-netlist views, bad-RTL wrapper,
+testbench generator, OpenSTA parser, parity and the controls'
+netlist/DEF/SPEF edits). The `hold_closure.py --signoff --openrcx
+--antenna-controls` regression with the new binary passes (1:12.3, 289,748
+KiB) and reproduces all 88 bound files of the previous round's run; only the
+three hold plans differ (they now carry `inputs.binding.sta_record`).
 
 ## Resources (rule 9)
 
@@ -257,26 +267,26 @@ largest single process: a signoff container (KLayout/Magic/Netgen, capped at
 limit and a 120 s timeout, the gate itself under 8 GiB, the whole command in
 a `systemd-run` scope with MemoryMax=8G.
 
-Measured (evidence run `.work/runs/final-c`, both PDKs): **121.2 s** end to
-end (`/usr/bin/time`: 2:01.3), 290 guarded processes, peak RSS **475,012 KiB**
+Measured (evidence run `.work/runs/r1-a`, both PDKs): **110.5 s** end to
+end (`/usr/bin/time`: 1:50.6), 290 guarded processes, peak RSS **475,468 KiB**
 (a sky130 signoff container in the controls); the largest host process was
-the Verilator co-simulation build (288,080 KiB). The two earlier complete runs
-took 109.8 s and 128.4 s with the same results. Per step (wall s / peak RSS
-KiB):
+the Verilator co-simulation build (288,844 KiB; host-side peak of the whole
+command 289,668 KiB). The previous round's three complete runs took 109.8 s,
+121.2 s and 128.4 s with the same results. Per step (wall s / peak RSS KiB):
 
 | Step | SKY130 | GF180 |
 |---|---|---|
-| synthesis | 0.14 / 61,632 | 0.28 / 103,904 |
-| place, CTS, route, closure | 3.33 / 120,760 | 2.34 / 231,020 |
-| OpenRCX (3 corners) | 1.26 / 126,684 | 1.54 / 136,012 |
-| GDS export | 0.03 / 17,744 | 0.02 / 11,628 |
-| CEC pre-layout / final / powered | 0.17 / 0.16 / 0.18 (<= 62,788) | 0.25 / 0.25 / 0.25 (<= 107,452) |
-| timing (2 SPEFs x RustSTA + 6 OpenSTA) | 1.98 / 120,532 | 3.09 / 231,068 |
-| signoff (reference streamout + 7 checks) | 13.21 / 474,888 | 16.73 / 446,292 |
-| co-simulation | 1.82 / 287,884 | 1.70 / 288,080 |
-| cell proofs | 0.74 / 61,500 | 0.93 / 79,344 |
-| determinism rerun | 4.70 / 120,740 | 4.08 / 230,880 |
-| controls (10) | 27.11 / 475,012 | 33.65 / 448,104 |
+| synthesis | 0.13 / 61,916 | 0.22 / 104,400 |
+| place, CTS, route, closure | 3.05 / 120,732 | 2.22 / 231,596 |
+| OpenRCX (3 corners) | 0.97 / 111,800 | 1.31 / 126,232 |
+| GDS export | 0.03 / 17,220 | 0.02 / 11,488 |
+| CEC pre-layout / final / powered | 0.15 / 0.15 / 0.16 (<= 63,180) | 0.26 / 0.25 / 0.25 (<= 106,944) |
+| timing (2 SPEFs x RustSTA + 6 OpenSTA) | 1.80 / 120,268 | 3.06 / 231,144 |
+| signoff (reference streamout + 7 checks) | 11.31 / 474,468 | 14.88 / 445,076 |
+| co-simulation | 1.67 / 287,224 | 1.74 / 288,844 |
+| cell proofs | 0.72 / 61,788 | 1.00 / 79,120 |
+| determinism rerun | 4.22 / 120,812 | 3.95 / 231,056 |
+| controls (11) | 24.14 / 475,468 | 31.70 / 448,584 |
 
 ## Open issues
 
