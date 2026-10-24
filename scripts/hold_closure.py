@@ -122,20 +122,17 @@ HOLD_PLAN_EXTRA_NS = 0.03
 # Gate sizing with RustSTA `whatif` as the oracle (exact on the layout's
 # SPEF: a resize keeps every net): candidates per round, rounds, resizes
 # accepted per round, and the wall-clock budget of one whatif call.
-WHATIF_MAX_CANDIDATES = 160
+WHATIF_MAX_CANDIDATES = 48
 WHATIF_ROUNDS = 6
 WHATIF_ACCEPT_PER_ROUND = 12
 WHATIF_TIMEOUT_S = 600
-# Budget of all whatif rounds of one iteration, in ESTIMATED seconds:
-# WHATIF_CANDIDATE_S per candidate per 1000 timed instances (measured: 0.13 s
-# at ~200, 1.1 s at ~2000 instances). The estimate, not the measured time,
-# sizes the rounds, so the determinism rebuild evaluates the same candidates
-# (a whatif call that hits WHATIF_TIMEOUT_S is a failed round, recorded).
-WHATIF_BUDGET_S = 90
-# ... and of all whatif rounds of one closure loop (the gate runs the loop
-# twice per PDK, the determinism rebuild included, within its wall budget).
-WHATIF_LOOP_BUDGET_S = 360
-WHATIF_CANDIDATE_S = 0.55
+# Candidate budgets, as counts so the determinism rebuild evaluates exactly
+# the same candidates (a whatif call that fails or hits WHATIF_TIMEOUT_S is a
+# failed round, recorded): per layout and per closure loop (the gate runs
+# the loop twice per PDK within its 3600 s wall budget). Measured cost per
+# candidate: 0.13 s (counter), 1.1 s (regfile), 1.9 s (mult) on this host.
+WHATIF_LAYOUT_CANDIDATES = 96
+WHATIF_LOOP_CANDIDATES = 320
 WHATIF_HOLD_LOSS_NS = 0.5
 # DRV/setup ECOs stop (the loop goes on to hold) after this many consecutive
 # layouts on which the previous ECO improved neither the DRV count nor the
@@ -741,11 +738,10 @@ class Flow:
 
         accepted, history, evaluated = {}, [], 0
         prev_base = None
-        per_cand = WHATIF_CANDIDATE_S * max(len(timed), 100) / 1000.0
-        spent = 0.0
-        budget = min(WHATIF_BUDGET_S, WHATIF_LOOP_BUDGET_S - self.whatif_spent)
+        spent = 0
+        budget = min(WHATIF_LAYOUT_CANDIDATES, WHATIF_LOOP_CANDIDATES - self.whatif_spent)
         for rnd in range(WHATIF_ROUNDS):
-            room = int((budget - spent) / max(per_cand, 1e-3))
+            room = budget - spent
             if room < 4:
                 break
             cands = []
@@ -767,8 +763,8 @@ class Flow:
                 self.tools['ruststa'], '-w', sta['workspace'], '--format', 'json', 'whatif', '--rev', sta['revision'],
                 '--edits', ef, '--max-candidates', '1024', '--max-edits', '4096', '--timeout', WHATIF_TIMEOUT_S,
                 '--threads', '2', '-q']])
-            spent += per_cand * len(cands)
-            self.whatif_spent += per_cand * len(cands)
+            spent += len(cands)
+            self.whatif_spent += len(cands)
             try:
                 d = json.loads(bounded_text(Path(r['stdout']), 256 * 1024 ** 2))
             except (ValueError, OSError):
@@ -814,7 +810,7 @@ class Flow:
                 break
         ops = [dict(op='resize_cell', instance=i, cell=c) for i, c in sorted(accepted.items())]
         summary = dict(resized=len(ops), candidates=len(prio), traced_setup_endpoints=traced,
-                       whatif_estimated_seconds=round(spent, 1), whatif_loop_estimated_seconds=round(self.whatif_spent, 1),
+                       whatif_candidates=spent, whatif_loop_candidates=self.whatif_spent,
                        failing_setup_endpoints=len({e for _, _, e in failing}), evaluated=evaluated,
                        rounds=history, utilization_after=round(used / rows_area, 4), max_width_dbu=max_width,
                        oracle='ruststa whatif (resize on the layout SPEF)')
@@ -1238,7 +1234,7 @@ exit
         # the controls run their own loops on fresh layouts).
         self.weights = None  # timing-driven net weights of the next layout
         self.last_setup_eco, self.no_progress, self.eco_blocked = None, 0, None
-        self.whatif_spent = 0.0
+        self.whatif_spent = 0
         seed, best = None, None
         for it in range(self.args.max_iterations):
             try:
