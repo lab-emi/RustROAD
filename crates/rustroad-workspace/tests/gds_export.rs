@@ -110,6 +110,7 @@ fn config() -> PhysicalConfig {
             max_fanout: 2,
             max_buffers: 10,
             max_work: 1000,
+            level_cells: Vec::new(),
         }),
     }
 }

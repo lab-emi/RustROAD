@@ -206,6 +206,7 @@ fn clock_fixture(max_buffers: usize) -> Fixture {
         max_fanout: 2,
         max_buffers,
         max_work: 1000,
+        level_cells: Vec::new(),
     });
     Fixture::new(
         "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule",
@@ -253,6 +254,77 @@ fn bounded_clock_tree_is_level_balanced_and_persistent() {
         rustroad_workspace::clock::synthesize(&f.workspace, &repeated.revision, &limits()).is_err()
     );
     assert_eq!(f.head(), format!("{}\n", repeated.revision));
+}
+
+#[test]
+fn clock_level_masters_follow_the_policy() {
+    let buf2 = "MACRO BUF2\nCLASS CORE ; ORIGIN 0 0 ; SIZE 2 BY 2 ; SITE s ; SYMMETRY X Y ;\n\
+PIN A DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M1 ; RECT 0.3 0.4 0.5 0.6 ; END END A\n\
+PIN Y DIRECTION OUTPUT ; USE SIGNAL ; PORT LAYER M1 ; RECT 1.5 1.3 1.7 1.5 ; END END Y\n\
+PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M1 ; RECT 0 -0.1 2 0.1 ; END END VSS\n\
+PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 2 2.1 ; END END VDD\nEND BUF2\nEND LIBRARY\n";
+    let logic = "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule";
+    for (levels, expect_ok) in [
+        (vec!["BUF2".to_string(), "BUF".to_string()], true),
+        (vec!["BUF2".to_string()], true),
+        (vec!["FILL".to_string()], false),
+    ] {
+        let mut c = config();
+        c.clock = Some(rustroad_workspace::clock::ClockConfig {
+            port: "a".into(),
+            cell: "BUF".into(),
+            input_pin: "A".into(),
+            output_pin: "Y".into(),
+            sink_pin: "A".into(),
+            max_fanout: 2,
+            max_buffers: 10,
+            max_work: 1000,
+            level_cells: levels.clone(),
+        });
+        let f = Fixture::new(logic, &c);
+        fs::write(
+            &f.sources.cell_lef,
+            library().replace("END LIBRARY\n", buf2),
+        )
+        .unwrap();
+        f.import().unwrap();
+        place(&f.workspace, "rev1", &limits()).unwrap();
+        let done = rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits());
+        if !expect_ok {
+            assert!(done.is_err(), "{levels:?}");
+            assert_eq!(f.head(), "rev2\n");
+            continue;
+        }
+        done.unwrap();
+        let s = read(&f.workspace, &limits()).unwrap();
+        let bundle = s.metadata().physical.as_ref().unwrap();
+        let report = bundle.clock_tree.as_ref().unwrap();
+        assert_eq!(report.levels, 2);
+        let cell = |name: &str| {
+            bundle
+                .netlist
+                .instances
+                .iter()
+                .find(|i| i.name == name)
+                .unwrap()
+                .cell
+                .clone()
+        };
+        // rr_clkbuf_0/1 drive the sinks, rr_clkbuf_2 is the root.
+        assert_eq!(cell("rr_clkbuf_0"), "BUF2");
+        assert_eq!(cell("rr_clkbuf_1"), "BUF2");
+        let root = if levels.len() == 1 { "BUF2" } else { "BUF" };
+        assert_eq!(cell("rr_clkbuf_2"), root);
+        let width = s
+            .metadata()
+            .design
+            .cells
+            .iter()
+            .find(|c| c.name == "rr_clkbuf_0")
+            .unwrap()
+            .width;
+        assert_eq!(width, 2000);
+    }
 }
 
 #[test]

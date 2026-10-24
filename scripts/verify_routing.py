@@ -150,6 +150,7 @@ def case(h,p,tools,opts,policy):
     before_def=h.root/(tag+'_before.def');r=run_ok(h,tag+'_before_def',road+['export-def']);before_def.write_bytes(Path(r['stdout']).read_bytes())
     before=capture_power_db(h,tag+'_before',p,before_def)
     cfg=json.loads(config.read_text());proof=clock_function_proof(h,tag,cfg['clock'],lib,tools['yosys'])
+    for k,extra in enumerate(c for c in cfg['clock'].get('level_cells',[]) if c!=cfg['clock']['cell']):proof.setdefault('level_masters',[]).append(clock_function_proof(h,f'{tag}_level{k}',dict(cfg['clock'],cell=extra),lib,tools['yosys']))
     a=h.json_command(tag+'_cts',list(map(str,road+['clock-tree','--base-rev',a['revision'],'--sdc',p['cts_sdc']])))
     cts=a
     clock=h.json_command(tag+'_clock_route',list(map(str,road+['route','--base-rev',a['revision'],'--scope','clock','--config',p['routing_config']])))

@@ -60,7 +60,7 @@ def check(data,routes,profile,scope,spacing_override=None):
     if scope=='clock':
         cfg=json.loads((ROOT/profile['config']).read_text())['clock']
         selected={p['net'] for p in data['io'] if p['name']==cfg['port']}
-        selected|={p['net'] for i in data['instances'] if i['master']==cfg['cell'] for p in i['pins'] if p['name']==cfg['output_pin'] and p['net'] is not None}
+        selected|={p['net'] for i in data['instances'] if i['master'] in {cfg['cell'],*cfg.get('level_cells',[])} for p in i['pins'] if p['name']==cfg['output_pin'] and p['net'] is not None}
     all_vias=routes['vias']+data['vias']
     for wire in routes['wires']+data['wires']:
         require(len(wire['rect'])==4 and wire['rect'][0]<wire['rect'][2] and wire['rect'][1]<wire['rect'][3],'invalid routed rectangle')

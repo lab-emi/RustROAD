@@ -371,7 +371,7 @@ pub fn import_pdk_with_config(
             v.push(t.cell.clone());
         }
         if let Some(t) = &c.clock {
-            v.push(t.cell.clone());
+            v.extend(t.masters());
         }
         v
     });

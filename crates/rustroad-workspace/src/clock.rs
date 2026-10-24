@@ -20,9 +20,41 @@ pub struct ClockConfig {
     pub max_fanout: usize,
     pub max_buffers: usize,
     pub max_work: usize,
+    /// Optional clock-buffer master per tree level. Index 0 is the level that
+    /// drives the sinks, index k the level k steps closer to the root; levels
+    /// beyond the list reuse its last entry. Empty (the default) uses `cell`
+    /// everywhere, which is the previous behaviour. Every master must expose
+    /// exactly `input_pin`/`output_pin` as its single input/output.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub level_cells: Vec<String>,
 }
 impl ClockConfig {
+    /// Master for a tree level counted from the sinks (0 = drives the sinks).
+    pub fn cell_for_level(&self, level_from_sinks: usize) -> &str {
+        match self.level_cells.len() {
+            0 => &self.cell,
+            n => &self.level_cells[level_from_sinks.min(n - 1)],
+        }
+    }
+    /// Every master this configuration may instantiate (deduplicated, ordered).
+    pub fn masters(&self) -> Vec<String> {
+        let mut out = vec![self.cell.clone()];
+        for c in &self.level_cells {
+            if !out.contains(c) {
+                out.push(c.clone());
+            }
+        }
+        out
+    }
     pub fn validate(&self) -> Result<()> {
+        if self.level_cells.len() > 32
+            || self
+                .level_cells
+                .iter()
+                .any(|n| !rustroad_core::valid_object_name(n))
+        {
+            return Err(Error::Invalid("invalid clock level_cells".into()));
+        }
         if self.max_fanout < 2
             || self.max_fanout > 1024
             || self.max_buffers > 250_000
@@ -106,12 +138,13 @@ fn root_net(bundle: &PhysicalBundle, cfg: &ClockConfig) -> Result<u32> {
 fn master<'a>(
     bundle: &'a PhysicalBundle,
     cfg: &ClockConfig,
+    name: &str,
 ) -> Result<&'a rustroad_core::connectivity::Master> {
     let m = bundle
         .connectivity
         .masters
         .iter()
-        .find(|m| m.name == cfg.cell)
+        .find(|m| m.name == name)
         .ok_or_else(|| fail("clock buffer master absent"))?;
     let inputs: Vec<_> = m
         .pins
@@ -145,7 +178,9 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
         .and_then(|c| c.clock.as_ref())
         .ok_or_else(|| fail("clock tree without configuration"))?;
     cfg.validate()?;
-    master(bundle, cfg)?;
+    for name in cfg.masters() {
+        master(bundle, cfg, &name)?;
+    }
     let fanout = if let Some(c) = &report.constraints {
         c.clock.validate().map_err(Error::Invalid)?;
         if c.clock.port != cfg.port
@@ -202,8 +237,9 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
     if buffers.len() != report.buffers.len() || leaves.len() != report.sinks.len() {
         return Err(fail("duplicate clock report endpoint"));
     }
+    let allowed = cfg.masters();
     for &i in &buffers {
-        if bundle.netlist.instances[i].cell != cfg.cell {
+        if !allowed.contains(&bundle.netlist.instances[i].cell) {
             return Err(fail("clock buffer type mismatch"));
         }
     }
@@ -249,6 +285,15 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
             if buffers.contains(&instance) {
                 if pin.name != cfg.input_pin || !seen_buffers.insert(instance) {
                     return Err(fail("clock buffer wiring error"));
+                }
+                // A buffer driven from BFS depth d sits report.levels - d
+                // levels above the sinks (1-based), i.e. index levels-d-1.
+                let level = report
+                    .levels
+                    .checked_sub(depth + 1)
+                    .ok_or_else(|| fail("clock buffer deeper than the reported levels"))?;
+                if bundle.netlist.instances[instance].cell != cfg.cell_for_level(level) {
+                    return Err(fail("clock buffer master differs from its level policy"));
                 }
                 queue.push_back((
                     *outputs
@@ -325,8 +370,10 @@ pub fn synthesize_with_sdc(
             .and_then(|c| c.clock.max_fanout)
             .unwrap_or(cfg.max_fanout),
     );
-    let m = master(bundle, &cfg)?;
-    let size = m.size;
+    let mut sizes = HashMap::new();
+    for name in cfg.masters() {
+        sizes.insert(name.clone(), master(bundle, &cfg, &name)?.size);
+    }
     let root = root_net(bundle, &cfg)?;
     let mut sinks = Vec::new();
     for pin in &bundle.connectivity.pins {
@@ -390,6 +437,8 @@ pub fn synthesize_with_sdc(
         if levels > 32 {
             return Err(budget("clock tree depth"));
         }
+        let cell = cfg.cell_for_level(levels - 1).to_string();
+        let size = sizes[&cell];
         let mut next = Vec::new();
         for group in current.chunks(fanout) {
             work = work
@@ -428,7 +477,7 @@ pub fn synthesize_with_sdc(
             let i = bundle.netlist.instances.len();
             bundle.netlist.instances.push(verilog::Instance {
                 name: name.clone(),
-                cell: cfg.cell.clone(),
+                cell: cell.clone(),
                 connections: vec![
                     verilog::Connection {
                         pin: cfg.input_pin.clone(),
@@ -446,7 +495,7 @@ pub fn synthesize_with_sdc(
             });
             metadata.design.cells.push(Cell {
                 name: name.clone(),
-                master: cfg.cell.clone(),
+                master: cell.clone(),
                 width: size[0],
                 height: size[1],
             });
