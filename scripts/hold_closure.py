@@ -54,7 +54,7 @@ from verify_physical import PhysicalHarness, run_ok, fingerprint, external_cec, 
 from verify_logic import bounded_text, sha256, write_json, tcl_path  # noqa: E402
 from verify_taps import clock_function_proof  # noqa: E402
 import verify_routing  # noqa: E402
-from scale_flow import deconflict, SITES  # noqa: E402
+from scale_flow import deconflict, buffer_port_aliases, port_buffer_cell, SITES  # noqa: E402
 
 # RustSTA 0.4.0 fix-round-2 binaries (RustSTA d1f61e6), copied unchanged from the
 # timing stream's .work/sta-signoff/bin/round2 into this checkout's .work/tools/sta;
@@ -235,7 +235,8 @@ class Flow:
 
         Escaped scalar wires that collide with a vector port bit (RustSys
         register outputs ``\\p_q[0]``) are renamed (scale_flow.deconflict);
-        the raw producer output is kept as ``<tag>_rustsys.v`` when renamed.
+        output ports that share a net are buffered (scale_flow.buffer_port_aliases);
+        the raw producer output is kept as ``<tag>_rustsys.v`` when changed.
         Every CEC of the gate checks the renamed netlist against the RTL.
         """
         mapped = self.h.root / f'{self.tag}_mapped.v'
@@ -248,7 +249,10 @@ class Flow:
                                                 *self.design.rtl])
         text = mapped.read_text()
         renamed_text, self.renamed_wires = deconflict(text)
-        if self.renamed_wires:
+        # Output ports sharing one net get identity buffers (LVS: one pin per
+        # port in the layout); a no-op for netlists without such aliases.
+        renamed_text, self.port_buffers = buffer_port_aliases(renamed_text, port_buffer_cell(self.tag))
+        if self.renamed_wires or self.port_buffers:
             mapped.rename(self.h.root / f'{self.tag}_rustsys.v')
             mapped.write_text(renamed_text)
         return mapped

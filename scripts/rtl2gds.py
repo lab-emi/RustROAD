@@ -186,6 +186,7 @@ class PdkGate:
         with steps(h, tag, f"{label}synthesis"):
             out["mapped"] = flow.synth()
             out["renamed_wires"] = flow.renamed_wires
+            out["port_buffers"] = flow.port_buffers
         if self.recipe == "track":
             with steps(h, tag, f"{label}floorplan"):
                 out["floorplan_check"] = flow.reproduce_floorplan(out["mapped"])
@@ -230,6 +231,7 @@ class PdkGate:
                                     recipe=self.recipe, iterations=len(b["iterations"]), final_iteration=b["final_iteration"],
                                     routed_nets=phys["routed_nets"], wires=phys["wires"], vias=phys["vias"],
                                     patches=phys["patches"], floorplan_reproduced=fpc, renamed_escaped_wires=b["renamed_wires"],
+                                    port_buffers=b.get("port_buffers"),
                                     clock_tree=phys.get("cts"), placement=phys.get("placement"), route=phys.get("route"),
                                     antenna_repair=phys.get("antenna_repair"))
         policy = ctx.flow_args.cell_policy
