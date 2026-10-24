@@ -30,6 +30,12 @@
    "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef",
    "sha256": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
    "bytes": 18167
+  },
+  {
+   "role": "nominal_calibration_table_for_overlap_corner_ratio",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/librelane/rules.openrcx.sky130A.nom.calibre",
+   "sha256": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+   "bytes": 45409
   }
  ],
  "model": {
@@ -37,7 +43,8 @@
   "per_side": "each wire side is looked up separately; an isolated wire has 2 * ground(last row)",
   "beyond_last_row": "coupling 0, ground = last-row ground (isolated side)",
   "context": "over = calibration metal index of the nearest conductor below (0 = substrate), under = nearest above",
-  "resistance": "sheet_resistance * centerline_length / width; via = resistance_ohm_per_cut / cuts"
+  "resistance": "sheet_resistance * centerline_length / width; via = resistance_ohm_per_cut / cuts",
+  "overlap_area": "metal of another layer that covers part of a wire face without forming a calibration plate couples over the covered width at overlap_area.pf_per_um2 (counted once, from the upper face), and the covered face loses area_cap_pf_per_um2 to the substrate; values are the Magic nominal defaultoverlap/defaultareacap times the calibration table's corner ratio (table_corner_ratio: plate excess of the same pair; substrate row for area_cap)"
  },
  "layers": [
   {
@@ -442,7 +449,9 @@
       ]
      ]
     }
-   ]
+   ],
+   "area_cap_pf_per_um2": 3.417782456431142e-05,
+   "overlap_area": []
   },
   {
    "name": "met1",
@@ -1109,6 +1118,16 @@
        5.20846e-05
       ]
      ]
+    }
+   ],
+   "area_cap_pf_per_um2": 2.396580414827077e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 8.358251635790306e-05,
+     "magic_nominal_af_per_um2": 114.2,
+     "table_corner_ratio": 0.7318959400867169,
+     "table_corner_ratio_source": "plate excess of the pair"
     }
    ]
   },
@@ -1910,6 +1929,23 @@
       ]
      ]
     }
+   ],
+   "area_cap_pf_per_um2": 1.6548378789786316e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 3.5881930439032384e-05,
+     "magic_nominal_af_per_um2": 37.56,
+     "table_corner_ratio": 0.9553229616355801,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 9.499247554528475e-05,
+     "magic_nominal_af_per_um2": 133.86,
+     "table_corner_ratio": 0.7096404866672998,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
    ]
   },
   {
@@ -2710,6 +2746,30 @@
       ]
      ]
     }
+   ],
+   "area_cap_pf_per_um2": 1.1685300837368001e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 4.1382951359178595e-05,
+     "magic_nominal_af_per_um2": 20.79,
+     "table_corner_ratio": 1.9905219508984415,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 3.1210626435140924e-05,
+     "magic_nominal_af_per_um2": 34.54,
+     "table_corner_ratio": 0.9036081770451919,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 7.075303900524874e-05,
+     "magic_nominal_af_per_um2": 86.19,
+     "table_corner_ratio": 0.8208961481059144,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
    ]
   },
   {
@@ -3378,6 +3438,37 @@
       ]
      ]
     }
+   ],
+   "area_cap_pf_per_um2": 8.108361267579707e-06,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 1.1238073158272588e-05,
+     "magic_nominal_af_per_um2": 11.67,
+     "table_corner_ratio": 0.9629882740593477,
+     "table_corner_ratio_source": "substrate row (pair plate excess not positive)"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 1.766678683714104e-05,
+     "magic_nominal_af_per_um2": 15.03,
+     "table_corner_ratio": 1.1754349193041278,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 2.1461043046670043e-05,
+     "magic_nominal_af_per_um2": 20.33,
+     "table_corner_ratio": 1.0556341882277445,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 4,
+     "pf_per_um2": 6.565966224506979e-05,
+     "magic_nominal_af_per_um2": 84.03,
+     "table_corner_ratio": 0.7813835802102795,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
    ]
   },
   {
@@ -3781,6 +3872,44 @@
        0.000100611
       ]
      ]
+    }
+   ],
+   "area_cap_pf_per_um2": 5.957808061001713e-06,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 8.634717180027763e-06,
+     "magic_nominal_af_per_um2": 8.03,
+     "table_corner_ratio": 1.07530724533347,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 1.0110469788956343e-05,
+     "magic_nominal_af_per_um2": 9.48,
+     "table_corner_ratio": 1.0665052519996143,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 1.1981408239388196e-05,
+     "magic_nominal_af_per_um2": 11.34,
+     "table_corner_ratio": 1.056561573138289,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 4,
+     "pf_per_um2": 1.776373731755823e-05,
+     "magic_nominal_af_per_um2": 19.63,
+     "table_corner_ratio": 0.9049280345164663,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 5,
+     "pf_per_um2": 5.4324474437432236e-05,
+     "magic_nominal_af_per_um2": 68.33,
+     "table_corner_ratio": 0.7950310908449032,
+     "table_corner_ratio_source": "plate excess of the pair"
     }
    ]
   }

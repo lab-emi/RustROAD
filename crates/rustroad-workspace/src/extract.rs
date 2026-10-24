@@ -47,6 +47,18 @@ pub struct ProfileContext {
     pub under: Option<u32>,
     pub rows: Vec<[f64; 3]>,
 }
+/// Area capacitance of a layer's face over metal of a lower layer where that
+/// metal is not a calibration plate (stacked, offset or barely wider metal).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileOverlap {
+    /// Calibration metal index of the lower layer.
+    pub over: u32,
+    pub pf_per_um2: f64,
+    pub magic_nominal_af_per_um2: f64,
+    pub table_corner_ratio: f64,
+    pub table_corner_ratio_source: String,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileLayer {
@@ -55,6 +67,12 @@ pub struct ProfileLayer {
     pub width_um: f64,
     pub sheet_resistance_ohm_per_square: f64,
     pub contexts: Vec<ProfileContext>,
+    /// Face-to-substrate area capacitance (absent in older profiles: the
+    /// overlap-area term is then off and reported).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area_cap_pf_per_um2: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlap_area: Vec<ProfileOverlap>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -117,6 +135,7 @@ pub struct ExtractScope {
     pub wire_ends: &'static str,
     pub metal_union: &'static str,
     pub diagonal_coupling: &'static str,
+    pub passive_conductors: &'static str,
     pub crossings: &'static str,
     pub parallel_overlap: &'static str,
     pub cell_internal_metal: &'static str,
@@ -284,6 +303,12 @@ pub fn extract(
                     under: c.under,
                     rows: c.rows.clone(),
                 })
+                .collect(),
+            area_cap: p.area_cap_pf_per_um2,
+            overlap: p
+                .overlap_area
+                .iter()
+                .map(|o| (o.over, o.pf_per_um2))
                 .collect(),
         }));
     }
@@ -511,6 +536,26 @@ pub fn extract(
             network.stats.foreign_overlaps
         ));
     }
+    let without_area: Vec<&str> = profile
+        .layers
+        .iter()
+        .filter(|l| l.area_cap_pf_per_um2.is_none())
+        .map(|l| l.name.as_str())
+        .collect();
+    if !without_area.is_empty() {
+        diagnostics.push(format!(
+            "OVERLAP_AREA_UNAVAILABLE: profile has no overlap-area data for {}; non-plate \
+             overlaps on those layers are not extracted",
+            without_area.join(", ")
+        ));
+    }
+    if network.stats.overlap_pairs_without_data > 0 {
+        diagnostics.push(format!(
+            "OVERLAP_PAIR_UNAVAILABLE: {} non-plate overlaps have no layer-pair overlap data and \
+             are not extracted",
+            network.stats.overlap_pairs_without_data
+        ));
+    }
     if !unannotated.is_empty() {
         diagnostics.push(format!(
             "RC_UNROUTED_NETS: {} signal nets have no routed RC tree and no D_NET",
@@ -539,6 +584,10 @@ pub fn extract(
             pin_capacitance: "excluded (Liberty pin capacitance)",
             via_capacitance: "landing pads extracted (pad metal outside the wires is a \
                               capacitance-only piece at the via node); cut capacitance unmodeled",
+            passive_conductors: "pins, obstructions and supply metal that a routed conductor \
+                                 crosses count their own cross-section toward it (the second \
+                                 cut of a crossing); their ground and lateral sides are counted \
+                                 from the routed side",
             wire_ends: "half-width end extensions (DEF default) extracted as capacitance-only \
                         pieces at the run end node",
             metal_union: "wire bodies and pieces (end extensions, via pads, patches) tile the \
@@ -548,9 +597,13 @@ pub fn extract(
             crossings: "a conductor is a calibration plate where its layer covers the strip and \
                         reaches one strip width beyond both edges; a plate below shields the \
                         substrate; both wires of a crossing count their own cross-section",
-            parallel_overlap: "unmodeled (narrower, offset or barely wider metal on other layers \
-                               is not a plate)",
-            cell_internal_metal: "pins and obstructions are neighbours and planes, not extracted",
+            parallel_overlap: "narrower, offset or barely wider metal on other layers is not a \
+                               plate: the covered face of the upper conductor couples by the \
+                               profile's overlap-area capacitance (counted once) and loses its \
+                               face-to-substrate area capacitance; fringe of such overlaps \
+                               unmodeled",
+            cell_internal_metal: "pins and obstructions are neighbours, plates and overlap \
+                                  partners; their own metal is not extracted",
             routing_patches: "extracted: each piece not covered by same-net metal adds ground and \
                               coupling on all four edges at the RC node of the same-net conductor \
                               it overlaps (no new node or resistor)",

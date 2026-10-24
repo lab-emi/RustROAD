@@ -29,6 +29,13 @@ pub struct RcLayer {
     pub width: i64,
     pub sheet_ohm: f64,
     pub contexts: Vec<RcContext>,
+    /// Area capacitance of this layer's face to the substrate, pF/um^2 (the
+    /// share a non-plate overlap below removes from the face); None when the
+    /// profile has no overlap-area data (the term is then off).
+    pub area_cap: Option<f64>,
+    /// `(calibration metal below, pF/um^2)`: area capacitance of this layer's
+    /// face over metal of that layer where it is not a calibration plate.
+    pub overlap: Vec<(u32, f64)>,
 }
 /// Corner model bound to one routing input.
 #[derive(Clone, Debug)]
@@ -151,6 +158,12 @@ pub struct ExtractStats {
     /// Loop-closing conductors whose resistance was dropped to keep a tree.
     pub opened_loop_resistors: usize,
     pub coincident_pin_links: usize,
+    /// Wire-record pieces repeating metal another record of the net already
+    /// stores (collinear overlap); counted once.
+    pub duplicate_wire_edges: usize,
+    /// Cut points of runs longer than the segment limit that are not stored
+    /// nodes; each becomes an internal RC node.
+    pub segment_cut_nodes: usize,
     pub couplings: usize,
     pub shapes: usize,
     pub intervals: usize,
@@ -174,8 +187,18 @@ pub struct ExtractStats {
     /// Wire-run side intervals inside same-net metal (not exposed, no C).
     pub covered_side_intervals: usize,
     /// Intervals whose nearest other-layer metal overlaps without spanning
-    /// the strip (parallel or offset): not a calibration plate, unmodelled.
+    /// the strip (parallel or offset): not a calibration plate; its overlap
+    /// area is extracted when the profile carries overlap data.
     pub nonspanning_plane_intervals: usize,
+    /// Strips of passive conductors (pins, obstructions, supply) that a routed
+    /// conductor on another layer overlaps, and their intervals: each counts
+    /// its own cross-section where a routed conductor is its plate.
+    pub passive_strips: usize,
+    pub passive_intervals: usize,
+    /// Non-plate overlap area extracted (um^2, face of the upper conductor)
+    /// and overlapped layer pairs without overlap data (left out, counted).
+    pub overlap_area_um2: f64,
+    pub overlap_pairs_without_data: usize,
     pub wire_length_dbu: u64,
     pub ground_pf: f64,
     /// Each coupling capacitor counted once.
@@ -227,6 +250,11 @@ struct Run {
     shape: u32,
     /// Strip of a rectangle piece (end extension, via pad or routing patch).
     piece: bool,
+    /// Strip of a passive conductor (pin, obstruction or supply metal): it
+    /// counts only its own cross-section toward routed conductors that are
+    /// its plate (the second cut of a crossing); `net` is the pin's net or
+    /// `u32::MAX` for ground.
+    passive: Option<PassiveOwner>,
     /// Local (tree-order) nodes at `lo` and `hi` (equal for a piece).
     node_lo: u32,
     node_hi: u32,
@@ -327,6 +355,13 @@ fn preflight(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<()> {
                 if !(m.sheet_ohm.is_finite() && m.sheet_ohm > 0.0) || m.contexts.is_empty() {
                     return Err(invalid("invalid layer resistance or empty calibration"));
                 }
+                if m.area_cap.is_some_and(|a| !(a.is_finite() && a >= 0.0))
+                    || m.overlap
+                        .iter()
+                        .any(|o| !(o.1.is_finite() && o.1 >= 0.0) || o.0 >= m.metal)
+                {
+                    return Err(invalid("invalid overlap-area capacitance"));
+                }
                 if !m.contexts.iter().any(|c| c.over == 0 && c.under.is_none()) {
                     return Err(invalid("layer lacks the substrate calibration context"));
                 }
@@ -418,13 +453,64 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         }
         let id = |k: &Key| keys.binary_search(k).map(|i| i as u32);
         let missing = |_| invalid("graph node lookup");
+        // A wire record may be one lattice edge or a longer collinear
+        // segment: split every record at each same-net node of its layer that
+        // lies strictly inside it, so the graph does not depend on how the
+        // router stored the metal.
+        let mut by_row = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, y) -> x
+        let mut by_col = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, x) -> y
+        for k in &keys {
+            by_row.entry((k.0, k.2)).or_default().push(k.1);
+            by_col.entry((k.0, k.1)).or_default().push(k.2);
+        }
+        for v in by_row.values_mut() {
+            v.sort_unstable();
+        }
         let mut edges: Vec<(u32, u32, EdgeKind)> = Vec::new();
         for &i in net_wires {
             let w = &routes.wires[i];
-            let a = id(&(w.layer, w.start[0], w.start[1])).map_err(missing)?;
-            let b = id(&(w.layer, w.end[0], w.end[1])).map_err(missing)?;
-            edges.push((a.min(b), a.max(b), EdgeKind::Wire(w.layer)));
+            let horizontal = w.start[1] == w.end[1];
+            let (fixed, a0, a1) = if horizontal {
+                (
+                    w.start[1],
+                    w.start[0].min(w.end[0]),
+                    w.start[0].max(w.end[0]),
+                )
+            } else {
+                (
+                    w.start[0],
+                    w.start[1].min(w.end[1]),
+                    w.start[1].max(w.end[1]),
+                )
+            };
+            let line = if horizontal {
+                &by_row[&(w.layer, fixed)]
+            } else {
+                &by_col[&(w.layer, fixed)]
+            };
+            let lo = line.partition_point(|&c| c < a0);
+            let hi = line.partition_point(|&c| c <= a1);
+            let at = |c: i64| -> Key {
+                if horizontal {
+                    (w.layer, c, fixed)
+                } else {
+                    (w.layer, fixed, c)
+                }
+            };
+            for pair in line[lo..hi].windows(2) {
+                let a = id(&at(pair[0])).map_err(missing)?;
+                let b = id(&at(pair[1])).map_err(missing)?;
+                edges.push((a.min(b), a.max(b), EdgeKind::Wire(w.layer)));
+            }
+            if edges.len() > limits.max_elements.saturating_mul(4) {
+                return Err(budget("extraction wire edges"));
+            }
         }
+        // Overlapping records describe the same metal once.
+        let before = edges.len();
+        edges.sort_unstable_by_key(|e| (e.0, e.1));
+        edges.dedup_by_key(|e| (e.0, e.1));
+        stats.duplicate_wire_edges += before - edges.len();
         for &i in net_vias {
             let v = &routes.vias[i];
             let spec = &input.vias[v.kind as usize];
@@ -470,6 +556,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         }
         // Junctions: everything but interior points of straight same-layer runs.
         let point = |g: u32| keys[g as usize];
+        let mut virtual_keys: Vec<Key> = Vec::new();
         let mut junction = vec![true; n];
         for g in 0..n {
             if pin_of[g].is_some() || incident[g].len() != 2 {
@@ -555,27 +642,47 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
                     break;
                 }
             }
-            // Split long chains at interior lattice nodes.
-            let axis = |g: u32| {
-                let k = point(g);
-                if keys[chain[0] as usize].1 == keys[chain[chain.len() - 1] as usize].1 {
-                    k.2
-                } else {
-                    k.1
-                }
+            // Split a run longer than the segment limit into equal pieces at
+            // exact coordinates (independent of where records start and end):
+            // n = ceil(L / limit) pieces; a cut point that is not a stored node
+            // becomes a virtual node.
+            let (ka, kb) = (point(start), point(current));
+            let horizontal = ka.2 == kb.2;
+            let (p0, p1) = if horizontal {
+                (ka.1, kb.1)
+            } else {
+                (ka.2, kb.2)
             };
-            let mut seg_start = 0usize;
-            for i in 1..chain.len() {
-                let last = i == chain.len() - 1;
-                let too_long = !last
-                    && (axis(chain[i + 1]) - axis(chain[seg_start])).abs()
-                        > limits.max_segment_length;
-                if last || too_long {
-                    junction[chain[i] as usize] = true;
-                    run_ends.push((chain[seg_start], chain[i], layer));
-                    seg_start = i;
-                }
+            let length = (p1 - p0).abs();
+            let pieces = if length > limits.max_segment_length {
+                (length + limits.max_segment_length - 1) / limits.max_segment_length
+            } else {
+                1
+            };
+            let mut prev = start;
+            for i in 1..pieces {
+                let c = p0
+                    + (p1 - p0).signum()
+                        * ((i128::from(length) * i128::from(i) / i128::from(pieces)) as i64);
+                let key = if horizontal {
+                    (layer, c, ka.2)
+                } else {
+                    (layer, ka.1, c)
+                };
+                let node = match keys.binary_search(&key) {
+                    Ok(g) => {
+                        junction[g] = true;
+                        g as u32
+                    }
+                    Err(_) => {
+                        virtual_keys.push(key);
+                        (n + virtual_keys.len() - 1) as u32
+                    }
+                };
+                run_ends.push((prev, node, layer));
+                prev = node;
             }
+            run_ends.push((prev, current, layer));
         }
         if used
             .iter()
@@ -584,7 +691,17 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         {
             return Err(invalid("wire not covered by a straight run"));
         }
-        // Electrical elements over junction nodes plus extra pin nodes.
+        // Electrical elements over junction and virtual nodes plus extra pin
+        // nodes (graph nodes, then virtual cut nodes, then extra pins).
+        let node_count = n + virtual_keys.len();
+        stats.segment_cut_nodes += virtual_keys.len();
+        let point = |g: u32| -> Key {
+            if (g as usize) < n {
+                keys[g as usize]
+            } else {
+                virtual_keys[g as usize - n]
+            }
+        };
         let mut elems: Vec<(u32, u32, f64)> = Vec::new();
         for &(a, b, layer) in &run_ends {
             let m = layer_model(input, layer)?;
@@ -602,7 +719,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
                 elems.push((a, b, input.tech.via_ohm[k as usize]));
             }
         }
-        let mut total_nodes = n as u32;
+        let mut total_nodes = node_count as u32;
         let mut extra_pin = Vec::new();
         for &(pin, node) in &extra {
             let v = total_nodes;
@@ -626,7 +743,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
             .map(|g| g >= n || junction[g] || pin_of_full[g].is_some())
             .collect();
         let sort_key = |g: u32| -> (u8, Key) {
-            if (g as usize) < n {
+            if (g as usize) < node_count {
                 (0, point(g))
             } else {
                 (1, (g, 0, 0))
@@ -717,6 +834,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
                 plus: cross + half,
                 shape: out.runs.len() as u32,
                 piece: false,
+                passive: None,
                 node_lo: local[lo_node as usize],
                 node_hi: local[hi_node as usize],
             });
@@ -892,6 +1010,7 @@ fn add_piece(
             plus,
             shape,
             piece: true,
+            passive: None,
             node_lo: node,
             node_hi: node,
         });
@@ -1098,6 +1217,178 @@ fn add_patches(
     Ok(())
 }
 
+/// The end node of a strip nearer to `point` (Manhattan distance; ties go to
+/// the lower end).
+fn nearer_end(run: &Run, point: [f64; 2]) -> u32 {
+    let ends = if run.vertical {
+        [
+            [run.cross as f64, run.lo as f64],
+            [run.cross as f64, run.hi as f64],
+        ]
+    } else {
+        [
+            [run.lo as f64, run.cross as f64],
+            [run.hi as f64, run.cross as f64],
+        ]
+    };
+    let d = |p: [f64; 2]| (p[0] - point[0]).abs() + (p[1] - point[1]).abs();
+    if d(ends[1]) < d(ends[0]) {
+        run.node_hi
+    } else {
+        run.node_lo
+    }
+}
+
+/// `(metal, covered width, [(shape, width)])` of one layer over a strip face.
+type FacePortion = (u32, i64, Vec<(u32, i64)>);
+
+/// Coverage of a strip face `minus..plus` by the metal of other layers below
+/// (`upper == false`) or above, nearest layer first; a nearer layer shields
+/// the farther ones. Each entry is `(metal, covered width, [(shape, width)])`
+/// in exact integer DBU. `layered` is sorted by metal, then cross extent.
+fn face_portions(
+    layered: &[(u32, i64, i64, u32)],
+    own: u32,
+    upper: bool,
+    minus: i64,
+    plus: i64,
+) -> Vec<FacePortion> {
+    let mut metals: Vec<u32> = layered
+        .iter()
+        .map(|e| e.0)
+        .filter(|&m| if upper { m > own } else { m < own })
+        .collect();
+    metals.dedup();
+    if !upper {
+        metals.reverse();
+    }
+    let mut remaining: Vec<(i64, i64)> = vec![(minus, plus)];
+    let mut out = Vec::new();
+    for metal in metals {
+        let mut owners: Vec<(u32, i64)> = Vec::new();
+        let mut covered = 0;
+        for e in layered.iter().filter(|e| e.0 == metal) {
+            let mut next = Vec::with_capacity(remaining.len() + 1);
+            let mut width = 0;
+            for &(r0, r1) in &remaining {
+                let (c0, c1) = (r0.max(e.1), r1.min(e.2));
+                if c1 > c0 {
+                    width += c1 - c0;
+                    if r0 < c0 {
+                        next.push((r0, c0));
+                    }
+                    if c1 < r1 {
+                        next.push((c1, r1));
+                    }
+                } else {
+                    next.push((r0, r1));
+                }
+            }
+            remaining = next;
+            if width > 0 {
+                owners.push((e.3, width));
+                covered += width;
+            }
+        }
+        if covered > 0 {
+            out.push((metal, covered, owners));
+        }
+        if remaining.is_empty() {
+            break;
+        }
+    }
+    out
+}
+
+/// Passive conductors (pins, obstructions, supply metal) that a routed
+/// conductor on another routing layer overlaps get two strips (along x and
+/// along y, like a piece) so that their own cross-section is counted where a
+/// routed conductor is their calibration plate: a crossing is counted from
+/// both conductors' cross-sections whoever owns them.
+fn add_passive_strips(
+    input: &ExtractInput<'_>,
+    limits: &ExtractLimits,
+    built: &mut Built,
+    shapes: &[Shape],
+    bins: &Bins,
+    stats: &mut ExtractStats,
+) -> Result<()> {
+    let routing: Vec<u32> = (0..input.layers.len() as u32)
+        .filter(|&l| input.tech.layers[l as usize].is_some())
+        .collect();
+    for (si, sh) in shapes.iter().enumerate() {
+        let Owner::Passive(owner) = sh.owner else {
+            continue;
+        };
+        let r = sh.rect;
+        let (x0, x1) = bins.range(r.lx, r.ux);
+        let (y0, y1) = bins.range(r.ly, r.uy);
+        let mut crossed = false;
+        'search: for &layer in routing.iter().filter(|&&l| l != sh.layer) {
+            for bx in x0..=x1 {
+                for by in y0..=y1 {
+                    let Some(list) = bins.map.get(&(layer, bx, by)) else {
+                        continue;
+                    };
+                    stats.work = stats
+                        .work
+                        .checked_add(list.len())
+                        .ok_or_else(|| budget("extraction work"))?;
+                    if stats.work > limits.max_work {
+                        return Err(budget("extraction work"));
+                    }
+                    for &o in list {
+                        let q = &shapes[o as usize];
+                        if matches!(q.owner, Owner::Run(_))
+                            && q.rect.lx < r.ux
+                            && r.lx < q.rect.ux
+                            && q.rect.ly < r.uy
+                            && r.ly < q.rect.uy
+                        {
+                            crossed = true;
+                            break 'search;
+                        }
+                    }
+                }
+            }
+        }
+        if !crossed {
+            continue;
+        }
+        let net = match owner {
+            PassiveOwner::Pin { net, .. } => net,
+            PassiveOwner::Ground => u32::MAX,
+        };
+        for vertical in [false, true] {
+            let (lo, hi, minus, plus) = if vertical {
+                (r.ly, r.uy, r.lx, r.ux)
+            } else {
+                (r.lx, r.ux, r.ly, r.uy)
+            };
+            built.runs.push(Run {
+                net,
+                layer: sh.layer,
+                vertical,
+                cross: minus + (plus - minus) / 2,
+                lo,
+                hi,
+                minus,
+                plus,
+                shape: si as u32,
+                piece: true,
+                passive: Some(owner),
+                node_lo: 0,
+                node_hi: 0,
+            });
+        }
+        stats.passive_strips += 2;
+        if built.runs.len() > limits.max_shapes.saturating_mul(2) {
+            return Err(budget("extraction strips"));
+        }
+    }
+    Ok(())
+}
+
 /// The plate below (`upper == false`) or above a strip: the nearest other
 /// calibration metal whose conductors (merged along the strip's cross axis)
 /// cover `minus..plus` and extend at least one strip width beyond each side
@@ -1259,6 +1550,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         &net_index,
         &mut stats,
     )?;
+    add_passive_strips(input, limits, &mut built, &shapes, &bins, &mut stats)?;
     stats.wire_runs = built.runs.iter().filter(|r| !r.piece).count();
     stats.shapes = shapes.len();
     if shapes.len() > limits.max_shapes {
@@ -1270,6 +1562,12 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     let mut points: Vec<i64> = Vec::new();
     // (calibration metal, cross-axis lo, hi, shape) of other-layer conductors.
     let mut layered: Vec<(u32, i64, i64, u32)> = Vec::new();
+    let metal_layer: HashMap<u32, usize> = tech
+        .layers
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| l.as_ref().map(|m| (m.metal, i)))
+        .collect();
     let contexts: Vec<Option<ContextIndex>> = tech
         .layers
         .iter()
@@ -1360,13 +1658,35 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         points.sort_unstable();
         points.dedup();
         let span = (run.hi - run.lo) as f64;
-        let net_local = net_index[&run.net];
+        // Passive strips attach to their routed partners only.
+        let net_local = match run.passive {
+            None => net_index[&run.net],
+            Some(_) => usize::MAX,
+        };
+        // Same metal as this strip: its own net, or for a passive conductor
+        // the same supply/ground class or the same pin net.
+        let same_metal = |sh: &Shape| -> bool {
+            match (sh.owner, run.passive) {
+                (Owner::Run(o), _) => built.runs[o as usize].net == run.net,
+                (Owner::Passive(p), None) => {
+                    matches!(p, PassiveOwner::Pin { net, .. } if net == run.net)
+                }
+                (Owner::Passive(p), Some(PassiveOwner::Ground)) => p == PassiveOwner::Ground,
+                (Owner::Passive(p), Some(PassiveOwner::Pin { net, .. })) => {
+                    matches!(p, PassiveOwner::Pin { net: other, .. } if other == net)
+                }
+            }
+        };
         for w in points.windows(2) {
             let (t0, t1) = (w[0], w[1]);
             if t1 <= t0 {
                 continue;
             }
-            stats.intervals += 1;
+            if run.passive.is_some() {
+                stats.passive_intervals += 1;
+            } else {
+                stats.intervals += 1;
+            }
             stats.work = stats
                 .work
                 .checked_add(candidates.len().max(1))
@@ -1390,10 +1710,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                 if a0 > t0 || a1 < t1 {
                     continue;
                 }
-                let same = match sh.owner {
-                    Owner::Run(o) => built.runs[o as usize].net == run.net,
-                    _ => sh.net() == Some(run.net),
-                };
+                let same = same_metal(sh);
                 if sh.layer == run.layer {
                     if x0 >= edge_plus {
                         let gap = x0 - edge_plus;
@@ -1406,7 +1723,9 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                             minus = Some((gap, s));
                         }
                     } else if !same {
-                        stats.foreign_overlaps += 1;
+                        if run.passive.is_none() {
+                            stats.foreign_overlaps += 1;
+                        }
                     } else {
                         // Same-net metal across a side edge: that side is
                         // inside the net's metal union, not exposed.
@@ -1441,7 +1760,9 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                 .filter(|e| e.0 > model.metal)
                 .map(|e| e.0)
                 .min();
-            if nearest_below != below.map(|b| b.0) || nearest_above != above.map(|a| a.0) {
+            if run.passive.is_none()
+                && (nearest_below != below.map(|b| b.0) || nearest_above != above.map(|a| a.0))
+            {
                 stats.nonspanning_plane_intervals += 1;
             }
             let over = below.map_or(0, |b| b.0);
@@ -1450,7 +1771,9 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             let (ctx, plane_split) = match exact {
                 Some(&i) => (i, (below.is_some(), above.is_some())),
                 None => {
-                    stats.context_fallback_intervals += 1;
+                    if run.passive.is_none() {
+                        stats.context_fallback_intervals += 1;
+                    }
                     if let Some(&i) = ctx_map.get(&(over, None)).filter(|_| over > 0) {
                         (i, (true, false))
                     } else if let Some(&i) = ctx_map.get(&(0, under)) {
@@ -1484,13 +1807,14 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             let mut contributions: Vec<(u32, f64, f64)> = Vec::with_capacity(6);
             for (k, side, covered) in [(0, plus, covered_plus), (1, minus, covered_minus)] {
                 if covered {
-                    stats.covered_side_intervals += 1;
+                    if run.passive.is_none() {
+                        stats.covered_side_intervals += 1;
+                    }
                     continue;
                 }
                 let spacing = side.map(|(g, _)| um(tech, g));
-                let touching_same = side.is_some_and(|(g, s)| {
-                    g == 0 && shape_net(&built.runs, &shapes[s as usize]) == Some(run.net)
-                });
+                let touching_same =
+                    side.is_some_and(|(g, s)| g == 0 && same_metal(&shapes[s as usize]));
                 if touching_same {
                     continue;
                 }
@@ -1535,6 +1859,102 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                     contributions.push((s, cc * length, 0.5));
                 }
             }
+            // Overlap area of non-plate metal on other layers: a conductor
+            // that covers part of this strip's face (stacked, offset or barely
+            // wider metal) but is not a calibration plate couples over the
+            // covered width, counted once from the upper face; the covered
+            // face no longer sees the substrate. A piece counts its face on
+            // its x strip only.
+            if run.passive.is_none()
+                && !(run.piece && run.vertical)
+                && let Some(area_cap) = model.area_cap
+            {
+                let mut shielded = 0.0;
+                if below.is_none() {
+                    for (metal, covered, owners) in
+                        face_portions(&layered, model.metal, false, edge_minus, edge_plus)
+                    {
+                        let Some(&(_, ov)) = model.overlap.iter().find(|o| o.0 == metal) else {
+                            stats.overlap_pairs_without_data += 1;
+                            continue;
+                        };
+                        let area = um(tech, covered) * length;
+                        stats.overlap_area_um2 += area;
+                        shielded += area_cap * area;
+                        for (sh, w) in owners {
+                            contributions.push((sh, ov * um(tech, w) * length, 1.0));
+                        }
+                    }
+                }
+                if above.is_none() {
+                    // A routed conductor above counts the overlap from its
+                    // own face; passive metal does not model itself.
+                    for (metal, _, owners) in
+                        face_portions(&layered, model.metal, true, edge_minus, edge_plus)
+                    {
+                        let passive: Vec<(u32, i64)> = owners
+                            .into_iter()
+                            .filter(|o| matches!(shapes[o.0 as usize].owner, Owner::Passive(_)))
+                            .collect();
+                        if passive.is_empty() {
+                            continue;
+                        }
+                        let upper = metal_layer
+                            .get(&metal)
+                            .and_then(|&l| tech.layers[l].as_ref())
+                            .and_then(|u| u.overlap.iter().find(|o| o.0 == model.metal));
+                        let Some(&(_, ov)) = upper else {
+                            stats.overlap_pairs_without_data += 1;
+                            continue;
+                        };
+                        for (sh, w) in passive {
+                            stats.overlap_area_um2 += um(tech, w) * length;
+                            contributions.push((sh, ov * um(tech, w) * length, 1.0));
+                        }
+                    }
+                }
+                ground = (ground - shielded).max(0.0);
+            }
+            if run.passive.is_some() {
+                // Only this conductor's plate shares toward routed conductors
+                // of other nets: ground and lateral sides are counted from the
+                // routed side.
+                for (s, value, run_factor) in contributions {
+                    if run_factor < 1.0 {
+                        continue;
+                    }
+                    let Owner::Run(o) = shapes[s as usize].owner else {
+                        continue;
+                    };
+                    let other = &built.runs[o as usize];
+                    if other.passive.is_some() || other.net == run.net {
+                        continue;
+                    }
+                    let pnode = nearer_end(other, mid_point);
+                    let li = net_index[&other.net];
+                    let pin_node = match run.passive {
+                        Some(PassiveOwner::Pin { pin, .. }) => built.pin_nodes.get(&pin).copied(),
+                        _ => None,
+                    };
+                    match pin_node {
+                        Some(a) => {
+                            let b = (other.net, pnode);
+                            let key = if a <= b { (a, b) } else { (b, a) };
+                            *coupling.entry(key).or_insert(0.0) += value;
+                            if coupling.len() > limits.max_couplings {
+                                return Err(budget("extraction coupling capacitors"));
+                            }
+                        }
+                        None => {
+                            if matches!(run.passive, Some(PassiveOwner::Pin { .. })) {
+                                stats.unrouted_pin_partners += 1;
+                            }
+                            built.nets[li].ground[pnode as usize] += value;
+                        }
+                    }
+                }
+                continue;
+            }
             // Attach to this run's end nodes by position (pi split).
             let rc = &mut built.nets[net_local];
             rc.ground[run.node_lo as usize] += ground * (1.0 - w_hi);
@@ -1549,26 +1969,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                         if other.net == run.net {
                             None
                         } else {
-                            let ends = if other.vertical {
-                                [
-                                    [other.cross as f64, other.lo as f64],
-                                    [other.cross as f64, other.hi as f64],
-                                ]
-                            } else {
-                                [
-                                    [other.lo as f64, other.cross as f64],
-                                    [other.hi as f64, other.cross as f64],
-                                ]
-                            };
-                            let d = |p: [f64; 2]| {
-                                (p[0] - mid_point[0]).abs() + (p[1] - mid_point[1]).abs()
-                            };
-                            let node = if d(ends[1]) < d(ends[0]) {
-                                other.node_hi
-                            } else {
-                                other.node_lo
-                            };
-                            Some(Some((other.net, node, run_factor)))
+                            Some(Some((other.net, nearer_end(other, mid_point), run_factor)))
                         }
                     }
                     Owner::Passive(PassiveOwner::Ground) => Some(None),
@@ -1667,12 +2068,16 @@ mod tests {
                         under: None,
                         rows: rows(),
                     }],
+                    area_cap: None,
+                    overlap: vec![],
                 }),
                 Some(RcLayer {
                     metal: 2,
                     width: 200,
                     sheet_ohm: 0.05,
                     contexts,
+                    area_cap: None,
+                    overlap: vec![],
                 }),
                 None,
             ],
@@ -2167,6 +2572,289 @@ mod tests {
         assert!((sum(&lattice) - sum(&compact)).abs() < 1e-15);
         assert_eq!(lattice.stats.wire_runs, compact.stats.wire_runs);
         assert_eq!(lattice.stats.pad_pieces, compact.stats.pad_pieces);
+    }
+
+    #[test]
+    fn a_crossed_passive_conductor_counts_its_own_cut() {
+        // An M2 wire (0.2 um, x = 0, y 0..10 um) crosses a grounded M1 rail
+        // 1 um tall and 10 um wide (y 4.5..5.5 um). The rail is a plate below
+        // the wire over 1 um; the wire is a plate above the rail over 0.2 um.
+        // A passive conductor models only that second cut: its UNDER excess
+        // (7e-5 - 4e-5 per side) goes to the wire's net as ground.
+        let mut tech = tech(true);
+        if let Some(m1) = tech.layers[0].as_mut() {
+            m1.contexts.push(RcContext {
+                over: 0,
+                under: Some(2),
+                rows: vec![[0.1, 9e-5, 3e-5], [0.5, 3e-5, 6e-5], [1.0, 0.0, 7e-5]],
+            });
+        }
+        let wires: Vec<Wire> = vec![Wire {
+            net: 0,
+            layer: 1,
+            start: [0, 0],
+            end: [0, 10_000],
+        }];
+        let r = routes(
+            wires,
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 1,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 1,
+                    at: [0, 10_000],
+                },
+            ],
+            vec![0],
+        );
+        let t = [terminal(0, 0, true), terminal(1, 0, false)];
+        let rail = PassiveShape {
+            layer: 0,
+            rect: Rect {
+                lx: -5000,
+                ly: 4500,
+                ux: 5000,
+                uy: 5500,
+            },
+            owner: PassiveOwner::Ground,
+        };
+        let n = run(&r, &t, &[rail], &tech).unwrap();
+        // Wire: substrate 4e-5 per side over 9 um of body and the exposed
+        // 0.4 um of edge per end extension; OVER-1 6e-5 per side over the 1 um
+        // rail. Rail cut: 2 sides x 3e-5 x 0.2 um.
+        let want = 4e-5 * (2.0 * 9.0 + 0.8) + 2.0 * 6e-5 * 1.0 + 2.0 * 3e-5 * 0.2;
+        let got: f64 = n.nets[0].ground.iter().sum();
+        assert!((got - want).abs() < 1e-15, "{got} {want}");
+        assert_eq!(n.stats.passive_strips, 2);
+        assert!(n.couplings.is_empty());
+        // The same rail as a routed conductor of another net gives the wire's
+        // net the same total: the cut is the conductor's, whoever owns it.
+        let mut r2 = r.clone();
+        r2.wires.push(Wire {
+            net: 1,
+            layer: 0,
+            start: [-5000, 5000],
+            end: [5000, 5000],
+        });
+        r2.access
+            .extend([access(2, 1, [-5000, 5000]), access(3, 1, [5000, 5000])]);
+        r2.nets = vec![0, 1];
+        let t2 = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 1, true),
+            terminal(3, 1, false),
+        ];
+        let mut wide = tech.clone();
+        if let Some(m1) = wide.layers[0].as_mut() {
+            m1.width = 1000;
+        }
+        let mut wide_layers = layers();
+        wide_layers[0].width = 1000;
+        let v = vias();
+        let routed = extract_cpu_ref(
+            &ExtractInput {
+                layers: &wide_layers,
+                vias: &v,
+                routes: &r2,
+                terminals: &t2,
+                passive: &[],
+                tech: &wide,
+            },
+            &ExtractLimits::default(),
+        )
+        .unwrap();
+        let total0 = routed.nets[0].ground.iter().sum::<f64>()
+            + routed
+                .couplings
+                .iter()
+                .filter(|c| c.a.0 == 0 || c.b.0 == 0)
+                .map(|c| c.pf)
+                .sum::<f64>();
+        assert!((total0 - want).abs() < 1e-15, "{total0} {want}");
+    }
+
+    #[test]
+    fn non_plate_overlap_couples_over_the_covered_face_once() {
+        // An M2 wire (0.2 um) over an aligned, narrower M1 wire (0.1 um) of
+        // another net: not a calibration plate. With overlap data the upper
+        // face couples over the covered 0.1 um at 3e-4 pF/um^2 (counted once)
+        // and loses 1e-4 pF/um^2 of face-to-substrate capacitance. The
+        // covered length is the M1 body plus its two 0.05 um end extensions:
+        // 10.1 um.
+        let wires = vec![
+            Wire {
+                net: 0,
+                layer: 1,
+                start: [0, 0],
+                end: [10_000, 0],
+            },
+            Wire {
+                net: 1,
+                layer: 0,
+                start: [0, 0],
+                end: [10_000, 0],
+            },
+        ];
+        let r = routes(
+            wires,
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 1,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 1,
+                    at: [10_000, 0],
+                },
+                access(2, 1, [0, 0]),
+                access(3, 1, [10_000, 0]),
+            ],
+            vec![0, 1],
+        );
+        let t = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 1, true),
+            terminal(3, 1, false),
+        ];
+        let off = run(&r, &t, &[], &tech(true)).unwrap();
+        let mut with = tech(true);
+        if let Some(m2) = with.layers[1].as_mut() {
+            m2.area_cap = Some(1e-4);
+            m2.overlap = vec![(1, 3e-4)];
+        }
+        if let Some(m1) = with.layers[0].as_mut() {
+            m1.area_cap = Some(1e-4);
+        }
+        let on = run(&r, &t, &[], &with).unwrap();
+        let area = 0.1 * 10.1;
+        assert!(
+            (on.stats.overlap_area_um2 - area).abs() < 1e-12,
+            "{}",
+            on.stats.overlap_area_um2
+        );
+        let coupling: f64 = on.couplings.iter().map(|c| c.pf).sum();
+        let before: f64 = off.couplings.iter().map(|c| c.pf).sum();
+        assert!(
+            (coupling - before - 3e-4 * area).abs() < 1e-15,
+            "{coupling} {before}"
+        );
+        let g = |n: &RcNetwork, k: usize| n.nets[k].ground.iter().sum::<f64>();
+        assert!((g(&off, 0) - g(&on, 0) - 1e-4 * area).abs() < 1e-15);
+        assert!(
+            (g(&off, 1) - g(&on, 1)).abs() < 1e-18,
+            "lower wire unchanged"
+        );
+        assert_eq!(on.stats.overlap_pairs_without_data, 0);
+    }
+
+    #[test]
+    fn long_runs_split_at_the_same_coordinates_however_stored() {
+        // An M1 run 0..10 um with a T branch at x = 4 um (up to y = 3 um) and
+        // a segment limit of 3 um. Stored as 1 um lattice edges, or as one
+        // record through the T point plus an overlapping duplicate record
+        // (3..5 um): both give runs 0-2, 2-4, 4-7, 7-10 and the 3 um branch,
+        // i.e. ceil(L / limit) equal pieces cut at exact coordinates.
+        let build = |lattice: bool| {
+            let mut wires = if lattice {
+                straight(0, 0, 10)
+            } else {
+                vec![
+                    Wire {
+                        net: 0,
+                        layer: 0,
+                        start: [0, 0],
+                        end: [10_000, 0],
+                    },
+                    Wire {
+                        net: 0,
+                        layer: 0,
+                        start: [5000, 0],
+                        end: [3000, 0],
+                    },
+                ]
+            };
+            let branch = if lattice { 3 } else { 1 };
+            let step = 3000 / branch;
+            wires.extend((0..branch).map(|i| Wire {
+                net: 0,
+                layer: 0,
+                start: [4000, i * step],
+                end: [4000, (i + 1) * step],
+            }));
+            routes(
+                wires,
+                vec![],
+                vec![
+                    access(0, 0, [0, 0]),
+                    access(1, 0, [10_000, 0]),
+                    access(2, 0, [4000, 3000]),
+                ],
+                vec![0],
+            )
+        };
+        let t = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 0, false),
+        ];
+        let (l, v) = (layers(), vias());
+        let limits = ExtractLimits {
+            max_segment_length: 3000,
+            ..Default::default()
+        };
+        let tech = tech(false);
+        let extract = |r: &Routes| {
+            extract_cpu_ref(
+                &ExtractInput {
+                    layers: &l,
+                    vias: &v,
+                    routes: r,
+                    terminals: &t,
+                    passive: &[],
+                    tech: &tech,
+                },
+                &limits,
+            )
+            .unwrap()
+        };
+        let (a, b) = (extract(&build(true)), extract(&build(false)));
+        assert_eq!(a.nets[0].nodes, b.nets[0].nodes);
+        assert_eq!(a.nets[0].resistors, b.nets[0].resistors);
+        for (x, y) in a.nets[0].ground.iter().zip(&b.nets[0].ground) {
+            assert!((x - y).abs() < 1e-18, "{x} {y}");
+        }
+        // 0.1 ohm/sq, 0.1 um wide: 1 ohm per um.
+        let mut ohms: Vec<f64> = a.nets[0].resistors.iter().map(|r| r.2).collect();
+        ohms.sort_by(f64::total_cmp);
+        let want = [2.0, 2.0, 3.0, 3.0, 3.0];
+        assert_eq!(ohms.len(), want.len());
+        for (got, want) in ohms.iter().zip(want) {
+            assert!((got - want).abs() < 1e-12, "{ohms:?}");
+        }
+        assert_eq!((a.stats.wire_runs, b.stats.wire_runs), (5, 5));
+        // Lattice storage has a node at every cut; one record needs two.
+        assert_eq!(
+            (a.stats.segment_cut_nodes, b.stats.segment_cut_nodes),
+            (0, 2)
+        );
+        assert_eq!(
+            (a.stats.duplicate_wire_edges, b.stats.duplicate_wire_edges),
+            (0, 2)
+        );
     }
 
     #[test]
