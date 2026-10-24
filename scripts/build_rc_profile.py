@@ -6,9 +6,15 @@ Inputs are PDK *data* files, read as data and fingerprinted (path + sha256):
 * the PDK-supplied OpenRCX calibration tables (``rules.openrcx.*``): per routing
   layer and vertical context, rows ``spacing, coupling, ground`` per unit length;
 * the Magic technology file ``extract`` section: sheet resistance and per-cut
-  contact resistance for the nominal / high-R / low-R variants, plus the
-  area/perimeter/sidewall capacitance used here only as an independent
-  cross-check of the calibration tables;
+  contact resistance for the nominal / high-R / low-R variants; the
+  area/perimeter/sidewall capacitance as an independent cross-check of the
+  calibration tables; and the nominal face-to-substrate area capacitance and
+  layer-over-layer overlap capacitance, used only for metal on another layer
+  that overlaps a wire face without forming a calibration plate (the tables
+  have no data for that case). Those two are moved to each corner with the
+  calibration table's own corner ratio (the substrate row for the area
+  capacitance, the plate excess of the same layer pair for the overlap), so
+  every capacitance term follows the table's corners;
 * the technology LEF, used for layer names/order/widths and, where the PDK states
   the values are valid (Sky130 only), as a resistance/capacitance cross-check.
   The GF180 technology LEF states its parasitic values are placeholders; they
@@ -22,6 +28,7 @@ docs/extraction.md.
 
 Usage:
   scripts/build_rc_profile.py [--pdk-root DIR] [--out-dir fixtures/pdk] [--check]
+  scripts/build_rc_profile.py --compare-ref REV   # every field present at git REV is unchanged
 """
 from __future__ import annotations
 
@@ -205,7 +212,7 @@ def parse_magic(text: str, variant: str, types: list[str], cut_types: list[str])
     except StopIteration:
         fail("magic extract section missing")
     active = {"*"}
-    out = dict(resist={}, contact={}, areacap={}, perimeter={}, sidewall={})
+    out = dict(resist={}, contact={}, areacap={}, perimeter={}, sidewall={}, overlap={}, all_contacts={})
     for raw in lines[start + 1:]:
         line = raw.split("#", 1)[0].strip()
         if line == "end":
@@ -223,12 +230,18 @@ def parse_magic(text: str, variant: str, types: list[str], cut_types: list[str])
             m = re.match(r"^\(([^)]*)\)/(\S+)$", tokens[1])
             if m and m[1] in types:
                 out["resist"][m[1]] = float(tokens[2])
-        elif key == "contact" and len(tokens) == 3 and tokens[1] in cut_types:
-            out["contact"][tokens[1]] = float(tokens[2])
+        elif key == "contact" and len(tokens) == 3:
+            # Every contact line of the variant (cuts, diffusion, poly, MIM):
+            # a block that gives all of them one value is not characterized.
+            out["all_contacts"][tokens[1]] = float(tokens[2])
+            if tokens[1] in cut_types:
+                out["contact"][tokens[1]] = float(tokens[2])
         elif key == "defaultareacap" and len(tokens) == 4 and tokens[1] in types:
             out["areacap"][tokens[1]] = float(tokens[3])
         elif key == "defaultperimeter" and len(tokens) == 4 and tokens[1] in types:
             out["perimeter"][tokens[1]] = float(tokens[3])
+        elif key == "defaultoverlap" and len(tokens) == 6 and tokens[1] in types and tokens[3] in types:
+            out["overlap"][(tokens[1], tokens[3])] = float(tokens[5])
         elif key == "defaultsidewall" and len(tokens) in (4, 5) and tokens[1] in types:
             out["sidewall"][tokens[1]] = [float(tokens[3]), float(tokens[4]) if len(tokens) == 5 else 0.0]
     return out
@@ -275,6 +288,8 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
     magic_path = base / spec["magic"]
     lef = parse_lef(read_text(lef_path))
     rules = parse_rules(read_text(rules_path))
+    nominal_rules_path = base / spec["rules"].format(corner="nom")
+    rules_nom = rules if corner == "nom" else parse_rules(read_text(nominal_rules_path))
     magic_text = read_text(magic_path)
     check_magic_contacts(magic_text, spec)
     variant = MAGIC_VARIANT[corner]
@@ -310,8 +325,10 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
             contexts.append(dict(over=over, under=under, rows=rows))
         if not any(c["over"] == 0 and c["under"] is None for c in contexts):
             fail(f"{tag}: no OVER 0 calibration context for {name}")
+        area_cap, overlap = overlap_area(tag, index, spec, rules, rules_nom, nominal)
         layers.append(dict(name=name, rules_metal=index, width_um=width,
-                           sheet_resistance_ohm_per_square=sheet / 1000.0, contexts=contexts))
+                           sheet_resistance_ohm_per_square=sheet / 1000.0, contexts=contexts,
+                           area_cap_pf_per_um2=area_cap, overlap_area=overlap))
         over0 = next(c for c in contexts if c["over"] == 0 and c["under"] is None)["rows"]
         isolated = 2.0 * over0[-1][2]
         s0, cc0 = over0[0][0], over0[0][1]
@@ -348,12 +365,21 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
         source = f"magic contact {ctype} {variant}"
         if value is None:
             fail(f"{tag}: magic contact resistance missing for {ctype} {variant}")
+        blanket = corner_contacts_blanket(magic, nominal)
         if value <= 0.0:
             fallback = nominal["contact"][ctype]
             diagnostics.append(
                 f"VIA_R_CORNER_UNAVAILABLE: magic {variant} lists {ctype} contact resistance {value:g} mOhm "
                 f"(all contacts are 0 in that block, i.e. no corner data); using nominal {fallback:g} mOhm")
             value, source = fallback, f"magic contact {ctype} () fallback"
+        elif blanket is not None:
+            fallback = nominal["contact"][ctype]
+            diagnostics.append(
+                f"VIA_R_CORNER_UNAVAILABLE: magic {variant} gives every one of its {blanket} contact types "
+                f"(diffusion, poly, via and MIM contacts alike) the same {value:g} mOhm while the nominal "
+                f"block distinguishes them, i.e. a placeholder, not corner data; using nominal "
+                f"{fallback:g} mOhm for {ctype}")
+            value, source = fallback, f"magic contact {ctype} () fallback (blanket {variant} block)"
         entry = dict(name=cut, lower=lower, upper=upper, resistance_ohm_per_cut=value / 1000.0, source=source)
         if spec["lef_rc_valid"] and "resistance" in by_name[cut]:
             entry["lef_resistance_ohm_nominal"] = by_name[cut]["resistance"]
@@ -361,6 +387,8 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
     sources = [fingerprint("capacitance_calibration_table", rules_path),
                fingerprint("resistance_and_crosscheck_tech", magic_path),
                fingerprint("technology_lef", lef_path)]
+    if corner != "nom":
+        sources.append(fingerprint("nominal_calibration_table_for_overlap_corner_ratio", nominal_rules_path))
     return dict(
         schema="rustroad.rc-profile.v1",
         pdk=tag,
@@ -378,6 +406,12 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
             beyond_last_row="coupling 0, ground = last-row ground (isolated side)",
             context="over = calibration metal index of the nearest conductor below (0 = substrate), under = nearest above",
             resistance="sheet_resistance * centerline_length / width; via = resistance_ohm_per_cut / cuts",
+            overlap_area="metal of another layer that covers part of a wire face without forming a "
+                         "calibration plate couples over the covered width at overlap_area.pf_per_um2 "
+                         "(counted once, from the upper face), and the covered face loses "
+                         "area_cap_pf_per_um2 to the substrate; values are the Magic nominal "
+                         "defaultoverlap/defaultareacap times the calibration table's corner ratio "
+                         "(table_corner_ratio: plate excess of the same pair; substrate row for area_cap)",
         ),
         layers=layers,
         cuts=cuts,
@@ -387,8 +421,110 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
     )
 
 
+def corner_contacts_blanket(magic: dict, nominal: dict) -> int | None:
+    """Number of contact types when a corner variant gives every contact type
+    one and the same value although the nominal block distinguishes them (a
+    placeholder block, not corner data); None otherwise. A block of zeros is
+    handled separately (no data at all)."""
+    values = list(magic["all_contacts"].values())
+    nominal_values = set(nominal["all_contacts"].values())
+    if len(values) >= 3 and len(set(values)) == 1 and values[0] > 0.0 and len(nominal_values) > 1:
+        return len(values)
+    return None
+
+
+def isolated_side(rules: dict, metal: int, over: int) -> float | None:
+    rows = rules["tables"].get((metal, over, None))
+    return None if rows is None else rows[-1][2]
+
+
+def overlap_area(tag: str, index: int, spec: dict, rules: dict, rules_nom: dict, nominal: dict):
+    """Face area capacitance to the substrate and over each lower routing layer
+    (pF/um^2) for one routing layer: Magic nominal values moved to the corner
+    by the calibration table's own ratio."""
+    types = spec["magic_types"]
+    mtype = types[index - 1]
+    area = nominal["areacap"].get(mtype)
+    sub, sub_nom = isolated_side(rules, index, 0), isolated_side(rules_nom, index, 0)
+    if area is None or not sub or not sub_nom:
+        fail(f"{tag}: magic nominal area capacitance or substrate row missing for {mtype}")
+    area_cap = area * (sub / sub_nom) * 1e-6
+    out = []
+    for lower in range(1, index):
+        ov = nominal["overlap"].get((mtype, types[lower - 1]))
+        if ov is None:
+            fail(f"{tag}: magic nominal overlap {mtype} over {types[lower - 1]} missing")
+        plate, plate_nom = isolated_side(rules, index, lower), isolated_side(rules_nom, index, lower)
+        if plate is None or plate_nom is None:
+            fail(f"{tag}: calibration plate context metal {index} over {lower} missing")
+        if plate - sub > 0.0 and plate_nom - sub_nom > 0.0:
+            ratio, source = (plate - sub) / (plate_nom - sub_nom), "plate excess of the pair"
+        else:
+            # A distant plate the table rates at or below the substrate row
+            # has no usable excess; the substrate row's ratio moves it.
+            ratio, source = sub / sub_nom, "substrate row (pair plate excess not positive)"
+        out.append(dict(over=lower, pf_per_um2=ov * ratio * 1e-6, magic_nominal_af_per_um2=ov,
+                        table_corner_ratio=ratio, table_corner_ratio_source=source))
+    return area_cap, out
+
+
 def render(profile: dict) -> str:
     return json.dumps(profile, indent=1) + "\n"
+
+
+# Field changes made on purpose since the reference revision, with the PDK
+# evidence for each (a regex over the reported field path). Everything else
+# must be unchanged; diagnostics may only gain entries.
+INTENTIONAL_CHANGES = {
+    r"^gf180-max\.cuts\[\d\]\.(resistance_ohm_per_cut|source)$":
+        "GF180 Magic (hrhc) gives all 10 contact types (diffusion, poly, via, MIM) one blanket 15000 mOhm "
+        "while the nominal block distinguishes them (and (lrlc) gives all of them 0): a placeholder, not "
+        "corner via data, so the max profile keeps the nominal 4.5 ohm per cut like the min profile",
+}
+
+
+def compare_ref(rev: str, out_dir: Path) -> int:
+    """Fail unless every field of the profiles at git ``rev`` is unchanged in
+    the tracked profiles (fields may only have been added), apart from the
+    listed intentional changes; diagnostics may only gain entries."""
+    import subprocess
+
+    def unchanged(old, new, where, bad):
+        if isinstance(old, dict) and isinstance(new, dict):
+            for k, v in old.items():
+                if k not in new:
+                    bad.append(f"{where}.{k} removed")
+                else:
+                    unchanged(v, new[k], f"{where}.{k}", bad)
+        elif isinstance(old, list) and isinstance(new, list) and where.endswith(".sources"):
+            if new[:len(old)] != old:
+                bad.append(f"{where} changed")
+        elif isinstance(old, list) and isinstance(new, list) and where.endswith(".diagnostics"):
+            if any(d not in new for d in old):
+                bad.append(f"{where} lost entries")
+        elif isinstance(old, list) and isinstance(new, list) and len(old) == len(new):
+            for i, (a, b) in enumerate(zip(old, new)):
+                unchanged(a, b, f"{where}[{i}]", bad)
+        elif old != new:
+            bad.append(f"{where} changed")
+
+    status = 0
+    for tag in PDKS:
+        for corner in CORNERS:
+            rel_path = f"fixtures/pdk/{tag}-rc-{corner}.json"
+            old = json.loads(subprocess.run(["git", "-C", str(ROOT), "show", f"{rev}:{rel_path}"],
+                                            capture_output=True, check=True, text=True).stdout)
+            new = json.loads((out_dir / f"{tag}-rc-{corner}.json").read_text())
+            found: list[str] = []
+            unchanged(old, new, tag + "-" + corner, found)
+            intended = [b for b in found if any(re.match(k, b.rsplit(" ", 1)[0]) for k in INTENTIONAL_CHANGES)]
+            bad = [b for b in found if b not in intended]
+            added = sorted({k for layer in new["layers"] for k in layer} - {k for layer in old["layers"] for k in layer})
+            print(f"{tag} {corner}: {'unchanged' if not bad else 'CHANGED ' + ', '.join(bad)}; added layer fields: "
+                  f"{', '.join(added) or 'none'}"
+                  + (f"; intentional: {', '.join(intended)}" if intended else ""))
+            status |= bool(bad)
+    return status
 
 
 def main() -> int:
@@ -396,7 +532,10 @@ def main() -> int:
     parser.add_argument("--pdk-root", type=Path, default=DEFAULT_PDK_ROOT)
     parser.add_argument("--out-dir", type=Path, default=ROOT / "fixtures/pdk")
     parser.add_argument("--check", action="store_true", help="fail if tracked profiles differ from a rebuild")
+    parser.add_argument("--compare-ref", metavar="REV", help="fail unless all fields at git REV are unchanged")
     args = parser.parse_args()
+    if args.compare_ref:
+        return compare_ref(args.compare_ref, args.out_dir)
     stale = []
     for tag in PDKS:
         for corner in CORNERS:

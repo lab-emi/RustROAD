@@ -37,7 +37,8 @@
   "per_side": "each wire side is looked up separately; an isolated wire has 2 * ground(last row)",
   "beyond_last_row": "coupling 0, ground = last-row ground (isolated side)",
   "context": "over = calibration metal index of the nearest conductor below (0 = substrate), under = nearest above",
-  "resistance": "sheet_resistance * centerline_length / width; via = resistance_ohm_per_cut / cuts"
+  "resistance": "sheet_resistance * centerline_length / width; via = resistance_ohm_per_cut / cuts",
+  "overlap_area": "metal of another layer that covers part of a wire face without forming a calibration plate couples over the covered width at overlap_area.pf_per_um2 (counted once, from the upper face), and the covered face loses area_cap_pf_per_um2 to the substrate; values are the Magic nominal defaultoverlap/defaultareacap times the calibration table's corner ratio (table_corner_ratio: plate excess of the same pair; substrate row for area_cap)"
  },
  "layers": [
   {
@@ -442,7 +443,9 @@
       ]
      ]
     }
-   ]
+   ],
+   "area_cap_pf_per_um2": 3.699e-05,
+   "overlap_area": []
   },
   {
    "name": "met1",
@@ -1109,6 +1112,16 @@
        5.84154e-05
       ]
      ]
+    }
+   ],
+   "area_cap_pf_per_um2": 2.578e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 0.0001142,
+     "magic_nominal_af_per_um2": 114.2,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
     }
    ]
   },
@@ -1910,6 +1923,23 @@
       ]
      ]
     }
+   ],
+   "area_cap_pf_per_um2": 1.75e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 3.756e-05,
+     "magic_nominal_af_per_um2": 37.56,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 0.00013386,
+     "magic_nominal_af_per_um2": 133.86,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
    ]
   },
   {
@@ -2710,6 +2740,30 @@
       ]
      ]
     }
+   ],
+   "area_cap_pf_per_um2": 1.2369999999999998e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 2.079e-05,
+     "magic_nominal_af_per_um2": 20.79,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 3.454e-05,
+     "magic_nominal_af_per_um2": 34.54,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 8.619e-05,
+     "magic_nominal_af_per_um2": 86.19,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
    ]
   },
   {
@@ -3378,6 +3432,37 @@
       ]
      ]
     }
+   ],
+   "area_cap_pf_per_um2": 8.419999999999999e-06,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 1.167e-05,
+     "magic_nominal_af_per_um2": 11.67,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "substrate row (pair plate excess not positive)"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 1.5029999999999998e-05,
+     "magic_nominal_af_per_um2": 15.03,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 2.0329999999999997e-05,
+     "magic_nominal_af_per_um2": 20.33,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 4,
+     "pf_per_um2": 8.403e-05,
+     "magic_nominal_af_per_um2": 84.03,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
    ]
   },
   {
@@ -3781,6 +3866,44 @@
        0.000117864
       ]
      ]
+    }
+   ],
+   "area_cap_pf_per_um2": 6.32e-06,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 8.03e-06,
+     "magic_nominal_af_per_um2": 8.03,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 9.48e-06,
+     "magic_nominal_af_per_um2": 9.48,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 1.134e-05,
+     "magic_nominal_af_per_um2": 11.34,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 4,
+     "pf_per_um2": 1.9629999999999997e-05,
+     "magic_nominal_af_per_um2": 19.63,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 5,
+     "pf_per_um2": 6.832999999999999e-05,
+     "magic_nominal_af_per_um2": 68.33,
+     "table_corner_ratio": 1.0,
+     "table_corner_ratio_source": "plate excess of the pair"
     }
    ]
   }
