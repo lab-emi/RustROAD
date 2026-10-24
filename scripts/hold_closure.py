@@ -168,6 +168,13 @@ WHATIF_TIMEOUT_S = 600
 WHATIF_LAYOUT_CANDIDATES = 128
 WHATIF_LOOP_CANDIDATES = 640
 WHATIF_HOLD_LOSS_NS = 0.5
+# A resize may not make the worst DRV pin worse by more than this fraction of
+# its limit (severity guard; the count alone accepted alu g121 _2 -> _1 at an
+# equal count while its own transition went from 1.84 to 2.62 ns).
+WHATIF_DWS_TOLERANCE = 1e-3
+# Chain co-sizing candidates (a violating driver and its upstream drivers one
+# step up together) per whatif round, worst violators first.
+WHATIF_CHAIN_CANDIDATES = 6
 # DRV/setup ECOs stop (the loop goes on to hold) after this many consecutive
 # layouts on which the previous ECO improved neither the DRV count nor the
 # worst setup slack.
@@ -755,6 +762,18 @@ class Flow:
                  re.findall(r'(?m)^\s*assign\s+(\S+)\s*=\s*(\S+?)\s*;', bounded_text(Path(sta['timed_netlist']), 64 * 1024 ** 2))}
         drv_rows = json.loads(bounded_text(Path(sta['files']['drv']), 64 * 1024 ** 2))['sections']['drv']['rows']
         import closure_eco as CE  # noqa: E402
+        limits = {k: max((r['limit'] for r in drv_rows if r['kind'] == k), default=1.0)
+                  for k in ('max_transition', 'max_capacitance')}
+        # Inputs of each timed instance: the upstream drivers whose output
+        # slew a violating driver sees (chain co-sizing).
+        fanin = {}
+        for name, (master, conns) in timed.items():
+            for pin, net in conns.items():
+                if (((lef.get(master) or {}).get(pin) or {}).get('direction') or '') == 'INPUT':
+                    up = driver.get(net.lstrip('\\'))
+                    if up and up != name:
+                        fanin.setdefault(name, set()).add(up)
+        violators = {}
         for row in drv_rows:
             if row['kind'] in ('max_transition', 'max_capacitance') and row['value'] > CE.DRV_PLAN_MARGIN * row['limit']:
                 net = (row.get('net') or '').lstrip('\\')
@@ -762,10 +781,17 @@ class Flow:
                 inst = driver.get(net)
                 if inst:
                     want(inst, -10.0 + row['slack'] / max(row['limit'], 1e-9), 'drv')
+                    if row['slack'] < 0:
+                        violators[inst] = min(violators.get(inst, 0.0), row['slack'] / max(row['limit'], 1e-9))
                 # ECO buffers loading the net may shrink (less input capacitance).
                 for sink in sinks_of.get(net, []):
                     if sink.startswith('rr_eco_buf_'):
                         want(sink, -9.0 + row['slack'] / max(row['limit'], 1e-9), 'drv_sink')
+        # The upstream drivers of violating drivers may grow (a sharper input
+        # slew, and room for the violating driver's own upsizing).
+        for inst, sev in sorted(violators.items(), key=lambda x: (x[1], x[0])):
+            for up in sorted(fanin.get(inst, ())):
+                want(up, -8.0 + sev, 'drv_up')
         failing = sorted(((v['setup'], c, e) for c in ('tt', 'ss') for e, v in sta['corners'][c]['endpoints'].items()
                           if v['setup'] is not None and v['setup'] < 0), key=lambda x: x[0])
         seen, traced = set(), 0
@@ -788,15 +814,31 @@ class Flow:
             k, members = family[master]
             out = []
             # A (near-)violating driver grows (or steps down once, below), an
-            # ECO buffer loading such a net only shrinks.
+            # ECO buffer loading such a net shrinks (one or two steps), an
+            # upstream driver of a violating one grows.
             why = prio[inst][1]
             # A violating driver also tries one step down: the largest member is
             # not always the fastest edge at a light load (GF180 aoi22_4 vs _2).
-            for j in ((k + 1, k + 2, k - 1) if why == 'drv' else (k - 1,) if why == 'drv_sink' else (k + 1, k - 1, k + 2)):
+            steps = {'drv': (k + 1, k + 2, k - 1), 'drv_sink': (k - 1, k - 2), 'drv_up': (k + 1,)}
+            for j in steps.get(why, (k + 1, k - 1, k + 2)):
                 if 0 <= j < len(members) and members[j] != master and \
                         (max_width is None or widths[members[j]] <= max_width):
                     out.append(members[j])
             return out
+
+        def chain_candidate(inst):
+            """A violating driver one step up together with each of its
+            upstream drivers one step up (one candidate): growing the driver
+            alone loads its inputs, which then violate (GF180 alu oai21)."""
+            edits = []
+            for i in [inst] + sorted(fanin.get(inst, ())):
+                if i not in mapped or i in skip or mapped[i][0] not in family or i in accepted or \
+                        i.startswith(('rr_eco_hold_', 'rr_eco_ant_', 'rr_tie_', 'rr_clk')):
+                    continue
+                k, members = family[mapped[i][0]]
+                if k + 1 < len(members) and (max_width is None or widths[members[k + 1]] <= max_width):
+                    edits.append((i, members[k + 1]))
+            return edits if len(edits) >= 2 and edits[0][0] == inst else None
 
         def metrics(values):
             s = values['summary']
@@ -805,7 +847,13 @@ class Flow:
             tns = sum(corners[c]['setup']['tns_ns'] for c in ('tt', 'ss') if c in corners)
             drv = sum(int(s.get(k) or 0) for k in ('max_transition_violating', 'max_capacitance_violating',
                                                     'max_fanout_violating'))
-            return dict(drv=drv, wns=wns, tns=tns, whs=s.get('worst_hold_slack_ns'))
+            # Severity: the worst transition / capacitance slack over every pin,
+            # as a fraction of its limit (counts alone accepted resizes that
+            # made the worst net worse at an equal count: alu g121 _2 -> _1).
+            dws = min([float(s[k]) / limits[lk] for k, lk in (('worst_max_transition_slack_ns', 'max_transition'),
+                                                             ('worst_max_capacitance_slack_pf', 'max_capacitance'))
+                       if s.get(k) is not None] or [0.0])
+            return dict(drv=drv, wns=wns, tns=tns, whs=s.get('worst_hold_slack_ns'), dws=dws)
 
         target = self.args.target_margin
 
@@ -815,11 +863,19 @@ class Flow:
             if m['whs'] is not None and b['whs'] is not None and \
                     m['whs'] < min(b['whs'], target) - WHATIF_HOLD_LOSS_NS:
                 return False
-            if m['drv'] < b['drv'] and m['wns'] >= min(b['wns'], 0.0) - 1e-9:
+            # Never accept a worse worst DRV pin (WHATIF_DWS_TOLERANCE of the
+            # limit), whatever the count does.
+            if m['dws'] < b['dws'] - WHATIF_DWS_TOLERANCE and m['dws'] < 0:
+                return False
+            setup_ok = m['wns'] >= min(b['wns'], 0.0) - 1e-9
+            if m['drv'] < b['drv'] and setup_ok:
+                return True
+            # Same count, a less severe worst violation.
+            if m['drv'] <= b['drv'] and m['dws'] > b['dws'] + 1e-4 and b['dws'] < 0 and setup_ok:
                 return True
             # Upsizing a near-violating driver (planning margin): kept unless
             # it adds a violation or costs setup below zero.
-            if why in ('drv', 'drv_sink') and m['drv'] <= b['drv'] and m['wns'] >= min(b['wns'], 0.0) - 1e-9:
+            if why in ('drv', 'drv_sink', 'drv_up', 'drv_chain') and m['drv'] <= b['drv'] and setup_ok:
                 return True
             if m['drv'] <= b['drv'] and m['wns'] > b['wns'] + 1e-4:
                 return True
@@ -844,18 +900,29 @@ class Flow:
             if room < 4:
                 break
             cands = []
+            cap_n = min(WHATIF_MAX_CANDIDATES, room)
+            # Chain co-sizing candidates of the worst violators first (up to
+            # WHATIF_CHAIN_CANDIDATES), then single resizes by priority.
+            for inst, _ in sorted(violators.items(), key=lambda x: (x[1], x[0])):
+                if sum(1 for c in cands if len(c[1]) > 1) >= WHATIF_CHAIN_CANDIDATES or len(cands) >= cap_n:
+                    break
+                if inst in accepted or inst not in prio:
+                    continue
+                ch = chain_candidate(inst)
+                if ch:
+                    cands.append((inst, ch, 'drv_chain'))
             for inst in order:
                 if inst in accepted:
                     continue
                 for cell in alternatives(inst):
-                    if len(cands) < min(WHATIF_MAX_CANDIDATES, room):
-                        cands.append((inst, cell))
+                    if len(cands) < cap_n:
+                        cands.append((inst, [(inst, cell)], prio[inst][1]))
             if not cands:
                 break
             edits = dict(schema='rusteda.edits.v1',
                          base=[dict(op='resize', instance=i, cell=c) for i, c in sorted(accepted.items())],
-                         candidates=[dict(id=f'c{k}', edits=[dict(op='resize', instance=i, cell=c)])
-                                     for k, (i, c) in enumerate(cands)],
+                         candidates=[dict(id=f'c{k}', edits=[dict(op='resize', instance=i, cell=c) for i, c in e])
+                                     for k, (_, e, _) in enumerate(cands)],
                          report=dict(endpoints=[], paths=[]))
             ef = jdump(h.root / f'{t}_whatif_{rnd}.json', edits)
             r = h.run(f'{t}_whatif_{rnd}', [str(x) for x in [
@@ -877,7 +944,7 @@ class Flow:
                 # The combined set is worse than before it: keep only the
                 # single best edit of the last round.
                 last = history[-1]['accepted']
-                for i, _ in last[1:]:
+                for i, _ in last[history[-1].get('first_size', 1):]:
                     accepted.pop(i, None)
                 history[-1]['reverted'] = [i for i, _ in last[1:]]
                 continue
@@ -888,22 +955,25 @@ class Flow:
                 evaluated += 1
                 m = metrics(c['values'])
                 k = int(c['id'][1:])
-                if better(m, base, prio[cands[k][0]][1]):
-                    scored.append(((m['drv'] - base['drv'], -(m['wns'] - base['wns']), -(m['tns'] - base['tns']), k), cands[k], m))
+                if better(m, base, cands[k][2]):
+                    scored.append(((m['drv'] - base['drv'], -(m['dws'] - base['dws']), -(m['wns'] - base['wns']),
+                                    -(m['tns'] - base['tns']), k), cands[k], m))
             scored.sort()
             take, insts = [], set()
-            for key_, (inst, cell), m in scored:
-                if inst in insts or len(take) >= WHATIF_ACCEPT_PER_ROUND:
+            for key_, (inst, cand_edits, why), m in scored:
+                if any(i in insts for i, _ in cand_edits) or len(take) >= WHATIF_ACCEPT_PER_ROUND:
                     continue
-                grow = (widths[cell] - widths[mapped[inst][0]]) * floor['site']['height']
+                grow = sum((widths[cell] - widths[mapped[i][0]]) * floor['site']['height'] for i, cell in cand_edits)
                 if grow > 0 and used + grow > SIZE_MAX_UTILIZATION * rows_area:
                     continue
                 used += max(grow, 0)
-                insts.add(inst)
-                take.append((inst, cell))
-                accepted[inst] = cell
+                for i, cell in cand_edits:
+                    insts.add(i)
+                    take.append((i, cell))
+                    accepted[i] = cell
             history.append(dict(round=rnd, candidates=len(cands), improving=len(scored), base=base,
-                                accepted=take, exit_code=r['exit_code'], seconds=round(r.get('elapsed_seconds') or 0.0, 2)))
+                                accepted=take, first_size=len(scored[0][1][1]) if scored and take else 1,
+                                exit_code=r['exit_code'], seconds=round(r.get('elapsed_seconds') or 0.0, 2)))
             prev_base = base
             if not take:
                 break
@@ -1023,10 +1093,13 @@ class Flow:
         rows_area = sum((r['x_end'] - r['x_start']) for r in floor['rows']) * floor['site']['height']
         used = sum(widths.get(m, 0) for m, _ in netlist_instances(text).values()) * floor['site']['height']
         room = max(0, int((SIZE_MAX_UTILIZATION * rows_area - used) // floor['site']['height']))
+        # Buffer names continue after every rr_eco_buf_ of the netlist the plan
+        # is applied to (the hold ECO's output may hold isolation buffers).
+        seq = max(CE.next_sequence(text), CE.next_sequence(bounded_text(apply_to, 64 * 1024 ** 2)) if apply_to else 0)
         buf = CE.plan_buffering(text, lef, bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2), prof, drv_rows, pins,
-                                'ss', max_width, CE.next_sequence(text), floor['site']['height'], widths, setup_failing,
-                                frozen, room)
-        skip = set(buf['resizes'])
+                                'ss', max_width, seq, floor['site']['height'], widths, setup_failing,
+                                frozen, room, self.hold_drive())
+        skip = set(buf['resizes']) | set(buf.get('touched') or [])
         n = CE.parse_netlist(text, lef)
         for rec in buf['records']:
             d = n.driver.get(rec['net'], '')
@@ -1035,7 +1108,8 @@ class Flow:
         size_ops, summary = self.whatif_sizing(it, netlist, sta, skip, buf['added_width_dbu'])
         resizes = [dict(op='resize_cell', instance=i, cell=c) for i, (c, _) in sorted(buf['resizes'].items())]
         ops = buf['ops'] + resizes + size_ops
-        summary.update(buffers=len(buf['ops']), buffer_nets=len(buf['records']), driver_resizes=len(resizes),
+        summary.update(buffers=sum(1 for o in buf['ops'] if o['op'] == 'buffer_sinks'), buffer_nets=len(buf['records']),
+                       driver_resizes=len(resizes),
                        buffering=dict(records=buf['records'][:60], skipped=dict(sorted(buf['skipped'].items())[:40]),
                                       added_width_dbu=buf['added_width_dbu'], nets_with_drv_rows=buf['nets_with_rows']),
                        library_limited=dict(sorted(buf.get('library_limited', {}).items())[:64]))
@@ -1051,7 +1125,59 @@ class Flow:
                                     '--out', out])
         summary['plan'] = fingerprint(plan)
         summary['ops'] = len(ops)
+        # Applied: the next layout seeds the co-sized buffers next to their
+        # drivers and keeps those drivers' nets short.
+        self.seed_positions.update(buf.get('positions') or {})
+        self.drv_weights.update(buf.get('weights') or {})
+        summary['co_sizing'] = dict(positions=len(buf.get('positions') or {}), weighted_nets=len(buf.get('weights') or {}),
+                                    arrangements={m: sum(1 for r in buf['records'] if r.get('arrangement') == m)
+                                                  for m in ('cluster', 'driver', 'root', 'unbounded')})
         return out, summary
+
+    def hold_isolation(self, it: int, out: Path, plan: dict, sta: dict, phys: dict) -> tuple[Path, dict | None]:
+        """DRV-aware hold insertion (track recipe): a sizing-profile buffer
+        behind every hold chain whose sink-side delay cell cannot drive its
+        point's load within the transition target (closure_eco.
+        plan_hold_isolation; setup-guarded per point), applied to the hold
+        ECO's output `out`. Returns (netlist, summary); `out` unchanged when
+        nothing applies."""
+        if self.design.sizing_profile is None or not plan.get('points'):
+            return out, None
+        import closure_eco as CE  # noqa: E402
+        import rtl2gds_logic as L  # noqa: E402
+        t, h = f'{self.tag}_i{it}', self.h
+        prof = json.loads(self.design.sizing_profile.read_text())
+        cfg = json.loads(self.config.read_text())
+        floor = json.loads(self.design.floorplan.read_text() if self.design.floorplan else self.floorplan().read_text())
+        site_w, row_h = floor['site']['width'], floor['site']['height']
+        spacing = int(cfg.get('cell_spacing_sites') or 0) * site_w
+        max_width = (cfg['tap']['max_gap'] // site_w) * site_w - spacing if cfg.get('tap') else None
+        lef = L.lef_pins(Path(self.p['cell_lef']['path']))
+        widths = lef_widths(Path(self.p['cell_lef']['path']), floor['units_per_micron'])
+        drv_rows = json.loads(bounded_text(Path(sta['files']['drv']), 64 * 1024 ** 2))['sections']['drv']['rows']
+        limits = [r['limit'] for r in drv_rows if r['kind'] == 'max_transition']
+        if not limits:
+            return out, dict(status='skipped', reason='no max_transition limit in the drv report')
+        def_text = bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2)
+        cw = CE.layout_wire_cap(bounded_text(Path(sta['timed_netlist']), 64 * 1024 ** 2), lef, def_text, prof, drv_rows,
+                                'ss', widths, row_h)
+        text = bounded_text(out, 64 * 1024 ** 2)
+        iso = CE.plan_hold_isolation(text, lef, def_text, prof, plan['points'], self.hold_drive(), min(limits),
+                                     CE.next_sequence(text), row_h, widths, cw, float(self.args.setup_margin), max_width)
+        summary = dict(status='none', records=iso['records'][:64], skipped=dict(sorted(iso['skipped'].items())[:32]),
+                       wire_cap_pf_per_dbu=cw)
+        if not iso['ops']:
+            return out, summary
+        ef = jdump(h.root / f'{t}_hold_iso_plan.json', dict(schema='rustroad.eco-plan.v1', module=self.top,
+                                                            operations=iso['ops']))
+        result = h.root / f'{self.tag}_i{it + 1}_mapped_hold_iso.v'
+        run_ok(h, f'{t}_hold_iso_eco', [self.tools['rustroad'], 'apply-eco', '--netlist', out, '--plan', ef,
+                                        '--delay-cells', self.delay_cells, '--sizing-profile', self.design.sizing_profile,
+                                        '--out', result])
+        self.seed_positions.update(iso['positions'])
+        self.drv_weights.update(iso['weights'])
+        summary.update(status='applied', buffers=len(iso['ops']), plan=fingerprint(ef))
+        return result, summary
 
     def placement_seed(self, it: int, phys: dict) -> Path:
         """rustroad.placement-seed.v1 of this layout's cell positions (DEF
@@ -1062,9 +1188,43 @@ class Flow:
             m = re.match(r'- (\S+) \S+ .*?\+ (?:PLACED|FIXED) \( (-?\d+) (-?\d+) \)', line)
             if m:
                 cells[m[1].lstrip('\\')] = [int(m[2]), int(m[3])]
+        source = {'def': fingerprint(Path(phys['paths']['def']))}
+        planned = getattr(self, 'seed_positions', None) or {}
+        if planned:
+            # DRV co-sizing: buffers (new or moved) next to their weak driver,
+            # hold chains and their isolation buffer next to their sinks.
+            moved = sum(1 for k in planned if k in cells)
+            for inst, (x, y) in sorted(planned.items()):
+                cells[inst] = [int(x), int(y)]
+            source['eco_positions'] = dict(new=len(planned) - moved, moved=moved)
+            self.seed_positions = {}
         return jdump(self.h.root / f'{self.tag}_i{it + 1}_placement_seed.json',
-                     dict(schema='rustroad.placement-seed.v1', source={'def': fingerprint(Path(phys['paths']['def']))},
-                          cells=dict(sorted(cells.items()))))
+                     dict(schema='rustroad.placement-seed.v1', source=source, cells=dict(sorted(cells.items()))))
+
+    def layout_weights(self, it: int) -> Path | None:
+        """Net weights of layout `it`: the timing-driven ones (while setup
+        failed) merged (max) with the DRV co-sizing weights of weak drivers'
+        nets; None when neither exists."""
+        drv = getattr(self, 'drv_weights', None) or {}
+        if not drv:
+            return self.weights
+        w = json.loads(self.weights.read_text()) if self.weights else \
+            dict(schema='rustroad.net-weights.v1', source=dict(rule='no timing-driven weights'), weights={})
+        merged = dict(w['weights'])
+        for net, v in drv.items():
+            merged[net] = max(merged.get(net, 1000), v)
+        w['weights'] = dict(sorted(merged.items()))
+        w['source'] = dict(w.get('source') or {}, drv_driver_nets=len(drv),
+                           drv_rule='nets of weak drivers to the buffer or hold isolation placed next to them')
+        return jdump(self.h.root / f'{self.tag}_i{it}_net_weights_layout.json', w)
+
+    def hold_drive(self) -> dict:
+        """Delay-cell master -> (characterized load pF, worst output
+        transition ns at ss) from the delay-cell profile."""
+        prof = json.loads(self.delay_cells.read_text())
+        load = prof['representative']['load_pf']
+        return {b['name']: (load, max(b['output_slew_ns']['ss'].values())) for b in prof['buffers']
+                if 'ss' in b.get('output_slew_ns', {})}
 
     def net_weights(self, it: int, netlist: Path, sta: dict) -> Path | None:
         """Timing-driven placement weights from this layout's per-pin setup
@@ -1415,12 +1575,15 @@ exit
         # Track-recipe loop state (reset per call: the determinism rebuild and
         # the controls run their own loops on fresh layouts).
         self.weights = None  # timing-driven net weights of the next layout
+        # DRV co-sizing: placement seeds of cells that must sit next to their
+        # driver (next layout only) and weights of those drivers' nets (kept).
+        self.seed_positions, self.drv_weights = {}, {}
         self.last_setup_eco, self.no_progress, self.eco_blocked = None, 0, None
         self.whatif_spent = 0
         seed, best = None, None
         for it in range(self.args.max_iterations):
             try:
-                phys = self.physical(it, netlist, self.weights, seed)
+                phys = self.physical(it, netlist, self.layout_weights(it), seed)
                 sta = self.sta(it, phys)
             except RuntimeError as error:
                 # Track recipe: an ECO layout that cannot be built ends the
@@ -1577,6 +1740,9 @@ exit
             if plan['status'] == 'closed':
                 record['stopped'] = 'hold ECO planned nothing'
                 return netlist, True
+            out, iso = self.hold_isolation(it, out, plan, sta, phys)
+            if iso is not None:
+                record['hold_isolation'] = iso
             if combined:
                 frozen = set()
                 for op in plan['eco']['operations']:

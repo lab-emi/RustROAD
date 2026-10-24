@@ -79,6 +79,26 @@ BUFFER_PREFIX = "rr_eco_buf_"
 # Hold-ECO cells are never resized (their delay is the hold fix): a weak one
 # driving a long wire gets a buffer behind it (more delay, which hold likes).
 HOLD_PREFIX = "rr_eco_hold_"
+# Driver/buffer co-sizing. A driver whose best family member cannot reach
+# DRIVER_TARGET even at the smallest load a buffer arrangement can present
+# (smallest buffer input + NEAR_ROWS row heights of wire) plans with a target
+# this fraction of the way from that floor to the limit (GF180 aoi22 at ss:
+# floor 0.89 ns at 4 fF, target 0.96 ns).
+DRIVER_HEADROOM = 0.6
+# Wire between a driver and a cell placed next to it (seeded at the driver):
+# NEAR_ROWS row heights at the layout's median wire capacitance per DBU.
+# Measured on the GF180 final2 layouts (two-pin nets, routed): median 0.9-1.1
+# fF under 5 um, 1.7-1.9 fF at 5-10 um; median 0.245 fF/um over all nets, so
+# 1.5 rows (5.9 um) is 1.4 fF.
+NEAR_ROWS = 1.5
+# Placement weight (milli-units) of a weak driver's net to the buffer seeded
+# next to it: detailed placement then never moves the buffer towards its
+# cluster (that move costs the driver-side HPWL as much as it saves).
+DRIVER_NET_WEIGHT = 8000
+# A weak driver's input-slew degradation (observed transition above the
+# Liberty model at the observed load, 0.2 ns input) is subtracted from its
+# target, at most this fraction of the limit.
+MAX_SLEW_DEGRADATION = 0.3
 
 INSTANCE_LINE = re.compile(r"^\s*(\S+)\s+(\S+)\s+\((.*)\);\s*$")
 CONNECTION = re.compile(r"\.(\w+)\(([^()]*)\)")
@@ -256,6 +276,27 @@ class Profile:
             return 0.0
         return (d["delay_ns"][1] - d["delay_ns"][0]) / (self.loads[1] - self.loads[0])
 
+    def capacity(self, master: str, target: float) -> float | None:
+        """Load (pF) at which `master` reaches transition `target` on the
+        linear model (0 if it cannot even at no load); None: no drive data."""
+        d = self.drive.get(master)
+        if not d or "slew_ns" not in d:
+            return None
+        (c1, c2), (t1, t2) = self.loads, d["slew_ns"]
+        k = (t2 - t1) / (c2 - c1)
+        return max(0.0, c1 + (target - t1) / k) if k > 0 else float("inf")
+
+    def members_up(self, master: str, max_width: int | None, steps: int = 2) -> list:
+        """`master` and up to `steps` larger members of its family within the
+        width bound (ascending)."""
+        if master not in self.family:
+            return [master]
+        _, k, members = self.family[master]
+        return [master] + [m for m in members[k + 1:k + 1 + steps] if max_width is None or self.width[m] <= max_width]
+
+    def same_family(self, a: str, b: str) -> bool:
+        return a in self.family and b in self.family and self.family[a][0] == self.family[b][0]
+
     def upsize_for(self, master: str, c: float, target: float, max_width: int | None) -> str | None:
         """The larger family member that meets `target` at load `c` with the
         smallest delay at `c` (then the narrowest); None if none does."""
@@ -318,6 +359,42 @@ def centroid(group) -> tuple:
     return (sum(i.pos[0] for i in group) // len(group), sum(i.pos[1] for i in group) // len(group))
 
 
+def manhattan(a: tuple, b: tuple) -> int:
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def fit_buffers(buffers: list, loads: list, target: float, slope: float, per_cap: float,
+                smallest: bool = False) -> list | None:
+    """One buffer per load: each meets `target` at its load and has an input
+    capacitance within `per_cap` (the driver's share). Chosen by the
+    smallest estimated delay (own delay + `slope` x input capacitance), or
+    with `smallest` by the smallest input capacitance (a driver at its
+    limit). None when some load has no such buffer."""
+    out = []
+    for load in loads:
+        ok = [b for b in buffers if b.cap <= per_cap + 1e-12 and b.slew_at(load) <= target]
+        if not ok:
+            return None
+        if smallest:
+            out.append(min(ok, key=lambda b: (b.cap, b.delay_at(load), b.width, b.name)))
+        else:
+            out.append(min(ok, key=lambda b: (b.delay_at(load) + slope * b.cap, b.width, b.name)))
+    return out
+
+
+@dataclass
+class DriverModel:
+    """What a net's driver can take: its family members (current first,
+    then larger ones within the width bound) with the load each reaches the
+    driver target at, the target itself and whether it is a headroom target
+    (the family cannot reach DRIVER_TARGET at any arrangement's load)."""
+    members: list           # [(master, capacity pF)]
+    target: float
+    headroom: bool
+    slope: float            # current master's delay slope (ns/pF)
+    degradation: float = 0.0
+
+
 def pick_buffer(prof: Profile, load_pf: float, target_ns: float, driver_slope: float = 0.0,
                 max_cap_pf: float | None = None) -> Buffer:
     """The buffer meeting the slew target at `load_pf` with the smallest
@@ -349,6 +426,63 @@ class Planner:
         self.consumed: dict[str, float] = {}
         self.sequential: set[str] = set()
         self.walk_budget = [MAX_CONSUME_VISITS]
+        # Placement seeds (lower-left DBU) of buffers that must sit next to
+        # their driver, placement weights of those drivers' nets, and every
+        # instance this call decided (kept out of the whatif sizing).
+        self.positions: dict[str, tuple] = {}
+        self.weights: dict[str, int] = {}
+        self.touched: set[str] = set()
+
+    def place_at(self, inst: str, width: int, centre: tuple):
+        self.positions[inst] = (int(centre[0]) - width // 2, int(centre[1]) - self.row_h // 2)
+        self.touched.add(inst)
+
+    def near_pf(self, cw: float) -> float:
+        """Estimated wire of a connection to a cell placed next to the pin
+        (the layout's median wire capacitance per DBU; a short net's own
+        ratio is dominated by pin access)."""
+        return (getattr(self, "cw_design", 0.0) or cw) * NEAR_ROWS * self.row_h
+
+    def arrange(self, groups: list, loads: list, driver_pos: tuple, trunk: float, base_pf: float, cw: float,
+                target: float, model: DriverModel) -> dict | None:
+        """Co-size the buffers of one net with its driver. Options, first
+        feasible wins: buffers at their clusters (the driver takes the trunk),
+        buffers next to the driver (each takes its own trunk), each with the
+        current driver and then with a larger family member; then one root
+        buffer next to the driver in front of the cluster buffers. Feasible:
+        every buffer meets `target` at its load, and the driver meets its
+        target with the buffer inputs, `base_pf` (kept sinks, ports) and the
+        estimated wire. None: no option is feasible."""
+        n = len(groups)
+        near = self.near_pf(cw)
+        far = [l + cw * manhattan(driver_pos, centroid(g)) for g, l in zip(groups, loads)]
+        bufs = self.prof.buffers
+        ups = list(range(1, len(model.members)))
+        order = [("cluster", 0), ("driver", 0)] + [(m, k) for k in ups for m in ("cluster", "driver")] + \
+            [("root", k) for k in range(len(model.members))]
+        for mode, k in order:
+            member, cap = model.members[k]
+            if cap is None:
+                continue
+            room = cap - base_pf
+            if mode == "cluster":
+                picks = fit_buffers(bufs, loads, target, model.slope, (room - trunk) / n, model.headroom)
+                if picks:
+                    return dict(mode=mode, member=member, picks=picks, loads=loads)
+            elif mode == "driver" and n <= MAX_CLUSTER_FANOUT:
+                picks = fit_buffers(bufs, far, target, model.slope, (room - near * n) / n, model.headroom)
+                if picks:
+                    return dict(mode=mode, member=member, picks=picks, loads=far)
+            elif mode == "root" and n <= MAX_CLUSTER_FANOUT:
+                mid = self.prof.delay_slope(bufs[len(bufs) // 2].name)
+                level1 = fit_buffers(bufs, loads, target, mid, float("inf"))
+                if not level1:
+                    continue
+                root_load = sum(b.cap for b in level1) + trunk
+                root = fit_buffers(bufs, [root_load], target, model.slope, room - near, model.headroom)
+                if root:
+                    return dict(mode=mode, member=member, picks=level1, loads=loads, root=root[0], root_load=root_load)
+        return None
 
     def consume(self, pin: str, delta: float):
         """Charge `delta` ns to `pin` and every pin downstream of it through
@@ -416,41 +550,67 @@ class Planner:
 
     def buffer_net(self, net: str, why: str, items: list, fixed: list, total_pf: float, cw: float,
                    driver_slew_target: float, cap_limit: float, driver_slope: float = 0.0,
-                   driver_cap_pf: float | None = None) -> dict:
+                   driver_cap_pf: float | None = None, model: DriverModel | None = None,
+                   kept_pf: float = 0.0) -> dict:
         """Clusters -> level-1 buffers -> (level 2 if the driver load stays
-        too big). `driver_cap_pf`: the load the driver can take within its
-        transition target (None: unbounded, e.g. an input port); the buffer
-        input capacitances share it."""
+        too big). With a driver `model` the buffers are co-sized with the
+        driver (`arrange`: at their clusters, next to the driver, or behind
+        one root buffer next to the driver; a larger driver member if
+        needed). Otherwise `driver_cap_pf`: the load the driver can take
+        within its transition target (None: unbounded, e.g. an input port);
+        the buffer input capacitances share it."""
         prof = self.prof
         target = driver_slew_target
         big = prof.buffers[-1]
         limit = min(big.max_load(target), cap_limit)
-        driver_pos = self.pos_of(self.n.driver.get(net, "")) or centroid(items)
+        driver = self.n.driver.get(net, "")
+        driver_pos = self.pos_of(driver) or centroid(items)
         # Clusters as large as the strongest buffer can drive within the
         # target (fewest buffer inputs on the driver); each cluster's buffer
         # is then the fastest one whose input capacitance fits the driver's
         # remaining budget.
         groups = bisect_clusters(items, limit, cw, MAX_CLUSTER_FANOUT, self.budget)
+        loads = [sum(i.cap for i in g) + cw * hpwl([i.pos for i in g]) for g in groups]
+        fixed_pts = [self.ports[p] for p in fixed if p in self.ports]
+        trunk_est = cw * hpwl([driver_pos] + [centroid(g) for g in groups] + fixed_pts)
+        fixed_pf = OUTPUT_PORT_LOAD_PF * len(fixed)
+        arr = None
+        if model is not None and self.pos_of(driver) is not None:
+            arr = self.arrange(groups, loads, driver_pos, trunk_est, fixed_pf + kept_pf, cw, target, model)
         per_group = None
-        if driver_cap_pf is not None:
-            trunk_est = cw * hpwl([driver_pos] + [centroid(g) for g in groups])
-            per_group = (driver_cap_pf - trunk_est - OUTPUT_PORT_LOAD_PF * len(fixed)) / len(groups)
-            if per_group < prof.buffers[0].cap:
-                per_group = None  # over budget anyway: the driver is resized next
+        if arr is None:
+            if driver_cap_pf is not None:
+                per_group = (driver_cap_pf - kept_pf - trunk_est - fixed_pf) / len(groups)
+                if per_group < prof.buffers[0].cap:
+                    per_group = None  # over budget anyway: the driver is resized next
+            arr = dict(mode="cluster" if model is None else "unbounded", member=None, loads=loads,
+                       picks=[pick_buffer(prof, load, target, driver_slope, per_group) for load in loads])
+        at_driver = arr["mode"] == "driver"
         level, made, cost, under = [], [], {}, {}
-        for g in groups:
-            load = sum(i.cap for i in g) + cw * hpwl([i.pos for i in g])
-            b = pick_buffer(prof, load, target, driver_slope, per_group)
+        for g, b, load in zip(groups, arr["picks"], arr["loads"]):
             inst = self.emit(g, b)
             pin = f"{inst}/{b.input_pin}"
-            level.append(Item(pin, centroid(g), b.cap,
+            if at_driver:
+                self.place_at(inst, b.width, driver_pos)
+            level.append(Item(pin, driver_pos if at_driver else centroid(g), b.cap,
                               min((i.slack for i in g if i.slack is not None), default=None)))
             under[pin] = [i.name for i in g]
             for i in g:
                 cost[i.name] = b.delay_at(load) + SLEW_SENSITIVITY * b.slew_at(load)
             made.append(dict(instance=inst, cell=b.name, items=len(g), load_pf=round(load, 5),
-                             slew_ns=round(b.slew_at(load), 4)))
+                             slew_ns=round(b.slew_at(load), 4), **({"at_driver": True} if at_driver else {})))
         levels = 1
+        if arr["mode"] == "root":
+            root, rl = arr["root"], arr["root_load"]
+            inst = self.emit(level, root)
+            self.place_at(inst, root.width, driver_pos)
+            pin = f"{inst}/{root.input_pin}"
+            under[pin] = [x for i in level for x in under.get(i.name, [i.name])]
+            for x in under[pin]:
+                cost[x] = cost.get(x, 0.0) + root.delay_at(rl) + SLEW_SENSITIVITY * root.slew_at(rl)
+            made.append(dict(instance=inst, cell=root.name, items=len(level), load_pf=round(rl, 5),
+                             slew_ns=round(root.slew_at(rl), 4), level=2, at_driver=True))
+            level, levels = [Item(pin, driver_pos, root.cap, None)], 2
         while len(level) > MAX_CLUSTER_FANOUT and levels < MAX_TREE_LEVELS:
             groups = bisect_clusters(level, limit, cw, MAX_CLUSTER_FANOUT, self.budget)
             nxt = []
@@ -470,22 +630,41 @@ class Planner:
             level, levels = nxt, levels + 1
         trunk = [driver_pos] + [i.pos for i in level] + [self.ports[p] for p in fixed if p in self.ports]
         new_load = sum(i.cap for i in level) + OUTPUT_PORT_LOAD_PF * len(fixed) + cw * hpwl(trunk)
+        if arr["mode"] in ("driver", "root"):
+            new_load += self.near_pf(cw) * len(level)
+            self.weights[net] = DRIVER_NET_WEIGHT
         rec = dict(net=net, why=why, items=len(items), load_before_pf=round(total_pf, 5),
-                   driver_load_after_pf=round(new_load, 5), buffers=made, levels=levels)
+                   driver_load_after_pf=round(new_load, 5), buffers=made, levels=levels, arrangement=arr["mode"])
+        if model is not None:
+            rec["driver_target_ns"] = round(model.target, 4)
+            if model.headroom:
+                rec["driver_headroom"] = True
+            if model.degradation > 0:
+                rec["input_slew_degradation_ns"] = round(model.degradation, 4)
+        member = arr.get("member")
+        if member and "/" in driver:
+            dinst = driver.rsplit("/", 1)[0]
+            if member != self.n.instances[dinst][0]:
+                self.resizes[dinst] = (member, "co-sized with its buffers")
+                rec["driver_resized_to"] = member
+            self.touched.add(dinst)
         self.records.append(rec)
         self.costs = cost
         return rec
 
     def mark(self) -> tuple:
-        return (len(self.ops), self.seq, self.added_width, len(self.records))
+        return (len(self.ops), self.seq, self.added_width, len(self.records), dict(self.positions),
+                dict(self.weights), dict(self.resizes), set(self.touched))
 
     def rollback(self, m: tuple):
         del self.ops[m[0]:]
         self.seq, self.added_width = m[1], m[2]
         del self.records[m[3]:]
+        self.positions, self.weights, self.resizes, self.touched = m[4], m[5], m[6], m[7]
 
     def guarded(self, net: str, why: str, cand: list, kept: list, fixed: list, total: float, cw: float,
-                target: float, cap_limit: float, slope: float, drv_cap: float | None, delay, slew) -> dict | None:
+                target: float, cap_limit: float, slope: float, drv_cap: float | None, delay, slew,
+                model: DriverModel | None = None) -> dict | None:
         """buffer_net, keeping on the driver every sink whose estimated
         setup slack after the edit would drop below SETUP_GUARD_NS.
 
@@ -505,8 +684,8 @@ class Planner:
             if not moving:
                 return None
             m = self.mark()
-            budget = None if drv_cap is None else max(drv_cap - sum(i.cap for i in kept), 0.0)
-            rec = self.buffer_net(net, why, moving, fixed, total, cw, target, cap_limit, slope, budget)
+            rec = self.buffer_net(net, why, moving, fixed, total, cw, target, cap_limit, slope, drv_cap, model,
+                                  sum(i.cap for i in kept))
             after = rec["driver_load_after_pf"] + sum(i.cap for i in kept)
             bad, spend = [], {}
             for i in moving:
@@ -526,11 +705,175 @@ class Planner:
             moving = [i for i in moving if i not in bad]
         return None
 
+    def rebalance(self, net: str, items: list, fixed: list, total: float, cw: float, target: float,
+                  model: DriverModel, out_load: dict) -> dict | None:
+        """A violating net whose sinks are all ECO buffers and whose driver
+        cannot take its load: co-size the existing tree with its driver.
+        Options, first feasible wins (current driver member, then larger):
+        `driver` -- every buffer moves next to the driver (placement seed;
+        the trunk wire moves to the buffer outputs) and is re-sized within
+        its family for its own load plus that trunk, its input capacitance
+        within the driver's share; `root` -- one new buffer next to the
+        driver in front of all of them (it drives the existing trunk).
+        Setup guard as for new buffers: a buffer whose input pin keeps less
+        than SETUP_GUARD_NS of estimated slack after its extra delay blocks
+        the option. Returns the record or None (nothing feasible)."""
+        driver = self.n.driver[net]
+        driver_pos = self.pos_of(driver)
+        if driver_pos is None or "/" not in driver:
+            return None
+        prof = self.prof
+        near = self.near_pf(cw)
+        fixed_pf = OUTPUT_PORT_LOAD_PF * len(fixed)
+        bufs = []
+        for it in items:
+            inst = it.name.rsplit("/", 1)[0]
+            master, conns = self.n.instances[inst]
+            outs = [f"{inst}/{p}" for p, x in conns.items() if self.n.driver.get(x) == f"{inst}/{p}"]
+            old = next((b for b in prof.buffers if b.name == master), None)
+            if len(outs) != 1 or outs[0] not in out_load or old is None:
+                return None
+            bufs.append((inst, it, old, out_load[outs[0]], out_load[outs[0]] + cw * manhattan(driver_pos, it.pos)))
+
+        def room(i):
+            return None if i.slack is None else i.slack - self.consumed.get(i.name, 0.0)
+        order = []
+        for k in range(len(model.members)):
+            order += [("driver", k), ("root", k)]
+        tried = []
+        for mode, k in order:
+            member, cap = model.members[k]
+            if cap is None:
+                continue
+            avail = cap - fixed_pf
+            if mode == "driver":
+                picks = []
+                for inst, it, old, load0, load1 in bufs:
+                    fam = [b for b in prof.buffers if prof.same_family(b.name, old.name)]
+                    p = fit_buffers(fam, [load1], target, model.slope, (avail - near * len(bufs)) / len(bufs),
+                                    model.headroom)
+                    if not p:
+                        break
+                    picks.append(p[0])
+                if len(picks) != len(bufs):
+                    tried.append(f"{mode}@{member}: no buffer of the family fits")
+                    continue
+                spend = {}
+                for (inst, it, old, load0, load1), b in zip(bufs, picks):
+                    spend[it.name] = (b.delay_at(load1) + SLEW_SENSITIVITY * b.slew_at(load1)) - \
+                        (old.delay_at(load0) + SLEW_SENSITIVITY * old.slew_at(load0))
+            else:
+                root_load = total - fixed_pf
+                r = fit_buffers(prof.buffers, [root_load], target, model.slope, avail - near, model.headroom)
+                if not r:
+                    tried.append(f"{mode}@{member}: no root buffer fits")
+                    continue
+                root = r[0]
+                spend = {it.name: root.delay_at(root_load) + SLEW_SENSITIVITY * root.slew_at(root_load)
+                         for _, it, _, _, _ in bufs}
+            blocked = [n for n, d in spend.items() if d > 0 and any(
+                room(i) is not None and room(i) - d < SETUP_GUARD_NS for _, i, _, _, _ in bufs if i.name == n)]
+            if blocked:
+                tried.append(f"{mode}@{member}: setup guard ({len(blocked)} buffers)")
+                continue
+            rec = dict(net=net, why="drv:rebalance ECO buffers", items=len(items), load_before_pf=round(total, 5),
+                       arrangement=mode, driver_target_ns=round(model.target, 4), tried=tried)
+            if mode == "driver":
+                resized = {}
+                for (inst, it, old, load0, load1), b in zip(bufs, picks):
+                    if b.name != old.name:
+                        self.resizes[inst] = (b.name, "co-sized next to its driver")
+                        resized[inst] = b.name
+                    self.place_at(inst, b.width, driver_pos)
+                rec.update(moved=[inst for inst, *_ in bufs], resized=resized,
+                           driver_load_after_pf=round(sum(b.cap for b in picks) + fixed_pf + near * len(bufs), 5))
+            else:
+                inst = self.emit(items, root)
+                self.place_at(inst, root.width, driver_pos)
+                rec.update(root=dict(instance=inst, cell=root.name, load_pf=round(root_load, 5),
+                                     slew_ns=round(root.slew_at(root_load), 4)),
+                           driver_load_after_pf=round(root.cap + fixed_pf + near, 5))
+            for name, d in spend.items():
+                if d > 0:
+                    self.consume(name, self.consumed.get(name, 0.0) + d)
+            self.weights[net] = DRIVER_NET_WEIGHT
+            dinst = driver.rsplit("/", 1)[0]
+            if member != self.n.instances[dinst][0]:
+                self.resizes[dinst] = (member, "co-sized with its buffers")
+                rec["driver_resized_to"] = member
+            self.touched.add(dinst)
+            self.touched.update(inst for inst, *_ in bufs)
+            self.records.append(rec)
+            return rec
+        return dict(failed=tried)
+
+
+def hold_capacity(hold_drive: dict | None, master: str, target: float) -> float | None:
+    """Load a delay cell may drive within `target`: its profile is
+    characterized at one load only; the slew is taken as proportional to the
+    load through that point (an upper bound of a line with a positive
+    intercept, so the capacity is conservative)."""
+    if not hold_drive or master not in hold_drive:
+        return None
+    load, slew = hold_drive[master]
+    return load * target / slew if slew > 0 else None
+
+
+def driver_model(prof: Profile, master: str, slew_limit: float, max_width: int | None, near_pf: float,
+                 observed: float | None, total: float, hold_drive: dict | None) -> DriverModel | None:
+    """What the driver of a planned net can take (see DriverModel). Target:
+    DRIVER_TARGET x limit, or the headroom target when even the best member
+    (current or up to two sizes larger) misses DRIVER_TARGET at the smallest
+    arrangement load (smallest buffer input + `near_pf`); minus the observed
+    input-slew degradation (observed transition above the model at the
+    observed load, at most MAX_SLEW_DEGRADATION x limit). Hold delay cells:
+    one member, `hold_capacity`. None: no drive data."""
+    d = prof.drive.get(master)
+    if d and "slew_ns" in d:
+        members = prof.members_up(master, max_width)
+        floor_load = prof.buffers[0].cap + near_pf
+        floor = min(prof.slew_at(m, floor_load) for m in members)
+        target, headroom = DRIVER_TARGET * slew_limit, False
+        if target < floor < slew_limit:
+            target, headroom = floor + DRIVER_HEADROOM * (slew_limit - floor), True
+        degradation = 0.0
+        if observed is not None:
+            degradation = min(MAX_SLEW_DEGRADATION * slew_limit, max(0.0, observed - prof.slew_at(master, total)))
+        target -= degradation
+        return DriverModel([(m, prof.capacity(m, target)) for m in members], target, headroom,
+                           prof.delay_slope(master), degradation)
+    target = DRIVER_TARGET * slew_limit
+    cap = hold_capacity(hold_drive, master, target)
+    if cap is None:
+        return None
+    if observed and total > 0:
+        cap = min(cap, total * target / observed)
+    return DriverModel([(master, cap)], target, False, 0.5 * observed / total if observed and total > 0 else 0.0)
+
+
+def design_wire_cap(n: Netlist, pl, prof: Profile, out_load: dict) -> float:
+    """Median wire capacitance per DBU over the layout's nets (driver pin
+    load minus sink pin capacitances, over the HPWL of driver and sinks)."""
+    vals = []
+    for net, sinks in sorted(n.sinks.items()):
+        drv = n.driver.get(net)
+        if not drv or drv not in out_load or "/" not in drv:
+            continue
+        pts = [pl.pos_of(f"{i}/{p}") for i, p in sinks] + [pl.pos_of(drv)]
+        if any(x is None for x in pts) or len(pts) < 2:
+            continue
+        span = hpwl(pts)
+        wire = out_load[drv] - sum(prof.pin_cap(n.instances[i][0], p) for i, p in sinks)
+        if span > 0 and wire > 0:
+            vals.append(wire / span)
+    vals.sort()
+    return vals[len(vals) // 2] if vals else 0.0
+
 
 def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, drv_rows: list, pins: dict,
                    corner: str, max_width: int | None, seq: int, row_h: int, widths: dict,
                    setup_critical: bool, frozen: set | frozenset = frozenset(),
-                   max_added_width: int | None = None) -> dict:
+                   max_added_width: int | None = None, hold_drive: dict | None = None) -> dict:
     """Plan buffers (and driver resizes) for one layout.
 
     drv_rows: RustSTA drv rows (every corner); pins: corner -> {pin: setup
@@ -538,16 +881,20 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
     corner); frozen: `inst/pin` sinks another ECO of the same iteration
     already moves (the hold ECO's chains), never moved here;
     max_added_width: the buffer width (DBU) this layout may still take (the
-    loop's utilization cap), a net whose buffers would exceed it is skipped.
-    Returns {ops,
-    resizes, records, skipped, added_width_dbu, next_seq}.
+    loop's utilization cap), a net whose buffers would exceed it is skipped;
+    hold_drive: delay-cell master -> (characterized load pF, worst output
+    transition ns there) from the delay-cell profile (hold cells have no
+    sizing family; `hold_capacity`).
+    Returns {ops, resizes, records, skipped, added_width_dbu, next_seq,
+    positions (instance -> lower-left DBU seed of the next placement),
+    weights (net -> placement weight), touched (instances decided here)}.
     """
     n = parse_netlist(netlist_text, lef)
     comps, ports = def_positions(def_text)
     prof = Profile(profile, corner, max_width)
     if not prof.buffers:
         return dict(ops=[], resizes={}, records=[], skipped={"*": "no buffer with drive data fits the tap gap"},
-                    added_width_dbu=0, next_seq=seq, nets_with_rows=0)
+                    added_width_dbu=0, next_seq=seq, nets_with_rows=0, positions={}, weights={}, touched=[])
     pl = Planner(n, comps, ports, prof, widths, row_h, seq)
     pl.sequential = {c["name"] for f in profile["families"] if f.get("sequential") for c in f["cells"]}
     # A moved sink gets at least one buffer delay: only sinks with that much
@@ -599,6 +946,10 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
         if r["value"] > margin * r["limit"]:
             e["kinds"][r["kind"]] = min(e["kinds"].get(r["kind"], 0.0), margin * r["limit"] - r["value"])
     design_cap_limit = max((r["limit"] for r in drv_rows if r["kind"] == "max_capacitance"), default=0.3)
+    # Load of every driver pin at the planning corner (max_capacitance rows
+    # carry the driver pin and its net's total load).
+    out_load = {key(r["pin"]): r["value"] for r in drv_rows if r["kind"] == "max_capacitance" and r["corner"] == corner}
+    pl.cw_design = design_wire_cap(n, pl, prof, out_load)
     skipped, library_limited = {}, {}
     for net in sorted(nets, key=lambda k: (min(nets[k]["kinds"].values(), default=0.0), k)):
         e = nets[net]
@@ -660,6 +1011,8 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
 
             def s_model(c, o=o, t=max(total, 1e-6)):
                 return o * c / t
+        dmodel = None if is_port else driver_model(prof, master, slew_limit, max_width, pl.near_pf(cw), obs, total,
+                                                    hold_drive)
         if violated:
             kinds = set(e["kinds"])
             if not is_port and "max_transition" in kinds and master in prof.family:
@@ -695,13 +1048,29 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
             # are all critical is left to sizing.
             if not (kinds & {"max_capacitance", "max_fanout"}) and \
                     all(i.name.startswith(BUFFER_PREFIX) for i in items):
-                # Already a buffer tree: another level would only add delay;
-                # the driver is resized instead (whatif sizing).
-                skipped[net] = "sinks are ECO buffers already: left to sizing"
+                # Already a buffer tree. If the driver can take the load, it is
+                # resized (whatif sizing); if not (the largest member, a hold
+                # cell, too much wire), the tree is co-sized with its driver:
+                # buffers next to the driver, or one root buffer there.
+                cap_now = dmodel.members[0][1] if dmodel is not None else None
+                violating = max(e["slew"].values(), default=0.0) > slew_limit or \
+                    max(e["cap"].values(), default=0.0) > e.get("cap_limit", float("inf"))
+                if dmodel is None or cap_now is None or total <= cap_now or not violating:
+                    skipped[net] = "sinks are ECO buffers already: left to sizing"
+                    continue
+                m = pl.mark()
+                rec = pl.rebalance(net, items, fixed, total, cw, target, dmodel, out_load)
+                if rec is not None and "failed" not in rec and max_added_width is not None and \
+                        pl.added_width > max_added_width:
+                    pl.rollback(m)
+                    skipped[net] = "area budget of this layout reached (utilization cap)"
+                elif rec is None or "failed" in rec:
+                    skipped[net] = "sinks are ECO buffers already; no co-sized arrangement: " + \
+                        "; ".join((rec or {}).get("failed") or ["no position/load data"])
                 continue
             m = pl.mark()
             rec = pl.guarded(net, "drv:" + "/".join(sorted(kinds)), items, [], fixed, total, cw, target,
-                             CAPACITANCE_TARGET * cap_limit, slope, drv_cap, d_model, s_model)
+                             CAPACITANCE_TARGET * cap_limit, slope, drv_cap, d_model, s_model, dmodel)
             if rec is not None and max_added_width is not None and pl.added_width > max_added_width:
                 pl.rollback(m)
                 skipped[net] = "area budget of this layout reached (utilization cap)"
@@ -729,7 +1098,111 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
                 pl.rollback(m)
                 skipped[net] = "area budget of this layout reached (utilization cap)"
     return dict(ops=pl.ops, resizes=pl.resizes, records=pl.records, skipped=skipped, library_limited=library_limited,
-                added_width_dbu=pl.added_width, next_seq=pl.seq, nets_with_rows=len(nets))
+                added_width_dbu=pl.added_width, next_seq=pl.seq, nets_with_rows=len(nets),
+                positions=dict(sorted(pl.positions.items())), weights=dict(sorted(pl.weights.items())),
+                touched=sorted(pl.touched))
+
+
+def layout_wire_cap(netlist_text: str, lef: dict, def_text: str, profile: dict, drv_rows: list, corner: str,
+                    widths: dict, row_h: int) -> float:
+    """Median wire capacitance per DBU of a timed layout (design_wire_cap)."""
+    n = parse_netlist(netlist_text, lef)
+    comps, ports = def_positions(def_text)
+    prof = Profile(profile, corner, None)
+    pl = Planner(n, comps, ports, prof, widths, row_h, 0)
+    out_load = {key(r["pin"]): r["value"] for r in drv_rows if r["kind"] == "max_capacitance" and r["corner"] == corner}
+    return design_wire_cap(n, pl, prof, out_load)
+
+
+def plan_hold_isolation(netlist_text: str, lef: dict, def_text: str, profile: dict, points: list, hold_drive: dict,
+                        slew_limit: float, seq: int, row_h: int, widths: dict, cw: float, setup_margin: float,
+                        max_width: int | None = None, corners=("ss", "tt")) -> dict:
+    """DRV-aware hold insertion: a buffer behind a hold chain whose sink-side
+    delay cell cannot drive the point's load.
+
+    netlist_text: the hold ECO's output; points: the hold plan's points
+    (path-aware plan: name, sinks, cells, instances, setup_slack_ns,
+    added_setup_ns per corner); hold_drive: delay-cell master ->
+    (characterized load pF, worst output transition ns) at the planning
+    corner (`corners[0]`); cw: wire capacitance per DBU (design median).
+    The sink-side cell (`instances[0]`, output net `<inst>_n`) drives the
+    point's sinks: load = their pin capacitances + cw x HPWL(sinks) + a
+    near-wire term. Above `hold_capacity` at DRIVER_TARGET x the limit, the
+    sinks move behind one sizing-profile buffer (`buffer_sinks`) chosen to
+    meet TRANSITION_TARGET at that load with its input within the delay
+    cell's capacity, and only if every corner in `corners` keeps
+    `setup_margin` + SETUP_GUARD_NS of the point's setup slack after the
+    chain and the buffer (both estimates). The chain and the buffer get
+    placement seeds at the sinks' centroid (the strong upstream driver takes
+    the long wire, the weak delay cell drives only the buffer next to it) and
+    the delay cell's net a placement weight. Returns {ops, positions,
+    weights, records, skipped, next_seq}."""
+    n = parse_netlist(netlist_text, lef)
+    comps, ports = def_positions(def_text)
+    profs = {c: Profile(profile, c, max_width) for c in corners}
+    prof = profs[corners[0]]
+    out = dict(ops=[], positions={}, weights={}, records=[], skipped={}, next_seq=seq)
+    if not prof.buffers:
+        out["skipped"]["*"] = "no buffer with drive data fits the tap gap"
+        return out
+    near = cw * NEAR_ROWS * row_h
+    target = DRIVER_TARGET * slew_limit
+
+    def centre(inst):
+        p = comps.get(inst)
+        if p is None:
+            return None
+        return (p[0] + widths.get(n.instances[inst][0], 0) // 2, p[1] + row_h // 2)
+    for pt in points:
+        insts = pt.get("instances") or []
+        if not insts or insts[0] not in n.instances:
+            continue
+        first = insts[0]
+        master = n.instances[first][0]
+        net = key(f"{first}_n")
+        cap = hold_capacity(hold_drive, master, target)
+        sinks = sorted(n.sinks.get(net, []))
+        if cap is None or not sinks or n.driver.get(net, "").rsplit("/", 1)[0] != first:
+            out["skipped"][pt["name"]] = "no drive data, no sinks or not the chain's sink-side cell"
+            continue
+        pos = [centre(i) for i, _ in sinks]
+        if any(x is None for x in pos):
+            out["skipped"][pt["name"]] = "a sink has no position on this layout"
+            continue
+        pins_pf = sum(prof.pin_cap(n.instances[i][0], p) for i, p in sinks)
+        load = pins_pf + cw * hpwl(pos) + near
+        rec = dict(point=pt["name"], cell=master, instance=first, load_pf=round(load, 5),
+                   capacity_pf=round(cap, 5))
+        if load <= cap:
+            continue
+        pick = fit_buffers(prof.buffers, [load], TRANSITION_TARGET * slew_limit, 0.0, cap - near)
+        if not pick:
+            out["skipped"][pt["name"]] = f"no buffer meets the target within {cap - near:.4f} pF"
+            continue
+        buf = pick[0]
+        rooms = {}
+        for c in corners:
+            d = profs[c].delay_at(buf.name, load)
+            s = (pt.get("setup_slack_ns") or {}).get(c)
+            if d is None or s is None:
+                continue
+            rooms[c] = round(s - (pt.get("added_setup_ns") or {}).get(c, 0.0) - d, 4)
+        if any(r < setup_margin + SETUP_GUARD_NS for r in rooms.values()):
+            out["skipped"][pt["name"]] = f"setup room after the chain and a buffer: {rooms}"
+            continue
+        name = f"{BUFFER_PREFIX}{seq}"
+        seq += 1
+        out["ops"].append(dict(op="buffer_sinks", cell=buf.name, instance=name, net=f"{name}_n",
+                               sinks=[dict(instance=i, pin=p) for i, p in sinks]))
+        c = (sum(x[0] for x in pos) // len(pos), sum(x[1] for x in pos) // len(pos))
+        for inst, w in [(name, buf.width)] + [(i, widths.get(n.instances[i][0], 0)) for i in insts if i in n.instances]:
+            out["positions"][inst] = (c[0] - w // 2, c[1] - row_h // 2)
+        out["weights"][net] = DRIVER_NET_WEIGHT
+        rec.update(buffer=name, buffer_cell=buf.name, buffer_slew_ns=round(buf.slew_at(load), 4),
+                   setup_room_ns=rooms)
+        out["records"].append(rec)
+    out["next_seq"] = seq
+    return out
 
 
 def next_sequence(text: str, prefix: str = BUFFER_PREFIX) -> int:
