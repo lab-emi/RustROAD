@@ -268,7 +268,8 @@ class PdkGate:
             for src, spefs in (("native", native), ("openrcx", rcx)):
                 try:
                     rust = T.ruststa(h, f"{tag}_final_{src}", ctx.tool_paths, flow.libs, final, flow.sdc, spefs,
-                                     clock_model=flow.clock_model(), rc_limits=flow.sta_rc_limits())
+                                     clock_model=flow.clock_model(), rc_limits=flow.sta_rc_limits(),
+                         state_gib=flow.sta_state_gib())
                     ref = {c: T.opensta(h, f"{tag}_final_{src}_opensta_{c}", ctx.tool_paths["opensta"], flow.libs[c],
                                         final, ctx.top, flow.sdc, spefs[c]) for c in self.corners}
                 except GateError as error:

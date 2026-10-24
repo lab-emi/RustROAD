@@ -114,7 +114,13 @@ def spef_file_limit(argv: list[str]) -> int:
 # RustSTA SPEF import limits per recipe (legacy: this script's original
 # values; track: SERV-size blocks, below the engine's own hard limits).
 STA_RC_LIMITS = {'legacy': ['--max-rc-nodes', '200000', '--max-rc-elements', '200000'],
-                 'track': ['--max-rc-nodes', '2000000', '--max-rc-elements', '4000000']}
+                 'track': ['--max-rc-nodes', '2000000', '--max-rc-elements', '4000000',
+                           # SERV GF180: 94 MB SPEF per corner, names above 16 MiB
+                           # (import 4.9 s, 533 MiB; the native cap is 256 MiB).
+                           '--max-spef-mib', '256', '--max-rc-name-mib', '64']}
+# RustSTA `run --max-state-gib` per recipe (it also bounds the RC numeric
+# work: SERV GF180 needs 3.2e10 > 8.6e9 of 1 GiB; measured 13 s, 408 MiB).
+STA_STATE_GIB = {'legacy': '1', 'track': '4'}
 # Gate-sizing ECO bounds (size_eco): resizes per iteration, worst setup
 # endpoints traced per iteration, and the utilization the resized cells may
 # reach in the fixed core (taps/fillers excluded).
@@ -373,7 +379,8 @@ class Flow:
         argv += STA_RC_LIMITS[self.design.recipe]
         a = h.json_command(f'{t}_import', argv, True)
         r = h.json_command(f'{t}_run', [ruststa, *common, 'run', '--base-rev', a['new_rev'], '--backend', 'cpu', '--precision', 'f64',
-                                        '--max-paths', '16', '--max-state-gib', '1', '--require-wire-model', 'spef_rc'], True)
+                                        '--max-paths', '16', '--max-state-gib', STA_STATE_GIB[self.design.recipe],
+                                        '--require-wire-model', 'spef_rc'], True)
         require(r['scope'].get('clock_model') == self.clock_model() and r['scope'].get('wire_model') == 'spef_rc'
                 and (self.design.clocked or r['scope'].get('physical_clock_domains') == 0), f'{t}: wrong timing scope')
         rev = r['new_rev']
@@ -435,6 +442,9 @@ class Flow:
 
     def sta_rc_limits(self) -> list[str]:
         return list(STA_RC_LIMITS[self.design.recipe])
+
+    def sta_state_gib(self) -> str:
+        return STA_STATE_GIB[self.design.recipe]
 
     def clock_model(self) -> str:
         """RustSTA scope the gate requires: propagated clocks through the

@@ -81,7 +81,7 @@ def spef_binding(spefs: dict[str, Path], expected: dict[str, str]) -> dict:
 # ----------------------------------------------------------------------------- RustSTA
 
 def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spefs: dict,
-            clock_model: str = "propagated", rc_limits: list[str] | None = None) -> dict:
+            clock_model: str = "propagated", rc_limits: list[str] | None = None, state_gib: str = "1") -> dict:
     ws = h.root / f"{tag}_ws"
     common = ["--workspace", ws, "--threads", "2", "--format", "json", "--color", "never"]
     rusteda, sta = tools["rusteda"], tools["ruststa"]
@@ -98,7 +98,7 @@ def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spef
     base = imp["new_rev"]
     for mode, extra in (("gating", []), ("compat", COMPAT)):
         r = run_json(h, f"{tag}_run_{mode}", [sta, *common, "run", "--base-rev", base, "--backend", "cpu",
-                                               "--precision", "f64", "--max-paths", "16", "--max-state-gib", "1",
+                                               "--precision", "f64", "--max-paths", "16", "--max-state-gib", state_gib,
                                                "--require-wire-model", "spef_rc", "-q", *extra])
         rev = r["new_rev"]
         base = rev
