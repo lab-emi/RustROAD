@@ -114,7 +114,10 @@ pub struct ExtractScope {
     pub supply_nets: &'static str,
     pub pin_capacitance: &'static str,
     pub via_capacitance: &'static str,
+    pub wire_ends: &'static str,
+    pub metal_union: &'static str,
     pub diagonal_coupling: &'static str,
+    pub crossing_fringe: &'static str,
     pub cell_internal_metal: &'static str,
     pub routing_patches: &'static str,
     pub max_segment_length_dbu: i64,
@@ -533,8 +536,15 @@ pub fn extract(
                               capacitance; the timing engine grounds coupling at factor 1",
             supply_nets: "excluded",
             pin_capacitance: "excluded (Liberty pin capacitance)",
-            via_capacitance: "unmodeled (cut and landing-pad self capacitance)",
+            via_capacitance: "landing pads extracted (pad metal outside the wires is a \
+                              capacitance-only piece at the via node); cut capacitance unmodeled",
+            wire_ends: "half-width end extensions (DEF default) extracted as capacitance-only \
+                        pieces at the run end node",
+            metal_union: "wire bodies and pieces (end extensions, via pads, patches) tile the \
+                          routed metal without overlap; sides inside or touching same-net metal \
+                          (including the net's own pins) are not exposed",
             diagonal_coupling: "unmodeled",
+            crossing_fringe: "unmodeled (a crossing is a plane over the footprint only)",
             cell_internal_metal: "pins and obstructions are neighbours and planes, not extracted",
             routing_patches: "extracted: each piece not covered by same-net metal adds ground and \
                               coupling on all four edges at the RC node of the same-net conductor \

@@ -165,6 +165,17 @@ pub struct ExtractStats {
     /// covered by same-net conductors; each piece adds capacitance only.
     pub patches: usize,
     pub patch_pieces: usize,
+    /// Pieces of the half-width end extensions of wire runs (DEF default
+    /// wire extension) not covered by same-net metal; capacitance only.
+    pub end_pieces: usize,
+    /// Pieces of via landing pads (LEF via geometry on routing layers) not
+    /// covered by same-net metal; capacitance only.
+    pub pad_pieces: usize,
+    /// Wire-run side intervals inside same-net metal (not exposed, no C).
+    pub covered_side_intervals: usize,
+    /// Intervals whose nearest other-layer metal overlaps without spanning
+    /// the strip (parallel or offset): not a calibration plate, unmodelled.
+    pub nonspanning_plane_intervals: usize,
     pub wire_length_dbu: u64,
     pub ground_pf: f64,
     /// Each coupling capacitor counted once.
@@ -193,11 +204,14 @@ enum EdgeKind {
     Wire(u32),
     Via(u32),
 }
-/// One capacitance-bearing strip. A routed wire run has its two long sides at
-/// `cross -/+ width/2` and spans its centerline `lo..hi` (end caps are not
-/// modelled). A routing patch contributes two strips per uncovered piece: one
-/// along x (bottom and top edges) and one along y (left and right edges), so
-/// all four piece edges are sides; both strips share one shape.
+/// One capacitance-bearing strip. A routed wire run (its body) has its two
+/// long sides at `cross -/+ width/2` and spans its centerline `lo..hi`. Metal
+/// beyond the body is cut into rectangle pieces (the half-width end
+/// extensions, via landing pads and routing patches, minus same-net metal);
+/// each piece contributes two strips: one along x (bottom and top edges) and
+/// one along y (left and right edges), so all four piece edges are sides; both
+/// strips share one shape. Sides inside or touching same-net metal are not
+/// exposed and carry no capacitance.
 #[derive(Clone, Copy, Debug)]
 struct Run {
     net: u32,
@@ -211,17 +225,26 @@ struct Run {
     plus: i64,
     /// Index of this strip's conductor shape (excluded from its own query).
     shape: u32,
-    /// Strip of a routing patch piece (`Routes::patches`).
-    patch: bool,
-    /// Local (tree-order) nodes at `lo` and `hi`.
+    /// Strip of a rectangle piece (end extension, via pad or routing patch).
+    piece: bool,
+    /// Local (tree-order) nodes at `lo` and `hi` (equal for a piece).
     node_lo: u32,
     node_hi: u32,
 }
+/// Owner of a conductor shape. Every routed-net shape (wire body or piece) is
+/// a `Run` strip that models its own exposed sides.
 #[derive(Clone, Copy, Debug)]
 enum Owner {
     Run(u32),
-    Pad { net: u32, node: u32 },
     Passive(PassiveOwner),
+}
+/// Via landing-pad metal on a routing layer, at the via's node in the tree.
+#[derive(Clone, Copy, Debug)]
+struct Pad {
+    net: u32,
+    layer: u32,
+    rect: Rect,
+    node: u32,
 }
 #[derive(Clone, Copy, Debug)]
 struct Shape {
@@ -230,12 +253,36 @@ struct Shape {
     owner: Owner,
 }
 impl Shape {
+    /// Signal net of a passive pin shape (runs are resolved through `runs`).
     fn net(&self) -> Option<u32> {
         match self.owner {
             Owner::Run(_) => None,
-            Owner::Pad { net, .. } => Some(net),
             Owner::Passive(PassiveOwner::Pin { net, .. }) => Some(net),
             Owner::Passive(PassiveOwner::Ground) => None,
+        }
+    }
+}
+fn shape_net(runs: &[Run], s: &Shape) -> Option<u32> {
+    match s.owner {
+        Owner::Run(o) => Some(runs[o as usize].net),
+        _ => s.net(),
+    }
+}
+/// Body rectangle of a wire run: its centerline extent times the width.
+fn body_rect(r: &Run) -> Rect {
+    if r.vertical {
+        Rect {
+            lx: r.minus,
+            ux: r.plus,
+            ly: r.lo,
+            uy: r.hi,
+        }
+    } else {
+        Rect {
+            lx: r.lo,
+            ux: r.hi,
+            ly: r.minus,
+            uy: r.plus,
         }
     }
 }
@@ -243,7 +290,7 @@ impl Shape {
 struct Built {
     nets: Vec<RcNet>,
     runs: Vec<Run>,
-    pads: Vec<Shape>,
+    pads: Vec<Pad>,
     /// Pin index -> (net, local node).
     pin_nodes: HashMap<u32, (u32, u32)>,
 }
@@ -669,12 +716,12 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
                 minus: cross - half,
                 plus: cross + half,
                 shape: out.runs.len() as u32,
-                patch: false,
+                piece: false,
                 node_lo: local[lo_node as usize],
                 node_hi: local[hi_node as usize],
             });
         }
-        // Via landing pads are passive conductors of this net at the via node.
+        // Via landing-pad metal of this net, at the via's node on each layer.
         for &i in net_vias {
             let v = &routes.vias[i];
             let spec = &input.vias[v.kind as usize];
@@ -683,13 +730,11 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
                     continue;
                 }
                 let g = id(&(s.layer, v.at[0], v.at[1])).map_err(missing)?;
-                out.pads.push(Shape {
+                out.pads.push(Pad {
+                    net,
                     layer: s.layer,
                     rect: crate::routing::shifted(s.rect, v.at)?,
-                    owner: Owner::Pad {
-                        net,
-                        node: local[g as usize],
-                    },
+                    node: local[g as usize],
                 });
             }
         }
@@ -749,15 +794,219 @@ fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
     out
 }
 
-/// Pieces of one patch that may exist per patch after subtraction.
+/// Pieces of one rectangle (patch, end extension or via pad) that may exist
+/// after subtracting the same-net metal it overlaps.
 const MAX_PATCH_PIECES: usize = 256;
+
+/// Same-net conductor shapes on `layer` that overlap or touch `r` (closed),
+/// in shape-index order. Bin scans are charged to the work budget.
+#[allow(clippy::too_many_arguments)]
+fn same_net_near(
+    r: Rect,
+    net: u32,
+    layer: u32,
+    built: &Built,
+    shapes: &[Shape],
+    bins: &Bins,
+    limits: &ExtractLimits,
+    stats: &mut ExtractStats,
+) -> Result<Vec<u32>> {
+    let (x0, x1) = bins.range(r.lx, r.ux);
+    let (y0, y1) = bins.range(r.ly, r.uy);
+    let mut near: Vec<u32> = Vec::new();
+    for bx in x0..=x1 {
+        for by in y0..=y1 {
+            let Some(list) = bins.map.get(&(layer, bx, by)) else {
+                continue;
+            };
+            stats.work = stats
+                .work
+                .checked_add(list.len())
+                .ok_or_else(|| budget("extraction work"))?;
+            if stats.work > limits.max_work {
+                return Err(budget("extraction work"));
+            }
+            near.extend(list.iter().copied());
+        }
+    }
+    near.sort_unstable();
+    near.dedup();
+    near.retain(|&s| {
+        let q = shapes[s as usize].rect;
+        shape_net(&built.runs, &shapes[s as usize]) == Some(net)
+            && q.lx <= r.ux
+            && r.lx <= q.ux
+            && q.ly <= r.uy
+            && r.ly <= q.uy
+    });
+    if near.len() > limits.max_candidates {
+        return Err(budget("extraction candidates per metal piece"));
+    }
+    Ok(near)
+}
+
+/// `r` minus every listed shape, as disjoint rectangles (exact integers).
+fn uncovered(r: Rect, covering: &[u32], shapes: &[Shape]) -> Result<Vec<Rect>> {
+    let mut pieces = vec![r];
+    for &s in covering {
+        let q = shapes[s as usize].rect;
+        pieces = pieces.into_iter().flat_map(|p| subtract(p, q)).collect();
+        if pieces.len() > MAX_PATCH_PIECES {
+            return Err(budget("metal pieces per rectangle"));
+        }
+    }
+    Ok(pieces)
+}
+
+/// Add one rectangle piece as a conductor shape with two side strips (along x
+/// and along y), all of its capacitance at `node`. Pieces add capacitance only:
+/// never a node or a resistor.
+#[allow(clippy::too_many_arguments)]
+fn add_piece(
+    piece: Rect,
+    net: u32,
+    layer: u32,
+    node: u32,
+    built: &mut Built,
+    shapes: &mut Vec<Shape>,
+    bins: &mut Bins,
+    entries: &mut usize,
+    limits: &ExtractLimits,
+) -> Result<()> {
+    let shape = shapes.len() as u32;
+    let first = built.runs.len() as u32;
+    for vertical in [false, true] {
+        let (lo, hi, minus, plus) = if vertical {
+            (piece.ly, piece.uy, piece.lx, piece.ux)
+        } else {
+            (piece.lx, piece.ux, piece.ly, piece.uy)
+        };
+        built.runs.push(Run {
+            net,
+            layer,
+            vertical,
+            cross: minus + (plus - minus) / 2,
+            lo,
+            hi,
+            minus,
+            plus,
+            shape,
+            piece: true,
+            node_lo: node,
+            node_hi: node,
+        });
+    }
+    shapes.push(Shape {
+        layer,
+        rect: piece,
+        owner: Owner::Run(first),
+    });
+    if shapes.len() > limits.max_shapes {
+        return Err(budget("extraction shape count"));
+    }
+    let (x0, x1) = bins.range(piece.lx, piece.ux);
+    let (y0, y1) = bins.range(piece.ly, piece.uy);
+    let cells = usize::try_from((x1 - x0 + 1) * (y1 - y0 + 1)).map_err(|_| budget("bin span"))?;
+    *entries = entries
+        .checked_add(cells)
+        .ok_or_else(|| budget("bin entries"))?;
+    if *entries > limits.max_bin_entries {
+        return Err(budget("extraction spatial-bin entries"));
+    }
+    for bx in x0..=x1 {
+        for by in y0..=y1 {
+            bins.map.entry((layer, bx, by)).or_default().push(shape);
+        }
+    }
+    Ok(())
+}
+
+/// Metal of routed nets beyond the wire bodies, as capacitance-only pieces:
+/// first each wire run's half-width end extensions (DEF default extension, at
+/// the run's end node), then each via landing pad (LEF via geometry, at the
+/// via node). Each rectangle minus the same-net metal already present on its
+/// layer (wire bodies, pins, earlier pieces) is added; nothing is counted
+/// twice, and the union of bodies and pieces is exactly the routed metal.
+#[allow(clippy::too_many_arguments)]
+fn add_metal_pieces(
+    input: &ExtractInput<'_>,
+    limits: &ExtractLimits,
+    built: &mut Built,
+    shapes: &mut Vec<Shape>,
+    bins: &mut Bins,
+    entries: &mut usize,
+    stats: &mut ExtractStats,
+) -> Result<()> {
+    // (net, layer, rect, node, is_pad) in a fixed order.
+    let mut candidates: Vec<(u32, u32, Rect, u32, bool)> = Vec::new();
+    for r in built.runs.iter().filter(|r| !r.piece) {
+        let e = input.layers[r.layer as usize].width / 2;
+        if e <= 0 {
+            continue;
+        }
+        let ends = if r.vertical {
+            [
+                Rect {
+                    lx: r.minus,
+                    ux: r.plus,
+                    ly: r.lo - e,
+                    uy: r.lo,
+                },
+                Rect {
+                    lx: r.minus,
+                    ux: r.plus,
+                    ly: r.hi,
+                    uy: r.hi + e,
+                },
+            ]
+        } else {
+            [
+                Rect {
+                    lx: r.lo - e,
+                    ux: r.lo,
+                    ly: r.minus,
+                    uy: r.plus,
+                },
+                Rect {
+                    lx: r.hi,
+                    ux: r.hi + e,
+                    ly: r.minus,
+                    uy: r.plus,
+                },
+            ]
+        };
+        candidates.push((r.net, r.layer, ends[0], r.node_lo, false));
+        candidates.push((r.net, r.layer, ends[1], r.node_hi, false));
+    }
+    for p in &built.pads {
+        if p.rect.valid() {
+            candidates.push((p.net, p.layer, p.rect, p.node, true));
+        }
+    }
+    for (net, layer, rect, node, is_pad) in candidates {
+        let covering = same_net_near(rect, net, layer, built, shapes, bins, limits, stats)?;
+        let pieces = uncovered(rect, &covering, shapes)?;
+        if is_pad {
+            stats.pad_pieces += pieces.len();
+        } else {
+            stats.end_pieces += pieces.len();
+        }
+        for piece in pieces {
+            add_piece(
+                piece, net, layer, node, built, shapes, bins, entries, limits,
+            )?;
+        }
+    }
+    Ok(())
+}
 
 /// Attach every routing patch to the RC node of a same-net conductor it
 /// overlaps or touches (largest overlap area, then lowest shape index; a wire
-/// run attaches at its end nearer the patch centre), and add each piece of the
-/// patch not already covered by same-net metal on its layer as a conductor
-/// shape with two side strips. Patches add capacitance only: they never add a
-/// node or a resistor (the tree stays the wire graph's tree).
+/// body attaches at its end nearer the patch centre, a piece at its node), and
+/// add each piece of the patch not already covered by same-net metal on its
+/// layer as a conductor shape with two side strips. Patches add capacitance
+/// only: they never add a node or a resistor (the tree stays the wire graph's
+/// tree).
 #[allow(clippy::too_many_arguments)]
 fn add_patches(
     input: &ExtractInput<'_>,
@@ -782,44 +1031,16 @@ fn add_patches(
             return Err(invalid("routing patch on a net without an RC tree"));
         }
         // Same-net conductors on the patch layer touching the patch (closed).
-        let (x0, x1) = bins.range(r.lx, r.ux);
-        let (y0, y1) = bins.range(r.ly, r.uy);
-        let mut near: Vec<u32> = Vec::new();
-        for bx in x0..=x1 {
-            for by in y0..=y1 {
-                let Some(list) = bins.map.get(&(patch.layer, bx, by)) else {
-                    continue;
-                };
-                stats.work = stats
-                    .work
-                    .checked_add(list.len())
-                    .ok_or_else(|| budget("extraction work"))?;
-                if stats.work > limits.max_work {
-                    return Err(budget("extraction work"));
-                }
-                near.extend(list.iter().copied());
-            }
-        }
-        near.sort_unstable();
-        near.dedup();
-        let net_of = |s: &Shape| match s.owner {
-            Owner::Run(o) => Some(built.runs[o as usize].net),
-            _ => s.net(),
-        };
-        let touching: Vec<u32> = near
-            .into_iter()
-            .filter(|&s| {
-                let q = shapes[s as usize].rect;
-                net_of(&shapes[s as usize]) == Some(patch.net)
-                    && q.lx <= r.ux
-                    && r.lx <= q.ux
-                    && q.ly <= r.uy
-                    && r.ly <= q.uy
-            })
-            .collect();
-        if touching.len() > limits.max_candidates {
-            return Err(budget("extraction candidates per routing patch"));
-        }
+        let touching = same_net_near(
+            r,
+            patch.net,
+            patch.layer,
+            built,
+            shapes,
+            bins,
+            limits,
+            stats,
+        )?;
         let overlap = |q: Rect| -> i128 {
             let w = i128::from(q.ux.min(r.ux)) - i128::from(q.lx.max(r.lx));
             let h = i128::from(q.uy.min(r.uy)) - i128::from(q.ly.max(r.ly));
@@ -833,7 +1054,7 @@ fn add_patches(
         let node = match shapes[anchor as usize].owner {
             Owner::Run(o) => {
                 let run = &built.runs[o as usize];
-                if run.patch {
+                if run.piece {
                     run.node_lo
                 } else {
                     let centre = if run.vertical {
@@ -848,7 +1069,6 @@ fn add_patches(
                     }
                 }
             }
-            Owner::Pad { node, .. } => node,
             Owner::Passive(PassiveOwner::Pin { pin, .. }) => built
                 .pin_nodes
                 .get(&pin)
@@ -858,67 +1078,78 @@ fn add_patches(
             Owner::Passive(PassiveOwner::Ground) => unreachable!("ground has no net"),
         };
         // Uncovered pieces: subtract every same-net conductor overlapping it.
-        let mut pieces = vec![r];
-        for &s in &touching {
-            let q = shapes[s as usize].rect;
-            pieces = pieces.into_iter().flat_map(|p| subtract(p, q)).collect();
-            if pieces.len() > MAX_PATCH_PIECES {
-                return Err(budget("routing patch pieces"));
-            }
-        }
+        let pieces = uncovered(r, &touching, shapes)?;
         stats.patches += 1;
         stats.patch_pieces += pieces.len();
         for piece in pieces {
-            let shape = shapes.len() as u32;
-            let first = built.runs.len() as u32;
-            for vertical in [false, true] {
-                let (lo, hi, minus, plus) = if vertical {
-                    (piece.ly, piece.uy, piece.lx, piece.ux)
-                } else {
-                    (piece.lx, piece.ux, piece.ly, piece.uy)
-                };
-                built.runs.push(Run {
-                    net: patch.net,
-                    layer: patch.layer,
-                    vertical,
-                    cross: minus + (plus - minus) / 2,
-                    lo,
-                    hi,
-                    minus,
-                    plus,
-                    shape,
-                    patch: true,
-                    node_lo: node,
-                    node_hi: node,
-                });
-            }
-            shapes.push(Shape {
-                layer: patch.layer,
-                rect: piece,
-                owner: Owner::Run(first),
-            });
-            let (x0, x1) = bins.range(piece.lx, piece.ux);
-            let (y0, y1) = bins.range(piece.ly, piece.uy);
-            let cells =
-                usize::try_from((x1 - x0 + 1) * (y1 - y0 + 1)).map_err(|_| budget("bin span"))?;
-            *entries = entries
-                .checked_add(cells)
-                .ok_or_else(|| budget("bin entries"))?;
-            if *entries > limits.max_bin_entries {
-                return Err(budget("extraction spatial-bin entries"));
-            }
-            for bx in x0..=x1 {
-                for by in y0..=y1 {
-                    bins.map
-                        .entry((patch.layer, bx, by))
-                        .or_default()
-                        .push(shape);
-                }
-            }
+            add_piece(
+                piece,
+                patch.net,
+                patch.layer,
+                node,
+                built,
+                shapes,
+                bins,
+                entries,
+                limits,
+            )?;
         }
     }
-    stats.wire_runs = built.runs.iter().filter(|r| !r.patch).count();
     Ok(())
+}
+
+/// The plate below (`upper == false`) or above a strip: the nearest other
+/// calibration metal whose conductors (merged along the strip's cross axis)
+/// cover `minus..plus` and extend at least one strip width beyond each side
+/// edge (where the edge fringe lands), with the conductor under each side
+/// edge (`[plus side, minus side]`). `layered` is sorted by metal, then cross
+/// extent.
+fn plate(
+    layered: &[(u32, i64, i64, u32)],
+    own: u32,
+    upper: bool,
+    minus: i64,
+    plus: i64,
+) -> Option<(u32, [u32; 2])> {
+    let mut metals: Vec<u32> = layered
+        .iter()
+        .map(|e| e.0)
+        .filter(|&m| if upper { m > own } else { m < own })
+        .collect();
+    metals.dedup();
+    if !upper {
+        metals.reverse();
+    }
+    for metal in metals {
+        let on: Vec<&(u32, i64, i64, u32)> = layered.iter().filter(|e| e.0 == metal).collect();
+        // Merged cross-axis coverage; `on` is sorted by its lower end.
+        let margin = plus - minus;
+        let (need_lo, need_hi) = (minus - margin, plus + margin);
+        let mut spans = false;
+        let (mut lo, mut hi) = (on[0].1, on[0].2);
+        for e in &on[1..] {
+            if e.1 <= hi {
+                hi = hi.max(e.2);
+            } else {
+                spans |= lo <= need_lo && hi >= need_hi;
+                (lo, hi) = (e.1, e.2);
+            }
+        }
+        spans |= lo <= need_lo && hi >= need_hi;
+        if !spans {
+            continue;
+        }
+        let plus_owner = on
+            .iter()
+            .filter(|e| e.1 < plus && e.2 >= plus)
+            .max_by_key(|e| (e.2, std::cmp::Reverse(e.3)))?;
+        let minus_owner = on
+            .iter()
+            .filter(|e| e.2 > minus && e.1 <= minus)
+            .min_by_key(|e| (e.1, e.3))?;
+        return Some((metal, [plus_owner.3, minus_owner.3]));
+    }
+    None
 }
 
 fn sample(rows: &[[f64; 3]], spacing: Option<f64>) -> (f64, f64) {
@@ -943,32 +1174,16 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     preflight(input, limits)?;
     let (mut built, mut stats) = build_trees(input, limits)?;
     let tech = input.tech;
-    // Conductor shapes: runs (with end extension), via pads, passive shapes.
+    // Conductor shapes: wire-run bodies and passive shapes; the end
+    // extensions, via pads and patches are added as pieces below.
     let mut shapes: Vec<Shape> = Vec::new();
     for (i, r) in built.runs.iter().enumerate() {
-        let half = input.layers[r.layer as usize].width / 2;
-        let rect = if r.vertical {
-            Rect {
-                lx: r.minus,
-                ux: r.plus,
-                ly: r.lo - half,
-                uy: r.hi + half,
-            }
-        } else {
-            Rect {
-                lx: r.lo - half,
-                ux: r.hi + half,
-                ly: r.minus,
-                uy: r.plus,
-            }
-        };
         shapes.push(Shape {
             layer: r.layer,
-            rect,
+            rect: body_rect(r),
             owner: Owner::Run(i as u32),
         });
     }
-    shapes.append(&mut built.pads);
     for p in input.passive {
         if (p.layer as usize) < input.layers.len()
             && input.layers[p.layer as usize].vertical.is_some()
@@ -1025,6 +1240,15 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         .enumerate()
         .map(|(i, n)| (n.net, i))
         .collect();
+    add_metal_pieces(
+        input,
+        limits,
+        &mut built,
+        &mut shapes,
+        &mut bins,
+        &mut entries,
+        &mut stats,
+    )?;
     add_patches(
         input,
         limits,
@@ -1035,6 +1259,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         &net_index,
         &mut stats,
     )?;
+    stats.wire_runs = built.runs.iter().filter(|r| !r.piece).count();
     stats.shapes = shapes.len();
     if shapes.len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
@@ -1043,6 +1268,8 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     let mut stamp = vec![u32::MAX; shapes.len()];
     let mut candidates: Vec<u32> = Vec::new();
     let mut points: Vec<i64> = Vec::new();
+    // (calibration metal, cross-axis lo, hi, shape) of other-layer conductors.
+    let mut layered: Vec<(u32, i64, i64, u32)> = Vec::new();
     let contexts: Vec<Option<ContextIndex>> = tech
         .layers
         .iter()
@@ -1150,8 +1377,8 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             // Nearest lateral neighbour per side and nearest planes.
             let mut plus: Option<(i64, u32)> = None;
             let mut minus: Option<(i64, u32)> = None;
-            let mut below: Option<(u32, i64, u32)> = None; // (metal, overlap, shape)
-            let mut above: Option<(u32, i64, u32)> = None;
+            let (mut covered_plus, mut covered_minus) = (false, false);
+            layered.clear();
             for &s in &candidates {
                 let sh = &shapes[s as usize];
                 let r = sh.rect;
@@ -1180,6 +1407,11 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                         }
                     } else if !same {
                         stats.foreign_overlaps += 1;
+                    } else {
+                        // Same-net metal across a side edge: that side is
+                        // inside the net's metal union, not exposed.
+                        covered_plus |= x1 > edge_plus;
+                        covered_minus |= x0 < edge_minus;
                     }
                 } else {
                     let metal = layer_model(input, sh.layer)?.metal;
@@ -1187,23 +1419,30 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                     if overlap <= 0 {
                         continue;
                     }
-                    if metal < model.metal {
-                        let better = below.is_none_or(|(m, o, i)| {
-                            (metal, overlap, std::cmp::Reverse(s)) > (m, o, std::cmp::Reverse(i))
-                        });
-                        if better {
-                            below = Some((metal, overlap, s));
-                        }
-                    } else if metal > model.metal {
-                        let better = above.is_none_or(|(m, o, i)| {
-                            (std::cmp::Reverse(metal), overlap, std::cmp::Reverse(s))
-                                > (std::cmp::Reverse(m), o, std::cmp::Reverse(i))
-                        });
-                        if better {
-                            above = Some((metal, overlap, s));
-                        }
-                    }
+                    layered.push((metal, x0, x1, s));
                 }
+            }
+            // A conductor on another layer is a plate for this strip (the
+            // calibration OVER/UNDER contexts) only where its layer's metal
+            // spans the whole strip cross-section and reaches one strip width
+            // beyond both side edges: crossings and clearly wider shapes.
+            // Narrower, offset or barely wider parallel metal is not a plate;
+            // that overlap coupling is not modelled.
+            layered.sort_unstable();
+            let below = plate(&layered, model.metal, false, edge_minus, edge_plus);
+            let above = plate(&layered, model.metal, true, edge_minus, edge_plus);
+            let nearest_below = layered
+                .iter()
+                .filter(|e| e.0 < model.metal)
+                .map(|e| e.0)
+                .max();
+            let nearest_above = layered
+                .iter()
+                .filter(|e| e.0 > model.metal)
+                .map(|e| e.0)
+                .min();
+            if nearest_below != below.map(|b| b.0) || nearest_above != above.map(|a| a.0) {
+                stats.nonspanning_plane_intervals += 1;
             }
             let over = below.map_or(0, |b| b.0);
             let under = above.map(|a| a.0);
@@ -1243,41 +1482,47 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             let mut ground = 0.0f64;
             // (shape, pF, factor applied when the partner is another run).
             let mut contributions: Vec<(u32, f64, f64)> = Vec::with_capacity(6);
-            for side in [plus, minus] {
+            for (k, side, covered) in [(0, plus, covered_plus), (1, minus, covered_minus)] {
+                if covered {
+                    stats.covered_side_intervals += 1;
+                    continue;
+                }
                 let spacing = side.map(|(g, _)| um(tech, g));
                 let touching_same = side.is_some_and(|(g, s)| {
-                    g == 0
-                        && match shapes[s as usize].owner {
-                            Owner::Run(o) => built.runs[o as usize].net == run.net,
-                            _ => shapes[s as usize].net() == Some(run.net),
-                        }
+                    g == 0 && shape_net(&built.runs, &shapes[s as usize]) == Some(run.net)
                 });
                 if touching_same {
                     continue;
                 }
                 let (cc, cg) = sample(rows, spacing);
                 let (_, cg_sub) = sample(sub, spacing);
-                let delta = cg - cg_sub;
-                let (d_below, d_above) = match plane_split {
+                // Split this side's context value between the substrate and
+                // the planes. A conductor below is the plate of an OVER
+                // context: it shields the substrate, so the whole OVER value
+                // goes to it. A plane above takes only the excess over what
+                // goes down (the substrate share, or the OVER value).
+                let cg = cg.max(0.0);
+                let (g, d_below, d_above) = match plane_split {
                     (true, true) => {
-                        let db = below_only.map_or(delta / 2.0, |r| sample(r, spacing).1 - cg_sub);
-                        (db, delta - db)
+                        let down = below_only.map_or(cg_sub, |r| sample(r, spacing).1).min(cg);
+                        (0.0, down, cg - down)
                     }
-                    (true, false) => (delta, 0.0),
-                    (false, true) => (0.0, delta),
-                    (false, false) => (0.0, 0.0),
+                    (true, false) => (0.0, cg, 0.0),
+                    (false, true) => {
+                        let up = (cg - cg_sub).max(0.0);
+                        (cg - up, 0.0, up)
+                    }
+                    (false, false) => (cg, 0.0, 0.0),
                 };
-                let mut g = cg_sub;
-                for (d, plane, upper) in [(d_below, below, false), (d_above, above, true)] {
-                    if d < 0.0 {
-                        g += d;
-                    } else if d > 0.0 {
+                let mut g = g;
+                // Each conductor's own cross-section is authoritative for its
+                // own field: a crossing is counted from both wires (the upper
+                // wire's OVER cut over the lower wire's width, the lower wire's
+                // UNDER cut over the upper wire's width).
+                for (d, plane) in [(d_below, below), (d_above, above)] {
+                    if d > 0.0 {
                         match plane {
-                            // A crossing between two runs is owned by the upper
-                            // run (its OVER context); the lower run skips it.
-                            Some((_, _, s))
-                                if upper && matches!(shapes[s as usize].owner, Owner::Run(_)) => {}
-                            Some((_, _, s)) => contributions.push((s, d * length, 1.0)),
+                            Some((_, owners)) => contributions.push((owners[k], d * length, 1.0)),
                             None => g += d,
                         }
                     }
@@ -1298,18 +1543,9 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                 let sh = shapes[s as usize];
                 let partner = match sh.owner {
                     Owner::Run(o) => {
+                        // Every routed-net shape models its own exposed sides,
+                        // so a lateral pair is counted half from each side.
                         let other = &built.runs[o as usize];
-                        // A patch strip facing the end cap of a wire run (axes
-                        // differ) is not counted from the wire's side: own it.
-                        let run_factor = if run.patch
-                            && !other.patch
-                            && other.vertical != run.vertical
-                            && run_factor < 1.0
-                        {
-                            1.0
-                        } else {
-                            run_factor
-                        };
                         if other.net == run.net {
                             None
                         } else {
@@ -1333,13 +1569,6 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                                 other.node_lo
                             };
                             Some(Some((other.net, node, run_factor)))
-                        }
-                    }
-                    Owner::Pad { net, node } => {
-                        if net == run.net {
-                            None
-                        } else {
-                            Some(Some((net, node, 1.0)))
                         }
                     }
                     Owner::Passive(PassiveOwner::Ground) => Some(None),
@@ -1568,7 +1797,9 @@ mod tests {
     #[test]
     fn isolated_straight_wire_matches_hand_computed_rc() {
         // 10 um of M1, width 0.1 um, sheet 0.1 ohm/sq: R = 0.1 * 10 / 0.1 = 10 ohm.
-        // Isolated ground per side 4e-5 pF/um, two sides: C = 2 * 4e-5 * 10 = 8e-4 pF.
+        // Isolated ground per side 4e-5 pF/um, two sides: 2 * 4e-5 * 10 = 8e-4 pF.
+        // Each 0.05 um half-width end extension exposes 0.05 + 0.05 + 0.1 um
+        // of edge: 4e-5 * 0.2 = 8e-6 pF at its end node.
         let r = routes(
             straight(0, 0, 10),
             vec![],
@@ -1597,9 +1828,10 @@ mod tests {
         assert_eq!(net.resistors.len(), 1);
         assert!((net.resistors[0].2 - 10.0).abs() < 1e-12);
         let c: f64 = net.ground.iter().sum();
-        assert!((c - 8e-4).abs() < 1e-15, "{c}");
-        assert!((net.ground[0] - 4e-4).abs() < 1e-15);
+        assert!((c - 8.16e-4).abs() < 1e-15, "{c}");
+        assert!((net.ground[0] - 4.08e-4).abs() < 1e-15);
         assert!(n.couplings.is_empty());
+        assert_eq!((n.stats.end_pieces, n.stats.pad_pieces), (2, 0));
     }
 
     #[test]
@@ -1641,12 +1873,19 @@ mod tests {
             terminal(3, 1, false),
         ];
         let n = run(&r, &t, &[], &tech(false)).unwrap();
-        // Facing side: cc 4e-5, cg 3e-5; far side isolated cg 4e-5.
+        // Facing side: cc 4e-5, cg 3e-5; far side isolated cg 4e-5. The end
+        // extensions (0.05 um long) face each other too; their outer short
+        // edges (0.1 um) are isolated.
         let coupling: f64 = n.couplings.iter().map(|c| c.pf).sum();
-        assert!((coupling - 4e-5 * 10.0).abs() < 1e-15, "{coupling}");
+        let want = 4e-5 * 10.0 + 2.0 * 4e-5 * 0.05;
+        assert!((coupling - want).abs() < 1e-15, "{coupling}");
         for net in &n.nets {
             let g: f64 = net.ground.iter().sum();
-            assert!((g - (3e-5 + 4e-5) * 10.0).abs() < 1e-15, "{g}");
+            let end = 0.05 * (3e-5 + 4e-5) + 0.1 * 4e-5;
+            assert!(
+                (g - ((3e-5 + 4e-5) * 10.0 + 2.0 * end)).abs() < 1e-15,
+                "{g}"
+            );
         }
         // Deterministic.
         let m = run(&r, &t, &[], &tech(false)).unwrap();
@@ -1838,18 +2077,353 @@ mod tests {
         };
         let n = run(&r, &t, &[obstruction], &tech(true)).unwrap();
         assert!(n.couplings.iter().all(|c| c.a.0 != c.b.0));
-        // Only the 0.1 um crossing interval of the upper run couples: on each
-        // side OVER-1 ground minus substrate ground (5e-5-3e-5 facing the
-        // obstruction at 0.5 um, 6e-5-4e-5 isolated) per um.
+        // Only the 0.1 um crossing interval of the upper run couples. The
+        // plate below shields the substrate, so the whole OVER-1 ground of
+        // each side goes to it: 5e-5 facing the obstruction at 0.5 um and
+        // 6e-5 isolated, per um.
         let total: f64 = n.couplings.iter().map(|c| c.pf).sum();
-        assert!((total - 4e-6).abs() < 1e-18, "{total}");
-        // The lower run has no UNDER table: explicit fallback, no double count.
+        assert!((total - 1.1e-5).abs() < 1e-18, "{total}");
+        // The lower run has no UNDER table: explicit fallback, no B-cut term.
         assert!(n.stats.context_fallback_intervals > 0);
-        // Upper run ground: substrate part both sides plus lateral to obstruction.
+        // Upper run ground: substrate part both sides plus lateral to the
+        // obstruction outside the crossing; inside it only the lateral cc(0.5)
+        // of OVER-1 (3e-5) to the obstruction; plus its two 0.2 x 0.1 um end
+        // extensions (isolated except the edge touching the body).
         let g: f64 = n.nets[0].ground.iter().sum();
-        let want = 10.0 * (3e-5 + 4e-5 + 4e-5) - 0.1 * (4e-5 - 3e-5);
+        let want = 9.9 * (3e-5 + 4e-5 + 4e-5) + 0.1 * 3e-5 + 2.0 * 0.4 * 4e-5;
         assert!((g - want).abs() < 1e-15, "{g} {want}");
+        // The upper run's total is still its context total (shielding only
+        // moves the substrate share to the plate).
+        let old_total = 10.0 * (3e-5 + 4e-5 + 4e-5) - 0.1 * (4e-5 - 3e-5) + 4e-6;
+        assert!((g + total - old_total - 2.0 * 0.4 * 4e-5).abs() < 1e-15);
         assert_eq!(n.stats.foreign_overlaps, 0);
+    }
+
+    /// Isolated ground per side and um of the test rows.
+    const ISO: f64 = 4e-5;
+
+    #[test]
+    fn compact_segments_extract_like_lattice_edges() {
+        // The same metal stored as one record per lattice edge or as one
+        // record per straight run (another stream may store compact
+        // segments) gives the same network.
+        let build = |pieces: i64| {
+            let step = 5000 / pieces;
+            let mut wires: Vec<Wire> = (0..pieces)
+                .map(|i| Wire {
+                    net: 0,
+                    layer: 0,
+                    start: [i * step, 0],
+                    end: [(i + 1) * step, 0],
+                })
+                .collect();
+            wires.extend((0..pieces).map(|i| Wire {
+                net: 0,
+                layer: 1,
+                start: [5000, i * step],
+                end: [5000, (i + 1) * step],
+            }));
+            let mut r = routes(
+                wires,
+                vec![Via {
+                    net: 0,
+                    kind: 0,
+                    at: [5000, 0],
+                }],
+                vec![
+                    access(0, 0, [0, 0]),
+                    Access {
+                        pin: 1,
+                        net: 0,
+                        layer: 1,
+                        at: [5000, 5000],
+                    },
+                ],
+                vec![0],
+            );
+            r.wires.extend(straight(1, 600, pieces.min(10)));
+            r.access
+                .extend([access(2, 1, [0, 600]), access(3, 1, [10_000, 600])]);
+            r.nets = vec![0, 1];
+            r
+        };
+        let t = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 1, true),
+            terminal(3, 1, false),
+        ];
+        let lattice = run(&build(10), &t, &[], &tech(true)).unwrap();
+        let compact = run(&build(1), &t, &[], &tech(true)).unwrap();
+        assert_eq!(lattice.nets.len(), compact.nets.len());
+        for (a, b) in lattice.nets.iter().zip(&compact.nets) {
+            assert_eq!(a.nodes, b.nodes);
+            assert_eq!(a.resistors, b.resistors);
+            for (x, y) in a.ground.iter().zip(&b.ground) {
+                assert!((x - y).abs() < 1e-15, "{x} {y}");
+            }
+        }
+        let sum = |n: &RcNetwork| n.couplings.iter().map(|c| c.pf).sum::<f64>();
+        assert!((sum(&lattice) - sum(&compact)).abs() < 1e-15);
+        assert_eq!(lattice.stats.wire_runs, compact.stats.wire_runs);
+        assert_eq!(lattice.stats.pad_pieces, compact.stats.pad_pieces);
+    }
+
+    #[test]
+    fn narrower_parallel_metal_below_is_not_a_plate() {
+        // M2 (0.2 um) vertical net 0 over a parallel M1 (0.1 um) net 1 that
+        // lies inside its footprint for 6 um: the M1 wire does not span the
+        // M2 cross-section, so the M2 wire keeps its substrate context and no
+        // plate coupling is invented (the overlap is counted as unmodelled).
+        let mut wires: Vec<Wire> = (0..10)
+            .map(|i| Wire {
+                net: 0,
+                layer: 1,
+                start: [0, i * 1000],
+                end: [0, (i + 1) * 1000],
+            })
+            .collect();
+        wires.extend((0..6).map(|i| Wire {
+            net: 1,
+            layer: 0,
+            start: [0, 2000 + i * 1000],
+            end: [0, 3000 + i * 1000],
+        }));
+        let r = routes(
+            wires,
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 1,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 1,
+                    at: [0, 10_000],
+                },
+                access(2, 1, [0, 2000]),
+                access(3, 1, [0, 8000]),
+            ],
+            vec![0, 1],
+        );
+        let t = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 1, true),
+            terminal(3, 1, false),
+        ];
+        let n = run(&r, &t, &[], &tech(true)).unwrap();
+        assert!(n.couplings.is_empty(), "{:?}", n.couplings);
+        let g0: f64 = n.nets[0].ground.iter().sum();
+        assert!(
+            (g0 - (2.0 * ISO * 10.0 + 2.0 * 0.4 * ISO)).abs() < 1e-15,
+            "{g0}"
+        );
+        assert!(n.stats.nonspanning_plane_intervals > 0);
+    }
+
+    #[test]
+    fn a_crossing_is_counted_from_both_wires_cross_sections() {
+        // M2 (0.2 um) vertical net 0 at x = 0 over an M1 (0.1 um) horizontal
+        // net 1 at y = 5 um. M2 OVER-1 isolated ground 6e-5 per side; M1
+        // UNDER-2 isolated ground 5e-5 per side against 4e-5 over substrate.
+        let mut tk = tech(true);
+        tk.layers[0].as_mut().unwrap().contexts.push(RcContext {
+            over: 0,
+            under: Some(2),
+            rows: vec![[0.1, 8e-5, 1.5e-5], [0.5, 3e-5, 4.5e-5], [1.0, 0.0, 5e-5]],
+        });
+        let mut wires: Vec<Wire> = (0..10)
+            .map(|i| Wire {
+                net: 0,
+                layer: 1,
+                start: [0, i * 1000],
+                end: [0, (i + 1) * 1000],
+            })
+            .collect();
+        wires.extend((0..4).map(|i| Wire {
+            net: 1,
+            layer: 0,
+            start: [-2000 + i * 1000, 5000],
+            end: [-1000 + i * 1000, 5000],
+        }));
+        let r = routes(
+            wires,
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 1,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 1,
+                    at: [0, 10_000],
+                },
+                access(2, 1, [-2000, 5000]),
+                access(3, 1, [2000, 5000]),
+            ],
+            vec![0, 1],
+        );
+        let t = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 1, true),
+            terminal(3, 1, false),
+        ];
+        let n = run(&r, &t, &[], &tk).unwrap();
+        // Upper cut: the plate shields the substrate, both sides' 6e-5 go to
+        // the M1 wire over its 0.1 um width. Lower cut: the excess 5e-5 - 4e-5
+        // per side goes to the M2 wire over its 0.2 um width.
+        let coupling: f64 = n.couplings.iter().map(|c| c.pf).sum();
+        let want = 2.0 * 6e-5 * 0.1 + 2.0 * (5e-5 - 4e-5) * 0.2;
+        assert!((coupling - want).abs() < 1e-18, "{coupling} {want}");
+        // M2 ground: substrate both sides except over the plate, plus ends.
+        let g0: f64 = n.nets[0].ground.iter().sum();
+        assert!(
+            (g0 - (2.0 * ISO * 9.9 + 2.0 * 0.4 * ISO)).abs() < 1e-15,
+            "{g0}"
+        );
+        // M1 keeps its substrate share under the plate: 4 um body, two ends.
+        let g1: f64 = n.nets[1].ground.iter().sum();
+        assert!(
+            (g1 - (2.0 * ISO * 4.0 + 2.0 * 0.2 * ISO)).abs() < 1e-15,
+            "{g1}"
+        );
+        assert_eq!(n.stats.context_fallback_intervals, 0);
+    }
+
+    #[test]
+    fn l_corner_counts_exactly_the_union_perimeter() {
+        // M1 (0.1 um wide) from (0,0) to (5,0) um, then to (5,5) um. The metal
+        // union (bodies plus half-width end extensions) is an L whose perimeter
+        // is 5.1 + 5.1 + 0.1 + 5.0 + 5.0 + 0.1 = 20.4 um; every edge is
+        // isolated. The inner-corner sides inside the other body are covered,
+        // and the outer corner is one 0.05 x 0.05 um piece.
+        let mut wires = straight(0, 0, 10)
+            .into_iter()
+            .filter(|w| w.end[0] <= 5000)
+            .collect::<Vec<_>>();
+        wires.extend((0..5).map(|i| Wire {
+            net: 0,
+            layer: 0,
+            start: [5000, i * 1000],
+            end: [5000, (i + 1) * 1000],
+        }));
+        let r = routes(
+            wires,
+            vec![],
+            vec![access(0, 0, [0, 0]), access(1, 0, [5000, 5000])],
+            vec![0],
+        );
+        let t = [terminal(0, 0, true), terminal(1, 0, false)];
+        let n = run(&r, &t, &[], &tech(false)).unwrap();
+        let total: f64 = n.nets[0].ground.iter().sum();
+        assert!((total - ISO * 20.4).abs() < 1e-15, "{total}");
+        assert_eq!(n.stats.wire_runs, 2);
+        assert_eq!(n.stats.end_pieces, 3); // two free ends and the outer corner
+        assert_eq!(n.stats.covered_side_intervals, 2);
+    }
+
+    #[test]
+    fn via_pads_add_their_metal_outside_the_wires() {
+        // M1 (0.1 um) from (0,0) to (5,0) um, via V12 at (5,0) um with 0.2 x
+        // 0.2 um pads on M1 and M2, then M2 (0.2 um) up to (5,5) um.
+        // M1 union: wire [-0.05,5.0] x [-0.05,0.05] and pad [4.9,5.1] x
+        // [-0.1,0.1]; perimeter 0.1 + 2 * 4.95 + 2 * 0.05 + 3 * 0.2 = 10.7 um.
+        // M2 union: [4.9,5.1] x [-0.1,5.1] (the pad is inside the wire and its
+        // end extension); perimeter 2 * 0.2 + 2 * 5.2 = 10.8 um. Same-net
+        // planes carry no capacitance, so every edge is isolated.
+        let mut wires = straight(0, 0, 10)
+            .into_iter()
+            .filter(|w| w.end[0] <= 5000)
+            .collect::<Vec<_>>();
+        wires.extend((0..5).map(|i| Wire {
+            net: 0,
+            layer: 1,
+            start: [5000, i * 1000],
+            end: [5000, (i + 1) * 1000],
+        }));
+        let r = routes(
+            wires,
+            vec![Via {
+                net: 0,
+                kind: 0,
+                at: [5000, 0],
+            }],
+            vec![
+                access(0, 0, [0, 0]),
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 1,
+                    at: [5000, 5000],
+                },
+            ],
+            vec![0],
+        );
+        let t = [terminal(0, 0, true), terminal(1, 0, false)];
+        let n = run(&r, &t, &[], &tech(false)).unwrap();
+        let total: f64 = n.nets[0].ground.iter().sum();
+        assert!((total - ISO * (10.7 + 10.8)).abs() < 1e-15, "{total}");
+        // Pad pieces: the M1 pad minus the wire body and the end extension.
+        assert_eq!((n.stats.end_pieces, n.stats.pad_pieces), (4, 5));
+        // All M1 pad metal sits at the via's M1 node; R is unchanged.
+        assert_eq!(n.nets[0].resistors.len(), 3);
+        // A neighbour beside the pad couples to the pad edge (0.5 um away),
+        // counted once: half from each side.
+        let mut r2 = r.clone();
+        r2.wires.extend((0..4).map(|i| Wire {
+            net: 1,
+            layer: 0,
+            start: [5600, -2000 + i * 1000],
+            end: [5600, -1000 + i * 1000],
+        }));
+        r2.access
+            .extend([access(2, 1, [5600, -2000]), access(3, 1, [5600, 2000])]);
+        r2.nets = vec![0, 1];
+        let t2 = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 1, true),
+            terminal(3, 1, false),
+        ];
+        let n2 = run(&r2, &t2, &[], &tech(false)).unwrap();
+        let coupling: f64 = n2.couplings.iter().map(|c| c.pf).sum();
+        // Pad right edge x = 5.1 um, net 1 left edge x = 5.55 um: cc(0.45)
+        // over the pad's 0.2 um.
+        assert!((coupling - 4.75e-5 * 0.2).abs() < 1e-18, "{coupling}");
+    }
+
+    #[test]
+    fn sides_inside_the_nets_own_pin_are_not_exposed() {
+        // M1 wire 0..10 um whose first 1 um lies on its own M1 pin shape
+        // [-0.2,1.0] x [-0.2,0.2] um: both sides over that 1 um and the start
+        // extension are pin metal (Liberty), not routing capacitance.
+        let pin = PassiveShape {
+            layer: 0,
+            rect: Rect {
+                lx: -200,
+                ly: -200,
+                ux: 1000,
+                uy: 200,
+            },
+            owner: PassiveOwner::Pin { net: 0, pin: 0 },
+        };
+        let r = patched(vec![]);
+        let t = [terminal(0, 0, true), terminal(1, 0, false)];
+        let n = run(&r, &t, &[pin], &tech(false)).unwrap();
+        let total: f64 = n.nets[0].ground.iter().sum();
+        assert!((total - ISO * (2.0 * 9.0 + 0.2)).abs() < 1e-15, "{total}");
+        assert_eq!(n.stats.covered_side_intervals, 2);
+        assert_eq!(n.stats.end_pieces, 1);
     }
 
     fn access(pin: u32, net: u32, at: [i64; 2]) -> Access {
@@ -1890,6 +2464,7 @@ mod tests {
         // Wire: bottom side 10 um isolated, top side loses the 1 um the patch
         // covers. Patch: top edge 1 um and two 0.2 um short edges isolated;
         // its bottom edge touches the wire. Isolated ground 4e-5 pF/um/side.
+        // Each end extension adds 0.2 um of isolated edge (8e-6 pF).
         let t = [terminal(0, 0, true), terminal(1, 0, false)];
         let plain = run(&patched(vec![]), &t, &[], &tech(false)).unwrap();
         let n = run(
@@ -1904,12 +2479,12 @@ mod tests {
         assert_eq!(net.nodes, plain.nets[0].nodes);
         assert_eq!(net.resistors, plain.nets[0].resistors);
         let total: f64 = net.ground.iter().sum();
-        let want = 4e-5 * (10.0 + 9.0) + 4e-5 * (1.0 + 0.2 + 0.2);
+        let want = 4e-5 * (10.0 + 9.0) + 4e-5 * (1.0 + 0.2 + 0.2) + 2.0 * 8e-6;
         assert!((total - want).abs() < 1e-15, "{total} {want}");
         // Patch centre x = 4.5 um is nearer the driver end (node 0).
         let wire0 = 4e-5 * (4.0 * 0.8 + 0.55 + 5.0 * 0.25) + 4e-5 * (4.0 * 0.8 + 5.0 * 0.25);
         assert!(
-            (net.ground[0] - (wire0 + 5.6e-5)).abs() < 1e-15,
+            (net.ground[0] - (wire0 + 5.6e-5 + 8e-6)).abs() < 1e-15,
             "{:?}",
             net.ground
         );
@@ -1938,9 +2513,10 @@ mod tests {
     }
 
     #[test]
-    fn patch_side_couples_once_and_owns_a_facing_wire_end() {
+    fn patch_side_couples_once_including_a_facing_wire_end() {
         // Net 1 parallel to net 0 at y = 750 (edges 0.65 um apart; the patch
-        // top is 0.45 um away over 1 um). Lateral pairs count half per side.
+        // top is 0.45 um away over 1 um). Lateral pairs count half per side;
+        // the 0.05 um end extensions of both wires face each other at 0.65 um.
         let mut r = patched(vec![patch(0, [4000, 50, 5000, 250])]);
         r.wires.extend(straight(1, 750, 5));
         r.access
@@ -1955,11 +2531,11 @@ mod tests {
         let n = run(&r, &t, &[], &tech(false)).unwrap();
         let coupling: f64 = n.couplings.iter().map(|c| c.pf).sum();
         // cc(0.65) = 2.8e-5, cc(0.45) = 4.75e-5 pF/um (linear rows).
-        let want = 2.8e-5 * 9.0 + 4.75e-5 * 1.0;
+        let want = 2.8e-5 * 9.0 + 4.75e-5 * 1.0 + 2.0 * 2.8e-5 * 0.05;
         assert!((coupling - want).abs() < 1e-15, "{coupling} {want}");
         assert!(n.couplings.iter().all(|c| c.a.0 != c.b.0));
-        // Net 1 wire end cap 0.45 um right of the patch, over 0.1 um of the
-        // patch's right edge: no wire side faces it, so the patch owns it.
+        // Net 1's wire end extension is 0.45 um right of the patch, over 0.1 um
+        // of the patch's right edge: each side counts half of cc(0.45).
         let mut r = routes(
             straight(0, 0, 10)
                 .into_iter()
