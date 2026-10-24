@@ -456,7 +456,8 @@ DEF (XOR 0) everywhere. All 16 rows pass every gating item.
   the dense spatial grid and the estimate change no routing decision, and
   designs without constants do not see the tie change. (Intermediate
   sweeps `s6` and `s7`, binaries `a4f5c17a` and `8603d1e4` from the
-  development of this round, gave the same bytes on all 16 rows.)
+  development of this round, gave the same bytes on all 16 rows; their run
+  directories were removed after the comparison.)
 * CEC control: in every row the planted dual-master swap of the final
   netlist came back `not-equivalent` on the first candidate.
 * Antenna: Magic `antennacheck` (sky130) and the KLayout antenna deck
