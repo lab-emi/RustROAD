@@ -23,9 +23,18 @@ oracle; the oracle-to-oracle disagreement is measured the same way.
 
 usage:
   rc_oracles.py campaign --workspace OUT --base-rev empty --inputs CASES.json \
-      [--rustroad BIN] [--variant NAME=BIN ...] --sta-bin DIR
+      [--rustroad BIN] [--variant NAME=BIN[:legacy] ...] --sta-bin DIR
   rc_oracles.py report --summary OUT/summary.json
   rc_oracles.py evidence --summary OUT/summary.json --out docs/evidence/X.json
+
+A ``:legacy`` variant (an extractor from before the overlap-area profile
+fields) is given profiles without those fields; every other profile field is
+unchanged since e0d074d (build_rc_profile.py --compare-ref e0d074d).
+
+Black-box controls on OpenRCX: the same DEF with ``-coupling_threshold 0``
+(every coupling explicit: does grounding sub-threshold couplings change the
+design total?) and with the cell LEF stripped of OBS (are cell obstructions
+extracted?).
 
 CASES.json: {"design": "...", "cases": [{"pdk": "sky130", "workspace": DIR,
   "netlist": V, "sdc": SDC, "flow_spef": optional OpenRCX nominal SPEF of the flow}]}
@@ -68,6 +77,47 @@ def per_net_spef(path: Path) -> dict:
 def per_net_magic(record: dict) -> dict:
     return {n: dict(c_pf=v["c_pf"], coupling_pf=v["coupling_pf"], r_ohm=v.get("r_ohm"))
             for n, v in record["nets"].items()}
+
+
+NEW_PROFILE_FIELDS = ("area_cap_pf_per_um2", "overlap_area")
+
+
+def legacy_profile(src: Path, dst: Path) -> Path:
+    """The profile without this round's overlap-area fields (for extractors
+    that reject unknown fields); all other content is unchanged."""
+    p = json.loads(bounded_text(src))
+    for layer in p["layers"]:
+        for key in NEW_PROFILE_FIELDS:
+            layer.pop(key, None)
+    p["model"].pop("overlap_area", None)
+    p["sources"] = [x for x in p["sources"] if x["role"] != "nominal_calibration_table_for_overlap_corner_ratio"]
+    dst.write_text(json.dumps(p, indent=1) + "\n")
+    return dst
+
+
+def strip_lef_obs(src: Path, dst: Path) -> int:
+    """Copy a cell LEF without its OBS blocks; returns the number removed."""
+    out, skip, removed = [], False, 0
+    for line in bounded_text(src, 64 * 1024 ** 2).splitlines(keepends=True):
+        token = line.strip()
+        if not skip and token == "OBS":
+            skip, removed = True, removed + 1
+            continue
+        if skip:
+            skip = token != "END"
+            continue
+        out.append(line)
+    dst.write_text("".join(out))
+    return removed
+
+
+def design_total(spef: dict) -> float:
+    return math.fsum(v["c_pf"] - v["coupling_pf"] / 2.0 for v in spef.values())
+
+
+def position(value: float, a: float, b: float) -> str:
+    lo, hi = min(a, b), max(a, b)
+    return "between" if lo <= value <= hi else "below_both" if value < lo else "above_both"
 
 
 def compare_totals(native: dict, oracle: dict) -> dict:
@@ -169,7 +219,7 @@ def strip_endpoints(delta: dict) -> dict:
     return {k: v for k, v in delta.items() if k != "endpoints"}
 
 
-def campaign_case(h, case: dict, rustroad: Path, variants: dict) -> dict:
+def campaign_case(h, case: dict, rustroad: Path, variants: dict, legacy: set) -> dict:
     pdk = case["pdk"]
     spec = cs.PDKS[pdk]
     base = cs.PDK_ROOT / spec["base"]
@@ -238,8 +288,10 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict) -> dict:
         old[vname] = {}
         for corner in CORNERS:
             out = h.root / f"{pdk}_variant_{vname}_{corner}.spef"
-            cs.native_extract(h, f"{tag}_variant_{vname}_{corner}", vbin, ws,
-                              ROOT / f"fixtures/pdk/{pdk}-rc-{corner}.json", corner, out)
+            profile = ROOT / f"fixtures/pdk/{pdk}-rc-{corner}.json"
+            if vname in legacy:
+                profile = legacy_profile(profile, h.root / f"{pdk}-rc-{corner}-legacy.json")
+            cs.native_extract(h, f"{tag}_variant_{vname}_{corner}", vbin, ws, profile, corner, out)
             old[vname][corner] = out
     # OpenRCX on the flow's DEF.
     rcx, result["openrcx"] = {}, {}
@@ -254,6 +306,32 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict) -> dict:
             source=fingerprint(Path(case["flow_spef"])),
             total_c_rel=cs.rel(sum(v["c_pf"] for v in mine.values()), sum(v["c_pf"] for v in flow.values())),
             max_abs_net_c_rel=max(abs(cs.rel(mine[n]["c_pf"], flow[n]["c_pf"]) or 0.0) for n in mine))
+    # Black-box OpenRCX controls: threshold 0 (all couplings explicit) and a
+    # cell LEF without OBS.
+    rcx0 = {}
+    result["openrcx_threshold0"] = {}
+    for corner in CORNERS:
+        spef, info = cs.openrcx(h, f"{tag}_rcx0", pdk, corner, paths["def_"], f"{pdk}_rcx0_{corner}",
+                                threshold="0")
+        rcx0[corner] = spef
+        a, b = per_net_spef(rcx[corner]), per_net_spef(spef)
+        ta, tb = design_total(a), design_total(b)
+        result["openrcx_threshold0"][corner] = dict(
+            spef=info["spef"], design_total_pf=dict(threshold_0_1=ta, threshold_0=tb), design_total_rel=cs.rel(ta, tb),
+            per_net_sum_rel=cs.rel(math.fsum(v["c_pf"] for v in a.values()), math.fsum(v["c_pf"] for v in b.values())),
+            max_abs_net_c_rel=max(abs(cs.rel(a[n]["c_pf"], b[n]["c_pf"]) or 0.0) for n in a),
+            status="passed" if abs(cs.rel(ta, tb) or 0.0) <= 1e-6 else "failed",
+            meaning="passed: grounding a sub-threshold coupling keeps the design total (it is grounded in one "
+                    "net, not both)")
+    stripped = h.root / f"{pdk}_cells_without_obs.lef"
+    removed = strip_lef_obs(cs.PDK_ROOT / spec["base"] / spec["lef"], stripped)
+    spef, _ = cs.openrcx(h, f"{tag}_rcx_noobs", pdk, "nom", paths["def_"], f"{pdk}_rcx_noobs_nom", cells_lef=stripped)
+    a, b = per_net_spef(rcx["nom"]), per_net_spef(spef)
+    moved = max(abs(a[n]["c_pf"] - b[n]["c_pf"]) for n in a)
+    result["openrcx_obs_blind"] = dict(obs_blocks_removed=removed, max_abs_net_c_change_pf=moved,
+                                       status="passed" if moved == 0.0 and removed > 0 else "failed",
+                                       meaning="passed: OpenRCX gives identical per-net C without the cell OBS, "
+                                               "i.e. it does not extract cell obstructions (native and Magic do)")
     # Magic.
     magic, magic_ba, result["magic"] = {}, {}, {}
     for corner in CORNERS:
@@ -284,6 +362,7 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict) -> dict:
         m = per_net_magic(magic[corner])
         entry = dict(vs_openrcx=cs.compare_spefs(native[corner], rcx[corner]),
                      vs_openrcx_totals=compare_totals(n, x),
+                     vs_openrcx_threshold0_totals=compare_totals(n, per_net_spef(rcx0[corner]))["targets"],
                      vs_magic=compare_totals(n, m),
                      openrcx_vs_magic=compare_totals(x, m),
                      magic_r_terminals=terminal_decomposition(
@@ -324,6 +403,7 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict) -> dict:
         # to the oracle's per-net totals on the native trees and record the
         # move of the worst endpoint (first-order, per net).
         oracle_nets = dict(vs_openrcx=per_net_spef(rcx[rc]), vs_magic=per_net_magic(magic[rc]))
+        other = dict(vs_openrcx="vs_magic", vs_magic="vs_openrcx")
         native_nets = per_net_spef(native[rc])
         for ref, delta in (("vs_openrcx", entry["vs_openrcx"]), ("vs_magic", entry["vs_magic"])):
             if delta["status"] == "passed":
@@ -340,8 +420,9 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict) -> dict:
                 magic_rc.backannotate(native[rc], one, spef)
                 run = sta(h, f"{tag}_attr_{sta_corner}_{ref}_{len(rows)}", libs[sta_corner]["path"],
                           sta_corner, netlist, sdc, spef)
-                rows.append(dict(net=net, native_c_pf=native_nets[net]["c_pf"],
-                                 oracle_c_pf=oracle_nets[ref][net]["c_pf"],
+                o1, o2 = oracle_nets[ref][net]["c_pf"], oracle_nets[other[ref]][net]["c_pf"]
+                rows.append(dict(net=net, native_c_pf=native_nets[net]["c_pf"], oracle_c_pf=o1,
+                                 other_oracle_c_pf=o2, position=position(native_nets[net]["c_pf"], o1, o2),
                                  slack_move_ns=run["endpoints"][worst["endpoint"]][f"{kind}_slack_ns"] - base_slack))
                 spef.unlink()
             rows.sort(key=lambda r: -abs(r["slack_move_ns"]))
@@ -412,9 +493,12 @@ def campaign(args) -> int:
         summary["memory_preflight"] = bounded_text(Path(r["stdout"]))
         bins = [("rustroad", rustroad), ("rusteda", cs.RUSTSTA_BIN / "rusteda"),
                 ("ruststa", cs.RUSTSTA_BIN / "ruststa")]
-        variants = {}
+        variants, legacy = {}, set()
         for spec_ in args.variant:
             vname, _, vpath = spec_.partition("=")
+            if vpath.endswith(":legacy"):
+                vpath = vpath[: -len(":legacy")]
+                legacy.add(vname)
             require(re.fullmatch(r"[A-Za-z0-9_-]+", vname) is not None and vpath, f"bad --variant {spec_}")
             variants[vname] = Path(vpath).resolve()
             bins.append((f"rustroad_variant_{vname}", variants[vname]))
@@ -425,7 +509,7 @@ def campaign(args) -> int:
         summary["tools"]["openroad_image"] = cs.IMAGE
         summary["tools"]["magic_image"] = magic_rc.container.SIGNOFF_IMAGE
         for case in inputs["cases"]:
-            summary["cases"].append(campaign_case(h, case, rustroad, variants))
+            summary["cases"].append(campaign_case(h, case, rustroad, variants, legacy))
         verdicts = []
         for c in summary["cases"]:
             for corner in CORNERS:
@@ -442,6 +526,9 @@ def campaign(args) -> int:
             for corner, v in c["resistance_accounting"].items():
                 verdicts.append((c["pdk"], corner, "independent", "resistance_accounting", v["status"]))
             verdicts.append((c["pdk"], "all", "self", "read_only", c["read_only"]["status"]))
+            for corner, v in c["openrcx_threshold0"].items():
+                verdicts.append((c["pdk"], corner, "independent", "openrcx_threshold0_design_total", v["status"]))
+            verdicts.append((c["pdk"], "nom", "independent", "openrcx_obs_blind", c["openrcx_obs_blind"]["status"]))
             verdicts.append((c["pdk"], "nom", "self", "magic_determinism", c["magic"]["determinism"]["status"]))
             for k, v in c["controls"].items():
                 verdicts.append((c["pdk"], "control", k, "detected",
@@ -520,7 +607,8 @@ def report(summary_path: Path) -> str:
                 a = v.get(f"attribution_{ref}")
                 if not a:
                     continue
-                top = ", ".join(f"{r['net']} ({1e3 * r['slack_move_ns']:+.1f}, {1e3 * (r['native_c_pf'] - r['oracle_c_pf']):+.2f})"
+                top = ", ".join(f"{r['net']} ({1e3 * r['slack_move_ns']:+.1f}, {1e3 * (r['native_c_pf'] - r['oracle_c_pf']):+.2f}"
+                                f"{', ' + r['position'].replace('_', ' ') if 'position' in r else ''})"
                                 for r in a["nets"][:4])
                 out.append(f"| {c['pdk']} | {sc}+{v['rc_corner']} | {ref[3:]} | {a['endpoint']} ({a['check']}) | "
                            f"{1e3 * a['measured_delta_ns']:+.1f} / {1e3 * a['sum_of_moves_ns']:+.1f} | {top} |")
@@ -533,10 +621,26 @@ def report(summary_path: Path) -> str:
             out.append(f"| {c['pdk']} | {corner} | {mt and f'{mt['min']:.2f}..{mt['max']:.2f}'} | "
                        f"{t['native_via_ohm_per_terminal']} | {pct(t['rest']['max_abs_rel'])} ({t['rest']['eligible']}) "
                        f"{t['rest']['status']} |")
+    if all("openrcx_threshold0" in c for c in d["cases"]):
+        out += ["", "| PDK | RC | OpenRCX design total, threshold 0.1 / 0 fF (pF) | per-net sum change | "
+                "total C vs OpenRCX threshold 0 | per-net C vs OpenRCX threshold 0 |", "|---|---|---|---|---|---|"]
+        for c in d["cases"]:
+            for corner in CORNERS:
+                t0 = c["openrcx_threshold0"][corner]
+                t = c["spef"][corner]["vs_openrcx_threshold0_totals"]
+                dt = t0["design_total_pf"]
+                out.append(f"| {c['pdk']} | {corner} | {dt['threshold_0_1']:.6f} / {dt['threshold_0']:.6f} "
+                           f"({t0['status']}) | {pct(t0['per_net_sum_rel'])} | {pct(t['total_c']['rel'])} "
+                           f"{t['total_c']['status']} | {pct((t['net_c']['distribution'] or {}).get('min'))}.."
+                           f"{pct((t['net_c']['distribution'] or {}).get('max'))} {t['net_c']['status']} |")
     out += ["", "| PDK | control | result |", "|---|---|---|"]
     for c in d["cases"]:
         for k, v in c["controls"].items():
             out.append(f"| {c['pdk']} | {k} | {v['status']} |")
+        if "openrcx_obs_blind" in c:
+            v = c["openrcx_obs_blind"]
+            out.append(f"| {c['pdk']} | OpenRCX without cell OBS ({v['obs_blocks_removed']} blocks): max per-net "
+                       f"change {v['max_abs_net_c_change_pf']:.1e} pF | {v['status']} |")
         for k, v in c["resistance_accounting"].items():
             out.append(f"| {c['pdk']} | independent R accounting {k} | {v['status']} ({v['max_rel_error']:.1e}) |")
         out.append(f"| {c['pdk']} | Magic determinism | {c['magic']['determinism']['status']} |")
@@ -557,11 +661,15 @@ def evidence(summary_path: Path) -> dict:
         cases.append(dict(pdk=c["pdk"], inputs=c["inputs"], native=c["native"], read_only=c["read_only"],
                           resistance_accounting=c["resistance_accounting"], openrcx=c["openrcx"],
                           magic=c["magic"], spef=spef,
+                          openrcx_threshold0=c.get("openrcx_threshold0"),
+                          openrcx_obs_blind=c.get("openrcx_obs_blind"),
                           sta={k: dict(rc_corner=v["rc_corner"], liberty=v["liberty"], runs=v["runs"],
                                        **{r: strip_endpoints(v[r]) for r in v if isinstance(v[r], dict)
                                           and "max_abs_setup_delta_ns" in v[r]},
                                        endpoints=v["endpoints"])
                                for k, v in c["sta"].items()},
+                          attribution={k: {r: v[r] for r in v if r.startswith("attribution_")}
+                                       for k, v in c["sta"].items()},
                           controls=c["controls"]))
     return dict(schema="rustroad.rc-oracles-evidence.v1", design=d.get("design"), status=d["status"],
                 reason=d.get("reason"), targets=d["targets"], sta_corners=d["sta_corners"], scope=d["scope"],
@@ -577,8 +685,9 @@ def main() -> int:
     c.add_argument("--base-rev", required=True)
     c.add_argument("--inputs", type=Path, required=True)
     c.add_argument("--rustroad", type=Path, default=ROOT / "target/release/rustroad")
-    c.add_argument("--variant", action="append", default=[], metavar="NAME=BIN",
-                   help="other extractor binary measured on the same inputs (ablation)")
+    c.add_argument("--variant", action="append", default=[], metavar="NAME=BIN[:legacy]",
+                   help="other extractor binary measured on the same inputs (ablation); :legacy gives it "
+                        "profiles without the overlap-area fields")
     c.add_argument("--sta-bin", type=Path, required=True)
     r = sub.add_parser("report")
     r.add_argument("--summary", type=Path, required=True)

@@ -386,7 +386,9 @@ def tree_digest(root: Path) -> str:
     return h.hexdigest()
 
 
-def openrcx(h, tag, pdk, corner, def_path, label):
+def openrcx(h, tag, pdk, corner, def_path, label, threshold="0.1", cells_lef=None):
+    """OpenRCX on a DEF. ``threshold`` is ``-coupling_threshold`` (fF);
+    ``cells_lef`` replaces the PDK cell LEF (black-box controls only)."""
     spec = PDKS[pdk]
     base = PDK_ROOT / spec["base"]
     run_dir = h.root / f"{tag}_rcx"
@@ -394,6 +396,8 @@ def openrcx(h, tag, pdk, corner, def_path, label):
     local_def = run_dir / def_path.name
     if not local_def.exists():
         shutil.copyfile(def_path, local_def)
+    require(re.fullmatch(r"[0-9]+(\.[0-9]+)?", threshold) is not None, "bad coupling threshold")
+    lef = base / spec["lef"] if cells_lef is None else Path(cells_lef)
     out = run_dir / f"{label}.spef"
     script = run_dir / f"{label}.tcl"
     process = "nominal" if corner == "nom" else corner
@@ -403,7 +407,7 @@ read_liberty /library.lib
 read_def /run/{local_def.name}
 define_process_corner -ext_model_index 0 {process}
 set_extraction_rules_file /extraction.rules
-extract_parasitics -max_res 0 -coupling_threshold 0.1 -no_merge_via_res
+extract_parasitics -max_res 0 -coupling_threshold {threshold} -no_merge_via_res
 write_spef /run/{out.name}
 puts EXTRACTION_COMPLETE
 exit
@@ -412,7 +416,7 @@ exit
     command = ["podman", "run", "--rm", "--pull=never", "--network=none", "--read-only",
                "--tmpfs=/tmp:rw,size=64m", "--memory=2g", "--memory-swap=2g", "--cpus=2", "--pids-limit=128",
                f"--volume={run_dir}:/run:rw", f"--volume={base / spec['tlef']}:/technology.lef:ro",
-               f"--volume={base / spec['lef']}:/cells.lef:ro",
+               f"--volume={lef}:/cells.lef:ro",
                f"--volume={base / spec['lib'].format(spec['libs']['tt'])}:/library.lib:ro",
                f"--volume={rules}:/extraction.rules:ro", "--entrypoint=/usr/bin/timeout", IMAGE, "25s",
                "/usr/bin/time", "-v", "-o", f"/run/{label}.time", OPENROAD, "-no_init", "-no_splash",

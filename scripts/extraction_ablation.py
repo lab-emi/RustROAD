@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Rebuild the extractor ablation variants used by docs/extraction.md.
 
-Each variant is the committed extractor with one modelling rule reverted:
+Each variant is the committed extractor with one modelling rule switched off:
 
-* strict_plates: a plate needs to extend only beyond the strip edges
-  (margin 1 DBU) instead of one strip width;
-* any_overlap_plates: any overlapping conductor on the nearest other layer is
-  a plate (owner: largest overlap), as before this stream;
-* pads_ends: additionally the earlier split (substrate share kept, the excess
-  to the plate, a crossing counted from the upper wire only), i.e. only the
-  via pads, end extensions and covered sides of this stream.
+* no_passive_cuts: pins, obstructions and supply metal do not count their own
+  cross-section toward a routed conductor that crosses them;
+* no_overlap_area: non-plate overlaps (stacked, offset or barely wider metal on
+  another layer) add nothing, as before this round;
+* split_only: both off, i.e. the previous round's model plus the
+  storage-independent run splitting of this round;
+* round1: the previous round's committed extractor (git revision ROUND1),
+  rebuilt from git; it reads profiles without the overlap-area fields
+  (rc_oracles.py --variant NAME=BIN:legacy).
 
 usage: extraction_ablation.py --out DIR [--build]
 Writes DIR/<variant>/src (a copy of the workspace crates with the patch),
@@ -25,60 +27,9 @@ import subprocess
 import sys
 
 SRC = Path(__file__).resolve().parents[1]
-PLATE_OLD = '''fn plate(
-    layered: &[(u32, i64, i64, u32)],
-    own: u32,
-    upper: bool,
-    minus: i64,
-    plus: i64,
-) -> Option<(u32, [u32; 2])> {
-    let mut best: Option<(u32, i64, u32)> = None;
-    for e in layered {
-        if (upper && e.0 > own) || (!upper && e.0 < own) {
-            let overlap = e.2.min(plus) - e.1.max(minus);
-            let better = match best {
-                None => true,
-                Some((m, o, s)) => {
-                    if upper {
-                        (std::cmp::Reverse(e.0), overlap, std::cmp::Reverse(e.3))
-                            > (std::cmp::Reverse(m), o, std::cmp::Reverse(s))
-                    } else {
-                        (e.0, overlap, std::cmp::Reverse(e.3)) > (m, o, std::cmp::Reverse(s))
-                    }
-                }
-            };
-            if better {
-                best = Some((e.0, overlap, e.3));
-            }
-        }
-    }
-    best.map(|(m, _, s)| (m, [s, s]))
-}
-'''
-SPLIT_OLD = '''                let delta = cg - cg_sub;
-                let (d_below, d_above) = match plane_split {
-                    (true, true) => {
-                        let db = below_only.map_or(delta / 2.0, |r| sample(r, spacing).1 - cg_sub);
-                        (db, delta - db)
-                    }
-                    (true, false) => (delta, 0.0),
-                    (false, true) => (0.0, delta),
-                    (false, false) => (0.0, 0.0),
-                };
-                let mut g = cg_sub;
-                for (d, plane, upper) in [(d_below, below, false), (d_above, above, true)] {
-                    if d < 0.0 {
-                        g += d;
-                    } else if d > 0.0 {
-                        match plane {
-                            Some((_, owners))
-                                if upper && matches!(shapes[owners[k] as usize].owner, Owner::Run(_)) => {}
-                            Some((_, owners)) => contributions.push((owners[k], d * length, 1.0)),
-                            None => g += d,
-                        }
-                    }
-                }
-'''
+ROUND1 = "0851d03"
+
+
 def build(out, name, patch, compile_):
     d = out / name
     if d.exists():
@@ -96,18 +47,34 @@ def build(out, name, patch, compile_):
     if compile_:
         env = dict(os.environ, CARGO_TARGET_DIR=str(d / 'target'))
         subprocess.run(['cargo', 'build', '--release', '-p', 'rustroad-cli'], cwd=d / 'src', env=env, check=True)
-def strict(s):
-    assert s.count('let margin = plus - minus;') == 1
-    return s.replace('let margin = plus - minus;', 'let margin = 1;')
-def nearest(s):
-    start = s.index('fn plate(\n'); end = s.index('fn sample(rows')
-    return s[:start] + PLATE_OLD + '\n' + s[end:]
-def oldsplit(s):
-    start = s.index('                // Split this side\'s context value between the substrate and')
-    end = s.index('                ground += g.max(0.0) * length;')
-    return s[:start] + SPLIT_OLD + s[end:]
-VARIANTS = dict(strict_plates=strict, any_overlap_plates=nearest,
-                pads_ends=lambda s: oldsplit(nearest(s)))
+def no_passive(s):
+    call = "    add_passive_strips(input, limits, &mut built, &shapes, &bins, &mut stats)?;\n"
+    assert s.count(call) == 1
+    return s.replace(call, "")
+
+
+def no_overlap(s):
+    cond = "                && let Some(area_cap) = model.area_cap\n"
+    assert s.count(cond) == 1
+    return s.replace(cond, "                && let Some(area_cap) = model.area_cap.filter(|_| false)\n")
+
+
+VARIANTS = dict(no_passive_cuts=no_passive, no_overlap_area=no_overlap,
+                split_only=lambda s: no_overlap(no_passive(s)))
+
+
+def build_round1(out, compile_):
+    d = out / "round1"
+    if d.exists():
+        shutil.rmtree(d)
+    (d / "src").mkdir(parents=True)
+    archive = subprocess.run(["git", "-C", str(SRC), "archive", ROUND1, "Cargo.toml", "Cargo.lock",
+                              "rust-toolchain.toml", "crates"], capture_output=True, check=True).stdout
+    subprocess.run(["tar", "-x", "-C", str(d / "src")], input=archive, check=True)
+    (d / "REVISION").write_text(ROUND1 + "\n")
+    if compile_:
+        env = dict(os.environ, CARGO_TARGET_DIR=str(d / "target"))
+        subprocess.run(["cargo", "build", "--release", "-p", "rustroad-cli"], cwd=d / "src", env=env, check=True)
 
 
 def main() -> int:
@@ -117,6 +84,7 @@ def main() -> int:
     args = parser.parse_args()
     for name, patch in VARIANTS.items():
         build(args.out.resolve(), name, patch, args.build)
+    build_round1(args.out.resolve(), args.build)
     return 0
 
 

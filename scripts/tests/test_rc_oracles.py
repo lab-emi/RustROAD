@@ -5,6 +5,7 @@ Run: python3 -m unittest discover -s scripts/tests -v
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import random
 import sys
@@ -186,6 +187,43 @@ class TargetsTest(unittest.TestCase):
         self.assertEqual(t["coverage"]["status"], "passed")
         native.pop("b")
         self.assertEqual(rc_oracles.compare_totals(native, oracle)["coverage"]["status"], "failed")
+
+
+class CampaignHelpersTest(unittest.TestCase):
+    def test_legacy_profile_drops_only_the_new_fields(self):
+        root = Path(__file__).resolve().parents[2]
+        src = root / "fixtures/pdk/sky130-rc-max.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            dst = rc_oracles.legacy_profile(src, Path(tmp) / "legacy.json")
+            new, old = json.loads(src.read_text()), json.loads(dst.read_text())
+        self.assertTrue(all("overlap_area" in l and "area_cap_pf_per_um2" in l for l in new["layers"]))
+        self.assertFalse(any("overlap_area" in l or "area_cap_pf_per_um2" in l for l in old["layers"]))
+        self.assertNotIn("overlap_area", old["model"])
+        for a, b in zip(old["layers"], new["layers"]):
+            self.assertEqual(a["contexts"], b["contexts"])
+            self.assertEqual(a["sheet_resistance_ohm_per_square"], b["sheet_resistance_ohm_per_square"])
+        self.assertEqual(old["cuts"], new["cuts"])
+
+    def test_lef_obs_blocks_are_removed_and_counted(self):
+        lef = ("MACRO a\n PIN A\n  PORT\n   LAYER li1 ;\n  END\n END A\n OBS\n  LAYER li1 ;\n"
+               "  RECT 0 0 1 1 ;\n END\nEND a\nMACRO b\n OBS\n  LAYER met1 ;\n END\nEND b\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst = Path(tmp) / "in.lef", Path(tmp) / "out.lef"
+            src.write_text(lef)
+            self.assertEqual(rc_oracles.strip_lef_obs(src, dst), 2)
+            text = dst.read_text()
+        self.assertNotIn("OBS", text)
+        self.assertNotIn("RECT 0 0 1 1", text)
+        self.assertIn(" PIN A", text)
+        self.assertIn("END a", text)
+        self.assertIn("END b", text)
+
+    def test_design_total_counts_each_coupling_once_and_positions(self):
+        nets = {"a": dict(c_pf=3.0, coupling_pf=2.0), "b": dict(c_pf=5.0, coupling_pf=2.0)}
+        self.assertAlmostEqual(rc_oracles.design_total(nets), 6.0)
+        self.assertEqual(rc_oracles.position(2.0, 1.0, 3.0), "between")
+        self.assertEqual(rc_oracles.position(0.5, 3.0, 1.0), "below_both")
+        self.assertEqual(rc_oracles.position(4.0, 3.0, 1.0), "above_both")
 
 
 if __name__ == "__main__":
