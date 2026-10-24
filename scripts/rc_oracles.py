@@ -152,8 +152,17 @@ def terminal_decomposition(record: dict, native_spef: Path, profile: dict, route
                 nets=rows)
 
 
+def sta(h, tag, lib, corner, netlist, sdc, spef, expect="ok") -> dict:
+    """RustSTA run whose workspace (about 35 MiB of imported Liberty) is removed
+    once its reports are parsed; the receipts keep every command and output."""
+    try:
+        return cs.sta_run(h, tag, lib, corner, netlist, sdc, spef, expect=expect)
+    finally:
+        shutil.rmtree(h.root / f"{tag}_sta", ignore_errors=True)
+
+
 def sta_set(h, tag, lib, corner, netlist, sdc, spefs: dict) -> dict:
-    return {label: cs.sta_run(h, f"{tag}_{label}", lib, corner, netlist, sdc, spef) for label, spef in spefs.items()}
+    return {label: sta(h, f"{tag}_{label}", lib, corner, netlist, sdc, spef) for label, spef in spefs.items()}
 
 
 def strip_endpoints(delta: dict) -> dict:
@@ -329,8 +338,8 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict) -> dict:
                 one[net] = oracle_nets[ref][net]
                 spef = h.root / f"{pdk}_attr_{sta_corner}_{ref}_{len(rows)}.spef"
                 magic_rc.backannotate(native[rc], one, spef)
-                run = cs.sta_run(h, f"{tag}_attr_{sta_corner}_{ref}_{len(rows)}", libs[sta_corner]["path"],
-                                 sta_corner, netlist, sdc, spef)
+                run = sta(h, f"{tag}_attr_{sta_corner}_{ref}_{len(rows)}", libs[sta_corner]["path"],
+                          sta_corner, netlist, sdc, spef)
                 rows.append(dict(net=net, native_c_pf=native_nets[net]["c_pf"],
                                  oracle_c_pf=oracle_nets[ref][net]["c_pf"],
                                  slack_move_ns=run["endpoints"][worst["endpoint"]][f"{kind}_slack_ns"] - base_slack))
@@ -357,12 +366,12 @@ def campaign_case(h, case: dict, rustroad: Path, variants: dict) -> dict:
         bad = h.root / f"{pdk}_native_nom_{kind}.spef"
         detail = cs.mutate_spef(native["nom"], bad, kind)
         cov = compare_totals(per_net_spef(bad), per_net_magic(magic["nom"]))["coverage"]
-        sta = cs.sta_run(h, f"{tag}_control_{kind}", libs["tt"]["path"], "tt", netlist, sdc, bad,
-                         expect="run_rejected")
+        rejected = sta(h, f"{tag}_control_{kind}", libs["tt"]["path"], "tt", netlist, sdc, bad,
+                       expect="run_rejected")
         controls[kind] = dict(mutation=detail, magic_coverage=cov["status"],
-                              ruststa=dict(status=sta["status"], stage=sta["stage"]),
+                              ruststa=dict(status=rejected["status"], stage=rejected["stage"]),
                               status="detected" if (cov["status"] == "failed" or kind == "dropped_connection")
-                              and sta["status"] == "rejected" else "missed")
+                              and rejected["status"] == "rejected" else "missed")
     planted = h.root / f"{pdk}_planted_open.gds"
     plant = magic_rc.plant_open(paths["gds"], planted, bounded_text(paths["def_"], 64 * 1024 ** 2), pdk,
                                 json.loads((ROOT / f"fixtures/pdk/{pdk}-rc-nom.json").read_text()))

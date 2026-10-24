@@ -686,8 +686,8 @@
       "status": "passed"
     }
   ],
-  "wall_seconds": 43.830823016003706,
-  "peak_child_rss_kib": 136468,
+  "wall_seconds": 43.93786181596806,
+  "peak_child_rss_kib": 136300,
   "receipts": 730,
   "cases": [
     {
@@ -763,8 +763,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.015774541010614485,
-          "peak_rss_kib": 9020
+          "elapsed_seconds": 0.015633039001841098,
+          "peak_rss_kib": 8956
         },
         "nom": {
           "output": {
@@ -820,8 +820,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.014590256032533944,
-          "peak_rss_kib": 8636
+          "elapsed_seconds": 0.014711157011333853,
+          "peak_rss_kib": 9072
         },
         "max": {
           "output": {
@@ -877,8 +877,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.015447505982592702,
-          "peak_rss_kib": 8988
+          "elapsed_seconds": 0.014992210024502128,
+          "peak_rss_kib": 9300
         }
       },
       "read_only": {
@@ -914,11 +914,11 @@
           },
           "spef": {
             "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/sky130_rcx_rcx/sky130_rcx_min.spef",
-            "sha256": "e41f21f25e8e3993635228635d79509cd4a3189c8d5475a68f1c33a96326c0cb",
+            "sha256": "5338aac5a89da9bf7589775a30eeee1d44d974410f2e82fc109d9972bb7b186e",
             "bytes": 15884
           },
-          "container_peak_rss_kib": 111680,
-          "elapsed_seconds": 0.3526701199589297,
+          "container_peak_rss_kib": 112104,
+          "elapsed_seconds": 0.3284767830045894,
           "receipt": "sky130_rcx_min"
         },
         "nom": {
@@ -929,11 +929,11 @@
           },
           "spef": {
             "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/sky130_rcx_rcx/sky130_rcx_nom.spef",
-            "sha256": "b0bd12a23e2c019805f726872d3037bb9c48acbb075eed88b7b5105318887b68",
+            "sha256": "3c715e5ac0de752e3ac39a08e43024c93fd94437f931891247d7cec7e341cb39",
             "bytes": 15868
           },
-          "container_peak_rss_kib": 110848,
-          "elapsed_seconds": 0.3144533039885573,
+          "container_peak_rss_kib": 110444,
+          "elapsed_seconds": 0.32514885999262333,
           "receipt": "sky130_rcx_nom"
         },
         "max": {
@@ -944,11 +944,11 @@
           },
           "spef": {
             "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/sky130_rcx_rcx/sky130_rcx_max.spef",
-            "sha256": "7c5ecd08f5ed26bb7c0f10a0f10782110981817d03579106da65e69856461255",
+            "sha256": "20bc01fa1dd952688f396b16383ef56f7070bec6d0f9b0beb3d06be9a790ef62",
             "bytes": 15876
           },
-          "container_peak_rss_kib": 111376,
-          "elapsed_seconds": 0.31778706604382023,
+          "container_peak_rss_kib": 111360,
+          "elapsed_seconds": 0.37079615995753556,
           "receipt": "sky130_rcx_max"
         },
         "flow_reference_nominal": {
@@ -974,12 +974,12 @@
             {
               "label": "c_min_0",
               "wall_seconds": 0.765,
-              "peak_rss_kib": 72692
+              "peak_rss_kib": 73608
             },
             {
               "label": "r_min_0",
               "wall_seconds": 0.314,
-              "peak_rss_kib": 72124
+              "peak_rss_kib": 72400
             }
           ],
           "terminal_layout": {
@@ -1015,12 +1015,12 @@
             {
               "label": "c_nom_0",
               "wall_seconds": 0.765,
-              "peak_rss_kib": 72720
+              "peak_rss_kib": 72572
             },
             {
               "label": "r_nom_0",
               "wall_seconds": 0.314,
-              "peak_rss_kib": 72108
+              "peak_rss_kib": 72784
             }
           ],
           "terminal_layout": {
@@ -1055,13 +1055,13 @@
           "receipts": [
             {
               "label": "c_max_0",
-              "wall_seconds": 0.765,
-              "peak_rss_kib": 72724
+              "wall_seconds": 0.815,
+              "peak_rss_kib": 72904
             },
             {
               "label": "r_max_0",
               "wall_seconds": 0.314,
-              "peak_rss_kib": 73040
+              "peak_rss_kib": 72276
             }
           ],
           "terminal_layout": {
@@ -1096,7 +1096,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/sky130_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/sky130_rcx_rcx/sky130_rcx_min.spef",
             "native_sha256": "fbf9778b3cea08b67e975ae43e9a9c803dcb2669a4d5a38164001187f46c32f4",
-            "reference_sha256": "e41f21f25e8e3993635228635d79509cd4a3189c8d5475a68f1c33a96326c0cb",
+            "reference_sha256": "5338aac5a89da9bf7589775a30eeee1d44d974410f2e82fc109d9972bb7b186e",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -2272,7 +2272,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/sky130_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/sky130_rcx_rcx/sky130_rcx_nom.spef",
             "native_sha256": "4dff4a8f152082a001c5e566f58bb50b531dfc12eef5d8a1ba3ace579065aa78",
-            "reference_sha256": "b0bd12a23e2c019805f726872d3037bb9c48acbb075eed88b7b5105318887b68",
+            "reference_sha256": "3c715e5ac0de752e3ac39a08e43024c93fd94437f931891247d7cec7e341cb39",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3315,7 +3315,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/sky130_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/sky130_rcx_rcx/sky130_rcx_max.spef",
             "native_sha256": "339971ccb1553fc4cb7199f17c2423c45862d8758507e4649c703365271b781e",
-            "reference_sha256": "7c5ecd08f5ed26bb7c0f10a0f10782110981817d03579106da65e69856461255",
+            "reference_sha256": "20bc01fa1dd952688f396b16383ef56f7070bec6d0f9b0beb3d06be9a790ef62",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -4505,7 +4505,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67092
+              "peak_rss_kib": 67488
             },
             "openrcx": {
               "scope": {
@@ -4583,7 +4583,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 66704
+              "peak_rss_kib": 66732
             },
             "magic_ba": {
               "scope": {
@@ -4660,7 +4660,7 @@
               "diagnostics": [
                 "T0076"
               ],
-              "peak_rss_kib": 67364
+              "peak_rss_kib": 66704
             },
             "openrcx_ba": {
               "scope": {
@@ -4737,7 +4737,7 @@
               "diagnostics": [
                 "T0076"
               ],
-              "peak_rss_kib": 67340
+              "peak_rss_kib": 66988
             },
             "variant_e0d074d": {
               "scope": {
@@ -4815,7 +4815,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67104
+              "peak_rss_kib": 66992
             },
             "variant_pads_ends": {
               "scope": {
@@ -4893,7 +4893,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67452
+              "peak_rss_kib": 67224
             },
             "variant_any_overlap_plates": {
               "scope": {
@@ -4971,7 +4971,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67468
+              "peak_rss_kib": 67168
             },
             "variant_strict_plates": {
               "scope": {
@@ -5049,7 +5049,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 66964
+              "peak_rss_kib": 67188
             }
           },
           "vs_openrcx": {
@@ -5603,7 +5603,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67216
+              "peak_rss_kib": 66964
             },
             "openrcx": {
               "scope": {
@@ -5681,7 +5681,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 66896
+              "peak_rss_kib": 67152
             },
             "magic_ba": {
               "scope": {
@@ -5758,7 +5758,7 @@
               "diagnostics": [
                 "T0076"
               ],
-              "peak_rss_kib": 67672
+              "peak_rss_kib": 67012
             },
             "openrcx_ba": {
               "scope": {
@@ -5835,7 +5835,7 @@
               "diagnostics": [
                 "T0076"
               ],
-              "peak_rss_kib": 67520
+              "peak_rss_kib": 66920
             },
             "variant_e0d074d": {
               "scope": {
@@ -5913,7 +5913,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67352
+              "peak_rss_kib": 67064
             },
             "variant_pads_ends": {
               "scope": {
@@ -5991,7 +5991,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67044
+              "peak_rss_kib": 66916
             },
             "variant_any_overlap_plates": {
               "scope": {
@@ -6069,7 +6069,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67296
+              "peak_rss_kib": 67092
             },
             "variant_strict_plates": {
               "scope": {
@@ -6147,7 +6147,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67452
+              "peak_rss_kib": 67192
             }
           },
           "vs_openrcx": {
@@ -6701,7 +6701,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 62640
+              "peak_rss_kib": 62636
             },
             "openrcx": {
               "scope": {
@@ -6779,7 +6779,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 62948
+              "peak_rss_kib": 62488
             },
             "magic_ba": {
               "scope": {
@@ -6856,7 +6856,7 @@
               "diagnostics": [
                 "T0076"
               ],
-              "peak_rss_kib": 63220
+              "peak_rss_kib": 62720
             },
             "openrcx_ba": {
               "scope": {
@@ -6933,7 +6933,7 @@
               "diagnostics": [
                 "T0076"
               ],
-              "peak_rss_kib": 62416
+              "peak_rss_kib": 62612
             },
             "variant_e0d074d": {
               "scope": {
@@ -7011,7 +7011,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 62588
+              "peak_rss_kib": 62392
             },
             "variant_pads_ends": {
               "scope": {
@@ -7089,7 +7089,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 62780
+              "peak_rss_kib": 62824
             },
             "variant_any_overlap_plates": {
               "scope": {
@@ -7167,7 +7167,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 63016
+              "peak_rss_kib": 62244
             },
             "variant_strict_plates": {
               "scope": {
@@ -7245,7 +7245,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 62720
+              "peak_rss_kib": 62216
             }
           },
           "vs_openrcx": {
@@ -7851,8 +7851,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.014784606988541782,
-          "peak_rss_kib": 8700
+          "elapsed_seconds": 0.015338085009716451,
+          "peak_rss_kib": 9416
         },
         "nom": {
           "output": {
@@ -7908,8 +7908,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.014854979002848268,
-          "peak_rss_kib": 9220
+          "elapsed_seconds": 0.01429240102879703,
+          "peak_rss_kib": 8952
         },
         "max": {
           "output": {
@@ -7965,8 +7965,8 @@
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.014163510000798851,
-          "peak_rss_kib": 9060
+          "elapsed_seconds": 0.014087088988162577,
+          "peak_rss_kib": 9016
         }
       },
       "read_only": {
@@ -8002,11 +8002,11 @@
           },
           "spef": {
             "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/gf180_rcx_rcx/gf180_rcx_min.spef",
-            "sha256": "8c31eac38063c08c8222c1b195ce3844f425c6d448805438c1f977be0d566701",
+            "sha256": "185a12609623f4c77334cf58352ca79efa42a5e5eac125a8681064d7443ccb8b",
             "bytes": 16194
           },
-          "container_peak_rss_kib": 125852,
-          "elapsed_seconds": 0.4439715800108388,
+          "container_peak_rss_kib": 125660,
+          "elapsed_seconds": 0.43536982004297897,
           "receipt": "gf180_rcx_min"
         },
         "nom": {
@@ -8017,11 +8017,11 @@
           },
           "spef": {
             "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/gf180_rcx_rcx/gf180_rcx_nom.spef",
-            "sha256": "93222e4580af27ee487606f2a8ac8a9d0c008beb22c693be6da139ad1a3f98a6",
+            "sha256": "5ac8a52ccaf7598b9d4087fe8d3232c59075ba0aa64ee16a27ae7fcc289f27ce",
             "bytes": 16162
           },
-          "container_peak_rss_kib": 126364,
-          "elapsed_seconds": 0.4168510350282304,
+          "container_peak_rss_kib": 126032,
+          "elapsed_seconds": 0.4217987779993564,
           "receipt": "gf180_rcx_nom"
         },
         "max": {
@@ -8032,11 +8032,11 @@
           },
           "spef": {
             "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/gf180_rcx_rcx/gf180_rcx_max.spef",
-            "sha256": "59fae70640b10dab8653afe0e2c2e36dcf8dcc9f4398837f84948991f8fcd79a",
+            "sha256": "70fa329eae23cfadb9a9dba961eda69cffc66af96d9f9e0e03d137e93668d4c4",
             "bytes": 16155
           },
-          "container_peak_rss_kib": 126416,
-          "elapsed_seconds": 0.4242132790386677,
+          "container_peak_rss_kib": 126156,
+          "elapsed_seconds": 0.4238539639627561,
           "receipt": "gf180_rcx_max"
         },
         "flow_reference_nominal": {
@@ -8062,12 +8062,12 @@
             {
               "label": "c_min_0",
               "wall_seconds": 0.464,
-              "peak_rss_kib": 67424
+              "peak_rss_kib": 67752
             },
             {
               "label": "r_min_0",
               "wall_seconds": 0.264,
-              "peak_rss_kib": 67720
+              "peak_rss_kib": 68524
             }
           ],
           "terminal_layout": {
@@ -8103,12 +8103,12 @@
             {
               "label": "c_nom_0",
               "wall_seconds": 0.464,
-              "peak_rss_kib": 67920
+              "peak_rss_kib": 67756
             },
             {
               "label": "r_nom_0",
-              "wall_seconds": 0.314,
-              "peak_rss_kib": 67284
+              "wall_seconds": 0.264,
+              "peak_rss_kib": 66876
             }
           ],
           "terminal_layout": {
@@ -8144,12 +8144,12 @@
             {
               "label": "c_max_0",
               "wall_seconds": 0.464,
-              "peak_rss_kib": 67236
+              "peak_rss_kib": 67712
             },
             {
               "label": "r_max_0",
               "wall_seconds": 0.264,
-              "peak_rss_kib": 67520
+              "peak_rss_kib": 67840
             }
           ],
           "terminal_layout": {
@@ -8184,7 +8184,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/gf180_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/gf180_rcx_rcx/gf180_rcx_min.spef",
             "native_sha256": "4fcf65bd54a77f0103d3207c068397442671776514caf3f81c20e367f70355f6",
-            "reference_sha256": "8c31eac38063c08c8222c1b195ce3844f425c6d448805438c1f977be0d566701",
+            "reference_sha256": "185a12609623f4c77334cf58352ca79efa42a5e5eac125a8681064d7443ccb8b",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -9202,7 +9202,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/gf180_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/gf180_rcx_rcx/gf180_rcx_nom.spef",
             "native_sha256": "a15bf04616d304ae165682c98742141e1f936b678fd5f2d7e9c1c8653deeda71",
-            "reference_sha256": "93222e4580af27ee487606f2a8ac8a9d0c008beb22c693be6da139ad1a3f98a6",
+            "reference_sha256": "5ac8a52ccaf7598b9d4087fe8d3232c59075ba0aa64ee16a27ae7fcc289f27ce",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -10183,7 +10183,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/gf180_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/.work/runs/final/pre/gf180_rcx_rcx/gf180_rcx_max.spef",
             "native_sha256": "51888acdfb6b8d48fdd67b3cc921bff319e1d5e8a18cdae6b22bddafbda69d28",
-            "reference_sha256": "59fae70640b10dab8653afe0e2c2e36dcf8dcc9f4398837f84948991f8fcd79a",
+            "reference_sha256": "70fa329eae23cfadb9a9dba961eda69cffc66af96d9f9e0e03d137e93668d4c4",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -11354,7 +11354,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120256
+              "peak_rss_kib": 119684
             },
             "openrcx": {
               "scope": {
@@ -11433,7 +11433,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 119584
+              "peak_rss_kib": 120212
             },
             "magic_ba": {
               "scope": {
@@ -11511,7 +11511,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 119820
+              "peak_rss_kib": 119828
             },
             "openrcx_ba": {
               "scope": {
@@ -11589,7 +11589,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120164
+              "peak_rss_kib": 120492
             },
             "variant_e0d074d": {
               "scope": {
@@ -11668,7 +11668,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 119832
+              "peak_rss_kib": 119904
             },
             "variant_pads_ends": {
               "scope": {
@@ -11747,7 +11747,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120116
+              "peak_rss_kib": 120132
             },
             "variant_any_overlap_plates": {
               "scope": {
@@ -11826,7 +11826,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120336
+              "peak_rss_kib": 120080
             },
             "variant_strict_plates": {
               "scope": {
@@ -11905,7 +11905,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 119852
+              "peak_rss_kib": 118884
             }
           },
           "vs_openrcx": {
@@ -12460,7 +12460,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120076
+              "peak_rss_kib": 119144
             },
             "openrcx": {
               "scope": {
@@ -12539,7 +12539,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 119940
+              "peak_rss_kib": 120100
             },
             "magic_ba": {
               "scope": {
@@ -12617,7 +12617,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 119860
+              "peak_rss_kib": 119768
             },
             "openrcx_ba": {
               "scope": {
@@ -12695,7 +12695,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 119576
+              "peak_rss_kib": 119652
             },
             "variant_e0d074d": {
               "scope": {
@@ -12774,7 +12774,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 119868
+              "peak_rss_kib": 119848
             },
             "variant_pads_ends": {
               "scope": {
@@ -12853,7 +12853,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 119204
+              "peak_rss_kib": 118668
             },
             "variant_any_overlap_plates": {
               "scope": {
@@ -12932,7 +12932,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120116
+              "peak_rss_kib": 119820
             },
             "variant_strict_plates": {
               "scope": {
@@ -13011,7 +13011,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120352
+              "peak_rss_kib": 119524
             }
           },
           "vs_openrcx": {
@@ -13566,7 +13566,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 135712
+              "peak_rss_kib": 135412
             },
             "openrcx": {
               "scope": {
@@ -13645,7 +13645,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 135356
+              "peak_rss_kib": 135368
             },
             "magic_ba": {
               "scope": {
@@ -13723,7 +13723,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 135296
+              "peak_rss_kib": 135612
             },
             "openrcx_ba": {
               "scope": {
@@ -13801,7 +13801,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 135800
+              "peak_rss_kib": 135856
             },
             "variant_e0d074d": {
               "scope": {
@@ -13880,7 +13880,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 136092
+              "peak_rss_kib": 135904
             },
             "variant_pads_ends": {
               "scope": {
@@ -13959,7 +13959,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 135456
+              "peak_rss_kib": 136048
             },
             "variant_any_overlap_plates": {
               "scope": {
@@ -14038,7 +14038,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 136468
+              "peak_rss_kib": 135700
             },
             "variant_strict_plates": {
               "scope": {
@@ -14117,7 +14117,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 135820
+              "peak_rss_kib": 135348
             }
           },
           "vs_openrcx": {
