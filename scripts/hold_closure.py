@@ -99,6 +99,18 @@ EXTRACT_LIMITS = {'legacy': [], 'track': ['--max-extract-work', '12800000000', '
                                           # SERV (scale-stream layout): 8,054 candidates on one wire run
                                           # (44 B scratch each); RC elements 4.3M of the 8M ceiling.
                                           '--max-extract-candidates', '65536', '--max-rc-elements', '8000000']}
+# check-antenna rows kept in a report (all rows of every required design;
+# a SERV-size report of every row exceeds the 64 MiB process output cap).
+ANTENNA_REPORT_ROWS = '16384'
+
+
+def spef_file_limit(argv: list[str]) -> int:
+    """Process file-size limit of an extract step: its --max-spef-mib cap
+    (default 32 MiB) plus 1 MiB, never below the harness log cap."""
+    mib = int(argv[argv.index('--max-spef-mib') + 1]) if '--max-spef-mib' in argv else 32
+    return max(64 * 1024 ** 2, (mib + 1) * 1024 ** 2)
+
+
 # RustSTA SPEF import limits per recipe (legacy: this script's original
 # values; track: SERV-size blocks, below the engine's own hard limits).
 STA_RC_LIMITS = {'legacy': ['--max-rc-nodes', '200000', '--max-rc-elements', '200000'],
@@ -332,9 +344,13 @@ class Flow:
         rec['spef'] = {}
         for c in self.libs:
             spef = h.root / f'{t}_{self.rc[c]}.spef'
-            x = h.json_command(f'{t}_extract_{self.rc[c]}', list(map(str, road + ['extract', '--rc-profile', self.rc_profiles[c],
-                                                                                    '--corner', self.rc[c], '--out', spef,
-                                                                                    *EXTRACT_LIMITS[self.design.recipe]])))
+            argv = list(map(str, road + ['extract', '--rc-profile', self.rc_profiles[c], '--corner', self.rc[c],
+                                         '--out', spef, *EXTRACT_LIMITS[self.design.recipe]]))
+            # The SPEF is capped by the extractor's own --max-spef-mib; the
+            # process file-size limit must not be tighter than that cap.
+            r = h.run(f'{t}_extract_{self.rc[c]}', argv, file_limit_bytes=spef_file_limit(argv))
+            require(r['exit_code'] == 0, f'{t}_extract_{self.rc[c]}: process exited {r["exit_code"]}; see receipt')
+            x = json.loads(bounded_text(Path(r['stdout'])))
             require(x['status'] == 'ok' and not x['unannotated_signal_nets'], f'{t}: native extraction incomplete')
             rec['spef'][c] = dict(path=str(spef), sha256=x['output']['sha256'], rc=self.rc[c], diagnostics=x['diagnostics'])
         return rec
@@ -575,7 +591,9 @@ class Flow:
 
     # ------------------------------------------------------------ antenna
     def check_antenna(self, label: str, workspace: str, extra: Path | None = None) -> dict:
-        argv = [self.tools['rustroad'], '--workspace', workspace, 'check-antenna']
+        # Rows are worst-first; ANTENNA_REPORT_ROWS keeps every row of the
+        # required designs (regfile 8,334) and bounds SERV-size reports.
+        argv = [self.tools['rustroad'], '--workspace', workspace, 'check-antenna', '--max-rows', ANTENNA_REPORT_ROWS]
         if extra is not None:
             argv += ['--extra-shapes', extra]
         out = self.h.root / f'{label}_antenna.json'
