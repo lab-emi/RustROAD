@@ -100,11 +100,16 @@ def report(run_dir: Path, work: Path) -> list:
         w.mkdir(parents=True, exist_ok=False)
         ideal = w / "ideal_clock.sdc"
         ideal.write_text("".join(x for x in sdc_text.splitlines(keepends=True) if "set_propagated_clock" not in x))
-        row = dict(design=summary["design"]["name"], pdk=tag, run=str(run_dir), period_ns=period)
-        closure = (pdk["statuses"].get("hold_closure") or {}).get("iterations") or []
-        final_it = len(closure) - 1
+        row = dict(design=summary["design"]["name"], pdk=tag, run=str(run_dir), period_ns=period,
+                   final_iteration=None)
+        hc = pdk["statuses"].get("hold_closure") or {}
+        closure = hc.get("iterations") or []
+        # The loop's selected layout (best complete one), else the last.
+        final_it = hc.get("final_iteration", len(closure) - 1)
+        row["final_iteration"] = final_it
         final_mapped = None
-        for cand in (f"{tag}_i{final_it}_mapped_sized.v", f"{tag}_i{final_it}_mapped.v", f"{tag}_i{final_it}_mapped_ant.v"):
+        for cand in (f"{tag}_i{final_it}_mapped_sized.v", f"{tag}_i{final_it}_mapped.v", f"{tag}_i{final_it}_mapped_ant.v",
+                     f"{tag}_i{final_it}_mapped_hold_sized.v"):
             if (run_dir / cand).is_file():
                 final_mapped = run_dir / cand
         for label, netlist in (("prelayout_synth", run_dir / f"{tag}_mapped.v"), ("prelayout_final", final_mapped)):
