@@ -87,6 +87,17 @@ on stdout.
   `placement` report: HPWL (centre to centre, DBU) of the result, of the
   global placement and of fixed-order packing of the same cells into the same
   intervals (`baseline_hpwl_dbu`).
+* **Timing-driven weights** (`place --net-weights`, `rustroad.net-weights.v1`):
+  integer per-net weights (1000 = 1.0, at most 16,000) scale the springs and
+  the detailed-placement HPWL cost; unit weights are bit-identical to the
+  unweighted placer (`net_weights` in the report: applied, unmatched,
+  weighted HPWL).
+* **Seeded ECO placement** (`place --seed`, `rustroad.placement-seed.v1`):
+  seeded cells go straight to legalization from their seed, new cells start
+  at the mean of their seeded/fixed net neighbours; no global solve
+  (`seed` in the report: seeded/unseeded/unmatched, displacement). Weights
+  and seed are stored with the physical bundle, so the CTS re-placement uses
+  them too. The closure loop uses both (`docs/closure.md`).
 
 ## Router (`track_router` in the routing profile; needs `lef_rules`)
 

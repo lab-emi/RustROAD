@@ -12,8 +12,13 @@ bound artifact) and runs the oracle that must catch it; the control is
   removed_via       one routing via SREF of a two-terminal signal net deleted
                     -> Netgen LVS AND KLayout LVS fail
   removed_hold_cell the hold-buffer chain of the worst iteration-0 hold
-                    endpoint removed from the final netlist, fresh layout and
-                    extraction -> RustSTA AND OpenSTA hold below the margin
+                    endpoint removed from the final netlist (a chain in front
+                    of the endpoint, else one on a recorded path-aware point
+                    of its path, else every hold cell), fresh layout and
+                    extraction -> RustSTA AND OpenSTA hold below the margin;
+                    when the closure loop's DRV buffers still keep hold met
+                    without it, every hold cell and ECO buffer is removed
+                    (recorded as `escalated`)
   planted_hold_uncertainty
                     only when no hold cell was inserted (removed_hold_cell is
                     then not applicable): a copy of the rendered SDC with
@@ -43,7 +48,10 @@ bound artifact) and runs the oracle that must catch it; the control is
                     64 ports x 3 lengths, the native check flags: a pin whose
                     route leaves upward has no gate on the I/O layer) ->
                     native check-antenna and the foundry deck both flag it
-                    (margin evidence recorded)
+                    (margin evidence recorded). A plant the conservative
+                    native check flags but the deck passes is recorded in
+                    `deck_plants` and the next candidate is planted (at
+                    most MAX_DECK_PLANTS deck runs)
 """
 from __future__ import annotations
 
@@ -204,8 +212,49 @@ def remove_chain(text: str, sink: str, prefix: str, buffers: dict[str, tuple[str
             continue
         if any(re.fullmatch(r"\s*wire\s+" + re.escape(n) + r"\s*;\s*", line) for n in nets):
             continue
-        if m and m[2] == inst:
-            line = line.replace(f".{pin}({nets[0]})", f".{pin}({net})")
+        # Every pin the chain drove (one sink, or every sink of a net-level
+        # path-aware point) goes back to the original net.
+        if m:
+            line = line.replace(f"({nets[0]})", f"({net})")
+        out.append(line)
+    return "".join(out), removed
+
+
+def remove_all_chains(text: str, prefix: str | tuple, buffers: dict[str, tuple[str, str]]) -> tuple[str, list[str]]:
+    """Remove every `prefix` buffer of the netlist and reconnect each pin it
+    drove (directly or through further removed buffers) to the net in front
+    of the chain. Used when no single chain feeds an iteration-0 endpoint
+    (path-aware hold chains whose output a DRV buffer re-drives)."""
+    lines = text.splitlines(keepends=True)
+    hops = {}
+    removed = []
+    for line in lines:
+        m = INSTANCE.match(line)
+        if m and m[2].startswith(prefix) and m[1] in buffers:
+            conns = dict(L.CONN.findall(m[3]))
+            i, o = buffers[m[1]]
+            if i in conns and o in conns:
+                hops[conns[o].strip()] = conns[i].strip()
+                removed.append(m[2])
+    if not removed:
+        raise GateError(f"no {prefix} cell in the netlist")
+
+    def root(net):
+        for _ in range(len(hops) + 1):
+            if net not in hops:
+                return net
+            net = hops[net]
+        raise GateError("cyclic ECO buffer chain")
+    out = []
+    for line in lines:
+        m = INSTANCE.match(line)
+        if m and m[2] in removed:
+            continue
+        if any(re.fullmatch(r"\s*wire\s+" + re.escape(n) + r"\s*;\s*", line) for n in hops):
+            continue
+        if m or line.lstrip().startswith("assign"):
+            for n in hops:
+                line = line.replace(f"({n})", f"({root(n)})").replace(f"= {n};", f"= {root(n)};")
         out.append(line)
     return "".join(out), removed
 
@@ -225,25 +274,82 @@ def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
         worst = (hold, corner, ep)
         break
     if worst is None:
-        raise GateError("no hold chain feeds an iteration-0 hold endpoint; the control cannot be planted")
+        # Path-aware hold ECO: the chain sits on the endpoint's worst hold
+        # path (a sink pin or a whole net upstream), recorded with the points.
+        points = [pt for rec in b["iterations"] for pt in ((rec.get("hold_eco") or {}).get("points") or [])
+                  if isinstance(rec.get("hold_eco"), dict)]
+        for hold, corner, ep in sorted((v["hold"], c, e) for c, rows in it0.items() for e, v in rows.items() if "/" in e):
+            for pt in points:
+                if ep not in pt.get("endpoints", []):
+                    continue
+                for sink in pt.get("sinks", []):
+                    try:
+                        text, removed = remove_chain(source, sink, "rr_eco_hold_", buffers)
+                    except GateError:
+                        continue
+                    worst = (hold, corner, ep)
+                    break
+                if worst:
+                    break
+            if worst:
+                break
+    if worst is None:
+        # No chain can be traced from an endpoint (e.g. a DRV buffer now
+        # drives the chain's output): remove every hold cell instead.
+        text, removed = remove_all_chains(source, "rr_eco_hold_", buffers)
+        worst = min((v["hold"], c, e) for c, rows in it0.items() for e, v in rows.items() if "/" in e)
     work.mkdir(parents=True, exist_ok=True)
-    netlist = work / "no_hold_cell_mapped.v"
-    netlist.write_text(text)
-    hc = ctx.make_harness(work, ctx.budgets)
-    flow = gate.flow(hc)
-    phys = flow.physical(0, netlist)
-    sta = flow.sta(0, phys)
     margin = ctx.budgets["hold_margin_ns"]
-    rust = {c: v["worst_hold_ns"] for c, v in sta["corners"].items()}
-    corner = min(rust, key=rust.get)
-    ref = T.opensta(hc, f"{gate.tag}_ctl_hold_opensta_{corner}", ctx.tool_paths["opensta"], flow.libs[corner],
-                    Path(phys["paths"]["netlist"]), ctx.top, flow.sdc, Path(phys["spef"][corner]["path"]))
-    ref_worst = min(ref["hold"].values())
+
+    def plant(label: str, text: str) -> dict:
+        sub = work / label
+        sub.mkdir(parents=True, exist_ok=True)
+        netlist = sub / "no_hold_cell_mapped.v"
+        netlist.write_text(text)
+        hc = ctx.make_harness(sub, ctx.budgets)
+        flow = gate.flow(hc)
+        phys = flow.physical(0, netlist)
+        sta = flow.sta(0, phys)
+        rust = {c: v["worst_hold_ns"] for c, v in sta["corners"].items()}
+        corner = min(rust, key=rust.get)
+        ref = T.opensta(hc, f"{gate.tag}_ctl_hold_opensta_{corner}", ctx.tool_paths["opensta"], flow.libs[corner],
+                        Path(phys["paths"]["netlist"]), ctx.top, flow.sdc, Path(phys["spef"][corner]["path"]))
+        return dict(rust=rust, corner=corner, ref_worst=min(ref["hold"].values()), processes=len(hc.receipts),
+                    peak=max((r["peak_rss_kib"] for r in hc.receipts if r.get("peak_rss_kib")), default=None))
+    first = plant("chain", text)
+    escalated = None
+    if not (first["rust"][first["corner"]] < margin and first["ref_worst"] < margin):
+        # The closure loop's DRV buffers also delay the hold paths (a buffer
+        # behind a hold chain keeps hold met without it): remove every delay
+        # insertion of the loop -- hold cells and ECO buffers; resizes stay.
+        both = dict(buffers)
+        both.update(eco_buffer_pins(b))
+        text2, removed2 = remove_all_chains(source, ("rr_eco_hold_", "rr_eco_buf_"), both)
+        escalated = dict(removed=removed2, first=dict(ruststa_worst_hold_ns=first["rust"],
+                                                      opensta_worst_hold_ns=first["ref_worst"], removed=removed))
+        first = plant("all_insertions", text2)
+        removed = removed2
+    rust, corner, ref_worst = first["rust"], first["corner"], first["ref_worst"]
     return control("RustSTA and OpenSTA hold gate on a fresh layout", rust[corner] < margin and ref_worst < margin,
                    removed=removed, sink=worst[2], iteration0_hold_ns=worst[0], worst_corner=corner,
                    ruststa_worst_hold_ns=rust, opensta_worst_hold_ns=ref_worst, margin_ns=margin,
-                   processes=len(hc.receipts), peak_rss_kib=max((r["peak_rss_kib"] for r in hc.receipts
-                                                                if r.get("peak_rss_kib")), default=None))
+                   escalated=escalated, processes=first["processes"], peak_rss_kib=first["peak"])
+
+
+def eco_buffer_pins(b) -> dict:
+    """(input, output) pins of every identity-function sizing-profile master
+    (the masters the closure loop's buffer insertion uses)."""
+    sizing = b["flow"].design.sizing_profile
+    if sizing is None:
+        return {}
+    out = {}
+    for f in json.loads(Path(sizing).read_text())["families"]:
+        ins = [p for p, d in f["pins"].items() if d == "input"]
+        outs = [p for p, d in f["pins"].items() if d == "output"]
+        if len(ins) == 1 and len(outs) == 1 and len(f["pins"]) == 2:
+            for c in f["cells"]:
+                out[c["name"]] = (ins[0], outs[0])
+    return out
 
 
 def hold_cells_inserted(b) -> bool:
@@ -467,6 +573,10 @@ def antenna_candidates(netlist_text: str, bits: list[str]) -> list[str]:
     return sorted((b for b in bits if b not in diode and loads[b] > 0), key=lambda b: (loads[b], bits.index(b)))
 
 
+# Deck runs of the antenna control (each a full foundry antenna check).
+MAX_DECK_PLANTS = 3
+
+
 def antenna_planted(ctx, gate, b, work: Path) -> dict:
     flow, phys = b["flow"], b["phys"]
     work.mkdir(parents=True, exist_ok=True)
@@ -478,6 +588,8 @@ def antenna_planted(ctx, gate, b, work: Path) -> dict:
     # the first candidate/length the native check flags is planted.
     base = flow.plant_shape(phys, port=candidates[0])["length_um"]
     k, native, shape, hit = 0, None, None, False
+    tried = []
+    deck = None
     for port in candidates[:64]:
         for length in (base, 2 * base, 4 * base):
             shape = flow.plant_shape(phys, port=port, length_um=length)
@@ -490,13 +602,20 @@ def antenna_planted(ctx, gate, b, work: Path) -> dict:
             hit = any(v["net"] == shape["net"] for v in native["violated"])
             if hit:
                 break
-        if hit:
+        if not hit:
+            continue
+        planted = flow.plant_gds(f"{gate.tag}_ctl_antenna{len(tried) or ''}", b["gds"], b["gds_export"], shape)
+        deck = flow.deck_antenna(f"{gate.tag}_ctl_antenna{len(tried) or ''}", planted, phys)
+        tried.append(dict(port=shape["net"], length_um=shape["length_um"], deck=deck["status"]))
+        # The native model is conservative (safety margin, LEF gate areas):
+        # a plant it flags but the deck passes is recorded and the next
+        # candidate is tried, at most MAX_DECK_PLANTS deck runs.
+        if deck["status"] == "failed" or len(tried) >= MAX_DECK_PLANTS:
             break
-    if not hit:
+        hit = False
+    if deck is None:
         raise GateError(f"no input pin whose I/O-layer partial net reaches a gate ({k} plants tried): every route "
                         "leaves its pin upward, so the planted strip has no gate at that layer's etch")
-    planted = flow.plant_gds(f"{gate.tag}_ctl_antenna", b["gds"], b["gds_export"], shape)
-    deck = flow.deck_antenna(f"{gate.tag}_ctl_antenna", planted, phys)
     report = json.loads(Path(native["report"]).read_text())
     rows = [c for c in report["checks"] if c["net"] == shape["net"] and c["violated"]]
     deck_summary = json.loads(Path(deck["summary"]).read_text())
@@ -513,7 +632,7 @@ def antenna_planted(ctx, gate, b, work: Path) -> dict:
     return control("native check-antenna and the foundry antenna deck",
                    native["status"] == "violated" and bool(rows) and deck["status"] == "failed",
                    port=shape["net"], layer=shape["layer"], length_um=shape["length_um"],
-                   candidates=candidates[:4],
+                   candidates=candidates[:4], deck_plants=tried,
                    native=dict(status=native["status"], violated=native["violated"][:3]),
                    deck=dict(status=deck["status"], count=deck["count"], by_rule=deck["by_rule"]),
                    margin_check=check, peak_rss_kib=deck_summary["resources"]["peak_rss_kib"])

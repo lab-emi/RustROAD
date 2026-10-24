@@ -120,6 +120,87 @@ pub struct PhysicalConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub io_plan: Option<rustroad_core::io::IoPlan>,
 }
+/// Schema of a net-weight file (`place --net-weights`).
+pub const NET_WEIGHTS_SCHEMA: &str = "rustroad.net-weights.v1";
+/// Largest number of weighted nets in one file.
+pub const MAX_WEIGHTED_NETS: usize = 1_000_000;
+/// Timing-driven placement weights: net name -> weight in milli-units
+/// (1000 = 1.0, at most `rustroad_core::place::MAX_NET_WEIGHT`). Nets not
+/// listed keep 1000.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetWeights {
+    pub schema: String,
+    /// Free-form provenance (the STA revision and rule that produced them).
+    #[serde(default)]
+    pub source: serde_json::Value,
+    pub weights: std::collections::BTreeMap<String, u32>,
+}
+impl NetWeights {
+    pub fn validate(&self) -> Result<()> {
+        if self.schema != NET_WEIGHTS_SCHEMA {
+            return Err(Error::Invalid(format!(
+                "net weights schema {} is not {NET_WEIGHTS_SCHEMA}",
+                self.schema
+            )));
+        }
+        if self.weights.len() > MAX_WEIGHTED_NETS {
+            return Err(Error::Budget("net weights: too many nets".into()));
+        }
+        if let Some((n, w)) = self
+            .weights
+            .iter()
+            .find(|(_, w)| **w == 0 || **w > rustroad_core::place::MAX_NET_WEIGHT)
+        {
+            return Err(Error::Invalid(format!(
+                "net weight {w} of {n} is outside 1..={}",
+                rustroad_core::place::MAX_NET_WEIGHT
+            )));
+        }
+        Ok(())
+    }
+}
+/// Schema of a placement seed file (`place --seed`).
+pub const PLACEMENT_SEED_SCHEMA: &str = "rustroad.placement-seed.v1";
+/// ECO placement seed: instance name -> lower-left (DBU), typically the
+/// previous layout of the same design. Seeded cells are legalized from their
+/// seed; new cells start at their net neighbours (no global placement).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlacementSeed {
+    pub schema: String,
+    #[serde(default)]
+    pub source: serde_json::Value,
+    pub cells: std::collections::BTreeMap<String, [i64; 2]>,
+}
+impl PlacementSeed {
+    pub fn validate(&self) -> Result<()> {
+        if self.schema != PLACEMENT_SEED_SCHEMA {
+            return Err(Error::Invalid(format!(
+                "placement seed schema {} is not {PLACEMENT_SEED_SCHEMA}",
+                self.schema
+            )));
+        }
+        if self.cells.len() > MAX_WEIGHTED_NETS {
+            return Err(Error::Budget("placement seed: too many cells".into()));
+        }
+        Ok(())
+    }
+}
+/// What the seeded placer did.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeedUse {
+    /// Cells placed from their seed.
+    pub seeded: usize,
+    /// Cells without a seed (new ECO cells, renamed clock buffers).
+    pub unseeded: usize,
+    /// Seed entries no current cell has (removed or renamed cells).
+    pub unmatched: usize,
+    /// Legalization displacement of the seeded cells (Manhattan, DBU).
+    pub max_displacement_dbu: i64,
+    pub total_displacement_dbu: i64,
+}
 /// Wirelength record of the last placement (centre-to-centre HPWL, DBU).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -131,6 +212,25 @@ pub struct PlacementReport {
     pub global_hpwl_dbu: u64,
     pub work: u64,
     pub status: String,
+    /// Timing-driven weights applied (absent: unweighted placement).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_weights: Option<WeightUse>,
+    /// Seeded ECO placement (absent: global placement).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<SeedUse>,
+}
+/// What the placer did with `NetWeights`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeightUse {
+    /// Listed nets found in the placement model and weighted.
+    pub applied: usize,
+    /// Listed nets the model does not have (supply, unconnected or renamed
+    /// nets); reported, never guessed.
+    pub unmatched: usize,
+    pub max_weight: u32,
+    /// Weighted HPWL / 1000 of the result (same nets as `hpwl_dbu`).
+    pub weighted_hpwl_dbu: u64,
 }
 impl PhysicalConfig {
     pub fn validate(&self) -> Result<()> {
@@ -1204,6 +1304,32 @@ fn analytic(
         })
         .collect();
     let mut nets: Vec<Vec<rustroad_core::place::PinRef>> = vec![Vec::new(); model.nets.len()];
+    // Timing-driven weights by net name (aliases too); unlisted nets 1000.
+    let mut weights: Vec<u32> = Vec::new();
+    let mut weight_use = None;
+    if let Some(nw) = &bundle.net_weights {
+        nw.validate()?;
+        let mut applied = 0usize;
+        weights = model
+            .nets
+            .iter()
+            .map(|n| {
+                let w = std::iter::once(&n.name)
+                    .chain(&n.aliases)
+                    .find_map(|name| nw.weights.get(name).copied());
+                if w.is_some() {
+                    applied += 1;
+                }
+                w.unwrap_or(1000)
+            })
+            .collect();
+        weight_use = Some(WeightUse {
+            applied,
+            unmatched: nw.weights.len().saturating_sub(applied),
+            max_weight: weights.iter().copied().max().unwrap_or(1000),
+            weighted_hpwl_dbu: 0,
+        });
+    }
     for pin in &model.pins {
         let Some(n) = pin.net else { continue };
         if model.nets[n as usize].use_.is_supply() {
@@ -1227,8 +1353,17 @@ fn analytic(
             }
         }
     }
+    if !weights.is_empty() {
+        weights = weights
+            .into_iter()
+            .zip(&nets)
+            .filter(|(_, n)| n.len() >= 2)
+            .map(|(w, _)| w)
+            .collect();
+    }
     nets.retain(|n| n.len() >= 2);
     let problem = rustroad_core::place::PlaceProblem {
+        weights,
         widths: placed.iter().map(|p| p.width).collect(),
         row_height: design.site.height,
         site: design.site.width,
@@ -1236,14 +1371,42 @@ fn analytic(
         nets,
         intervals: free_intervals(design, bundle)?,
     };
-    let result = rustroad_core::place::place(
-        &problem,
-        pc,
-        &rustroad_core::place::PlaceLimits {
-            max_cells: limits.max_cells,
-            ..Default::default()
-        },
-    )?;
+    let place_limits = rustroad_core::place::PlaceLimits {
+        max_cells: limits.max_cells,
+        ..Default::default()
+    };
+    let mut seed_use = None;
+    let mut seeds = Vec::new();
+    let result = match &bundle.placement_seed {
+        Some(seed) => {
+            seed.validate()?;
+            seeds = design
+                .cells
+                .iter()
+                .take(placed.len())
+                .map(|c| seed.cells.get(&c.name).copied())
+                .collect::<Vec<_>>();
+            let seeded = seeds.iter().filter(|s| s.is_some()).count();
+            seed_use = Some(SeedUse {
+                seeded,
+                unseeded: seeds.len() - seeded,
+                unmatched: seed.cells.len().saturating_sub(seeded),
+                max_displacement_dbu: 0,
+                total_displacement_dbu: 0,
+            });
+            rustroad_core::place::place_seeded(&problem, &seeds, pc, &place_limits)?
+        }
+        None => rustroad_core::place::place(&problem, pc, &place_limits)?,
+    };
+    if let Some(u) = &mut seed_use {
+        for (s, p) in seeds.iter().zip(&result.positions) {
+            if let Some(s) = s {
+                let d = (s[0] - p[0]).abs() + (s[1] - p[1]).abs();
+                u.max_displacement_dbu = u.max_displacement_dbu.max(d);
+                u.total_displacement_dbu = u.total_displacement_dbu.saturating_add(d);
+            }
+        }
+    }
     for (p, xy) in placed.iter_mut().zip(&result.positions) {
         p.x = xy[0];
         p.y = xy[1];
@@ -1268,12 +1431,22 @@ fn analytic(
         }
     }
     Ok(PlacementReport {
-        mode: "analytic_b2b_bisection".into(),
+        mode: if seed_use.is_some() {
+            "seeded_eco_legalize".into()
+        } else {
+            "analytic_b2b_bisection".into()
+        },
+        seed: seed_use,
         hpwl_dbu: result.hpwl,
         baseline_hpwl_dbu: rustroad_core::place::hpwl(&problem, &baseline),
         global_hpwl_dbu: result.global_hpwl,
         work: result.work,
         status: "legal_checked".into(),
+        net_weights: weight_use.map(|u| WeightUse {
+            weighted_hpwl_dbu: rustroad_core::place::weighted_hpwl(&problem, &result.positions)
+                / 1000,
+            ..u
+        }),
     })
 }
 

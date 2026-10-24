@@ -341,11 +341,79 @@ pub fn init(path: &Path, base_rev: &str, design: Design, limits: &Limits) -> Res
 }
 
 pub fn place(path: &Path, base_rev: &str, limits: &Limits) -> Result<Summary> {
+    place_weighted(path, base_rev, limits, None)
+}
+
+pub fn place_weighted(
+    path: &Path,
+    base_rev: &str,
+    limits: &Limits,
+    weights: Option<&Path>,
+) -> Result<Summary> {
+    place_with(path, base_rev, limits, weights, None)
+}
+
+/// `place` with optional timing-driven net weights (`rustroad.net-weights.v1`).
+/// The weights are stored with the physical bundle so that every later
+/// re-placement of the workspace (clock-tree insertion) uses the same ones;
+/// `None` keeps whatever the workspace already has.
+/// `place` with optional timing-driven net weights and an ECO placement
+/// seed (`rustroad.placement-seed.v1`, e.g. the previous layout); both are
+/// stored with the physical bundle like the weights.
+pub fn place_with(
+    path: &Path,
+    base_rev: &str,
+    limits: &Limits,
+    weights: Option<&Path>,
+    seed: Option<&Path>,
+) -> Result<Summary> {
+    let seed = match seed {
+        Some(file) => {
+            let bytes = read_bounded(file, 64 << 20)?;
+            let s: physical::PlacementSeed = serde_json::from_slice(&bytes)
+                .map_err(|e| Error::Invalid(format!("placement seed: {e}")))?;
+            s.validate()?;
+            Some(s)
+        }
+        None => None,
+    };
+    let weights = match weights {
+        Some(file) => {
+            let bytes = read_bounded(file, 64 << 20)?;
+            let w: physical::NetWeights = serde_json::from_slice(&bytes)
+                .map_err(|e| Error::Invalid(format!("net weights: {e}")))?;
+            w.validate()?;
+            Some(w)
+        }
+        None => None,
+    };
     let lock = lock(path, false, true)?;
     let current = head(path)?;
     check_base(base_rev, &current)?;
     let snapshot = load(path, lock, limits)?;
     let mut metadata = snapshot.metadata.clone();
+    if let Some(w) = weights {
+        let bundle = metadata.physical.as_mut().ok_or_else(|| {
+            Error::Invalid("net weights need a physical (import-pdk) workspace".into())
+        })?;
+        if bundle.config.as_ref().is_none_or(|c| c.placer.is_none()) {
+            return Err(Error::Invalid(
+                "net weights need the analytic placer (physical config `placer`)".into(),
+            ));
+        }
+        bundle.net_weights = Some(w);
+    }
+    if let Some(sd) = seed {
+        let bundle = metadata.physical.as_mut().ok_or_else(|| {
+            Error::Invalid("a placement seed needs a physical (import-pdk) workspace".into())
+        })?;
+        if bundle.config.as_ref().is_none_or(|c| c.placer.is_none()) {
+            return Err(Error::Invalid(
+                "a placement seed needs the analytic placer (physical config `placer`)".into(),
+            ));
+        }
+        bundle.placement_seed = Some(sd);
+    }
     if let Some(bundle) = &mut metadata.physical
         && bundle.config.is_some()
     {

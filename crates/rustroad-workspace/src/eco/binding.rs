@@ -161,8 +161,14 @@ pub struct BindingSummary {
     pub hold_rows_bound: usize,
     pub path_stages_bound: usize,
     pub endpoint_rows_bound: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pin_rows_bound: usize,
     pub inserted_instances: Vec<String>,
     pub redirected_pins: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 fn stale(m: impl std::fmt::Display) -> crate::Error {
@@ -406,6 +412,17 @@ pub fn bind_endpoint(t: &NetIndex, endpoint: &str, b: &mut BindingSummary) -> Re
         )));
     }
     b.endpoint_rows_bound += 1;
+    Ok(())
+}
+
+/// A pins-report row: its pin or port must exist in the timed netlist.
+pub fn bind_pin(t: &NetIndex, pin: &str, b: &mut BindingSummary) -> Result<()> {
+    if t.pin_key(&norm(pin)).is_none() {
+        return Err(stale(format!(
+            "pin {pin} of the pins report is absent from the timed netlist"
+        )));
+    }
+    b.pin_rows_bound += 1;
     Ok(())
 }
 

@@ -13,6 +13,11 @@
 //!   into the widest free gap near the median of its nets, and swaps of
 //!   neighbouring cells of equal width.
 //!
+//! * **Net weights (timing-driven mode).** `PlaceProblem::weights` scales
+//!   each net's springs and its detailed-placement HPWL cost by an integer
+//!   weight in milli-units (1000 = 1.0, bounded by `MAX_NET_WEIGHT`); an
+//!   empty vector is the unweighted placer, bit for bit.
+//!
 //! Inputs and outputs are integer DBU; only the solver works in f64. Memory is
 //! O(cells + pins); work is counted against `PlaceLimits::max_work`.
 //! See docs/scaling.md for the estimate.
@@ -42,6 +47,18 @@ pub struct PlaceProblem {
     pub nets: Vec<Vec<PinRef>>,
     /// Sorted by (y, lx); disjoint.
     pub intervals: Vec<Interval>,
+    /// Per-net weight in milli-units (1000 = 1.0), one per `nets` entry, or
+    /// empty for the unweighted placer. Each weight is within
+    /// `1..=MAX_NET_WEIGHT`.
+    pub weights: Vec<u32>,
+}
+/// Largest net weight (milli-units): 16x the default.
+pub const MAX_NET_WEIGHT: u32 = 16_000;
+impl PlaceProblem {
+    /// Weight of net `k` in milli-units (1000 when unweighted).
+    fn weight(&self, k: usize) -> u32 {
+        self.weights.get(k).copied().unwrap_or(1000)
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -148,6 +165,36 @@ pub fn hpwl(problem: &PlaceProblem, positions: &[[i64; 2]]) -> u64 {
             y1 = y1.max(y);
         }
         total = total.saturating_add((x1 - x0) as u64 + (y1 - y0) as u64);
+    }
+    total
+}
+
+/// `hpwl` with every net multiplied by its milli-unit weight.
+pub fn weighted_hpwl(problem: &PlaceProblem, positions: &[[i64; 2]]) -> u64 {
+    let mut total = 0u64;
+    for (k, net) in problem.nets.iter().enumerate() {
+        if net.len() < 2 {
+            continue;
+        }
+        let (mut x0, mut x1, mut y0, mut y1) = (i64::MAX, i64::MIN, i64::MAX, i64::MIN);
+        for p in net {
+            let [x, y] = match *p {
+                PinRef::Cell(c) => {
+                    let c = c as usize;
+                    [
+                        positions[c][0] + problem.widths[c] / 2,
+                        positions[c][1] + problem.row_height / 2,
+                    ]
+                }
+                PinRef::Fixed(f) => f,
+            };
+            x0 = x0.min(x);
+            x1 = x1.max(x);
+            y0 = y0.min(y);
+            y1 = y1.max(y);
+        }
+        let h = (x1 - x0) as u64 + (y1 - y0) as u64;
+        total = total.saturating_add(h.saturating_mul(u64::from(problem.weight(k))));
     }
     total
 }
@@ -292,12 +339,13 @@ fn quadratic(
     let eps = problem.site.max(1) as f64;
     for axis in 0..2 {
         let mut sys = System::new(n);
-        for net in &problem.nets {
+        for (k, net) in problem.nets.iter().enumerate() {
             let p = net.len();
             if p < 2 || p > config.max_net_pins {
                 continue;
             }
             work.add(p as u64)?;
+            let net_weight = f64::from(problem.weight(k)) / 1000.0;
             let coord = |r: &PinRef| -> (Option<usize>, f64) {
                 match *r {
                     PinRef::Cell(c) => (Some(c as usize), pos[c as usize][axis]),
@@ -317,7 +365,7 @@ fn quadratic(
             if lo == hi {
                 hi = if lo == 0 { 1 } else { 0 };
             }
-            let scale = 2.0 / (p as f64 - 1.0);
+            let scale = net_weight * 2.0 / (p as f64 - 1.0);
             let mut link = |i: usize, j: usize| {
                 let (a, b) = (pins[i], pins[j]);
                 let w = scale / (a.1 - b.1).abs().max(eps);
@@ -674,6 +722,8 @@ fn detailed(
         }
         (x1 - x0) as u64 + (y1 - y0) as u64
     };
+    // Weighted (milli-unit) HPWL; with no weights every net counts 1000x,
+    // which orders moves exactly like the unweighted sum.
     let cost = |pos: &[[i64; 2]], cells: &[usize]| -> u64 {
         let mut ks: Vec<u32> = cells
             .iter()
@@ -681,7 +731,9 @@ fn detailed(
             .collect();
         ks.sort_unstable();
         ks.dedup();
-        ks.iter().map(|k| net_hpwl(pos, *k)).sum()
+        ks.iter()
+            .map(|k| net_hpwl(pos, *k).saturating_mul(u64::from(problem.weight(*k as usize))))
+            .fold(0u64, u64::saturating_add)
     };
     let gap = problem.gap;
     for _ in 0..passes {
@@ -847,11 +899,7 @@ fn check_legal(problem: &PlaceProblem, pos: &[[i64; 2]]) -> Result<()> {
     Ok(())
 }
 
-pub fn place(
-    problem: &PlaceProblem,
-    config: &PlaceConfig,
-    limits: &PlaceLimits,
-) -> Result<PlaceResult> {
+fn validate(problem: &PlaceProblem, config: &PlaceConfig, limits: &PlaceLimits) -> Result<()> {
     let n = problem.widths.len();
     if n > limits.max_cells || problem.nets.iter().map(Vec::len).sum::<usize>() > limits.max_pins {
         return Err(budget("problem size"));
@@ -868,6 +916,11 @@ pub fn place(
             (w[0].y, w[0].lx) >= (w[1].y, w[1].lx) || (w[0].y == w[1].y && w[0].ux > w[1].lx)
         })
         || problem.intervals.iter().any(|v| v.ux <= v.lx)
+        || (!problem.weights.is_empty() && problem.weights.len() != problem.nets.len())
+        || problem
+            .weights
+            .iter()
+            .any(|w| *w == 0 || *w > MAX_NET_WEIGHT)
         || config.global_iterations > 100
         || config.cg_iterations > 10_000
         || config.detailed_passes > 100
@@ -883,6 +936,133 @@ pub fn place(
             }
         }
     }
+    Ok(())
+}
+
+/// Passes that propagate targets to unseeded cells through their nets.
+pub const SEED_PASSES: usize = 4;
+
+/// ECO placement from a seed (e.g. the previous layout of the same netlist
+/// before a small netlist edit): every seeded cell targets its seed (lower
+/// left, DBU); a cell without one targets the mean centre of its seeded,
+/// already targeted or fixed net neighbours (index order, `SEED_PASSES`
+/// passes, else the region centre). No global placement runs: the targets
+/// go straight to the same legalizer and detailed placement as `place`, so
+/// unchanged cells move only by the legalization displacement the new cells
+/// cause. Deterministic; work is counted against `PlaceLimits::max_work`.
+pub fn place_seeded(
+    problem: &PlaceProblem,
+    seeds: &[Option<[i64; 2]>],
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
+) -> Result<PlaceResult> {
+    validate(problem, config, limits)?;
+    let n = problem.widths.len();
+    if seeds.len() != n {
+        return Err(invalid("seed count differs from the cell count"));
+    }
+    let mut work = Work {
+        used: 0,
+        max: limits.max_work,
+    };
+    if n == 0 {
+        return Ok(PlaceResult {
+            positions: Vec::new(),
+            hpwl: 0,
+            global_hpwl: 0,
+            work: 0,
+        });
+    }
+    let region = [
+        problem.intervals.iter().map(|v| v.lx).min().unwrap() as f64,
+        problem.intervals.iter().map(|v| v.y).min().unwrap() as f64,
+        problem.intervals.iter().map(|v| v.ux).max().unwrap() as f64,
+        (problem.intervals.iter().map(|v| v.y).max().unwrap() + problem.row_height) as f64,
+    ];
+    let half_h = problem.row_height as f64 / 2.0;
+    let mut target: Vec<Option<[f64; 2]>> = seeds
+        .iter()
+        .enumerate()
+        .map(|(c, s)| {
+            s.map(|p| {
+                [
+                    p[0] as f64 + problem.widths[c] as f64 / 2.0,
+                    p[1] as f64 + half_h,
+                ]
+            })
+        })
+        .collect();
+    let mut nets_of: Vec<Vec<u32>> = vec![Vec::new(); n];
+    for (k, net) in problem.nets.iter().enumerate() {
+        for p in net {
+            if let PinRef::Cell(c) = p {
+                nets_of[*c as usize].push(k as u32);
+            }
+        }
+    }
+    for _ in 0..SEED_PASSES {
+        let mut changed = false;
+        for c in 0..n {
+            if target[c].is_some() {
+                continue;
+            }
+            let (mut sx, mut sy, mut m) = (0.0, 0.0, 0usize);
+            for &k in &nets_of[c] {
+                let net = &problem.nets[k as usize];
+                work.add(net.len() as u64)?;
+                for p in net {
+                    let q = match *p {
+                        PinRef::Cell(o) if o as usize == c => None,
+                        PinRef::Cell(o) => target[o as usize],
+                        PinRef::Fixed(f) => Some([f[0] as f64, f[1] as f64]),
+                    };
+                    if let Some(q) = q {
+                        sx += q[0];
+                        sy += q[1];
+                        m += 1;
+                    }
+                }
+            }
+            if m > 0 {
+                target[c] = Some([sx / m as f64, sy / m as f64]);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let centre = [(region[0] + region[2]) / 2.0, (region[1] + region[3]) / 2.0];
+    let targets: Vec<[f64; 2]> = target.iter().map(|t| t.unwrap_or(centre)).collect();
+    let global: Vec<[i64; 2]> = targets
+        .iter()
+        .enumerate()
+        .map(|(c, t)| {
+            [
+                (t[0] - problem.widths[c] as f64 / 2.0).round() as i64,
+                (t[1] - half_h).round() as i64,
+            ]
+        })
+        .collect();
+    let global_hpwl = hpwl(problem, &global);
+    let mut legal = legalize(problem, &targets, &mut work)?;
+    detailed(problem, &mut legal, config.detailed_passes, &mut work)?;
+    check_legal(problem, &legal)?;
+    Ok(PlaceResult {
+        hpwl: hpwl(problem, &legal),
+        positions: legal,
+        global_hpwl,
+        work: work.used,
+    })
+}
+
+pub fn place(
+    problem: &PlaceProblem,
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
+) -> Result<PlaceResult> {
+    validate(problem, config, limits)?;
+    let n = problem.widths.len();
     let mut work = Work {
         used: 0,
         max: limits.max_work,
@@ -981,6 +1161,7 @@ mod tests {
         }
         nets.push(vec![PinRef::Cell(n as u32 - 1), PinRef::Fixed([width, 50])]);
         PlaceProblem {
+            weights: Vec::new(),
             widths: vec![20; n],
             row_height: 100,
             site: 10,
@@ -1013,6 +1194,101 @@ mod tests {
             "{} vs {}",
             a.hpwl,
             hpwl(&p, &packed)
+        );
+    }
+    #[test]
+    fn unit_weights_are_bit_identical_and_a_heavy_net_gets_shorter() {
+        // Two fixed anchors far apart pull a 2-cell chain; a third net ties
+        // cell 0 to a distant fixed pin.
+        let mut p = chain(12, 3, 400);
+        p.nets
+            .push(vec![PinRef::Cell(0), PinRef::Fixed([400, 250])]);
+        let base = place(&p, &PlaceConfig::default(), &PlaceLimits::default()).unwrap();
+        p.weights = vec![1000; p.nets.len()];
+        let unit = place(&p, &PlaceConfig::default(), &PlaceLimits::default()).unwrap();
+        assert_eq!(base.positions, unit.positions);
+        assert_eq!(base.hpwl, unit.hpwl);
+        let k = p.nets.len() - 1;
+        p.weights[k] = MAX_NET_WEIGHT;
+        let heavy = place(&p, &PlaceConfig::default(), &PlaceLimits::default()).unwrap();
+        check_legal(&p, &heavy.positions).unwrap();
+        let one = |pos: &[[i64; 2]]| {
+            let only = PlaceProblem {
+                weights: Vec::new(),
+                widths: p.widths.clone(),
+                row_height: p.row_height,
+                site: p.site,
+                gap: p.gap,
+                nets: vec![p.nets[k].clone()],
+                intervals: p.intervals.clone(),
+            };
+            hpwl(&only, pos)
+        };
+        assert!(
+            one(&heavy.positions) < one(&base.positions),
+            "{} vs {}",
+            one(&heavy.positions),
+            one(&base.positions)
+        );
+        // Deterministic, and weights outside 1..=MAX_NET_WEIGHT or of the
+        // wrong length are refused.
+        let again = place(&p, &PlaceConfig::default(), &PlaceLimits::default()).unwrap();
+        assert_eq!(heavy.positions, again.positions);
+        for bad in [
+            vec![0; p.nets.len()],
+            vec![MAX_NET_WEIGHT + 1; p.nets.len()],
+            vec![1000],
+        ] {
+            p.weights = bad;
+            assert!(matches!(
+                place(&p, &PlaceConfig::default(), &PlaceLimits::default()),
+                Err(Error::Invalid(_))
+            ));
+        }
+    }
+    #[test]
+    fn seeded_placement_keeps_cells_and_puts_new_ones_near_their_nets() {
+        let p = chain(30, 3, 400);
+        let base = place(&p, &PlaceConfig::default(), &PlaceLimits::default()).unwrap();
+        // Seeded with its own legal result: every cell stays within a few sites.
+        let seeds: Vec<Option<[i64; 2]>> = base.positions.iter().map(|x| Some(*x)).collect();
+        let again =
+            place_seeded(&p, &seeds, &PlaceConfig::default(), &PlaceLimits::default()).unwrap();
+        check_legal(&p, &again.positions).unwrap();
+        let moved: i64 = base
+            .positions
+            .iter()
+            .zip(&again.positions)
+            .map(|(a, b)| (a[0] - b[0]).abs() + (a[1] - b[1]).abs())
+            .sum();
+        assert!(again.hpwl <= base.hpwl, "{} vs {}", again.hpwl, base.hpwl);
+        assert!(moved <= 30 * 100, "total displacement {moved}");
+        // Cell 15 loses its seed: it lands next to its chain neighbours.
+        let mut s2 = seeds.clone();
+        s2[15] = None;
+        let r = place_seeded(&p, &s2, &PlaceConfig::default(), &PlaceLimits::default()).unwrap();
+        check_legal(&p, &r.positions).unwrap();
+        let d = |a: [i64; 2], b: [i64; 2]| (a[0] - b[0]).abs() + (a[1] - b[1]).abs();
+        assert!(
+            d(r.positions[15], base.positions[14]) <= 200,
+            "{:?}",
+            r.positions[15]
+        );
+        // Deterministic; a seed vector of the wrong length is refused.
+        assert_eq!(
+            r.positions,
+            place_seeded(&p, &s2, &PlaceConfig::default(), &PlaceLimits::default())
+                .unwrap()
+                .positions
+        );
+        assert!(
+            place_seeded(
+                &p,
+                &seeds[..3],
+                &PlaceConfig::default(),
+                &PlaceLimits::default()
+            )
+            .is_err()
         );
     }
     #[test]

@@ -1,0 +1,1108 @@
+{
+ "schema": "rustroad.critical-path.v1",
+ "rows": [
+  {
+   "design": "pipeline",
+   "pdk": "sky130",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-pipeline",
+   "period_ns": 10.0,
+   "final_iteration": 2,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-pipeline/sky130_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r0/CLK",
+     "endpoint": "r2/D",
+     "slack_ns": 8.876500628810014,
+     "arrival_ns": 0.8140141890864264,
+     "required_ns": 9.69051481789644,
+     "min_period_ns": 1.1235
+    },
+    "tt": {
+     "startpoint": "b[1]",
+     "endpoint": "z[1]",
+     "slack_ns": 9.36279194331538,
+     "arrival_ns": 0.3872080566846201,
+     "required_ns": 9.75,
+     "min_period_ns": 0.6372
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-pipeline/sky130_i2_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r0/CLK",
+     "endpoint": "r2/D",
+     "slack_ns": 8.728178609967378,
+     "arrival_ns": 0.9719649416662304,
+     "required_ns": 9.700143551633609,
+     "min_period_ns": 1.2718
+    },
+    "tt": {
+     "startpoint": "r0/CLK",
+     "endpoint": "r2/D",
+     "slack_ns": 9.358530171988258,
+     "arrival_ns": 0.5032778644816317,
+     "required_ns": 9.86180803646989,
+     "min_period_ns": 0.6415
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r2/CLK",
+     "endpoint": "y[0]",
+     "slack_ns": 8.49097311883781,
+     "arrival_ns": 1.2590268811621914,
+     "required_ns": 9.75,
+     "min_period_ns": 1.509
+    },
+    "tt": {
+     "startpoint": "r2/CLK",
+     "endpoint": "y[0]",
+     "slack_ns": 9.08763419145182,
+     "arrival_ns": 0.6623658085481806,
+     "required_ns": 9.75,
+     "min_period_ns": 0.9124
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "pipeline",
+   "pdk": "gf180",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-pipeline",
+   "period_ns": 10.0,
+   "final_iteration": 1,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-pipeline/gf180_mapped.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r0/CLK",
+     "endpoint": "r2/D",
+     "slack_ns": 6.39648643200711,
+     "arrival_ns": 2.7289459927213002,
+     "required_ns": 9.12543242472841,
+     "min_period_ns": 3.6035
+    },
+    "tt": {
+     "startpoint": "r0/CLK",
+     "endpoint": "r2/D",
+     "slack_ns": 8.231962482002691,
+     "arrival_ns": 1.3525867461766126,
+     "required_ns": 9.584549228179304,
+     "min_period_ns": 1.768
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-pipeline/gf180_i1_mapped.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r0/CLK",
+     "endpoint": "r2/D",
+     "slack_ns": 5.20478207825942,
+     "arrival_ns": 3.8417052510203913,
+     "required_ns": 9.046487329279811,
+     "min_period_ns": 4.7952
+    },
+    "tt": {
+     "startpoint": "r0/CLK",
+     "endpoint": "r2/D",
+     "slack_ns": 7.619064495387574,
+     "arrival_ns": 1.9320379008042292,
+     "required_ns": 9.551102396191803,
+     "min_period_ns": 2.3809
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r3/D",
+     "slack_ns": 4.844104505829436,
+     "arrival_ns": 5.825079976417812,
+     "required_ns": 10.669184482247248,
+     "min_period_ns": 5.1559
+    },
+    "tt": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r3/D",
+     "slack_ns": 7.46105543263267,
+     "arrival_ns": 2.8786184284501593,
+     "required_ns": 10.33967386108283,
+     "min_period_ns": 2.5389
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "dense",
+   "pdk": "sky130",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-dense",
+   "period_ns": 10.0,
+   "final_iteration": 0,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-dense/sky130_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r5/CLK",
+     "endpoint": "y[3]",
+     "slack_ns": 9.03474341992647,
+     "arrival_ns": 0.7152565800735312,
+     "required_ns": 9.75,
+     "min_period_ns": 0.9653
+    },
+    "tt": {
+     "startpoint": "b[3]",
+     "endpoint": "z[3]",
+     "slack_ns": 9.317814612482067,
+     "arrival_ns": 0.4321853875179333,
+     "required_ns": 9.75,
+     "min_period_ns": 0.6822
+    }
+   },
+   "prelayout_final": {
+    "status": "not_applicable",
+    "reason": "no closure ECO changed the netlist"
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r1/CLK",
+     "endpoint": "low_bit",
+     "slack_ns": 8.663971683969473,
+     "arrival_ns": 1.0860283160305275,
+     "required_ns": 9.75,
+     "min_period_ns": 1.336
+    },
+    "tt": {
+     "startpoint": "r1/CLK",
+     "endpoint": "low_bit",
+     "slack_ns": 9.171932379058644,
+     "arrival_ns": 0.5780676209413567,
+     "required_ns": 9.75,
+     "min_period_ns": 0.8281
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "dense",
+   "pdk": "gf180",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-dense",
+   "period_ns": 10.0,
+   "final_iteration": 2,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-dense/gf180_mapped.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "b[0]",
+     "endpoint": "r2/D",
+     "slack_ns": 7.33833876245359,
+     "arrival_ns": 1.7366806252584261,
+     "required_ns": 9.075019387712016,
+     "min_period_ns": 2.6617
+    },
+    "tt": {
+     "startpoint": "b[0]",
+     "endpoint": "r2/D",
+     "slack_ns": 8.58602152990383,
+     "arrival_ns": 0.9777572042760794,
+     "required_ns": 9.563778734179909,
+     "min_period_ns": 1.414
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-dense/gf180_i2_mapped_sized.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "en",
+     "endpoint": "r2/D",
+     "slack_ns": 6.815756327664469,
+     "arrival_ns": 2.305828706850728,
+     "required_ns": 9.121585034515197,
+     "min_period_ns": 3.1842
+    },
+    "tt": {
+     "startpoint": "en",
+     "endpoint": "r2/D",
+     "slack_ns": 8.29579323398321,
+     "arrival_ns": 1.286904084157977,
+     "required_ns": 9.582697318141186,
+     "min_period_ns": 1.7042
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r5/CLK",
+     "endpoint": "y[3]",
+     "slack_ns": 6.636295456912501,
+     "arrival_ns": 3.113704543087499,
+     "required_ns": 9.75,
+     "min_period_ns": 3.3637
+    },
+    "tt": {
+     "startpoint": "r5/CLK",
+     "endpoint": "y[3]",
+     "slack_ns": 8.194086891237614,
+     "arrival_ns": 1.5559131087623856,
+     "required_ns": 9.75,
+     "min_period_ns": 1.8059
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "counter",
+   "pdk": "sky130",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-counter",
+   "period_ns": 10.0,
+   "final_iteration": 1,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-counter/sky130_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r4/D",
+     "slack_ns": 6.803874757311908,
+     "arrival_ns": 2.887202378501012,
+     "required_ns": 9.69107713581292,
+     "min_period_ns": 3.1961
+    },
+    "tt": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r4/D",
+     "slack_ns": 8.477671383503436,
+     "arrival_ns": 1.3765027378734662,
+     "required_ns": 9.854174121376902,
+     "min_period_ns": 1.5223
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-counter/sky130_i1_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r4/D",
+     "slack_ns": 6.65800084322582,
+     "arrival_ns": 3.0389020321609275,
+     "required_ns": 9.696902875386748,
+     "min_period_ns": 3.342
+    },
+    "tt": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r4/D",
+     "slack_ns": 8.401455676803694,
+     "arrival_ns": 1.4568774371447772,
+     "required_ns": 9.858333113948472,
+     "min_period_ns": 1.5985
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r4/D",
+     "slack_ns": 6.407462595480288,
+     "arrival_ns": 3.6822896571981496,
+     "required_ns": 10.089752252678437,
+     "min_period_ns": 3.5925
+    },
+    "tt": {
+     "startpoint": "r1/CLK",
+     "endpoint": "wrap_o",
+     "slack_ns": 8.124326416859974,
+     "arrival_ns": 1.6256735831400264,
+     "required_ns": 9.75,
+     "min_period_ns": 1.8757
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "counter",
+   "pdk": "gf180",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-counter",
+   "period_ns": 10.0,
+   "final_iteration": 3,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-counter/gf180_mapped.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r0/CLK",
+     "endpoint": "r7/D",
+     "slack_ns": 0.38159974812996644,
+     "arrival_ns": 8.462636390833586,
+     "required_ns": 8.844236138963552,
+     "min_period_ns": 9.6184
+    },
+    "tt": {
+     "startpoint": "r0/CLK",
+     "endpoint": "r7/D",
+     "slack_ns": 5.321665561334431,
+     "arrival_ns": 4.122051501756614,
+     "required_ns": 9.443717063091045,
+     "min_period_ns": 4.6783
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-counter/gf180_i3_mapped_hold_sized.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r3/CLK",
+     "endpoint": "r7/D",
+     "slack_ns": 0.5410671204295294,
+     "arrival_ns": 8.381150515956802,
+     "required_ns": 8.922217636386332,
+     "min_period_ns": 9.4589
+    },
+    "tt": {
+     "startpoint": "r3/CLK",
+     "endpoint": "r3/D",
+     "slack_ns": 5.345328494138141,
+     "arrival_ns": 4.385511691133261,
+     "required_ns": 9.730840185271402,
+     "min_period_ns": 4.6547
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r2/CLK",
+     "endpoint": "r7/D",
+     "slack_ns": 0.056446635592466876,
+     "arrival_ns": 9.643250506300552,
+     "required_ns": 9.699697141893019,
+     "min_period_ns": 9.9436
+    },
+    "tt": {
+     "startpoint": "r2/CLK",
+     "endpoint": "r3/D",
+     "slack_ns": 5.092702954074371,
+     "arrival_ns": 5.031605180840295,
+     "required_ns": 10.124308134914665,
+     "min_period_ns": 4.9073
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "uart_tx",
+   "pdk": "sky130",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-uart_tx",
+   "period_ns": 10.0,
+   "final_iteration": 1,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-uart_tx/sky130_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r5/D",
+     "slack_ns": 7.405620762554934,
+     "arrival_ns": 2.2769328335366184,
+     "required_ns": 9.682553596091552,
+     "min_period_ns": 2.5944
+    },
+    "tt": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r5/D",
+     "slack_ns": 8.674132118141786,
+     "arrival_ns": 1.1770020174592413,
+     "required_ns": 9.851134135601027,
+     "min_period_ns": 1.3259
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-uart_tx/sky130_i1_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r5/D",
+     "slack_ns": 7.405620762554934,
+     "arrival_ns": 2.2769328335366184,
+     "required_ns": 9.682553596091552,
+     "min_period_ns": 2.5944
+    },
+    "tt": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r5/D",
+     "slack_ns": 8.674132118141786,
+     "arrival_ns": 1.1770020174592413,
+     "required_ns": 9.851134135601027,
+     "min_period_ns": 1.3259
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r4/CLK",
+     "endpoint": "r5/D",
+     "slack_ns": 6.952083762975292,
+     "arrival_ns": 3.3212807843611944,
+     "required_ns": 10.273364547336486,
+     "min_period_ns": 3.0479
+    },
+    "tt": {
+     "startpoint": "r4/CLK",
+     "endpoint": "r5/D",
+     "slack_ns": 8.474511745764456,
+     "arrival_ns": 1.7127574606387002,
+     "required_ns": 10.187269206403156,
+     "min_period_ns": 1.5255
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "uart_tx",
+   "pdk": "gf180",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-uart_tx",
+   "period_ns": 10.0,
+   "final_iteration": 5,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-uart_tx/gf180_mapped.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r6/D",
+     "slack_ns": 0.1782057437976423,
+     "arrival_ns": 8.510294667921062,
+     "required_ns": 8.688500411718705,
+     "min_period_ns": 9.8218
+    },
+    "tt": {
+     "startpoint": "r1/CLK",
+     "endpoint": "r6/D",
+     "slack_ns": 5.20153294592445,
+     "arrival_ns": 4.1638299144296536,
+     "required_ns": 9.365362860354104,
+     "min_period_ns": 4.7985
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-uart_tx/gf180_i5_mapped_sized.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r3/CLK",
+     "endpoint": "r6/D",
+     "slack_ns": 1.0059887023606784,
+     "arrival_ns": 7.691301963265616,
+     "required_ns": 8.697290665626294,
+     "min_period_ns": 8.994
+    },
+    "tt": {
+     "startpoint": "r3/CLK",
+     "endpoint": "r1/D",
+     "slack_ns": 5.539675448791032,
+     "arrival_ns": 3.936826766663668,
+     "required_ns": 9.4765022154547,
+     "min_period_ns": 4.4603
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r6/CLK",
+     "endpoint": "r0/D",
+     "slack_ns": 0.2634341175715722,
+     "arrival_ns": 10.058769821625681,
+     "required_ns": 10.322203939197253,
+     "min_period_ns": 9.7366
+    },
+    "tt": {
+     "startpoint": "r6/CLK",
+     "endpoint": "r0/D",
+     "slack_ns": 5.201196936375886,
+     "arrival_ns": 4.993776142060882,
+     "required_ns": 10.194973078436767,
+     "min_period_ns": 4.7988
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "fifo",
+   "pdk": "sky130",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-fifo",
+   "period_ns": 10.0,
+   "final_iteration": 2,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-fifo/sky130_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r4/CLK",
+     "endpoint": "r4/D",
+     "slack_ns": 7.144178360997456,
+     "arrival_ns": 2.521285923888214,
+     "required_ns": 9.66546428488567,
+     "min_period_ns": 2.8558
+    },
+    "tt": {
+     "startpoint": "r4/CLK",
+     "endpoint": "r4/D",
+     "slack_ns": 8.57112631992696,
+     "arrival_ns": 1.2643642064510097,
+     "required_ns": 9.835490526377969,
+     "min_period_ns": 1.4289
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-fifo/sky130_i2_mapped_ant.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r6/CLK",
+     "endpoint": "r6/D",
+     "slack_ns": 6.945989809339981,
+     "arrival_ns": 2.877551863356254,
+     "required_ns": 9.823541672696235,
+     "min_period_ns": 3.054
+    },
+    "tt": {
+     "startpoint": "r6/CLK",
+     "endpoint": "r6/D",
+     "slack_ns": 8.442553827431825,
+     "arrival_ns": 1.4556132321503221,
+     "required_ns": 9.898167059582146,
+     "min_period_ns": 1.5574
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r6/CLK",
+     "endpoint": "r6/D",
+     "slack_ns": 6.506254153138855,
+     "arrival_ns": 3.943464357401126,
+     "required_ns": 10.44971851053998,
+     "min_period_ns": 3.4937
+    },
+    "tt": {
+     "startpoint": "r2/CLK",
+     "endpoint": "data_o[7]",
+     "slack_ns": 8.144782710484263,
+     "arrival_ns": 1.6052172895157373,
+     "required_ns": 9.75,
+     "min_period_ns": 1.8552
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "fifo",
+   "pdk": "gf180",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-fifo",
+   "period_ns": 10.0,
+   "final_iteration": 4,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-fifo/gf180_mapped.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r5/CLK",
+     "endpoint": "r4/D",
+     "slack_ns": 0.5034072342107692,
+     "arrival_ns": 8.291674208772179,
+     "required_ns": 8.795081442982948,
+     "min_period_ns": 9.4966
+    },
+    "tt": {
+     "startpoint": "r6/CLK",
+     "endpoint": "r6/D",
+     "slack_ns": 5.354500053986762,
+     "arrival_ns": 4.359169586891572,
+     "required_ns": 9.713669640878335,
+     "min_period_ns": 4.6455
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-fifo/gf180_i4_mapped_sized.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r5/CLK",
+     "endpoint": "r6/D",
+     "slack_ns": 0.614508098267672,
+     "arrival_ns": 8.820232639788287,
+     "required_ns": 9.43474073805596,
+     "min_period_ns": 9.3855
+    },
+    "tt": {
+     "startpoint": "r5/CLK",
+     "endpoint": "r6/D",
+     "slack_ns": 5.356820259582437,
+     "arrival_ns": 4.356849400043555,
+     "required_ns": 9.713669659625992,
+     "min_period_ns": 4.6432
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r5/CLK",
+     "endpoint": "r5/D",
+     "slack_ns": 0.10786855276349172,
+     "arrival_ns": 10.409493727740003,
+     "required_ns": 10.517362280503495,
+     "min_period_ns": 9.8921
+    },
+    "tt": {
+     "startpoint": "r5/CLK",
+     "endpoint": "r5/D",
+     "slack_ns": 5.102202267796828,
+     "arrival_ns": 5.194805440685405,
+     "required_ns": 10.297007708482234,
+     "min_period_ns": 4.8978
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "alu",
+   "pdk": "sky130",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-alu",
+   "period_ns": 10.0,
+   "final_iteration": 2,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-alu/sky130_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "a_i[3]",
+     "endpoint": "zero_o",
+     "slack_ns": 6.12500821137553,
+     "arrival_ns": 3.6249917886244702,
+     "required_ns": 9.75,
+     "min_period_ns": 3.875
+    },
+    "tt": {
+     "startpoint": "b_i[1]",
+     "endpoint": "zero_o",
+     "slack_ns": 7.786398491765706,
+     "arrival_ns": 1.963601508234294,
+     "required_ns": 9.75,
+     "min_period_ns": 2.2136
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-alu/sky130_i2_mapped_ant.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "a_i[3]",
+     "endpoint": "zero_o",
+     "slack_ns": 6.125424542377813,
+     "arrival_ns": 3.6245754576221874,
+     "required_ns": 9.75,
+     "min_period_ns": 3.8746
+    },
+    "tt": {
+     "startpoint": "b_i[1]",
+     "endpoint": "zero_o",
+     "slack_ns": 7.788514545548434,
+     "arrival_ns": 1.9614854544515663,
+     "required_ns": 9.75,
+     "min_period_ns": 2.2115
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "b_i[1]",
+     "endpoint": "zero_o",
+     "slack_ns": 5.7462164797680035,
+     "arrival_ns": 4.0037835202319965,
+     "required_ns": 9.75,
+     "min_period_ns": 4.2538
+    },
+    "tt": {
+     "startpoint": "b_i[1]",
+     "endpoint": "zero_o",
+     "slack_ns": 7.555313081879941,
+     "arrival_ns": 2.1946869181200586,
+     "required_ns": 9.75,
+     "min_period_ns": 2.4447
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "alu",
+   "pdk": "gf180",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-alu",
+   "period_ns": 10.0,
+   "final_iteration": 3,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-alu/gf180_mapped.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "b_i[0]",
+     "endpoint": "zero_o",
+     "slack_ns": -3.0707992130340074,
+     "arrival_ns": 12.820799213034007,
+     "required_ns": 9.75,
+     "min_period_ns": 13.0708
+    },
+    "tt": {
+     "startpoint": "b_i[0]",
+     "endpoint": "zero_o",
+     "slack_ns": 3.3397183790804714,
+     "arrival_ns": 6.410281620919529,
+     "required_ns": 9.75,
+     "min_period_ns": 6.6603
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-alu/gf180_i3_mapped_sized.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "b_i[0]",
+     "endpoint": "zero_o",
+     "slack_ns": -3.0406068810318843,
+     "arrival_ns": 12.790606881031884,
+     "required_ns": 9.75,
+     "min_period_ns": 13.0406
+    },
+    "tt": {
+     "startpoint": "b_i[0]",
+     "endpoint": "zero_o",
+     "slack_ns": 3.3554819640812408,
+     "arrival_ns": 6.394518035918759,
+     "required_ns": 9.75,
+     "min_period_ns": 6.6445
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "b_i[0]",
+     "endpoint": "zero_o",
+     "slack_ns": -4.578347125687577,
+     "arrival_ns": 14.328347125687577,
+     "required_ns": 9.75,
+     "min_period_ns": 14.5783
+    },
+    "tt": {
+     "startpoint": "b_i[0]",
+     "endpoint": "zero_o",
+     "slack_ns": 2.6517770452569973,
+     "arrival_ns": 7.098222954743003,
+     "required_ns": 9.75,
+     "min_period_ns": 7.3482
+    }
+   },
+   "setup_feasible_at_period": false
+  },
+  {
+   "design": "regfile",
+   "pdk": "sky130",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-regfile",
+   "period_ns": 10.0,
+   "final_iteration": 5,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-regfile/sky130_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r47/CLK",
+     "endpoint": "rdata_a[7]",
+     "slack_ns": 8.020257698623192,
+     "arrival_ns": 1.7297423013768085,
+     "required_ns": 9.75,
+     "min_period_ns": 1.9797
+    },
+    "tt": {
+     "startpoint": "r47/CLK",
+     "endpoint": "rdata_b[7]",
+     "slack_ns": 8.899231527369695,
+     "arrival_ns": 0.8507684726303048,
+     "required_ns": 9.75,
+     "min_period_ns": 1.1008
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-regfile/sky130_i5_mapped_ant.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "wdata[2]",
+     "endpoint": "r42/D",
+     "slack_ns": 7.537448412291452,
+     "arrival_ns": 2.2852048579720314,
+     "required_ns": 9.822653270263483,
+     "min_period_ns": 2.4626
+    },
+    "tt": {
+     "startpoint": "wdata[2]",
+     "endpoint": "r42/D",
+     "slack_ns": 8.494416018781294,
+     "arrival_ns": 1.4028618141186469,
+     "required_ns": 9.897277832899942,
+     "min_period_ns": 1.5056
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r47/CLK",
+     "endpoint": "rdata_a[7]",
+     "slack_ns": 6.898791843570754,
+     "arrival_ns": 2.8512081564292457,
+     "required_ns": 9.75,
+     "min_period_ns": 3.1012
+    },
+    "tt": {
+     "startpoint": "r47/CLK",
+     "endpoint": "rdata_b[7]",
+     "slack_ns": 8.305198906011066,
+     "arrival_ns": 1.4448010939889344,
+     "required_ns": 9.75,
+     "min_period_ns": 1.6948
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "regfile",
+   "pdk": "gf180",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-regfile",
+   "period_ns": 10.0,
+   "final_iteration": 5,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-regfile/gf180_mapped.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "r47/CLK",
+     "endpoint": "rdata_a[7]",
+     "slack_ns": 3.03664776539015,
+     "arrival_ns": 6.71335223460985,
+     "required_ns": 9.75,
+     "min_period_ns": 6.9634
+    },
+    "tt": {
+     "startpoint": "r47/CLK",
+     "endpoint": "rdata_a[7]",
+     "slack_ns": 6.444360604651386,
+     "arrival_ns": 3.3056393953486136,
+     "required_ns": 9.75,
+     "min_period_ns": 3.5556
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-regfile/gf180_i5_mapped_sized.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "waddr[2]",
+     "endpoint": "r24/D",
+     "slack_ns": 2.2974145256411305,
+     "arrival_ns": 6.607772522958655,
+     "required_ns": 8.905187048599785,
+     "min_period_ns": 7.7026
+    },
+    "tt": {
+     "startpoint": "waddr[2]",
+     "endpoint": "r24/D",
+     "slack_ns": 6.130910200984161,
+     "arrival_ns": 3.33935577281876,
+     "required_ns": 9.47026597380292,
+     "min_period_ns": 3.8691
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "r42/CLK",
+     "endpoint": "rdata_b[2]",
+     "slack_ns": 0.04422004496896115,
+     "arrival_ns": 9.705779955031039,
+     "required_ns": 9.75,
+     "min_period_ns": 9.9558
+    },
+    "tt": {
+     "startpoint": "r42/CLK",
+     "endpoint": "rdata_b[2]",
+     "slack_ns": 4.965960585079257,
+     "arrival_ns": 4.784039414920743,
+     "required_ns": 9.75,
+     "min_period_ns": 5.034
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "mult",
+   "pdk": "sky130",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-mult",
+   "period_ns": 10.0,
+   "final_iteration": 1,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-mult/sky130_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "b[4]",
+     "endpoint": "r11/D",
+     "slack_ns": 4.160810313182489,
+     "arrival_ns": 5.538917706781337,
+     "required_ns": 9.699728019963826,
+     "min_period_ns": 5.8392
+    },
+    "tt": {
+     "startpoint": "ua[3]",
+     "endpoint": "up[11]",
+     "slack_ns": 6.9793771994334595,
+     "arrival_ns": 2.770622800566541,
+     "required_ns": 9.75,
+     "min_period_ns": 3.0206
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-mult/sky130_i1_mapped.v",
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "b[4]",
+     "endpoint": "r11/D",
+     "slack_ns": 4.160810313182489,
+     "arrival_ns": 5.538917706781337,
+     "required_ns": 9.699728019963826,
+     "min_period_ns": 5.8392
+    },
+    "tt": {
+     "startpoint": "ua[3]",
+     "endpoint": "up[11]",
+     "slack_ns": 6.9793771994334595,
+     "arrival_ns": 2.770622800566541,
+     "required_ns": 9.75,
+     "min_period_ns": 3.0206
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "b[4]",
+     "endpoint": "r11/D",
+     "slack_ns": 4.225273405685488,
+     "arrival_ns": 5.938090019734728,
+     "required_ns": 10.163363425420217,
+     "min_period_ns": 5.7747
+    },
+    "tt": {
+     "startpoint": "ua[3]",
+     "endpoint": "up[10]",
+     "slack_ns": 6.8668004265792355,
+     "arrival_ns": 2.883199573420765,
+     "required_ns": 9.75,
+     "min_period_ns": 3.1332
+    }
+   },
+   "setup_feasible_at_period": true
+  },
+  {
+   "design": "mult",
+   "pdk": "gf180",
+   "run": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-mult",
+   "period_ns": 10.0,
+   "final_iteration": 3,
+   "prelayout_synth": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-mult/gf180_mapped.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "b[0]",
+     "endpoint": "r10/D",
+     "slack_ns": -12.05276770592465,
+     "arrival_ns": 21.094859826936613,
+     "required_ns": 9.042092121011963,
+     "min_period_ns": 22.0528
+    },
+    "tt": {
+     "startpoint": "b[0]",
+     "endpoint": "r10/D",
+     "slack_ns": -0.834564897302764,
+     "arrival_ns": 10.384764127250323,
+     "required_ns": 9.550199229947559,
+     "min_period_ns": 10.8346
+    }
+   },
+   "prelayout_final": {
+    "netlist": "/mnt/data2/cgao/git/RustROAD/.work/wt/closure-dev2/.work/runs/E6-mult/gf180_i3_mapped_sized.v",
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "ss": {
+     "startpoint": "b[1]",
+     "endpoint": "r11/D",
+     "slack_ns": -11.18728696726441,
+     "arrival_ns": 20.263404774915884,
+     "required_ns": 9.076117807651475,
+     "min_period_ns": 21.1873
+    },
+    "tt": {
+     "startpoint": "b[1]",
+     "endpoint": "r11/D",
+     "slack_ns": -0.4470479371016207,
+     "arrival_ns": 10.011441608029184,
+     "required_ns": 9.564393670927563,
+     "min_period_ns": 10.447
+    }
+   },
+   "postroute": {
+    "spef": "native",
+    "clock_model": "propagated",
+    "ss": {
+     "startpoint": "b[1]",
+     "endpoint": "r11/D",
+     "slack_ns": -10.587543324447564,
+     "arrival_ns": 21.08081347056652,
+     "required_ns": 10.493270146118958,
+     "min_period_ns": 20.5875
+    },
+    "tt": {
+     "startpoint": "ua[2]",
+     "endpoint": "up[10]",
+     "slack_ns": -0.18722943145067994,
+     "arrival_ns": 9.93722943145068,
+     "required_ns": 9.75,
+     "min_period_ns": 10.1872
+    }
+   },
+   "setup_feasible_at_period": false
+  }
+ ]
+}

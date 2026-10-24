@@ -553,6 +553,7 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
             .filter(|n| n.len() >= 2)
             .collect();
         let problem = PlaceProblem {
+            weights: Vec::new(),
             widths: widths.clone(),
             row_height: sh,
             site: sw,

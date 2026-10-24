@@ -18,6 +18,14 @@ Members are ordered by drive: the output pin's `max_capacitance` (tt), then
 area. Families with a single member are kept (the planner then knows the
 instance cannot be resized).
 
+Drive data (`cells[].drive`, planner input of the closure loop's buffering
+and sizing ECOs): for each owner-fixed corner Liberty (tt/ss/ff), the input
+pin capacitances and, for families with one output pin, the worst delay and
+output transition over that pin's timing arcs (max of rise/fall) at one
+input slew and two loads (`drive_model`), read by bilinear lookup inside the
+characterized table (no extrapolation). The planner interpolates linearly in
+load between the two points; it is an estimate, the loop re-times every ECO.
+
 Usage: build_sizing_profile.py [--pdk sky130|gf180|all] [--out-dir fixtures/pdk] [--check]
 """
 from __future__ import annotations
@@ -37,6 +45,11 @@ import liberty_lite as lib  # noqa: E402
 SCHEMA = "rustroad.sizing-profile.v1"
 PROFILES = ROOT / "fixtures/pdk/local-routing.json"
 POLICY = ROOT / "fixtures/flow/cell-policy.json"
+# Corner Liberty names (scripts/hold_closure.CORNERS): tt is the profile's own.
+CORNER_LIBS = {"sky130": [("tt", "tt_025C_1v80"), ("ss", "ss_100C_1v60"), ("ff", "ff_n40C_1v95")],
+               "gf180": [("tt", "tt_025C_3v30"), ("ss", "ss_125C_3v00"), ("ff", "ff_n40C_3v60")]}
+DRIVE_INPUT_SLEW_NS = 0.2
+DRIVE_LOADS_PF = (0.005, 0.05)
 SEQUENTIAL_KEYS = ("clocked_on", "next_state", "clear", "preset", "clear_preset_var1", "clear_preset_var2",
                    "enable", "data_in")
 
@@ -98,6 +111,40 @@ def describe(cell) -> tuple[dict | None, str | None]:
     return dict(pins=dict(sorted(pins.items())), functions=dict(sorted(functions.items())), sequential=seq), None
 
 
+def drive_data(cell, library) -> dict | None:
+    """Input caps and the worst output delay/transition at DRIVE_LOADS_PF."""
+    t, c = library.time_unit_ns(), library.cap_unit_pf()
+    caps = {}
+    for pin in cell.sub("pin"):
+        if pin.attr("direction") == "input":
+            try:
+                caps[pin.name] = round(float(pin.attr("capacitance")) * c, 9)
+            except (TypeError, ValueError):
+                return None
+    outputs = [p for p in cell.sub("pin") if p.attr("direction") == "output"]
+    if len(outputs) != 1:
+        return dict(input_cap_pf=dict(sorted(caps.items())))
+    delay, slew = [0.0, 0.0], [0.0, 0.0]
+    arcs = 0
+    for arc in outputs[0].sub("timing"):
+        if arc.attr("timing_type", "combinational") not in ("combinational", "rising_edge", "falling_edge"):
+            continue
+        for k, load in enumerate(DRIVE_LOADS_PF):
+            for kind, out in (("cell_rise", delay), ("cell_fall", delay), ("rise_transition", slew),
+                              ("fall_transition", slew)):
+                for g in arc.sub(kind):
+                    try:
+                        v = lib.Table(g, library).lookup(DRIVE_INPUT_SLEW_NS / t, load / c) * t
+                    except lib.LibertyError:
+                        return dict(input_cap_pf=dict(sorted(caps.items())))
+                    out[k] = max(out[k], v)
+        arcs += 1
+    if not arcs:
+        return dict(input_cap_pf=dict(sorted(caps.items())))
+    return dict(input_cap_pf=dict(sorted(caps.items())), output_pin=outputs[0].name,
+                delay_ns=[round(x, 6) for x in delay], slew_ns=[round(x, 6) for x in slew])
+
+
 def build(tag: str) -> dict:
     profile = next(p for p in json.loads(PROFILES.read_text())["pdks"] if p["tag"] == tag)
     policy = json.loads(POLICY.read_text())["pdks"][tag]
@@ -106,6 +153,9 @@ def build(tag: str) -> dict:
     widths = lef_widths(cell_lef, dbu)
     library = lib.Library(liberty)
     blocked = list(policy["synth_dont_use"]) + list(policy["pnr_exclude"])
+    names = set(library.cells)
+    corner_paths = [(c, Path(str(liberty).replace(CORNER_LIBS[tag][0][1], n))) for c, n in CORNER_LIBS[tag]]
+    corner_libs = [(c, library if c == "tt" else lib.Library(path, wanted=names)) for c, path in corner_paths]
     families, excluded = {}, []
     for name in sorted(library.cells):
         cell = library.cells[name]
@@ -128,8 +178,13 @@ def build(tag: str) -> dict:
             excluded.append(dict(name=name, reason="non-numeric area or max_capacitance"))
             continue
         key = json.dumps(sig, sort_keys=True)
+        drive = {}
+        for corner, lib_c in corner_libs:
+            data = drive_data(lib_c.cells[name], lib_c) if name in lib_c.cells else None
+            if data is not None:
+                drive[corner] = data
         families.setdefault(key, dict(signature=sig, cells=[]))["cells"].append(
-            dict(name=name, width_dbu=widths[name], area_um2=area, max_capacitance_pf=cap))
+            dict(name=name, width_dbu=widths[name], area_um2=area, max_capacitance_pf=cap, drive=drive))
     out = []
     for fam in families.values():
         cells = sorted(fam["cells"], key=lambda c: (c["max_capacitance_pf"] if c["max_capacitance_pf"] is not None
@@ -148,9 +203,16 @@ def build(tag: str) -> dict:
             f["id"] = f"{f['id']}#{sum(1 for x in out[:i] if x['id'] == f['id'])}"
     out.sort(key=lambda f: f["id"])
     return dict(schema=SCHEMA, pdk=tag, library=profile["name"], generator="scripts/build_sizing_profile.py",
-                sources=[source("liberty_tt", liberty), source("cell_lef", cell_lef), source("cell_policy", POLICY)],
+                sources=[source("liberty_tt", liberty), source("cell_lef", cell_lef), source("cell_policy", POLICY)] +
+                        [source(f"liberty_{c}", path) for c, path in corner_paths if c != "tt"],
                 dbu_per_um=dbu, rule="same pins, directions, output functions and sequential description; "
                                      "policy synth_dont_use and pnr_exclude removed; ordered by output max_capacitance",
+                drive_model=dict(input_slew_ns=DRIVE_INPUT_SLEW_NS, loads_pf=list(DRIVE_LOADS_PF),
+                                 corners=[c for c, _ in corner_paths],
+                                 rule="per corner Liberty: input pin capacitance; worst (max rise/fall, max over "
+                                      "combinational and edge arcs of the one output pin) delay and output "
+                                      "transition at input_slew_ns and each of loads_pf, bilinear inside the "
+                                      "table; linear in load between the points is the planner's estimate"),
                 families=out, excluded=excluded)
 
 

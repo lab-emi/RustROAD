@@ -12,6 +12,7 @@ fn problem() -> PlaceProblem {
     }
     nets.push(vec![PinRef::Cell(n as u32 - 1), PinRef::Fixed([290, 150])]);
     PlaceProblem {
+        weights: Vec::new(),
         widths: (0..n).map(|i| if i % 3 == 0 { 30 } else { 10 }).collect(),
         row_height: 100,
         site: 10,

@@ -106,6 +106,40 @@ STA_RC_LIMITS = {'legacy': ['--max-rc-nodes', '200000', '--max-rc-elements', '20
 SIZE_MAX_RESIZES = 256
 SIZE_MAX_SETUP_ENDPOINTS = 48
 SIZE_MAX_UTILIZATION = 0.70
+# Closure loop (track recipe): a setup ECO that improved the worst setup
+# slack by less than this over the previous layout counts as stagnant; the
+# loop then moves on to hold repair instead of spending the remaining
+# layouts on setup it cannot close (setup stays failed and reported).
+SETUP_STAGNATION_NS = 0.05
+# Hold ECO on the track recipe: path-aware placement (pins reports at these
+# corners bound the setup room of each point) and partial plans.
+PATH_AWARE_SETUP_CORNERS = ('ss', 'tt')
+# A net-level hold point (one chain in front of every sink of a net) only on
+# nets this small: delay cells are weak drivers.
+HOLD_MAX_GROUP_SINKS = 4
+# The track loop's hold ECO plans this much above its target margin.
+HOLD_PLAN_EXTRA_NS = 0.03
+# Gate sizing with RustSTA `whatif` as the oracle (exact on the layout's
+# SPEF: a resize keeps every net): candidates per round, rounds, resizes
+# accepted per round, and the wall-clock budget of one whatif call.
+WHATIF_MAX_CANDIDATES = 48
+WHATIF_ROUNDS = 6
+WHATIF_ACCEPT_PER_ROUND = 12
+WHATIF_TIMEOUT_S = 600
+# Candidate budgets, as counts so the determinism rebuild evaluates exactly
+# the same candidates (a whatif call that fails or hits WHATIF_TIMEOUT_S is a
+# failed round, recorded): per layout and per closure loop (the gate runs
+# the loop twice per PDK within its 3600 s wall budget). Measured cost per
+# candidate: 0.13 s (counter, 47 logic instances), 1.1 s (regfile, 367),
+# 1.9 s (mult, 417) on this host. Both scale with 200 / logic instances,
+# clamped to 0.5x..4x (counter 384 per layout, mult 48).
+WHATIF_LAYOUT_CANDIDATES = 96
+WHATIF_LOOP_CANDIDATES = 320
+WHATIF_HOLD_LOSS_NS = 0.5
+# DRV/setup ECOs stop (the loop goes on to hold) after this many consecutive
+# layouts on which the previous ECO improved neither the DRV count nor the
+# worst setup slack.
+SETUP_STAGNATION_ROUNDS = 2
 
 
 class Design:
@@ -281,7 +315,11 @@ class Flow:
                                    rows=[dict(x_start=20 * sw, x_end=120 * sw, y=(5 + i) * sh) for i in range(8)]))
         return floor
 
-    def physical(self, it: int, netlist: Path) -> dict:
+    def physical(self, it: int, netlist: Path, weights: Path | None = None, seed: Path | None = None) -> dict:
+        """One complete layout. `weights`: timing-driven net weights for the
+        analytic placer (`place --net-weights`); `seed`: ECO placement seed
+        (`place --seed`, the previous layout); both are kept for the CTS
+        re-placement."""
         t, h = f'{self.tag}_i{it}', self.h
         ws = h.root / f'{t}_physical'
         road = [self.tools['rustroad'], '--workspace', ws, '--threads', '2', *ROAD_LIMITS[self.design.recipe]]
@@ -289,8 +327,14 @@ class Flow:
         a = h.json_command(f'{t}_import', list(map(str, road + ['import-pdk', '--base-rev', 'rev0', '--tech-lef', self.p['technology_lef']['path'],
                                                                  '--cell-lef', self.p['cell_lef']['path'], '--netlist', netlist,
                                                                  '--floorplan', self.floorplan(), '--physical-config', self.config])))
-        a = h.json_command(f'{t}_place', list(map(str, road + ['place', '--base-rev', a['revision']])))
+        place = ['place', '--base-rev', a['revision']] + (['--net-weights', weights] if weights else []) + \
+            (['--seed', seed] if seed else [])
+        a = h.json_command(f'{t}_place', list(map(str, road + place)))
         rec['placement'] = a.get('placement')
+        if weights:
+            rec['net_weights'] = fingerprint(weights)
+        if seed:
+            rec['placement_seed'] = fingerprint(seed)
         if self.design.clocked:
             a = h.json_command(f'{t}_cts', list(map(str, road + ['clock-tree', '--base-rev', a['revision'], '--sdc', self.p['cts_sdc']])))
             rec['cts'] = a
@@ -397,6 +441,13 @@ class Flow:
             bad = [x for x in rows if x['slack'] < 0]
             drv = dict(violations=len(bad), by_kind={k: sum(1 for x in bad if x['kind'] == k) for k in sorted({x['kind'] for x in bad})},
                        status=r['metrics'].get('drv_status'))
+            # Per-pin setup slack (path-aware hold ECO, buffering, net weights).
+            for c in PATH_AWARE_SETUP_CORNERS:
+                pins = h.root / f'{t}_pins_{c}.json'
+                rr = run_ok(h, f'{t}_pins_{c}', [ruststa, *common[:-2], 'report', '--rev', rev, '--section', 'pins',
+                                                 '--corner', c, '--limit', '0'])
+                pins.write_bytes(Path(rr['stdout']).read_bytes())
+                files[f'pins_{c}'] = pins
         return dict(workspace=str(ws), revision=rev, timed_netlist=str(timed), timed_netlist_sha256=timed_sha,
                     scope=r['scope'], metrics=r['metrics'], completeness=r['completeness'],
                     diagnostics=[d for d in r.get('diagnostics', []) if d.get('severity') != 'note'][:20],
@@ -431,14 +482,20 @@ class Flow:
                 '--setup-margin-ns', self.args.setup_margin, '--out', out, '--plan-out', plan]
         for c in self.libs:
             argv += ['--hold-corner', c, '--setup-report', sta['files'][f'endpoints_{c}']]
+        if self.design.sizing_profile is not None:
+            # Track recipe: path-aware placement bounded by per-pin setup slack
+            # at ss and tt, and partial plans (infeasible endpoints listed).
+            for c in PATH_AWARE_SETUP_CORNERS:
+                argv += ['--pins-report', sta['files'][f'pins_{c}']]
+            argv += ['--allow-partial', '--max-group-sinks', HOLD_MAX_GROUP_SINKS]
         r = self.h.run(f'{t}_hold_eco', [str(x) for x in argv])
         result = json.loads(bounded_text(plan)) if plan.exists() else None
         require(r['exit_code'] == 0, f'{t}: hold-eco failed: ' + bounded_text(Path(r['stderr']))[-600:])
         return out, result
 
     # ------------------------------------------------------------ gate sizing
-    def size_eco(self, it: int, netlist: Path, sta: dict, phys: dict) -> tuple[Path | None, dict]:
-        """Plan and apply one gate-sizing step (resize_cell, same Liberty family).
+    def size_plan(self, it: int, netlist: Path, sta: dict, phys: dict, skip: set, extra_width: int = 0) -> tuple[list, dict]:
+        """Plan one gate-sizing step (resize_cell, same Liberty family).
 
         Candidates: the driver of every net with a max_transition /
         max_capacitance violation (RustSTA drv report, any corner; one to three
@@ -447,8 +504,10 @@ class Flow:
         at tt/ss (one size up). Only instances of the mapped netlist are
         resized (not CTS, hold, tie or diode cells); the new width must fit the
         tap clear gap and the resized cells must keep the core utilization at
-        or below SIZE_MAX_UTILIZATION. Bounded by SIZE_MAX_RESIZES. Returns
-        (None, summary) when nothing can be resized.
+        or below SIZE_MAX_UTILIZATION. Bounded by SIZE_MAX_RESIZES. `skip`:
+        instances the buffering planner already handles (drivers of buffered
+        nets, its own resizes); `extra_width`: DBU of row width the planned
+        buffers add. Returns (operations, summary).
         """
         import rtl2gds_logic as L  # noqa: E402 - gate helper (LEF pin reader)
         t, h = f'{self.tag}_i{it}', self.h
@@ -483,6 +542,9 @@ class Flow:
             if inst.startswith(('rr_eco_hold_', 'rr_eco_ant_', 'rr_tie_', 'rr_clk')):
                 skipped[inst] = 'ECO, tie or clock cell'
                 return
+            if inst in skip:
+                skipped[inst] = 'handled by the buffering ECO'
+                return
             steps[inst] = max(steps.get(inst, 0), n)
             reasons.setdefault(inst, set()).add(why)
         drv_rows = json.loads(bounded_text(Path(sta['files']['drv']), 64 * 1024 ** 2))['sections']['drv']['rows']
@@ -515,7 +577,7 @@ class Flow:
         # Apply the steps within families, width and utilization bounds.
         height = floor['site']['height']
         sizes = lef_widths(Path(self.p['cell_lef']['path']), floor['units_per_micron'])
-        used = sum(sizes.get(m, 0) for m, _ in mapped.values()) * height
+        used = (sum(sizes.get(m, 0) for m, _ in mapped.values()) + extra_width) * height
         ops, unsizable = [], {}
         order = sorted(steps, key=lambda i: (-steps[i], i))
         for inst in order:
@@ -548,16 +610,297 @@ class Flow:
                                   for r in ('setup', 'max_transition', 'max_capacitance')},
                        unsizable=dict(sorted(unsizable.items())[:40]), skipped=dict(sorted(skipped.items())[:40]),
                        utilization_after=round(used / rows_area, 4), max_width_dbu=max_width)
+        return ops, summary
+
+    def whatif_sizing(self, it: int, netlist: Path, sta: dict, skip: set, extra_width: int = 0) -> tuple[list, dict]:
+        """Gate sizing decided by RustSTA `whatif` on this layout (exact: a
+        resize keeps every net and its SPEF parasitics).
+
+        Candidates: the drivers of nets with max_transition/max_capacitance
+        violations and the cells on the worst setup paths of up to
+        SIZE_MAX_SETUP_ENDPOINTS failing endpoints (tt/ss), each with the
+        neighbouring members of its sizing family (one down, one and two up,
+        within the tap gap). Each round evaluates every candidate on top of
+        the resizes accepted so far and accepts up to WHATIF_ACCEPT_PER_ROUND
+        improving ones on distinct instances, best first. Improving: fewer
+        DRV violations without losing worst tt/ss setup slack (or keeping it
+        >= 0), or no more DRV violations and a better worst setup slack, or
+        an equal worst and a better total negative slack. The next round's
+        base re-checks the accepted set as a whole; a round whose combined
+        base is worse than the previous one keeps only its single best edit.
+        Bounded by WHATIF_ROUNDS x WHATIF_MAX_CANDIDATES evaluations and
+        WHATIF_TIMEOUT_S per call. Returns (resize operations, summary).
+        """
+        t, h = f'{self.tag}_i{it}', self.h
+        prof = json.loads(self.design.sizing_profile.read_text())
+        family, widths = {}, {}
+        for f in prof['families']:
+            for k, c in enumerate(f['cells']):
+                family[c['name']] = (k, [x['name'] for x in f['cells']])
+                widths[c['name']] = c['width_dbu']
+        cfg = json.loads(self.config.read_text())
+        floor = json.loads(self.design.floorplan.read_text() if self.design.floorplan else self.floorplan().read_text())
+        site_w = floor['site']['width']
+        spacing = int(cfg.get('cell_spacing_sites') or 0) * site_w
+        max_width = (cfg['tap']['max_gap'] // site_w) * site_w - spacing if cfg.get('tap') else None
+        rows_area = sum((r['x_end'] - r['x_start']) for r in floor['rows']) * floor['site']['height']
+        sizes = lef_widths(Path(self.p['cell_lef']['path']), floor['units_per_micron'])
+        mapped = netlist_instances(bounded_text(netlist, 64 * 1024 ** 2))
+        used = (sum(sizes.get(m, 0) for m, _ in mapped.values()) + extra_width) * floor['site']['height']
+        import rtl2gds_logic as L  # noqa: E402
+        lef = L.lef_pins(Path(self.p['cell_lef']['path']))
+        timed = netlist_instances(bounded_text(Path(sta['timed_netlist']), 64 * 1024 ** 2))
+        driver, sinks_of = {}, {}
+        for name, (master, conns) in timed.items():
+            for pin, net in conns.items():
+                d = ((lef.get(master) or {}).get(pin) or {}).get('direction') or ''
+                if d.startswith('OUTPUT'):
+                    driver[net.lstrip('\\')] = name
+                elif d == 'INPUT':
+                    sinks_of.setdefault(net.lstrip('\\'), []).append(name)
+        prio = {}
+
+        def want(inst, value, why):
+            if inst in mapped and inst not in skip and mapped[inst][0] in family and \
+                    not inst.startswith(('rr_eco_hold_', 'rr_eco_ant_', 'rr_tie_', 'rr_clk')):
+                old = prio.get(inst)
+                if old is None or value < old[0]:
+                    prio[inst] = (value, why)
+        alias = {a.lstrip('\\'): b.lstrip('\\') for a, b in
+                 re.findall(r'(?m)^\s*assign\s+(\S+)\s*=\s*(\S+?)\s*;', bounded_text(Path(sta['timed_netlist']), 64 * 1024 ** 2))}
+        drv_rows = json.loads(bounded_text(Path(sta['files']['drv']), 64 * 1024 ** 2))['sections']['drv']['rows']
+        import closure_eco as CE  # noqa: E402
+        for row in drv_rows:
+            if row['kind'] in ('max_transition', 'max_capacitance') and row['value'] > CE.DRV_PLAN_MARGIN * row['limit']:
+                net = (row.get('net') or '').lstrip('\\')
+                net = net if net in driver else alias.get(net, net)
+                inst = driver.get(net)
+                if inst:
+                    want(inst, -10.0 + row['slack'] / max(row['limit'], 1e-9), 'drv')
+                # ECO buffers loading the net may shrink (less input capacitance).
+                for sink in sinks_of.get(net, []):
+                    if sink.startswith('rr_eco_buf_'):
+                        want(sink, -9.0 + row['slack'] / max(row['limit'], 1e-9), 'drv_sink')
+        failing = sorted(((v['setup'], c, e) for c in ('tt', 'ss') for e, v in sta['corners'][c]['endpoints'].items()
+                          if v['setup'] is not None and v['setup'] < 0), key=lambda x: x[0])
+        seen, traced = set(), 0
+        for slack, corner, ep in failing:
+            if ep in seen or traced >= SIZE_MAX_SETUP_ENDPOINTS:
+                continue
+            seen.add(ep)
+            traced += 1
+            r = run_ok(h, f'{t}_size_path_{traced}', [self.tools['ruststa'], 'path', '-w', sta['workspace'], '--rev', sta['revision'],
+                                                     '--to', ep, '--kind', 'setup', '--corner', corner, '--format', 'json', '-q'])
+            data = json.loads(bounded_text(Path(r['stdout']), 64 * 1024 ** 2))
+            for path in data.get('paths') or ([data['path']] if data.get('path') else []):
+                for point in path.get('points') or []:
+                    if point.get('arc') == 'cell' and point.get('inst'):
+                        want(point['inst'], slack, 'setup')
+        order = sorted(prio, key=lambda i: (prio[i][0], i))
+
+        def alternatives(inst):
+            master = mapped[inst][0]
+            k, members = family[master]
+            out = []
+            # A (near-)violating driver only grows, an ECO buffer loading such
+            # a net only shrinks.
+            why = prio[inst][1]
+            for j in ((k + 1, k + 2) if why == 'drv' else (k - 1,) if why == 'drv_sink' else (k + 1, k - 1, k + 2)):
+                if 0 <= j < len(members) and members[j] != master and \
+                        (max_width is None or widths[members[j]] <= max_width):
+                    out.append(members[j])
+            return out
+
+        def metrics(values):
+            s = values['summary']
+            corners = {x['corner']: x for x in values.get('corners') or []}
+            wns = min(corners[c]['setup']['worst_slack_ns'] for c in ('tt', 'ss') if c in corners)
+            tns = sum(corners[c]['setup']['tns_ns'] for c in ('tt', 'ss') if c in corners)
+            drv = sum(int(s.get(k) or 0) for k in ('max_transition_violating', 'max_capacitance_violating',
+                                                    'max_fanout_violating'))
+            return dict(drv=drv, wns=wns, tns=tns, whs=s.get('worst_hold_slack_ns'))
+
+        target = self.args.target_margin
+
+        def better(m, b, why='setup'):
+            # Hold below the target is repaired by the hold ECO afterwards;
+            # a resize may cost it at most WHATIF_HOLD_LOSS_NS there.
+            if m['whs'] is not None and b['whs'] is not None and \
+                    m['whs'] < min(b['whs'], target) - WHATIF_HOLD_LOSS_NS:
+                return False
+            if m['drv'] < b['drv'] and m['wns'] >= min(b['wns'], 0.0) - 1e-9:
+                return True
+            # Upsizing a near-violating driver (planning margin): kept unless
+            # it adds a violation or costs setup below zero.
+            if why in ('drv', 'drv_sink') and m['drv'] <= b['drv'] and m['wns'] >= min(b['wns'], 0.0) - 1e-9:
+                return True
+            if m['drv'] <= b['drv'] and m['wns'] > b['wns'] + 1e-4:
+                return True
+            return m['drv'] <= b['drv'] and m['wns'] >= b['wns'] - 1e-9 and m['tns'] > b['tns'] + 1e-4
+
+        accepted, history, evaluated = {}, [], 0
+        prev_base = None
+        spent = 0
+        scale = min(4.0, max(0.5, 200.0 / max(len(mapped), 1)))
+        budget = min(int(WHATIF_LAYOUT_CANDIDATES * scale), int(WHATIF_LOOP_CANDIDATES * scale) - self.whatif_spent)
+        for rnd in range(WHATIF_ROUNDS):
+            room = budget - spent
+            if room < 4:
+                break
+            cands = []
+            for inst in order:
+                if inst in accepted:
+                    continue
+                for cell in alternatives(inst):
+                    if len(cands) < min(WHATIF_MAX_CANDIDATES, room):
+                        cands.append((inst, cell))
+            if not cands:
+                break
+            edits = dict(schema='rusteda.edits.v1',
+                         base=[dict(op='resize', instance=i, cell=c) for i, c in sorted(accepted.items())],
+                         candidates=[dict(id=f'c{k}', edits=[dict(op='resize', instance=i, cell=c)])
+                                     for k, (i, c) in enumerate(cands)],
+                         report=dict(endpoints=[], paths=[]))
+            ef = jdump(h.root / f'{t}_whatif_{rnd}.json', edits)
+            r = h.run(f'{t}_whatif_{rnd}', [str(x) for x in [
+                self.tools['ruststa'], '-w', sta['workspace'], '--format', 'json', 'whatif', '--rev', sta['revision'],
+                '--edits', ef, '--max-candidates', '1024', '--max-edits', '4096', '--timeout', WHATIF_TIMEOUT_S,
+                '--threads', '2', '-q']])
+            spent += len(cands)
+            self.whatif_spent += len(cands)
+            try:
+                d = json.loads(bounded_text(Path(r['stdout']), 256 * 1024 ** 2))
+            except (ValueError, OSError):
+                d = {}
+            if not d.get('base') or r['exit_code'] != 0:
+                history.append(dict(round=rnd, status='failed', exit_code=r['exit_code'],
+                                    stderr=bounded_text(Path(r['stderr']))[-400:]))
+                break
+            base = metrics(d['base'])
+            if prev_base is not None and better(prev_base, base) and history and history[-1].get('accepted'):
+                # The combined set is worse than before it: keep only the
+                # single best edit of the last round.
+                last = history[-1]['accepted']
+                for i, _ in last[1:]:
+                    accepted.pop(i, None)
+                history[-1]['reverted'] = [i for i, _ in last[1:]]
+                continue
+            scored = []
+            for c in d.get('candidates') or []:
+                if c.get('status') != 'evaluated' or not c.get('values'):
+                    continue
+                evaluated += 1
+                m = metrics(c['values'])
+                k = int(c['id'][1:])
+                if better(m, base, prio[cands[k][0]][1]):
+                    scored.append(((m['drv'] - base['drv'], -(m['wns'] - base['wns']), -(m['tns'] - base['tns']), k), cands[k], m))
+            scored.sort()
+            take, insts = [], set()
+            for key_, (inst, cell), m in scored:
+                if inst in insts or len(take) >= WHATIF_ACCEPT_PER_ROUND:
+                    continue
+                grow = (widths[cell] - widths[mapped[inst][0]]) * floor['site']['height']
+                if grow > 0 and used + grow > SIZE_MAX_UTILIZATION * rows_area:
+                    continue
+                used += max(grow, 0)
+                insts.add(inst)
+                take.append((inst, cell))
+                accepted[inst] = cell
+            history.append(dict(round=rnd, candidates=len(cands), improving=len(scored), base=base,
+                                accepted=take, exit_code=r['exit_code'], seconds=round(r.get('elapsed_seconds') or 0.0, 2)))
+            prev_base = base
+            if not take:
+                break
+        ops = [dict(op='resize_cell', instance=i, cell=c) for i, c in sorted(accepted.items())]
+        summary = dict(resized=len(ops), candidates=len(prio), traced_setup_endpoints=traced,
+                       whatif_candidates=spent, whatif_loop_candidates=self.whatif_spent,
+                       failing_setup_endpoints=len({e for _, _, e in failing}), evaluated=evaluated,
+                       rounds=history, utilization_after=round(used / rows_area, 4), max_width_dbu=max_width,
+                       oracle='ruststa whatif (resize on the layout SPEF)')
+        return ops, summary
+
+    def closure_eco(self, it: int, netlist: Path, sta: dict, phys: dict, apply_to: Path | None = None,
+                    frozen: frozenset = frozenset()) -> tuple[Path | None, dict]:
+        """DRV + setup repair of one layout (track recipe): buffer insertion
+        (scripts/closure_eco.plan_buffering: repeaters / port buffers /
+        critical-sink isolation on the nets RustSTA reports with DRV
+        violations, located by the layout's DEF) plus gate sizing
+        (size_plan), applied as one typed plan by `rustroad apply-eco
+        --sizing-profile`. `apply_to`: apply the plan to this netlist instead
+        (the hold ECO's output of the same iteration; `frozen` are the sink
+        pins its chains moved, never re-buffered). Returns (None, summary)
+        when nothing applies."""
+        import closure_eco as CE  # noqa: E402
+        import rtl2gds_logic as L  # noqa: E402
+        t, h = f'{self.tag}_i{it}', self.h
+        prof = json.loads(self.design.sizing_profile.read_text())
+        cfg = json.loads(self.config.read_text())
+        floor = json.loads(self.design.floorplan.read_text() if self.design.floorplan else self.floorplan().read_text())
+        site_w = floor['site']['width']
+        spacing = int(cfg.get('cell_spacing_sites') or 0) * site_w
+        max_width = (cfg['tap']['max_gap'] // site_w) * site_w - spacing if cfg.get('tap') else None
+        lef = L.lef_pins(Path(self.p['cell_lef']['path']))
+        widths = lef_widths(Path(self.p['cell_lef']['path']), floor['units_per_micron'])
+        drv_rows = json.loads(bounded_text(Path(sta['files']['drv']), 64 * 1024 ** 2))['sections']['drv']['rows']
+        pins = {c: {x['pin']: x['slack_ns'] for x in json.loads(bounded_text(Path(sta['files'][f'pins_{c}']), 64 * 1024 ** 2))
+                    ['sections']['pins']['rows']} for c in PATH_AWARE_SETUP_CORNERS}
+        setup_failing = any(sta['corners'][c]['worst_setup_ns'] < 0 for c in ('tt', 'ss'))
+        text = bounded_text(netlist, 64 * 1024 ** 2)
+        buf = CE.plan_buffering(text, lef, bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2), prof, drv_rows, pins,
+                                'ss', max_width, CE.next_sequence(text), floor['site']['height'], widths, setup_failing,
+                                frozen)
+        skip = set(buf['resizes'])
+        n = CE.parse_netlist(text, lef)
+        for rec in buf['records']:
+            d = n.driver.get(rec['net'], '')
+            if '/' in d:
+                skip.add(d.rsplit('/', 1)[0])
+        size_ops, summary = self.whatif_sizing(it, netlist, sta, skip, buf['added_width_dbu'])
+        resizes = [dict(op='resize_cell', instance=i, cell=c) for i, (c, _) in sorted(buf['resizes'].items())]
+        ops = buf['ops'] + resizes + size_ops
+        summary.update(buffers=len(buf['ops']), buffer_nets=len(buf['records']), driver_resizes=len(resizes),
+                       buffering=dict(records=buf['records'][:60], skipped=dict(sorted(buf['skipped'].items())[:40]),
+                                      added_width_dbu=buf['added_width_dbu'], nets_with_drv_rows=buf['nets_with_rows']),
+                       library_limited=dict(sorted(buf.get('library_limited', {}).items())[:64]))
+        summary['resized'] = len(size_ops) + len(resizes)
         if not ops:
             return None, summary
         plan = jdump(h.root / f'{t}_size_plan.json', dict(schema='rustroad.eco-plan.v1', module=self.top, operations=ops))
         out = h.root / f'{self.tag}_i{it + 1}_mapped_sized.v'
-        run_ok(h, f'{t}_size_eco', [self.tools['rustroad'], 'apply-eco', '--netlist', netlist, '--plan', plan,
+        if apply_to is not None:
+            out = h.root / f'{self.tag}_i{it + 1}_mapped_hold_sized.v'
+        run_ok(h, f'{t}_size_eco', [self.tools['rustroad'], 'apply-eco', '--netlist', apply_to or netlist, '--plan', plan,
                                     '--delay-cells', self.delay_cells, '--sizing-profile', self.design.sizing_profile,
                                     '--out', out])
         summary['plan'] = fingerprint(plan)
-        summary['ops'] = ops
+        summary['ops'] = len(ops)
         return out, summary
+
+    def placement_seed(self, it: int, phys: dict) -> Path:
+        """rustroad.placement-seed.v1 of this layout's cell positions (DEF
+        COMPONENTS, lower-left DBU): the next ECO layout is legalized from it
+        instead of re-running global placement (stable wires between ECOs)."""
+        cells = {}
+        for line in bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2).split('\nCOMPONENTS ', 1)[1].split('\nEND COMPONENTS', 1)[0].splitlines():
+            m = re.match(r'- (\S+) \S+ .*?\+ (?:PLACED|FIXED) \( (-?\d+) (-?\d+) \)', line)
+            if m:
+                cells[m[1].lstrip('\\')] = [int(m[2]), int(m[3])]
+        return jdump(self.h.root / f'{self.tag}_i{it + 1}_placement_seed.json',
+                     dict(schema='rustroad.placement-seed.v1', source={'def': fingerprint(Path(phys['paths']['def']))},
+                          cells=dict(sorted(cells.items()))))
+
+    def net_weights(self, it: int, netlist: Path, sta: dict) -> Path | None:
+        """Timing-driven placement weights from this layout's per-pin setup
+        slack (scripts/closure_eco.net_weights); None when nothing is weighted."""
+        import closure_eco as CE  # noqa: E402
+        import rtl2gds_logic as L  # noqa: E402
+        pins = {c: {x['pin']: x['slack_ns'] for x in json.loads(bounded_text(Path(sta['files'][f'pins_{c}']), 64 * 1024 ** 2))
+                    ['sections']['pins']['rows']} for c in PATH_AWARE_SETUP_CORNERS}
+        w = CE.net_weights(bounded_text(netlist, 64 * 1024 ** 2), L.lef_pins(Path(self.p['cell_lef']['path'])), pins)
+        if not w['weights']:
+            return None
+        w['source'].update(sta_workspace=sta['workspace'], sta_revision=sta['revision'], netlist=fingerprint(netlist))
+        return jdump(self.h.root / f'{self.tag}_i{it + 1}_net_weights.json', w)
 
     # ------------------------------------------------------------ antenna
     def check_antenna(self, label: str, workspace: str, extra: Path | None = None) -> dict:
@@ -795,10 +1138,24 @@ exit
         """Yosys sat proofs for every inserted buffer master + a native wrong-polarity control."""
         profile = json.loads(self.delay_cells.read_text())
         text = netlist.read_text()
-        used = sorted({b['name'] for b in profile['buffers'] if re.search(rf'(?m)^\s*{re.escape(b["name"])}\s', text)})
+        pins_of = {b['name']: (b['input_pin'], b['output_pin']) for b in profile['buffers']}
+        used = {b['name'] for b in profile['buffers'] if re.search(rf'(?m)^\s*{re.escape(b["name"])}\s', text)}
+        if self.design.sizing_profile is not None:
+            # Drive-strength buffers the buffering ECO inserted (rr_eco_buf_*).
+            fams = json.loads(self.design.sizing_profile.read_text())['families']
+            for f in fams:
+                ins = [k for k, d in f['pins'].items() if d == 'input']
+                outs = [k for k, d in f['pins'].items() if d == 'output']
+                if len(ins) == 1 and len(outs) == 1:
+                    for c in f['cells']:
+                        pins_of.setdefault(c['name'], (ins[0], outs[0]))
+            for master, name in re.findall(r'(?m)^\s*(\S+)\s+\\?(rr_eco_buf_\d+)\s', text):
+                require(master in pins_of, f'{name}: inserted master {master} is not a profiled buffer')
+                used.add(master)
+        used = sorted(used)
         proofs = {}
         for name in used:
-            b = next(x for x in profile['buffers'] if x['name'] == name)
+            b = dict(name=name, input_pin=pins_of[name][0], output_pin=pins_of[name][1])
             for c in self.libs:
                 proofs[f'{name}@{c}'] = clock_function_proof(self.h, f'{self.tag}_proof_{name}_{c}',
                                                              dict(cell=name, input_pin=b['input_pin'], output_pin=b['output_pin']),
@@ -876,9 +1233,15 @@ exit
         per-iteration records and (iteration, netlist, physical, sta, antenna)
         of the final iteration."""
         iterations, final = [], None
+        # Track-recipe loop state (reset per call: the determinism rebuild and
+        # the controls run their own loops on fresh layouts).
+        self.weights = None  # timing-driven net weights of the next layout
+        self.last_setup_eco, self.no_progress, self.eco_blocked = None, 0, None
+        self.whatif_spent = 0
+        seed, best = None, None
         for it in range(self.args.max_iterations):
             try:
-                phys = self.physical(it, netlist)
+                phys = self.physical(it, netlist, self.weights, seed)
                 sta = self.sta(it, phys)
             except RuntimeError as error:
                 # Track recipe: an ECO layout that cannot be built ends the
@@ -898,10 +1261,15 @@ exit
             iterations.append(record)
             final = (it, netlist, phys, sta, antenna)
             if self.design.sizing_profile is not None:
+                record['score'] = self.layout_score(sta, antenna)
+                if best is None or record['score'] <= best[0]:
+                    best = (record['score'], final)
                 record['drv'] = sta['drv']
                 netlist, stop = self.sized_step(it, netlist, sta, phys, antenna, record)
                 if stop:
                     break
+                # The next layout is an ECO of this one: seeded placement.
+                seed = self.placement_seed(it, phys)
                 continue
             # 'partial' (unmodeled LEF antenna statements) cannot be repaired here;
             # it ends the loop like 'passed' and fails the native_antenna gate.
@@ -921,16 +1289,39 @@ exit
                 plan = self.antenna_eco(f'{self.tag}_i{it}', netlist, antenna['report'], repaired)
                 record['antenna_eco'] = dict(status=plan['status'], nets=plan['nets'])
                 netlist = repaired
+        if best is not None and best[1][0] != final[0]:
+            # Track recipe: the gate checks the best complete layout of the
+            # loop, not merely the last one (a late ECO can lose ground).
+            iterations[-1]['selected_iteration'] = dict(
+                iteration=best[1][0], score=best[0], last_score=iterations[-1].get('score'),
+                rule='fewest failing categories (setup, hold, DRV, antenna), then the smallest '
+                     'setup + hold deficit + 0.01 ns per DRV violation; ties: the later layout')
+            final = best[1]
         return iterations, final
+
+    def layout_score(self, sta: dict, antenna: dict) -> list:
+        """[failing categories, deficit] of one layout (smaller is better)."""
+        c = sta['corners']
+        setup = sum(max(0.0, -c[x]['worst_setup_ns']) for x in ('tt', 'ss') if x in c)
+        hold = sum(max(0.0, self.args.target_margin - v['worst_hold_ns']) for v in c.values())
+        drv = (sta.get('drv') or {}).get('violations') or 0
+        fails = int(setup > 0) + int(hold > 0) + int(drv > 0) + int(antenna['status'] == 'violated')
+        return [fails, round(setup + hold + 0.01 * drv, 6)]
 
     def sized_step(self, it: int, netlist: Path, sta: dict, phys: dict, antenna: dict, record: dict) -> tuple[Path, bool]:
         """One decision of the closure loop with gate sizing (track recipe).
 
-        Order: setup or DRV violated -> gate-sizing ECO (if anything can be
-        resized); hold below the target -> hold ECO; antenna violated on a
-        timing- and DRV-clean layout -> antenna ECO. Returns (netlist for the
-        next iteration, stop). A hold ECO that is infeasible ends the loop with
-        the last layout (closure failed, every oracle still runs on it).
+        Order (explicit bound: `max_iterations` layouts in all):
+          1. DRV violated, or setup < 0 at tt/ss and the last setup ECO still
+             helped -> DRV/setup ECO (`closure_eco`: buffering + sizing), and
+             timing-driven net weights for the next placement while setup fails;
+          2. hold below the target -> path-aware hold ECO (partial plans
+             apply; infeasible endpoints are recorded with their evidence);
+          3. antenna violated on a timing- and DRV-clean layout -> antenna ECO.
+        DRV/setup count as stagnant (not repairable by this loop) after
+        SETUP_STAGNATION_ROUNDS consecutive DRV/setup ECOs that improved
+        neither the DRV count nor the worst tt/ss setup slack (by
+        SETUP_STAGNATION_NS); the loop then goes on to hold. Returns (netlist for the next iteration, stop).
         """
         corners = sta['corners'].values()
         setup_ok = all(v['worst_setup_ns'] >= 0 for v in corners)
@@ -950,26 +1341,82 @@ exit
         if it + 1 == self.args.max_iterations:
             record['stopped'] = 'iteration bound reached'
             return netlist, True
-        if not (setup_ok and drv_ok):
-            out, summary = self.size_eco(it, netlist, sta, phys)
+        worst = min(sta['corners'][c]['worst_setup_ns'] for c in ('tt', 'ss'))
+        drv_count = (sta['drv'] or {}).get('violations') or 0
+        record['worst_setup_ns'] = worst
+        prev = getattr(self, 'last_setup_eco', None)
+        if prev is not None and prev[0] == it - 1 and worst < prev[1] + SETUP_STAGNATION_NS and drv_count >= prev[2]:
+            self.no_progress = getattr(self, 'no_progress', 0) + 1
+        elif prev is not None and prev[0] == it - 1:
+            self.no_progress = 0
+        if getattr(self, 'no_progress', 0) >= SETUP_STAGNATION_ROUNDS and not getattr(self, 'eco_blocked', None):
+            # The last DRV/setup ECOs helped neither: stop spending layouts on them.
+            self.eco_blocked = dict(iteration=it, previous_worst_ns=prev[1], worst_ns=worst, previous_drv=prev[2],
+                                    drv=drv_count, bound_ns=SETUP_STAGNATION_NS, rounds=SETUP_STAGNATION_ROUNDS)
+        blocked = getattr(self, 'eco_blocked', None)
+        if blocked:
+            record['setup_stagnant'] = blocked
+        if not setup_ok and not blocked:
+            self.weights = self.net_weights(it, netlist, sta) or self.weights
+            record['net_weights'] = fingerprint(self.weights) if self.weights else None
+        want_eco = (not drv_ok or not setup_ok) and not blocked
+        # The first DRV/setup ECO runs alone (it changes the most); later
+        # ones share the layout with the hold ECO (one layout for both).
+        combined = want_eco and not hold_ok and self.last_setup_eco is not None
+        if want_eco and not combined:
+            out, summary = self.closure_eco(it, netlist, sta, phys)
             record['size_eco'] = summary
             if out is not None:
+                self.last_setup_eco = (it, worst, drv_count)
                 return out, False
         if not hold_ok:
+            if raised is None and self.design.sizing_profile is not None:
+                # Plan above the target: chain delays at the profile's one
+                # representative load under-deliver on routed layouts.
+                raised = round(self.args.target_margin + HOLD_PLAN_EXTRA_NS, 4)
             try:
                 out, plan = self.hold_eco(it, netlist, sta, target=raised)
             except RuntimeError as error:
                 record['hold_eco'] = dict(status='failed', reason=str(error)[-1500:])
+                written = self.h.root / f'{self.tag}_i{it}_hold_plan.json'
+                if written.is_file():
+                    # HOLD_ECO_INFEASIBLE: the plan lists every endpoint with
+                    # the setup budget of each point of its worst hold path.
+                    done = json.loads(bounded_text(written))
+                    record['hold_eco'].update(plan_status=done.get('status'), infeasible=done.get('infeasible', [])[:64],
+                                              plan=fingerprint(written))
+                if combined:
+                    out, summary = self.closure_eco(it, netlist, sta, phys)
+                    record['size_eco'] = summary
+                    if out is not None:
+                        self.last_setup_eco = (it, worst, drv_count)
+                        return out, False
                 return netlist, True
             record['hold_eco'] = dict(status=plan['status'], totals=plan['totals'], sinks=plan['sinks'],
+                                      points=plan.get('points', []), infeasible=plan.get('infeasible', []),
                                       plan=fingerprint(self.h.root / f'{self.tag}_i{it}_hold_plan.json'))
+            if plan['status'] == 'closed':
+                record['stopped'] = 'hold ECO planned nothing'
+                return netlist, True
+            if combined:
+                frozen = set()
+                for op in plan['eco']['operations']:
+                    if op['op'] == 'insert_buffer':
+                        frozen.add(f"{op['sink']['instance']}/{op['sink']['pin']}")
+                    elif op['op'] == 'buffer_sinks':
+                        frozen |= {f"{x['instance']}/{x['pin']}" for x in op['sinks']}
+                both, summary = self.closure_eco(it, netlist, sta, phys, apply_to=out, frozen=frozenset(frozen))
+                record['size_eco'] = summary
+                if both is not None:
+                    self.last_setup_eco = (it, worst, drv_count)
+                    return both, False
             return out, False
         if antenna['status'] == 'violated' and setup_ok and drv_ok:
             repaired = self.h.root / f'{self.tag}_i{it + 1}_mapped_ant.v'
             plan = self.antenna_eco(f'{self.tag}_i{it}', netlist, antenna['report'], repaired)
             record['antenna_eco'] = dict(status=plan['status'], nets=plan['nets'])
             return repaired, False
-        record['stopped'] = 'no repair applies (setup/DRV not resizable further)'
+        record['stopped'] = 'no repair applies (setup/DRV not repairable further)'
         return netlist, True
 
     def reference_hold(self, it: int, phys: dict) -> dict:

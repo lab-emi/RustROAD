@@ -1,9 +1,13 @@
 //! Typed, bounded netlist ECO on the flat structural Verilog AST.
 //!
-//! Three operations exist:
+//! Four operations exist:
 //! - `insert_buffer`: a non-inverting buffer cell is placed between the net
 //!   that currently feeds ONE named sink pin and that pin. The driver net keeps
 //!   every other sink; only the named connection is redirected to a new net.
+//! - `buffer_sinks`: the same for a group of sinks of ONE net (repeater /
+//!   port buffering / critical-sink isolation): every named sink pin, and
+//!   every named output port whose `assign` reads the net, moves behind one
+//!   new buffer; the net keeps its driver and every sink not named.
 //! - `insert_diode`: an antenna diode cell is attached to a named net.
 //! - `resize_cell`: an existing instance keeps its name and every connection
 //!   and gets another master of the same sizing family (caller-supplied
@@ -82,6 +86,17 @@ pub enum EcoOp {
         instance: String,
         net: String,
         sink: PinRef,
+    },
+    /// `sinks` (instance input pins, all on one net) and `ports` (output
+    /// ports whose `assign <port> = <net>` reads that net) are driven by
+    /// `cell` through the new `net`; the old net drives the new cell's input.
+    BufferSinks {
+        cell: String,
+        instance: String,
+        net: String,
+        sinks: Vec<PinRef>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ports: Vec<String>,
     },
     /// Attach an antenna diode `cell` to `net` (a scalar wire/port or `name[i]`).
     InsertDiode {
@@ -172,6 +187,12 @@ pub struct AppliedOp {
     pub driver_net: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sink: Option<PinRef>,
+    /// Every sink pin moved by a `buffer_sinks` (in plan order).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sinks: Vec<PinRef>,
+    /// Output ports moved by a `buffer_sinks`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<String>,
     /// The master before a `resize_cell`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_cell: Option<String>,
@@ -469,6 +490,150 @@ pub fn apply(
                     net: net.clone(),
                     driver_net: expr_text(&driver),
                     sink: Some(sink.clone()),
+                    sinks: Vec::new(),
+                    ports: Vec::new(),
+                    previous_cell: None,
+                });
+            }
+            EcoOp::BufferSinks {
+                cell,
+                instance,
+                net,
+                sinks,
+                ports,
+            } => {
+                let b = buffers.get(cell.as_str()).ok_or_else(|| {
+                    EcoError::NotBuffer(format!("{cell} is not a profiled buffer cell"))
+                })?;
+                b.check_identity()?;
+                if sinks.is_empty() && ports.is_empty() {
+                    return Err(EcoError::Invalid(format!(
+                        "buffer_sinks {instance}: no sink pin or port named"
+                    )));
+                }
+                let mut driver: Option<Expr> = None;
+                let mut same = |e: &Expr, what: &str| -> Result<()> {
+                    let e = match e {
+                        e @ (Expr::Ident(_) | Expr::BitSelect { .. }) => e.clone(),
+                        other => {
+                            return Err(EcoError::Invalid(format!(
+                                "{what} is driven by {}; only a single net bit is supported",
+                                expr_text(other)
+                            )));
+                        }
+                    };
+                    match &driver {
+                        None => driver = Some(e),
+                        Some(d) if *d == e => {}
+                        Some(d) => {
+                            return Err(EcoError::Invalid(format!(
+                                "{what} is on {} but the other sinks of {instance} are on {}",
+                                expr_text(&e),
+                                expr_text(d)
+                            )));
+                        }
+                    }
+                    Ok(())
+                };
+                let mut seen: HashSet<(&str, &str)> = HashSet::new();
+                let mut at_of = Vec::with_capacity(sinks.len());
+                for sink in sinks {
+                    if !seen.insert((sink.instance.as_str(), sink.pin.as_str())) {
+                        return Err(EcoError::Invalid(format!(
+                            "sink {}/{} is listed twice",
+                            sink.instance, sink.pin
+                        )));
+                    }
+                    let at = *index.get(&sink.instance).ok_or_else(|| {
+                        EcoError::Invalid(format!("sink instance {} absent", sink.instance))
+                    })?;
+                    cells.check_sink(&out.instances[at].cell, &sink.instance, &sink.pin)?;
+                    let c = out.instances[at]
+                        .connections
+                        .iter()
+                        .find(|c| c.pin == sink.pin)
+                        .ok_or_else(|| {
+                            EcoError::Invalid(format!(
+                                "sink pin {}/{} is not connected",
+                                sink.instance, sink.pin
+                            ))
+                        })?;
+                    same(&c.signal, &format!("sink {}/{}", sink.instance, sink.pin))?;
+                    at_of.push(at);
+                }
+                let mut port_assigns = Vec::with_capacity(ports.len());
+                let mut seen_ports = HashSet::new();
+                for port in ports {
+                    if !seen_ports.insert(port.as_str()) {
+                        return Err(EcoError::Invalid(format!("port {port} is listed twice")));
+                    }
+                    let lhs = resolve_net(&out, port)?;
+                    let base = match &lhs {
+                        Expr::Ident(n) | Expr::BitSelect { name: n, .. } => n.clone(),
+                        _ => unreachable!(),
+                    };
+                    if !out
+                        .ports
+                        .iter()
+                        .any(|p| p.name == base && p.direction == verilog::Direction::Output)
+                    {
+                        return Err(EcoError::Invalid(format!("{port} is not an output port")));
+                    }
+                    let k = out
+                        .assigns
+                        .iter()
+                        .position(|a| a.lhs == lhs)
+                        .ok_or_else(|| {
+                            EcoError::Invalid(format!(
+                                "output port {port} is not driven by an assign; it cannot move"
+                            ))
+                        })?;
+                    same(&out.assigns[k].rhs, &format!("output port {port}"))?;
+                    port_assigns.push(k);
+                }
+                let driver = driver.expect("at least one sink or port");
+                claim(instance, "instance")?;
+                claim(net, "net")?;
+                for (sink, at) in sinks.iter().zip(&at_of) {
+                    let c = out.instances[*at]
+                        .connections
+                        .iter_mut()
+                        .find(|c| c.pin == sink.pin)
+                        .expect("checked above");
+                    c.signal = Expr::Ident(net.clone());
+                }
+                for k in port_assigns {
+                    out.assigns[k].rhs = Expr::Ident(net.clone());
+                }
+                out.wires.push(Wire {
+                    name: net.clone(),
+                    range: None,
+                });
+                index.insert(instance.clone(), out.instances.len());
+                out.instances.push(Instance {
+                    name: instance.clone(),
+                    cell: b.name.clone(),
+                    connections: vec![
+                        Connection {
+                            pin: b.input_pin.clone(),
+                            signal: driver.clone(),
+                        },
+                        Connection {
+                            pin: b.output_pin.clone(),
+                            signal: Expr::Ident(net.clone()),
+                        },
+                    ],
+                });
+                nbuf += 1;
+                applied.push(AppliedOp {
+                    op: "buffer_sinks".into(),
+                    instance: instance.clone(),
+                    cell: b.name.clone(),
+                    net: net.clone(),
+                    driver_net: expr_text(&driver),
+                    sink: None,
+                    sinks: sinks.clone(),
+                    ports: ports.clone(),
                     previous_cell: None,
                 });
             }
@@ -502,6 +667,8 @@ pub fn apply(
                     net: net.clone(),
                     driver_net: expr_text(&signal),
                     sink: None,
+                    sinks: Vec::new(),
+                    ports: Vec::new(),
                     previous_cell: None,
                 });
             }
@@ -548,6 +715,8 @@ pub fn apply(
                     net: String::new(),
                     driver_net: String::new(),
                     sink: None,
+                    sinks: Vec::new(),
+                    ports: Vec::new(),
                     previous_cell: Some(old),
                 });
             }
@@ -769,6 +938,129 @@ endmodule
         )
         .unwrap();
         assert_eq!(again, out);
+    }
+
+    fn group(
+        cell: &str,
+        instance: &str,
+        net: &str,
+        sinks: &[(&str, &str)],
+        ports: &[&str],
+    ) -> EcoOp {
+        EcoOp::BufferSinks {
+            cell: cell.into(),
+            instance: instance.into(),
+            net: net.into(),
+            sinks: sinks
+                .iter()
+                .map(|(i, p)| PinRef {
+                    instance: i.to_string(),
+                    pin: p.to_string(),
+                })
+                .collect(),
+            ports: ports.iter().map(|p| p.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn buffer_sinks_moves_a_group_of_one_net_and_output_port_assigns() {
+        let (out, report) = run(vec![group(
+            "dly_1",
+            "rr_eco_buf_0",
+            "rr_eco_buf_0_n",
+            &[("r0", "D"), ("r2", "D")],
+            &[],
+        )])
+        .unwrap();
+        let pin = |inst: &str, pin: &str| {
+            out.instances
+                .iter()
+                .find(|i| i.name == inst)
+                .unwrap()
+                .connections
+                .iter()
+                .find(|c| c.pin == pin)
+                .unwrap()
+                .signal
+                .clone()
+        };
+        assert_eq!(pin("r0", "D"), Expr::Ident("rr_eco_buf_0_n".into()));
+        assert_eq!(pin("r2", "D"), Expr::Ident("rr_eco_buf_0_n".into()));
+        assert_eq!(pin("rr_eco_buf_0", "A"), Expr::Ident("n0".into()));
+        assert_eq!(pin("g0", "X"), Expr::Ident("n0".into()));
+        assert_eq!(report.buffers_inserted, 1);
+        assert_eq!(report.applied[0].sinks.len(), 2);
+        // Sinks on two different nets, a repeated sink, an output pin and an
+        // empty group are refused.
+        for (sinks, needle) in [
+            (&[("r0", "D"), ("r1", "D")][..], "other sinks"),
+            (&[("r0", "D"), ("r0", "D")][..], "listed twice"),
+            (&[("r0", "Q")][..], "OUTPUT pin"),
+            (&[][..], "no sink pin or port"),
+        ] {
+            let e = run(vec![group("dly_1", "e0", "e0_n", sinks, &[])])
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains(needle), "{e}");
+        }
+        let e = run(vec![group("inv_1", "e0", "e0_n", &[("r0", "D")], &[])]).unwrap_err();
+        assert!(matches!(e, EcoError::NotBuffer(_)), "{e}");
+        // An output port read through an assign moves with the group; the
+        // net keeps the sinks that were not named.
+        let n = parse_verilog(
+            "module top(input wire clk, input wire d, output wire [1:0] y);
+  wire q;
+  wire n1;
+  dff r0 (.D(d), .CLK(clk), .Q(q));
+  cellx g0 (.A(q), .B(q), .X(n1));
+  dff r1 (.D(q), .CLK(clk), .Q(y[1]));
+  assign y[0] = q;
+endmodule
+",
+            &VerilogLimits::default(),
+        )
+        .unwrap();
+        let (out, report) = apply(
+            &n,
+            &plan(vec![group(
+                "dly_1",
+                "b0",
+                "b0_n",
+                &[("g0", "A"), ("r1", "D")],
+                &["y[0]"],
+            )]),
+            &cells(),
+            &EcoLimits::default(),
+            &VerilogLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(report.applied[0].ports, vec!["y[0]".to_string()]);
+        assert_eq!(out.assigns[0].rhs, Expr::Ident("b0_n".into()));
+        let g0 = out.instances.iter().find(|i| i.name == "g0").unwrap();
+        assert_eq!(g0.connections[0].signal, Expr::Ident("b0_n".into()));
+        assert_eq!(g0.connections[1].signal, Expr::Ident("q".into()));
+        let mut text = Vec::new();
+        write_verilog(&out, &mut text).unwrap();
+        let again = parse_verilog(
+            std::str::from_utf8(&text).unwrap(),
+            &VerilogLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(again, out);
+        // An input port, a port without an assign and an unknown port fail.
+        for port in ["d", "y[1]", "zz"] {
+            assert!(
+                apply(
+                    &n,
+                    &plan(vec![group("dly_1", "b0", "b0_n", &[("g0", "A")], &[port])]),
+                    &cells(),
+                    &EcoLimits::default(),
+                    &VerilogLimits::default(),
+                )
+                .is_err(),
+                "{port}"
+            );
+        }
     }
 
     #[test]

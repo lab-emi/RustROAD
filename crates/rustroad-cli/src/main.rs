@@ -54,6 +54,13 @@ enum Command {
     Place {
         #[arg(long)]
         base_rev: String,
+        /// Timing-driven net weights (`rustroad.net-weights.v1`, analytic placer only).
+        #[arg(long)]
+        net_weights: Option<PathBuf>,
+        /// ECO placement seed (`rustroad.placement-seed.v1`): seeded cells are
+        /// legalized from their seed, new cells start at their neighbours.
+        #[arg(long)]
+        seed: Option<PathBuf>,
     },
     /// Build a bounded level-balanced clock-buffer topology, then replace placement.
     ClockTree {
@@ -187,6 +194,20 @@ enum Command {
         max_combinations: usize,
         #[arg(long, default_value = "rr_eco_hold_")]
         prefix: String,
+        /// `ruststa report --section pins --corner C --limit 0` JSON of the same
+        /// revision (repeatable, one per setup corner; must cover
+        /// --setup-corner). Enables path-aware placement: delay goes where every
+        /// path through the point keeps its setup slack (a sink pin on the worst
+        /// hold path, or every sink of one net, e.g. an input port).
+        #[arg(long = "pins-report")]
+        pins_reports: Vec<PathBuf>,
+        /// Apply the feasible part and list the infeasible endpoints (status
+        /// `partial`) instead of failing the whole plan.
+        #[arg(long)]
+        allow_partial: bool,
+        /// Largest sink count of a net-level point (path-aware mode).
+        #[arg(long, default_value_t = 8)]
+        max_group_sinks: usize,
         #[arg(long)]
         out: PathBuf,
         #[arg(long)]
@@ -318,6 +339,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             max_sinks,
             max_combinations,
             prefix,
+            pins_reports,
+            allow_partial,
+            max_group_sinks,
             out,
             plan_out,
         } => {
@@ -341,6 +365,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     timed_netlist: timed_netlist.clone(),
                     timed_netlist_sha256: timed_netlist_sha256.clone(),
                     cell_lef: cell_lef.clone(),
+                    pins_reports: pins_reports.clone(),
+                    allow_partial: *allow_partial,
+                    max_group_sinks: *max_group_sinks,
                 },
             )?);
         }
@@ -468,9 +495,17 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 physical_config.as_deref(),
             )?)
         }
-        Command::Place { base_rev } => {
-            emit(&rustroad_workspace::place(&workspace, &base_rev, &limits)?)
-        }
+        Command::Place {
+            base_rev,
+            net_weights,
+            seed,
+        } => emit(&rustroad_workspace::place_with(
+            &workspace,
+            &base_rev,
+            &limits,
+            net_weights.as_deref(),
+            seed.as_deref(),
+        )?),
         Command::ClockTree { base_rev, sdc } => {
             emit(&rustroad_workspace::clock::synthesize_with_sdc(
                 &workspace,

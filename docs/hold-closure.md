@@ -178,12 +178,27 @@ the estimated setup slack must stay at or above `--setup-margin`.
 are found by walking back along the chain. New cells extend that chain, up to
 `--max-total-chain`.
 
+**Path-aware mode (`--pins-report`, closure stream).** With per-pin setup
+slack reports of the same STA revision (bound like the other reports:
+`pin_rows_bound`), the chain goes on the endpoint's worst hold path instead
+of in front of the endpoint: on a sink pin of the path, or in front of every
+input-pin sink of one small net (`--max-group-sinks`, e.g. an input port),
+wherever the setup slack of every path through the point (and of the
+delay already planned on the same path) leaves room at every setup corner;
+a point shared by several violating endpoints is credited to all of them.
+`--allow-partial` applies the feasible part (status `partial`) and lists
+the infeasible endpoints with the setup budget of each point of their
+path. Details and the ranking in `docs/closure.md`. Without
+`--pins-report` the planner below is unchanged (same netlists; the plan
+JSON carries three more parameter fields).
+
 **Infeasible cases.** These write the plan with status `infeasible` and exit 2
 with `HOLD_ECO_INFEASIBLE`:
 
 - no chain meets the need without breaking the setup margin;
 - the chain would exceed its length cap;
-- the violating endpoint is a top-level port.
+- the violating endpoint is a top-level port (endpoint planner; the
+  path-aware planner can delay an upstream pin of its path instead).
 
 The estimate is not a timing result. The loop re-times every ECO with new
 parasitics.

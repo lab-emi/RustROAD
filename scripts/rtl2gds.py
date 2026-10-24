@@ -375,12 +375,19 @@ class PdkGate:
                              antenna=rec["antenna"]["status"], hold_eco=he.get("totals") or he.get("reason"),
                              antenna_eco=rec.get("antenna_eco"), drv=rec.get("drv"),
                              size_eco={k: se.get(k) for k in ("resized", "candidates", "by_reason", "failing_setup_endpoints",
-                                                              "drv_violations", "utilization_after")} if se else None,
+                                                              "drv_violations", "utilization_after", "buffers",
+                                                              "buffer_nets", "driver_resizes", "library_limited")} if se else None,
+                             hold_points=len(he.get("points") or []) or None,
+                             hold_infeasible=(he.get("infeasible") or [])[:8] or None,
+                             net_weights=bool(rec.get("net_weights")), setup_stagnant=rec.get("setup_stagnant"),
+                             score=rec.get("score"),
                              stopped=rec.get("stopped")))
         closed = b["sta"]["closed"]
         return item("passed" if closed else "failed",
                     None if closed else f"native RustSTA hold/setup not closed after {len(rows)} iteration(s)",
                     iterations=rows, max_iterations=self.ctx.flow_args.max_iterations,
+                    final_iteration=b["final_iteration"],
+                    selected=(b["iterations"][-1].get("selected_iteration") if b["iterations"] else None),
                     decision_spef="native rustroad extract", target_margin_ns=self.ctx.flow_args.target_margin,
                     gate_hold_margin_ns=self.ctx.budgets["hold_margin_ns"],
                     sizing=self.spec.get("sizing_profile") is not None)

@@ -272,6 +272,9 @@ fn case(rows: &[(&str, &str, f64, f64)], setup_ss: f64, profile: Value) -> Case 
         prefix: "rr_eco_hold_".into(),
         out: d.join("out.v"),
         plan_out: d.join("plan.json"),
+        pins_reports: Vec::new(),
+        allow_partial: false,
+        max_group_sinks: 8,
     };
     Case { d, req }
 }
@@ -1115,4 +1118,178 @@ fn antenna_eco_sizes_diodes_against_the_safety_margin() {
     r["safety_margin"]["fraction"] = json!(0.0);
     let p = write(&d, "m0.json", &r);
     assert_eq!(plan_antenna(&req(&p, "m0")).unwrap().nets[0].diodes, 1);
+}
+
+/// hold_fix row with the stage fields RustSTA writes (arc, inst, driver).
+fn path_row(endpoint: &str, hold: f64, setup: f64) -> Value {
+    let stage = |pin: &str, inst: Option<&str>, arc: &str, net: &str, driver: &str| json!({"pin": pin, "inst": inst, "arc": arc, "net": net, "net_driver": driver});
+    let stages = match endpoint {
+        // a[0] -> g0/A -> g0/X -> r0/D
+        "r0/D" => vec![
+            stage("a[0]", None, "input", "a[0]", "a[0]"),
+            stage("g0/A", Some("g0"), "net", "a[0]", "a[0]"),
+            stage("g0/X", Some("g0"), "cell", "n0", "g0/X"),
+            stage("r0/D", Some("r0"), "net", "n0", "g0/X"),
+        ],
+        // a[0] -> r2/D
+        "r2/D" => vec![
+            stage("a[0]", None, "input", "a[0]", "a[0]"),
+            stage("r2/D", Some("r2"), "net", "a[0]", "a[0]"),
+        ],
+        // en -> g1/B -> g1/X -> r1/D
+        _ => vec![
+            stage("en", None, "input", "en", "en"),
+            stage("g1/B", Some("g1"), "net", "en", "en"),
+            stage("g1/X", Some("g1"), "cell", "n1", "g1/X"),
+            stage("r1/D", Some("r1"), "net", "n1", "g1/X"),
+        ],
+    };
+    let (cell, net, driver) = binding_of(endpoint);
+    json!({"endpoint": endpoint, "inst": endpoint.split('/').next().unwrap(), "cell": cell, "net": net,
+           "net_driver": driver, "hold_slack_ns": hold, "setup_slack_ns": setup,
+           "required_delay_ns": 0.05 - hold, "path": {"stages": stages}})
+}
+fn pins_report(corner: &str, rows: &[(&str, f64)]) -> Value {
+    let rows: Vec<Value> = rows
+        .iter()
+        .map(|r| json!({"pin": r.0, "is_port": !r.0.contains('/'), "slack_ns": r.1, "hold_slack_ns": 0.0}))
+        .collect();
+    json!({"schema": "rusteda.v1", "ok": true, "workspace": "/sta/ws", "rev": "rev2",
+           "scope": {"corner": corner, "wire_model": "spef_rc", "clock_model": "propagated"},
+           "sections": {"pins": {"total": rows.len(), "matched": rows.len(), "shown": rows.len(), "rows": rows}}})
+}
+/// Path-aware case: hold rows with stages, pins reports at ss and tt where
+/// the a[0] port and its g0/A branch have room but r0/D (and g0/X) do not.
+fn path_case(rows: &[(&str, &str, f64, f64)], a0_slack: f64) -> Case {
+    let mut c = case(rows, 0.1, default_profile());
+    let hold = write(
+        &c.d,
+        "hold_path.json",
+        &hold_report_rev(0.05, rows, "spef_rc", "rev2", Some(&path_row)),
+    );
+    let pins = |corner: &str, scale: f64| {
+        pins_report(
+            corner,
+            &[
+                ("a[0]", a0_slack * scale),
+                ("en", 0.12 * scale),
+                ("g0/A", a0_slack * scale),
+                ("g0/X", 0.1 * scale),
+                ("g1/B", 4.0 * scale),
+                ("g1/X", 0.1 * scale),
+                ("r0/D", 0.1 * scale),
+                ("r1/D", 0.1 * scale),
+                ("r2/D", 4.0 * scale),
+            ],
+        )
+    };
+    c.req.hold_reports = vec![hold];
+    c.req.pins_reports = vec![
+        write(&c.d, "pins_ss.json", &pins("ss", 1.0)),
+        write(&c.d, "pins_tt.json", &pins("tt", 2.0)),
+    ];
+    c
+}
+
+#[test]
+fn path_aware_delay_goes_upstream_of_the_setup_critical_part() {
+    // r0/D needs 0.30 ns at ss but has 0.1 ns of setup slack: the endpoint
+    // planner cannot help it. Its hold path enters through input a[0]; a[0]
+    // also feeds r2/D, which needs 0.2 ns: two BUF1 (0.34 ns at ss, area 8,
+    // smaller than one DLY1) in front of both a[0] sinks fix both and leave
+    // every setup path through a[0] 4 - 0.374 ns.
+    let rows = [
+        ("ss", "r0/D", -0.25, 0.1),
+        ("ss", "r2/D", -0.15, 0.1),
+        ("tt", "r0/D", -0.05, 9.0),
+    ];
+    let mut old = path_case(&rows, 4.0);
+    old.req.pins_reports.clear();
+    let e = plan_hold(&old.req).unwrap_err().to_string();
+    assert!(
+        e.contains("HOLD_ECO_INFEASIBLE") && e.contains("r0/D"),
+        "{e}"
+    );
+    let c = path_case(&rows, 4.0);
+    let plan = plan_hold(&c.req).unwrap();
+    assert_eq!(plan.status, "planned", "{:?}", plan.infeasible);
+    assert_eq!(plan.points.len(), 1);
+    let p = &plan.points[0];
+    assert_eq!((p.kind, p.name.as_str()), ("net", "a[0]"));
+    assert_eq!(p.cells, ["BUF1", "BUF1"]);
+    assert_eq!(p.instances, ["rr_eco_hold_0", "rr_eco_hold_1"]);
+    assert_eq!(p.sinks, ["g0/A", "r2/D"]);
+    assert_eq!(p.endpoints, ["r0/D", "r2/D"]);
+    assert_eq!(plan.sinks.len(), 2);
+    assert!(
+        plan.sinks
+            .iter()
+            .all(|s| s.point.as_deref() == Some("net:a[0]"))
+    );
+    // The second endpoint is covered by the first one's point (no cells).
+    assert_eq!(plan.sinks[1].endpoint, "r2/D");
+    assert!(plan.sinks[1].cells.is_empty());
+    let out = fs::read_to_string(&c.req.out).unwrap();
+    assert!(
+        out.contains("BUF1 rr_eco_hold_1 (.A(a[0]), .X(rr_eco_hold_1_n));"),
+        "{out}"
+    );
+    assert!(
+        out.contains("BUF1 rr_eco_hold_0 (.A(rr_eco_hold_1_n), .X(rr_eco_hold_0_n));"),
+        "{out}"
+    );
+    assert!(
+        out.contains("AND2 g0 (.A(rr_eco_hold_0_n), .B(en), .X(n0));"),
+        "{out}"
+    );
+    assert!(
+        out.contains("DFF r2 (.D(rr_eco_hold_0_n), .CLK(clk), .Q(y[0]));"),
+        "{out}"
+    );
+    assert!(
+        out.contains("DFF r0 (.D(n0), .CLK(clk), .Q(\\q[0] ));"),
+        "{out}"
+    );
+    let v: Value = serde_json::from_slice(&fs::read(&c.req.plan_out).unwrap()).unwrap();
+    assert_eq!(v["inputs"]["binding"]["pin_rows_bound"], 18);
+    assert_eq!(v["parameters"]["path_aware"], true);
+    // Same inputs, same bytes.
+    let mut again = c.req.clone();
+    again.out = c.d.join("again.v");
+    again.plan_out = c.d.join("again.json");
+    plan_hold(&again).unwrap();
+    assert_eq!(fs::read(&c.req.out).unwrap(), fs::read(&again.out).unwrap());
+}
+
+#[test]
+fn path_aware_infeasible_endpoints_carry_evidence_and_partial_plans_apply() {
+    // a[0] has no room either: r0/D is truly infeasible (every point of its
+    // path has less setup slack than the smallest cell's ss delay). r1/D
+    // enters through en -> g1/B, whose branch has room.
+    let rows = [("ss", "r0/D", -0.25, 0.1), ("ss", "r1/D", -0.1, 0.1)];
+    let c = path_case(&rows, 0.15);
+    let e = plan_hold(&c.req).unwrap_err().to_string();
+    assert!(e.contains("HOLD_ECO_INFEASIBLE"), "{e}");
+    assert!(
+        e.contains("r0/D: needs") && e.contains("net:a[0] (setup budget ss 0.1500"),
+        "{e}"
+    );
+    assert!(!c.req.out.exists());
+    let v: Value = serde_json::from_slice(&fs::read(&c.req.plan_out).unwrap()).unwrap();
+    assert_eq!(v["status"], "infeasible");
+    let mut partial = path_case(&rows, 0.15);
+    partial.req.allow_partial = true;
+    let plan = plan_hold(&partial.req).unwrap();
+    assert_eq!(plan.status, "partial");
+    assert_eq!(plan.infeasible.len(), 1);
+    assert_eq!(plan.points.len(), 1);
+    // en drives g0/B and g1/B, but only en's g1 branch is on r1/D's path and
+    // en itself has 0.12 ns of room: the sink pin g1/B carries the delay.
+    assert_eq!(plan.points[0].name, "g1/B");
+    assert_eq!(plan.points[0].kind, "sink_pin");
+    let out = fs::read_to_string(&partial.req.out).unwrap();
+    assert!(
+        out.contains("AND2 g1 (.A(a[1]), .B(rr_eco_hold_0_n), .X(n1));"),
+        "{out}"
+    );
 }

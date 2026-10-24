@@ -56,6 +56,8 @@ def roles(netlist: Path, sizes: dict, physical: set[str]) -> dict:
             role = "clock_buffer"
         elif name.startswith("rr_eco_hold"):
             role = "hold_cell"
+        elif name.startswith("rr_eco_buf"):
+            role = "eco_buffer"
         elif name.startswith("rr_tie"):
             role = "tie"
         else:
@@ -99,9 +101,11 @@ def closure(pdk: dict) -> dict:
     hold = sum((r.get("hold_eco") or {}).get("cells", 0) for r in rows if isinstance(r.get("hold_eco"), dict))
     diodes = sum(sum(n.get("diodes", 0) for n in (r.get("antenna_eco") or {}).get("nets") or []) for r in rows)
     resized = sum((r.get("size_eco") or {}).get("resized") or 0 for r in rows)
+    buffers = sum((r.get("size_eco") or {}).get("buffers") or 0 for r in rows)
     return dict(status=h.get("status"), iterations=len(rows), max_iterations=h.get("max_iterations"),
                 target_margin_ns=h.get("target_margin_ns"), sizing=h.get("sizing"),
                 hold_cells_planned=hold, antenna_diodes_planned=diodes, cells_resized=resized,
+                buffers_planned=buffers, final_iteration=h.get("final_iteration"), selected=h.get("selected"),
                 trace=[dict(iteration=r["iteration"], worst=r["worst"], drv=(r.get("drv") or {}).get("violations"),
                             hold_eco=r.get("hold_eco") if not isinstance(r.get("hold_eco"), str) else short(r["hold_eco"], 300),
                             size_eco=r.get("size_eco"), antenna=r.get("antenna"), stopped=r.get("stopped"))
