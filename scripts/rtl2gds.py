@@ -95,7 +95,7 @@ class Steps:
             rss += [x for x in extra if x]
             self.rows.append(dict(pdk=pdk, step=name, wall_seconds=round(time.monotonic() - t0, 3),
                                   peak_rss_kib=max(rss, default=None), processes=len(h.receipts) - start,
-                                  container_peaks=len([x for x in extra if x])))
+                                  nested_peaks=len([x for x in extra if x])))
 
 
 class Context:
@@ -140,6 +140,7 @@ class PdkGate:
         self.p = p
         self.statuses: dict[str, dict] = {}
         self.details: dict = {}
+        self.container_peaks: list = []  # peak RSS of every signoff container run (steps)
         want = [(c["name"], c["liberty"], c["rc"]) for c in self.spec["corners"]]
         if want != CORNERS[tag]:
             raise GateError(f"{tag}: manifest corners {want} differ from the closure engine {CORNERS[tag]}")
@@ -330,6 +331,7 @@ class PdkGate:
                                 manifest=ctx.signoff_manifest, threads=2, memory=ctx.budgets["container_memory"],
                                 timeout=int(ctx.budgets["container_timeout_s"]), plant=None)
         summary = signoff_harness.run_checks(ns, checks)
+        self.container_peaks.append(summary["resources"]["peak_rss_kib"])
         path = ns.out / "signoff.json"
         summary["summary_path"] = str(path)
         path.write_text(json.dumps(summary, indent=2) + "\n")
@@ -427,12 +429,15 @@ def run_pdk(ctx: Context, tag: str, profile: dict) -> dict:
                     st["determinism"] = item("unverified", f"rerun did not complete: {error}",
                                              traceback=traceback.format_exc()[-2000:])
         if not ctx.args.no_controls:
-            with ctx.steps(h, tag, "controls"):
+            with ctx.steps(h, tag, "controls") as extra:
+                first = len(gate.container_peaks)
                 try:
                     st["controls"] = C.run_all(ctx, gate, built, record)
                 except Exception as error:  # noqa: BLE001
                     st["controls"] = item("unverified", f"controls did not complete: {error}",
                                           traceback=traceback.format_exc()[-2000:])
+                extra += gate.container_peaks[first:]
+                extra += [c.get("peak_rss_kib") for c in (st["controls"].get("controls") or {}).values()]
         # Frozen inputs and every bound artifact re-verified at the very end.
         frozen_after = D.compare_frozen(gate.spec["frozen"], built["flow"].frozen())
         if "inputs_frozen" in st:

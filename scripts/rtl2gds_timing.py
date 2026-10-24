@@ -222,14 +222,22 @@ def pulse_parity(compat: dict, ref: dict, corner: str, tolerance: float) -> dict
             mine[key] = r
     period = {r["pin"]: r for r in compat["reports"]["min_period"]["rows"] if r["corner"] == corner}
     missing = sorted(set(ref["mpw"]) ^ set(mine)) + sorted(set(ref["period"]) ^ set(period))
-    diff = 0.0
-    for k in set(ref["mpw"]) & set(mine):
-        diff = max(diff, abs(mine[k]["slack"] - ref["mpw"][k]["slack"]), abs(mine[k]["limit"] - ref["mpw"][k]["required"]))
-    for k in set(ref["period"]) & set(period):
-        diff = max(diff, abs(period[k]["slack"] - ref["period"][k]["slack"]),
-                   abs(period[k]["limit"] - ref["period"][k]["min_period"]))
+    rows = []
+    for k in sorted(set(ref["mpw"]) & set(mine)):
+        rows.append(dict(check=k, ruststa_slack_ns=mine[k]["slack"], opensta_slack_ns=ref["mpw"][k]["slack"],
+                         ruststa_required_ns=mine[k]["limit"], opensta_required_ns=ref["mpw"][k]["required"],
+                         difference_ns=max(abs(mine[k]["slack"] - ref["mpw"][k]["slack"]),
+                                           abs(mine[k]["limit"] - ref["mpw"][k]["required"]))))
+    for k in sorted(set(ref["period"]) & set(period)):
+        rows.append(dict(check=f"{k}:min_period", ruststa_slack_ns=period[k]["slack"],
+                         opensta_slack_ns=ref["period"][k]["slack"], ruststa_required_ns=period[k]["limit"],
+                         opensta_required_ns=ref["period"][k]["min_period"],
+                         difference_ns=max(abs(period[k]["slack"] - ref["period"][k]["slack"]),
+                                           abs(period[k]["limit"] - ref["period"][k]["min_period"]))))
+    diff = max((r["difference_ns"] for r in rows), default=0.0)
     return dict(status="passed" if not missing and diff <= tolerance else "failed", mpw_rows=len(mine),
-                period_rows=len(period), max_difference_ns=diff, missing_or_extra=missing[:20])
+                period_rows=len(period), max_difference_ns=diff, missing_or_extra=missing[:20],
+                worst_rows=sorted(rows, key=lambda r: -r["difference_ns"])[:4])
 
 
 def drv_parity(gating: dict, ref: dict, corner: str) -> dict:

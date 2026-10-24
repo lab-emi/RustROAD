@@ -67,7 +67,9 @@ def plant(tag: str, gds: Path, work: Path, kind: str, **extra) -> tuple[Path, di
                       memory="2g", cpus=1, threads=1, timeout=300)
     if not out.is_file() or not report.is_file():
         raise GateError(f"planting {kind} failed: {container.read_capture(r['stdout'])[-400:]}")
-    return out, json.loads(report.read_text())
+    info = json.loads(report.read_text())
+    info["plant_peak_rss_kib"] = r.get("peak_rss_kib")
+    return out, info
 
 
 def verdict(summary: dict, check: str) -> dict:
@@ -83,7 +85,7 @@ def drc_spacing(ctx, gate, b, work: Path) -> dict:
     st = s["statuses"]
     return control("Magic DRC and KLayout DRC", st.get("drc_magic") == "failed" and st.get("drc_klayout") == "failed",
                    statuses=st, counts=s["counts"], by_rule=s["by_rule"], planted=info.get("shapes"),
-                   gap_um=info.get("gap_um"))
+                   gap_um=info.get("gap_um"), peak_rss_kib=info.get("plant_peak_rss_kib"))
 
 
 def input_bits(ctx) -> list[str]:
@@ -104,7 +106,8 @@ def label_swap(ctx, gate, b, work: Path) -> dict:
     detected = (st.get("lvs_netgen") == "failed" and st.get("lvs_klayout") == "failed" and st.get("xor") == "failed"
                 and bool(own["netgen"]) and bool(own["klayout"]))
     return control("Netgen LVS, KLayout LVS (own results) and the XOR label comparison", detected, statuses=st,
-                   swapped=swap, own_problems=own, labels_swapped=info.get("swapped"))
+                   swapped=swap, own_problems=own, labels_swapped=info.get("swapped"),
+                   peak_rss_kib=info.get("plant_peak_rss_kib"))
 
 
 def two_terminal_via(def_text: str, vias: set[str], divisor: int, clock_nets: set[str]) -> tuple[str, str, int, int]:
@@ -140,7 +143,7 @@ def removed_via(ctx, gate, b, work: Path) -> dict:
     own = dict(netgen=signoff_controls.lvs_own(ng)[:4], klayout=signoff_controls.lvs_own(kl)[:4])
     detected = st.get("lvs_netgen") == "failed" and st.get("lvs_klayout") == "failed" and own["netgen"] and own["klayout"]
     return control("Netgen LVS and KLayout LVS (own results)", detected, statuses=st, net=net, via=via, at_gds=[x, y],
-                   removed=info.get("removed"), own_problems=own)
+                   removed=info.get("removed"), own_problems=own, peak_rss_kib=info.get("plant_peak_rss_kib"))
 
 
 # ----------------------------------------------------------------------------- timing / identity controls
@@ -212,7 +215,9 @@ def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
     ref_worst = min(ref["hold"].values())
     return control("RustSTA and OpenSTA hold gate on a fresh layout", rust[corner] < margin and ref_worst < margin,
                    removed=removed, sink=worst[2], iteration0_hold_ns=worst[0], worst_corner=corner,
-                   ruststa_worst_hold_ns=rust, opensta_worst_hold_ns=ref_worst, margin_ns=margin)
+                   ruststa_worst_hold_ns=rust, opensta_worst_hold_ns=ref_worst, margin_ns=margin,
+                   processes=len(hc.receipts), peak_rss_kib=max((r["peak_rss_kib"] for r in hc.receipts
+                                                                if r.get("peak_rss_kib")), default=None))
 
 
 def tampered_sdc(ctx, gate, b, work: Path) -> dict:
@@ -267,7 +272,8 @@ def tampered_spef(ctx, gate, b, work: Path) -> dict:
     except Exception as error:  # noqa: BLE001 - recorded, the identity check is the oracle
         effect = dict(ruststa="did not time the tampered SPEF", error=repr(error)[:400])
     return control("SPEF identity against the extraction receipt", binding["status"] == "failed",
-                   resistors_scaled=resistors, factor=1000.0, binding=binding["files"], timing_effect=effect)
+                   resistors_scaled=resistors, factor=1000.0, binding=binding["files"], timing_effect=effect,
+                   peak_rss_kib=max((r["peak_rss_kib"] for r in hc.receipts if r.get("peak_rss_kib")), default=None))
 
 
 def bad_rtl(ctx, gate, b, work: Path) -> dict:
@@ -290,15 +296,19 @@ def missing_tool(ctx, gate, b, work: Path) -> dict:
            "--run", str(run), "--base-rev", "empty", "--rustroad", str(ctx.args.rustroad), "--tools", str(ctx.args.tools),
            "--tool", f"yosys={missing}", "--no-controls", "--no-determinism"]
     work.mkdir(parents=True, exist_ok=True)
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=600, cwd=work)
+    timing = work / "time.txt"
+    p = subprocess.run(["/usr/bin/time", "-v", "-o", str(timing), *cmd], capture_output=True, text=True,
+                       timeout=600, cwd=work)
     (work / "stdout.txt").write_text(p.stdout)
     (work / "stderr.txt").write_text(p.stderr)
+    m = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", timing.read_text()) if timing.is_file() else None
     summary = json.loads((run / "summary.json").read_text()) if (run / "summary.json").is_file() else {}
     tools = (summary.get("global_statuses") or {}).get("tools_identity") or {}
     detected = (p.returncode == 3 and summary.get("status") == "unverified" and tools.get("status") == "unverified"
                 and "yosys" in (tools.get("reason") or ""))
     return control("tool identity preflight (missing -> unverified, exit 3)", detected, exit_code=p.returncode,
-                   status=summary.get("status"), tools_identity=tools, pdk_items_run=len(summary.get("pdks", [])))
+                   status=summary.get("status"), tools_identity=tools, pdk_items_run=len(summary.get("pdks", [])),
+                   peak_rss_kib=int(m[1]) if m else None)
 
 
 def tampered_artifact(ctx, gate, b, record: dict, work: Path) -> dict:
@@ -335,7 +345,8 @@ def antenna_planted(ctx, gate, b, work: Path) -> dict:
     deck = flow.deck_antenna(f"{gate.tag}_ctl_antenna", planted, phys)
     report = json.loads(Path(native["report"]).read_text())
     rows = [c for c in report["checks"] if c["net"] == shape["net"] and c["violated"]]
-    v = json.loads(Path(json.loads(Path(deck["summary"]).read_text())["verdicts"]["antenna"]).read_text())
+    deck_summary = json.loads(Path(deck["summary"]).read_text())
+    v = json.loads(Path(deck_summary["verdicts"]["antenna"]).read_text())
     res = v.get("result") or {}
     magic = (res.get("primary") if gate.tag == "sky130" else res.get("secondary")) or {}
     margin = report["safety_margin"]["fraction"]
@@ -350,7 +361,7 @@ def antenna_planted(ctx, gate, b, work: Path) -> dict:
                    port=shape["net"], layer=shape["layer"], length_um=shape["length_um"],
                    native=dict(status=native["status"], violated=native["violated"][:3]),
                    deck=dict(status=deck["status"], count=deck["count"], by_rule=deck["by_rule"]),
-                   margin_check=check)
+                   margin_check=check, peak_rss_kib=deck_summary["resources"]["peak_rss_kib"])
 
 
 def run_all(ctx, gate, b, record) -> dict:
