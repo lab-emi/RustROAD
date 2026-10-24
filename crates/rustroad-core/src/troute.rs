@@ -1388,7 +1388,9 @@ impl<'a> Router<'a> {
                     if k == kind as usize || !wants.iter().all(|&(l, d)| self.pad_along(k, l, d)) {
                         continue;
                     }
-                    if self.spatial.via_clear(k, at, net)? {
+                    // Clear of other nets and without a new same-net near
+                    // miss (which the same-net pass would have to patch).
+                    if self.spatial.via_probe(k, at, net)? == Some(false) {
                         for s in &self.input.vias[k].shapes {
                             route.shapes.push(self.spatial.add_routed(Blockage {
                                 layer: s.layer,

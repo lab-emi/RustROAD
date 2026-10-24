@@ -327,16 +327,27 @@ pub(crate) fn fill_for(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
 /// both axes, so the union never forms a sub-width neck at the junction.
 pub(crate) fn fill_for_robust(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
     let (ox, oy) = (overlap_x(a, b), overlap_y(a, b));
-    if ox > 0 || oy > 0 {
+    // Facing spans of at least one width: the legacy gap fill already has
+    // full-width contact with both shapes.
+    if ox >= i128::from(width) || oy >= i128::from(width) {
         return fill_for(a, b, width, grid);
     }
-    let (left, right) = if a.ux <= b.lx { (a, b) } else { (b, a) };
-    let (bottom, top) = if a.uy <= b.ly { (a, b) } else { (b, a) };
+    // Corner or narrow facing span: the bounding box of the parts of each
+    // shape within two widths of the other. It contains both facing corners,
+    // so the union has no sub-width step or diagonal neck there.
+    let reach = 2 * width;
+    let near = |s: Rect, o: Rect| Rect {
+        lx: s.lx.max(o.lx - reach),
+        ly: s.ly.max(o.ly - reach),
+        ux: s.ux.min(o.ux + reach),
+        uy: s.uy.min(o.uy + reach),
+    };
+    let (pa, pb) = (near(a, b), near(b, a));
     let r = Rect {
-        lx: left.ux - width.min(left.ux - left.lx),
-        ux: right.lx + width.min(right.ux - right.lx),
-        ly: bottom.uy - width.min(bottom.uy - bottom.ly),
-        uy: top.ly + width.min(top.uy - top.ly),
+        lx: pa.lx.min(pb.lx),
+        ly: pa.ly.min(pb.ly),
+        ux: pa.ux.max(pb.ux),
+        uy: pa.uy.max(pb.uy),
     };
     Rect {
         lx: floor_to(r.lx, grid),
@@ -818,17 +829,38 @@ mod scale_tests {
                 a.uy.min(b.uy) - a.ly.max(b.ly),
             )
         };
-        let (x, y) = ov(f, pin);
-        assert!(x >= 560 && y >= 560, "{f:?}");
+        // The fill holds both facing corners and overlaps each shape by at
+        // least the layer width or that shape's extent near the other.
+        let inside = |p: [i64; 2]| f.lx <= p[0] && p[0] <= f.ux && f.ly <= p[1] && p[1] <= f.uy;
+        assert!(inside([2000, 259260]) && inside([2420, 259560]), "{f:?}");
         let (x, y) = ov(f, pad);
-        assert!(x >= 560 && y >= 560, "{f:?}");
+        assert!(x > 0 && y > 0, "{f:?}");
+        assert!(f.ux - f.lx >= 560 && f.uy - f.ly >= 560, "{f:?}");
         // The legacy corner bridge overlaps by less than a width (a neck).
         let g = fill_for(pin, pad, 560, 10);
         let (x, _) = ov(g, pin);
         assert!(x < 560);
-        // Overlapping projections keep the legacy fill.
+        // Facing spans of at least a width keep the legacy gap fill.
         let a = r(0, 0, 100, 20);
         let b = r(10, 30, 90, 50);
         assert_eq!(fill_for_robust(a, b, 20, 5), fill_for(a, b, 20, 5));
+        // Two pads facing over less than a width: the fill covers both
+        // facing corners (no step narrower than the width).
+        let p1 = r(31350, 197410, 31670, 197670);
+        let p2 = r(31810, 197240, 32130, 197500);
+        let f = fill_for_robust(p1, p2, 140, 5);
+        assert!(f.ly <= 197410 && f.uy >= 197500 && f.lx <= 31670 - 140 && f.ux >= 31810 + 140);
+        // A short facing span of a pad at a long wire stays local.
+        let wire = r(0, 0, 10_000, 140);
+        let pad = r(9_950, 200, 10_270, 460);
+        let f = fill_for_robust(wire, pad, 140, 5);
+        assert!(
+            f.lx >= 9_950 - 2 * 140 - 5 && f.ux <= 10_270 && f.ly == 0,
+            "{f:?}"
+        );
+        assert!(
+            f.lx <= 9_950 && f.ux >= 10_000 && f.uy >= 200 + 140,
+            "{f:?}"
+        );
     }
 }

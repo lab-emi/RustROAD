@@ -300,3 +300,32 @@ The difference is the process baseline (binary, loaded design.json, LEF
 masters, connectivity, output records: ~14-20 MiB for these sizes).
 `cargo test --workspace`: 158 passed, 4 ignored; each test binary peaks
 below 10 MiB RSS; the whole run 16 s.
+
+## Limits and open issues
+
+* **Sky130 tie cells.** Designs that need constants on sky130 instantiate
+  `conb_1`, which neither LVS check of the pinned harness accepts (see the
+  dense row). A tie-cell policy (dual-output reuse, or deck/harness support
+  for device-less body pins and conb_1's resistors) belongs to the signoff
+  and gate streams; GF180's tieh/tiel pass.
+* **GF180 tap gap.** The scale physical profile allows a 23 um clear tap gap
+  (the 20 um of `gf180-routed-physical.json` cannot hold the 20.2-22.4 um
+  flip-flops and AOI cells RustSys maps to); the KLayout DF.13/DF.14 tap
+  distance rules pass at 23 um and fail at 60 um. rv_core needs a 24.1 um
+  cell and is refused by `floorplan` (`FLOORPLAN_TAP_GAP`) on GF180.
+* **Antenna.** No required design needs a diode. `antenna-eco` cannot repair
+  clock-tree nets; large blocks (SERV) have antenna violations on long CTS
+  nets. Layer-hopping or CTS-aware diodes are not implemented.
+* **Timing.** Hold closure and multi-corner timing on these designs run in
+  the unified gate after merge. The CTS profile here uses clkbuf_2 with
+  fan-out 8; skew/hold are not optimized by the placer or router.
+* **Performance.** Detailed routing is one sequential A* per sink with
+  Spatial checks per edge (`cpu_ref` only, no parallel batches yet):
+  ~1-2 s for the required designs, minutes for SERV-size blocks; the
+  repair loop and same-net pass are bounded but not tuned.
+* **Extraction granularity.** Wires are stored as maximal runs split at
+  junctions, so `extract` sees no interior nodes inside a straight run (the
+  Elmore delay of a straight segment is unchanged; higher-order slew effects
+  of very long runs are not split out).
+* **Escaped names.** RustSys' `\p_q[0]` next to port `p_q` is renamed by the
+  harness, not by RustROAD's importer, which still refuses the ambiguity.
