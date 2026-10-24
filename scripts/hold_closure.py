@@ -54,7 +54,7 @@ from verify_physical import PhysicalHarness, run_ok, fingerprint, external_cec, 
 from verify_logic import bounded_text, sha256, write_json, tcl_path  # noqa: E402
 from verify_taps import clock_function_proof  # noqa: E402
 import verify_routing  # noqa: E402
-from scale_flow import deconflict, buffer_port_aliases, port_buffer_cell, SITES  # noqa: E402
+from scale_flow import deconflict, buffer_port_aliases, port_buffer_cell, port_tie_cells, SITES  # noqa: E402
 
 # RustSTA 0.4.0 fix-round-2 binaries (RustSTA d1f61e6), copied unchanged from the
 # timing stream's .work/sta-signoff/bin/round2 into this checkout's .work/tools/sta;
@@ -182,24 +182,42 @@ def netlist_instances(text: str) -> dict:
 
 
 def constant_pins(netlist: Path, config: Path) -> set[str]:
-    """``instance/pin`` connected to a constant: a tie-cell output net (physical
-    configuration tie_high/tie_low), a literal 1'b0/1'b1, or an assign alias of
-    either. Independent of the timing engine (used to accept its no-arrival
-    endpoints only when they are constant-driven)."""
+    """``instance/pin`` and output port bits connected to a constant: a
+    tie-cell output net (physical configuration tie_high/tie_low; a rail-input
+    tie only when its rail pin is a literal, so an ordinary inverter of the
+    same master never counts; constant_cells outputs), a literal 1'b0/1'b1,
+    or an assign alias of either. Independent of the timing engine (used to
+    accept its no-arrival endpoints only when they are constant-driven)."""
+    import scale_flow  # noqa: E402 - port declarations
     text = bounded_text(Path(netlist), 64 * 1024 ** 2)
     cfg = json.loads(Path(config).read_text())
-    ties = {(cfg[k]['cell'], cfg[k]['pin']) for k in ('tie_high', 'tie_low') if cfg.get(k)}
+    ties = {}
+    for k in ('tie_high', 'tie_low'):
+        if cfg.get(k):
+            ties[(cfg[k]['cell'], cfg[k]['pin'])] = (cfg[k].get('rail_input') or {}).get('pin')
+    for c in cfg.get('constant_cells') or []:
+        for pin in c.get('high', []) + c.get('low', []):
+            ties[(c['cell'], pin)] = None
+    literal = {"1'b0", "1'b1"}
+
+    def is_tie(master: str, pin: str, conns: dict) -> bool:
+        if (master, pin) not in ties:
+            return False
+        rail = ties[(master, pin)]
+        return rail is None or conns.get(rail, '').strip() in literal
     insts = netlist_instances(text)
-    constant = {n for name, (master, conns) in insts.items() for p, n in conns.items() if (master, p) in ties}
-    constant |= {"1'b0", "1'b1"}
+    constant = {n.strip().lstrip('\\') for name, (master, conns) in insts.items() for p, n in conns.items()
+                if is_tie(master, p, conns)}
+    constant |= literal
     aliases = re.findall(r'(?m)^\s*assign\s+(\S+)\s*=\s*(\S+?)\s*;', text)
     for _ in range(len(aliases) + 1):
         grown = {a.lstrip('\\') for a, b in aliases if b.lstrip('\\') in constant and a.lstrip('\\') not in constant}
         if not grown:
             break
         constant |= grown
-    return {f'{name}/{p}' for name, (master, conns) in insts.items() for p, n in conns.items()
-            if n.lstrip('\\') in constant and (master, p) not in ties}
+    pins = {f'{name}/{p}' for name, (master, conns) in insts.items() for p, n in conns.items()
+            if n.strip().lstrip('\\') in constant and not is_tie(master, p, conns)}
+    return pins | (scale_flow._port_bits(text, 'output') & constant)
 
 
 def lef_widths(path: Path, dbu: int) -> dict[str, int]:
@@ -273,7 +291,8 @@ class Flow:
         renamed_text, self.renamed_wires = deconflict(text)
         # Output ports sharing one net get identity buffers (LVS: one pin per
         # port in the layout); a no-op for netlists without such aliases.
-        renamed_text, self.port_buffers = buffer_port_aliases(renamed_text, port_buffer_cell(self.tag))
+        renamed_text, self.port_buffers = buffer_port_aliases(renamed_text, port_buffer_cell(self.tag),
+                                                               port_tie_cells(self.tag))
         if self.renamed_wires or self.port_buffers:
             mapped.rename(self.h.root / f'{self.tag}_rustsys.v')
             mapped.write_text(renamed_text)

@@ -226,6 +226,21 @@ def deconflict(text: str) -> tuple[str, int]:
 
 
 PORT_BUFFER_PREFIX = "rr_portbuf_"
+PORT_TIE_PREFIX = "rr_porttie_"
+
+
+def port_tie_cells(tag: str) -> dict[str, set[str]]:
+    """Tie masters of the PDK's scale physical profile and their constant
+    outputs (tie_high/tie_low without a rail input, constant_cells)."""
+    cfg = json.loads((ROOT / f"fixtures/pdk/{tag}-scale-physical.json").read_text())
+    out: dict[str, set[str]] = {}
+    for k in ("tie_high", "tie_low"):
+        t = cfg.get(k)
+        if t and not t.get("rail_input"):
+            out.setdefault(t["cell"], set()).add(t["pin"])
+    for c in cfg.get("constant_cells") or []:
+        out.setdefault(c["cell"], set()).update(c.get("high", []) + c.get("low", []))
+    return out
 
 
 def port_buffer_cell(tag: str) -> tuple[str, str, str]:
@@ -249,7 +264,8 @@ def _port_bits(text: str, direction: str) -> set[str]:
     return bits
 
 
-def buffer_port_aliases(text: str, cell: tuple[str, str, str]) -> tuple[str, list[dict]]:
+def buffer_port_aliases(text: str, cell: tuple[str, str, str],
+                        ties: dict[str, set[str]] | None = None) -> tuple[str, list[dict]]:
     """Give every output port bit its own net (OpenROAD ``buffer_ports`` /
     OpenLane ``insbuf`` practice for LVS).
 
@@ -261,13 +277,22 @@ def buffer_port_aliases(text: str, cell: tuple[str, str, str]) -> tuple[str, lis
     order) is kept and every other port gets an identity buffer
     ``CELL rr_portbuf_<k> (.IN(NET), .OUT(PORT));`` in place of its assign; an
     output assigned from an input port (feedthrough) or from another output
-    port is buffered too. A netlist without such aliases is returned
-    unchanged. The CEC oracles check the result against the RTL."""
+    port is buffered too. A constant (a net driven by a tie cell of ``ties``:
+    master -> constant output pins) is not buffered: the extra port gets its
+    own copy of the tie cell ``MASTER rr_porttie_<k> (.PIN(PORT));`` so it
+    stays a tie-cell output (a constant-driven endpoint). A netlist without
+    such aliases is returned unchanged. The CEC oracles check the result
+    against the RTL."""
     name, pin_in, pin_out = cell
     outs, ins = _port_bits(text, "output"), _port_bits(text, "input")
     assign = re.compile(r"(?m)^(\s*)assign\s+(\\\S+\s|[\w\[\]]+)\s*=\s*(\\\S+\s|[\w\[\]']+)\s*;[ \t]*$")
     seen: set[str] = set()
     inserted: list[dict] = []
+    tie_of: dict[str, tuple[str, str]] = {}
+    for m in re.finditer(r"(?m)^\s*(\S+)\s+(\S+)\s+\((.*)\);\s*$", text):
+        for pin, net in re.findall(r"\.(\w+)\(([^()]*)\)", m[3]):
+            if pin in (ties or {}).get(m[1], ()):
+                tie_of[net.strip().lstrip("\\")] = (m[1], pin)
 
     def ident(x: str) -> str:
         return x.strip().lstrip("\\")
@@ -282,6 +307,10 @@ def buffer_port_aliases(text: str, cell: tuple[str, str, str]) -> tuple[str, lis
         k = len(inserted)
         src = m[3].strip() + (" " if m[3].startswith("\\") else "")
         dst = m[2].strip() + (" " if m[2].startswith("\\") else "")
+        if rhs in tie_of:
+            master, pin = tie_of[rhs]
+            inserted.append(dict(instance=f"{PORT_TIE_PREFIX}{k}", net=rhs, port=lhs, cell=master))
+            return f"{m[1]}{master} {PORT_TIE_PREFIX}{k} (.{pin}({dst}));"
         inserted.append(dict(instance=f"{PORT_BUFFER_PREFIX}{k}", net=rhs, port=lhs, cell=name))
         return f"{m[1]}{name} {PORT_BUFFER_PREFIX}{k} (.{pin_in}({src}), .{pin_out}({dst}));"
     out = assign.sub(sub, text)
@@ -339,7 +368,7 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str, facts: 
         facts["synth"] = dict(cells=sum(report["cells"].values()), area=report.get("area"),
                               sequential=report.get("sequential_cells"))
     text, renamed = deconflict(mapped.read_text())
-    text, port_buffers = buffer_port_aliases(text, port_buffer_cell(tag))
+    text, port_buffers = buffer_port_aliases(text, port_buffer_cell(tag), port_tie_cells(tag))
     netlist = run_dir / "netlist.v"
     netlist.write_text(text)
     facts["renamed_escaped_wires"] = renamed
