@@ -172,7 +172,7 @@ class PdkGate:
                         sdc_text=ctx.sdc_texts[self.tag], recipe=self.recipe, clocked=ctx.clocked,
                         netlist=D.resolve(literal["path"]) if literal else None,
                         physical_profile=D.resolve(profile["path"]) if profile else None,
-                        floorplan_recipe=ctx.manifest["recipe"]["floorplan"],
+                        floorplan_recipe=D.floorplan_recipe(ctx.manifest, self.tag),
                         sizing_profile=D.resolve(sizing["path"]) if sizing else None)
         tools = {k: ctx.tool_paths[k] for k in ("yosys", "verilator", "opensta", "rustsys", "rustroad",
                                                   "rusteda", "ruststa")}

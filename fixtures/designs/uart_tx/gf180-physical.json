@@ -63,24 +63,24 @@
   },
   "io_plan": {
     "west": [
-      "data_i[7]"
+      "data_i[6]"
     ],
     "east": [
-      "data_i[0]",
-      "valid_i",
-      "data_i[1]",
-      "data_i[3]"
-    ],
-    "south": [
-      "data_i[6]",
-      "clk_i",
-      "rst_ni",
       "data_i[4]",
       "ready_o",
+      "valid_i",
+      "tx_o",
+      "data_i[3]",
+      "data_i[1]"
+    ],
+    "south": [
+      "clk_i",
+      "rst_ni",
+      "data_i[0]",
       "data_i[5]"
     ],
     "north": [
-      "tx_o",
+      "data_i[7]",
       "data_i[2]"
     ],
     "x_track": [

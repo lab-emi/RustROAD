@@ -227,6 +227,11 @@
       "sdc_clock": {
         "path": "fixtures/designs/pipeline_track/gf180-cts.sdc",
         "sha256": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550"
+      },
+      "floorplan_recipe": {
+        "utilization": 0.35,
+        "aspect": 1.0,
+        "margin_um": 10.0
       }
     }
   },

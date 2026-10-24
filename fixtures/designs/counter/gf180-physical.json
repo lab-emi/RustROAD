@@ -63,25 +63,25 @@
   },
   "io_plan": {
     "west": [
+      "cnt_o[4]",
       "wrap_o"
     ],
     "east": [
-      "clr_i",
+      "cnt_o[6]",
       "clk_i",
-      "rst_ni",
-      "cnt_o[7]"
+      "rst_ni"
     ],
     "south": [
       "cnt_o[5]",
-      "cnt_o[6]",
-      "cnt_o[4]"
+      "cnt_o[7]"
     ],
     "north": [
       "cnt_o[3]",
       "en_i",
+      "clr_i",
       "cnt_o[2]",
-      "cnt_o[0]",
-      "cnt_o[1]"
+      "cnt_o[1]",
+      "cnt_o[0]"
     ],
     "x_track": [
       1120,

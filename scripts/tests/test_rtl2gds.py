@@ -174,6 +174,11 @@ class ManifestSchema(unittest.TestCase):
         bad = json.loads(json.dumps(m))
         del bad["pdks"]["gf180"]["sdc_clock"]
         self.assertTrue(any("sdc_clock" in x for x in D.manifest_problems(bad)))
+        self.assertEqual(D.floorplan_recipe(m, "gf180")["utilization"], 0.35)  # per-PDK override
+        self.assertEqual(D.floorplan_recipe(m, "sky130"), m["recipe"]["floorplan"])
+        bad = json.loads(json.dumps(m))
+        bad["pdks"]["gf180"]["floorplan_recipe"] = {"utilization": "dense"}
+        self.assertTrue(any("floorplan_recipe" in x for x in D.manifest_problems(bad)))
         bad = json.loads(json.dumps(m))
         bad["pdks_unavailable"] = {"sky130": "x"}
         self.assertTrue(any("both available and unavailable" in x for x in D.manifest_problems(bad)))

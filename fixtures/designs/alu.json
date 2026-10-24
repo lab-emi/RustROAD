@@ -149,11 +149,11 @@
     "gf180": {
       "floorplan": {
         "path": "fixtures/designs/alu/gf180-floorplan.json",
-        "sha256": "cf92fa04d4e41216d190667e41bcd42feb2ebcee3fdab8e761c65f6a31d0be6b"
+        "sha256": "53613b8728524e6720023ca92eda8a96ebc464a603159d4cc09958bd5c6d5ba0"
       },
       "physical_config": {
         "path": "fixtures/designs/alu/gf180-physical.json",
-        "sha256": "9520d15b0a94334e75f898b66c2d2279fa1bbfe6ab6832eca8cc1e1e862ab872"
+        "sha256": "fd4c9cd86b0d181c6714d05e53154daae1cca1d59c1ca631af194ec52d98f1d7"
       },
       "physical_profile": {
         "path": "fixtures/pdk/gf180-scale-physical.json",
@@ -214,7 +214,7 @@
         "openrcx_rules_ff": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
         "openrcx_rules_ss": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
         "openrcx_rules_tt": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
-        "physical_config": "9520d15b0a94334e75f898b66c2d2279fa1bbfe6ab6832eca8cc1e1e862ab872",
+        "physical_config": "fd4c9cd86b0d181c6714d05e53154daae1cca1d59c1ca631af194ec52d98f1d7",
         "rc_profile_ff": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
         "rc_profile_ss": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
         "rc_profile_tt": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
@@ -231,6 +231,11 @@
       "sdc_clock": {
         "path": "fixtures/designs/alu/gf180-cts.sdc",
         "sha256": "e9b9238651b019b2464c735b0e51e0b966a3dd004ddb9a470f4a43ef777b787e"
+      },
+      "floorplan_recipe": {
+        "utilization": 0.35,
+        "aspect": 1.0,
+        "margin_um": 10.0
       }
     }
   },

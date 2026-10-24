@@ -373,7 +373,7 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str, facts: 
     facts["renamed_escaped_wires"] = renamed
     facts["port_buffers"] = len(port_buffers)
     done.append("synth")
-    fp = m["recipe"]["floorplan"]
+    fp = m["pdks"][tag].get("floorplan_recipe") or m["recipe"]["floorplan"]
     floor, phys = run_dir / "floorplan.json", run_dir / "physical.json"
     road = [args.rustroad]
     clock = ["--no-clock"] if m["clock"]["port"] is None else ["--clock-port", m["clock"]["port"]]

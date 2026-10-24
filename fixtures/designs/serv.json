@@ -213,11 +213,11 @@
     "gf180": {
       "floorplan": {
         "path": "fixtures/designs/serv/gf180-floorplan.json",
-        "sha256": "d92884a326c3aaed9f36c98df3b5b686d96f7b4653904575d2a82fba38970220"
+        "sha256": "c460eb299e1e420f945d8626bc2f08d22d9ae3cb85dd9090487813786af28b18"
       },
       "physical_config": {
         "path": "fixtures/designs/serv/gf180-physical.json",
-        "sha256": "f6aa9b0a869dcaaf4c355e712b8fd1113c0e9d6bba86d9382cf059c524a917d6"
+        "sha256": "3420e1bed683e099e014a8b3bc4a242bc77ee22190c5a43f6e50f1d675f1ff85"
       },
       "physical_profile": {
         "path": "fixtures/pdk/gf180-scale-physical.json",
@@ -278,7 +278,7 @@
         "openrcx_rules_ff": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
         "openrcx_rules_ss": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
         "openrcx_rules_tt": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
-        "physical_config": "f6aa9b0a869dcaaf4c355e712b8fd1113c0e9d6bba86d9382cf059c524a917d6",
+        "physical_config": "3420e1bed683e099e014a8b3bc4a242bc77ee22190c5a43f6e50f1d675f1ff85",
         "rc_profile_ff": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
         "rc_profile_ss": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
         "rc_profile_tt": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
@@ -295,6 +295,11 @@
       "sdc_clock": {
         "path": "fixtures/designs/serv/gf180-cts.sdc",
         "sha256": "4c8c7163e5b66a07a2fe0a608535664885857ebadd4097e459aa427ee8e24229"
+      },
+      "floorplan_recipe": {
+        "utilization": 0.35,
+        "aspect": 1.0,
+        "margin_um": 10.0
       }
     }
   },

@@ -72,6 +72,17 @@ DESIGNS = {
                                 "5x the routing work budgets (2e9 expansions, 2e11 comparisons)."),
 }
 RECIPE = dict(utilization=0.5, aspect=1.0, margin_um=10.0, command="rustroad floorplan")
+# Per-PDK floorplan recipe (manifest pdks.<tag>.floorplan_recipe). GF180 at ss
+# needs room for its closure ECOs: measured on regfile/alu/mult at the
+# derived periods, DRV buffers, hold cells and resizes took the standard-cell
+# utilization from 0.50 to the 0.74 cap (0.76 failed CTS packing) with
+# violations left; from 0.35 they end at 0.50-0.63. SKY130 needs almost no
+# ECO area (0-19 buffers per design) and keeps 0.5.
+PDK_RECIPE = {"gf180": dict(utilization=0.35)}
+
+
+def recipe_of(tag: str) -> dict:
+    return dict(RECIPE, **PDK_RECIPE.get(tag, {}))
 CORNERS = {
     "sky130": [dict(name="tt", liberty="tt_025C_1v80", rc="nom"),
                dict(name="ss", liberty="ss_100C_1v60", rc="max"),
@@ -191,8 +202,8 @@ def build(name: str, spec: dict, args) -> dict:
                                   "--cell-lef", p["cell_lef"]["path"], "--netlist", str(netlist),
                                   "--physical-config", str(ROOT / profile), "--routing-config",
                                   str(ROOT / routing), "--site", SITES[tag], "--utilization",
-                                  str(RECIPE["utilization"]), "--aspect", str(RECIPE["aspect"]),
-                                  "--margin-um", str(RECIPE["margin_um"]), *clock,
+                                  str(recipe_of(tag)["utilization"]), "--aspect", str(recipe_of(tag)["aspect"]),
+                                  "--margin-um", str(recipe_of(tag)["margin_um"]), *clock,
                                   "--out-floorplan", str(floor), "--out-physical-config", str(phys)],
                                  capture_output=True, text=True)
             if res.returncode != 0:
@@ -287,6 +298,10 @@ def finish(m: dict, spec: dict) -> dict:
                 e[key] = entry(e[key]["path"])
         e["rc_profiles"] = {rc: entry(v["path"]) for rc, v in e["rc_profiles"].items()}
         e["sdc_clock"] = entry(periods[tag])
+        if tag in PDK_RECIPE:
+            e["floorplan_recipe"] = {k: recipe_of(tag)[k] for k in D.FLOORPLAN_RECIPE_KEYS}
+        else:
+            e.pop("floorplan_recipe", None)
         rendered = hashlib.sha256(rendered_sdc(dict(out, pdks={tag: e}), tag).encode()).hexdigest()
         e["frozen"] = dict(frozen(tag, e["physical_config"]["path"], e["routing_config"]["path"]),
                            sdc_cts=e["sdc_clock"]["sha256"], sdc_postroute=rendered,

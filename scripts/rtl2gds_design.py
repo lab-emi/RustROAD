@@ -149,9 +149,11 @@ PDK_KEYS = ("floorplan", "physical_config", "routing_config", "delay_cells", "gd
 SDC_KEYS = ("reference_clock", "io_template", "period_derivation")
 # Optional per-PDK tracked files: the track recipe's physical profile (input of
 # ``rustroad floorplan``), a literal mapped netlist that replaces synthesis,
-# and the sizing profile that enables the gate-sizing ECO in the closure loop.
-PDK_OPTIONAL = ("physical_profile", "netlist", "sizing_profile")
+# the sizing profile that enables the gate-sizing ECO in the closure loop, and
+# a per-PDK floorplan recipe that replaces recipe.floorplan for that PDK.
+PDK_OPTIONAL = ("physical_profile", "netlist", "sizing_profile", "floorplan_recipe")
 FLOORPLAN_RECIPE_KEYS = ("utilization", "aspect", "margin_um")
+PDK_FILES = ("physical_profile", "netlist", "sizing_profile")  # optional tracked files
 BUDGET_KEYS = ("hold_margin_ns", "hold_eco_target_margin_ns", "setup_margin_ns", "hold_eco_setup_margin_ns", "parity_ns",
                "max_hold_iterations", "process_timeout_s", "process_memory_mib", "max_wall_s",
                "container_memory", "container_timeout_s")
@@ -272,6 +274,10 @@ def manifest_problems(m: dict) -> list[str]:
         problems.append("pdks_unavailable must be an object {pdk: reason}")
     for tag, spec in (m.get("pdks") or {}).items():
         problems += [f"pdks.{tag}: missing key {k}" for k in PDK_KEYS if k not in spec]
+        own = spec.get("floorplan_recipe")
+        if own is not None and (physical != "track" or not isinstance(own, dict) or
+                                any(not isinstance(own.get(k), (int, float)) for k in FLOORPLAN_RECIPE_KEYS)):
+            problems.append(f"pdks.{tag}.floorplan_recipe must give {FLOORPLAN_RECIPE_KEYS} (track recipe only)")
         if physical == "track" and "physical_profile" not in spec:
             problems.append(f"pdks.{tag}: the track recipe needs physical_profile")
         if physical == "legacy" and "physical_profile" in spec:
@@ -309,7 +315,7 @@ def tracked_entries(m: dict) -> dict[str, dict]:
         out[key] = m[key]
     for tag, spec in m["pdks"].items():
         for key in ("floorplan", "physical_config", "routing_config", "delay_cells", "gds_layer_map",
-                    "sdc_clock") + PDK_OPTIONAL:
+                    "sdc_clock") + PDK_FILES:
             if key in spec:
                 out[f"pdks.{tag}.{key}"] = spec[key]
         for rc, entry in spec["rc_profiles"].items():
@@ -479,3 +485,8 @@ def tools_status(tools: dict[str, dict]) -> dict:
     st = worst(["unverified" if s == "missing" else s for s in statuses.values()])
     bad = {n: s for n, s in statuses.items() if s != "passed"}
     return item(st, None if not bad else f"tool identity: {bad}", tools=statuses)
+
+
+def floorplan_recipe(m: dict, tag: str) -> dict | None:
+    """The `rustroad floorplan` recipe of one PDK (per-PDK override, else recipe.floorplan)."""
+    return (m["pdks"][tag].get("floorplan_recipe") or m["recipe"]["floorplan"]) if m["recipe"]["floorplan"] else None

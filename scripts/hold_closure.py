@@ -162,9 +162,11 @@ WHATIF_TIMEOUT_S = 600
 # the loop twice per PDK within its 3600 s wall budget). Measured cost per
 # candidate: 0.13 s (counter, 47 logic instances), 1.1 s (regfile, 367),
 # 1.9 s (mult, 417) on this host. Both scale with 200 / logic instances,
-# clamped to 0.5x..4x (counter 384 per layout, mult 48).
-WHATIF_LAYOUT_CANDIDATES = 96
-WHATIF_LOOP_CANDIDATES = 320
+# clamped to 0.5x..4x (counter 512 per layout, mult 64). Raised from 96/320
+# when violating drivers also try one step down (three candidates each):
+# GF180 alu/mult/regfile ran out of candidates with 20-40 violations left.
+WHATIF_LAYOUT_CANDIDATES = 128
+WHATIF_LOOP_CANDIDATES = 640
 WHATIF_HOLD_LOSS_NS = 0.5
 # DRV/setup ECOs stop (the loop goes on to hold) after this many consecutive
 # layouts on which the previous ECO improved neither the DRV count nor the

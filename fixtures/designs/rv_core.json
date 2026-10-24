@@ -149,11 +149,11 @@
     "gf180": {
       "floorplan": {
         "path": "fixtures/designs/rv_core/gf180-floorplan.json",
-        "sha256": "41eaa49c9250c5c70795de6f0c25293088b8a693f438bd62b54914f873fe906b"
+        "sha256": "831f393d476976fb1105dedbf6b1e57c6f3ac416e03fb2de03a1bc9a18ce08a9"
       },
       "physical_config": {
         "path": "fixtures/designs/rv_core/gf180-physical.json",
-        "sha256": "b02eb2387ca278f7b6a55d0b15937e5d7c871fbcb6ba294ee8f9b487b0d9adf2"
+        "sha256": "bb47a383e73a575936223835354880b94888407d952304690cefc611be855970"
       },
       "physical_profile": {
         "path": "fixtures/pdk/gf180-scale-physical-wide.json",
@@ -214,7 +214,7 @@
         "openrcx_rules_ff": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
         "openrcx_rules_ss": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
         "openrcx_rules_tt": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
-        "physical_config": "b02eb2387ca278f7b6a55d0b15937e5d7c871fbcb6ba294ee8f9b487b0d9adf2",
+        "physical_config": "bb47a383e73a575936223835354880b94888407d952304690cefc611be855970",
         "rc_profile_ff": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
         "rc_profile_ss": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
         "rc_profile_tt": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
@@ -231,6 +231,11 @@
       "sdc_clock": {
         "path": "fixtures/designs/rv_core/gf180-cts.sdc",
         "sha256": "6e794632c90ae9644ce605fe2082d66266639ee91ae9227243fbbe8987cdee00"
+      },
+      "floorplan_recipe": {
+        "utilization": 0.35,
+        "aspect": 1.0,
+        "margin_um": 10.0
       }
     }
   },
