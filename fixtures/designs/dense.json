@@ -127,7 +127,7 @@
         "routing_profile": "f1420e3afbce37e77ad3ad56b939c2c7b2874f0befdb0a13df4d7e754c476051",
         "sdc_cts": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550",
         "sdc_postroute": "956663cc2ce7897ce2fed12663d536009be12d604b5b05d8b579eadce13dd43e",
-        "sizing_profile": "e34b0154fdc16025a48e3797a4589f13aef17361c370eb3ac522d3ff75df76aa",
+        "sizing_profile": "f1a5110cf84f5597f9cb3425782e30cd9b61d50fb8c915e831a76d99c360e6a5",
         "technology_lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519"
       },
       "netlist": {
@@ -136,7 +136,7 @@
       },
       "sizing_profile": {
         "path": "fixtures/pdk/sky130-sizing.json",
-        "sha256": "e34b0154fdc16025a48e3797a4589f13aef17361c370eb3ac522d3ff75df76aa"
+        "sha256": "f1a5110cf84f5597f9cb3425782e30cd9b61d50fb8c915e831a76d99c360e6a5"
       }
     },
     "gf180": {
@@ -214,7 +214,7 @@
         "routing_profile": "2e895962d5de944c4015aa2392f350567758b54239c4472072b515efe979f103",
         "sdc_cts": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550",
         "sdc_postroute": "956663cc2ce7897ce2fed12663d536009be12d604b5b05d8b579eadce13dd43e",
-        "sizing_profile": "d79e4b7215bfb31b2c0e062e911446024a7ac4da4c3f2da97e70f1408707edc4",
+        "sizing_profile": "e6f63c52aea5ff8dc8d29240f734ef1352efbbee3f4ae9a9f4f9505685e5667f",
         "technology_lef": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd"
       },
       "netlist": {
@@ -223,7 +223,7 @@
       },
       "sizing_profile": {
         "path": "fixtures/pdk/gf180-sizing.json",
-        "sha256": "d79e4b7215bfb31b2c0e062e911446024a7ac4da4c3f2da97e70f1408707edc4"
+        "sha256": "e6f63c52aea5ff8dc8d29240f734ef1352efbbee3f4ae9a9f4f9505685e5667f"
       }
     }
   },

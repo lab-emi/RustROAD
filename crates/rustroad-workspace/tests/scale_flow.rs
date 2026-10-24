@@ -10,7 +10,7 @@ use rustroad_workspace::floorplan::{FloorplanRequest, floorplan};
 use rustroad_workspace::pdk::{ImportSources, import_pdk_with_config};
 use rustroad_workspace::physical::{PhysicalConfig, TieCell, TieRailInput};
 use rustroad_workspace::routing::{RouteScope, route};
-use rustroad_workspace::{Error, place, read};
+use rustroad_workspace::{Error, place, place_weighted, read};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -482,4 +482,135 @@ fn rail_input_ties_are_routed_to_the_cells_own_rail() {
     // Deterministic, and the stored routes re-validate on load.
     let again = f.flow("u", "track.json").unwrap();
     assert_eq!(text, def(&again));
+}
+
+#[test]
+fn net_weights_are_stored_applied_and_validated() {
+    let f = Fixture::new();
+    f.floorplan("w").unwrap();
+    let import = |name: &str| {
+        import_pdk_with_config(
+            &f.path(name),
+            "rev0",
+            &ImportSources {
+                technology_lef: f.path("tech.lef"),
+                cell_lef: f.path("cells.lef"),
+                netlist: f.path("mapped.v"),
+                floorplan: f.path("w-floor.json"),
+            },
+            &limits(),
+            &ConnectivityLimits::default(),
+            Some(&f.path("w-physical.json")),
+        )
+        .unwrap()
+    };
+    let a = import("plain");
+    let plain = place(&f.path("plain"), &a.revision, &limits()).unwrap();
+    // Every net weighted 1.0 is the unweighted placement, bit for bit.
+    let names: Vec<String> = (0..24)
+        .map(|i| format!("n{i}"))
+        .chain(["a".into()])
+        .collect();
+    let unit = serde_json::json!({"schema": "rustroad.net-weights.v1", "source": {},
+        "weights": names.iter().map(|n| (n.clone(), serde_json::json!(1000))).collect::<serde_json::Map<_, _>>()});
+    fs::write(f.path("unit.json"), unit.to_string()).unwrap();
+    let b = import("unit");
+    let one = place_weighted(
+        &f.path("unit"),
+        &b.revision,
+        &limits(),
+        Some(&f.path("unit.json")),
+    )
+    .unwrap();
+    assert_eq!(def(&f.path("plain")), def(&f.path("unit")));
+    let used = one
+        .placement
+        .as_ref()
+        .unwrap()
+        .net_weights
+        .as_ref()
+        .unwrap();
+    assert_eq!((used.applied, used.unmatched), (25, 0));
+    assert!(plain.placement.as_ref().unwrap().net_weights.is_none());
+    // A heavy net gets shorter; unknown names are counted, not guessed.
+    let heavy = serde_json::json!({"schema": "rustroad.net-weights.v1", "source": {"rule": "test"},
+        "weights": {"n9": 16000, "nope": 2000}});
+    fs::write(f.path("heavy.json"), heavy.to_string()).unwrap();
+    let c = import("heavy");
+    let h = place_weighted(
+        &f.path("heavy"),
+        &c.revision,
+        &limits(),
+        Some(&f.path("heavy.json")),
+    )
+    .unwrap();
+    let used = h.placement.as_ref().unwrap().net_weights.as_ref().unwrap();
+    assert_eq!(
+        (used.applied, used.unmatched, used.max_weight),
+        (1, 1, 16000)
+    );
+    let span = |ws: &Path, net: &str| -> i64 {
+        // Centre-to-centre x/y span of the cells on `net` from the DEF.
+        let text = def(ws);
+        let line = text
+            .lines()
+            .find(|l| l.starts_with(&format!("- {net} ")))
+            .unwrap()
+            .to_string();
+        let cells: Vec<&str> = line
+            .split("( ")
+            .skip(1)
+            .map(|x| x.split_whitespace().next().unwrap())
+            .collect();
+        let pos: Vec<(i64, i64)> = cells
+            .iter()
+            .filter_map(|c| {
+                text.lines()
+                    .find(|l| l.starts_with(&format!("- {c} ")) && l.contains("PLACED"))
+                    .map(|l| {
+                        let v: Vec<i64> = l
+                            .split("( ")
+                            .nth(1)
+                            .unwrap()
+                            .split_whitespace()
+                            .take(2)
+                            .map(|x| x.parse().unwrap())
+                            .collect();
+                        (v[0], v[1])
+                    })
+            })
+            .collect();
+        let (x0, x1) = (
+            pos.iter().map(|p| p.0).min().unwrap(),
+            pos.iter().map(|p| p.0).max().unwrap(),
+        );
+        let (y0, y1) = (
+            pos.iter().map(|p| p.1).min().unwrap(),
+            pos.iter().map(|p| p.1).max().unwrap(),
+        );
+        (x1 - x0) + (y1 - y0)
+    };
+    assert!(span(&f.path("heavy"), "n9") <= span(&f.path("plain"), "n9"));
+    // The weights stay with the workspace: a later place without the option
+    // still uses them.
+    let again = place(&f.path("heavy"), &h.revision, &limits()).unwrap();
+    assert!(again.placement.as_ref().unwrap().net_weights.is_some());
+    // Out-of-range weights and a wrong schema are refused.
+    for bad in [
+        serde_json::json!({"schema": "rustroad.net-weights.v1", "source": {}, "weights": {"n9": 0}}),
+        serde_json::json!({"schema": "rustroad.net-weights.v1", "source": {}, "weights": {"n9": 16001}}),
+        serde_json::json!({"schema": "other", "source": {}, "weights": {}}),
+    ] {
+        fs::write(f.path("bad.json"), bad.to_string()).unwrap();
+        let d = import(&format!("bad{}", bad["weights"]["n9"]));
+        assert!(
+            place_weighted(
+                &f.path(&format!("bad{}", bad["weights"]["n9"])),
+                &d.revision,
+                &limits(),
+                Some(&f.path("bad.json"))
+            )
+            .is_err()
+        );
+    }
 }

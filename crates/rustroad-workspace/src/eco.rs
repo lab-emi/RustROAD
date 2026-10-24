@@ -40,7 +40,7 @@ use rustroad_formats::eco::{
     PinDirections, PinRef, SizeFamily,
 };
 use rustroad_formats::lef;
-use rustroad_formats::verilog::{self, Netlist, VerilogLimits};
+use rustroad_formats::verilog::{self, Expr, Netlist, VerilogLimits};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -513,6 +513,18 @@ pub struct HoldEcoRequest {
     pub timed_netlist_sha256: Option<String>,
     /// Override of the profile's cell-LEF path (same SHA-256 required).
     pub cell_lef: Option<PathBuf>,
+    /// `ruststa report --section pins --corner C --limit 0` of the same STA
+    /// revision (one per setup corner; the setup corner is required). Given:
+    /// path-aware placement (delay goes on the worst hold path where the
+    /// setup slack of every path through the point allows it). Empty: one
+    /// chain in front of each violating endpoint pin (the original planner).
+    pub pins_reports: Vec<PathBuf>,
+    /// Apply the feasible part of a plan and report the rest (`partial`)
+    /// instead of failing the whole plan with HOLD_ECO_INFEASIBLE.
+    pub allow_partial: bool,
+    /// Largest number of sinks a net-level point (delay in front of every
+    /// sink of one net, e.g. an input port) may move.
+    pub max_group_sinks: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -536,6 +548,32 @@ pub struct SinkPlan {
     pub setup_slack_ns: f64,
     pub estimated_setup_slack_ns: f64,
     pub combinations_evaluated: usize,
+    /// Path-aware mode: the point that carries this endpoint's delay
+    /// (`sink_pin:<inst/pin>` or `net:<net>`), also when an earlier
+    /// endpoint's point already covers it (then `cells` is empty).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point: Option<String>,
+}
+/// One insertion point of a path-aware hold plan.
+#[derive(Clone, Debug, Serialize)]
+pub struct PointPlan {
+    /// `sink_pin` (one input pin moves behind the chain) or `net` (every
+    /// input-pin sink of the net moves behind it).
+    pub kind: &'static str,
+    pub name: String,
+    /// The pin whose setup slack bounds the point (the sink pin, or the
+    /// net's driver pin / input port).
+    pub setup_pin: String,
+    pub setup_slack_ns: BTreeMap<String, f64>,
+    pub sinks: Vec<String>,
+    pub existing_chain: Vec<String>,
+    pub cells: Vec<String>,
+    pub instances: Vec<String>,
+    pub area_um2: f64,
+    /// Violating endpoints whose worst hold path crosses the point.
+    pub endpoints: Vec<String>,
+    pub added_min_ns: BTreeMap<String, f64>,
+    pub added_setup_ns: BTreeMap<String, f64>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct HoldParameters {
@@ -549,6 +587,9 @@ pub struct HoldParameters {
     pub max_combinations: usize,
     pub prefix: String,
     pub delay_model: &'static str,
+    pub path_aware: bool,
+    pub allow_partial: bool,
+    pub max_group_sinks: usize,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct HoldPlanInputs {
@@ -574,6 +615,8 @@ pub struct HoldPlan {
     pub inputs: HoldPlanInputs,
     pub parameters: HoldParameters,
     pub sinks: Vec<SinkPlan>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub points: Vec<PointPlan>,
     pub infeasible: Vec<String>,
     pub eco: EcoPlan,
     pub eco_report: Option<EcoReport>,
@@ -610,6 +653,27 @@ fn choose_chain(
     max_chain: usize,
     max_combinations: usize,
 ) -> Result<(Option<Vec<usize>>, usize)> {
+    choose_chain_multi(
+        candidates,
+        need,
+        hold_corners,
+        &[(setup_corner.to_string(), setup_slack)],
+        setup_margin,
+        max_chain,
+        max_combinations,
+    )
+}
+
+/// `choose_chain` with a setup budget per setup corner: (corner, slack).
+fn choose_chain_multi(
+    candidates: &[&ProfiledBuffer],
+    need: &BTreeMap<String, f64>,
+    hold_corners: &[String],
+    setup: &[(String, f64)],
+    setup_margin: f64,
+    max_chain: usize,
+    max_combinations: usize,
+) -> Result<(Option<Vec<usize>>, usize)> {
     // Multisets of candidate indices, non-decreasing, size 1..=max_chain.
     let n = candidates.len();
     let mut best: Option<(f64, usize, Vec<usize>)> = None;
@@ -628,11 +692,11 @@ fn choose_chain(
                 let added: f64 = idx.iter().map(|&i| candidates[i].delay_ns[c].min()).sum();
                 added + 1e-12 >= need.get(c).copied().unwrap_or(0.0)
             });
-            let setup_added: f64 = idx
-                .iter()
-                .map(|&i| candidates[i].delay_ns[setup_corner].max())
-                .sum();
-            if covers && setup_slack - setup_added >= setup_margin {
+            let setup_ok = setup.iter().all(|(c, slack)| {
+                let added: f64 = idx.iter().map(|&i| candidates[i].delay_ns[c].max()).sum();
+                slack - added >= setup_margin
+            });
+            if covers && setup_ok {
                 let better = match &best {
                     None => true,
                     Some((a, l, v)) => {
@@ -666,6 +730,588 @@ fn choose_chain(
     Ok((best.map(|b| b.2), evaluated))
 }
 
+/// One stage of a hold_fix worst path, as the planner needs it.
+#[derive(Clone, Debug)]
+struct Stage {
+    pin: String,
+    inst: Option<String>,
+    arc: String,
+    driver: Option<String>,
+}
+
+fn stages_of(row: &serde_json::Value) -> Vec<Stage> {
+    row.get("path")
+        .and_then(|p| p.get("stages"))
+        .and_then(serde_json::Value::as_array)
+        .map(|st| {
+            st.iter()
+                .map(|x| Stage {
+                    pin: binding::norm(x.get("pin").and_then(|v| v.as_str()).unwrap_or("")),
+                    inst: x.get("inst").and_then(|v| v.as_str()).map(binding::norm),
+                    arc: x
+                        .get("arc")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    driver: x
+                        .get("net_driver")
+                        .and_then(|v| v.as_str())
+                        .map(binding::norm),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A place a delay chain can go on a worst hold path.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Point {
+    /// Every input-pin sink of the net (edited-netlist expression key).
+    Net(String),
+    /// One sink pin `inst/pin`.
+    Pin(String),
+}
+impl Point {
+    fn label(&self) -> String {
+        match self {
+            Point::Net(n) => format!("net:{n}"),
+            Point::Pin(p) => format!("sink_pin:{p}"),
+        }
+    }
+}
+
+struct PathInputs<'a> {
+    r: &'a HoldEcoRequest,
+    timing: &'a BTreeMap<String, EndpointTiming>,
+    paths: &'a BTreeMap<String, BTreeMap<String, Vec<Stage>>>,
+    pin_slack: &'a BTreeMap<String, BTreeMap<String, f64>>,
+    candidates: &'a [&'a ProfiledBuffer],
+    cells: &'a EcoCells,
+    netlist: &'a Netlist,
+    drivers: &'a HashMap<String, &'a verilog::Instance>,
+    inputs: &'a HashMap<&'a str, &'a str>,
+}
+struct PathResult {
+    points: Vec<PointPlan>,
+    sinks: Vec<SinkPlan>,
+    infeasible: Vec<String>,
+    violating: usize,
+}
+/// Hard bound of chain searches of one path-aware plan.
+const MAX_POINT_EVALUATIONS: usize = 200_000;
+
+/// Path-aware hold planning. For each violating endpoint (largest need
+/// first) the candidate points are the sink pins of its worst hold path and,
+/// for each of them, the whole net feeding it (all input-pin sinks of that
+/// net move behind one chain: e.g. an input port when all its sinks need
+/// hold). A point is kept only if it lies on the worst path of every corner
+/// where the endpoint violates, so its delay is credited at each of them.
+/// The setup budget of a point is the setup slack of the pin it delays every
+/// path through (the sink pin, or the net's driver), at every setup corner of
+/// a pins report, minus the delay already planned on points of the same
+/// path. Among the feasible points the one on the most violating paths
+/// wins, then the most downstream one (it delays every parallel branch
+/// after a reconvergence), then the smallest chain. Delay planned
+/// on a shared point is credited to every later endpoint whose path crosses
+/// it. An endpoint with no feasible point is infeasible, with the budget of
+/// each of its points as evidence.
+fn plan_paths(x: &PathInputs) -> Result<PathResult> {
+    let r = x.r;
+    let instances: HashMap<&str, &verilog::Instance> = x
+        .netlist
+        .instances
+        .iter()
+        .map(|i| (i.name.as_str(), i))
+        .collect();
+    // Input-pin sinks of every single-bit net of the edited netlist.
+    let mut net_sinks: HashMap<String, Vec<String>> = HashMap::new();
+    for i in &x.netlist.instances {
+        for c in &i.connections {
+            if matches!(c.signal, Expr::Ident(_) | Expr::BitSelect { .. })
+                && x.cells.check_sink(&i.cell, &i.name, &c.pin).is_ok()
+            {
+                net_sinks
+                    .entry(expr_key(&c.signal))
+                    .or_default()
+                    .push(format!("{}/{}", i.name, c.pin));
+            }
+        }
+    }
+    let setup_corners: Vec<&String> = x.pin_slack.keys().collect();
+    let pin_point = |pin: &str| -> Option<(Point, String, String)> {
+        let (inst, p) = pin.rsplit_once('/')?;
+        let i = instances.get(inst)?;
+        let c = i.connections.iter().find(|c| c.pin == p)?;
+        if !matches!(c.signal, Expr::Ident(_) | Expr::BitSelect { .. })
+            || x.cells.check_sink(&i.cell, inst, p).is_err()
+        {
+            return None;
+        }
+        Some((
+            Point::Pin(pin.to_string()),
+            pin.to_string(),
+            expr_key(&c.signal),
+        ))
+    };
+    // Points of one endpoint at one corner, in path order: (point, setup pin).
+    let points_of = |stages: &[Stage]| -> Vec<(Point, String)> {
+        let mut out = Vec::new();
+        for st in stages {
+            if st.arc != "net" || st.inst.is_none() {
+                continue;
+            }
+            let Some((pp, pin, key)) = pin_point(&st.pin) else {
+                continue;
+            };
+            if let Some(d) = &st.driver {
+                let n = net_sinks.get(&key).map_or(0, Vec::len);
+                if n >= 1 && n <= r.max_group_sinks {
+                    out.push((Point::Net(key), d.clone()));
+                }
+            }
+            out.push((pp, pin));
+        }
+        out
+    };
+    // Pass 1: needs and candidate points of every violating endpoint.
+    struct Want {
+        endpoint: String,
+        need: BTreeMap<String, f64>,
+        points: Vec<(Point, String)>,
+    }
+    let mut wants = Vec::new();
+    let mut infeasible = Vec::new();
+    for (endpoint, t) in x.timing {
+        let need: BTreeMap<String, f64> = r
+            .hold_corners
+            .iter()
+            .filter_map(|c| t.hold.get(c).map(|s| (c.clone(), r.target_margin_ns - s)))
+            .filter(|(_, n)| *n > 0.0)
+            .collect();
+        if need.is_empty() {
+            continue;
+        }
+        if wants.len() + infeasible.len() >= r.max_sinks {
+            return Err(Error::Budget(format!(
+                "HOLD_ECO: more than {} violating endpoints",
+                r.max_sinks
+            )));
+        }
+        let by_corner = x.paths.get(endpoint);
+        let worst = need
+            .iter()
+            .max_by(|a, b| a.1.total_cmp(b.1).then_with(|| b.0.cmp(a.0)))
+            .map(|(c, _)| c.clone())
+            .expect("need is not empty");
+        let mut pts = by_corner
+            .and_then(|m| m.get(&worst))
+            .map(|st| points_of(st))
+            .unwrap_or_default();
+        for c in need.keys() {
+            if *c == worst {
+                continue;
+            }
+            if let Some(st) = by_corner.and_then(|m| m.get(c)) {
+                let here: BTreeSet<Point> = points_of(st).into_iter().map(|p| p.0).collect();
+                pts.retain(|p| here.contains(&p.0));
+            }
+        }
+        if pts.is_empty() {
+            match pin_point(endpoint) {
+                Some((pp, pin, _)) => pts.push((pp, pin)),
+                None => {
+                    infeasible.push(format!(
+                        "{endpoint}: needs {need:?} ns but its worst hold path has no sink pin of the \
+                         edited netlist to delay (top-level port endpoint or constant/unknown pins)"
+                    ));
+                    continue;
+                }
+            }
+        }
+        wants.push(Want {
+            endpoint: endpoint.clone(),
+            need,
+            points: pts,
+        });
+    }
+    let violating = wants.len() + infeasible.len();
+    // Largest need at the setup corner's worst first (then name).
+    let key_need = |w: &Want| w.need.values().copied().fold(0.0f64, f64::max);
+    wants.sort_by(|a, b| {
+        key_need(b)
+            .total_cmp(&key_need(a))
+            .then_with(|| a.endpoint.cmp(&b.endpoint))
+    });
+    let mut coverage: HashMap<Point, Vec<String>> = HashMap::new();
+    for w in &wants {
+        for (p, _) in &w.points {
+            coverage
+                .entry(p.clone())
+                .or_default()
+                .push(w.endpoint.clone());
+        }
+    }
+    // Existing chain feeding a point (earlier hold ECO cells, walked back).
+    let existing_of = |p: &Point| -> Vec<String> {
+        let mut net = match p {
+            Point::Net(k) => k.clone(),
+            Point::Pin(pin) => match pin_point(pin) {
+                Some((_, _, k)) => k,
+                None => return Vec::new(),
+            },
+        };
+        let mut chain = Vec::new();
+        while let Some(d) = x.drivers.get(&net) {
+            if !d.name.starts_with(&r.prefix) || chain.len() > r.max_total_chain {
+                break;
+            }
+            chain.push(d.name.clone());
+            let input = x.inputs[d.cell.as_str()];
+            net = match d.connections.iter().find(|c| c.pin == input) {
+                Some(c) => expr_key(&c.signal),
+                None => break,
+            };
+        }
+        chain.reverse();
+        chain
+    };
+    // point -> (setup pin, chosen candidate indices in plan order)
+    let mut planned: BTreeMap<Point, (String, Vec<usize>, BTreeSet<String>)> = BTreeMap::new();
+    let mut sinks = Vec::new();
+    let mut evaluations = 0usize;
+    for w in &wants {
+        let on_path: Vec<&Point> = w.points.iter().map(|p| &p.0).collect();
+        let credit =
+            |c: &str, planned: &BTreeMap<Point, (String, Vec<usize>, BTreeSet<String>)>| -> f64 {
+                on_path
+                    .iter()
+                    .filter_map(|p| planned.get(*p))
+                    .flat_map(|(_, idx, _)| idx.iter())
+                    .map(|&i| x.candidates[i].delay_ns[c].min())
+                    .sum()
+            };
+        let used_setup =
+            |c: &str, planned: &BTreeMap<Point, (String, Vec<usize>, BTreeSet<String>)>| -> f64 {
+                on_path
+                    .iter()
+                    .filter_map(|p| planned.get(*p))
+                    .flat_map(|(_, idx, _)| idx.iter())
+                    .map(|&i| x.candidates[i].delay_ns[c].max())
+                    .sum()
+            };
+        let remaining: BTreeMap<String, f64> = w
+            .need
+            .iter()
+            .map(|(c, n)| (c.clone(), n - credit(c, &planned)))
+            .filter(|(_, n)| *n > 1e-12)
+            .collect();
+        let t = &x.timing[&w.endpoint];
+        let ep_setup = t.setup.get(&r.setup_corner).copied().unwrap_or(f64::NAN);
+        let (inst, pin) = w
+            .endpoint
+            .rsplit_once('/')
+            .map_or((String::new(), String::new()), |(a, b)| {
+                (a.to_string(), b.to_string())
+            });
+        if remaining.is_empty() {
+            let by = w
+                .points
+                .iter()
+                .find(|p| planned.contains_key(&p.0))
+                .map(|p| p.0.label());
+            if let Some(by) = &by
+                && let Some(e) =
+                    planned.get_mut(&w.points.iter().find(|p| p.0.label() == *by).unwrap().0)
+            {
+                e.2.insert(w.endpoint.clone());
+            }
+            sinks.push(SinkPlan {
+                endpoint: w.endpoint.clone(),
+                instance: inst,
+                pin,
+                driver_net: String::new(),
+                existing_chain: Vec::new(),
+                cells: Vec::new(),
+                area_um2: 0.0,
+                corners: estimate(&w.need, t, |c| credit(c, &planned)),
+                setup_slack_ns: ep_setup,
+                estimated_setup_slack_ns: ep_setup - used_setup(&r.setup_corner, &planned),
+                combinations_evaluated: 0,
+                point: by,
+            });
+            continue;
+        }
+        // Rank points: most violating paths, then the most downstream (a
+        // point after a reconvergence delays every parallel branch of the
+        // endpoint at once; an upstream branch pin fixes only its branch).
+        let mut order: Vec<(usize, &(Point, String))> = w.points.iter().enumerate().collect();
+        order.sort_by(|a, b| {
+            let ca = coverage.get(&a.1.0).map_or(0, Vec::len);
+            let cb = coverage.get(&b.1.0).map_or(0, Vec::len);
+            cb.cmp(&ca).then(b.0.cmp(&a.0))
+        });
+        let mut chosen = None;
+        let mut evidence = Vec::new();
+        let mut combos = 0usize;
+        for (_, (point, setup_pin)) in &order {
+            let mut budget = Vec::new();
+            let mut known = true;
+            for c in &setup_corners {
+                match x.pin_slack[*c].get(setup_pin) {
+                    Some(s) => budget.push(((*c).clone(), s - used_setup(c, &planned))),
+                    None => known = false,
+                }
+            }
+            let shown: Vec<String> = budget.iter().map(|(c, b)| format!("{c} {b:.4}")).collect();
+            if !known {
+                evidence.push(format!(
+                    "{} (setup pin {setup_pin}: no setup slack)",
+                    point.label()
+                ));
+                continue;
+            }
+            let have = existing_of(point).len() + planned.get(point).map_or(0, |e| e.1.len());
+            let room = r.max_total_chain.saturating_sub(have).min(r.max_chain);
+            if room == 0 {
+                evidence.push(format!(
+                    "{} (chain cap {} reached)",
+                    point.label(),
+                    r.max_total_chain
+                ));
+                continue;
+            }
+            evaluations += 1;
+            if evaluations > MAX_POINT_EVALUATIONS {
+                return Err(Error::Budget(format!(
+                    "HOLD_ECO: more than {MAX_POINT_EVALUATIONS} point evaluations"
+                )));
+            }
+            let (choice, n) = choose_chain_multi(
+                x.candidates,
+                &remaining,
+                &r.hold_corners,
+                &budget,
+                r.setup_margin_ns,
+                room,
+                r.max_combinations,
+            )?;
+            combos += n;
+            match choice {
+                Some(c) => {
+                    chosen = Some(((*point).clone(), setup_pin.clone(), c));
+                    break;
+                }
+                None => evidence.push(format!(
+                    "{} (setup budget {})",
+                    point.label(),
+                    shown.join(", ")
+                )),
+            }
+        }
+        let Some((point, setup_pin, choice)) = chosen else {
+            infeasible.push(format!(
+                "{}: needs {remaining:?} ns more hold at the worst-path points, none of which has \
+                 the setup room (setup margin {} ns): {}",
+                w.endpoint,
+                r.setup_margin_ns,
+                evidence.join("; ")
+            ));
+            continue;
+        };
+        let e = planned
+            .entry(point.clone())
+            .or_insert_with(|| (setup_pin, Vec::new(), BTreeSet::new()));
+        e.1.extend(choice.iter().copied());
+        e.2.insert(w.endpoint.clone());
+        let mut names: Vec<String> = choice
+            .iter()
+            .map(|&i| x.candidates[i].name.clone())
+            .collect();
+        names.sort();
+        sinks.push(SinkPlan {
+            endpoint: w.endpoint.clone(),
+            instance: inst,
+            pin,
+            driver_net: String::new(),
+            existing_chain: existing_of(&point),
+            area_um2: choice.iter().map(|&i| x.candidates[i].area_um2).sum(),
+            cells: names,
+            corners: estimate(&w.need, t, |c| credit(c, &planned)),
+            setup_slack_ns: ep_setup,
+            estimated_setup_slack_ns: ep_setup - used_setup(&r.setup_corner, &planned),
+            combinations_evaluated: combos,
+            point: Some(point.label()),
+        });
+    }
+    let mut points = Vec::new();
+    for (point, (setup_pin, idx, endpoints)) in planned {
+        let mut chosen: Vec<&ProfiledBuffer> = idx.iter().map(|&i| x.candidates[i]).collect();
+        chosen.sort_by(|a, b| a.name.cmp(&b.name));
+        let sum = |c: &str, max: bool| -> f64 {
+            chosen
+                .iter()
+                .map(|b| {
+                    if max {
+                        b.delay_ns[c].max()
+                    } else {
+                        b.delay_ns[c].min()
+                    }
+                })
+                .sum()
+        };
+        let (kind, name, moved) = match &point {
+            Point::Net(k) => (
+                "net",
+                k.clone(),
+                net_sinks.get(k).cloned().unwrap_or_default(),
+            ),
+            Point::Pin(p) => ("sink_pin", p.clone(), vec![p.clone()]),
+        };
+        points.push(PointPlan {
+            kind,
+            existing_chain: existing_of(&point),
+            name,
+            setup_slack_ns: setup_corners
+                .iter()
+                .filter_map(|c| x.pin_slack[*c].get(&setup_pin).map(|s| ((*c).clone(), *s)))
+                .collect(),
+            setup_pin,
+            sinks: moved,
+            cells: chosen.iter().map(|b| b.name.clone()).collect(),
+            instances: Vec::new(),
+            area_um2: chosen.iter().map(|b| b.area_um2).sum(),
+            endpoints: endpoints.into_iter().collect(),
+            added_min_ns: r
+                .hold_corners
+                .iter()
+                .map(|c| (c.clone(), sum(c, false)))
+                .collect(),
+            added_setup_ns: setup_corners
+                .iter()
+                .map(|c| ((*c).clone(), sum(c, true)))
+                .collect(),
+        });
+    }
+    // Net points first, so a later sink-pin chain on one of their sinks
+    // extends the moved connection.
+    points.sort_by(|a, b| (a.kind != "net", &a.name).cmp(&(b.kind != "net", &b.name)));
+    Ok(PathResult {
+        points,
+        sinks,
+        infeasible,
+        violating,
+    })
+}
+
+fn estimate(
+    need: &BTreeMap<String, f64>,
+    t: &EndpointTiming,
+    credit: impl Fn(&str) -> f64,
+) -> BTreeMap<String, CornerEstimate> {
+    need.keys()
+        .map(|c| {
+            let slack = t.hold.get(c).copied();
+            let added = credit(c);
+            (
+                c.clone(),
+                CornerEstimate {
+                    hold_slack_ns: slack,
+                    need_ns: need[c],
+                    added_min_ns: added,
+                    added_max_ns: added,
+                    estimated_hold_slack_ns: slack.map(|s| s + added),
+                },
+            )
+        })
+        .collect()
+}
+
+/// ECO operations of one planned point: a net point moves every listed sink
+/// behind the first cell (`buffer_sinks`), a sink-pin point buffers the pin;
+/// further cells extend the chain on the driver side of the first one.
+fn emit_point_ops(
+    r: &HoldEcoRequest,
+    cells: &EcoCells,
+    pt: &mut PointPlan,
+    seq: &mut usize,
+    ops: &mut Vec<EcoOp>,
+) -> Result<()> {
+    let mut previous: Option<String> = None;
+    for cell in &pt.cells {
+        let name = format!("{}{}", r.prefix, *seq);
+        *seq += 1;
+        if !cells.buffers.iter().any(|b| b.name == *cell) {
+            return Err(fail(
+                "DELAY_PROFILE",
+                format!("{cell} is not a profiled buffer"),
+            ));
+        }
+        let op = match (&previous, pt.kind) {
+            (None, "net") => EcoOp::BufferSinks {
+                cell: cell.clone(),
+                instance: name.clone(),
+                net: format!("{name}_n"),
+                sinks: pt
+                    .sinks
+                    .iter()
+                    .map(|s| {
+                        let (i, p) = s.rsplit_once('/').expect("instance pin");
+                        PinRef {
+                            instance: i.to_string(),
+                            pin: p.to_string(),
+                        }
+                    })
+                    .collect(),
+                ports: Vec::new(),
+            },
+            (None, _) => {
+                let (i, p) = pt.name.rsplit_once('/').expect("instance pin");
+                EcoOp::InsertBuffer {
+                    cell: cell.clone(),
+                    instance: name.clone(),
+                    net: format!("{name}_n"),
+                    sink: PinRef {
+                        instance: i.to_string(),
+                        pin: p.to_string(),
+                    },
+                }
+            }
+            (Some(prev), _) => EcoOp::InsertBuffer {
+                cell: cell.clone(),
+                instance: name.clone(),
+                net: format!("{name}_n"),
+                sink: PinRef {
+                    instance: prev.clone(),
+                    pin: input_of(cells, prev, ops),
+                },
+            },
+        };
+        ops.push(op);
+        pt.instances.push(name.clone());
+        previous = Some(name);
+    }
+    Ok(())
+}
+
+/// Input pin of the buffer instance `name` inserted earlier in `ops`.
+fn input_of(cells: &EcoCells, name: &str, ops: &[EcoOp]) -> String {
+    ops.iter()
+        .find_map(|op| match op {
+            EcoOp::InsertBuffer { cell, instance, .. }
+            | EcoOp::BufferSinks { cell, instance, .. }
+                if instance == name =>
+            {
+                cells
+                    .buffers
+                    .iter()
+                    .find(|b| b.name == *cell)
+                    .map(|b| b.input_pin.clone())
+            }
+            _ => None,
+        })
+        .expect("chain cell inserted before")
+}
+
 pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
     let r = request;
     if !(r.target_margin_ns.is_finite()
@@ -687,6 +1333,12 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
         return Err(fail(
             "INVALID_ARGUMENT",
             "chain/sink/combination budgets outside hard bounds",
+        ));
+    }
+    if r.max_group_sinks == 0 || r.max_group_sinks > 256 {
+        return Err(fail(
+            "INVALID_ARGUMENT",
+            "max_group_sinks outside hard bounds 1..=256",
         ));
     }
     if r.hold_corners.is_empty() || r.hold_reports.is_empty() || r.setup_reports.is_empty() {
@@ -775,6 +1427,8 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
         }
     };
     let mut timing: BTreeMap<String, EndpointTiming> = BTreeMap::new();
+    // endpoint -> corner -> worst hold path stages (path-aware planning).
+    let mut paths: BTreeMap<String, BTreeMap<String, Vec<Stage>>> = BTreeMap::new();
     let mut reports = Vec::new();
     let mut hold_seen = BTreeSet::new();
     for path in &r.hold_reports {
@@ -831,6 +1485,10 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
             for e in rows {
                 let name = text(e, "endpoint", "hold_fix row")?;
                 binding::bind_hold_row(&tindex, e, &mut bind)?;
+                paths
+                    .entry(name.to_string())
+                    .or_default()
+                    .insert(corner.clone(), stages_of(e));
                 let slack = num(e, "hold_slack_ns", name)?;
                 let t = timing.entry(name.to_string()).or_default();
                 merge_slack(&mut t.hold, &corner, slack, "hold", name)?;
@@ -899,9 +1557,67 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
             clock_model: clock,
         });
     }
+    // corner -> pin/port -> setup slack (pins reports, path-aware mode).
+    let mut pin_slack: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
+    for path in &r.pins_reports {
+        let (env, artifact) = read_envelope(path)?;
+        same_revision(&env, path, &mut bind)?;
+        let (wire, clock) = scope_models(&env);
+        if wire != "spef_rc" || clock != "propagated" {
+            return Err(fail(
+                "TIMING_REPORT",
+                format!("{}: not spef_rc/propagated", path.display()),
+            ));
+        }
+        let corner = env
+            .scope
+            .get("corner")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| fail("TIMING_REPORT", "pins report has no scope.corner"))?
+            .to_string();
+        let e = env.sections.get("pins").ok_or_else(|| {
+            fail(
+                "TIMING_REPORT",
+                format!("{} has no pins section", path.display()),
+            )
+        })?;
+        let total = num(e, "total", "pins")?;
+        let rows = e
+            .get("rows")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| fail("TIMING_REPORT", "pins rows missing"))?;
+        if num(e, "matched", "pins")? != total || rows.len() as f64 != total {
+            return Err(fail(
+                "TIMING_REPORT",
+                "pins report is filtered or truncated; use --limit 0 and no --filter",
+            ));
+        }
+        let map = pin_slack.entry(corner.clone()).or_default();
+        for row in rows {
+            let name = text(row, "pin", "pins row")?;
+            binding::bind_pin(&tindex, name, &mut bind)?;
+            if let Some(s) = row.get("slack_ns").and_then(serde_json::Value::as_f64) {
+                map.insert(binding::norm(name), s);
+            }
+        }
+        reports.push(ReportInput {
+            artifact,
+            kind: "pins",
+            corners: vec![corner],
+            wire_model: wire,
+            clock_model: clock,
+        });
+    }
     if let Some((w, v)) = revision {
         bind.sta_workspace = w;
         bind.sta_revision = v;
+    }
+    let path_aware = !r.pins_reports.is_empty();
+    if path_aware && !pin_slack.contains_key(&r.setup_corner) {
+        return Err(fail(
+            "MISSING_CORNER",
+            format!("no pins report covers setup corner {}", r.setup_corner),
+        ));
     }
     for c in &r.hold_corners {
         if !hold_seen.contains(c) {
@@ -961,7 +1677,28 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
     let mut ops = Vec::new();
     let mut seq = eco::next_sequence(&netlist, &r.prefix);
     let mut violating = 0usize;
-    for (endpoint, t) in &timing {
+    let mut points = Vec::new();
+    if path_aware {
+        let planned = plan_paths(&PathInputs {
+            r,
+            timing: &timing,
+            paths: &paths,
+            pin_slack: &pin_slack,
+            candidates: &candidates,
+            cells: &cells,
+            netlist: &netlist,
+            drivers: &drivers,
+            inputs: &inputs,
+        })?;
+        for mut pt in planned.points {
+            emit_point_ops(r, &cells, &mut pt, &mut seq, &mut ops)?;
+            points.push(pt);
+        }
+        sinks = planned.sinks;
+        infeasible = planned.infeasible;
+        violating = planned.violating;
+    }
+    for (endpoint, t) in timing.iter().filter(|_| !path_aware) {
         let need: BTreeMap<String, f64> = r
             .hold_corners
             .iter()
@@ -1095,6 +1832,7 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
             setup_slack_ns: setup_slack,
             estimated_setup_slack_ns: setup_slack - setup_added,
             combinations_evaluated: evaluated,
+            point: None,
         });
     }
     let eco_plan = EcoPlan {
@@ -1103,8 +1841,12 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
         operations: ops,
     };
     let status = if !infeasible.is_empty() {
-        "infeasible"
-    } else if sinks.is_empty() {
+        if r.allow_partial && !eco_plan.operations.is_empty() {
+            "partial"
+        } else {
+            "infeasible"
+        }
+    } else if eco_plan.operations.is_empty() {
         "closed"
     } else {
         "planned"
@@ -1140,14 +1882,22 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
             delay_model: "profile delay at the representative slew/load; hold covers with \
                           min(rise,fall) per corner, setup charges max(rise,fall) at the setup \
                           corner; re-time with extracted parasitics after every ECO",
+            path_aware,
+            allow_partial: r.allow_partial,
+            max_group_sinks: r.max_group_sinks,
         },
         totals: HoldPlanTotals {
             violating_sinks: violating,
             planned_sinks: sinks.len(),
             cells: eco_plan.operations.len(),
-            area_um2: sinks.iter().map(|s| s.area_um2).sum(),
+            area_um2: if path_aware {
+                points.iter().map(|p| p.area_um2).sum()
+            } else {
+                sinks.iter().map(|s| s.area_um2).sum()
+            },
         },
         sinks,
+        points,
         infeasible,
         eco: eco_plan,
         eco_report: None,
@@ -1191,6 +1941,10 @@ pub struct SizedCell {
     pub width_dbu: i64,
     pub area_um2: f64,
     pub max_capacitance_pf: Option<f64>,
+    /// Liberty-derived drive data per corner (planner input only; the ECO
+    /// itself never reads it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drive: Option<serde_json::Value>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1213,6 +1967,9 @@ pub struct SizingProfile {
     pub sources: Vec<ProfileSource>,
     pub dbu_per_um: u32,
     pub rule: String,
+    /// How `cells[].drive` was derived (absent in profiles without drive data).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drive_model: Option<serde_json::Value>,
     pub families: Vec<SizingFamily>,
     pub excluded: Vec<serde_json::Value>,
 }
@@ -1260,6 +2017,47 @@ pub fn load_sizing_profile(path: &Path) -> Result<(Vec<SizeFamily>, Artifact)> {
     Ok((out, artifact_of(&pin)))
 }
 
+/// Non-inverting buffers of a sizing profile: every member of a family with
+/// exactly one input and one output pin whose Liberty function (normalized by
+/// the profile builder) is that input. `buffer_sinks`/`insert_buffer` accept
+/// them after `BufferCell::check_identity` (the profile excludes cells the
+/// cell policy reserves or forbids).
+pub fn sizing_buffers(path: &Path) -> Result<Vec<BufferCell>> {
+    let (text, _) = read_file(path, MAX_PROFILE_BYTES, "sizing_profile")?;
+    let profile: SizingProfile = serde_json::from_str(&text)?;
+    let mut out = Vec::new();
+    for f in &profile.families {
+        let inputs: Vec<&String> = f
+            .pins
+            .iter()
+            .filter(|(_, d)| d.as_str() == "input")
+            .map(|(p, _)| p)
+            .collect();
+        let outputs: Vec<&String> = f
+            .pins
+            .iter()
+            .filter(|(_, d)| d.as_str() == "output")
+            .map(|(p, _)| p)
+            .collect();
+        if inputs.len() != 1 || outputs.len() != 1 || f.pins.len() != 2 {
+            continue;
+        }
+        let function = f.functions.get(outputs[0]).cloned().unwrap_or_default();
+        for c in &f.cells {
+            let b = BufferCell {
+                name: c.name.clone(),
+                input_pin: inputs[0].clone(),
+                output_pin: outputs[0].clone(),
+                function: function.clone(),
+            };
+            if b.check_identity().is_ok() {
+                out.push(b);
+            }
+        }
+    }
+    Ok(out)
+}
+
 // ----------------------------------------------------------------- apply
 
 #[derive(Clone, Debug, Serialize)]
@@ -1297,16 +2095,26 @@ pub fn apply_plan(
     let p: EcoPlan = serde_json::from_str(&text)?;
     let (prof, fpin) = load_profile(profile)?;
     let mut cells = prof.eco_cells()?;
-    let (directions, lef_pin) = load_pin_directions(&prof, cell_lef, &masters_of(&[&n], &prof))?;
-    cells.pin_directions = directions;
     let sizing_profile = match sizing {
         Some(path) => {
             let (families, art) = load_sizing_profile(path)?;
             cells.families = families;
+            // Drive-strength buffers of the sizing profile (repeaters, port
+            // buffers); a master already profiled as a delay cell keeps its
+            // delay-profile entry.
+            for b in sizing_buffers(path)? {
+                if !cells.buffers.iter().any(|x| x.name == b.name) {
+                    cells.buffers.push(b);
+                }
+            }
             Some(art)
         }
         None => None,
     };
+    let mut masters = masters_of(&[&n], &prof);
+    masters.extend(cells.buffers.iter().map(|b| b.name.clone()));
+    let (directions, lef_pin) = load_pin_directions(&prof, cell_lef, &masters)?;
+    cells.pin_directions = directions;
     let (edited, report) = eco::apply(
         &n,
         &p,

@@ -75,6 +75,13 @@ pub struct PhysicalBundle {
     pub state: Option<crate::physical::PhysicalState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<crate::physical::PlacementReport>,
+    /// Timing-driven net weights (`place --net-weights`); every later
+    /// placement of this workspace (clock-tree re-placement) uses them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_weights: Option<crate::physical::NetWeights>,
+    /// ECO placement seed (`place --seed`); kept for the clock-tree re-placement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement_seed: Option<crate::physical::PlacementSeed>,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -521,6 +528,8 @@ pub fn import_pdk_with_config(
         routing: None,
         state: None,
         placement: None,
+        net_weights: None,
+        placement_seed: None,
     };
     validate_bundle(&physical, &design, connection_limits)?;
     let records = DesignDb::new(&design, limits)?.unplaced_records();
