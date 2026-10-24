@@ -27,7 +27,8 @@ SI, IR/EM, OCV and CPPR remain `unchecked`. DRC/LVS status is `unchecked`.
 rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   --corner max --out /path/outside/W/routed_max.spef \
   [--max-spef-mib 32] [--max-segment-um 25] [--max-rc-nodes 500000] \
-  [--max-coupling-caps 1000000] [--max-extract-work 200000000]
+  [--max-coupling-caps 1000000] [--max-extract-work 200000000] \
+  [--max-rc-elements 1000000] [--max-extract-candidates 4096]
 ```
 
 * The workspace is opened under its shared lock and never written. `--out`
@@ -46,7 +47,24 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
 * stdout is a JSON report (`rustroad.extract.v1`): output path, sha256 and
   bytes; profile identity; `scope` (corner, `wire_model: rc_tree_per_net`,
   `coupling: cross_net_spef` plus the reason, and how each structure is
-  treated); `stats`; unannotated signal nets; and diagnostics.
+  treated); `stats`; unannotated signal nets; and diagnostics. Nets with no
+  pin (`pinless_signal_nets`) and nets with exactly one pin
+  (`single_pin_signal_nets`: an unused input port or an unloaded output pin;
+  the router routes nets of two or more terminals only) have nothing to
+  extract and are listed separately, never as unannotated.
+* Candidate shapes per wire run (`--max-extract-candidates`, default 4,096)
+  were a fixed cap; they are a budget now. Per run the extractor holds the
+  candidate list, two clamped cut points per candidate and at most one plane
+  entry per candidate: 44 B per candidate (`CANDIDATE_SCRATCH_BYTES`), one run
+  at a time. The ceiling is 48 MiB of that scratch, 1,143,901 candidates
+  (`MAX_CANDIDATES_CEILING`); the quadratic intervals x candidates work stays
+  charged to `--max-extract-work`. The report states `max_candidates_per_run`,
+  `candidate_scratch_bytes` and the observed `stats.max_run_candidates`.
+  `--max-rc-elements` (resistors + nodes + 2 x couplings, ceiling 8x the
+  default) is a command-line budget too. SERV (scale-stream layout, sky130,
+  7,959 nets): 8,054 candidates on its largest run, 4.3 M elements, work
+  7.4e9, 20.6 s and 521 MB peak; the track recipe of the gate passes 65,536
+  candidates (2.9 MB scratch) and 8 M elements.
 
 Repeated runs are byte-identical. The SPEF `*DATE` is a fixed string, and the
 JSON report carries provenance.

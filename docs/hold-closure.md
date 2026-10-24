@@ -37,6 +37,10 @@ rustroad --workspace W check-antenna [--extra-shapes shapes.json] [--safety-marg
 rustroad antenna-eco --netlist mapped.v --antenna-report antenna.json \
   --delay-cells fixtures/pdk/<pdk>-delay-cells.json --out eco.v --plan-out plan.json
 
+# Diode-free antenna repair of HEAD by layer jumpers (mutating; new revision)
+rustroad --workspace W repair-antenna --base-rev revN [--antenna-report antenna.json] \
+  [--safety-margin 0.10] [--max-jumpers-per-net 16] [--max-positions 512] [--max-candidates 32]
+
 # Apply a given rustroad.eco-plan.v1 (used for the controls)
 rustroad apply-eco --netlist mapped.v --plan plan.json --delay-cells profile.json [--cell-lef LEF] --out eco.v
 
@@ -317,6 +321,87 @@ bound the work. One run takes 0.03 s and about 13 MiB.
 
 The repair runs `antenna-eco`, then a fresh import, place, CTS and route, and
 then the same plant. The repaired layouts still meet timing at every corner.
+
+## Layer jumpers (`rustroad repair-antenna`)
+
+**Why not diodes on sky130.** The antenna ECO's `sky130_fd_sc_hd__diode_2`
+cannot pass the frozen LVS setup (E3 uart_tx and alu, root-caused with the
+pinned image `4c48415d8bd0` on the E3 logs):
+
+- the reference (powered) netlist is correct: the diode is present with the
+  right connections (`DIODE` on the port net, `VGND/VNB` on VSS, `VPB/VPWR`
+  on VDD), the XOR is clean and Netgen ends with `Circuits match uniquely`;
+- Netgen prints `Cell sky130_fd_sc_hd__diode_2 (0|1) disconnected node:
+  VGND/VPWR/VPB` inside the cell comparison, for both netlists: the PDK cell
+  has one device (`XD0 VNB DIODE sky130_fd_pr__diode_pw2nd_05v5`) and three
+  device-less supply pins. The frozen harness fails any disconnected node
+  (the rule that catches a planted extra pin);
+- the sky130 KLayout deck extracts no device from the `diode_2` layout
+  (diff 65/20, nsdm 93/44 and areaid.diode 81/23 are all there; the deck's
+  diode derivations do not recognise it): the extracted subckt is empty,
+  the cell is `NoMatch` and the top is skipped.
+
+Neither is a netlist error, so the deck/setup stays frozen and the repair
+avoids diodes.
+
+**Method.** The native check is per layer and non-cumulative (partial net:
+the conductors that exist when the layer is etched). A jumper over layer L
+cuts one straight L run of the violating partial net and bridges the gap on
+the next routing layer up: two L/L+1 vias and a short L+1 wire (a
+non-preferred-direction jog between two upper-layer track positions). While
+L is etched the bridge does not exist, so the gates keep only the L metal
+between them and the cut; when L+1 is etched the bridge is the only L+1
+metal it adds. Netlist and placement are unchanged; only the violating
+net's routes change.
+
+- Per violating net, the lowest violating layer first. The net graph holds
+  the layers up to L (wires split at every node, vias, access points and one
+  virtual node per terminal joined to every node inside its pin shapes: the
+  access point is often not on a via). Dijkstra from the gates of the
+  violating partial nets gives the gate side of every straight run (interior
+  nodes without via, access point or branch).
+- Candidates: positions on the upper layer's tracks (lattice steps for the
+  legacy router) inside the run, nearest the gate end first, bridges of one
+  to three pitches; up to 512 positions per run. A candidate must clear
+  every other-net shape (both vias on all their layers and the bridge,
+  spatial index of the router's validation), leave no same-net pin or patch
+  across the cut, and add no same-net rule violation (`route_rules`: notch
+  spacing, minimum area, holes, floating patches) to the net.
+- Strategy A cuts the longest runs; the first candidate that clears the
+  net wins, else the one with the largest drop. Strategy B (multi-sink
+  trees, where one cut can raise the other side's ratio) isolates every
+  gate of the violating partial net on its nearest run in one batch. A
+  choice is accepted only when the layer's worst ratio over the effective
+  limit drops and no row of the net becomes newly violated; at most 16
+  jumpers per net.
+- The native margin is kept: acceptance uses the same `(1 - 0.10) x limit`
+  as `check-antenna`. The edited routes pass the full `routing::validate`
+  (other-net spacing, connectivity, same-net rules) before the commit and
+  again inside it. `--antenna-report` binds a `check-antenna` report of the
+  base revision (revision, margin and violated row set must equal the
+  recomputed ones, else `STALE_REPORT`). With nothing violated, no revision
+  is written (`status: clean`).
+- Not repairable: a violation on the top routing layer (met4 / Metal4: no
+  layer above in the routing profiles), cut-layer rules, runs whose every
+  position is blocked. They are listed in `unrepaired` with the reason; the
+  closure loop's diode ECO remains the fallback (sky130 LVS then fails, as
+  before).
+
+`scripts/hold_closure.py` runs `repair-antenna` right after routing on every
+layout of the closure loop (legacy and track recipes), so the antenna check,
+extraction, timing and signoff of that iteration see the jumpered routes.
+Results (gate runs `.work/runs/A1-*`, `A2-*`): uart_tx sky130 `data_i[7]`
+met3 361.2 -> 18.7, alu sky130 `a_i[3]` met3 396.4 -> 53.8, regfile sky130
+`raddr_a[0]` met3 396.6 -> 205.1 (one jumper each); Magic antenna, Magic and
+KLayout DRC, XOR and both LVS checks pass on those layouts.
+
+Tests: `rustroad-core` `jumper::tests` (gate-side cut on a routed lattice
+fixture that re-validates with unchanged wire length; other-net metal on the
+bridge layer moves the jumper; the cut partial net has no further position;
+bounds), `crates/rustroad-workspace/tests/antenna.rs`
+(`layer_jumpers_repair_partial_net_violations_without_diodes`: violated ->
+repaired with M2/M3 jumpers, `REVISION_CONFLICT`, `STALE_REPORT`, the
+committed revision re-validates, check-antenna agrees, netlist unchanged).
 
 ## Closure loop (`scripts/hold_closure.py`)
 
