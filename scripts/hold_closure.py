@@ -384,7 +384,7 @@ class Flow:
         a = self.sta_json(f'{t}_import', argv)
         r = self.sta_json(f'{t}_run', [ruststa, *common, 'run', '--base-rev', a['new_rev'], '--backend', 'cpu', '--precision', 'f64',
                                         '--max-paths', '16', '--max-state-gib', STA_STATE_GIB[self.design.recipe],
-                                        '--require-wire-model', 'spef_rc'], True)
+                                        '--require-wire-model', 'spef_rc'])
         require(r['scope'].get('clock_model') == self.clock_model() and r['scope'].get('wire_model') == 'spef_rc'
                 and (self.design.clocked or r['scope'].get('physical_clock_domains') == 0), f'{t}: wrong timing scope')
         rev = r['new_rev']
