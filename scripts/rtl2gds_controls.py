@@ -15,7 +15,10 @@ bound artifact) and runs the oracle that must catch it; the control is
                     endpoint removed from the final netlist (a chain in front
                     of the endpoint, else one on a recorded path-aware point
                     of its path, else every hold cell), fresh layout and
-                    extraction -> RustSTA AND OpenSTA hold below the margin
+                    extraction -> RustSTA AND OpenSTA hold below the margin;
+                    when the closure loop's DRV buffers still keep hold met
+                    without it, every hold cell and ECO buffer is removed
+                    (recorded as `escalated`)
   planted_hold_uncertainty
                     only when no hold cell was inserted (removed_hold_cell is
                     then not applicable): a copy of the rendered SDC with
@@ -217,7 +220,7 @@ def remove_chain(text: str, sink: str, prefix: str, buffers: dict[str, tuple[str
     return "".join(out), removed
 
 
-def remove_all_chains(text: str, prefix: str, buffers: dict[str, tuple[str, str]]) -> tuple[str, list[str]]:
+def remove_all_chains(text: str, prefix: str | tuple, buffers: dict[str, tuple[str, str]]) -> tuple[str, list[str]]:
     """Remove every `prefix` buffer of the netlist and reconnect each pin it
     drove (directly or through further removed buffers) to the net in front
     of the chain. Used when no single chain feeds an iteration-0 endpoint
@@ -296,23 +299,57 @@ def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
         text, removed = remove_all_chains(source, "rr_eco_hold_", buffers)
         worst = min((v["hold"], c, e) for c, rows in it0.items() for e, v in rows.items() if "/" in e)
     work.mkdir(parents=True, exist_ok=True)
-    netlist = work / "no_hold_cell_mapped.v"
-    netlist.write_text(text)
-    hc = ctx.make_harness(work, ctx.budgets)
-    flow = gate.flow(hc)
-    phys = flow.physical(0, netlist)
-    sta = flow.sta(0, phys)
     margin = ctx.budgets["hold_margin_ns"]
-    rust = {c: v["worst_hold_ns"] for c, v in sta["corners"].items()}
-    corner = min(rust, key=rust.get)
-    ref = T.opensta(hc, f"{gate.tag}_ctl_hold_opensta_{corner}", ctx.tool_paths["opensta"], flow.libs[corner],
-                    Path(phys["paths"]["netlist"]), ctx.top, flow.sdc, Path(phys["spef"][corner]["path"]))
-    ref_worst = min(ref["hold"].values())
+
+    def plant(label: str, text: str) -> dict:
+        sub = work / label
+        sub.mkdir(parents=True, exist_ok=True)
+        netlist = sub / "no_hold_cell_mapped.v"
+        netlist.write_text(text)
+        hc = ctx.make_harness(sub, ctx.budgets)
+        flow = gate.flow(hc)
+        phys = flow.physical(0, netlist)
+        sta = flow.sta(0, phys)
+        rust = {c: v["worst_hold_ns"] for c, v in sta["corners"].items()}
+        corner = min(rust, key=rust.get)
+        ref = T.opensta(hc, f"{gate.tag}_ctl_hold_opensta_{corner}", ctx.tool_paths["opensta"], flow.libs[corner],
+                        Path(phys["paths"]["netlist"]), ctx.top, flow.sdc, Path(phys["spef"][corner]["path"]))
+        return dict(rust=rust, corner=corner, ref_worst=min(ref["hold"].values()), processes=len(hc.receipts),
+                    peak=max((r["peak_rss_kib"] for r in hc.receipts if r.get("peak_rss_kib")), default=None))
+    first = plant("chain", text)
+    escalated = None
+    if not (first["rust"][first["corner"]] < margin and first["ref_worst"] < margin):
+        # The closure loop's DRV buffers also delay the hold paths (a buffer
+        # behind a hold chain keeps hold met without it): remove every delay
+        # insertion of the loop -- hold cells and ECO buffers; resizes stay.
+        both = dict(buffers)
+        both.update(eco_buffer_pins(b))
+        text2, removed2 = remove_all_chains(source, ("rr_eco_hold_", "rr_eco_buf_"), both)
+        escalated = dict(removed=removed2, first=dict(ruststa_worst_hold_ns=first["rust"],
+                                                      opensta_worst_hold_ns=first["ref_worst"], removed=removed))
+        first = plant("all_insertions", text2)
+        removed = removed2
+    rust, corner, ref_worst = first["rust"], first["corner"], first["ref_worst"]
     return control("RustSTA and OpenSTA hold gate on a fresh layout", rust[corner] < margin and ref_worst < margin,
                    removed=removed, sink=worst[2], iteration0_hold_ns=worst[0], worst_corner=corner,
                    ruststa_worst_hold_ns=rust, opensta_worst_hold_ns=ref_worst, margin_ns=margin,
-                   processes=len(hc.receipts), peak_rss_kib=max((r["peak_rss_kib"] for r in hc.receipts
-                                                                if r.get("peak_rss_kib")), default=None))
+                   escalated=escalated, processes=first["processes"], peak_rss_kib=first["peak"])
+
+
+def eco_buffer_pins(b) -> dict:
+    """(input, output) pins of every identity-function sizing-profile master
+    (the masters the closure loop's buffer insertion uses)."""
+    sizing = b["flow"].design.sizing_profile
+    if sizing is None:
+        return {}
+    out = {}
+    for f in json.loads(Path(sizing).read_text())["families"]:
+        ins = [p for p, d in f["pins"].items() if d == "input"]
+        outs = [p for p, d in f["pins"].items() if d == "output"]
+        if len(ins) == 1 and len(outs) == 1 and len(f["pins"]) == 2:
+            for c in f["cells"]:
+                out[c["name"]] = (ins[0], outs[0])
+    return out
 
 
 def hold_cells_inserted(b) -> bool:

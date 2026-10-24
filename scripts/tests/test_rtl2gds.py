@@ -476,6 +476,12 @@ class Controls(unittest.TestCase):
         self.assertNotIn("rr_eco_hold", out)
         with self.assertRaises(D.GateError):
             C.remove_all_chains(out, "rr_eco_hold_", {"BUF": ("A", "X")})
+        # Escalated: ECO buffers too, an output port assign included.
+        out, removed = C.remove_all_chains(text + "  assign y2 = rr_eco_buf_2_n;\n", ("rr_eco_hold_", "rr_eco_buf_"),
+                                           {"BUF": ("A", "X"), "BUF4": ("A", "X")})
+        self.assertEqual(sorted(removed), ["rr_eco_buf_2", "rr_eco_hold_0", "rr_eco_hold_1"])
+        self.assertIn("AND2 g0 (.A(a), .B(a), .X(n1));", out)
+        self.assertIn("assign y2 = a;", out)
 
     def test_inverted_output_and_antenna_candidates(self):
         text = ("module t (input wire a, output wire [1:0] y, output wire z);\n  wire n1;\n"
