@@ -117,7 +117,8 @@ pub struct ExtractScope {
     pub wire_ends: &'static str,
     pub metal_union: &'static str,
     pub diagonal_coupling: &'static str,
-    pub crossing_fringe: &'static str,
+    pub crossings: &'static str,
+    pub parallel_overlap: &'static str,
     pub cell_internal_metal: &'static str,
     pub routing_patches: &'static str,
     pub max_segment_length_dbu: i64,
@@ -544,7 +545,11 @@ pub fn extract(
                           routed metal without overlap; sides inside or touching same-net metal \
                           (including the net's own pins) are not exposed",
             diagonal_coupling: "unmodeled",
-            crossing_fringe: "unmodeled (a crossing is a plane over the footprint only)",
+            crossings: "a conductor is a calibration plate where its layer covers the strip and \
+                        reaches one strip width beyond both edges; a plate below shields the \
+                        substrate; both wires of a crossing count their own cross-section",
+            parallel_overlap: "unmodeled (narrower, offset or barely wider metal on other layers \
+                               is not a plate)",
             cell_internal_metal: "pins and obstructions are neighbours and planes, not extracted",
             routing_patches: "extracted: each piece not covered by same-net metal adds ground and \
                               coupling on all four edges at the RC node of the same-net conductor \
