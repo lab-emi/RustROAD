@@ -423,9 +423,9 @@
     "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/ngspice/r+c/res_high__cap_high.spice": "38ec47a4a5fa0d5a23dcab8dee6c43086503204c71ea956e0d78471cadc909a4",
     "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/ngspice/r+c/res_low__cap_low.spice": "8d8f19bfd7d9728508b0a45bfbfae293fed168b902cb2fc820fb40a7c2627ac0",
     "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/ngspice/r+c/res_typical__cap_typical.spice": "7c29723076a22fe5b080d245adb97451de5ad0812f0344f6bfe31c9697b71f0d",
-    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/sky130-rc-max.json": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
-    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/sky130-rc-min.json": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
-    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/sky130-rc-nom.json": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27"
+    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/sky130-rc-max.json": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/sky130-rc-min.json": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/sky130-rc-nom.json": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a"
    },
    "via_resistance": [
     {
@@ -897,9 +897,9 @@
     "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/librelane/rules.openrcx.gf180mcuD.nom.magic": "ad430c26f39a60cbcd1bf70c447203ba28b2582d9dfaaa83543067aa74be7308",
     "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/magic/gf180mcuD.tech": "f0c3a445aa0a2a9b7a1f10530a6c011800a41fcad36c12d8bb9b792a59c74f44",
     "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/ngspice/sm141064.ngspice": "f6f4a96e18fc5ad11270ad3451aaecc7ac37fc81eb61e15b0d7d94c7bc594a24",
-    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-max.json": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
-    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-min.json": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
-    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-nom.json": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a"
+    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-max.json": "0f8190a3871b5eb8d767e49009a67ae3f68d19096f22039911f3a2446ad0d003",
+    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-min.json": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+    "/mnt/data2/cgao/git/RustROAD/.work/wt/extract2/fixtures/pdk/gf180-rc-nom.json": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4"
    },
    "via_resistance": [
     {

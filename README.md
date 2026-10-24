@@ -239,11 +239,15 @@ rustroad extract --workspace .work/chip --rc-profile fixtures/pdk/sky130-rc-max.
 ```
 
 Routing patches add capacitance at the node of the conductor they overlap.
-The SPEF imports into RustSTA 0.3/0.4 (`wire_model=spef_rc`). The model, SPEF
-naming, budgets and the black-box OpenRCX comparison at min/nom/max on both
-PDKs are in [docs/extraction.md](docs/extraction.md). The result is partial:
-total and per-net C meet their targets against a geometry-identical reference,
-but min/max resistance and ss+max slack do not.
+Pins, obstructions and supply metal that a routed wire crosses count their own
+cut, and non-plate overlaps on other layers couple over their area. The SPEF
+imports into RustSTA 0.3/0.4 (`wire_model=spef_rc`). The model, SPEF naming,
+budgets and the three-way comparison (native, OpenRCX, Magic) at min/nom/max on
+both PDKs are in [docs/extraction.md](docs/extraction.md). The result is
+partial: total and per-net C meet their targets against OpenRCX on pipeline.v,
+the slack target is met on the hold-closed design at every corner but missed at
+ss+max on the pre-hold design and on the larger regfile design, and min/max
+resistance follows different PDK data than OpenRCX.
 
 ## Hold closure, CTS drive and antenna repair
 
