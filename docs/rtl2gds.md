@@ -26,7 +26,109 @@ design, their recovery/removal checks are timed. Corners: tt+nom, ss+max,
 ff+min. A design passes only on the PDK rows marked `passed` below; nothing
 else is claimed.
 
-## Results (evidence `docs/evidence/rtl2gds-final.json`)
+## Results (evidence `docs/evidence/rtl2gds-closure.json`)
+
+Gate runs `.work/runs/E6-<design>` (worktree `.work/wt/closure-dev2`) at
+RustROAD `039bfe5` (clean tree, release binary `4ec81093`), the same RustSTA
+pin `06b1c9f` (ruststa `3e80fde6`, rusteda `13050846`) and RustSys policy
+producer `3de13b3a` as the E3 round below, both PDKs, controls and the
+determinism rebuild included, eight gates in parallel. The closure ECOs of
+`docs/closure.md` (buffer insertion, `whatif`-verified sizing, path-aware
+hold, seeded timing-driven placement) are what changed:
+
+| Design | PDK | Gate | Failed gating items | Unverified | Final cells: hold / ECO buf / diodes (resized) | Worst setup ss / hold ss (RustSTA, native) | DRV viol. | Layouts (final) | Wall s | Peak RSS MiB |
+|---|---|---|---|---|---|---|---|---|---|---|
+| pipeline | sky130 | passed | - | - | 4 / 0 / 0 (0) | +8.491 / +0.065 | - | 3 (2) | 57 | 464 |
+| pipeline | gf180 | passed | - | - | 4 / 0 / 0 (0) | +4.844 / +0.362 | - | 2 (1) | 66 | 434 |
+| dense | sky130 | passed | - | - | 0 / 0 / 0 (0) | +8.664 / +0.185 | 0 | 1 (0) | 56 | 464 |
+| dense | gf180 | passed | - | - | 1 / 1 / 0 (0) | +6.636 / +0.186 | 0 | 3 (2) | 75 | 437 |
+| counter | sky130 | failed | timing_accuracy | - | 13 / 0 / 0 (0) | +6.407 / +0.082 | 0 | 2 (1) | 80 | 490 |
+| counter | gf180 | passed | - | - | 18 / 15 / 0 (5) | +0.056 / +0.102 | 0 | 4 (3) | 105 | 441 |
+| uart_tx | sky130 | failed | timing_accuracy | - | 32 / 0 / 0 (0) | +6.952 / +0.095 | 0 | 2 (1) | 109 | 493 |
+| uart_tx | gf180 | failed | drv, timing_accuracy | - | 17 / 58 / 0 (44) | +0.263 / +0.278 | 38 | 6 (5) | 340 | 444 |
+| fifo | sky130 | failed | timing_accuracy, lvs_netgen, lvs_klayout | - | 34 / 0 / 1 (0) | +6.506 / +0.249 | 0 | 3 (2) | 118 | 491 |
+| fifo | gf180 | failed | drv, timing_accuracy | - | 17 / 43 / 0 (20) | +0.108 / +0.213 | 9 | 5 (4) | 217 | 446 |
+| alu | sky130 | failed | timing_accuracy, lvs_netgen, lvs_klayout | timing_setup, timing_hold, mpw_min_period, drv | 0 / 1 / 1 (1) | +5.746 / +0.883 | 0 | 3 (2) | 201 | 519 |
+| alu | gf180 | failed | hold_closure, timing_setup, drv, timing_accuracy | - | 0 / 85 / 0 (19) | -4.578 / +1.321 | 381 | 6 (3) | 438 | 453 |
+| regfile | sky130 | failed | timing_accuracy, lvs_netgen, lvs_klayout | - | 53 / 19 / 1 (4) | +6.899 / +0.111 | 0 | 6 (5) | 398 | 498 |
+| regfile | gf180 | failed | drv, timing_accuracy | timing_setup, timing_hold, mpw_min_period | 64 / 106 / 0 (44) | +0.044 / +0.447 | 114 | 6 (5) | 602 | 465 |
+| mult | sky130 | failed | timing_accuracy | - | 3 / 0 / 0 (0) | +4.225 / +0.114 | 0 | 2 (1) | 253 | 520 |
+| mult | gf180 | failed | hold_closure, timing_setup, drv, timing_accuracy | - | 2 / 23 / 0 (34) | -10.588 / +0.550 | 579 | 4 (3) | 806 | 458 |
+
+"Final cells" are instances of the final (selected) layout: hold cells,
+`rr_eco_buf_*` buffers and antenna diodes, with the resizes the loop
+applied over all layouts in parentheses. Every row passes controls (11/11),
+determinism (full second build, byte-identical) and artifact binding;
+`density` is reported only.
+
+Against the E3 round (table below): GF180 counter now passes every gating
+status; GF180 uart_tx, fifo and regfile close setup and hold on both SPEFs
+and keep only `drv` (+ `timing_accuracy`); regfile sky130 closes its port
+max-capacitance (`drv`) and `antenna_native`. Not closed:
+
+1. **`timing_accuracy` (every track design but dense):** the RustSTA
+   effective-capacitance residual (owner RustSTA, unchanged pin).
+2. **GF180 `drv` (uart_tx 18, fifo 3, regfile 39 violating nets at the
+   selected layout; alu, mult more).** 10 GF180 7t families cannot meet the
+   1.0 ns `set_max_transition` at ss even at 5 fF with a 0.2 ns input
+   (Liberty, best member of each: aoi211 1.15, aoi221 1.57, aoi222 1.76,
+   nor4 1.31, oai22 1.21, oai221 1.56, oai222 1.98, oai31 1.11, oai32 1.96,
+   oai33 2.42 ns); RustSys maps 10 of them into uart_tx, 2 into fifo, 14 into
+   alu, 1 into regfile, 8 into mult, and their nets are reported
+   `library_limited` (10 of uart_tx's 18, 2 of fifo's 3). Only synthesis
+   (a GF180 dont_use for this limit, RustSys/cell-policy owner) or the
+   limit owner can remove them. The rest are nets where a buffer would cost
+   a setup-critical sink its slack (setup guard), transitions propagated
+   from those nets, and resizes the `whatif` budget did not reach.
+3. **GF180 alu and mult `timing_setup`/`hold_closure`:** setup-infeasible at
+   10 ns at ss even with ideal wires (critical-path table below; mult also
+   fails tt by -0.83 ns ideal). Hold closes on both (mult +0.550 ns ss).
+4. **sky130 `lvs_netgen`/`lvs_klayout` (fifo, alu, regfile):** the antenna
+   ECO's `diode_2` (owner: the antenna/diode LVS stream). fifo and regfile
+   need a diode only now: their layouts changed (fifo: `data_i[3]` met3 run
+   1.04 x the limit after the path-aware hold layout; regfile: the loop now
+   gets past DRV to the antenna ECO).
+5. **OpenRCX timing `unverified` on two rows:** RustSTA refuses the OpenRCX
+   SPEF of alu sky130 (`disconnected RC network in a_i[0]`) and regfile
+   GF180 (`RC mesh/parallel edge in waddr[1]`, a Metal4 jumper next to the
+   I/O pin). Native-SPEF timing is complete on both; the routes are the
+   track router's (owner: router/extraction).
+
+### Critical paths (`scripts/critical_path.py`, evidence `docs/evidence/critical-path.json`)
+
+Worst setup slack and the implied minimum period (`period - slack`) at ss:
+pre-layout = RustSTA without parasitics and with the ideal clock (GF180:
+`ideal` wires; SKY130: the Liberty default wire load, an upper bound of
+ideal) on the synthesized netlist and on the final closure netlist;
+post-route = the gate's native-SPEF analysis with the propagated clock. No
+period was changed (the owner decides on the 10 ns of `cts.sdc`).
+
+| Design | PDK | Period ns | Pre-layout synth: ss slack / min period (wire model) | Pre-layout final netlist ss | Post-route ss (native SPEF) | Post-route tt | Worst ss path | Setup-feasible at 10 ns with ideal wires |
+|---|---|---|---|---|---|---|---|---|
+| pipeline | sky130 | 10 | +8.877 / 1.12 (wireload_lumped) | +8.728 / 1.27 | +8.491 / 1.51 | +9.088 / 0.91 | r2/CLK -> y[0] | yes |
+| pipeline | gf180 | 10 | +6.396 / 3.60 (ideal) | +5.205 / 4.80 | +4.844 / 5.16 | +7.461 / 2.54 | r1/CLK -> r3/D | yes |
+| dense | sky130 | 10 | +9.035 / 0.97 (wireload_lumped) | - | +8.664 / 1.34 | +9.172 / 0.83 | r1/CLK -> low_bit | yes |
+| dense | gf180 | 10 | +7.338 / 2.66 (ideal) | +6.816 / 3.18 | +6.636 / 3.36 | +8.194 / 1.81 | r5/CLK -> y[3] | yes |
+| counter | sky130 | 10 | +6.804 / 3.20 (wireload_lumped) | +6.658 / 3.34 | +6.407 / 3.59 | +8.124 / 1.88 | r1/CLK -> r4/D | yes |
+| counter | gf180 | 10 | +0.382 / 9.62 (ideal) | +0.541 / 9.46 | +0.056 / 9.94 | +5.093 / 4.91 | r2/CLK -> r7/D | yes |
+| uart_tx | sky130 | 10 | +7.406 / 2.59 (wireload_lumped) | +7.406 / 2.59 | +6.952 / 3.05 | +8.475 / 1.53 | r4/CLK -> r5/D | yes |
+| uart_tx | gf180 | 10 | +0.178 / 9.82 (ideal) | +1.006 / 8.99 | +0.263 / 9.74 | +5.201 / 4.80 | r6/CLK -> r0/D | yes |
+| fifo | sky130 | 10 | +7.144 / 2.86 (wireload_lumped) | +6.946 / 3.05 | +6.506 / 3.49 | +8.145 / 1.86 | r6/CLK -> r6/D | yes |
+| fifo | gf180 | 10 | +0.503 / 9.50 (ideal) | +0.615 / 9.39 | +0.108 / 9.89 | +5.102 / 4.90 | r5/CLK -> r5/D | yes |
+| alu | sky130 | 10 | +6.125 / 3.88 (wireload_lumped) | +6.125 / 3.87 | +5.746 / 4.25 | +7.555 / 2.44 | b_i[1] -> zero_o | yes |
+| alu | gf180 | 10 | -3.071 / 13.07 (ideal) | -3.041 / 13.04 | -4.578 / 14.58 | +2.652 / 7.35 | b_i[0] -> zero_o | no |
+| regfile | sky130 | 10 | +8.020 / 1.98 (wireload_lumped) | +7.537 / 2.46 | +6.899 / 3.10 | +8.305 / 1.69 | r47/CLK -> rdata_a[7] | yes |
+| regfile | gf180 | 10 | +3.037 / 6.96 (ideal) | +2.297 / 7.70 | +0.044 / 9.96 | +4.966 / 5.03 | r42/CLK -> rdata_b[2] | yes |
+| mult | sky130 | 10 | +4.161 / 5.84 (wireload_lumped) | +4.161 / 5.84 | +4.225 / 5.77 | +6.867 / 3.13 | b[4] -> r11/D | yes |
+| mult | gf180 | 10 | -12.053 / 22.05 (ideal) | -11.187 / 21.19 | -10.588 / 20.59 | -0.187 / 10.19 | b[1] -> r11/D | no |
+
+alu and mult are setup-infeasible at 10 ns on GF180 ss with ideal wires
+(13.07 / 22.05 ns minimum period for the synthesized netlists; mult's path
+is an xor3 chain, 3.3-4.4 ns per xor3 at ss); every other design meets
+10 ns at ss after layout.
+
+### Earlier round (E3, before the closure ECOs)
+
 
 Gate runs `.work/runs/E3-<design>` at RustROAD `0acb28a` (clean tree,
 release binary `2911f28b`), RustSTA `06b1c9f` (ruststa `3e80fde6`, rusteda
@@ -64,9 +166,10 @@ diodes" are the cells the hold, sizing and antenna ECOs planned over the
 closure loop (GF180 rows with 0 hold cells: the hold ECO was infeasible or
 never reached).
 
-Root causes of the failures. No threshold, Liberty, deck, harness status
-logic or SDC value was changed to address any of them (the SDC additions in
-"SDC" below were made before closure was run):
+Root causes of the E3 failures (items 2 and 4 are what `docs/closure.md`
+addresses; see the E6 table above). No threshold, Liberty, deck, harness
+status logic or SDC value was changed to address any of them (the SDC
+additions in "SDC" below were made before closure was run):
 
 1. **`timing_accuracy` (all track designs except dense, both PDKs, 0.85-5.2
    ps; gate 1 ps).** RustSTA computes slightly smaller driver delays into
@@ -434,6 +537,15 @@ then RustSTA/Verilator (< 0.3 GiB). Four gates ran in parallel (about 2 GiB
 in all, 40 GiB available); each gate under `systemd-run` MemoryMax=8G, each
 tool under a 2 GiB address-space limit and a 600 s (pipeline 120 s) timeout.
 
+Measured (E6, both PDKs, controls and determinism included, eight gates in
+parallel): 17 min 40 s from the first start to the last finish (mult
+GF180: 806 s of its 1,059 s; regfile 1,001 s; the small designs 2-8 min);
+the largest host-side process tree under `/usr/bin/time` around a gate is
+370,944 KiB (mult), the largest step peak 532,892 KiB (a signoff container);
+`ruststa whatif` is the closure loop's main cost (1.1 s per candidate on
+regfile, 1.9 s on mult; bounded by candidate counts). Scratch after the
+runs: about 22 GB for the eight E6 runs before trimming.
+
 Measured (E3, both PDKs, controls and determinism included): see `runs[]` of
 the evidence (wall time, peak RSS, process count per design) and `rows[].steps`
 (wall time and peak RSS per step). Totals: the eight
@@ -448,14 +560,18 @@ containers run under podman and are counted in the step peaks).
 
 - RustSTA vs OpenSTA effective-capacitance residual on long RC nets (1-5 ps
   per endpoint on the track designs): owner RustSTA.
-- GF180 at ss with the 10 ns constraint set: setup, hold and DRV fail on six
-  track designs; RustROAD lacks timing-driven placement, buffering and
-  path-based hold fixing (gate sizing alone is not enough).
+- GF180 at ss with the 10 ns constraint set: alu and mult are
+  setup-infeasible even with ideal wires (owner decision on the period);
+  `drv` remains on uart_tx, fifo, regfile, alu and mult, partly from 10 cell
+  families that cannot meet 1.0 ns at ss at any load (synthesis dont_use or
+  owner decision on the limit), partly where a buffer would break setup.
 - sky130 antenna repair without `diode_2` (router jumpers) or a deck/harness
-  decision for `diode_2` (same class as `conb_1`).
-- Port buffering for high-fanout input ports (regfile `set_max_capacitance`).
-- RustSTA refuses RC meshes in SPEF; the router no longer produces them on
-  these designs, but any real loop in routed metal would make OpenRCX timing
-  `unverified`.
+  decision for `diode_2` (same class as `conb_1`): now fifo, alu, regfile.
+- RustSTA refuses RC meshes and disconnected RC networks in SPEF: OpenRCX
+  timing is `unverified` on alu sky130 (`a_i[0]`) and regfile GF180
+  (`waddr[1]`) because of the track router's metal there.
+- The closure loop's DRV repair is bounded by its `whatif` budget (counts,
+  for determinism) and its 8 layouts; regfile GF180 ends with nets the
+  budget did not reach.
 - Density is reported only; co-simulation starts from Verilator's zero
   state; one-bit vector ports are treated as scalars.

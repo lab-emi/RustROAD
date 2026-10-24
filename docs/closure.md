@@ -6,7 +6,9 @@ layouts: every iteration is import, place, CTS, route, native extraction
 and RustSTA (pinned 06b1c9f) at tt+nom / ss+max / ff+min. This page
 describes the ECOs added for the larger designs (buffer insertion,
 `whatif`-verified sizing, path-aware hold fixing, seeded timing-driven
-placement) and the loop order; results are in `docs/rtl2gds.md`.
+placement) and the loop order; results are in `docs/rtl2gds.md` (E6 table and the
+critical-path table; evidence `docs/evidence/rtl2gds-closure.json`,
+`docs/evidence/critical-path.json`).
 
 Nothing here changes an SDC, Liberty, RC profile, threshold, deck or status
 rule. Every ECO is a typed `rustroad.eco-plan.v1` applied by
@@ -186,3 +188,20 @@ gate's own final native-SPEF analysis (post-route), worst setup at ss and
 tt, the implied minimum period `period - worst slack`, and the worst path's
 end points. GF180 without SPEF is `ideal` (no wire-load table), SKY130 is
 `wireload_lumped` (Liberty default wire load, an upper bound of ideal).
+
+## What limits GF180 now (E6)
+
+| Design | GF180 failing gating items | Cause |
+|---|---|---|
+| counter | - | closed (setup +0.056, hold +0.102 ns at ss, DRV 0) |
+| uart_tx | drv, timing_accuracy | 18 nets above 1.0 ns at ss: 10 driven by library-limited cells (aoi/oai families below), the rest setup-guarded or propagated from them |
+| fifo | drv, timing_accuracy | 3 nets: 2 library-limited (oai221, oai31), 1 nor2_4 net whose buffer would break the +0.108 ns setup |
+| regfile | drv, timing_accuracy (OpenRCX timing unverified) | 39 nets: sinks already ECO buffers (23, driver resize not reached in the whatif budget), setup-guarded (11), 1 library-limited |
+| alu | hold_closure, timing_setup, drv, timing_accuracy | setup-infeasible: -3.07 ns at ss with ideal wires |
+| mult | hold_closure, timing_setup, drv, timing_accuracy | setup-infeasible: -12.05 ns at ss (and -0.83 ns at tt) with ideal wires |
+
+Library-limited GF180 7t families (no member reaches 1.0 ns output
+transition at ss, 5 fF, 0.2 ns input; best member): aoi211 1.15, aoi221
+1.57, aoi222 1.76, nor4 1.31, oai22 1.21, oai221 1.56, oai222 1.98, oai31
+1.11, oai32 1.96, oai33 2.42 ns. SKY130 hd has none. The planner reports
+their nets (`library_limited`) instead of spending layouts on them.
