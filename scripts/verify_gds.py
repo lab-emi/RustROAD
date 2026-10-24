@@ -9,9 +9,13 @@ For each PDK the routed RustROAD workspace of a finished flow run is COPIED
 2. compared with an independent reference stream of the same routed DEF made
    by KLayout's LEF/DEF reader (strmxor must report no differences; top-level
    label sets and flattened text multisets must be equal);
-3. checked for verbatim, byte-identical copies of the PDK cell structures;
+3. checked for verbatim, byte-identical copies of the PDK cell structures and
+   for every routing patch of the DEF (`RECT`) as a rectangle on its layer's
+   net purpose; deleting those rectangles must make the XOR fail, which shows
+   that the reference reader draws DEF routing RECTs;
 4. checked by Magic drc(full) and the foundry KLayout DRC deck (counts per
-   rule, all cells) on native and reference; the density decks are run and
+   rule, all cells) on native and reference: both must report 0, and a planted
+   sub-minimum square must raise both counts; the density decks are run and
    reported separately (owner decision: density is never folded into DRC);
 5. checked by Magic extraction + Netgen LVS and by KLayout LVS against the
    workspace's powered netlist, on native and reference;
@@ -21,7 +25,7 @@ For each PDK the routed RustROAD workspace of a finished flow run is COPIED
 
 Third-party tools run only as black boxes inside the pinned signoff image.
 Exit codes are never trusted alone: reports are parsed and positive controls
-(known DRC baseline, missing-cell guards) are required. A missing tool or image
+(planted DRC defect, deleted patches, missing-cell guards) are required. A missing tool or image
 makes the status `unverified`, never `passed`. Resource contract:
 docs/gds-budget.md. Scope: block level; no pad ring or seal ring.
 """
@@ -40,6 +44,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 ORACLES = ROOT / 'scripts' / 'gds_oracles'
+sys.path.insert(0, str(ROOT / 'scripts' / 'signoff'))
+import signoff as signoff_harness  # noqa: E402
+MANIFEST = ROOT / 'fixtures/flow/signoff-pinned.json'
 IMAGE = '4c48415d8bd08c04033f4777b65a96299e22c1e94d12a8ea1d9a062697c006ee'
 HOST_PDK = Path('/home/cgao/.local/share/containers/storage/overlay/'
                 'a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel')
@@ -63,8 +70,7 @@ PDKS = {
         lvs_deck='libs.tech/klayout/lvs/sky130.lvs',
         layer_map=ROOT / 'fixtures/pdk/sky130-gds-map.json',
         wire_layer=(69, 20), wrong_map=('met2', 'net', [69, 21]),
-        missing_cell='sky130_fd_sc_hd__and2_2',
-        baseline=dict(magic_total=26, klayout={'m1.2': 5, 'm2.2': 4})),
+        missing_cell='sky130_fd_sc_hd__and2_2'),
     'gf180': dict(
         variant='gf180mcuD', library='gf180mcu_fd_sc_mcu7t5v0', workspace='gf180_physical', def_name='gf180.def',
         cell_gds='libs.ref/gf180mcu_fd_sc_mcu7t5v0/gds/gf180mcu_fd_sc_mcu7t5v0.gds',
@@ -79,8 +85,7 @@ PDKS = {
         lvs_runner='libs.tech/klayout/tech/lvs/run_lvs.py',
         layer_map=ROOT / 'fixtures/pdk/gf180-gds-map.json',
         wire_layer=(36, 0), wrong_map=('Metal2', 'net', [36, 1]),
-        missing_cell='gf180mcu_fd_sc_mcu7t5v0__and2_2',
-        baseline=dict(magic_total=13, klayout={'M1.2a': 4, 'M2.3': 3})),
+        missing_cell='gf180mcu_fd_sc_mcu7t5v0__and2_2'),
 }
 
 
@@ -201,6 +206,35 @@ def structures(data):
         elif rtype == 0x07:
             require(name not in out, 'duplicate structure ' + name)
             out[name] = (start, at + length)
+    return out
+
+
+def boundary_record(layer, datatype, rect):
+    """One GDS BOUNDARY element (closed 5-point rectangle) as raw records."""
+    lx, ly, ux, uy = rect
+    xy = struct.pack('>10i', lx, ly, ux, ly, ux, uy, lx, uy, lx, ly)
+    return (struct.pack('>HH', 4, 0x0800) + struct.pack('>HHh', 6, 0x0D02, layer)
+            + struct.pack('>HHh', 6, 0x0E02, datatype) + struct.pack('>HH', 4 + len(xy), 0x1003) + xy
+            + struct.pack('>HH', 4, 0x1100))
+
+
+def insert_into_top(data, top, record):
+    """Bytes of `data` with `record` appended to structure `top` (before ENDSTR)."""
+    begin, end = structures(data)[top]
+    return data[:end - 4] + record + data[end - 4:]
+
+
+def def_patches(definition, divisor):
+    """Routing RECT statements of the DEF NETS section as (lef layer, GDS rect)."""
+    text = Path(definition).read_text()
+    body = text.split('\nNETS ', 1)[1].split('\nEND NETS', 1)[0]
+    out = []
+    for m in re.finditer(r'(?m)^\s*(?:\+ ROUTED|NEW) (\S+) \( (-?\d+) (-?\d+) \) RECT '
+                         r'\( (-?\d+) (-?\d+) (-?\d+) (-?\d+) \)', body):
+        x, y, a, b, c, d = map(int, m.groups()[1:])
+        rect = (x + a, y + b, x + c, y + d)
+        require(all(v % divisor == 0 for v in rect), 'DEF patch not on the GDS grid')
+        out.append((m.group(1), tuple(v // divisor for v in rect)))
     return out
 
 
@@ -512,6 +546,27 @@ def klayout_lvs(h, tag, p, gds, schematic, label):
                 circuits=xref['circuits'], mismatches=xref['mismatches'][:20], exit_code=receipt['exit_code'])
 
 
+def signoff_lvs(h, tag, gds, powered, label):
+    """Both LVS checks of scripts/signoff (pinned image): besides each tool's
+    verdict they require every labelled top-level net to be paired with the
+    same-named reference net, all reference ports to be paired top pins, and
+    the label set to equal the port set. The basic KLayout check above stops at
+    "Netlists match"; a labelled net that lost all its devices is left out of
+    that comparison, so a deleted port wire can still read "match" there."""
+    ns = argparse.Namespace(gds=gds, top=TOP, pdk=tag, out=h.run / tag / f'{label}_signoff', netlist=powered,
+                            against=None, against_top=None, manifest=MANIFEST, threads=4, memory='4g', timeout=900,
+                            plant=None)
+    summary = signoff_harness.run_checks(ns, ['lvs-netgen', 'lvs-klayout'])
+    out = {}
+    for check in ('lvs-netgen', 'lvs-klayout'):
+        v = json.loads(Path(summary['verdicts'][check]).read_text())
+        out[check.replace('-', '_')] = dict(
+            verdict={'passed': 'match', 'failed': 'mismatch'}.get(v['status'], 'unverified'),
+            status=v['status'], failures=v.get('failures', [])[:10],
+            unverified_reasons=v.get('unverified_reasons', [])[:10])
+    return out
+
+
 def strmxor(h, tag, a, b, label):
     receipt, output = h.container(f'{tag}_{label}', ['strmxor', cpath(h.run, a), cpath(h.run, b)], timeout=300)
     same = receipt['exit_code'] == 0 and 'No differences found' in output
@@ -626,6 +681,41 @@ def case(h, tag, args):
                                 copied=copied, identical=len(identical), tamper_control_detected=control,
                                 non_pdk_structures=[n for n in native_structs if n not in pdk_structs])
 
+    # 4b. Routing patches (DEF RECT) streamed on the net purpose, and the
+    # reference XOR's sensitivity to them.
+    layer_map = json.loads(Path(p['layer_map']).read_text())
+    net_targets = {e['lef']: [tuple(t) for t in e.get('net') or []] for e in layer_map['layers']}
+    divisor = report['coordinate_divisor']
+    wanted = def_patches(definition, divisor)
+    elements = top_elements(native_bytes, TOP)
+    boxes = {}
+    for e in elements:
+        if e['kind'] == 0x08 and len(e['xy']) == 5:
+            xs, ys = [x for x, _ in e['xy']], [y for _, y in e['xy']]
+            boxes.setdefault(((e['layer'], e['datatype']), (min(xs), min(ys), max(xs), max(ys))), []).append(e)
+    found, missing = [], []
+    for lef, rect in wanted:
+        hits = [boxes.get((t, rect)) for t in net_targets.get(lef, [])]
+        if hits and all(hits):
+            found.extend(x[0] for x in hits)
+        else:
+            missing.append([lef, list(rect)])
+    patch_check = dict(def_rects=len(wanted), streamed_elements=len(found), missing=missing,
+                       report_routed_patches=report['elements'].get('routed_patches'))
+    if wanted:
+        stripped = native_bytes
+        for e in sorted(found, key=lambda x: x['start'], reverse=True):
+            stripped = stripped[:e['start']] + stripped[e['end']:]
+        nopatch = work / 'control_patches_removed.gds'
+        nopatch.write_bytes(stripped)
+        x = strmxor(h, tag, nopatch, reference, 'control_patches_removed_xor')
+        controls_patch = dict(detected=not x['identical'], removed=len(found), xor=x)
+    else:
+        controls_patch = dict(detected=None, removed=0, note='no DEF RECT patches in this layout')
+    patch_check['status'] = ('passed' if not missing and report['elements'].get('routed_patches') == len(wanted)
+                             else 'failed')
+    result['patches'] = patch_check
+
     # 5. DRC (Magic + KLayout) and density, native vs reference.
     drc = {}
     for label, gds in (('native', native), ('reference', reference)):
@@ -635,13 +725,22 @@ def case(h, tag, args):
     equal = (drc['native']['magic'] == drc['reference']['magic']
              and drc['native']['klayout']['counts'] == drc['reference']['klayout']['counts']
              and drc['native']['density']['counts'] == drc['reference']['density']['counts'])
-    base = p['baseline']
-    baseline = (drc['native']['magic']['total'] == base['magic_total']
-                and drc['native']['klayout']['counts'] == base['klayout'])
-    result['drc'] = dict(status='equal_to_reference' if equal else 'differs', matches_known_router_baseline=baseline,
-                         known_baseline=base, native=drc['native'], reference=drc['reference'],
-                         drc_verdict='failed' if drc['native']['magic']['total'] or drc['native']['klayout']['items']
-                         else 'passed')
+    # Positive control: a 0.1 x 0.1 um square on the wire layer, outside the
+    # die, is below minimum width and area on both PDKs; both decks must see it.
+    planted = work / 'control_planted_drc.gds'
+    planted.write_bytes(insert_into_top(native.read_bytes(), TOP,
+                                        boundary_record(*p['wire_layer'], (-5000, -5000, -4900, -4900))))
+    plant = dict(magic=magic_drc_run(h, tag, p, planted, 'control_planted_magic_drc'),
+                 klayout=klayout_drc(h, tag, p, planted, 'control_planted_klayout_drc'))
+    plant_detected = (plant['magic']['total'] > drc['native']['magic']['total']
+                      and plant['klayout']['items'] > drc['native']['klayout']['items'])
+    clean = drc['native']['magic']['total'] == 0 and drc['native']['klayout']['items'] == 0
+    result['drc'] = dict(status='equal_to_reference' if equal else 'differs', clean=clean,
+                         native=drc['native'], reference=drc['reference'],
+                         drc_verdict='passed' if clean else 'failed',
+                         planted_control=dict(detected=plant_detected, layer=list(p['wire_layer']),
+                                              rect_gds=[-5000, -5000, -4900, -4900],
+                                              magic=plant['magic'], klayout=plant['klayout']['counts']))
     density = drc['native']['density']
     result['density_status'] = dict(status=density['status'], counts=density['counts'], items=density['items'],
                                     reference_counts=drc['reference']['density']['counts'], scope=density['scope'],
@@ -663,17 +762,38 @@ def case(h, tag, args):
     lvs = {}
     for label, gds in (('native', native), ('reference', reference)):
         lvs[label] = dict(netgen=netgen_lvs(h, tag, p, gds, powered, f'{label}_lvs'),
-                          klayout=klayout_lvs(h, tag, p, gds, schematic, f'{label}_klayout_lvs'))
-    verdicts = {k: (v['netgen']['verdict'], v['klayout']['verdict']) for k, v in lvs.items()}
+                          klayout=klayout_lvs(h, tag, p, gds, schematic, f'{label}_klayout_lvs'),
+                          signoff=signoff_lvs(h, tag, gds, powered, f'{label}_lvs'))
+    verdicts = {k: (v['netgen']['verdict'], v['klayout']['verdict'], v['signoff']['lvs_netgen']['verdict'],
+                    v['signoff']['lvs_klayout']['verdict']) for k, v in lvs.items()}
     result['lvs'] = dict(status='equal_to_reference' if verdicts['native'] == verdicts['reference'] else 'differs',
-                         lvs_verdict='match' if verdicts['native'] == ('match', 'match') else 'mismatch',
+                         lvs_verdict='match' if verdicts['native'] == ('match',) * 4 else 'mismatch',
+                         verdict_order=['netgen_basic', 'klayout_basic', 'signoff_netgen', 'signoff_klayout'],
                          verdicts=verdicts, schematic=generated, native=lvs['native'], reference=lvs['reference'])
 
     # 7. Negative controls.
     controls = {}
     elements = top_elements(native_bytes, TOP)
+    # Victim: the largest SIGNAL wire rectangle on the wire layer, i.e. one
+    # that is a DEF NETS path (centre line equal to a path, any half width);
+    # SPECIALNETS supply wires share the layer/datatype but have redundant
+    # connections, so deleting one need not open a net.
+    paths = set()
+    body = definition.read_text().split('\nNETS ', 1)[1].split('\nEND NETS', 1)[0]
+    for m in re.finditer(r'(?m)^\s*(?:\+ ROUTED|NEW) (\S+) \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)', body):
+        if m.group(1) == p['wrong_map'][0]:
+            x0, y0, x1, y1 = (int(v) // report['coordinate_divisor'] for v in m.groups()[1:])
+            paths.add((min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
+
+    def signal(e):
+        xs, ys = [x for x, _ in e['xy']], [y for _, y in e['xy']]
+        lx, ly, ux, uy = min(xs), min(ys), max(xs), max(ys)
+        hx, hy = (ux - lx) // 2, (uy - ly) // 2
+        cy, cx = (ly + uy) // 2, (lx + ux) // 2
+        return (lx + hy, cy, ux - hy, cy) in paths or (cx, ly + hx, cx, uy - hx) in paths
     wires = [e for e in elements if e['kind'] == 0x08 and (e['layer'], e['datatype']) == p['wire_layer']
-             and len(e['xy']) == 5]
+             and len(e['xy']) == 5 and signal(e)]
+    require(wires, 'no signal wire on the wire layer for the deleted-wire control')
     area = lambda e: (max(x for x, _ in e['xy']) - min(x for x, _ in e['xy'])) * (
         max(y for _, y in e['xy']) - min(y for _, y in e['xy']))
     victim = max(wires, key=area)
@@ -682,9 +802,16 @@ def case(h, tag, args):
     x = strmxor(h, tag, nowire, reference, 'control_deleted_wire_xor')
     lvs_bad = netgen_lvs(h, tag, p, nowire, powered, 'control_deleted_wire_lvs')
     kl_bad = klayout_lvs(h, tag, p, nowire, schematic, 'control_deleted_wire_klayout_lvs')
+    so_bad = signoff_lvs(h, tag, nowire, powered, 'control_deleted_wire_lvs')
+    # Both tools must reject on their own (Rule 8): Netgen (basic and signoff
+    # parser) and KLayout through the signoff checks. The basic KLayout verdict
+    # is recorded only; it is blind to a port net that lost its devices.
     controls['deleted_wire'] = dict(detected=not x['identical'] and lvs_bad['verdict'] == 'mismatch'
-                                    and kl_bad['verdict'] == 'mismatch', xor=x, netgen=lvs_bad['verdict'],
-                                    klayout_lvs=kl_bad['verdict'], removed_rect=victim['xy'][0:3:2])
+                                    and so_bad['lvs_netgen']['verdict'] == 'mismatch'
+                                    and so_bad['lvs_klayout']['verdict'] == 'mismatch', xor=x,
+                                    netgen=lvs_bad['verdict'], klayout_lvs_basic=kl_bad['verdict'],
+                                    signoff_netgen=so_bad['lvs_netgen'], signoff_klayout=so_bad['lvs_klayout'],
+                                    removed_rect=victim['xy'][0:3:2])
 
     wrong = json.loads(Path(p['layer_map']).read_text())
     layer, purpose, target = p['wrong_map']
@@ -702,19 +829,22 @@ def case(h, tag, args):
                                        and citations['status'] == 'failed', changed=p['wrong_map'],
                                        xor=x, citation_check=citations['problems'])
 
+    # Prefer the configured cell; the cell set depends on the synthesis
+    # producer, so fall back to the first copied PDK structure.
+    missing = p['missing_cell'] if p['missing_cell'] in native_structs else report['pdk_structures'][0]
     nocell = work / 'control_missing_cell.gds'
-    s, e = native_structs[p['missing_cell']]
+    s, e = native_structs[missing]
     nocell.write_bytes(native_bytes[:s] + native_bytes[e:])
     x = strmxor(h, tag, nocell, reference, 'control_missing_cell_xor')
     library = work / 'control_cell_library_without_cell.gds'
-    s, e = pdk_structs[p['missing_cell']]
+    s, e = pdk_structs[missing]
     library.write_bytes(pdk_bytes[:s] + pdk_bytes[e:])
     receipt, bad_report, output = export(h, tag, args.rustroad, workspace, library, p['layer_map'],
                                          work / 'control_missing_cell_export.gds', f'{tag}_control_missing_cell_export')
     controls['missing_cell_structure'] = dict(
         detected=not x['identical'] and receipt['exit_code'] != 0 and 'GDS_CELL_MISSING' in output
         and not (work / 'control_missing_cell_export.gds').exists(),
-        output_xor=x, export_exit=receipt['exit_code'], export_error=output.strip()[-400:])
+        output_xor=x, export_exit=receipt['exit_code'], export_error=output.strip()[-400:], cell=missing)
 
     if tag == 'sky130':
         # Without the 235/4 PR boundary the density deck divides by zero and
@@ -744,10 +874,23 @@ def case(h, tag, args):
         out = work / 'control_odd.gds'
         receipt, odd_report, output = export(h, tag, args.rustroad, odd, cell_gds, p['layer_map'], out,
                                              'gf180_control_odd_coordinate')
-        controls['odd_gf180_coordinate'] = dict(detected=receipt['exit_code'] != 0 and 'GDS_ODD_COORDINATE' in output
-                                                and not out.exists(), planted='Via1_HV cut rect %s (LEF DBU)' % changed,
+        # The workspace reader re-derives routing vias (LEF-rule enclosure) and
+        # supply vias (manufacturing grid) from this geometry, so with routed
+        # LEF-rule workspaces the tamper is refused on load (INVALID_WORKSPACE)
+        # before streaming; GDS_ODD_COORDINATE itself is unit-tested. Either
+        # way no output may be written.
+        caught = ('GDS_ODD_COORDINATE' if 'GDS_ODD_COORDINATE' in output else
+                  'INVALID_WORKSPACE' if 'INVALID_WORKSPACE' in output else None)
+        controls['odd_gf180_coordinate'] = dict(detected=receipt['exit_code'] != 0 and caught is not None
+                                                and not out.exists(), caught_by=caught,
+                                                planted='Via1_HV cut rect %s (LEF DBU)' % changed,
                                                 export_exit=receipt['exit_code'], export_error=output.strip()[-400:])
         shutil.rmtree(odd)
+    if controls_patch['detected'] is not None:
+        controls['patches_removed'] = controls_patch
+    controls['planted_drc'] = dict(detected=result['drc']['planted_control']['detected'],
+                                   magic=result['drc']['planted_control']['magic']['total'],
+                                   klayout=result['drc']['planted_control']['klayout'])
     result['negative_controls'] = controls
     result['layer_map_citations'] = verify_layer_map(p['layer_map'])
     result['source_workspace']['tree_sha256_after'] = tree_digest(source)
@@ -758,8 +901,9 @@ def case(h, tag, args):
                   determinism=result['determinism']['status'] == 'passed',
                   xor=result['xor']['status'] == 'passed', labels=result['labels']['status'] == 'passed',
                   cell_bytes=result['cell_bytes']['status'] == 'passed',
+                  patches=result['patches']['status'] == 'passed',
                   drc_equal=result['drc']['status'] == 'equal_to_reference',
-                  drc_baseline=result['drc']['matches_known_router_baseline'],
+                  drc_clean=result['drc']['clean'],
                   lvs_equal=result['lvs']['status'] == 'equal_to_reference',
                   lvs_match=result['lvs']['lvs_verdict'] == 'match',
                   controls=all(c['detected'] for c in controls.values()),
@@ -805,15 +949,18 @@ def evidence(d):
             labels={k: p['labels'][k] for k in ('status', 'top_labels', 'flat_texts', 'names', 'native_only',
                                                  'reference_only', 'dbu')},
             hierarchy=p['hierarchy'], cell_bytes=p['cell_bytes'],
-            drc=dict(status=p['drc']['status'], drc_verdict=p['drc']['drc_verdict'],
-                     matches_known_router_baseline=p['drc']['matches_known_router_baseline'],
-                     known_baseline=p['drc']['known_baseline'], native=side('native'), reference=side('reference')),
+            drc=dict(status=p['drc']['status'], drc_verdict=p['drc']['drc_verdict'], clean=p['drc']['clean'],
+                     planted_control={k: v for k, v in p['drc']['planted_control'].items()},
+                     native=side('native'), reference=side('reference')),
+            patches=p['patches'],
             density_status=p['density_status'],
             lvs=dict(status=p['lvs']['status'], lvs_verdict=p['lvs']['lvs_verdict'], verdicts=p['lvs']['verdicts'],
                      schematic=p['lvs']['schematic'],
                      netgen=dict(native=p['lvs']['native']['netgen'], reference=p['lvs']['reference']['netgen']),
                      klayout=dict(native=p['lvs']['native']['klayout']['circuits'],
-                                  reference=p['lvs']['reference']['klayout']['circuits'])),
+                                  reference=p['lvs']['reference']['klayout']['circuits']),
+                     signoff=dict(native=p['lvs']['native']['signoff'], reference=p['lvs']['reference']['signoff']),
+                     verdict_order=p['lvs']['verdict_order']),
             negative_controls={k: control(v) for k, v in p['negative_controls'].items()},
             layer_map_citations=p['layer_map_citations'], pdk_inputs={k: v['sha256'] for k, v in p['inputs'].items()})
     return dict(schema='rustroad.gds-verification-evidence.v1', status=d['status'], scope=d['scope'],

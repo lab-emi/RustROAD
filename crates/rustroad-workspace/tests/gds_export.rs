@@ -774,7 +774,13 @@ fn real_pdk_routed_workspaces_stream_verbatim_cells() {
         .unwrap();
         assert_eq!(tree(&workspace), before);
         assert_eq!(report.coordinate_divisor, divisor);
-        assert!(report.elements.routed_wires > 1000 && report.elements.labels == 12);
+        // Lattice records are merged into far fewer DEF/GDS runs.
+        let e = &report.elements;
+        assert!(e.stored_wire_records > 1000 && e.routed_wires > 50, "{e:?}");
+        assert!(
+            e.routed_wires < e.stored_wire_records && e.labels == 12,
+            "{e:?}"
+        );
         let bytes = fs::read(&out).unwrap();
         assert_eq!(bytes, fs::read(&again).unwrap());
         let source_bytes = fs::read(&cells).unwrap();

@@ -249,6 +249,9 @@ def compare_spefs(native_path: Path, reference_path: Path) -> dict:
 # ----------------------------------------------------------------------------
 WIRE = re.compile(r"^\s*(?:\+ ROUTED|NEW) (\S+) \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)\s*;?\s*$")
 VIA = re.compile(r"^\s*(?:\+ ROUTED|NEW) (\S+) \( (-?\d+) (-?\d+) \) (\S+)\s*;?\s*$")
+# DEF 5.8 routing RECT (the router's same-net patches), kept verbatim.
+RECT = re.compile(r"^\s*(?:\+ ROUTED|NEW) (\S+) \( (-?\d+) (-?\d+) \) RECT \( (-?\d+) (-?\d+) (-?\d+) (-?\d+) \)"
+                  r"\s*;?\s*$")
 
 
 def _line_union(intervals):
@@ -291,8 +294,12 @@ def merge_def(def_path: Path, routes_path: Path, out_path: Path) -> dict:
     out, nets, current = [lines[0]], [], None
     for line in lines[1:]:
         if line.startswith("- "):
-            current = dict(header=line, wires=[], vias=[], trailer=[])
+            current = dict(header=line, wires=[], vias=[], rects=[], trailer=[])
             nets.append(current)
+            continue
+        m = RECT.match(line)
+        if m and current is not None:
+            current["rects"].append((m[1], int(m[2]), int(m[3]), int(m[4]), int(m[5]), int(m[6]), int(m[7])))
             continue
         m = WIRE.match(line)
         if m and current is not None:
@@ -350,12 +357,16 @@ def merge_def(def_path: Path, routes_path: Path, out_path: Path) -> dict:
         for l, x, y, name in net["vias"]:
             out.append(("  + ROUTED " if first else "  NEW ") + f"{l} ( {x} {y} ) {name}")
             first = False
+        for l, x, y, a, b, c, d in net["rects"]:
+            out.append(("  + ROUTED " if first else "  NEW ") + f"{l} ( {x} {y} ) RECT ( {a} {b} {c} {d} )")
+            first = False
         if not out[-1].rstrip().endswith(";"):
             out[-1] += " ;"
     out_path.write_text(head + "\nNETS " + "\n".join(out) + "\nEND NETS\n" + tail)
     return dict(source=fingerprint(def_path), merged=fingerprint(out_path), nets=len(nets),
                 original_wire_paths=before_edges, merged_wire_paths=after_edges,
-                metal_union="identical per net, layer and track line", vias="identical")
+                rect_patches=sum(len(n["rects"]) for n in nets),
+                metal_union="identical per net, layer and track line", vias="identical", rects="identical")
 
 
 # ----------------------------------------------------------------------------
@@ -775,6 +786,8 @@ def campaign_pdk(h, pdk, ready, rustroad):
 
 
 def campaign(args) -> int:
+    global RUSTSTA_BIN
+    RUSTSTA_BIN = args.sta_bin.resolve()
     require(args.base_rev == "empty", "REVISION_CONFLICT: a fresh campaign directory requires --base-rev empty")
     root = args.workspace.resolve()
     root.mkdir(parents=True, exist_ok=False)
@@ -955,6 +968,8 @@ def main() -> int:
     c.add_argument("--ready", type=Path, default=READY_DEFAULT,
                    help="latest routed run to copy (never modified)")
     c.add_argument("--rustroad", type=Path, default=ROOT / "target/release/rustroad")
+    c.add_argument("--sta-bin", type=Path, default=RUSTSTA_BIN,
+                   help="directory holding the rusteda and ruststa binaries to use")
     args = parser.parse_args()
     if args.command == "spef":
         result = compare_spefs(args.native, args.reference)
