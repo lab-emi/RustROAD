@@ -1,7 +1,7 @@
 {
   "schema": "rustroad.scale-evidence.v1",
   "tools": {
-    "rustroad": "d156a2a6b44c3b2e5fb11f393ac3821538cc8d267ff4835b45d12f3ef068fe74",
+    "rustroad": "a453e4ca10b44a900ddbb3c13b2fc5b51bd53524002d5f3b04635896ffa4f143",
     "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae"
   },
   "scope": {
@@ -44,7 +44,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/counter/sky130/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/counter/sky130/a/signoff/density.json"
       },
       "synth_cells": 43,
       "placed_cells": 264,
@@ -81,7 +81,7 @@
       "route_stats": {
         "grid_nodes": 110032,
         "expansions": 183169,
-        "comparisons": 5064657,
+        "comparisons": 5064516,
         "wire_length_dbu": 1425790
       },
       "native_antenna": [
@@ -94,16 +94,16 @@
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
       "route_wall_seconds": 0.121,
-      "route_peak_rss_kib": 17672,
-      "wall_seconds": 19.229,
-      "host_peak_rss_kib": 62384,
-      "container_peak_rss_kib": 499608,
+      "route_peak_rss_kib": 17676,
+      "wall_seconds": 16.685,
+      "host_peak_rss_kib": 62400,
+      "container_peak_rss_kib": 499868,
       "artifacts": {
-        "def": "acc9a905585e1fb585f3265dc085a871356909cc551bf50c0e0db9640c0a3558",
+        "def": "d215471f5cd595c022e1313bf9da9d15393d93561541f3cf7a65864feb504975",
         "verilog": "1ebe0449d34fa69c59608918d2ed18d0a0269ca16faca4c892aa16108c0001f7",
         "powered": "a06306c326a1d34b39db3f2e74b3235ad48ad6dc96811a9b0ebcbcc66cd0249b",
-        "routes": "d5a8b3aad45d0c0feac619fda63d104a4b6ca14499e89d2949f7f411bf067a53",
-        "gds": "2bf1ee322269feed793056d8d3d74459d73b5e93a34feaf40f3e3f444f83da0d"
+        "routes": "15c208e9aba96efdde0817a09aa645527854eb3dd50c360770548c9982d93eb6",
+        "gds": "68f1c979707b404bffb9f2975a7780590eb2b073949437a45f6e228d2b0d6285"
       }
     },
     {
@@ -135,7 +135,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/counter/gf180/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/counter/gf180/a/signoff/density.json"
       },
       "synth_cells": 46,
       "placed_cells": 306,
@@ -172,7 +172,7 @@
       "route_stats": {
         "grid_nodes": 116232,
         "expansions": 129061,
-        "comparisons": 3025983,
+        "comparisons": 3066186,
         "wire_length_dbu": 4769390
       },
       "native_antenna": [
@@ -185,16 +185,16 @@
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
       "route_wall_seconds": 0.081,
-      "route_peak_rss_kib": 21812,
-      "wall_seconds": 20.938,
-      "host_peak_rss_kib": 106700,
-      "container_peak_rss_kib": 455204,
+      "route_peak_rss_kib": 22316,
+      "wall_seconds": 19.671,
+      "host_peak_rss_kib": 107232,
+      "container_peak_rss_kib": 453480,
       "artifacts": {
-        "def": "134cf26c90206d9dcf5a44e19391bfdf61aab4135b5cbb8ddb710be131514b54",
+        "def": "8580232410207eb24ff480bb47f42b1b82dde1c0c4aa93dad1993be43b1669fd",
         "verilog": "05890c9ba6ff3d2dccd94a1140ad0f98771bf6ccad09f5747a70eba98010f78c",
         "powered": "b9cad59a0ed18f7bfb4df6b336071c2eab6add8fdde62607b42213519e7e761f",
-        "routes": "ed2a260002e6bd45e5665a247db57933e00d89fdc9e526d9e49afb60db079284",
-        "gds": "0325ef7dc6d840c2627d516426bfb3a9cfcf1d0f625396da9b03f58e014e2529"
+        "routes": "b4415b79d22ca0ac0f13460a9b325de1c3140603101ad1736d79fb408573cb1e",
+        "gds": "b2829a6263aa27479f63ede289b9768ee0d12aa4a57690f8e1feb7344e203eb1"
       }
     },
     {
@@ -226,12 +226,12 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/uart_tx/sky130/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/uart_tx/sky130/a/signoff/density.json"
       },
       "synth_cells": 89,
       "placed_cells": 560,
       "routed_nets": 107,
-      "routing_segments": 2042,
+      "routing_segments": 2038,
       "floorplan": {
         "die_area": {
           "lx": 0,
@@ -263,7 +263,7 @@
       "route_stats": {
         "grid_nodes": 191040,
         "expansions": 448528,
-        "comparisons": 12273521,
+        "comparisons": 12272023,
         "wire_length_dbu": 3135360
       },
       "native_antenna": [
@@ -275,17 +275,17 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
-      "route_wall_seconds": 0.302,
-      "route_peak_rss_kib": 18524,
-      "wall_seconds": 25.031,
-      "host_peak_rss_kib": 62176,
-      "container_peak_rss_kib": 502952,
+      "route_wall_seconds": 0.262,
+      "route_peak_rss_kib": 19224,
+      "wall_seconds": 23.286,
+      "host_peak_rss_kib": 62144,
+      "container_peak_rss_kib": 502692,
       "artifacts": {
-        "def": "c0f49fe6e2531f424b0ab47247f7b75a8f698b1ebd8d98fec4f4e4cd00229193",
+        "def": "ed151cf12645bdf57341d9e90665dab2c354c510dc6be16eb3bf49e6a50198b8",
         "verilog": "69bffa114e1325660aac378e8ffdd8908916e9f3074ee7daa069afc4c88f3f92",
         "powered": "058a9226be6273ed7c274b3b92924adf6c97d82f75dde579c9dc59d670313f96",
-        "routes": "e62e0a7c2e28c5ed7a06a81298d66bc5ad5920a6998d3cbdb79c97394cdb640b",
-        "gds": "46dac40c9b95a88c150665fe46146822e8d929aca4b470543fc224fa0fd72ee4"
+        "routes": "3011765a22b903c3efa785ee52125656a99fab5e09da4b1437b2216521ffb790",
+        "gds": "bf87b25af53918053d73f722f5309636fc6985e8e3717c76a3858e9010c8471e"
       }
     },
     {
@@ -317,7 +317,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/uart_tx/gf180/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/uart_tx/gf180/a/signoff/density.json"
       },
       "synth_cells": 100,
       "placed_cells": 600,
@@ -354,7 +354,7 @@
       "route_stats": {
         "grid_nodes": 181440,
         "expansions": 262424,
-        "comparisons": 5898017,
+        "comparisons": 6053689,
         "wire_length_dbu": 10031630
       },
       "native_antenna": [
@@ -367,16 +367,16 @@
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
       "route_wall_seconds": 0.162,
-      "route_peak_rss_kib": 23164,
-      "wall_seconds": 25.429,
-      "host_peak_rss_kib": 106988,
-      "container_peak_rss_kib": 460240,
+      "route_peak_rss_kib": 22912,
+      "wall_seconds": 23.941,
+      "host_peak_rss_kib": 106956,
+      "container_peak_rss_kib": 459532,
       "artifacts": {
-        "def": "b25b7e8a77707a56291bc593a34d0709fb2c0b4b98db839884e57f4389fc6f2d",
+        "def": "db8833e6e48fee19507cd7f245c6af60381c5149c46b0b4dff095878bb6da1f7",
         "verilog": "f2537a8f48974a9a2dc01a850037d99d9197c857dc62cb4ff04dcee987c44688",
         "powered": "1b544772fcb3807e7fe2fbafc80157aad4f752c242f64b910a28be6989072edc",
-        "routes": "87a68f15452a0d0a54c50d25cc6b7689f2308d99eb7d979aa46770141635ff1b",
-        "gds": "c4aac1b463b0344b038684d59217fc095f89463c3109788605fef88bd250e411"
+        "routes": "a6a834664d517f263e4dbc355705972ce68f698ebdf14bb68e80c9407dee72a7",
+        "gds": "39ef8259c941709e9b66c54ff8ceb14feb3d9bb32cbd36b329e9ca98b80c0388"
       }
     },
     {
@@ -408,7 +408,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/fifo/sky130/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/fifo/sky130/a/signoff/density.json"
       },
       "synth_cells": 81,
       "placed_cells": 481,
@@ -445,7 +445,7 @@
       "route_stats": {
         "grid_nodes": 191040,
         "expansions": 376128,
-        "comparisons": 10089256,
+        "comparisons": 10088430,
         "wire_length_dbu": 3371480
       },
       "native_antenna": [
@@ -457,17 +457,17 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
-      "route_wall_seconds": 0.222,
-      "route_peak_rss_kib": 19168,
-      "wall_seconds": 27.38,
-      "host_peak_rss_kib": 62112,
-      "container_peak_rss_kib": 497740,
+      "route_wall_seconds": 0.221,
+      "route_peak_rss_kib": 18772,
+      "wall_seconds": 25.164,
+      "host_peak_rss_kib": 62672,
+      "container_peak_rss_kib": 497468,
       "artifacts": {
-        "def": "858545221bf7df269055592678c68d2ffe3ee95127428b1d43830788d4490c71",
+        "def": "cf77bb2f45fe374fcfc1ea0fca81f7c029c33a28e1fffd90632c0d6bb2da3b4f",
         "verilog": "64aef07056c20641b61b8c882ae43e877a5b37ca8115fb7cacab340b15f6b564",
         "powered": "89695b65f9362394badcd6ac56776495bfadaf0ba68aa635e1ebe16a885e91e1",
-        "routes": "b86eb921b375c3eb125d68d7af231234fcf86d92fe28c1b221536fad478bcbd5",
-        "gds": "e8f8f1b71021123a8ec0f7fe4fa29c5fd9a5a104066c8fa39d1104e6d01d3844"
+        "routes": "21e13ca0713659bc20235e9fef2ee0ad7f0906cacbd4bafb8251f9f7ba74c039",
+        "gds": "592c6b99d32314939379c2f2d7f362f56596764926fe2788d947da37d85d43f1"
       }
     },
     {
@@ -499,7 +499,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/fifo/gf180/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/fifo/gf180/a/signoff/density.json"
       },
       "synth_cells": 114,
       "placed_cells": 820,
@@ -536,7 +536,7 @@
       "route_stats": {
         "grid_nodes": 261096,
         "expansions": 351437,
-        "comparisons": 7022791,
+        "comparisons": 7023798,
         "wire_length_dbu": 13338800
       },
       "native_antenna": [
@@ -548,17 +548,17 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
-      "route_wall_seconds": 0.201,
-      "route_peak_rss_kib": 24232,
-      "wall_seconds": 27.291,
-      "host_peak_rss_kib": 106432,
-      "container_peak_rss_kib": 458268,
+      "route_wall_seconds": 0.182,
+      "route_peak_rss_kib": 24376,
+      "wall_seconds": 24.889,
+      "host_peak_rss_kib": 107504,
+      "container_peak_rss_kib": 464928,
       "artifacts": {
-        "def": "d6c27c4579a3f0777d2136bd8fd7014acb88be59205a80558dd53f0d32ad68a4",
+        "def": "20680d7def05168013b89f5ef0628ec4dc035f7c964cc100d61ff54cd160257e",
         "verilog": "40fea241cb6d2f66a3a64d91f0a59747d9bfc3def2ac063e1bcadbdb4a02c959",
         "powered": "d89bfeaf5480e8b88c699801aece35656393f1b992e41591c586a9dd2982ff4d",
-        "routes": "dc071b9b21cd1ff02e312b272e57c9819adc4ad099743288dd280cd249b051fd",
-        "gds": "93a30b8b721025f3d4953a13a0524aeb2ad1a4199b4ac6881a600e236b69fde4"
+        "routes": "01dd37d648ff5b1ff97ff671e2f981ff5ec1124d45b7f61e6bc0b5dbf66f4cae",
+        "gds": "7bb62afea40efc520fafa34bf3966652b3c625584b3dd8fa782825b501d86694"
       }
     },
     {
@@ -590,7 +590,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/alu/sky130/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/alu/sky130/a/signoff/density.json"
       },
       "synth_cells": 253,
       "placed_cells": 1094,
@@ -627,7 +627,7 @@
       "route_stats": {
         "grid_nodes": 302176,
         "expansions": 889518,
-        "comparisons": 29028644,
+        "comparisons": 29028203,
         "wire_length_dbu": 7618810
       },
       "native_antenna": [
@@ -639,17 +639,17 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
-      "route_wall_seconds": 0.582,
-      "route_peak_rss_kib": 27572,
-      "wall_seconds": 50.316,
-      "host_peak_rss_kib": 62352,
-      "container_peak_rss_kib": 527628,
+      "route_wall_seconds": 0.503,
+      "route_peak_rss_kib": 28616,
+      "wall_seconds": 43.571,
+      "host_peak_rss_kib": 62164,
+      "container_peak_rss_kib": 528220,
       "artifacts": {
-        "def": "0bdc9a60a7d31264dcd1765857dc526367b52407cb337d37e79e26b552190e04",
+        "def": "3e0b4249586e8ca9e9323ab1386352575cc84ca64281292ea000916176078b43",
         "verilog": "9a5641f58acfa069a0ceef2f58e5a84f3c7b96690696ffa8980374a182fb7cef",
         "powered": "9bb4ed02ab4b6d11bb061ee8c011daa5e14a0b14247576fd08561efeca8770bd",
-        "routes": "2c95e3e583836cb5294677202c27938b81d4f673cb93f6002b227570220a0efd",
-        "gds": "70b316c7f0c81f3e7196909185b1666a88e41a815825dd419468a9c2d5b7b320"
+        "routes": "6490f7fb0e7e4e27b791a8ee511500e810a056a20eb21dd5d5d97bc2ab946308",
+        "gds": "5f3571f3cd6bd3abccb13d1843c45caa9029a802b819c7886213cbb7decfce20"
       }
     },
     {
@@ -681,12 +681,12 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/alu/gf180/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/alu/gf180/a/signoff/density.json"
       },
       "synth_cells": 252,
       "placed_cells": 1001,
       "routed_nets": 271,
-      "routing_segments": 5762,
+      "routing_segments": 5757,
       "floorplan": {
         "die_area": {
           "lx": 0,
@@ -717,9 +717,9 @@
       "baseline_hpwl_dbu": 45149430,
       "route_stats": {
         "grid_nodes": 261096,
-        "expansions": 696262,
-        "comparisons": 16890684,
-        "wire_length_dbu": 23935200
+        "expansions": 745790,
+        "comparisons": 18006558,
+        "wire_length_dbu": 23984960
       },
       "native_antenna": [
         {
@@ -731,16 +731,16 @@
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
       "route_wall_seconds": 0.423,
-      "route_peak_rss_kib": 28132,
-      "wall_seconds": 36.823,
-      "host_peak_rss_kib": 106944,
-      "container_peak_rss_kib": 469060,
+      "route_peak_rss_kib": 28120,
+      "wall_seconds": 32.183,
+      "host_peak_rss_kib": 106928,
+      "container_peak_rss_kib": 471748,
       "artifacts": {
-        "def": "03e6cc80e85640cfcb2a93b6b407814a724a396c6bbf8adabfb7d4155bedd2be",
+        "def": "fdf61760c84b3497543dfce874b21dd183cb583481ad23a24ac686c890861014",
         "verilog": "a74ee0a705ff3c964d5c47e93713c53b0fc714b5db71a022bdde6d273574e202",
         "powered": "6a5be42407e5bb1e85e8e42973df06e09c83ccbadfc88aaac682aca5cb8d8327",
-        "routes": "1543b1197b3f311c40c4c26ced4d5ae0f1807763f536564896ceab6c1a53a8c6",
-        "gds": "38843d000a08a7553ee5e8e4becd491735a093d1327498eabb8ed82fd067f18c"
+        "routes": "6477d36ed505d97a3076a21c4c69592c7827f5a5bfc4d61c1f4b9c62e6e339eb",
+        "gds": "b9da5ab12752b6ae936d1a00dc4c8b8d0db283c0d5458b5867dc2450941bd463"
       }
     },
     {
@@ -772,7 +772,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/regfile/sky130/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/regfile/sky130/a/signoff/density.json"
       },
       "synth_cells": 372,
       "placed_cells": 1479,
@@ -809,7 +809,7 @@
       "route_stats": {
         "grid_nodes": 429120,
         "expansions": 2188444,
-        "comparisons": 62690388,
+        "comparisons": 62688780,
         "wire_length_dbu": 14572730
       },
       "native_antenna": [
@@ -821,17 +821,17 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
-      "route_wall_seconds": 1.326,
-      "route_peak_rss_kib": 37272,
-      "wall_seconds": 84.27,
-      "host_peak_rss_kib": 62416,
-      "container_peak_rss_kib": 499920,
+      "route_wall_seconds": 1.205,
+      "route_peak_rss_kib": 40588,
+      "wall_seconds": 76.923,
+      "host_peak_rss_kib": 62176,
+      "container_peak_rss_kib": 499552,
       "artifacts": {
-        "def": "fc67e900261e2fdbb7b503a016fecf289e3cf9090dd9efd57a6fb366ef49a314",
+        "def": "63c40ffdfdb244a7340f178db31a33f5238eadf66e05f4719767f77378987af3",
         "verilog": "d27bf2a07cc178d4cca28efe06e998cdf2c85b1e93eeb3f24b08cc61f72acb62",
         "powered": "856ac3056552c4ce2732bd417f43bd8a1816a61378111233450689898ed53736",
-        "routes": "fbe48bedb38f7d0b8cb8483129cf2139808d5453f11585832d879a01aff3daa4",
-        "gds": "1dc944eebc48da5fe028830f94477796dbe87697ae4a542a7b194b67d2dcb0b8"
+        "routes": "aba0d5fe22a51713c12322f7e63983edf4304fa89e532d9b0a6d8fcced79d63c",
+        "gds": "ef0dac441176904a0d6bd4f51e44461e7e4deb55fc505577a48f45a43b2cfc87"
       }
     },
     {
@@ -863,7 +863,7 @@
         "density": 7
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/regfile/gf180/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/regfile/gf180/a/signoff/density.json"
       },
       "synth_cells": 358,
       "placed_cells": 1737,
@@ -900,7 +900,7 @@
       "route_stats": {
         "grid_nodes": 463752,
         "expansions": 3436921,
-        "comparisons": 75550795,
+        "comparisons": 75554357,
         "wire_length_dbu": 51183960
       },
       "native_antenna": [
@@ -912,17 +912,17 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
-      "route_wall_seconds": 2.009,
-      "route_peak_rss_kib": 42900,
-      "wall_seconds": 50.335,
-      "host_peak_rss_kib": 106152,
-      "container_peak_rss_kib": 475704,
+      "route_wall_seconds": 1.747,
+      "route_peak_rss_kib": 44456,
+      "wall_seconds": 44.288,
+      "host_peak_rss_kib": 106780,
+      "container_peak_rss_kib": 477012,
       "artifacts": {
-        "def": "a261c26a95e55d2ae89bc81124df2d60db7a2bfafb975bf46d95de9654ad2f89",
+        "def": "6061b2723e4d0e6fc9fdbcd902a7ff8e3c70cfc9d6a83c93dfc08a462765df61",
         "verilog": "ae432e26d8ef6a75d50ad3716d1975f5cfcda7e95674f05d93a8130a29521c62",
         "powered": "056839ee8adb8e71a95558434257e8b4447c8b6bad334446a51b3908d38efdb2",
-        "routes": "c7c1bd87b43dc27cea1c7800a00d3766fd81ee0aaa31eeb3bb24d04a965c5848",
-        "gds": "9775ebe493dc745fce036be913346852220c203a0156a75f542cf482654f94e2"
+        "routes": "f0c0ebecd174fdb9099eae9808bc1074aef37b0591a33d9b30ac0ec5e9177e9f",
+        "gds": "48984d3e90cc0e5dbd0ee8e1405c29f0d2bda48e8edcf4b08e411c888373becc"
       }
     },
     {
@@ -954,7 +954,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/mult/sky130/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/mult/sky130/a/signoff/density.json"
       },
       "synth_cells": 418,
       "placed_cells": 1651,
@@ -991,7 +991,7 @@
       "route_stats": {
         "grid_nodes": 429120,
         "expansions": 1298738,
-        "comparisons": 42088860,
+        "comparisons": 41766369,
         "wire_length_dbu": 10140500
       },
       "native_antenna": [
@@ -1003,17 +1003,17 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 36,
-      "route_wall_seconds": 0.824,
-      "route_peak_rss_kib": 36996,
-      "wall_seconds": 67.287,
-      "host_peak_rss_kib": 62112,
-      "container_peak_rss_kib": 531576,
+      "route_wall_seconds": 0.723,
+      "route_peak_rss_kib": 37584,
+      "wall_seconds": 62.451,
+      "host_peak_rss_kib": 62448,
+      "container_peak_rss_kib": 531876,
       "artifacts": {
-        "def": "da95d27b54b4b5bed7a6b25047f149eca587e6164d557d6e1408f1d8a9006a66",
+        "def": "ae6de1aadd25e83a91000a87de00db0857306ec3c7298b47faebb428789f1308",
         "verilog": "ed2d03049955d22a43034712c990b9a253a1b9e5d23335a2535bdab97a00a818",
         "powered": "8bd80b1a3081dec2b97a9cb9d21462824740ca866f930fd2f000380d4d0703bc",
-        "routes": "aaf6c970035defaf8f189777942e5bd7c2ee24b98133eb53cb0153898e2498de",
-        "gds": "87d1dbb75e0bd525efdb14cab757683154c702f984a36fdc00d4a98778ee5f27"
+        "routes": "c961c5e62cef34be01a659e0f8fa41b8c59a5834a7c51119b225e269b2f40170",
+        "gds": "b763e4c9cbe7128dbb81c9f8c7ebc5163048ed1a2d669b7bf937d8a79f0e4691"
       }
     },
     {
@@ -1045,7 +1045,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/mult/gf180/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/mult/gf180/a/signoff/density.json"
       },
       "synth_cells": 414,
       "placed_cells": 1793,
@@ -1082,7 +1082,7 @@
       "route_stats": {
         "grid_nodes": 463752,
         "expansions": 1526323,
-        "comparisons": 31415172,
+        "comparisons": 31421028,
         "wire_length_dbu": 37733410
       },
       "native_antenna": [
@@ -1094,17 +1094,17 @@
       ],
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 36,
-      "route_wall_seconds": 0.824,
-      "route_peak_rss_kib": 41560,
-      "wall_seconds": 44.043,
-      "host_peak_rss_kib": 106736,
-      "container_peak_rss_kib": 478584,
+      "route_wall_seconds": 0.803,
+      "route_peak_rss_kib": 41700,
+      "wall_seconds": 44.73,
+      "host_peak_rss_kib": 106960,
+      "container_peak_rss_kib": 477624,
       "artifacts": {
-        "def": "3b53f537dcc984706a5e258ff969140753210d9b700d3cbe642d156929d86283",
+        "def": "52672e17c34f66fbcf57e8ebc88f4c370778fb10a27e38a2daa9604af6242fdc",
         "verilog": "a292f39f134745c0e456f16ce6dd0883dbdc5d1b1b8f95e81c44401e5751c9af",
         "powered": "e7469d104120311deeb0ba206d8264e4882140d22d9b1b73de9159fca4300b5b",
-        "routes": "18655c7d23f66d35827584dba1233531355cecd7bce14fb211f79cf81b7444e8",
-        "gds": "a726dae60251255283518cc06d2a260977fba571d18dbf26210181db8af421ca"
+        "routes": "321cb0a52b7af3f02152a2f518470b25a9407bf4884ad85dd8c8372cc50d567f",
+        "gds": "5042908c6dee9ddeea36205364a28ae19c0dfa9f601aef0e09a165c7a1cf3583"
       }
     },
     {
@@ -1136,9 +1136,9 @@
         "density": null
       },
       "non_passed_reasons": {
-        "lvs_netgen": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/dense/sky130/a/signoff/lvs_netgen.json",
-        "lvs_klayout": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/dense/sky130/a/signoff/lvs_klayout.json",
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/dense/sky130/a/signoff/density.json"
+        "lvs_netgen": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/dense/sky130/a/signoff/lvs_netgen.json",
+        "lvs_klayout": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/dense/sky130/a/signoff/lvs_klayout.json",
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/dense/sky130/a/signoff/density.json"
       },
       "synth_cells": null,
       "placed_cells": 258,
@@ -1175,7 +1175,7 @@
       "route_stats": {
         "grid_nodes": 110032,
         "expansions": 99908,
-        "comparisons": 2236981,
+        "comparisons": 2236849,
         "wire_length_dbu": 816500
       },
       "native_antenna": [
@@ -1189,15 +1189,15 @@
       "renamed_escaped_wires": 0,
       "route_wall_seconds": 0.061,
       "route_peak_rss_kib": 17660,
-      "wall_seconds": 13.442,
-      "host_peak_rss_kib": 62432,
-      "container_peak_rss_kib": 476384,
+      "wall_seconds": 13.009,
+      "host_peak_rss_kib": 61344,
+      "container_peak_rss_kib": 476300,
       "artifacts": {
-        "def": "b55829ca2fe9d5d47ea3c03ddd32fa531c6621cb4cb67ee097a6e5597bcb272f",
+        "def": "79de61eacea8d87bd18481e435759ee95a776bfa73f393832da2b79b4a1cf946",
         "verilog": "b98105de5e33c2de2ff81d0de82d5485dc445f0b819d47728f71dce5a5aaa069",
         "powered": "187343a139b2df57627a89f5f76a82a8b391cedcd75b3a546d6e6c0f36455610",
-        "routes": "bb5dd7cd8b2333778186ca91e8a5dd1a77bcd3742d50f3bd4cb65b6a691ca287",
-        "gds": "d5409a3f5be1860a9abd023add0520c45a7ce797df2cedb3884087ecc464fa29"
+        "routes": "aa9dfc5b849fd74d67acbf46fb7ccd0ab5976fbe0908acd1b785744145dec42e",
+        "gds": "5b9d60fbe37a1a52c728ccbda4696a32502c580f2be70178a49bf3861c476398"
       }
     },
     {
@@ -1229,7 +1229,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/dense/gf180/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/dense/gf180/a/signoff/density.json"
       },
       "synth_cells": null,
       "placed_cells": 160,
@@ -1266,7 +1266,7 @@
       "route_stats": {
         "grid_nodes": 65472,
         "expansions": 47829,
-        "comparisons": 1077001,
+        "comparisons": 1077299,
         "wire_length_dbu": 2242900
       },
       "native_antenna": [
@@ -1279,16 +1279,16 @@
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
       "route_wall_seconds": 0.041,
-      "route_peak_rss_kib": 21692,
-      "wall_seconds": 17.274,
-      "host_peak_rss_kib": 106944,
-      "container_peak_rss_kib": 450256,
+      "route_peak_rss_kib": 21680,
+      "wall_seconds": 16.289,
+      "host_peak_rss_kib": 107216,
+      "container_peak_rss_kib": 452584,
       "artifacts": {
-        "def": "f3dacb9a2135a8f1807c2469efbe8833af404495b10d96a1289254d55c13179e",
+        "def": "0225a4372fe6c26dd6aa6f4f1ecf0a22155b1937a075db25f236c57a64ce8467",
         "verilog": "8d80c2c5c7c4d50ac432cf573b1be21c842ce3293acb4147fb5228a1a8842491",
         "powered": "28ff245c186f8a62fc5972a0429766d956a426fe8520b0ecb9a20a042162203e",
-        "routes": "a69332732e233d8022048b1ba8e3db5dd591740b101dd9d8985c6dae472d4e55",
-        "gds": "89500a3f49bfbd7a7bf4c3323cc87cfadef8d9466e731afb6ded6837440dbf30"
+        "routes": "564f1d35fcc61af6252d2a6f8dcd97a103f4fa3fa4f257cd00958bce35d90680",
+        "gds": "a28cddb8f31c7ef1b41addcd41d2ca311f6f22369a43a220461de3f495b40ed9"
       }
     },
     {
@@ -1320,7 +1320,7 @@
         "density": null
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/pipeline_track/sky130/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/pipeline_track/sky130/a/signoff/density.json"
       },
       "synth_cells": 10,
       "placed_cells": 77,
@@ -1370,10 +1370,10 @@
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
       "route_wall_seconds": 0.041,
-      "route_peak_rss_kib": 17672,
-      "wall_seconds": 12.675,
-      "host_peak_rss_kib": 62144,
-      "container_peak_rss_kib": 473852,
+      "route_peak_rss_kib": 17300,
+      "wall_seconds": 11.386,
+      "host_peak_rss_kib": 62480,
+      "container_peak_rss_kib": 473776,
       "artifacts": {
         "def": "e73ebe227a290a060a02910bc8f818c1c095811f33afea429f1256cfe5cc136a",
         "verilog": "9b517f68203c0b78b5c212828218cffc0fc94e7881b933d7c1025c7a1a819956",
@@ -1411,7 +1411,7 @@
         "density": 8
       },
       "non_passed_reasons": {
-        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s4/pipeline_track/gf180/a/signoff/density.json"
+        "density": "see /mnt/data2/cgao/git/RustROAD/.work/wt/scale/.work/scale/runs/s5/pipeline_track/gf180/a/signoff/density.json"
       },
       "synth_cells": 10,
       "placed_cells": 132,
@@ -1448,7 +1448,7 @@
       "route_stats": {
         "grid_nodes": 65472,
         "expansions": 20021,
-        "comparisons": 407843,
+        "comparisons": 407955,
         "wire_length_dbu": 1117730
       },
       "native_antenna": [
@@ -1461,16 +1461,16 @@
       "antenna_eco_iterations": 0,
       "renamed_escaped_wires": 0,
       "route_wall_seconds": 0.021,
-      "route_peak_rss_kib": 21404,
-      "wall_seconds": 17.137,
-      "host_peak_rss_kib": 106508,
-      "container_peak_rss_kib": 449528,
+      "route_peak_rss_kib": 21028,
+      "wall_seconds": 16.201,
+      "host_peak_rss_kib": 106960,
+      "container_peak_rss_kib": 451340,
       "artifacts": {
-        "def": "b838f8b6ddf515f8b0de5f169670cc34b274f88b48e7aaf5c12db592ee99d529",
+        "def": "dc4b71991c3a9d1916f692f1b29a078f228d6a101d980625a7d047048d1b41ef",
         "verilog": "989673694156d6d9297104350a4bd15bacf760a9db1126227dbc86415dc7b780",
         "powered": "a645198d376c42fcdf4b6a4867b342be6680486bdacd4c82489d19c9425c60d7",
-        "routes": "2097595a707ed14203d2bd2a8eb617de7a45f12420b057717db9ff873fa430dd",
-        "gds": "e8e59b24c08b5534a5e47eff9e82da6608ecff96ee88c8aa76568fb7368a8b39"
+        "routes": "317fee6a674fe99c119c71ae985d621ed29fd88204c6d5ef12d3474cb8e5a001",
+        "gds": "8c0e8a402a18f6a055f9d1a971cb440ba278680560e98d301e310a831a732bfb"
       }
     }
   ]

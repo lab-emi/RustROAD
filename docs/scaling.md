@@ -124,10 +124,18 @@ on stdout.
    tree's bounding box), restricted to the guide, then to the guide box plus
    `expand_margin` (4) GCells. Every wire edge and via is checked by the
    spatial index against obstacles, pins, escapes and other nets (via
-   variants as in `lef_rules`); a same-net near miss costs one via. A via
-   may not follow a via through a layer whose single pads are below `AREA`
-   (sky130 met3, GF180 Metal2/3), so stacks never leave a min-area island.
-   Collinear new edges become one spatial shape.
+   variants as in `lef_rules`); a same-net near miss costs one via. On a
+   layer whose single via pads are below `AREA` (sky130 li1/met1/met3/met4,
+   GF180 Metal1-4) a via may leave only after a wire run of at least
+   `AREA / width` since the via that entered the layer, and a path may not
+   join the tree with a via at a tree node that already has one, so no
+   pad-only min-area island is created. A via taken right after a wire
+   prefers the variant whose pad is elongated along that wire; after
+   routing, variants are re-picked where exactly one wire ends at a via on a
+   layer and the pad runs across it (LEF58 end-of-line enclosure, e.g.
+   GF180 V1.3c, is not modelled natively), only when the new pad clears
+   every other net without a same-net near miss. Collinear new edges become
+   one spatial shape.
 5. **Rip-up and reroute.** A net that fails is re-tried in a soft mode in a
    wider box: routed metal of other nets is crossable at
    `10 x via_cost x (1 + round) x (1 + rips of that net)`; nets it crosses
@@ -138,9 +146,12 @@ on stdout.
 6. **Output and same-net pass.** Escapes and routed edges become wires merged
    into maximal collinear runs split at vias, access points and branches
    (`wire_runs`), then the existing bounded same-net pass prunes dead ends,
-   patches notches and grows min-area stubs. In track mode the corner
-   patch overlaps each shape by at least the layer width in both axes (the
-   legacy bridge overlapped by a few DBU and made `met1.1`/`M3.1` necks), and
+   patches notches and grows min-area stubs. In track mode a near pair
+   whose facing span is narrower than the layer width (or a corner pair) is
+   filled with the bounding box of the parts of both shapes within two
+   widths of each other, which contains both facing corners (the legacy
+   bridge overlapped by a few DBU and its widened gap fill left steps:
+   `met1.1`/`M3.1` necks), and
    holes enclosed by same-net metal smaller than 4x `AREA` (sky130 `m1.7`,
    `MINENCLOSEDAREA`) are reported and filled. Nets the pass cannot fix are
    ripped up and re-routed in strict mode (no near misses), up to four
@@ -151,7 +162,7 @@ on stdout.
 The lattice router, its caps and its output are unchanged: profiles without
 `track_router` give byte-identical DEF, design.json (except input paths) and
 powered Verilog to the binary before this stream (checked on `pipeline.v`
-for both PDKs).
+for both PDKs with `scripts/verify_routing.py`).
 
 ## Storage (schema 6)
 
@@ -229,7 +240,7 @@ Liberty and OpenRCX rules per corner, RC profiles) and the
 `floorplan_recipe` (utilization 0.5, aspect 1, margin 10 um).
 `scripts/scale_manifests.py` regenerates them.
 
-## Results (binary `d156a2a6…`, RustSys policy producer `3de13b3a…`)
+## Results (binary `a453e4ca…`, RustSys policy producer `3de13b3a…`)
 
 `docs/evidence/scale.json` holds every row below with hashes and receipts
 (`scripts/scale_evidence.py`). Signoff image `4c48415d8bd0` (Magic 8.3.678,
@@ -239,22 +250,22 @@ Native GDS == KLayout's streamout of the DEF (XOR 0) everywhere.
 
 | design | PDK | logic cells (placed incl. taps/fillers) | routed nets | Magic | KLayout | antenna | Netgen LVS | KLayout LVS | CEC | HPWL / fixed order | route s / MiB | flow s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| counter | sky130 | 43 (264) | 53 | 0 | 0 | 0 | match | match | equivalent | 0.73 | 0.12 / 17 | 19 |
-| counter | gf180 | 46 (306) | 51 | 0 | 0 | 0 | match | match | equivalent | 0.53 | 0.08 / 21 | 21 |
-| uart_tx | sky130 | 89 (560) | 107 | 0 | 0 | 0 | match | match | equivalent | 0.55 | 0.30 / 18 | 25 |
-| uart_tx | gf180 | 100 (600) | 114 | 0 | 0 | 0 | match | match | equivalent | 0.47 | 0.16 / 23 | 25 |
-| fifo | sky130 | 81 (481) | 102 | 0 | 0 | 0 | match | match | equivalent | 0.44 | 0.22 / 19 | 27 |
-| fifo | gf180 | 114 (820) | 132 | 0 | 0 | 0 | match | match | equivalent | 0.38 | 0.20 / 24 | 27 |
-| alu | sky130 | 253 (1094) | 272 | 0 | 0 | 0 | match | match | equivalent | 0.54 | 0.58 / 27 | 50 |
-| alu | gf180 | 252 (1001) | 271 | 0 | 0 | 0 | match | match | equivalent | 0.41 | 0.42 / 27 | 37 |
-| regfile | sky130 | 372 (1479) | 425 | 0 | 0 | 0 | match | match | equivalent | 0.42 | 1.33 / 36 | 84 |
-| regfile | gf180 | 358 (1737) | 387 | 0 | 0 | 0 | match | match | equivalent | 0.38 | 2.01 / 42 | 50 |
-| mult | sky130 | 418 (1651) | 440 | 0 | 0 | 0 | match | match | equivalent | 0.41 | 0.82 / 36 | 67 |
-| mult | gf180 | 414 (1793) | 436 | 0 | 0 | 0 | match | match | equivalent | 0.41 | 0.82 / 41 | 44 |
+| counter | sky130 | 43 (264) | 53 | 0 | 0 | 0 | match | match | equivalent | 0.73 | 0.12 / 17 | 17 |
+| counter | gf180 | 46 (306) | 51 | 0 | 0 | 0 | match | match | equivalent | 0.53 | 0.08 / 22 | 20 |
+| uart_tx | sky130 | 89 (560) | 107 | 0 | 0 | 0 | match | match | equivalent | 0.55 | 0.26 / 19 | 23 |
+| uart_tx | gf180 | 100 (600) | 114 | 0 | 0 | 0 | match | match | equivalent | 0.47 | 0.16 / 22 | 24 |
+| fifo | sky130 | 81 (481) | 102 | 0 | 0 | 0 | match | match | equivalent | 0.44 | 0.22 / 18 | 25 |
+| fifo | gf180 | 114 (820) | 132 | 0 | 0 | 0 | match | match | equivalent | 0.38 | 0.18 / 24 | 25 |
+| alu | sky130 | 253 (1094) | 272 | 0 | 0 | 0 | match | match | equivalent | 0.54 | 0.50 / 28 | 44 |
+| alu | gf180 | 252 (1001) | 271 | 0 | 0 | 0 | match | match | equivalent | 0.41 | 0.42 / 27 | 32 |
+| regfile | sky130 | 372 (1479) | 425 | 0 | 0 | 0 | match | match | equivalent | 0.42 | 1.21 / 40 | 77 |
+| regfile | gf180 | 358 (1737) | 387 | 0 | 0 | 0 | match | match | equivalent | 0.38 | 1.75 / 43 | 44 |
+| mult | sky130 | 418 (1651) | 440 | 0 | 0 | 0 | match | match | equivalent | 0.41 | 0.72 / 37 | 62 |
+| mult | gf180 | 414 (1793) | 436 | 0 | 0 | 0 | match | match | equivalent | 0.41 | 0.80 / 41 | 45 |
 | dense | sky130 | 26 literal (258) | 31 | 0 | 0 | 0 | **failed** | **failed** | equivalent | 0.61 | 0.06 / 17 | 13 |
-| dense | gf180 | 30 literal (160) | 35 | 0 | 0 | 0 | match | match | equivalent | 0.62 | 0.04 / 21 | 17 |
-| pipeline_track | sky130 | 10 (77) | 17 | 0 | 0 | 0 | match | match | equivalent | 0.72 | 0.04 / 17 | 13 |
-| pipeline_track | gf180 | 10 (132) | 17 | 0 | 0 | 0 | match | match | equivalent | 0.63 | 0.02 / 21 | 17 |
+| dense | gf180 | 30 literal (160) | 35 | 0 | 0 | 0 | match | match | equivalent | 0.62 | 0.04 / 21 | 16 |
+| pipeline_track | sky130 | 10 (77) | 17 | 0 | 0 | 0 | match | match | equivalent | 0.72 | 0.04 / 17 | 11 |
+| pipeline_track | gf180 | 10 (132) | 17 | 0 | 0 | 0 | match | match | equivalent | 0.63 | 0.02 / 21 | 16 |
 
 * Antenna: Magic `antennacheck` (sky130) and the KLayout antenna deck
   (GF180), plus the native `check-antenna` (0 violations on every required
@@ -267,7 +278,7 @@ Native GDS == KLayout's streamout of the DEF (XOR 0) everywhere.
   harness end to end: synthesis, floorplan, import, place, CTS, route,
   antenna check, exports, native GDS, reference streamout, all signoff
   checks, CEC and the full second run. Peak host-process RSS 61-105 MiB
-  (RustSys synthesis); signoff containers 449-532 MiB.
+  (RustSys synthesis); signoff containers 441-520 MiB.
 * `dense` sky130: DRC 0/0, XOR, antenna and CEC pass. Both LVS checks fail
   on the two `sky130_fd_sc_hd__conb_1` tie cells the literal netlist needs
   (`high_bit <= 1`, `low_bit <= 0`): Netgen ends with "Circuits match
@@ -278,11 +289,15 @@ Native GDS == KLayout's streamout of the DEF (XOR 0) everywhere.
   property of the PDK tie cell and the pinned decks, independent of
   routing; the signoff status logic is frozen and was not changed. GF180
   (separate tieh/tiel cells) passes. Raw receipts:
-  `.work/scale/runs/s4/dense/sky130/a/signoff/lvs_{netgen,klayout}.json`.
+  `.work/scale/runs/s5/dense/sky130/a/signoff/lvs_{netgen,klayout}.json`.
 * The lattice router (`pipeline.v`, `scripts/verify_routing.py` with the
   integrated profiles) gives DEF `cb94ea92…` (sky130) and `3a07101c…`
   (GF180), identical Verilog and powered Verilog with this binary and with
   the e0d074d binary: the requalified DRC 0/0 and LVS match carry over.
+* `scripts/hold_closure.py` (lattice-router profiles, native extraction,
+  RustSTA round-2 binaries) still closes `pipeline.v` with this binary:
+  `passed` on both PDKs (sky130 3 iterations, GF180 2), so the hold flow is
+  unaffected.
 * Tap gap control: GF180 counter with a 60 um tap gap gives KLayout
   DF.13_MV 31 + DF.14_MV 26 items (Magic 0); the 23 um scale gap gives 0.
 
@@ -291,14 +306,14 @@ Memory estimate versus measurement (route step):
 | design | PDK | nodes N | GCells G | shapes S | estimate | route RSS |
 |---|---|---|---|---|---|---|
 | counter | sky130 | 110,032 | 529 | 5,866 | 3.4 MiB | 17.3 MiB |
-| alu | sky130 | 302,176 | 1,444 | 24,727 | 10.8 MiB | 26.9 MiB |
-| regfile | sky130 | 429,120 | 2,025 | 47,132 | 17.1 MiB | 36.4 MiB |
-| regfile | gf180 | 463,752 | 9,506 | 38,593 | 16.9 MiB | 41.9 MiB |
-| mult | gf180 | 463,752 | 9,506 | 35,947 | 16.5 MiB | 40.6 MiB |
+| alu | sky130 | 302,176 | 1,444 | 24,727 | 10.8 MiB | 27.9 MiB |
+| regfile | sky130 | 429,120 | 2,025 | 47,132 | 17.1 MiB | 39.6 MiB |
+| regfile | gf180 | 463,752 | 9,506 | 38,593 | 16.9 MiB | 43.4 MiB |
+| mult | gf180 | 463,752 | 9,506 | 35,947 | 16.5 MiB | 40.7 MiB |
 
 The difference is the process baseline (binary, loaded design.json, LEF
 masters, connectivity, output records: ~14-20 MiB for these sizes).
-`cargo test --workspace`: 158 passed, 4 ignored; each test binary peaks
+`cargo test --workspace`: 160 passed, 4 ignored; each test binary peaks
 below 10 MiB RSS; the whole run 16 s.
 
 ## Limits and open issues
