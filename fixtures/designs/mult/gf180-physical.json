@@ -47,7 +47,7 @@
   },
   "clock": {
     "port": "clk",
-    "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_2",
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_8",
     "input_pin": "I",
     "output_pin": "Z",
     "sink_pin": "CLK",

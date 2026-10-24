@@ -108,7 +108,9 @@ impl ExtractLimits {
             (self.max_nodes, hard.max_nodes * 8),
             (self.max_elements, hard.max_elements * 8),
             (self.max_couplings, hard.max_couplings * 8),
-            (self.max_work, hard.max_work * 8),
+            // Work counts comparisons, not memory (bounded by the shape,
+            // node, element and bin caps): SERV-size blocks need ~2-5e9.
+            (self.max_work, hard.max_work * 64),
             (self.max_candidates, hard.max_candidates),
             (self.max_bin_entries, hard.max_bin_entries),
         ] {

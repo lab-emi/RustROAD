@@ -1,5 +1,5 @@
 {
-  "schema": "rustroad.design.v1",
+  "schema": "rustroad.design.v2",
   "name": "fifo",
   "description": "4x8 synchronous FIFO with count/full/empty, async reset (RustSys fixture).",
   "top": "fifo",
@@ -16,17 +16,28 @@
   "sdc": {
     "clock": {
       "path": "fixtures/designs/fifo/cts.sdc",
-      "sha256": "cc62822e182013b898af3dc5fbf8f4be6b09ea65ab637f850b1b16c3614c42df"
+      "sha256": "1b2f13f03135503f10cf9854b32b6abd85a2da89e6dce47b18ebd5b4e39e80fb"
     },
     "io_template": {
       "path": "fixtures/designs/postroute-io.sdc.tmpl",
       "sha256": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07"
     },
-    "note": "signoff SDC = clock SDC + io_template filled from the RTL port list; the CTS reads the clock SDC"
+    "note": "signoff SDC = clock SDC + io_template filled from the RTL port list; the CTS reads the clock SDC",
+    "rendered_sha256": "94a17dc2561e4f30d267fd3a9b084dd901706558f2294541c611af88f10c999f"
   },
+  "recipe": {
+    "physical": "track",
+    "floorplan": {
+      "utilization": 0.5,
+      "aspect": 1.0,
+      "margin_um": 10.0
+    }
+  },
+  "stretch": false,
+  "pdks_unavailable": {},
   "pdk_profiles": {
-    "path": "fixtures/pdk/local-real-pdks.json",
-    "sha256": "97b3907839728d4c8370e94f4b825d791b3cc536575614b4f704dfec9f008176"
+    "path": "fixtures/pdk/local-routing.json",
+    "sha256": "057a44b6061fada1dfb0222cee426e2498e890ce235794df2e68a1481c23dbfd"
   },
   "cell_policy": {
     "path": "fixtures/flow/cell-policy.json",
@@ -37,21 +48,8 @@
     "sha256": "446347653af195e1337997f57309fa4d8efec1c31be55b9b3a41067ea8775c24"
   },
   "tools": {
-    "path": "fixtures/flow/local-pinned.json",
-    "sha256": "a9f6f95052ef4a480589458985346eb7227996e60d15af84f18299b38531af06"
-  },
-  "floorplan_recipe": {
-    "utilization": 0.5,
-    "aspect": 1.0,
-    "margin_um": 10.0,
-    "command": "rustroad floorplan"
-  },
-  "stretch": false,
-  "pdks_unavailable": {},
-  "flow": {
-    "harness": "scripts/scale_flow.py",
-    "router": "track",
-    "placer": "analytic"
+    "path": "fixtures/flow/rtl2gds-tools.json",
+    "sha256": "f1b01f01eb282866515cca7b7a18917461088dfa5fb3f6f3405da05c7d1fb117"
   },
   "pdks": {
     "sky130": {
@@ -82,15 +80,15 @@
       "rc_profiles": {
         "min": {
           "path": "fixtures/pdk/sky130-rc-min.json",
-          "sha256": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a"
+          "sha256": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d"
         },
         "nom": {
           "path": "fixtures/pdk/sky130-rc-nom.json",
-          "sha256": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27"
+          "sha256": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a"
         },
         "max": {
           "path": "fixtures/pdk/sky130-rc-max.json",
-          "sha256": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20"
+          "sha256": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e"
         }
       },
       "corners": [
@@ -123,11 +121,18 @@
         "openrcx_rules_ss": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
         "openrcx_rules_tt": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
         "physical_config": "8eae957b6f44b15b4732ccc54dbd94aae788cbf99464e07a2064d4df1c6e95f7",
-        "rc_profile_ff": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
-        "rc_profile_ss": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
-        "rc_profile_tt": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+        "rc_profile_ff": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+        "rc_profile_ss": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+        "rc_profile_tt": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
         "routing_profile": "f1420e3afbce37e77ad3ad56b939c2c7b2874f0befdb0a13df4d7e754c476051",
+        "sdc_cts": "1b2f13f03135503f10cf9854b32b6abd85a2da89e6dce47b18ebd5b4e39e80fb",
+        "sdc_postroute": "94a17dc2561e4f30d267fd3a9b084dd901706558f2294541c611af88f10c999f",
+        "sizing_profile": "e34b0154fdc16025a48e3797a4589f13aef17361c370eb3ac522d3ff75df76aa",
         "technology_lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519"
+      },
+      "sizing_profile": {
+        "path": "fixtures/pdk/sky130-sizing.json",
+        "sha256": "e34b0154fdc16025a48e3797a4589f13aef17361c370eb3ac522d3ff75df76aa"
       }
     },
     "gf180": {
@@ -137,11 +142,11 @@
       },
       "physical_config": {
         "path": "fixtures/designs/fifo/gf180-physical.json",
-        "sha256": "2bf97ec86f7c8da40d6f44c7c6ef6dc95d15865ff3d61a62a703b6d7278aa589"
+        "sha256": "196dfc0e59cb86ceb694fb401a6df2ecf853629b4cc6d50ca379c1f74db756f1"
       },
       "physical_profile": {
         "path": "fixtures/pdk/gf180-scale-physical.json",
-        "sha256": "86028af415baea77086e8223e51105010cca8647262950559d4aa64176e093a9"
+        "sha256": "f5433f833642f104eab4b2871889db5bd8ae5dec8fac400f0a5df9c6860f77e4"
       },
       "routing_config": {
         "path": "fixtures/pdk/gf180-scale-routing.json",
@@ -158,15 +163,15 @@
       "rc_profiles": {
         "min": {
           "path": "fixtures/pdk/gf180-rc-min.json",
-          "sha256": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c"
+          "sha256": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55"
         },
         "nom": {
           "path": "fixtures/pdk/gf180-rc-nom.json",
-          "sha256": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a"
+          "sha256": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4"
         },
         "max": {
           "path": "fixtures/pdk/gf180-rc-max.json",
-          "sha256": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635"
+          "sha256": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8"
         }
       },
       "corners": [
@@ -198,12 +203,19 @@
         "openrcx_rules_ff": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
         "openrcx_rules_ss": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
         "openrcx_rules_tt": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
-        "physical_config": "2bf97ec86f7c8da40d6f44c7c6ef6dc95d15865ff3d61a62a703b6d7278aa589",
-        "rc_profile_ff": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
-        "rc_profile_ss": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
-        "rc_profile_tt": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+        "physical_config": "196dfc0e59cb86ceb694fb401a6df2ecf853629b4cc6d50ca379c1f74db756f1",
+        "rc_profile_ff": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+        "rc_profile_ss": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+        "rc_profile_tt": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
         "routing_profile": "2e895962d5de944c4015aa2392f350567758b54239c4472072b515efe979f103",
+        "sdc_cts": "1b2f13f03135503f10cf9854b32b6abd85a2da89e6dce47b18ebd5b4e39e80fb",
+        "sdc_postroute": "94a17dc2561e4f30d267fd3a9b084dd901706558f2294541c611af88f10c999f",
+        "sizing_profile": "d79e4b7215bfb31b2c0e062e911446024a7ac4da4c3f2da97e70f1408707edc4",
         "technology_lef": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd"
+      },
+      "sizing_profile": {
+        "path": "fixtures/pdk/gf180-sizing.json",
+        "sha256": "d79e4b7215bfb31b2c0e062e911446024a7ac4da4c3f2da97e70f1408707edc4"
       }
     }
   },
@@ -217,10 +229,11 @@
   },
   "budgets": {
     "hold_margin_ns": 0.05,
+    "hold_eco_target_margin_ns": 0.07,
     "setup_margin_ns": 0.0,
     "hold_eco_setup_margin_ns": 0.05,
     "parity_ns": 0.001,
-    "max_hold_iterations": 4,
+    "max_hold_iterations": 8,
     "process_timeout_s": 600,
     "process_memory_mib": 2048,
     "max_wall_s": 3600,

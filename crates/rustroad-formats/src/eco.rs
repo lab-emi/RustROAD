@@ -1,10 +1,16 @@
 //! Typed, bounded netlist ECO on the flat structural Verilog AST.
 //!
-//! Two operations exist:
+//! Three operations exist:
 //! - `insert_buffer`: a non-inverting buffer cell is placed between the net
 //!   that currently feeds ONE named sink pin and that pin. The driver net keeps
 //!   every other sink; only the named connection is redirected to a new net.
 //! - `insert_diode`: an antenna diode cell is attached to a named net.
+//! - `resize_cell`: an existing instance keeps its name and every connection
+//!   and gets another master of the same sizing family (caller-supplied
+//!   families derived from Liberty: identical pins, directions, output
+//!   functions and sequential description). A master outside the family of
+//!   the current one, or a connection to a pin the family does not have, is
+//!   rejected.
 //!
 //! Every operation names its new instance and net explicitly. Names must be
 //! shell-safe handles (`[A-Za-z][A-Za-z0-9_]*`) and unique against every
@@ -83,6 +89,8 @@ pub enum EcoOp {
         instance: String,
         net: String,
     },
+    /// Replace the master of `instance` by `cell` of the same sizing family.
+    ResizeCell { instance: String, cell: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +120,16 @@ pub struct DiodeCell {
 /// Cell-LEF pin directions: master -> pin -> `INPUT` / `OUTPUT` / ...
 pub type PinDirections = BTreeMap<String, BTreeMap<String, String>>;
 
+/// Interchangeable masters (drive strengths) with their common pin set.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SizeFamily {
+    pub id: String,
+    /// Pin name -> Liberty direction (`input` / `output`), shared by every member.
+    pub pins: BTreeMap<String, String>,
+    pub cells: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EcoCells {
@@ -121,6 +139,9 @@ pub struct EcoCells {
     /// whose master/pin is missing here is refused (never assumed INPUT).
     #[serde(default)]
     pub pin_directions: PinDirections,
+    /// Sizing families `resize_cell` may move an instance within.
+    #[serde(default)]
+    pub families: Vec<SizeFamily>,
 }
 
 impl EcoCells {
@@ -151,6 +172,9 @@ pub struct AppliedOp {
     pub driver_net: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sink: Option<PinRef>,
+    /// The master before a `resize_cell`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_cell: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -161,6 +185,8 @@ pub struct EcoReport {
     pub instances_after: usize,
     pub buffers_inserted: usize,
     pub diodes_inserted: usize,
+    #[serde(default)]
+    pub cells_resized: usize,
     pub applied: Vec<AppliedOp>,
     /// Existing instances and wires are retained by name; nothing is renamed.
     pub renamed_objects: usize,
@@ -336,6 +362,16 @@ pub fn apply(
     if buffers.len() != cells.buffers.len() || diodes.len() != cells.diodes.len() {
         return Err(EcoError::Invalid("duplicate ECO cell entry".into()));
     }
+    let mut family_of: HashMap<&str, &SizeFamily> = HashMap::new();
+    for f in &cells.families {
+        for c in &f.cells {
+            if family_of.insert(c.as_str(), f).is_some() {
+                return Err(EcoError::Invalid(format!(
+                    "{c} is listed in more than one sizing family"
+                )));
+            }
+        }
+    }
     let mut out = netlist.clone();
     let mut taken: HashSet<String> = out
         .instances
@@ -364,7 +400,8 @@ pub fn apply(
         Ok(())
     };
     let mut applied = Vec::with_capacity(plan.operations.len());
-    let (mut nbuf, mut ndiode) = (0usize, 0usize);
+    let (mut nbuf, mut ndiode, mut nresized) = (0usize, 0usize, 0usize);
+    let mut resized: HashSet<String> = HashSet::new();
     for op in &plan.operations {
         match op {
             EcoOp::InsertBuffer {
@@ -432,6 +469,7 @@ pub fn apply(
                     net: net.clone(),
                     driver_net: expr_text(&driver),
                     sink: Some(sink.clone()),
+                    previous_cell: None,
                 });
             }
             EcoOp::InsertDiode {
@@ -464,18 +502,66 @@ pub fn apply(
                     net: net.clone(),
                     driver_net: expr_text(&signal),
                     sink: None,
+                    previous_cell: None,
+                });
+            }
+            EcoOp::ResizeCell { instance, cell } => {
+                let at = *index.get(instance).ok_or_else(|| {
+                    EcoError::Invalid(format!("resize instance {instance} absent"))
+                })?;
+                if at >= netlist.instances.len() {
+                    return Err(EcoError::Invalid(format!(
+                        "resize of {instance}: only instances of the input netlist can be resized"
+                    )));
+                }
+                if !resized.insert(instance.clone()) {
+                    return Err(EcoError::Invalid(format!(
+                        "{instance} is resized more than once in one plan"
+                    )));
+                }
+                let old = out.instances[at].cell.clone();
+                let family = family_of.get(old.as_str()).ok_or_else(|| {
+                    EcoError::Invalid(format!("{instance}: master {old} is in no sizing family"))
+                })?;
+                if !family.cells.iter().any(|c| c == cell) || *cell == old {
+                    return Err(EcoError::Invalid(format!(
+                        "{instance}: {cell} is not another member of {old}'s sizing family {}",
+                        family.id
+                    )));
+                }
+                if let Some(c) = out.instances[at]
+                    .connections
+                    .iter()
+                    .find(|c| !family.pins.contains_key(&c.pin))
+                {
+                    return Err(EcoError::Invalid(format!(
+                        "{instance}: pin {} is not a pin of sizing family {}",
+                        c.pin, family.id
+                    )));
+                }
+                out.instances[at].cell = cell.clone();
+                nresized += 1;
+                applied.push(AppliedOp {
+                    op: "resize_cell".into(),
+                    instance: instance.clone(),
+                    cell: cell.clone(),
+                    net: String::new(),
+                    driver_net: String::new(),
+                    sink: None,
+                    previous_cell: Some(old),
                 });
             }
         }
     }
     verilog::validate_netlist(&out, verilog_limits)?;
-    // Every original instance keeps its name and cell; every original wire stays.
+    // Every original instance keeps its name (and its cell unless resized);
+    // every original wire stays.
     debug_assert!(
         netlist
             .instances
             .iter()
             .zip(&out.instances)
-            .all(|(a, b)| a.name == b.name && a.cell == b.cell)
+            .all(|(a, b)| a.name == b.name && (a.cell == b.cell || resized.contains(&a.name)))
     );
     Ok((
         out.clone(),
@@ -486,6 +572,7 @@ pub fn apply(
             instances_after: out.instances.len(),
             buffers_inserted: nbuf,
             diodes_inserted: ndiode,
+            cells_resized: nresized,
             applied,
             renamed_objects: 0,
         },
@@ -576,6 +663,38 @@ endmodule
                 )
             })
             .collect(),
+            families: vec![
+                SizeFamily {
+                    id: "cellx".into(),
+                    pins: [("A", "input"), ("B", "input"), ("X", "output")]
+                        .iter()
+                        .map(|(p, d)| (p.to_string(), d.to_string()))
+                        .collect(),
+                    cells: vec!["cellx".into(), "cellx_4".into()],
+                },
+                SizeFamily {
+                    id: "dff".into(),
+                    pins: [("D", "input"), ("CLK", "input"), ("Q", "output")]
+                        .iter()
+                        .map(|(p, d)| (p.to_string(), d.to_string()))
+                        .collect(),
+                    cells: vec!["dff".into(), "dff_2".into()],
+                },
+                SizeFamily {
+                    id: "narrow".into(),
+                    pins: [("D", "input"), ("Q", "output")]
+                        .iter()
+                        .map(|(p, d)| (p.to_string(), d.to_string()))
+                        .collect(),
+                    cells: vec!["narrow_1".into(), "narrow_2".into()],
+                },
+            ],
+        }
+    }
+    fn resize(instance: &str, cell: &str) -> EcoOp {
+        EcoOp::ResizeCell {
+            instance: instance.into(),
+            cell: cell.into(),
         }
     }
     fn plan(operations: Vec<EcoOp>) -> EcoPlan {
@@ -853,5 +972,89 @@ endmodule
         .unwrap();
         assert_eq!(next_sequence(&out, "rr_eco_hold_"), 8);
         assert_eq!(next_sequence(&netlist(), "rr_eco_hold_"), 0);
+    }
+
+    #[test]
+    fn resize_keeps_name_and_connections_within_the_family() {
+        let (out, report) = run(vec![resize("g0", "cellx_4"), resize("r1", "dff_2")]).unwrap();
+        assert_eq!(report.cells_resized, 2);
+        assert_eq!(report.instances_before, report.instances_after);
+        let before = netlist();
+        for (a, b) in before.instances.iter().zip(&out.instances) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.connections, b.connections);
+        }
+        assert_eq!(out.instances[0].cell, "cellx_4");
+        assert_eq!(out.instances[3].cell, "dff_2");
+        assert_eq!(report.applied[0].previous_cell.as_deref(), Some("cellx"));
+        let mut text = Vec::new();
+        write_verilog(&out, &mut text).unwrap();
+        assert!(String::from_utf8(text).unwrap().contains("cellx_4 g0 ("));
+        // Another family, the same master, an unknown master, a double
+        // resize and a new (plan-inserted) instance are all refused.
+        for (ops, needle) in [
+            (vec![resize("g0", "dff_2")], "not another member"),
+            (vec![resize("g0", "cellx")], "not another member"),
+            (vec![resize("zz", "cellx_4")], "absent"),
+            (
+                vec![resize("g0", "cellx_4"), resize("g0", "cellx_4")],
+                "more than once",
+            ),
+            (
+                vec![
+                    buffer("dly_1", "e0", "e0_n", ("r0", "D")),
+                    resize("e0", "dly_1"),
+                ],
+                "only instances of the input netlist",
+            ),
+        ] {
+            let e = run(ops).unwrap_err().to_string();
+            assert!(e.contains(needle), "{e}");
+        }
+        // A master in no family, and a family that lacks a connected pin.
+        let mut c = cells();
+        c.families.retain(|f| f.id != "dff");
+        let e = apply(
+            &netlist(),
+            &plan(vec![resize("r0", "dff_2")]),
+            &c,
+            &EcoLimits::default(),
+            &VerilogLimits::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("in no sizing family"), "{e}");
+        let mut c = cells();
+        c.families.push(SizeFamily {
+            id: "dup".into(),
+            pins: BTreeMap::new(),
+            cells: vec!["dff".into()],
+        });
+        let e = apply(
+            &netlist(),
+            &plan(vec![resize("r0", "dff_2")]),
+            &c,
+            &EcoLimits::default(),
+            &VerilogLimits::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("more than one sizing family"), "{e}");
+        let mut c = cells();
+        for f in &mut c.families {
+            if f.id == "dff" {
+                f.pins.remove("CLK");
+            }
+        }
+        let e = apply(
+            &netlist(),
+            &plan(vec![resize("r0", "dff_2")]),
+            &c,
+            &EcoLimits::default(),
+            &VerilogLimits::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("pin CLK is not a pin"), "{e}");
     }
 }

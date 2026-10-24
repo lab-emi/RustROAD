@@ -549,6 +549,7 @@ fn inverting_profile_entries_are_refused() {
         &plan,
         &c.req.profile,
         None,
+        None,
         &c.d.join("x.v"),
     )
     .unwrap_err()
@@ -567,7 +568,7 @@ fn inverting_profile_entries_are_refused() {
         &json!({"schema": "rustroad.eco-plan.v1", "module": "top", "operations": [
             {"op": "insert_diode", "cell": "DIODE", "instance": "rr_eco_ant_0", "net": "a[1]"}]}),
     );
-    let r = apply_plan(&c.req.netlist, &plan, &good, None, &c.d.join("d.v")).unwrap();
+    let r = apply_plan(&c.req.netlist, &plan, &good, None, None, &c.d.join("d.v")).unwrap();
     assert_eq!(r.eco_report.diodes_inserted, 1);
     assert!(
         fs::read_to_string(c.d.join("d.v"))
@@ -699,7 +700,7 @@ fn apply_eco_refuses_an_output_pin_sink_and_a_foreign_cell_lef() {
              "sink": {"instance": "r0", "pin": "Q"}}]}),
     );
     let out = c.d.join("q.v");
-    let e = apply_plan(&c.req.netlist, &plan, &c.req.profile, None, &out)
+    let e = apply_plan(&c.req.netlist, &plan, &c.req.profile, None, None, &out)
         .unwrap_err()
         .to_string();
     assert!(
@@ -715,7 +716,7 @@ fn apply_eco_refuses_an_output_pin_sink_and_a_foreign_cell_lef() {
             {"op": "insert_buffer", "cell": "BUF1", "instance": "vx0", "net": "vx0_n",
              "sink": {"instance": "r0", "pin": "D"}}]}),
     );
-    apply_plan(&c.req.netlist, &ok, &c.req.profile, None, &out).unwrap();
+    apply_plan(&c.req.netlist, &ok, &c.req.profile, None, None, &out).unwrap();
     // A cell LEF other than the one the profile was built from is refused.
     let other = c.d.join("other.lef");
     fs::write(&other, CELL_LEF.replace("SIZE 1 BY 2", "SIZE 2 BY 2")).unwrap();
@@ -724,6 +725,7 @@ fn apply_eco_refuses_an_output_pin_sink_and_a_foreign_cell_lef() {
         &ok,
         &c.req.profile,
         Some(&other),
+        None,
         &c.d.join("o.v"),
     )
     .unwrap_err()
@@ -731,7 +733,7 @@ fn apply_eco_refuses_an_output_pin_sink_and_a_foreign_cell_lef() {
     assert!(e.starts_with("ECO_PIN_DIRECTIONS:"), "{e}");
     // A profile without a cell LEF cannot prove sink directions.
     let bare = write(&c.d, "bare.json", &default_profile());
-    let e = apply_plan(&c.req.netlist, &ok, &bare, None, &c.d.join("b.v"))
+    let e = apply_plan(&c.req.netlist, &ok, &bare, None, None, &c.d.join("b.v"))
         .unwrap_err()
         .to_string();
     assert!(e.contains("no cell_lef source"), "{e}");

@@ -4,15 +4,23 @@
   "sky130": "unverified"
  },
  "design": {
+  "clock": {
+   "name": "core",
+   "port": "clk"
+  },
   "manifest": "pipeline.json",
-  "manifest_sha256": "0552304acf38c04a4d6883640c5322c83ee55e0c11fe1d196301fa84ef577353",
+  "manifest_sha256": "d87d3e57b1b4dbe1c522847a54ec27122fdfde2cc3061daf7201a07de1f476ec",
   "name": "pipeline",
+  "pdks_unavailable": {},
+  "recipe": {
+   "floorplan": null,
+   "physical": "legacy"
+  },
+  "stretch": false,
   "top": "lane_smoke"
  },
- "exit_code": 1,
- "failed_items": [
-  "gf180:timing_accuracy"
- ],
+ "exit_code": 0,
+ "failed_items": [],
  "gating": [
   "inputs_frozen",
   "implementation",
@@ -43,6 +51,12 @@
  "global_statuses": {
   "budget_floors": {
    "floors": {
+    "budgets.hold_eco_target_margin_ns": {
+     "required": ">= budgets.hold_margin_ns (0.05)",
+     "rule": "the ECO hold target is the gate margin plus a guard band",
+     "status": "passed",
+     "value": 0.05
+    },
     "budgets.hold_margin_ns": {
      "required": ">= 0.05",
      "rule": "hold >= +0.05 ns at tt/ss/ff (owner decision)",
@@ -104,18 +118,18 @@
      "status": "passed"
     },
     "pdks.gf180.rc_profiles.max": {
-     "actual": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
-     "expected": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+     "actual": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+     "expected": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
      "status": "passed"
     },
     "pdks.gf180.rc_profiles.min": {
-     "actual": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
-     "expected": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+     "actual": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+     "expected": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
      "status": "passed"
     },
     "pdks.gf180.rc_profiles.nom": {
-     "actual": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
-     "expected": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+     "actual": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+     "expected": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
      "status": "passed"
     },
     "pdks.gf180.routing_config": {
@@ -144,18 +158,18 @@
      "status": "passed"
     },
     "pdks.sky130.rc_profiles.max": {
-     "actual": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
-     "expected": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+     "actual": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+     "expected": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
      "status": "passed"
     },
     "pdks.sky130.rc_profiles.min": {
-     "actual": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
-     "expected": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+     "actual": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+     "expected": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
      "status": "passed"
     },
     "pdks.sky130.rc_profiles.nom": {
-     "actual": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
-     "expected": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+     "actual": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+     "expected": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
      "status": "passed"
     },
     "pdks.sky130.routing_config": {
@@ -184,18 +198,18 @@
      "status": "passed"
     },
     "tools": {
-     "actual": "fbccb5609e2a633930718c1cfcd23adb1df9b086bc5d251a0f14f807a441be6a",
-     "expected": "fbccb5609e2a633930718c1cfcd23adb1df9b086bc5d251a0f14f807a441be6a",
+     "actual": "f1b01f01eb282866515cca7b7a18917461088dfa5fb3f6f3405da05c7d1fb117",
+     "expected": "f1b01f01eb282866515cca7b7a18917461088dfa5fb3f6f3405da05c7d1fb117",
      "status": "passed"
     }
    },
    "status": "passed"
   },
   "manifest_provenance": {
-   "head": "05fca8dce3a1b68182f0b065bf52350931671c8a",
-   "head_blob": "b5e6d329357c141a475054b8939131ac71339c36",
+   "head": "0acb28a11a8319941564b82c0b12f91b07e64a21",
+   "head_blob": "577e8b618b08d233640b40e22d07e5281e5db91f",
    "status": "passed",
-   "worktree_blob": "b5e6d329357c141a475054b8939131ac71339c36"
+   "worktree_blob": "577e8b618b08d233640b40e22d07e5281e5db91f"
   },
   "openroad_image": {
    "image": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
@@ -219,18 +233,22 @@
    }
   }
  },
+ "not_applicable_items": [],
+ "not_applicable_rules": {
+  "mpw_min_period": "combinational design (no clock port, virtual I/O clock only): no sequential or clocked cell, RustSTA pulse_width_status unconstrained with zero pulse-width and period rows, OpenSTA zero min-pulse-width and period rows at every corner"
+ },
  "pdks": [
   {
    "binding": {
-    "artifacts": 53,
-    "digest": "23132cc6a2f1b94c9e5510b6c760540f63c644a0a32837347bb2e62095092d83",
+    "artifacts": 55,
+    "digest": "8d5795183fb85b4f276d5996b01dcc6f6b4465553f019eaefca35b63356c68b0",
     "revision": {
-     "branch": "feat/rtl2gds-gate",
+     "branch": "feat/rtl2gds-final",
      "dirty": false,
      "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
      "dirty_paths": 0,
-     "head": "05fca8dce3a1b68182f0b065bf52350931671c8a",
-     "rustroad_sha256": "2f7254d6196e420a558ddad300ff9137cc066014dce54b29209648a0b8a3cb37"
+     "head": "0acb28a11a8319941564b82c0b12f91b07e64a21",
+     "rustroad_sha256": "2911f28b20a26e273a426e45917cddad3ff3e1e8d2a1475f9a9ca212de70b3af"
     }
    },
    "details": {
@@ -247,32 +265,32 @@
      "native": {
       "ff": {
        "opensta": {
-        "worst_hold_ns": 0.114743828773,
-        "worst_setup_ns": 9.330951690674
+        "worst_hold_ns": 0.114521495998,
+        "worst_setup_ns": 9.327614784241
        },
        "ruststa": {
-        "worst_hold_ns": 0.11482004310524119,
-        "worst_setup_ns": 9.331024335334105
+        "worst_hold_ns": 0.1145345107710859,
+        "worst_setup_ns": 9.327687344763392
        }
       },
       "ss": {
        "opensta": {
-        "worst_hold_ns": 0.066504999995,
-        "worst_setup_ns": 8.501899719238
+        "worst_hold_ns": 0.064465686679,
+        "worst_setup_ns": 8.490673065186
        },
        "ruststa": {
-        "worst_hold_ns": 0.06668937367053535,
-        "worst_setup_ns": 8.502194665719463
+        "worst_hold_ns": 0.06458005468294642,
+        "worst_setup_ns": 8.49097311883781
        }
       },
       "tt": {
        "opensta": {
-        "worst_hold_ns": 0.081645108759,
-        "worst_setup_ns": 9.092730522156
+        "worst_hold_ns": 0.080875143409,
+        "worst_setup_ns": 9.087491035461
        },
        "ruststa": {
-        "worst_hold_ns": 0.08168690202739198,
-        "worst_setup_ns": 9.092872351548378
+        "worst_hold_ns": 0.08091612984406826,
+        "worst_setup_ns": 9.08763419145182
        }
       }
      },
@@ -283,7 +301,7 @@
         "worst_setup_ns": 9.33039855957
        },
        "ruststa": {
-        "worst_hold_ns": 0.11155408069300132,
+        "worst_hold_ns": 0.1115143354068277,
         "worst_setup_ns": 9.33054703505653
        }
       },
@@ -293,8 +311,8 @@
         "worst_setup_ns": 8.495097160339
        },
        "ruststa": {
-        "worst_hold_ns": 0.05577862255691668,
-        "worst_setup_ns": 8.494655904591973
+        "worst_hold_ns": 0.05572219757125679,
+        "worst_setup_ns": 8.494776616860188
        }
       },
       "tt": {
@@ -328,13 +346,13 @@
        "violating_endpoints": 0,
        "whs_ns": 0.0,
        "wns_ns": 0.0,
-       "worst_hold_slack_ns": 0.06668937367053535,
-       "worst_max_capacitance_slack_pf": 0.05315841041572,
+       "worst_hold_slack_ns": 0.06458005468294642,
+       "worst_max_capacitance_slack_pf": 0.05259049386304,
        "worst_max_fanout_slack": 0.0,
-       "worst_max_transition_slack_ns": 0.7476626252074932,
+       "worst_max_transition_slack_ns": 0.7412617775028834,
        "worst_min_period_slack_ns": null,
-       "worst_min_pulse_width_slack_ns": 4.264822626819572,
-       "worst_setup_slack_ns": 8.502194665719463
+       "worst_min_pulse_width_slack_ns": 4.253079364361682,
+       "worst_setup_slack_ns": 8.49097311883781
       },
       "scope": {
        "backend": "cpu",
@@ -381,13 +399,13 @@
        "violating_endpoints": 0,
        "whs_ns": 0.0,
        "wns_ns": 0.0,
-       "worst_hold_slack_ns": 0.05577862255691668,
+       "worst_hold_slack_ns": 0.05572219757125679,
        "worst_max_capacitance_slack_pf": 0.0528722931,
        "worst_max_fanout_slack": 0.0,
        "worst_max_transition_slack_ns": 0.7444503596363543,
        "worst_min_period_slack_ns": null,
-       "worst_min_pulse_width_slack_ns": 4.247837886909442,
-       "worst_setup_slack_ns": 8.494655904591973
+       "worst_min_pulse_width_slack_ns": 4.247663739182237,
+       "worst_setup_slack_ns": 8.494776616860188
       },
       "scope": {
        "backend": "cpu",
@@ -469,23 +487,26 @@
      ]
     },
     "artifact_binding": {
-     "artifacts": 53,
+     "artifacts": 55,
      "changed": [],
-     "digest": "23132cc6a2f1b94c9e5510b6c760540f63c644a0a32837347bb2e62095092d83",
+     "digest": "8d5795183fb85b4f276d5996b01dcc6f6b4465553f019eaefca35b63356c68b0",
      "status": "passed"
     },
     "cec_final": {
+     "exhaustive": null,
      "rustsys": {
       "exit_code": 0,
       "status": "passed",
       "supply_ports": []
      },
+     "second_oracle": "Yosys equiv_simple",
      "status": "passed",
      "yosys": {
       "status": "passed"
      }
     },
     "cec_powered": {
+     "exhaustive": null,
      "filtering": {
       "physical_only": {
        "by_master": {
@@ -497,6 +518,10 @@
        },
        "removed_instances": 123,
        "rule": "cell-policy physical_only masters without any LEF OUTPUT pin"
+      },
+      "rail_constants": {
+       "rail_tied_signal_pins": [],
+       "rule": "signal pin on a supply rail -> that rail's constant"
       },
       "supply_ports": [
        "VDD",
@@ -518,17 +543,20 @@
        "VSS"
       ]
      },
+     "second_oracle": "Yosys equiv_simple",
      "status": "passed",
      "yosys": {
       "status": "passed"
      }
     },
     "cec_prelayout": {
+     "exhaustive": null,
      "rustsys": {
       "exit_code": 0,
       "status": "passed",
       "supply_ports": []
      },
+     "second_oracle": "Yosys equiv_simple",
      "status": "passed",
      "yosys": {
       "status": "passed"
@@ -573,6 +601,12 @@
     "controls": {
      "controls": {
       "antenna_planted": {
+       "candidates": [
+        "en",
+        "a[0]",
+        "a[1]",
+        "b[0]"
+       ],
        "deck": {
         "by_rule": {
          "metal3": 1
@@ -586,9 +620,9 @@
        "length_um": 600,
        "margin_check": {
         "conservative": true,
-        "magic_max_ratio": 856.207,
-        "native_ratio": 810.5179797979797,
-        "native_ratio_over_keep": 900.5755331088664
+        "magic_max_ratio": 4194.11,
+        "native_ratio": 3970.6031746031745,
+        "native_ratio_over_keep": 4411.781305114639
        },
        "native": {
         "status": "violated",
@@ -597,43 +631,15 @@
           "kind": "side_area",
           "layer": "met3",
           "limit": 400.0,
-          "net": "b[1]",
-          "ratio": 810.5179797979797,
+          "net": "en",
+          "ratio": 3970.6031746031745,
           "rule": "ANTENNADIFFSIDEAREARATIO"
          }
         ]
        },
        "oracle": "native check-antenna and the foundry antenna deck",
-       "peak_rss_kib": 71712,
-       "port": "b[1]"
-      },
-      "bad_rtl": {
-       "cosim": {
-        "mismatches": [
-         "RR_COSIM_MISMATCH cycle=0 phase=0 port=y gold=01 gate=00",
-         "RR_COSIM_MISMATCH cycle=0 phase=1 port=y gold=01 gate=00",
-         "RR_COSIM_MISMATCH cycle=1 phase=0 port=y gold=01 gate=00"
-        ],
-        "status": "failed"
-       },
-       "detected": true,
-       "expected": "failed",
-       "files": [
-        "0_pipeline.v",
-        "rr_mutant_top.v"
-       ],
-       "mutation": "output bit y[0] inverted by a wrapper around the renamed top",
-       "oracle": "RustSys check synth, Yosys equiv and the random co-simulation",
-       "rustsys": {
-        "exit_code": 3,
-        "reason": "RustSys check synth verdict 'not-equivalent' (exit 3)",
-        "status": "failed",
-        "supply_ports": []
-       },
-       "yosys": {
-        "reason": "Yosys equiv: 1 unproven $equiv cells",
-        "status": "failed"
-       }
+       "peak_rss_kib": 72628,
+       "port": "en"
       },
       "drc_spacing": {
        "by_rule": {
@@ -652,7 +658,7 @@
        "expected": "failed",
        "gap_um": 0.1,
        "oracle": "Magic DRC and KLayout DRC",
-       "peak_rss_kib": 413300,
+       "peak_rss_kib": 415172,
        "planted": [
         "(20000,2000;20600,3000)",
         "(20700,2000;21300,3000)"
@@ -660,6 +666,31 @@
        "statuses": {
         "drc_klayout": "failed",
         "drc_magic": "failed"
+       }
+      },
+      "inverted_output": {
+       "cosim": {
+        "mismatches": [
+         "RR_COSIM_MISMATCH cycle=0 phase=0 port=y gold=00 gate=01",
+         "RR_COSIM_MISMATCH cycle=0 phase=1 port=y gold=00 gate=01",
+         "RR_COSIM_MISMATCH cycle=1 phase=0 port=y gold=00 gate=01"
+        ],
+        "status": "failed"
+       },
+       "detected": true,
+       "exhaustive": null,
+       "expected": "failed",
+       "mutation": "output bit y[0] driven through sky130_fd_sc_hd__inv_1 rr_mut",
+       "oracle": "RustSys check synth, Yosys equiv_simple and the random co-simulation",
+       "rustsys": {
+        "exit_code": 3,
+        "reason": "RustSys check synth verdict 'not-equivalent' (exit 3)",
+        "status": "failed",
+        "supply_ports": []
+       },
+       "yosys": {
+        "reason": "Yosys equiv: 1 unproven $equiv cells",
+        "status": "failed"
        }
       },
       "label_swap": {
@@ -680,7 +711,7 @@
          "final result 'Top level cell failed pin matching.'"
         ]
        },
-       "peak_rss_kib": 407588,
+       "peak_rss_kib": 408756,
        "statuses": {
         "lvs_klayout": "failed",
         "lvs_netgen": "failed",
@@ -694,7 +725,7 @@
        "expected": "failed",
        "oracle": "tool identity preflight (missing -> unverified, exit 3)",
        "pdk_items_run": 0,
-       "peak_rss_kib": 43064,
+       "peak_rss_kib": 41628,
        "status": "unverified",
        "tools_identity": {
         "reason": "tool identity: {'yosys': 'missing'}",
@@ -723,30 +754,30 @@
         "*:budget_floors"
        ],
        "manifest_provenance": {
-        "reason": ".work/runs/r1-a/sky130_controls/relaxed_manifest/relaxed-design.json is not tracked at HEAD",
+        "reason": ".work/runs/E3-pipeline/sky130_controls/relaxed_manifest/relaxed-design.json is not tracked at HEAD",
         "status": "unverified"
        },
        "oracle": "budget floors (owner thresholds) and manifest provenance (git-tracked at HEAD)",
        "pdk_items_run": 0,
-       "peak_rss_kib": 42288,
+       "peak_rss_kib": 42696,
        "status": "failed"
       },
       "removed_hold_cell": {
        "detected": true,
        "expected": "failed",
-       "iteration0_hold_ns": -0.09978928425284511,
+       "iteration0_hold_ns": -0.10804453866321856,
        "margin_ns": 0.05,
-       "opensta_worst_hold_ns": -0.0898758322,
+       "opensta_worst_hold_ns": -0.091031432152,
        "oracle": "RustSTA and OpenSTA hold gate on a fresh layout",
-       "peak_rss_kib": 120284,
+       "peak_rss_kib": 120580,
        "processes": 24,
        "removed": [
         "rr_eco_hold_0"
        ],
        "ruststa_worst_hold_ns": {
-        "ff": 0.06135925410347859,
-        "ss": -0.08976051683696268,
-        "tt": 0.003348758333624413
+        "ff": 0.06127292928544059,
+        "ss": -0.09091585358784299,
+        "tt": 0.0030100465421948885
        },
        "sink": "r0/D",
        "worst_corner": "ss"
@@ -774,7 +805,7 @@
          "1 pins without a matching pin: ['layout-only y[1]']"
         ]
        },
-       "peak_rss_kib": 407332,
+       "peak_rss_kib": 407616,
        "removed": "VIA_L1M1_PR",
        "statuses": {
         "lvs_klayout": "failed",
@@ -809,21 +840,21 @@
       "tampered_spef": {
        "binding": {
         "ss": {
-         "actual": "bef5be0b1d46cdd162a34c25796e531bee3f62dd91723c32b954dd2a35e1222a",
-         "expected": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03"
+         "actual": "9d24e7f91165352d80f922b1fb425022c7fe9773c45b79e8f6595fa764c8b489",
+         "expected": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3"
         }
        },
        "detected": true,
        "expected": "failed",
        "factor": 1000.0,
        "oracle": "SPEF identity against the extraction receipt",
-       "peak_rss_kib": 120140,
+       "peak_rss_kib": 120852,
        "resistors_scaled": 229,
        "timing_effect": {
-        "bound_worst_hold_ns": 0.06668937367053535,
-        "bound_worst_setup_ns": 8.502194665719463,
-        "worst_hold_ns": 0.20706344269052757,
-        "worst_setup_ns": 7.017652404317654
+        "bound_worst_hold_ns": 0.06458005468294642,
+        "bound_worst_setup_ns": 8.49097311883781,
+        "worst_hold_ns": 0.20322865868629547,
+        "worst_setup_ns": 6.979253578662555
        }
       }
      },
@@ -893,26 +924,26 @@
       },
       "routes": {
        "normalization": [],
-       "other_sha256": "0aae964c1c1b84d6acdfb77e31b40f1a506f101832d123e80fc711a066f78232",
-       "sha256": "0aae964c1c1b84d6acdfb77e31b40f1a506f101832d123e80fc711a066f78232",
+       "other_sha256": "0d81c9be796cb29a4137ee5e95f94af403fa8eccb70045f762f9aae65b1fb589",
+       "sha256": "0d81c9be796cb29a4137ee5e95f94af403fa8eccb70045f762f9aae65b1fb589",
        "status": "passed"
       },
       "spef.native.ff": {
        "normalization": [],
-       "other_sha256": "696da4d6167fe9eeba30e375e6c8d0db0663ee13b820cffebed9aa0f334ed3dd",
-       "sha256": "696da4d6167fe9eeba30e375e6c8d0db0663ee13b820cffebed9aa0f334ed3dd",
+       "other_sha256": "32f038661aa5d239f5b2c9cd2a9c85685012f1147990601054e12fd5eafb44b1",
+       "sha256": "32f038661aa5d239f5b2c9cd2a9c85685012f1147990601054e12fd5eafb44b1",
        "status": "passed"
       },
       "spef.native.ss": {
        "normalization": [],
-       "other_sha256": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03",
-       "sha256": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03",
+       "other_sha256": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3",
+       "sha256": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3",
        "status": "passed"
       },
       "spef.native.tt": {
        "normalization": [],
-       "other_sha256": "186878729bcc79a9ce65b5ea2f2af7481ec75ed9805f8a316829f46bb7e2d50d",
-       "sha256": "186878729bcc79a9ce65b5ea2f2af7481ec75ed9805f8a316829f46bb7e2d50d",
+       "other_sha256": "2f82fbb657d709ebc0ee354e218347cf516b434718aeb95a4cd9fcd1764de234",
+       "sha256": "2f82fbb657d709ebc0ee354e218347cf516b434718aeb95a4cd9fcd1764de234",
        "status": "passed"
       },
       "spef.openrcx.ff": {
@@ -967,7 +998,7 @@
          "unit": "ns",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.8434940049685569
+         "worst_slack": 0.8402418862930086
         },
         {
          "checked": 23,
@@ -979,7 +1010,7 @@
          "unit": "pF",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.10181263644149
+         "worst_slack": 0.101335251498235
         },
         {
          "checked": 23,
@@ -1003,7 +1034,7 @@
          "unit": "ns",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.7476626252074932
+         "worst_slack": 0.7412617775028834
         },
         {
          "checked": 23,
@@ -1015,7 +1046,7 @@
          "unit": "pF",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.05315841041572
+         "worst_slack": 0.05259049386304
         },
         {
          "checked": 23,
@@ -1039,7 +1070,7 @@
          "unit": "ns",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.8860755018824966
+         "worst_slack": 0.8839913501528069
         },
         {
          "checked": 23,
@@ -1051,7 +1082,7 @@
          "unit": "pF",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.14444376201965
+         "worst_slack": 0.14397497871383402
         },
         {
          "checked": 23,
@@ -1152,7 +1183,7 @@
          "unit": "ns",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.885322887397457
+         "worst_slack": 0.8853228873974579
         },
         {
          "checked": 23,
@@ -1189,16 +1220,16 @@
       "binding": {
        "files": {
         "ff": {
-         "actual": "696da4d6167fe9eeba30e375e6c8d0db0663ee13b820cffebed9aa0f334ed3dd",
-         "expected": "696da4d6167fe9eeba30e375e6c8d0db0663ee13b820cffebed9aa0f334ed3dd"
+         "actual": "32f038661aa5d239f5b2c9cd2a9c85685012f1147990601054e12fd5eafb44b1",
+         "expected": "32f038661aa5d239f5b2c9cd2a9c85685012f1147990601054e12fd5eafb44b1"
         },
         "ss": {
-         "actual": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03",
-         "expected": "9b66aff4095c4e328e38bf87cfdfdcb0103a77c9be74f64354177ca4a5ff9c03"
+         "actual": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3",
+         "expected": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3"
         },
         "tt": {
-         "actual": "186878729bcc79a9ce65b5ea2f2af7481ec75ed9805f8a316829f46bb7e2d50d",
-         "expected": "186878729bcc79a9ce65b5ea2f2af7481ec75ed9805f8a316829f46bb7e2d50d"
+         "actual": "2f82fbb657d709ebc0ee354e218347cf516b434718aeb95a4cd9fcd1764de234",
+         "expected": "2f82fbb657d709ebc0ee354e218347cf516b434718aeb95a4cd9fcd1764de234"
         }
        },
        "status": "passed"
@@ -1230,16 +1261,16 @@
       "binding": {
        "files": {
         "ff": {
-         "actual": "1e8d1bbf694c509cfe7d010f2db11acf56259b259d0d915cb525965e70f36ba9",
-         "expected": "1e8d1bbf694c509cfe7d010f2db11acf56259b259d0d915cb525965e70f36ba9"
+         "actual": "68b9564a1bb843349f68de775d6f8b450119c126fbb302e762cd98b3f9a19861",
+         "expected": "68b9564a1bb843349f68de775d6f8b450119c126fbb302e762cd98b3f9a19861"
         },
         "ss": {
-         "actual": "c1af9f8f8e16cac531a9a1ae3a1b82241e9ae649a94f6b7bf5d7a0a55c539501",
-         "expected": "c1af9f8f8e16cac531a9a1ae3a1b82241e9ae649a94f6b7bf5d7a0a55c539501"
+         "actual": "cd43d7d75c74929e483a4d85dc516fe82c820c7d8d4b35a52d268596e69bb226",
+         "expected": "cd43d7d75c74929e483a4d85dc516fe82c820c7d8d4b35a52d268596e69bb226"
         },
         "tt": {
-         "actual": "18532c29812c0e4ab4381f2597463786b8076e787f5d59b77f130f2cd257d374",
-         "expected": "18532c29812c0e4ab4381f2597463786b8076e787f5d59b77f130f2cd257d374"
+         "actual": "cdf1ce5ebd27c03ee6866c6b53778c94528c1c340c3117b0d8424bf4fe6fdfd4",
+         "expected": "cdf1ce5ebd27c03ee6866c6b53778c94528c1c340c3117b0d8424bf4fe6fdfd4"
         }
        },
        "status": "passed"
@@ -1274,11 +1305,13 @@
     },
     "hold_closure": {
      "decision_spef": "native rustroad extract",
+     "gate_hold_margin_ns": 0.05,
      "iterations": [
       {
        "antenna": "violated",
        "antenna_eco": null,
        "closed": false,
+       "drv": null,
        "hold_eco": {
         "area_um2": 11.2608,
         "cells": 3,
@@ -1286,18 +1319,20 @@
         "violating_sinks": 3
        },
        "iteration": 0,
+       "size_eco": null,
+       "stopped": null,
        "worst": {
         "ff": {
-         "hold_ns": 0.05735932066806454,
-         "setup_ns": 9.339369659157182
+         "hold_ns": 0.054580616285746286,
+         "setup_ns": 9.334751870799183
         },
         "ss": {
-         "hold_ns": -0.09978928425284511,
-         "setup_ns": 8.531039603787493
+         "hold_ns": -0.10804453866321856,
+         "setup_ns": 8.516792008718205
         },
         "tt": {
-         "hold_ns": -0.004488460950211437,
-         "setup_ns": 9.108091438990504
+         "hold_ns": -0.009019205285610843,
+         "setup_ns": 9.100921822132163
         }
        }
       },
@@ -1305,6 +1340,7 @@
        "antenna": "passed",
        "antenna_eco": null,
        "closed": false,
+       "drv": null,
        "hold_eco": {
         "area_um2": 3.7536,
         "cells": 1,
@@ -1312,18 +1348,20 @@
         "violating_sinks": 1
        },
        "iteration": 1,
+       "size_eco": null,
+       "stopped": null,
        "worst": {
         "ff": {
-         "hold_ns": 0.09299096803448881,
-         "setup_ns": 9.327346413538992
+         "hold_ns": 0.09425765746188436,
+         "setup_ns": 9.325215783582586
         },
         "ss": {
-         "hold_ns": 0.029940836171536034,
-         "setup_ns": 8.487163684374442
+         "hold_ns": 0.03553523034149397,
+         "setup_ns": 8.481044765544477
         },
         "tt": {
-         "hold_ns": 0.06410080779536032,
-         "setup_ns": 9.087608219627477
+         "hold_ns": 0.06688773549470428,
+         "setup_ns": 9.084571978987004
         }
        }
       },
@@ -1331,32 +1369,239 @@
        "antenna": "passed",
        "antenna_eco": null,
        "closed": true,
+       "drv": null,
        "hold_eco": null,
        "iteration": 2,
+       "size_eco": null,
+       "stopped": null,
        "worst": {
         "ff": {
-         "hold_ns": 0.11482004310524119,
-         "setup_ns": 9.331024335334105
+         "hold_ns": 0.1145345107710859,
+         "setup_ns": 9.327687344763392
         },
         "ss": {
-         "hold_ns": 0.06668937367053535,
-         "setup_ns": 8.502194665719463
+         "hold_ns": 0.06458005468294642,
+         "setup_ns": 8.49097311883781
         },
         "tt": {
-         "hold_ns": 0.08168690202739198,
-         "setup_ns": 9.092872351548378
+         "hold_ns": 0.08091612984406826,
+         "setup_ns": 9.08763419145182
         }
        }
       }
      ],
      "max_iterations": 4,
+     "sizing": false,
      "status": "passed",
      "target_margin_ns": 0.05
     },
     "implementation": {
+     "clock_tree": {
+      "body_bias_status": "tap_inserted_contact_unverified",
+      "cells": 140,
+      "clock_buffers": 3,
+      "clock_constraint_status": "explicit_sdc",
+      "clock_topology_status": "unrouted_topology_checked",
+      "connectivity_status": "linked_unverified",
+      "corner": "not_applicable",
+      "design": "lane_smoke",
+      "diagnostics": [
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units TIME (first line 23): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units CAPACITANCE (first line 24): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units RESISTANCE (first line 25): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library USEMINSPACING (first line 30): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "property_definitions LAYER (first line 33): Property schema is not interpreted; property uses produce separate diagnostics",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer PROPERTY (first line 52): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 2,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer SPACINGTABLE (first line 73): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer THICKNESS (first line 77): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer EDGECAPACITANCE (first line 78): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer CAPACITANCE (first line 79): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer RESISTANCE (first line 80): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 11,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNAMODEL (first line 82): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNADIFFSIDEAREARATIO (first line 83): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNADIFFAREARATIO (first line 95): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DCCURRENTDENSITY (first line 96): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 10,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer MINENCLOSEDAREA (first line 116): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 2,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ACCURRENTDENSITY (first line 124): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer MAXIMUMDENSITY (first line 125): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DENSITYCHECKWINDOW (first line 126): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DENSITYCHECKSTEP (first line 127): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "via_rule VIARULE (first line 310): Via generation rule is not modeled; routing/via DRC remain unchecked",
+        "occurrences": 25,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library NOWIREEXTENSIONATPIN (first line 2): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "macro FOREIGN (first line 7): FOREIGN is retained for GDS cell binding (checked by export-gds); import uses LEF geometry only",
+        "occurrences": 437,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "pin ANTENNAGATEAREA (first line 15): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 1314,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "pin ANTENNADIFFAREA (first line 88): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 450,
+        "source": "cell_lef"
+       },
+       {
+        "code": "PHYSICAL_SIGNOFF_UNCHECKED",
+        "message": "Primary metal rails/spines/vias and I/O geometry are generated and locally checked; well/tap continuity, DRC, IR/EM and extracted timing are not verified by this pass",
+        "occurrences": 1,
+        "source": "physical_preparation"
+       }
+      ],
+      "drc_status": "unchecked",
+      "expansions": 180,
+      "filler_cells": 91,
+      "inserted_tie_cells": 0,
+      "io_placement_status": "placed_geometry_checked",
+      "lvs_status": "unchecked",
+      "masters": 12,
+      "nets": 25,
+      "pins": 552,
+      "placement_status": "placed_unverified",
+      "power_grid_status": "primary_grid_generated",
+      "rail_continuity_status": "geometry_checked",
+      "revision": "rev3",
+      "routed_nets": null,
+      "routing_expansions": null,
+      "routing_segments": null,
+      "routing_status": "not_run",
+      "rows": 8,
+      "stage": "placed",
+      "tap_cells": 32,
+      "tap_placement_status": "geometry_checked",
+      "unconstrained_endpoints": null,
+      "wire_model": "none"
+     },
      "final_iteration": 2,
+     "floorplan_reproduced": null,
      "iterations": 3,
      "patches": 5,
+     "placement": null,
+     "recipe": "legacy",
+     "renamed_escaped_wires": 0,
+     "route": {
+      "cells": 140,
+      "filler_cells": 91,
+      "routed_nets": 23,
+      "routing_expansions": 803753,
+      "routing_segments": 6266,
+      "tap_cells": 32
+     },
      "routed_nets": 23,
      "status": "passed",
      "vias": 109,
@@ -1427,18 +1672,18 @@
         "status": "passed"
        },
        "rc_profile_ff": {
-        "actual": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
-        "expected": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+        "actual": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+        "expected": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
         "status": "passed"
        },
        "rc_profile_ss": {
-        "actual": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
-        "expected": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+        "actual": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+        "expected": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
         "status": "passed"
        },
        "rc_profile_tt": {
-        "actual": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
-        "expected": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+        "actual": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+        "expected": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
         "status": "passed"
        },
        "routing_profile": {
@@ -1528,18 +1773,18 @@
         "status": "passed"
        },
        "rc_profile_ff": {
-        "actual": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
-        "expected": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+        "actual": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+        "expected": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
         "status": "passed"
        },
        "rc_profile_ss": {
-        "actual": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
-        "expected": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+        "actual": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+        "expected": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
         "status": "passed"
        },
        "rc_profile_tt": {
-        "actual": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
-        "expected": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+        "actual": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+        "expected": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
         "status": "passed"
        },
        "routing_profile": {
@@ -1584,6 +1829,7 @@
     "mpw_min_period": {
      "by_spef": {
       "native": {
+       "async_set_clear_pins_unchecked": null,
        "min_period_note": "no Liberty minimum_period constraint on the clocked cells (both engines report none)",
        "min_period_rows": {
         "opensta": 0,
@@ -1593,9 +1839,10 @@
        "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
        "status": "passed",
        "worst_min_period_slack_ns": null,
-       "worst_min_pulse_width_slack_ns": 4.264822626819572
+       "worst_min_pulse_width_slack_ns": 4.253079364361682
       },
       "openrcx": {
+       "async_set_clear_pins_unchecked": null,
        "min_period_note": "no Liberty minimum_period constraint on the clocked cells (both engines report none)",
        "min_period_rows": {
         "opensta": 0,
@@ -1605,7 +1852,7 @@
        "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
        "status": "passed",
        "worst_min_period_slack_ns": null,
-       "worst_min_pulse_width_slack_ns": 4.247837886909442
+       "worst_min_pulse_width_slack_ns": 4.247663739182237
       }
      },
      "status": "passed"
@@ -1628,6 +1875,7 @@
      },
      "seed": "0x5eed2026c0ffee01",
      "status": "passed",
+     "stimulus": "xorshift64 random",
      "vectors": 4096
     },
     "timing_accuracy": {
@@ -1656,57 +1904,57 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 8.079338653044221e-05,
+          "max_difference_ns": 8.141825458296559e-05,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
            {
-            "difference_ns": 8.079338653044221e-05,
+            "difference_ns": 8.141825458296559e-05,
             "endpoint": "y[0]",
             "kind": "hold",
-            "opensta_ns": 0.541753351688,
-            "ruststa_ns": 0.5416725583014695
+            "opensta_ns": 0.544350147247,
+            "ruststa_ns": 0.5442687289924171
            },
            {
-            "difference_ns": 7.621433224118401e-05,
-            "endpoint": "r0/D",
-            "kind": "hold",
-            "opensta_ns": 0.114743828773,
-            "ruststa_ns": 0.11482004310524119
-           },
-           {
-            "difference_ns": 7.264466010425963e-05,
+            "difference_ns": 7.256052239235089e-05,
             "endpoint": "y[0]",
             "kind": "setup",
-            "opensta_ns": 9.330951690674,
-            "ruststa_ns": 9.331024335334105
+            "opensta_ns": 9.327614784241,
+            "ruststa_ns": 9.327687344763392
            },
            {
-            "difference_ns": 7.237274094151758e-05,
+            "difference_ns": 6.533856215007461e-05,
             "endpoint": "z[0]",
             "kind": "setup",
-            "opensta_ns": 9.405314445496,
-            "ruststa_ns": 9.405386818236941
+            "opensta_ns": 9.404953956604,
+            "ruststa_ns": 9.40501929516615
            },
            {
-            "difference_ns": 6.195010485932073e-05,
-            "endpoint": "r3/D",
-            "kind": "setup",
-            "opensta_ns": 9.521611213684,
-            "ruststa_ns": 9.521549263579141
-           },
-           {
-            "difference_ns": 6.013507784108363e-05,
+            "difference_ns": 5.808675177809697e-05,
             "endpoint": "z[0]",
             "kind": "hold",
-            "opensta_ns": 0.466151744127,
-            "ruststa_ns": 0.4660916090491589
+            "opensta_ns": 0.466627985239,
+            "ruststa_ns": 0.4665698984872219
+           },
+           {
+            "difference_ns": 4.5712558653765445e-05,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 0.461339473724,
+            "ruststa_ns": 0.46129376116534626
+           },
+           {
+            "difference_ns": 4.175460873323544e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 0.536838233471,
+            "ruststa_ns": 0.5367964788622668
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 2.5770444493922184e-05,
+          "max_difference_ns": 2.6280162777059246e-05,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 0,
@@ -1714,35 +1962,35 @@
           "worst_rows": [
            {
             "check": "r0/CLK:high",
-            "difference_ns": 2.5770444493922184e-05,
-            "opensta_required_ns": 0.203198224306,
-            "opensta_slack_ns": 4.790590286255,
-            "ruststa_required_ns": 0.20317254293884765,
-            "ruststa_slack_ns": 4.790616056699494
+            "difference_ns": 2.6280162777059246e-05,
+            "opensta_required_ns": 0.206430241466,
+            "opensta_slack_ns": 4.786327362061,
+            "ruststa_required_ns": 0.20640396130322294,
+            "ruststa_slack_ns": 4.786353215152354
            },
            {
             "check": "r1/CLK:high",
-            "difference_ns": 2.5681367152391443e-05,
-            "opensta_required_ns": 0.203198224306,
-            "opensta_slack_ns": 4.790591239929,
-            "ruststa_required_ns": 0.20317254293884762,
-            "ruststa_slack_ns": 4.79061656611472
+            "difference_ns": 2.6280162777059246e-05,
+            "opensta_required_ns": 0.206430241466,
+            "opensta_slack_ns": 4.786327838898,
+            "ruststa_required_ns": 0.20640396130322294,
+            "ruststa_slack_ns": 4.7863537245680545
            },
            {
             "check": "r2/CLK:high",
-            "difference_ns": 1.6905989037668823e-05,
-            "opensta_required_ns": 0.179502055049,
-            "opensta_slack_ns": 4.819356918335,
-            "ruststa_required_ns": 0.17948514905996232,
-            "ruststa_slack_ns": 4.8193717909922285
+            "difference_ns": 1.7127738819372462e-05,
+            "opensta_required_ns": 0.181284323335,
+            "opensta_slack_ns": 4.816902160645,
+            "ruststa_required_ns": 0.18126719559618062,
+            "ruststa_slack_ns": 4.816917343482599
            },
            {
             "check": "r3/CLK:high",
-            "difference_ns": 1.6905989037668823e-05,
-            "opensta_required_ns": 0.179502055049,
-            "opensta_slack_ns": 4.819356441498,
-            "ruststa_required_ns": 0.17948514905996232,
-            "ruststa_slack_ns": 4.819371487189828
+            "difference_ns": 1.7127738819372462e-05,
+            "opensta_required_ns": 0.181284323335,
+            "opensta_slack_ns": 4.816901683807,
+            "ruststa_required_ns": 0.18126719559618062,
+            "ruststa_slack_ns": 4.8169170396802
            }
           ]
          }
@@ -1769,93 +2017,93 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 0.0002999425141851919,
+          "max_difference_ns": 0.00030567799489866765,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
            {
-            "difference_ns": 0.0002999425141851919,
+            "difference_ns": 0.00030567799489866765,
             "endpoint": "y[0]",
             "kind": "hold",
-            "opensta_ns": 1.29941868782,
-            "ruststa_ns": 1.2991187453058148
+            "opensta_ns": 1.308854818344,
+            "ruststa_ns": 1.3085491403491014
            },
            {
-            "difference_ns": 0.0002949464814623326,
+            "difference_ns": 0.0003000536518094066,
             "endpoint": "y[0]",
             "kind": "setup",
-            "opensta_ns": 8.501899719238,
-            "ruststa_ns": 8.502194665719463
+            "opensta_ns": 8.490673065186,
+            "ruststa_ns": 8.49097311883781
            },
            {
-            "difference_ns": 0.0002749320196386851,
+            "difference_ns": 0.0002355068664730009,
             "endpoint": "y[1]",
             "kind": "hold",
-            "opensta_ns": 1.278207421303,
-            "ruststa_ns": 1.2779324892833612
+            "opensta_ns": 1.286001682281,
+            "ruststa_ns": 1.285766175414527
            },
            {
-            "difference_ns": 0.00027200943743110884,
-            "endpoint": "r2/D",
-            "kind": "setup",
-            "opensta_ns": 8.516094207764,
-            "ruststa_ns": 8.51582219832657
-           },
-           {
-            "difference_ns": 0.0002341881181244787,
+            "difference_ns": 0.0002251699935182927,
             "endpoint": "y[1]",
             "kind": "setup",
-            "opensta_ns": 8.535998344421,
-            "ruststa_ns": 8.536232532539124
+            "opensta_ns": 8.527575492859,
+            "ruststa_ns": 8.527800662852519
            },
            {
-            "difference_ns": 0.00020758752426153215,
+            "difference_ns": 0.00021639323582400838,
             "endpoint": "z[0]",
             "kind": "hold",
-            "opensta_ns": 0.648664355278,
-            "ruststa_ns": 0.6484567677537385
+            "opensta_ns": 0.649799346924,
+            "ruststa_ns": 0.649582953688176
+           },
+           {
+            "difference_ns": 0.00019823090443082947,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.197924613953,
+            "ruststa_ns": 9.198122844857432
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 0.0001300672001531833,
+          "max_difference_ns": 0.00012543642828255486,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 0,
           "status": "passed",
           "worst_rows": [
            {
-            "check": "r0/CLK:high",
-            "difference_ns": 0.0001300672001531833,
-            "opensta_required_ns": 0.690106987953,
-            "opensta_slack_ns": 4.264697551727,
-            "ruststa_required_ns": 0.6899769207528468,
-            "ruststa_slack_ns": 4.264822626819572
-           },
-           {
-            "check": "r1/CLK:high",
-            "difference_ns": 0.0001300672001531833,
-            "opensta_required_ns": 0.690106987953,
-            "opensta_slack_ns": 4.264698505402,
-            "ruststa_required_ns": 0.6899769207528468,
-            "ruststa_slack_ns": 4.264823206360162
+            "check": "r0/CLK:low",
+            "difference_ns": 0.00012543642828255486,
+            "opensta_required_ns": 0.640194237232,
+            "opensta_slack_ns": 4.407521724701,
+            "ruststa_required_ns": 0.6400728007772648,
+            "ruststa_slack_ns": 4.407647161129282
            },
            {
             "check": "r1/CLK:low",
-            "difference_ns": 0.00012483614176428404,
-            "opensta_required_ns": 0.635318934917,
-            "opensta_slack_ns": 4.409875869751,
-            "ruststa_required_ns": 0.6351991669942286,
-            "ruststa_slack_ns": 4.410000705892764
+            "difference_ns": 0.00012533372432610435,
+            "opensta_required_ns": 0.640193998814,
+            "opensta_slack_ns": 4.407521247864,
+            "ruststa_required_ns": 0.6400728007772648,
+            "ruststa_slack_ns": 4.407646581588326
            },
            {
-            "check": "r0/CLK:low",
-            "difference_ns": 0.00012446200835292132,
-            "opensta_required_ns": 0.635319232941,
-            "opensta_slack_ns": 4.409876823425,
-            "ruststa_required_ns": 0.6351991669942286,
-            "ruststa_slack_ns": 4.410001285433353
+            "check": "r0/CLK:high",
+            "difference_ns": 9.925779422925718e-05,
+            "opensta_required_ns": 0.699299931526,
+            "opensta_slack_ns": 4.252984523773,
+            "ruststa_required_ns": 0.6992006737317707,
+            "ruststa_slack_ns": 4.253079364361682
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 9.925779422925718e-05,
+            "opensta_required_ns": 0.699299931526,
+            "opensta_slack_ns": 4.25298500061,
+            "ruststa_required_ns": 0.6992006737317707,
+            "ruststa_slack_ns": 4.253079943902637
            }
           ]
          }
@@ -1882,57 +2130,57 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 0.00030487959774028184,
+          "max_difference_ns": 0.00016157803877869803,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
            {
-            "difference_ns": 0.00030487959774028184,
-            "endpoint": "r2/D",
-            "kind": "setup",
-            "opensta_ns": 9.25480556488,
-            "ruststa_ns": 9.25450068528226
-           },
-           {
-            "difference_ns": 0.00015959106100082998,
+            "difference_ns": 0.00016157803877869803,
             "endpoint": "y[0]",
             "kind": "hold",
-            "opensta_ns": 0.762570261955,
-            "ruststa_ns": 0.7624106708939992
+            "opensta_ns": 0.766741156578,
+            "ruststa_ns": 0.7665795785392213
            },
            {
-            "difference_ns": 0.0001418293923780567,
+            "difference_ns": 0.000143155990819821,
             "endpoint": "y[0]",
             "kind": "setup",
-            "opensta_ns": 9.092730522156,
-            "ruststa_ns": 9.092872351548378
+            "opensta_ns": 9.087491035461,
+            "ruststa_ns": 9.08763419145182
            },
            {
-            "difference_ns": 9.748651557339727e-05,
+            "difference_ns": 9.844598929464876e-05,
             "endpoint": "y[1]",
             "kind": "hold",
-            "opensta_ns": 0.751321911812,
-            "ruststa_ns": 0.7512244252964266
+            "opensta_ns": 0.754774570465,
+            "ruststa_ns": 0.7546761244757053
            },
            {
-            "difference_ns": 9.232783973267544e-05,
+            "difference_ns": 9.379419180532977e-05,
             "endpoint": "y[1]",
             "kind": "setup",
-            "opensta_ns": 9.113451957703,
-            "ruststa_ns": 9.113544285542734
+            "opensta_ns": 9.109537124634,
+            "ruststa_ns": 9.109630918825806
            },
            {
-            "difference_ns": 8.490530979621269e-05,
+            "difference_ns": 8.09103801611144e-05,
             "endpoint": "z[1]",
             "kind": "setup",
-            "opensta_ns": 9.353057861328,
-            "ruststa_ns": 9.353142766637797
+            "opensta_ns": 9.352344512939,
+            "ruststa_ns": 9.352425423319161
+           },
+           {
+            "difference_ns": 7.63855941917635e-05,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 0.523429989815,
+            "ruststa_ns": 0.5233536042208082
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 4.549369294415406e-05,
+          "max_difference_ns": 4.628142224089027e-05,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 0,
@@ -1940,35 +2188,35 @@
           "worst_rows": [
            {
             "check": "r0/CLK:high",
-            "difference_ns": 4.549369294415406e-05,
-            "opensta_required_ns": 0.337587565184,
-            "opensta_slack_ns": 4.637257099152,
-            "ruststa_required_ns": 0.33754207149105586,
-            "ruststa_slack_ns": 4.637299916524268
+            "difference_ns": 4.628142224089027e-05,
+            "opensta_required_ns": 0.34134376049,
+            "opensta_slack_ns": 4.632150173187,
+            "ruststa_required_ns": 0.3412974790677591,
+            "ruststa_slack_ns": 4.6321936875194885
            },
            {
             "check": "r1/CLK:high",
-            "difference_ns": 4.53148789441582e-05,
-            "opensta_required_ns": 0.33758738637,
-            "opensta_slack_ns": 4.637257575989,
-            "ruststa_required_ns": 0.33754207149105586,
-            "ruststa_slack_ns": 4.637300574418851
+            "difference_ns": 4.6132411240962234e-05,
+            "opensta_required_ns": 0.341343611479,
+            "opensta_slack_ns": 4.632151126862,
+            "ruststa_required_ns": 0.34129747906775904,
+            "ruststa_slack_ns": 4.632194345414567
            },
            {
             "check": "r0/CLK:low",
-            "difference_ns": 3.8676950461891124e-05,
-            "opensta_required_ns": 0.281418979168,
-            "opensta_slack_ns": 4.743736743927,
-            "ruststa_required_ns": 0.281382591107214,
-            "ruststa_slack_ns": 4.743775420877462
+            "difference_ns": 4.110540907920068e-05,
+            "opensta_required_ns": 0.283121645451,
+            "opensta_slack_ns": 4.74338388443,
+            "ruststa_required_ns": 0.2830838435736735,
+            "ruststa_slack_ns": 4.743424989839079
            },
            {
             "check": "r1/CLK:low",
-            "difference_ns": 3.8495892879630844e-05,
-            "opensta_required_ns": 0.281418800354,
-            "opensta_slack_ns": 4.74373626709,
-            "ruststa_required_ns": 0.281382591107214,
-            "ruststa_slack_ns": 4.74377476298288
+            "difference_ns": 4.044751400122948e-05,
+            "opensta_required_ns": 0.283121466637,
+            "opensta_slack_ns": 4.74338388443,
+            "ruststa_required_ns": 0.2830838435736735,
+            "ruststa_slack_ns": 4.743424331944001
            }
           ]
          }
@@ -2001,38 +2249,17 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 0.00018132734071277246,
+          "max_difference_ns": 0.00016281434474552103,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
-           {
-            "difference_ns": 0.00018132734071277246,
-            "endpoint": "r1/D",
-            "kind": "hold",
-            "opensta_ns": 0.133793726563,
-            "ruststa_ns": 0.13397505390371278
-           },
-           {
-            "difference_ns": 0.0001793543057075908,
-            "endpoint": "r1/D",
-            "kind": "setup",
-            "opensta_ns": 9.640700340271,
-            "ruststa_ns": 9.640520985965292
-           },
            {
             "difference_ns": 0.00016281434474552103,
             "endpoint": "y[0]",
             "kind": "hold",
             "opensta_ns": 0.542036116123,
             "ruststa_ns": 0.5418733017782544
-           },
-           {
-            "difference_ns": 0.00015076046887330108,
-            "endpoint": "z[0]",
-            "kind": "setup",
-            "opensta_ns": 9.404908180237,
-            "ruststa_ns": 9.405058940705873
            },
            {
             "difference_ns": 0.00014847548652952014,
@@ -2042,11 +2269,32 @@
             "ruststa_ns": 9.33054703505653
            },
            {
-            "difference_ns": 0.00011797962521747918,
+            "difference_ns": 0.0001397936750766604,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.404908180237,
+            "ruststa_ns": 9.405047973912076
+           },
+           {
+            "difference_ns": 0.00011441195015310379,
             "endpoint": "z[0]",
             "kind": "hold",
             "opensta_ns": 0.466782748699,
-            "ruststa_ns": 0.4666647690737825
+            "ruststa_ns": 0.4666683367488469
+           },
+           {
+            "difference_ns": 0.00010373903619853575,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 0.534783244133,
+            "ruststa_ns": 0.5346795050968015
+           },
+           {
+            "difference_ns": 0.00010078538399227455,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 9.344770431519,
+            "ruststa_ns": 9.344871216902993
            }
           ]
          },
@@ -2078,7 +2326,7 @@
             "difference_ns": 5.543308668620739e-05,
             "opensta_required_ns": 0.149990260601,
             "opensta_slack_ns": 4.85778427124,
-            "ruststa_required_ns": 0.14993723614724072,
+            "ruststa_required_ns": 0.1499372361472409,
             "ruststa_slack_ns": 4.857839704326686
            },
            {
@@ -2086,7 +2334,7 @@
             "difference_ns": 5.4486545074894366e-05,
             "opensta_required_ns": 0.149989888072,
             "opensta_slack_ns": 4.857784748077,
-            "ruststa_required_ns": 0.14993723614724072,
+            "ruststa_required_ns": 0.1499372361472409,
             "ruststa_slack_ns": 4.857839234622075
            }
           ]
@@ -2114,24 +2362,24 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 0.00044125574702746917,
+          "max_difference_ns": 0.0003205434788124961,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
            {
-            "difference_ns": 0.00044125574702746917,
+            "difference_ns": 0.0003205434788124961,
             "endpoint": "r2/D",
             "kind": "setup",
             "opensta_ns": 8.495097160339,
-            "ruststa_ns": 8.494655904591973
+            "ruststa_ns": 8.494776616860188
            },
            {
-            "difference_ns": 0.0002016904423476351,
+            "difference_ns": 0.00020169044234719102,
             "endpoint": "y[0]",
             "kind": "hold",
             "opensta_ns": 1.301212668419,
-            "ruststa_ns": 1.3010109779766523
+            "ruststa_ns": 1.3010109779766528
            },
            {
             "difference_ns": 0.00019701463305032973,
@@ -2155,16 +2403,16 @@
             "ruststa_ns": 9.198662219327211
            },
            {
-            "difference_ns": 0.00015419010868655825,
-            "endpoint": "y[1]",
+            "difference_ns": 0.00012867242871528184,
+            "endpoint": "z[1]",
             "kind": "hold",
-            "opensta_ns": 1.279332518578,
-            "ruststa_ns": 1.2791783284693135
+            "opensta_ns": 0.640161633492,
+            "ruststa_ns": 0.6400329610632847
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 0.0005699599090451812,
+          "max_difference_ns": 4.159711814910594e-05,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 0,
@@ -2172,35 +2420,35 @@
           "worst_rows": [
            {
             "check": "r0/CLK:low",
-            "difference_ns": 0.0005699599090451812,
+            "difference_ns": 4.159711814910594e-05,
             "opensta_required_ns": 0.64264190197,
             "opensta_slack_ns": 4.405473232269,
-            "ruststa_required_ns": 0.6432118618790452,
-            "ruststa_slack_ns": 4.404911660317316
+            "ruststa_required_ns": 0.6426046724863963,
+            "ruststa_slack_ns": 4.405514829387149
            },
            {
             "check": "r1/CLK:low",
-            "difference_ns": 0.0005699599090451812,
+            "difference_ns": 4.0932258408510336e-05,
             "opensta_required_ns": 0.64264190197,
             "opensta_slack_ns": 4.405473232269,
-            "ruststa_required_ns": 0.6432118618790452,
-            "ruststa_slack_ns": 4.404910995457575
+            "ruststa_required_ns": 0.6426046724863963,
+            "ruststa_slack_ns": 4.405514164527409
            },
            {
-            "check": "r0/CLK:high",
-            "difference_ns": 0.00018504191780399637,
-            "opensta_required_ns": 0.704223632812,
-            "opensta_slack_ns": 4.247660636902,
-            "ruststa_required_ns": 0.704038590894196,
-            "ruststa_slack_ns": 4.247837886909442
+            "check": "r2/CLK:high",
+            "difference_ns": 1.9559983516437285e-05,
+            "opensta_required_ns": 0.628558218479,
+            "opensta_slack_ns": 4.336282730103,
+            "ruststa_required_ns": 0.628575213262583,
+            "ruststa_slack_ns": 4.336263170119484
            },
            {
-            "check": "r1/CLK:high",
-            "difference_ns": 0.00018504191780399637,
-            "opensta_required_ns": 0.704223632812,
-            "opensta_slack_ns": 4.247661590576,
-            "ruststa_required_ns": 0.704038590894196,
-            "ruststa_slack_ns": 4.247838551769183
+            "check": "r3/CLK:high",
+            "difference_ns": 1.9521748937378902e-05,
+            "opensta_required_ns": 0.628558218479,
+            "opensta_slack_ns": 4.336282253265,
+            "ruststa_required_ns": 0.628575213262583,
+            "ruststa_slack_ns": 4.3362627315160625
            }
           ]
          }
@@ -2227,24 +2475,17 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 0.0004179028706730037,
+          "max_difference_ns": 0.00019581569285664902,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
            {
-            "difference_ns": 0.0004179028706730037,
-            "endpoint": "r2/D",
-            "kind": "setup",
-            "opensta_ns": 9.243569374084,
-            "ruststa_ns": 9.243151471213327
-           },
-           {
-            "difference_ns": 0.000195815692856538,
+            "difference_ns": 0.00019581569285664902,
             "endpoint": "y[0]",
             "kind": "hold",
             "opensta_ns": 0.762865006924,
-            "ruststa_ns": 0.7626691912311435
+            "ruststa_ns": 0.7626691912311434
            },
            {
             "difference_ns": 0.00017306420651586052,
@@ -2254,11 +2495,11 @@
             "ruststa_ns": 9.092171164487516
            },
            {
-            "difference_ns": 0.00011424492059564084,
+            "difference_ns": 0.00011424492059575186,
             "endpoint": "y[1]",
             "kind": "hold",
             "opensta_ns": 0.751348674297,
-            "ruststa_ns": 0.7512344293764044
+            "ruststa_ns": 0.7512344293764043
            },
            {
             "difference_ns": 0.00010974396816720855,
@@ -2273,11 +2514,18 @@
             "kind": "setup",
             "opensta_ns": 9.113196372986,
             "ruststa_ns": 9.113304902568274
+           },
+           {
+            "difference_ns": 0.0001005753102932827,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 0.523210167885,
+            "ruststa_ns": 0.5231095925747067
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 8.314818848975669e-05,
+          "max_difference_ns": 8.314818848986771e-05,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 0,
@@ -2285,35 +2533,35 @@
           "worst_rows": [
            {
             "check": "r0/CLK:high",
-            "difference_ns": 8.314818848975669e-05,
+            "difference_ns": 8.314818848986771e-05,
             "opensta_required_ns": 0.345206081867,
             "opensta_slack_ns": 4.627610206604,
-            "ruststa_required_ns": 0.34512293367851027,
+            "ruststa_required_ns": 0.34512293367851016,
             "ruststa_slack_ns": 4.62768776713199
            },
            {
             "check": "r1/CLK:high",
-            "difference_ns": 8.28501654897007e-05,
+            "difference_ns": 8.285016548986723e-05,
             "opensta_required_ns": 0.345205783844,
             "opensta_slack_ns": 4.627611160278,
-            "ruststa_required_ns": 0.3451229336785103,
+            "ruststa_required_ns": 0.34512293367851016,
             "ruststa_slack_ns": 4.627688428307944
            },
            {
             "check": "r0/CLK:low",
-            "difference_ns": 5.282758586666603e-05,
+            "difference_ns": 5.2827585867554205e-05,
             "opensta_required_ns": 0.284873425961,
             "opensta_slack_ns": 4.742310523987,
-            "ruststa_required_ns": 0.2848259476166335,
-            "ruststa_slack_ns": 4.742363351572867
+            "ruststa_required_ns": 0.2848259476166332,
+            "ruststa_slack_ns": 4.742363351572868
            },
            {
             "check": "r1/CLK:low",
-            "difference_ns": 5.2166409910903155e-05,
+            "difference_ns": 5.2166409911791334e-05,
             "opensta_required_ns": 0.28487315774,
             "opensta_slack_ns": 4.742310523987,
-            "ruststa_required_ns": 0.2848259476166335,
-            "ruststa_slack_ns": 4.742362690396911
+            "ruststa_required_ns": 0.2848259476166332,
+            "ruststa_slack_ns": 4.742362690396912
            }
           ]
          }
@@ -2370,19 +2618,19 @@
      "status": "passed"
     }
    },
-   "wall_seconds": 48.808
+   "wall_seconds": 50.804
   },
   {
    "binding": {
-    "artifacts": 52,
-    "digest": "5dabc6169812f994e5b261eb88d5f6f02138a98c4ee00e87e4ccbec25da8ac45",
+    "artifacts": 54,
+    "digest": "327c7394985d8eeeaa94ea92c6e38391641106bd881b4fedec85f671d10d744f",
     "revision": {
-     "branch": "feat/rtl2gds-gate",
+     "branch": "feat/rtl2gds-final",
      "dirty": false,
      "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
      "dirty_paths": 0,
-     "head": "05fca8dce3a1b68182f0b065bf52350931671c8a",
-     "rustroad_sha256": "2f7254d6196e420a558ddad300ff9137cc066014dce54b29209648a0b8a3cb37"
+     "head": "0acb28a11a8319941564b82c0b12f91b07e64a21",
+     "rustroad_sha256": "2911f28b20a26e273a426e45917cddad3ff3e1e8d2a1475f9a9ca212de70b3af"
     }
    },
    "details": {
@@ -2399,32 +2647,32 @@
      "native": {
       "ff": {
        "opensta": {
-        "worst_hold_ns": 0.196170866489,
-        "worst_setup_ns": 8.549168586731
+        "worst_hold_ns": 0.194193333387,
+        "worst_setup_ns": 8.547598838806
        },
        "ruststa": {
-        "worst_hold_ns": 0.1961917416231851,
-        "worst_setup_ns": 8.54919346352558
+        "worst_hold_ns": 0.1942148250466148,
+        "worst_setup_ns": 8.547623497569393
        }
       },
       "ss": {
        "opensta": {
-        "worst_hold_ns": 0.370532512665,
-        "worst_setup_ns": 4.852761268616
+        "worst_hold_ns": 0.36208859086,
+        "worst_setup_ns": 4.84410572052
        },
        "ruststa": {
-        "worst_hold_ns": 0.3706765838579389,
-        "worst_setup_ns": 4.852929142063824
+        "worst_hold_ns": 0.362088586010864,
+        "worst_setup_ns": 4.844104505829436
        }
       },
       "tt": {
        "opensta": {
-        "worst_hold_ns": 0.244502753019,
-        "worst_setup_ns": 7.463591575623
+        "worst_hold_ns": 0.241543784738,
+        "worst_setup_ns": 7.461035728455
        },
        "ruststa": {
-        "worst_hold_ns": 0.2445227435302908,
-        "worst_setup_ns": 7.463826732605014
+        "worst_hold_ns": 0.24156418899847754,
+        "worst_setup_ns": 7.46105543263267
        }
       }
      },
@@ -2436,7 +2684,7 @@
        },
        "ruststa": {
         "worst_hold_ns": 0.1938359303315127,
-        "worst_setup_ns": 8.549306116900645
+        "worst_setup_ns": 8.549281472909945
        }
       },
       "ss": {
@@ -2445,8 +2693,8 @@
         "worst_setup_ns": 4.85221862793
        },
        "ruststa": {
-        "worst_hold_ns": 0.3637132849481477,
-        "worst_setup_ns": 4.852335175696501
+        "worst_hold_ns": 0.36154441960255834,
+        "worst_setup_ns": 4.852230418776879
        }
       },
       "tt": {
@@ -2455,8 +2703,8 @@
         "worst_setup_ns": 7.463933467865
        },
        "ruststa": {
-        "worst_hold_ns": 0.24057538664274536,
-        "worst_setup_ns": 7.464313803450789
+        "worst_hold_ns": 0.2405742794680804,
+        "worst_setup_ns": 7.463964172867033
        }
       }
      }
@@ -2480,13 +2728,13 @@
        "violating_endpoints": 0,
        "whs_ns": 0.0,
        "wns_ns": 0.0,
-       "worst_hold_slack_ns": 0.1961917416231851,
-       "worst_max_capacitance_slack_pf": 0.276715239083436,
+       "worst_hold_slack_ns": 0.1942148250466148,
+       "worst_max_capacitance_slack_pf": 0.275947609629573,
        "worst_max_fanout_slack": 0.0,
-       "worst_max_transition_slack_ns": 0.07123714852676988,
+       "worst_max_transition_slack_ns": 0.04928745506994425,
        "worst_min_period_slack_ns": 6.438000000000001,
-       "worst_min_pulse_width_slack_ns": 3.247887058368783,
-       "worst_setup_slack_ns": 4.852929142063824
+       "worst_min_pulse_width_slack_ns": 3.2465038399357136,
+       "worst_setup_slack_ns": 4.844104505829436
       },
       "scope": {
        "backend": "cpu",
@@ -2536,10 +2784,10 @@
        "worst_hold_slack_ns": 0.1938359303315127,
        "worst_max_capacitance_slack_pf": 0.2758997427,
        "worst_max_fanout_slack": 0.0,
-       "worst_max_transition_slack_ns": 0.04997956891570743,
+       "worst_max_transition_slack_ns": 0.04997946398232278,
        "worst_min_period_slack_ns": 6.438000000000001,
-       "worst_min_pulse_width_slack_ns": 3.248451880259017,
-       "worst_setup_slack_ns": 4.852335175696501
+       "worst_min_pulse_width_slack_ns": 3.2509824924595616,
+       "worst_setup_slack_ns": 4.852230418776879
       },
       "scope": {
        "backend": "cpu",
@@ -2572,7 +2820,7 @@
    },
    "pdk": "gf180",
    "rerun_receipts": 54,
-   "status": "failed",
+   "status": "passed",
    "statuses": {
     "antenna_deck": {
      "by_rule": {},
@@ -2623,23 +2871,26 @@
      ]
     },
     "artifact_binding": {
-     "artifacts": 52,
+     "artifacts": 54,
      "changed": [],
-     "digest": "5dabc6169812f994e5b261eb88d5f6f02138a98c4ee00e87e4ccbec25da8ac45",
+     "digest": "327c7394985d8eeeaa94ea92c6e38391641106bd881b4fedec85f671d10d744f",
      "status": "passed"
     },
     "cec_final": {
+     "exhaustive": null,
      "rustsys": {
       "exit_code": 0,
       "status": "passed",
       "supply_ports": []
      },
+     "second_oracle": "Yosys equiv_simple",
      "status": "passed",
      "yosys": {
       "status": "passed"
      }
     },
     "cec_powered": {
+     "exhaustive": null,
      "filtering": {
       "physical_only": {
        "by_master": {
@@ -2652,6 +2903,10 @@
        },
        "removed_instances": 119,
        "rule": "cell-policy physical_only masters without any LEF OUTPUT pin"
+      },
+      "rail_constants": {
+       "rail_tied_signal_pins": [],
+       "rule": "signal pin on a supply rail -> that rail's constant"
       },
       "supply_ports": [
        "VDD",
@@ -2673,17 +2928,20 @@
        "VSS"
       ]
      },
+     "second_oracle": "Yosys equiv_simple",
      "status": "passed",
      "yosys": {
       "status": "passed"
      }
     },
     "cec_prelayout": {
+     "exhaustive": null,
      "rustsys": {
       "exit_code": 0,
       "status": "passed",
       "supply_ports": []
      },
+     "second_oracle": "Yosys equiv_simple",
      "status": "passed",
      "yosys": {
       "status": "passed"
@@ -2728,11 +2986,17 @@
     "controls": {
      "controls": {
       "antenna_planted": {
+       "candidates": [
+        "en",
+        "a[0]",
+        "a[1]",
+        "b[0]"
+       ],
        "deck": {
         "by_rule": {
-         "ANT.16_ii_ANT.4": 6
+         "ANT.16_ii_ANT.4": 5
         },
-        "count": 6,
+        "count": 5,
         "status": "failed"
        },
        "detected": true,
@@ -2741,9 +3005,9 @@
        "length_um": 2000,
        "margin_check": {
         "conservative": true,
-        "magic_max_ratio": 883.109,
-        "native_ratio": 867.1520218792734,
-        "native_ratio_over_keep": 963.502246532526
+        "magic_max_ratio": 1104.8,
+        "native_ratio": 1084.8357421874998,
+        "native_ratio_over_keep": 1205.3730468749998
        },
        "native": {
         "status": "violated",
@@ -2752,43 +3016,15 @@
           "kind": "side_area",
           "layer": "Metal3",
           "limit": 400.0,
-          "net": "b[1]",
-          "ratio": 867.1520218792734,
+          "net": "en",
+          "ratio": 1084.8357421874998,
           "rule": "ANTENNADIFFSIDEAREARATIO"
          }
         ]
        },
        "oracle": "native check-antenna and the foundry antenna deck",
-       "peak_rss_kib": 423296,
-       "port": "b[1]"
-      },
-      "bad_rtl": {
-       "cosim": {
-        "mismatches": [
-         "RR_COSIM_MISMATCH cycle=0 phase=0 port=y gold=01 gate=00",
-         "RR_COSIM_MISMATCH cycle=0 phase=1 port=y gold=01 gate=00",
-         "RR_COSIM_MISMATCH cycle=1 phase=0 port=y gold=01 gate=00"
-        ],
-        "status": "failed"
-       },
-       "detected": true,
-       "expected": "failed",
-       "files": [
-        "0_pipeline.v",
-        "rr_mutant_top.v"
-       ],
-       "mutation": "output bit y[0] inverted by a wrapper around the renamed top",
-       "oracle": "RustSys check synth, Yosys equiv and the random co-simulation",
-       "rustsys": {
-        "exit_code": 3,
-        "reason": "RustSys check synth verdict 'not-equivalent' (exit 3)",
-        "status": "failed",
-        "supply_ports": []
-       },
-       "yosys": {
-        "reason": "Yosys equiv: 1 unproven $equiv cells",
-        "status": "failed"
-       }
+       "peak_rss_kib": 425904,
+       "port": "en"
       },
       "drc_spacing": {
        "by_rule": {
@@ -2807,7 +3043,7 @@
        "expected": "failed",
        "gap_um": 0.12,
        "oracle": "Magic DRC and KLayout DRC",
-       "peak_rss_kib": 411320,
+       "peak_rss_kib": 412956,
        "planted": [
         "(43000,3000;43600,4000)",
         "(43720,3000;44320,4000)"
@@ -2815,6 +3051,31 @@
        "statuses": {
         "drc_klayout": "failed",
         "drc_magic": "failed"
+       }
+      },
+      "inverted_output": {
+       "cosim": {
+        "mismatches": [
+         "RR_COSIM_MISMATCH cycle=0 phase=0 port=y gold=00 gate=01",
+         "RR_COSIM_MISMATCH cycle=0 phase=1 port=y gold=00 gate=01",
+         "RR_COSIM_MISMATCH cycle=1 phase=0 port=y gold=00 gate=01"
+        ],
+        "status": "failed"
+       },
+       "detected": true,
+       "exhaustive": null,
+       "expected": "failed",
+       "mutation": "output bit y[0] driven through gf180mcu_fd_sc_mcu7t5v0__inv_1 rr_mut",
+       "oracle": "RustSys check synth, Yosys equiv_simple and the random co-simulation",
+       "rustsys": {
+        "exit_code": 3,
+        "reason": "RustSys check synth verdict 'not-equivalent' (exit 3)",
+        "status": "failed",
+        "supply_ports": []
+       },
+       "yosys": {
+        "reason": "Yosys equiv: 1 unproven $equiv cells",
+        "status": "failed"
        }
       },
       "label_swap": {
@@ -2835,7 +3096,7 @@
          "final result 'Top level cell failed pin matching.'"
         ]
        },
-       "peak_rss_kib": 406008,
+       "peak_rss_kib": 408580,
        "statuses": {
         "lvs_klayout": "failed",
         "lvs_netgen": "failed",
@@ -2849,7 +3110,7 @@
        "expected": "failed",
        "oracle": "tool identity preflight (missing -> unverified, exit 3)",
        "pdk_items_run": 0,
-       "peak_rss_kib": 42676,
+       "peak_rss_kib": 42456,
        "status": "unverified",
        "tools_identity": {
         "reason": "tool identity: {'yosys': 'missing'}",
@@ -2878,30 +3139,30 @@
         "*:budget_floors"
        ],
        "manifest_provenance": {
-        "reason": ".work/runs/r1-a/gf180_controls/relaxed_manifest/relaxed-design.json is not tracked at HEAD",
+        "reason": ".work/runs/E3-pipeline/gf180_controls/relaxed_manifest/relaxed-design.json is not tracked at HEAD",
         "status": "unverified"
        },
        "oracle": "budget floors (owner thresholds) and manifest provenance (git-tracked at HEAD)",
        "pdk_items_run": 0,
-       "peak_rss_kib": 43092,
+       "peak_rss_kib": 42052,
        "status": "failed"
       },
       "removed_hold_cell": {
        "detected": true,
        "expected": "failed",
-       "iteration0_hold_ns": -0.898712112964649,
+       "iteration0_hold_ns": -0.9115811915834465,
        "margin_ns": 0.05,
-       "opensta_worst_hold_ns": -0.794514894485,
+       "opensta_worst_hold_ns": -0.820352494717,
        "oracle": "RustSTA and OpenSTA hold gate on a fresh layout",
-       "peak_rss_kib": 230876,
+       "peak_rss_kib": 231200,
        "processes": 24,
        "removed": [
         "rr_eco_hold_3"
        ],
        "ruststa_worst_hold_ns": {
-        "ff": -0.15371426957945383,
-        "ss": -0.7944396149178612,
-        "tt": -0.34444110400925987
+        "ff": -0.15848480494636086,
+        "ss": -0.8203533626682248,
+        "tt": -0.3536653930190452
        },
        "sink": "r3/D",
        "worst_corner": "ss"
@@ -2929,7 +3190,7 @@
          "1 pins without a matching pin: ['layout-only y[1]']"
         ]
        },
-       "peak_rss_kib": 406056,
+       "peak_rss_kib": 408800,
        "removed": "VIA_Via1_HV",
        "statuses": {
         "lvs_klayout": "failed",
@@ -2964,21 +3225,21 @@
       "tampered_spef": {
        "binding": {
         "ss": {
-         "actual": "9299dc13751fd7673297c42543ed61f7a58cf1fdc75eb756d1710a6a7cb763fb",
-         "expected": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828"
+         "actual": "6d6958c1a95b1704cf323459c1e9db20c81fc397e999e167f7aebfc7ea532cd0",
+         "expected": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935"
         }
        },
        "detected": true,
        "expected": "failed",
        "factor": 1000.0,
        "oracle": "SPEF identity against the extraction receipt",
-       "peak_rss_kib": 230104,
-       "resistors_scaled": 210,
+       "peak_rss_kib": 231644,
+       "resistors_scaled": 209,
        "timing_effect": {
-        "bound_worst_hold_ns": 0.3706765838579389,
-        "bound_worst_setup_ns": 4.852929142063824,
-        "worst_hold_ns": 0.652331519154612,
-        "worst_setup_ns": 4.080520516140552
+        "bound_worst_hold_ns": 0.362088586010864,
+        "bound_worst_setup_ns": 4.844104505829436,
+        "worst_hold_ns": 0.5665188438660829,
+        "worst_setup_ns": 4.559875899702819
        }
       }
      },
@@ -3051,26 +3312,26 @@
       },
       "routes": {
        "normalization": [],
-       "other_sha256": "16fd5c39aab40e665fd82ec1437872e3743787260df48194a59fd1dd21723e32",
-       "sha256": "16fd5c39aab40e665fd82ec1437872e3743787260df48194a59fd1dd21723e32",
+       "other_sha256": "7b0fca253b5642aa8484123e2137748749669490ce7bf910aba68403c5141ccf",
+       "sha256": "7b0fca253b5642aa8484123e2137748749669490ce7bf910aba68403c5141ccf",
        "status": "passed"
       },
       "spef.native.ff": {
        "normalization": [],
-       "other_sha256": "06688e3b6e6eacf45ca67da1e1708acd858fc60423319d43bd121ed407c9c796",
-       "sha256": "06688e3b6e6eacf45ca67da1e1708acd858fc60423319d43bd121ed407c9c796",
+       "other_sha256": "392adedea2367d5baaf4d7877117620d43dcb228e3b7bf4684f0217b0d85bfd6",
+       "sha256": "392adedea2367d5baaf4d7877117620d43dcb228e3b7bf4684f0217b0d85bfd6",
        "status": "passed"
       },
       "spef.native.ss": {
        "normalization": [],
-       "other_sha256": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828",
-       "sha256": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828",
+       "other_sha256": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935",
+       "sha256": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935",
        "status": "passed"
       },
       "spef.native.tt": {
        "normalization": [],
-       "other_sha256": "b791d7023bcf4fa4ca982214629baf765cf0f4e86e7627d9597ead92eb588706",
-       "sha256": "b791d7023bcf4fa4ca982214629baf765cf0f4e86e7627d9597ead92eb588706",
+       "other_sha256": "2322a76b222df035307309426de6f89da6f702cc292c6b5d3fe0f92fae6c8fe8",
+       "sha256": "2322a76b222df035307309426de6f89da6f702cc292c6b5d3fe0f92fae6c8fe8",
        "status": "passed"
       },
       "spef.openrcx.ff": {
@@ -3125,7 +3386,7 @@
          "unit": "ns",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.5144105578292218
+         "worst_slack": 0.5046184060467371
         },
         {
          "checked": 23,
@@ -3137,7 +3398,7 @@
          "unit": "pF",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.277956914072703
+         "worst_slack": 0.277306111556227
         },
         {
          "checked": 23,
@@ -3161,7 +3422,7 @@
          "unit": "ns",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.07123714852676988
+         "worst_slack": 0.04928745506994425
         },
         {
          "checked": 23,
@@ -3173,7 +3434,7 @@
          "unit": "pF",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.276715239083436
+         "worst_slack": 0.275947609629573
         },
         {
          "checked": 23,
@@ -3197,7 +3458,7 @@
          "unit": "ns",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.7127705620812277
+         "worst_slack": 0.7076959475998593
         },
         {
          "checked": 23,
@@ -3209,7 +3470,7 @@
          "unit": "pF",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.278841089826367
+         "worst_slack": 0.27827840539606397
         },
         {
          "checked": 23,
@@ -3238,7 +3499,7 @@
          "unit": "ns",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.505313776248267
+         "worst_slack": 0.5053137762482646
         },
         {
          "checked": 23,
@@ -3274,7 +3535,7 @@
          "unit": "ns",
          "unlimited": 0,
          "violating": 0,
-         "worst_slack": 0.04997956891570743
+         "worst_slack": 0.04997946398232278
         },
         {
          "checked": 23,
@@ -3347,16 +3608,16 @@
       "binding": {
        "files": {
         "ff": {
-         "actual": "06688e3b6e6eacf45ca67da1e1708acd858fc60423319d43bd121ed407c9c796",
-         "expected": "06688e3b6e6eacf45ca67da1e1708acd858fc60423319d43bd121ed407c9c796"
+         "actual": "392adedea2367d5baaf4d7877117620d43dcb228e3b7bf4684f0217b0d85bfd6",
+         "expected": "392adedea2367d5baaf4d7877117620d43dcb228e3b7bf4684f0217b0d85bfd6"
         },
         "ss": {
-         "actual": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828",
-         "expected": "6ba013a898d65848c5358522986edec524855498241c5de8881500ce50210828"
+         "actual": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935",
+         "expected": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935"
         },
         "tt": {
-         "actual": "b791d7023bcf4fa4ca982214629baf765cf0f4e86e7627d9597ead92eb588706",
-         "expected": "b791d7023bcf4fa4ca982214629baf765cf0f4e86e7627d9597ead92eb588706"
+         "actual": "2322a76b222df035307309426de6f89da6f702cc292c6b5d3fe0f92fae6c8fe8",
+         "expected": "2322a76b222df035307309426de6f89da6f702cc292c6b5d3fe0f92fae6c8fe8"
         }
        },
        "status": "passed"
@@ -3374,7 +3635,11 @@
        "ss": [
         "calibration column 4 is not used; resistance is taken from the Magic extract section",
         "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
-        "via cut and via landing-pad self capacitance are not modeled"
+        "via cut and via landing-pad self capacitance are not modeled",
+        "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for m2c",
+        "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for m3c",
+        "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for via3",
+        "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for via4"
        ],
        "tt": [
         "calibration column 4 is not used; resistance is taken from the Magic extract section",
@@ -3392,16 +3657,16 @@
       "binding": {
        "files": {
         "ff": {
-         "actual": "fefeca907d730faf573fbe001e83f4453b7640fbe154fce4b8111d69ba03f99a",
-         "expected": "fefeca907d730faf573fbe001e83f4453b7640fbe154fce4b8111d69ba03f99a"
+         "actual": "548a2d1bd77cabba841b427bf034e652b73e429398a1f668430f660d3ac709a8",
+         "expected": "548a2d1bd77cabba841b427bf034e652b73e429398a1f668430f660d3ac709a8"
         },
         "ss": {
-         "actual": "49aeacb87079ebb0810c61dd28608d6ea5ac81942f4c428ef028a9f7b91c705c",
-         "expected": "49aeacb87079ebb0810c61dd28608d6ea5ac81942f4c428ef028a9f7b91c705c"
+         "actual": "546836477acbe5f4721d5674424a5b4105315173f6aa0010b8c5d73e6f271eae",
+         "expected": "546836477acbe5f4721d5674424a5b4105315173f6aa0010b8c5d73e6f271eae"
         },
         "tt": {
-         "actual": "47685afc75f7b55a02edf1d86e7e9f17eb98a6bac5972f6c54f9866b77a2a0fe",
-         "expected": "47685afc75f7b55a02edf1d86e7e9f17eb98a6bac5972f6c54f9866b77a2a0fe"
+         "actual": "ff9902c0078192d8b26b0e6159a01bcf24cd2ce82c6ba164dd601956c29d178b",
+         "expected": "ff9902c0078192d8b26b0e6159a01bcf24cd2ce82c6ba164dd601956c29d178b"
         }
        },
        "status": "passed"
@@ -3436,11 +3701,13 @@
     },
     "hold_closure": {
      "decision_spef": "native rustroad extract",
+     "gate_hold_margin_ns": 0.05,
      "iterations": [
       {
        "antenna": "passed",
        "antenna_eco": null,
        "closed": false,
+       "drv": null,
        "hold_eco": {
         "area_um2": 96.5888,
         "cells": 4,
@@ -3448,18 +3715,20 @@
         "violating_sinks": 4
        },
        "iteration": 0,
+       "size_eco": null,
+       "stopped": null,
        "worst": {
         "ff": {
-         "hold_ns": -0.18047936911969076,
-         "setup_ns": 8.571855516049729
+         "hold_ns": -0.18286362498551328,
+         "setup_ns": 8.564741023880629
         },
         "ss": {
-         "hold_ns": -0.898712112964649,
-         "setup_ns": 5.660602286410041
+         "hold_ns": -0.9115811915834465,
+         "setup_ns": 5.63001195859839
         },
         "tt": {
-         "hold_ns": -0.3944506589585728,
-         "setup_ns": 7.702045602444236
+         "hold_ns": -0.39899191425467007,
+         "setup_ns": 7.688717165593755
         }
        }
       },
@@ -3467,32 +3736,263 @@
        "antenna": "passed",
        "antenna_eco": null,
        "closed": true,
+       "drv": null,
        "hold_eco": null,
        "iteration": 1,
+       "size_eco": null,
+       "stopped": null,
        "worst": {
         "ff": {
-         "hold_ns": 0.1961917416231851,
-         "setup_ns": 8.54919346352558
+         "hold_ns": 0.1942148250466148,
+         "setup_ns": 8.547623497569393
         },
         "ss": {
-         "hold_ns": 0.3706765838579389,
-         "setup_ns": 4.852929142063824
+         "hold_ns": 0.362088586010864,
+         "setup_ns": 4.844104505829436
         },
         "tt": {
-         "hold_ns": 0.2445227435302908,
-         "setup_ns": 7.463826732605014
+         "hold_ns": 0.24156418899847754,
+         "setup_ns": 7.46105543263267
         }
        }
       }
      ],
      "max_iterations": 4,
+     "sizing": false,
      "status": "passed",
      "target_margin_ns": 0.05
     },
     "implementation": {
+     "clock_tree": {
+      "body_bias_status": "tap_inserted_contact_unverified",
+      "cells": 136,
+      "clock_buffers": 3,
+      "clock_constraint_status": "explicit_sdc",
+      "clock_topology_status": "unrouted_topology_checked",
+      "connectivity_status": "linked_unverified",
+      "corner": "not_applicable",
+      "design": "lane_smoke",
+      "diagnostics": [
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units CAPACITANCE (first line 41): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units CURRENT (first line 42): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units RESISTANCE (first line 43): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "property_definitions LAYER (first line 53): Property schema is not interpreted; property uses produce separate diagnostics",
+        "occurrences": 2,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library CLEARANCEMEASURE (first line 58): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library USEMINSPACING (first line 59): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer PROPERTY (first line 63): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer MINWIDTH (first line 88): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer SPACING (first line 91): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer THICKNESS (first line 94): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNAMODEL (first line 95): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 9,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNASIDEAREARATIO (first line 96): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DCCURRENTDENSITY (first line 98): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 9,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ACCURRENTDENSITY (first line 99): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 9,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer CAPACITANCE (first line 101): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer RESISTANCE (first line 102): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 9,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer MINIMUMDENSITY (first line 104): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DENSITYCHECKWINDOW (first line 105): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DENSITYCHECKSTEP (first line 106): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ARRAYSPACING (first line 121): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNAAREARATIO (first line 127): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNADIFFSIDEAREARATIO (first line 146): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNAGATEPLUSDIFF (first line 147): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "via RESISTANCE (first line 341): Via resistance is not modeled; extraction remains unchecked",
+        "occurrences": 16,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "via_rule VIARULE (first line 442): Via generation rule is not modeled; routing/via DRC remain unchecked",
+        "occurrences": 16,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library NOWIREEXTENSIONATPIN (first line 2): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "macro FOREIGN (first line 7): FOREIGN is retained for GDS cell binding (checked by export-gds); import uses LEF geometry only",
+        "occurrences": 229,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "pin ANTENNAGATEAREA (first line 14): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 616,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "pin ANTENNADIFFAREA (first line 40): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 221,
+        "source": "cell_lef"
+       },
+       {
+        "code": "PHYSICAL_SIGNOFF_UNCHECKED",
+        "message": "Primary metal rails/spines/vias and I/O geometry are generated and locally checked; well/tap continuity, DRC, IR/EM and extracted timing are not verified by this pass",
+        "occurrences": 1,
+        "source": "physical_preparation"
+       }
+      ],
+      "drc_status": "unchecked",
+      "expansions": 181,
+      "filler_cells": 87,
+      "inserted_tie_cells": 0,
+      "io_placement_status": "placed_geometry_checked",
+      "lvs_status": "unchecked",
+      "masters": 15,
+      "nets": 25,
+      "pins": 536,
+      "placement_status": "placed_unverified",
+      "power_grid_status": "primary_grid_generated",
+      "rail_continuity_status": "geometry_checked",
+      "revision": "rev3",
+      "routed_nets": null,
+      "routing_expansions": null,
+      "routing_segments": null,
+      "routing_status": "not_run",
+      "rows": 8,
+      "stage": "placed",
+      "tap_cells": 32,
+      "tap_placement_status": "geometry_checked",
+      "unconstrained_endpoints": null,
+      "wire_model": "none"
+     },
      "final_iteration": 1,
+     "floorplan_reproduced": null,
      "iterations": 2,
      "patches": 1,
+     "placement": null,
+     "recipe": "legacy",
+     "renamed_escaped_wires": 0,
+     "route": {
+      "cells": 136,
+      "filler_cells": 87,
+      "routed_nets": 23,
+      "routing_expansions": 616950,
+      "routing_segments": 5705,
+      "tap_cells": 32
+     },
      "routed_nets": 23,
      "status": "passed",
      "vias": 83,
@@ -3563,18 +4063,18 @@
         "status": "passed"
        },
        "rc_profile_ff": {
-        "actual": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
-        "expected": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+        "actual": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+        "expected": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
         "status": "passed"
        },
        "rc_profile_ss": {
-        "actual": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
-        "expected": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+        "actual": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+        "expected": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
         "status": "passed"
        },
        "rc_profile_tt": {
-        "actual": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
-        "expected": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+        "actual": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+        "expected": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
         "status": "passed"
        },
        "routing_profile": {
@@ -3664,18 +4164,18 @@
         "status": "passed"
        },
        "rc_profile_ff": {
-        "actual": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
-        "expected": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+        "actual": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+        "expected": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
         "status": "passed"
        },
        "rc_profile_ss": {
-        "actual": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
-        "expected": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+        "actual": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+        "expected": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
         "status": "passed"
        },
        "rc_profile_tt": {
-        "actual": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
-        "expected": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+        "actual": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+        "expected": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
         "status": "passed"
        },
        "routing_profile": {
@@ -3720,6 +4220,7 @@
     "mpw_min_period": {
      "by_spef": {
       "native": {
+       "async_set_clear_pins_unchecked": null,
        "min_period_note": null,
        "min_period_rows": {
         "opensta": 12,
@@ -3729,9 +4230,10 @@
        "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
        "status": "passed",
        "worst_min_period_slack_ns": 6.438000000000001,
-       "worst_min_pulse_width_slack_ns": 3.247887058368783
+       "worst_min_pulse_width_slack_ns": 3.2465038399357136
       },
       "openrcx": {
+       "async_set_clear_pins_unchecked": null,
        "min_period_note": null,
        "min_period_rows": {
         "opensta": 12,
@@ -3741,7 +4243,7 @@
        "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
        "status": "passed",
        "worst_min_period_slack_ns": 6.438000000000001,
-       "worst_min_pulse_width_slack_ns": 3.248451880259017
+       "worst_min_pulse_width_slack_ns": 3.2509824924595616
       }
      },
      "status": "passed"
@@ -3764,6 +4266,7 @@
      },
      "seed": "0x5eed2026c0ffee01",
      "status": "passed",
+     "stimulus": "xorshift64 random",
      "vectors": 4096
     },
     "timing_accuracy": {
@@ -3792,93 +4295,93 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 8.304012662563309e-05,
+          "max_difference_ns": 7.457452617831706e-05,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
            {
-            "difference_ns": 8.304012662563309e-05,
-            "endpoint": "r2/D",
-            "kind": "setup",
-            "opensta_ns": 8.569366455078,
-            "ruststa_ns": 8.569449495204626
-           },
-           {
-            "difference_ns": 7.272747934838897e-05,
+            "difference_ns": 7.457452617831706e-05,
             "endpoint": "y[0]",
             "kind": "hold",
-            "opensta_ns": 1.214918136597,
-            "ruststa_ns": 1.2148454091176517
+            "opensta_ns": 1.223753094673,
+            "ruststa_ns": 1.2236785201468217
            },
            {
-            "difference_ns": 7.112432888511933e-05,
+            "difference_ns": 7.133137650860988e-05,
             "endpoint": "y[0]",
             "kind": "setup",
-            "opensta_ns": 8.593006134033,
-            "ruststa_ns": 8.593077258361886
+            "opensta_ns": 8.583008766174,
+            "ruststa_ns": 8.583080097550509
            },
            {
-            "difference_ns": 6.92427479185298e-05,
+            "difference_ns": 7.073077033048492e-05,
             "endpoint": "z[0]",
             "kind": "hold",
-            "opensta_ns": 0.590206563473,
-            "ruststa_ns": 0.5901373207250815
+            "opensta_ns": 0.591328680515,
+            "ruststa_ns": 0.5912579497446695
            },
            {
-            "difference_ns": 6.752833075651665e-05,
+            "difference_ns": 6.963223298761534e-05,
             "endpoint": "z[0]",
             "kind": "setup",
-            "opensta_ns": 9.290086746216,
-            "ruststa_ns": 9.290154274546756
+            "opensta_ns": 9.288932800293,
+            "ruststa_ns": 9.289002432525988
            },
            {
-            "difference_ns": 5.1730785957104786e-05,
+            "difference_ns": 5.328898628320644e-05,
             "endpoint": "y[1]",
             "kind": "setup",
-            "opensta_ns": 8.617486953735,
-            "ruststa_ns": 8.617538684520957
+            "opensta_ns": 8.608744621277,
+            "ruststa_ns": 8.608797910263283
+           },
+           {
+            "difference_ns": 5.293414994267387e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.207623243332,
+            "ruststa_ns": 1.2075703091820573
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 1.4225734603634521e-05,
+          "max_difference_ns": 1.5135788876463607e-05,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 4,
           "status": "passed",
           "worst_rows": [
            {
-            "check": "r2/CLK:low",
-            "difference_ns": 1.4225734603634521e-05,
+            "check": "r3/CLK:low",
+            "difference_ns": 1.5135788876463607e-05,
             "opensta_required_ns": 0.324000000954,
-            "opensta_slack_ns": 4.677847862244,
+            "opensta_slack_ns": 4.678160667419,
             "ruststa_required_ns": 0.324,
-            "ruststa_slack_ns": 4.677862087978603
-           },
-           {
-            "check": "r2/CLK:high",
-            "difference_ns": 1.3928188603351543e-05,
-            "opensta_required_ns": 0.388999998569,
-            "opensta_slack_ns": 4.60915184021,
-            "ruststa_required_ns": 0.389,
-            "ruststa_slack_ns": 4.609137912021397
+            "ruststa_slack_ns": 4.678175803207877
            },
            {
             "check": "r3/CLK:high",
-            "difference_ns": 1.3928188603351543e-05,
+            "difference_ns": 1.4838241876979907e-05,
             "opensta_required_ns": 0.388999998569,
-            "opensta_slack_ns": 4.60915184021,
+            "opensta_slack_ns": 4.608839035034,
             "ruststa_required_ns": 0.389,
-            "ruststa_slack_ns": 4.609137912021397
+            "ruststa_slack_ns": 4.608824196792123
            },
            {
-            "check": "r0/CLK:high",
-            "difference_ns": 1.381805015032711e-05,
+            "check": "r2/CLK:high",
+            "difference_ns": 1.4838241876091729e-05,
             "opensta_required_ns": 0.388999998569,
-            "opensta_slack_ns": 4.608811855316,
+            "opensta_slack_ns": 4.608839035034,
             "ruststa_required_ns": 0.389,
-            "ruststa_slack_ns": 4.608798037265849
+            "ruststa_slack_ns": 4.608824196792124
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.4658950874490984e-05,
+            "opensta_required_ns": 0.324000000954,
+            "opensta_slack_ns": 4.678161144257,
+            "ruststa_required_ns": 0.324,
+            "ruststa_slack_ns": 4.678175803207875
            }
           ]
          }
@@ -3905,93 +4408,93 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 0.0004547113795183577,
+          "max_difference_ns": 0.00010113933646471729,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
            {
-            "difference_ns": 0.0004547113795183577,
-            "endpoint": "r2/D",
-            "kind": "setup",
-            "opensta_ns": 4.960721492767,
-            "ruststa_ns": 4.961176204146518
+            "difference_ns": 0.00010113933646471729,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 1.07991039753,
+            "ruststa_ns": 1.0798092581935352
            },
            {
-            "difference_ns": 0.00019324961591049572,
-            "endpoint": "r1/D",
+            "difference_ns": 7.744078482474492e-05,
+            "endpoint": "z[0]",
             "kind": "setup",
-            "opensta_ns": 7.600592136383,
-            "ruststa_ns": 7.600398886767089
+            "opensta_ns": 8.704963684082,
+            "ruststa_ns": 8.705041124866824
            },
            {
-            "difference_ns": 0.00019082179595919513,
-            "endpoint": "r0/D",
-            "kind": "setup",
-            "opensta_ns": 7.53519487381,
-            "ruststa_ns": 7.535004052014041
-           },
-           {
-            "difference_ns": 0.0001779574762243996,
+            "difference_ns": 5.708795896897101e-05,
             "endpoint": "y[0]",
             "kind": "hold",
-            "opensta_ns": 3.728322982788,
-            "ruststa_ns": 3.7281450253117754
+            "opensta_ns": 3.769137620926,
+            "ruststa_ns": 3.769080532967031
            },
            {
-            "difference_ns": 0.00017358319007332312,
+            "difference_ns": 5.4419180305353976e-05,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 1.045632839203,
+            "ruststa_ns": 1.0455784200226947
+           },
+           {
+            "difference_ns": 5.355579631061147e-05,
             "endpoint": "y[0]",
             "kind": "setup",
-            "opensta_ns": 5.744966030121,
-            "ruststa_ns": 5.745139613311073
+            "opensta_ns": 5.698850631714,
+            "ruststa_ns": 5.698904187510311
            },
            {
-            "difference_ns": 0.00016787344782454028,
-            "endpoint": "r3/D",
+            "difference_ns": 4.377797799293148e-05,
+            "endpoint": "z[1]",
             "kind": "setup",
-            "opensta_ns": 4.852761268616,
-            "ruststa_ns": 4.852929142063824
+            "opensta_ns": 8.753409385681,
+            "ruststa_ns": 8.753453163658993
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 3.939138635455919e-05,
+          "max_difference_ns": 5.504429889668927e-07,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 4,
           "status": "passed",
           "worst_rows": [
            {
-            "check": "r1/CLK:high",
-            "difference_ns": 3.939138635455919e-05,
-            "opensta_required_ns": 1.473999977112,
-            "opensta_slack_ns": 3.491814851761,
-            "ruststa_required_ns": 1.474,
-            "ruststa_slack_ns": 3.4917754603746456
-           },
-           {
-            "check": "r0/CLK:high",
-            "difference_ns": 3.891454935445182e-05,
-            "opensta_required_ns": 1.473999977112,
-            "opensta_slack_ns": 3.491814374924,
-            "ruststa_required_ns": 1.474,
-            "ruststa_slack_ns": 3.4917754603746456
-           },
-           {
             "check": "r1/CLK:low",
-            "difference_ns": 3.884016235433663e-05,
+            "difference_ns": 5.504429889668927e-07,
             "opensta_required_ns": 1.253999948502,
-            "opensta_slack_ns": 3.780185699463,
+            "opensta_slack_ns": 3.778118848801,
             "ruststa_required_ns": 1.254,
-            "ruststa_slack_ns": 3.780224539625354
+            "ruststa_slack_ns": 3.7781193992439888
            },
            {
-            "check": "r0/CLK:low",
-            "difference_ns": 3.8601744354327394e-05,
+            "check": "r3/CLK:low",
+            "difference_ns": 2.770087133008303e-07,
             "opensta_required_ns": 1.253999948502,
-            "opensta_slack_ns": 3.780185937881,
+            "opensta_slack_ns": 3.776503562927,
             "ruststa_required_ns": 1.254,
-            "ruststa_slack_ns": 3.780224539625354
+            "ruststa_slack_ns": 3.7765038399357134
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.9982828503017913e-07,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.776504039764,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.776503839935715
+           },
+           {
+            "check": "r0/CLK:min_period",
+            "difference_ns": 1.6784700029859323e-07,
+            "opensta_required_ns": 3.101000070572,
+            "opensta_slack_ns": 6.899000167847,
+            "ruststa_required_ns": 3.101,
+            "ruststa_slack_ns": 6.899
            }
           ]
          }
@@ -4018,93 +4521,93 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 0.0002604420901781146,
+          "max_difference_ns": 8.522307028158149e-05,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
            {
-            "difference_ns": 0.0002604420901781146,
-            "endpoint": "r2/D",
-            "kind": "hold",
-            "opensta_ns": 0.287925750017,
-            "ruststa_ns": 0.2876653079268219
-           },
-           {
-            "difference_ns": 0.00023515698201403978,
-            "endpoint": "r3/D",
-            "kind": "setup",
-            "opensta_ns": 7.463591575623,
-            "ruststa_ns": 7.463826732605014
-           },
-           {
-            "difference_ns": 0.0001359512559959697,
-            "endpoint": "r2/D",
-            "kind": "setup",
-            "opensta_ns": 7.502439022064,
-            "ruststa_ns": 7.502574973319996
-           },
-           {
-            "difference_ns": 8.330369531783788e-05,
+            "difference_ns": 8.522307028158149e-05,
             "endpoint": "z[0]",
             "kind": "hold",
-            "opensta_ns": 0.737409174442,
-            "ruststa_ns": 0.7373258707466822
+            "opensta_ns": 0.739439189434,
+            "ruststa_ns": 0.7393539663637184
            },
            {
-            "difference_ns": 7.55700331587228e-05,
+            "difference_ns": 7.788094835903259e-05,
             "endpoint": "y[0]",
             "kind": "hold",
-            "opensta_ns": 1.969297885895,
-            "ruststa_ns": 1.9692223158618414
+            "opensta_ns": 1.985738277435,
+            "ruststa_ns": 1.985660396486641
            },
            {
-            "difference_ns": 7.300788104114275e-05,
+            "difference_ns": 7.488614188044806e-05,
             "endpoint": "y[0]",
             "kind": "setup",
-            "opensta_ns": 7.741646766663,
-            "ruststa_ns": 7.741719774544041
+            "opensta_ns": 7.722896099091,
+            "ruststa_ns": 7.72297098523288
+           },
+           {
+            "difference_ns": 6.491613262404883e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.114609718323,
+            "ruststa_ns": 9.114674634455625
+           },
+           {
+            "difference_ns": 5.448186067535943e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 7.767554759979,
+            "ruststa_ns": 7.767609241839676
+           },
+           {
+            "difference_ns": 5.2763073602690724e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.958452343941,
+            "ruststa_ns": 1.9583995808673973
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 1.7199717753157984e-05,
+          "max_difference_ns": 1.797971989958569e-05,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 4,
           "status": "passed",
           "worst_rows": [
            {
-            "check": "r3/CLK:high",
-            "difference_ns": 1.7199717753157984e-05,
-            "opensta_required_ns": 0.707000017166,
-            "opensta_slack_ns": 4.283400535583,
-            "ruststa_required_ns": 0.707,
-            "ruststa_slack_ns": 4.283383335865246
-           },
-           {
             "check": "r2/CLK:low",
-            "difference_ns": 1.662369875443659e-05,
+            "difference_ns": 1.797971989958569e-05,
             "opensta_required_ns": 0.597000002861,
-            "opensta_slack_ns": 4.412600040436,
+            "opensta_slack_ns": 4.413273334503,
             "ruststa_required_ns": 0.597,
-            "ruststa_slack_ns": 4.412616664134754
+            "ruststa_slack_ns": 4.413291314222899
            },
            {
             "check": "r3/CLK:low",
-            "difference_ns": 1.6623698752660232e-05,
+            "difference_ns": 1.797971989958569e-05,
             "opensta_required_ns": 0.597000002861,
-            "opensta_slack_ns": 4.412600040436,
+            "opensta_slack_ns": 4.413273334503,
             "ruststa_required_ns": 0.597,
-            "ruststa_slack_ns": 4.412616664134752
+            "ruststa_slack_ns": 4.413291314222899
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.7602064900756886e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.282726287842,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.2827086857770995
            },
            {
             "check": "r2/CLK:high",
-            "difference_ns": 1.624604375383143e-05,
+            "difference_ns": 1.7602064899868708e-05,
             "opensta_required_ns": 0.707000017166,
-            "opensta_slack_ns": 4.283399581909,
+            "opensta_slack_ns": 4.282726287842,
             "ruststa_required_ns": 0.707,
-            "ruststa_slack_ns": 4.283383335865246
+            "ruststa_slack_ns": 4.2827086857771
            }
           ]
          }
@@ -4137,18 +4640,11 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 7.842255746837168e-05,
+          "max_difference_ns": 7.150774432118645e-05,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
-           {
-            "difference_ns": 7.842255746837168e-05,
-            "endpoint": "r2/D",
-            "kind": "setup",
-            "opensta_ns": 8.570183753967,
-            "ruststa_ns": 8.570262176524468
-           },
            {
             "difference_ns": 7.150774432118645e-05,
             "endpoint": "y[0]",
@@ -4178,11 +4674,18 @@
             "ruststa_ns": 9.289764843978645
            },
            {
-            "difference_ns": 5.3606829645502785e-05,
-            "endpoint": "r3/D",
+            "difference_ns": 5.204818389792365e-05,
+            "endpoint": "y[1]",
             "kind": "setup",
-            "opensta_ns": 8.549252510071,
-            "ruststa_ns": 8.549306116900645
+            "opensta_ns": 8.609883308411,
+            "ruststa_ns": 8.609935356594898
+           },
+           {
+            "difference_ns": 5.035181328527649e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.206664085388,
+            "ruststa_ns": 1.2066137335747147
            }
           ]
          },
@@ -4250,93 +4753,93 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 0.002722564062263011,
+          "max_difference_ns": 0.00014220860603919583,
           "missing": [],
-          "status": "failed",
+          "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
            {
-            "difference_ns": 0.002722564062263011,
+            "difference_ns": 0.00014220860603919583,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 1.077664971352,
+            "ruststa_ns": 1.0775227627459607
+           },
+           {
+            "difference_ns": 0.00011037561099414006,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 8.708365440369,
+            "ruststa_ns": 8.708475815979995
+           },
+           {
+            "difference_ns": 0.0001048897322322162,
             "endpoint": "y[0]",
             "kind": "hold",
             "opensta_ns": 3.767025947571,
-            "ruststa_ns": 3.764303383508737
+            "ruststa_ns": 3.766921057838768
            },
            {
-            "difference_ns": 0.0027167857821499553,
+            "difference_ns": 9.991922356089589e-05,
             "endpoint": "y[0]",
             "kind": "setup",
             "opensta_ns": 5.701058864594,
-            "ruststa_ns": 5.70377565037615
+            "ruststa_ns": 5.701158783817561
            },
            {
-            "difference_ns": 0.0026808386981294063,
+            "difference_ns": 7.453945893076686e-05,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 1.044184923172,
+            "ruststa_ns": 1.0441103837130692
+           },
+           {
+            "difference_ns": 6.408297869331392e-05,
             "endpoint": "y[1]",
             "kind": "setup",
             "opensta_ns": 5.790239810944,
-            "ruststa_ns": 5.792920649642129
-           },
-           {
-            "difference_ns": 0.0026793373429496725,
-            "endpoint": "y[1]",
-            "kind": "hold",
-            "opensta_ns": 3.713957071304,
-            "ruststa_ns": 3.7112777339610505
-           },
-           {
-            "difference_ns": 0.0025919942334995394,
-            "endpoint": "r0/D",
-            "kind": "hold",
-            "opensta_ns": 0.444480806589,
-            "ruststa_ns": 0.44707280082249956
-           },
-           {
-            "difference_ns": 0.0025862081124029546,
-            "endpoint": "r3/D",
-            "kind": "hold",
-            "opensta_ns": 0.394048810005,
-            "ruststa_ns": 0.396635018117403
+            "ruststa_ns": 5.790303893922693
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 0.0025069581771886007,
+          "max_difference_ns": 2.6536954562672577e-05,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 4,
-          "status": "failed",
+          "status": "passed",
           "worst_rows": [
            {
-            "check": "r1/CLK:low",
-            "difference_ns": 0.0025069581771886007,
-            "opensta_required_ns": 1.253999948502,
-            "opensta_slack_ns": 3.782307863235,
-            "ruststa_required_ns": 1.254,
-            "ruststa_slack_ns": 3.779800905057811
-           },
-           {
-            "check": "r0/CLK:high",
-            "difference_ns": 0.0025068837911885744,
+            "check": "r2/CLK:high",
+            "difference_ns": 2.6536954562672577e-05,
             "opensta_required_ns": 1.473999977112,
-            "opensta_slack_ns": 3.489692211151,
+            "opensta_slack_ns": 3.491044044495,
             "ruststa_required_ns": 1.474,
-            "ruststa_slack_ns": 3.4921990949421886
+            "ruststa_slack_ns": 3.4910175075404375
            },
            {
-            "check": "r0/CLK:low",
-            "difference_ns": 0.0025064813401889374,
-            "opensta_required_ns": 1.253999948502,
-            "opensta_slack_ns": 3.782307386398,
-            "ruststa_required_ns": 1.254,
-            "ruststa_slack_ns": 3.779800905057811
-           },
-           {
-            "check": "r1/CLK:high",
-            "difference_ns": 0.002506406954188467,
+            "check": "r3/CLK:high",
+            "difference_ns": 2.6536954562672577e-05,
             "opensta_required_ns": 1.473999977112,
-            "opensta_slack_ns": 3.489692687988,
+            "opensta_slack_ns": 3.491044044495,
             "ruststa_required_ns": 1.474,
-            "ruststa_slack_ns": 3.4921990949421886
+            "ruststa_slack_ns": 3.4910175075404375
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 2.6462567561225114e-05,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.780956029892,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.7809824924595614
+           },
+           {
+            "check": "r3/CLK:low",
+            "difference_ns": 2.6462567561225114e-05,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.780956029892,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.7809824924595614
            }
           ]
          }
@@ -4363,32 +4866,11 @@
          "endpoints": {
           "comparisons": 16,
           "endpoints": 8,
-          "max_difference_ns": 0.00038033558578920434,
+          "max_difference_ns": 9.224494819226603e-05,
           "missing": [],
           "status": "passed",
           "tolerance_ns": 0.001,
           "worst_rows": [
-           {
-            "difference_ns": 0.00038033558578920434,
-            "endpoint": "r3/D",
-            "kind": "setup",
-            "opensta_ns": 7.463933467865,
-            "ruststa_ns": 7.464313803450789
-           },
-           {
-            "difference_ns": 0.0002532543516098329,
-            "endpoint": "r2/D",
-            "kind": "hold",
-            "opensta_ns": 0.279413342476,
-            "ruststa_ns": 0.2791600881243902
-           },
-           {
-            "difference_ns": 0.00012790751125280053,
-            "endpoint": "r2/D",
-            "kind": "setup",
-            "opensta_ns": 7.504493236542,
-            "ruststa_ns": 7.504621144053253
-           },
            {
             "difference_ns": 9.224494819226603e-05,
             "endpoint": "z[0]",
@@ -4397,11 +4879,11 @@
             "ruststa_ns": 0.7381345860108077
            },
            {
-            "difference_ns": 8.270996635162398e-05,
+            "difference_ns": 8.270996635117989e-05,
             "endpoint": "y[0]",
             "kind": "hold",
             "opensta_ns": 1.985266923904,
-            "ruststa_ns": 1.9851842139376483
+            "ruststa_ns": 1.9851842139376488
            },
            {
             "difference_ns": 7.968113710354885e-05,
@@ -4409,11 +4891,32 @@
             "kind": "setup",
             "opensta_ns": 7.723526954651,
             "ruststa_ns": 7.723606635788103
+           },
+           {
+            "difference_ns": 7.036088191547663e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.116306304932,
+            "ruststa_ns": 9.116376665813915
+           },
+           {
+            "difference_ns": 5.5346150256596616e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 7.768431663513,
+            "ruststa_ns": 7.768487009663256
+           },
+           {
+            "difference_ns": 5.456024146366367e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.957830667496,
+            "ruststa_ns": 1.9577761072545363
            }
           ]
          },
          "pulse": {
-          "max_difference_ns": 1.879718561692556e-05,
+          "max_difference_ns": 1.8797185616037382e-05,
           "missing_or_extra": [],
           "mpw_rows": 8,
           "period_rows": 4,
@@ -4421,50 +4924,45 @@
           "worst_rows": [
            {
             "check": "r2/CLK:high",
-            "difference_ns": 1.879718561692556e-05,
+            "difference_ns": 1.8797185616037382e-05,
             "opensta_required_ns": 0.707000017166,
             "opensta_slack_ns": 4.28277349472,
             "ruststa_required_ns": 0.707,
-            "ruststa_slack_ns": 4.282754697534383
+            "ruststa_slack_ns": 4.282754697534384
            },
            {
             "check": "r3/CLK:high",
-            "difference_ns": 1.879718561692556e-05,
+            "difference_ns": 1.8797185616037382e-05,
             "opensta_required_ns": 0.707000017166,
             "opensta_slack_ns": 4.28277349472,
             "ruststa_required_ns": 0.707,
-            "ruststa_slack_ns": 4.282754697534383
+            "ruststa_slack_ns": 4.282754697534384
            },
            {
             "check": "r0/CLK:low",
-            "difference_ns": 1.8641426326126975e-05,
+            "difference_ns": 1.848045781294161e-05,
             "opensta_required_ns": 0.597000002861,
             "opensta_slack_ns": 4.413713932037,
             "ruststa_required_ns": 0.597,
-            "ruststa_slack_ns": 4.413732573463326
+            "ruststa_slack_ns": 4.413732412494813
            },
            {
-            "check": "r0/CLK:high",
-            "difference_ns": 1.8263771325521816e-05,
-            "opensta_required_ns": 0.707000017166,
-            "opensta_slack_ns": 4.282285690308,
-            "ruststa_required_ns": 0.707,
-            "ruststa_slack_ns": 4.2822674265366745
+            "check": "r2/CLK:low",
+            "difference_ns": 1.8221166614651452e-05,
+            "opensta_required_ns": 0.597000002861,
+            "opensta_slack_ns": 4.413227081299,
+            "ruststa_required_ns": 0.597,
+            "ruststa_slack_ns": 4.413245302465615
            }
           ]
          }
         }
        },
-       "failing": [
-        "ss:endpoints",
-        "ss:pulse"
-       ],
-       "reason": "parity outside 1 ps: ['ss:endpoints', 'ss:pulse']",
-       "status": "failed"
+       "failing": [],
+       "status": "passed"
       }
      },
-     "reason": "openrcx: parity outside 1 ps: ['ss:endpoints', 'ss:pulse']",
-     "status": "failed"
+     "status": "passed"
     },
     "timing_hold": {
      "by_spef": {
@@ -4511,9 +5009,12 @@
      "status": "passed"
     }
    },
-   "wall_seconds": 61.197
+   "wall_seconds": 60.566
   }
  ],
+ "port_source": {
+  "tool": "yosys"
+ },
  "ports": [
   {
    "bits": [
@@ -4600,40 +5101,40 @@
    "tool_process_address_space_mib": 2048,
    "tool_timeout_s": 120
   },
-  "peak_rss_kib": 475468,
+  "peak_rss_kib": 475596,
   "processes": 290,
   "steps": [
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 61916,
+    "peak_rss_kib": 61912,
     "processes": 1,
     "step": "synthesis",
-    "wall_seconds": 0.134
+    "wall_seconds": 0.14
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 120732,
+    "peak_rss_kib": 120648,
     "processes": 74,
     "step": "place_cts_route_closure",
-    "wall_seconds": 3.046
+    "wall_seconds": 2.994
    },
    {
     "nested_peaks": 3,
     "pdk": "sky130",
-    "peak_rss_kib": 111800,
+    "peak_rss_kib": 108620,
     "processes": 3,
     "step": "openrcx",
-    "wall_seconds": 0.97
+    "wall_seconds": 1.237
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 17220,
+    "peak_rss_kib": 18708,
     "processes": 1,
     "step": "gds_export",
-    "wall_seconds": 0.029
+    "wall_seconds": 0.03
    },
    {
     "nested_peaks": 0,
@@ -4641,143 +5142,143 @@
     "peak_rss_kib": null,
     "processes": 0,
     "step": "cell_policy",
-    "wall_seconds": 0.023
+    "wall_seconds": 0.028
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 62684,
+    "peak_rss_kib": 63440,
     "processes": 2,
     "step": "cec_prelayout",
-    "wall_seconds": 0.154
+    "wall_seconds": 0.157
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 120268,
+    "peak_rss_kib": 121160,
     "processes": 42,
     "step": "timing",
-    "wall_seconds": 1.801
+    "wall_seconds": 1.9
    },
    {
     "nested_peaks": 2,
     "pdk": "sky130",
-    "peak_rss_kib": 474468,
+    "peak_rss_kib": 475596,
     "processes": 0,
     "step": "signoff",
-    "wall_seconds": 11.31
+    "wall_seconds": 11.621
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 63180,
+    "peak_rss_kib": 62928,
     "processes": 2,
     "step": "cec_final",
-    "wall_seconds": 0.151
+    "wall_seconds": 0.156
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 62740,
+    "peak_rss_kib": 62940,
     "processes": 2,
     "step": "cec_powered",
-    "wall_seconds": 0.162
+    "wall_seconds": 0.166
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 287224,
+    "peak_rss_kib": 288848,
     "processes": 3,
     "step": "simulation",
-    "wall_seconds": 1.666
+    "wall_seconds": 1.697
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 61788,
+    "peak_rss_kib": 61928,
     "processes": 20,
     "step": "cell_proofs",
-    "wall_seconds": 0.72
+    "wall_seconds": 0.706
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 61964,
+    "peak_rss_kib": 61664,
     "processes": 1,
     "step": "rerun_synthesis",
-    "wall_seconds": 0.132
+    "wall_seconds": 0.133
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 120812,
+    "peak_rss_kib": 121268,
     "processes": 74,
     "step": "rerun_place_cts_route_closure",
-    "wall_seconds": 3.048
+    "wall_seconds": 2.905
    },
    {
     "nested_peaks": 3,
     "pdk": "sky130",
-    "peak_rss_kib": 112116,
+    "peak_rss_kib": 108268,
     "processes": 3,
     "step": "rerun_openrcx",
-    "wall_seconds": 0.989
+    "wall_seconds": 1.004
    },
    {
     "nested_peaks": 0,
     "pdk": "sky130",
-    "peak_rss_kib": 18032,
+    "peak_rss_kib": 18232,
     "processes": 1,
     "step": "rerun_gds_export",
-    "wall_seconds": 0.028
+    "wall_seconds": 0.03
    },
    {
     "nested_peaks": 79,
     "pdk": "sky130",
-    "peak_rss_kib": 120812,
+    "peak_rss_kib": 121268,
     "processes": 0,
     "step": "determinism_rerun",
-    "wall_seconds": 4.219
+    "wall_seconds": 4.094
    },
    {
     "nested_peaks": 11,
     "pdk": "sky130",
-    "peak_rss_kib": 475468,
+    "peak_rss_kib": 475172,
     "processes": 6,
     "step": "controls",
-    "wall_seconds": 24.14
+    "wall_seconds": 25.568
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 104400,
+    "peak_rss_kib": 104544,
     "processes": 1,
     "step": "synthesis",
-    "wall_seconds": 0.223
+    "wall_seconds": 0.227
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 231596,
+    "peak_rss_kib": 231536,
     "processes": 49,
     "step": "place_cts_route_closure",
-    "wall_seconds": 2.217
+    "wall_seconds": 2.144
    },
    {
     "nested_peaks": 3,
     "pdk": "gf180",
-    "peak_rss_kib": 126232,
+    "peak_rss_kib": 123240,
     "processes": 3,
     "step": "openrcx",
-    "wall_seconds": 1.305
+    "wall_seconds": 1.371
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 11488,
+    "peak_rss_kib": 12688,
     "processes": 1,
     "step": "gds_export",
-    "wall_seconds": 0.021
+    "wall_seconds": 0.018
    },
    {
     "nested_peaks": 0,
@@ -4790,121 +5291,122 @@
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 106944,
+    "peak_rss_kib": 106960,
     "processes": 2,
     "step": "cec_prelayout",
-    "wall_seconds": 0.258
+    "wall_seconds": 0.249
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 231144,
+    "peak_rss_kib": 231496,
     "processes": 42,
     "step": "timing",
-    "wall_seconds": 3.055
+    "wall_seconds": 3.063
    },
    {
     "nested_peaks": 2,
     "pdk": "gf180",
-    "peak_rss_kib": 445076,
+    "peak_rss_kib": 447560,
     "processes": 0,
     "step": "signoff",
-    "wall_seconds": 14.884
+    "wall_seconds": 15.278
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 106468,
+    "peak_rss_kib": 106980,
     "processes": 2,
     "step": "cec_final",
-    "wall_seconds": 0.245
-   },
-   {
-    "nested_peaks": 0,
-    "pdk": "gf180",
-    "peak_rss_kib": 106896,
-    "processes": 2,
-    "step": "cec_powered",
     "wall_seconds": 0.252
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 288844,
+    "peak_rss_kib": 106400,
+    "processes": 2,
+    "step": "cec_powered",
+    "wall_seconds": 0.253
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 287144,
     "processes": 3,
     "step": "simulation",
-    "wall_seconds": 1.743
+    "wall_seconds": 1.717
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 79120,
+    "peak_rss_kib": 79376,
     "processes": 20,
     "step": "cell_proofs",
-    "wall_seconds": 1.003
+    "wall_seconds": 0.946
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 103840,
+    "peak_rss_kib": 104384,
     "processes": 1,
     "step": "rerun_synthesis",
-    "wall_seconds": 0.228
+    "wall_seconds": 0.229
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 231056,
+    "peak_rss_kib": 231368,
     "processes": 49,
     "step": "rerun_place_cts_route_closure",
-    "wall_seconds": 2.362
+    "wall_seconds": 2.151
    },
    {
     "nested_peaks": 3,
     "pdk": "gf180",
-    "peak_rss_kib": 127276,
+    "peak_rss_kib": 123164,
     "processes": 3,
     "step": "rerun_openrcx",
-    "wall_seconds": 1.308
+    "wall_seconds": 1.402
    },
    {
     "nested_peaks": 0,
     "pdk": "gf180",
-    "peak_rss_kib": 11552,
+    "peak_rss_kib": 12428,
     "processes": 1,
     "step": "rerun_gds_export",
-    "wall_seconds": 0.019
+    "wall_seconds": 0.018
    },
    {
     "nested_peaks": 54,
     "pdk": "gf180",
-    "peak_rss_kib": 231056,
+    "peak_rss_kib": 231368,
     "processes": 0,
     "step": "determinism_rerun",
-    "wall_seconds": 3.947
+    "wall_seconds": 3.83
    },
    {
     "nested_peaks": 11,
     "pdk": "gf180",
-    "peak_rss_kib": 448584,
+    "peak_rss_kib": 447992,
     "processes": 6,
     "step": "controls",
-    "wall_seconds": 31.704
+    "wall_seconds": 30.873
    }
   ],
-  "wall_seconds": 110.49
+  "wall_seconds": 111.856
  },
  "revision": {
-  "branch": "feat/rtl2gds-gate",
+  "branch": "feat/rtl2gds-final",
   "dirty": false,
   "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
   "dirty_paths": 0,
-  "head": "05fca8dce3a1b68182f0b065bf52350931671c8a",
-  "rustroad_sha256": "2f7254d6196e420a558ddad300ff9137cc066014dce54b29209648a0b8a3cb37"
+  "head": "0acb28a11a8319941564b82c0b12f91b07e64a21",
+  "rustroad_sha256": "2911f28b20a26e273a426e45917cddad3ff3e1e8d2a1475f9a9ca212de70b3af"
  },
  "schema": "rustroad.rtl2gds.v1",
  "scope": {
   "antenna": "native check-antenna with a 0.10 safety margin + foundry deck (deck is the signoff gate)",
+  "async_reset_pulse_width": "unchecked: minimum pulse width of asynchronous set/clear inputs is a requirement on the reset source outside the block (pins listed per PDK in mpw_min_period); their recovery/removal checks are timed",
   "clocks": "propagated, RustROAD CTS",
   "cppr": "unchecked",
   "density": "reported separately (density_status); not part of the gate (owner decision)",
@@ -4916,106 +5418,9 @@
   "seal_ring": "not_applicable (block level, no seal ring)",
   "signal_integrity": "unchecked (coupling grounded)"
  },
- "status": "failed",
- "timing_accuracy_failures": [
-  {
-   "check": "endpoints",
-   "corner": "ss",
-   "max_difference_ns": 0.002722564062263011,
-   "missing": null,
-   "pdk": "gf180",
-   "spef": "openrcx",
-   "tolerance_ns": 0.001,
-   "worst_rows": [
-    {
-     "difference_ns": 0.002722564062263011,
-     "endpoint": "y[0]",
-     "kind": "hold",
-     "opensta_ns": 3.767025947571,
-     "ruststa_ns": 3.764303383508737
-    },
-    {
-     "difference_ns": 0.0027167857821499553,
-     "endpoint": "y[0]",
-     "kind": "setup",
-     "opensta_ns": 5.701058864594,
-     "ruststa_ns": 5.70377565037615
-    },
-    {
-     "difference_ns": 0.0026808386981294063,
-     "endpoint": "y[1]",
-     "kind": "setup",
-     "opensta_ns": 5.790239810944,
-     "ruststa_ns": 5.792920649642129
-    },
-    {
-     "difference_ns": 0.0026793373429496725,
-     "endpoint": "y[1]",
-     "kind": "hold",
-     "opensta_ns": 3.713957071304,
-     "ruststa_ns": 3.7112777339610505
-    },
-    {
-     "difference_ns": 0.0025919942334995394,
-     "endpoint": "r0/D",
-     "kind": "hold",
-     "opensta_ns": 0.444480806589,
-     "ruststa_ns": 0.44707280082249956
-    },
-    {
-     "difference_ns": 0.0025862081124029546,
-     "endpoint": "r3/D",
-     "kind": "hold",
-     "opensta_ns": 0.394048810005,
-     "ruststa_ns": 0.396635018117403
-    }
-   ]
-  },
-  {
-   "check": "pulse",
-   "corner": "ss",
-   "max_difference_ns": 0.0025069581771886007,
-   "missing": [],
-   "pdk": "gf180",
-   "spef": "openrcx",
-   "tolerance_ns": 0.001,
-   "worst_rows": [
-    {
-     "check": "r1/CLK:low",
-     "difference_ns": 0.0025069581771886007,
-     "opensta_required_ns": 1.253999948502,
-     "opensta_slack_ns": 3.782307863235,
-     "ruststa_required_ns": 1.254,
-     "ruststa_slack_ns": 3.779800905057811
-    },
-    {
-     "check": "r0/CLK:high",
-     "difference_ns": 0.0025068837911885744,
-     "opensta_required_ns": 1.473999977112,
-     "opensta_slack_ns": 3.489692211151,
-     "ruststa_required_ns": 1.474,
-     "ruststa_slack_ns": 3.4921990949421886
-    },
-    {
-     "check": "r0/CLK:low",
-     "difference_ns": 0.0025064813401889374,
-     "opensta_required_ns": 1.253999948502,
-     "opensta_slack_ns": 3.782307386398,
-     "ruststa_required_ns": 1.254,
-     "ruststa_slack_ns": 3.779800905057811
-    },
-    {
-     "check": "r1/CLK:high",
-     "difference_ns": 0.002506406954188467,
-     "opensta_required_ns": 1.473999977112,
-     "opensta_slack_ns": 3.489692687988,
-     "ruststa_required_ns": 1.474,
-     "ruststa_slack_ns": 3.4921990949421886
-    }
-   ]
-  }
- ],
- "timing_accuracy_status": "failed",
+ "status": "passed",
+ "timing_accuracy_failures": [],
+ "timing_accuracy_status": "passed",
  "tools": {
   "openroad": {
    "executable": "openroad",
@@ -5035,26 +5440,26 @@
    "status": "passed"
   },
   "rusteda": {
-   "actual_sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
-   "expected_sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
+   "actual_sha256": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+   "expected_sha256": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
    "overridden": false,
-   "provenance": "RustSTA 0.4.0 78ea7cc (feat/signoff-checks), .work/sta-signoff/bin",
+   "provenance": "RustSTA feat/signoff-checks 06b1c9f (merge of the shared-crate convergence 0.4.1, 6af9936, into stream sta3 ebc7037: lumped nearly resistance-free pi loads, driver resistance at 1 fF), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS",
    "reason": null,
-   "sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
+   "sha256": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
    "status": "passed"
   },
   "rustroad": {
-   "actual_sha256": "2f7254d6196e420a558ddad300ff9137cc066014dce54b29209648a0b8a3cb37",
+   "actual_sha256": "2911f28b20a26e273a426e45917cddad3ff3e1e8d2a1475f9a9ca212de70b3af",
    "note": "the binary under test: bound by sha256 with the git revision, not pinned",
    "status": "passed"
   },
   "ruststa": {
-   "actual_sha256": "c407c7423dbda69661825ad06db0b10f66bd8eae7e27b181ac40a5cca85b8f44",
-   "expected_sha256": "c407c7423dbda69661825ad06db0b10f66bd8eae7e27b181ac40a5cca85b8f44",
+   "actual_sha256": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+   "expected_sha256": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
    "overridden": false,
-   "provenance": "RustSTA 0.4.0 78ea7cc (feat/signoff-checks), .work/sta-signoff/bin",
+   "provenance": "RustSTA feat/signoff-checks 06b1c9f (merge of the shared-crate convergence 0.4.1, 6af9936, into stream sta3 ebc7037: lumped nearly resistance-free pi loads, driver resistance at 1 fF), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS",
    "reason": null,
-   "sha256": "c407c7423dbda69661825ad06db0b10f66bd8eae7e27b181ac40a5cca85b8f44",
+   "sha256": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
    "status": "passed"
   },
   "rustsys": {

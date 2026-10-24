@@ -69,6 +69,9 @@ SCOPE = dict(level="block/macro", pad_ring="not_applicable (block level, no pad 
              density="reported separately (density_status); not part of the gate (owner decision)",
              ir_drop="unchecked", electromigration="unchecked", signal_integrity="unchecked (coupling grounded)",
              ocv="unchecked", cppr="unchecked", clocks="propagated, RustROAD CTS",
+             async_reset_pulse_width="unchecked: minimum pulse width of asynchronous set/clear inputs is a "
+                                     "requirement on the reset source outside the block (pins listed per PDK in "
+                                     "mpw_min_period); their recovery/removal checks are timed",
              antenna="native check-antenna with a 0.10 safety margin + foundry deck (deck is the signoff gate)")
 SIGNOFF_CHECKS = ["drc-magic", "drc-klayout", "antenna", "density", "lvs-netgen", "lvs-klayout", "xor"]
 
@@ -109,12 +112,22 @@ class Context:
         self.rtl = [D.resolve(r["path"]) for r in manifest["rtl"]]
         self.budgets, self.verification = manifest["budgets"], manifest["verification"]
         self.clock = manifest["clock"]
+        self.clocked = self.clock["port"] is not None
+        # Combinational design whose RTL the pinned Yosys cannot elaborate:
+        # the second CEC oracle is an exhaustive co-simulation (complete for
+        # combinational logic) when the input space is small enough.
+        self.exhaustive = None
+        if not self.clocked:
+            bits = sum(p["width"] for p in ports if p["direction"] == "input")
+            if bits <= L.EXHAUSTIVE_MAX_INPUT_BITS:
+                self.exhaustive = dict(ports=ports, input_bits=bits, seed=int(str(self.verification["cosim_seed"]), 0))
         self.tool_paths = {n: Path(t["path"]) for n, t in tools.items() if "path" in t}
         self.tool_paths["rustroad"] = args.rustroad
         self.signoff_manifest = D.resolve(manifest["signoff_manifest"]["path"])
         self.flow_args = argparse.Namespace(
-            max_iterations=int(self.budgets["max_hold_iterations"]), target_margin=self.budgets["hold_margin_ns"],
+            max_iterations=int(self.budgets["max_hold_iterations"]), target_margin=self.budgets["hold_eco_target_margin_ns"],
             setup_margin=self.budgets["hold_eco_setup_margin_ns"], physical_config={},
+            gate_margin=self.budgets["hold_margin_ns"],
             cell_policy=D.resolve(manifest["cell_policy"]["path"]), manifest=self.signoff_manifest,
             openrcx=False, antenna_controls=False, signoff=False)
 
@@ -138,7 +151,9 @@ class PdkGate:
         p["config"] = str(D.resolve(self.spec["physical_config"]["path"]))
         p["routing_config"] = str(D.resolve(self.spec["routing_config"]["path"]))
         p["cts_sdc"] = str(D.resolve(ctx.manifest["sdc"]["clock"]["path"]))
+        p["clock_port"] = ctx.clock["port"]
         self.p = p
+        self.recipe = ctx.manifest["recipe"]["physical"]
         self.statuses: dict[str, dict] = {}
         self.details: dict = {}
         self.container_peaks: list = []  # peak RSS of every signoff container run (steps)
@@ -150,19 +165,30 @@ class PdkGate:
 
     def flow(self, h) -> Flow:
         ctx = self.ctx
+        literal = self.spec.get("netlist")
+        profile = self.spec.get("physical_profile")
+        sizing = self.spec.get("sizing_profile")
         design = Design(top=ctx.top, rtl=ctx.rtl, floorplan=D.resolve(self.spec["floorplan"]["path"]),
-                        sdc_text=ctx.sdc_text)
+                        sdc_text=ctx.sdc_text, recipe=self.recipe, clocked=ctx.clocked,
+                        netlist=D.resolve(literal["path"]) if literal else None,
+                        physical_profile=D.resolve(profile["path"]) if profile else None,
+                        floorplan_recipe=ctx.manifest["recipe"]["floorplan"],
+                        sizing_profile=D.resolve(sizing["path"]) if sizing else None)
         tools = {k: ctx.tool_paths[k] for k in ("yosys", "verilator", "opensta", "rustsys", "rustroad",
                                                   "rusteda", "ruststa")}
         return Flow(h, ctx.flow_args, tools, self.p, ctx.policy, design)
 
     # ------------------------------------------------------------------ build
     def build(self, h, label: str = "") -> dict:
-        tag, steps = self.tag, self.ctx.steps
+        tag, steps, ctx = self.tag, self.ctx.steps, self.ctx
         flow = self.flow(h)
         out = dict(flow=flow, frozen_before=flow.frozen())
         with steps(h, tag, f"{label}synthesis"):
             out["mapped"] = flow.synth()
+            out["renamed_wires"] = flow.renamed_wires
+        if self.recipe == "track":
+            with steps(h, tag, f"{label}floorplan"):
+                out["floorplan_check"] = flow.reproduce_floorplan(out["mapped"])
         with steps(h, tag, f"{label}place_cts_route_closure"):
             out["iterations"], final = flow.close(out["mapped"])
         it, netlist, phys, sta, antenna = final
@@ -172,7 +198,8 @@ class PdkGate:
             for c in self.corners:
                 rc = self.rc[c]
                 spef, info = compare_spef.openrcx(h, f"{tag}_final", tag, rc, Path(phys["paths"]["def"]),
-                                                  f"{tag}_openrcx_{rc}")
+                                                  f"{tag}_openrcx_{rc}",
+                                                  timeout_s=max(25, int(ctx.budgets["process_timeout_s"]) - 30))
                 out["openrcx"][c] = dict(path=spef, sha256=info["spef"]["sha256"], rules=info["rules"])
                 extra.append(info["container_peak_rss_kib"])
         with steps(h, tag, f"{label}gds_export"):
@@ -196,9 +223,14 @@ class PdkGate:
         lib = flow.libs["tt"]
         final, powered = Path(phys["paths"]["netlist"]), Path(phys["paths"]["powered"])
         st["inputs_frozen"] = D.compare_frozen(self.spec["frozen"], b["frozen_before"])
-        st["implementation"] = item("passed", iterations=len(b["iterations"]), final_iteration=b["final_iteration"],
+        fpc = b.get("floorplan_check")
+        impl_ok = fpc is None or fpc["status"] == "passed"
+        st["implementation"] = item("passed" if impl_ok else "failed",
+                                    None if impl_ok else f"track recipe: regenerated floorplan differs from the tracked one {fpc}",
+                                    recipe=self.recipe, iterations=len(b["iterations"]), final_iteration=b["final_iteration"],
                                     routed_nets=phys["routed_nets"], wires=phys["wires"], vias=phys["vias"],
-                                    patches=phys["patches"])
+                                    patches=phys["patches"], floorplan_reproduced=fpc, renamed_escaped_wires=b["renamed_wires"],
+                                    clock_tree=phys.get("cts"), placement=phys.get("placement"), route=phys.get("route"))
         policy = ctx.flow_args.cell_policy
         with steps(h, tag, "cell_policy"):
             checks = {"synth": check_cell_policy.check(tag, "synth", [b["mapped"]], None, policy, None),
@@ -208,7 +240,8 @@ class PdkGate:
                                                                         for k, c in checks.items()}),
                                      checks={k: dict(status=c["status"], violations=c["violations"][:10]) for k, c in checks.items()})
         with steps(h, tag, "cec_prelayout"):
-            pair = L.cec_pair(h, f"{tag}_cec_mapped", ctx.tool_paths, lib, ctx.rtl, ctx.top, b["mapped"], ctx.verification)
+            pair = L.cec_pair(h, f"{tag}_cec_mapped", ctx.tool_paths, lib, ctx.rtl, ctx.top, b["mapped"], ctx.verification,
+                              exhaustive=ctx.exhaustive)
             st["cec_prelayout"] = self.pair_status(pair, "RTL vs mapped netlist")
         st["hold_closure"] = self.closure_status(b)
         a = b["antenna"]
@@ -227,12 +260,23 @@ class PdkGate:
                                 openrcx=dict(binding=rb, rules={c: b["openrcx"][c]["rules"] for c in self.corners}))
         # Timing on both SPEF sources.
         with steps(h, tag, "timing"):
+            async_pins = T.async_pulse_pins(final, flow.libs["tt"])
             sources = {}
             for src, spefs in (("native", native), ("openrcx", rcx)):
-                rust = T.ruststa(h, f"{tag}_final_{src}", ctx.tool_paths, flow.libs, final, flow.sdc, spefs)
-                ref = {c: T.opensta(h, f"{tag}_final_{src}_opensta_{c}", ctx.tool_paths["opensta"], flow.libs[c],
-                                    final, ctx.top, flow.sdc, spefs[c]) for c in self.corners}
-                sources[src] = T.evaluate_source(rust, ref, self.corners, ctx.budgets)
+                try:
+                    rust = T.ruststa(h, f"{tag}_final_{src}", ctx.tool_paths, flow.libs, final, flow.sdc, spefs,
+                                     clock_model=flow.clock_model(), rc_limits=flow.sta_rc_limits())
+                    ref = {c: T.opensta(h, f"{tag}_final_{src}_opensta_{c}", ctx.tool_paths["opensta"], flow.libs[c],
+                                        final, ctx.top, flow.sdc, spefs[c]) for c in self.corners}
+                except GateError as error:
+                    # One engine could not time this SPEF source: every timing
+                    # status of the source is unverified (never passed); the
+                    # other source and the remaining oracles still run.
+                    sources[src] = T.unverified_source(f"{src} SPEF: {error}"[:600])
+                    sources[src]["ruststa_metrics"] = sources[src]["ruststa_scope"] = None
+                    continue
+                sources[src] = T.evaluate_source(rust, ref, self.corners, ctx.budgets, clocked=ctx.clocked,
+                                                 async_pins=async_pins)
                 sources[src]["ruststa_metrics"] = rust["gating"]["metrics"]
                 sources[src]["ruststa_scope"] = rust["gating"]["scope"]
             combined = T.combine(sources)
@@ -266,7 +310,8 @@ class PdkGate:
             self.details["signoff_summary"] = summary.get("summary_path")
         with steps(h, tag, "cec_final"):
             st["cec_final"] = self.pair_status(L.cec_pair(h, f"{tag}_cec_final", ctx.tool_paths, lib, ctx.rtl, ctx.top,
-                                                          final, ctx.verification), "RTL vs final netlist")
+                                                          final, ctx.verification, exhaustive=ctx.exhaustive),
+                                               "RTL vs final netlist")
         with steps(h, tag, "cec_powered"):
             st["cec_powered"] = self.powered_cec(powered, lib)
         with steps(h, tag, "simulation"):
@@ -276,7 +321,11 @@ class PdkGate:
         with steps(h, tag, "cell_proofs"):
             sink = next((e for e in sorted(sta["corners"]["tt"]["endpoints"]) if "/" in e), None)
             if sink is None:
-                raise GateError("no instance endpoint for the ECO polarity control")
+                # Combinational design: the endpoints are output ports; take the
+                # first cell-LEF INPUT pin of the final netlist instead.
+                sink = L.first_input_pin(final, L.lef_pins(Path(self.p["cell_lef"]["path"])))
+            if sink is None:
+                raise GateError("no instance input pin for the ECO polarity control")
             flow.design.control_sink = tuple(sink.rsplit("/", 1))
             proofs = flow.cell_proofs(final)
             ok = proofs["status"] in ("proved", "no_cells_inserted") and all(
@@ -287,9 +336,12 @@ class PdkGate:
                                      native_wrong_polarity=proofs["native_wrong_polarity"])
 
     def pair_status(self, pair: dict, what: str) -> dict:
-        s = D.worst([pair["rustsys"]["status"], pair["yosys"]["status"]])
-        return item(s, None if s == "passed" else f"{what}: RustSys {pair['rustsys']['status']}, Yosys {pair['yosys']['status']}",
-                    rustsys=pair["rustsys"], yosys=pair["yosys"])
+        second = L.second_oracle(pair)
+        s = D.worst([pair["rustsys"]["status"], second["status"]])
+        return item(s, None if s == "passed" else f"{what}: RustSys {pair['rustsys']['status']}, "
+                                                  f"{second['oracle']} {second['status']}",
+                    rustsys=pair["rustsys"], yosys=pair["yosys"], exhaustive=pair.get("exhaustive"),
+                    second_oracle=second["oracle"])
 
     def powered_cec(self, powered: Path, lib: Path) -> dict:
         ctx, h, tag = self.ctx, self.ctx.h, self.tag
@@ -298,15 +350,16 @@ class PdkGate:
         supply = [self.p["power_net"], self.p["ground_net"]]
         text = bounded_text(powered)
         filtered, removed = L.physical_only_view(text, globs, pins)
+        filtered, rails = L.rail_constant_view(filtered, pins, supply)
         f1 = h.root / f"{tag}_powered_logic.v"
         f1.write_text(filtered)
         unpowered, stripped = L.unpowered_view(filtered, pins, supply)
         f2 = h.root / f"{tag}_powered_unpowered.v"
         f2.write_text(unpowered)
         pair = L.cec_pair(h, f"{tag}_cec_powered", ctx.tool_paths, lib, ctx.rtl, ctx.top, f1, ctx.verification,
-                          supply_ports=supply, yosys_netlist=f2)
+                          supply_ports=supply, yosys_netlist=f2, exhaustive=ctx.exhaustive)
         out = self.pair_status(pair, "RTL vs powered netlist")
-        out.update(filtering=dict(physical_only=removed, unpowered_view=stripped, supply_ports=supply,
+        out.update(filtering=dict(physical_only=removed, rail_constants=rails, unpowered_view=stripped, supply_ports=supply,
                                   rustsys_input=str(f1), yosys_input=str(f2)))
         return out
 
@@ -314,16 +367,23 @@ class PdkGate:
         rows = []
         for rec in b["iterations"]:
             t = rec["timing"]
+            he = rec.get("hold_eco") or {}
+            se = rec.get("size_eco") or {}
             rows.append(dict(iteration=rec["iteration"], closed=t["closed"],
                              worst={c: dict(setup_ns=v["worst_setup_ns"], hold_ns=v["worst_hold_ns"])
                                     for c, v in t["corners"].items()},
-                             antenna=rec["antenna"]["status"], hold_eco=(rec.get("hold_eco") or {}).get("totals"),
-                             antenna_eco=rec.get("antenna_eco")))
+                             antenna=rec["antenna"]["status"], hold_eco=he.get("totals") or he.get("reason"),
+                             antenna_eco=rec.get("antenna_eco"), drv=rec.get("drv"),
+                             size_eco={k: se.get(k) for k in ("resized", "candidates", "by_reason", "failing_setup_endpoints",
+                                                              "drv_violations", "utilization_after")} if se else None,
+                             stopped=rec.get("stopped")))
         closed = b["sta"]["closed"]
         return item("passed" if closed else "failed",
                     None if closed else f"native RustSTA hold/setup not closed after {len(rows)} iteration(s)",
                     iterations=rows, max_iterations=self.ctx.flow_args.max_iterations,
-                    decision_spef="native rustroad extract", target_margin_ns=self.ctx.budgets["hold_margin_ns"])
+                    decision_spef="native rustroad extract", target_margin_ns=self.ctx.flow_args.target_margin,
+                    gate_hold_margin_ns=self.ctx.budgets["hold_margin_ns"],
+                    sizing=self.spec.get("sizing_profile") is not None)
 
     def signoff(self, gds: Path, powered: Path, against: Path | None, label: str, checks: list[str]) -> dict:
         ctx = self.ctx
@@ -387,7 +447,8 @@ def binding_inputs(ctx: Context, gate: PdkGate, b: dict) -> dict:
         art[f"tool.{name}"] = path
     art["design_manifest"] = ctx.args.design
     art["tools_manifest"] = ctx.args.tools
-    for script in sorted((ROOT / "scripts").glob("rtl2gds*.py")) + [ROOT / "scripts/hold_closure.py"]:
+    for script in sorted((ROOT / "scripts").glob("rtl2gds*.py")) + [ROOT / "scripts/hold_closure.py",
+                                                                     ROOT / "scripts/scale_flow.py"]:
         art[f"harness.{script.name}"] = script
     return art
 
@@ -455,7 +516,10 @@ def run_pdk(ctx: Context, tag: str, profile: dict) -> dict:
         st["controls"] = item("unverified", "controls disabled (--no-controls)")
     if ctx.args.no_determinism:
         st["determinism"] = item("unverified", "determinism rerun disabled (--no-determinism)")
-    result.update(status=D.worst(st[k]["status"] for k in GATING), statuses=st, details=gate.details,
+    gating = [st[k]["status"] if not (st[k]["status"] == "not_applicable" and k in D.NOT_APPLICABLE) else "passed"
+              for k in GATING]
+    result.update(status=D.worst("unverified" if x == "not_applicable" else x for x in gating), statuses=st,
+                  details=gate.details,
                   wall_seconds=round(time.monotonic() - started, 3))
     return result
 
@@ -505,7 +569,12 @@ def main(argv=None) -> int:
     try:
         manifest = D.load_manifest(args.design)
         summary["design"] = dict(name=manifest["name"], top=manifest["top"], manifest=str(args.design),
-                                 manifest_sha256=D.sha256_file(args.design))
+                                 manifest_sha256=D.sha256_file(args.design), recipe=manifest["recipe"],
+                                 stretch=manifest["stretch"], pdks_unavailable=manifest["pdks_unavailable"],
+                                 clock=manifest["clock"])
+        if manifest["clock"]["port"] is None:
+            summary["scope"] = dict(SCOPE, clocks=f"virtual I/O clock {manifest['clock']['name']} only "
+                                                  "(combinational design: no clock port, no clock tree, ideal clock model)")
         args.tools = (args.tools or D.resolve(manifest["tools"]["path"])).resolve()
         budgets = manifest["budgets"]
         h = harness(root, budgets)
@@ -547,9 +616,9 @@ def main(argv=None) -> int:
         g["manifest_provenance"] = D.manifest_provenance(args.design)
         if ready and not args.preflight_only:
             tool_paths = {n: Path(t["path"]) for n, t in tools.items() if "path" in t}
-            module = L.rtl_module(h, "rtl_ports", tool_paths["yosys"], [D.resolve(r["path"]) for r in manifest["rtl"]],
-                                  manifest["top"])
-            ports = D.ports_from_yosys_json(module)
+            rtl_files = [D.resolve(r["path"]) for r in manifest["rtl"]]
+            ports, port_source = L.rtl_ports(h, tool_paths, rtl_files, manifest["top"])
+            summary["port_source"] = port_source
             sdc_text = D.render_sdc(D.resolve(manifest["sdc"]["clock"]["path"]).read_text(),
                                     D.resolve(manifest["sdc"]["io_template"]["path"]).read_text(), ports,
                                     manifest["clock"]["port"], manifest["clock"]["name"])
@@ -581,7 +650,9 @@ def main(argv=None) -> int:
         if args.preflight_only and verdict["status"] == "passed":
             verdict = dict(verdict, status="unverified", exit_code=3, unverified_items=["*:preflight_only"])
         summary.update(status=verdict["status"], exit_code=verdict["exit_code"], failed_items=verdict["failed_items"],
-                       unverified_items=verdict["unverified_items"])
+                       unverified_items=verdict["unverified_items"],
+                       not_applicable_items=verdict.get("not_applicable_items", []),
+                       not_applicable_rules={k: D.NOT_APPLICABLE[k] for k in D.NOT_APPLICABLE})
         summary["timing_accuracy_status"] = D.worst((p["statuses"].get("timing_accuracy") or {}).get("status", "unverified")
                                                     for p in summary["pdks"]) if summary["pdks"] else "unverified"
         summary["timing_accuracy_failures"] = accuracy_evidence(summary["pdks"])
@@ -603,6 +674,7 @@ def main(argv=None) -> int:
             args.evidence.write_text(json.dumps(evidence(summary), indent=1, sort_keys=True, default=str) + "\n")
     print(json.dumps(dict(status=summary["status"], exit_code=summary["exit_code"],
                           failed=summary.get("failed_items"), unverified=summary.get("unverified_items")[:20],
+                          not_applicable=summary.get("not_applicable_items"),
                           timing_accuracy_status=summary.get("timing_accuracy_status"),
                           summary=str(root / "summary.json"))))
     return summary["exit_code"]

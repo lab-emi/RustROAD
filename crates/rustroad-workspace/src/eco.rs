@@ -37,7 +37,7 @@ use crate::pdk::read_input;
 use crate::{Error, Result};
 use rustroad_formats::eco::{
     self, BufferCell, DiodeCell, ECO_PLAN_SCHEMA, EcoCells, EcoLimits, EcoOp, EcoPlan, EcoReport,
-    PinDirections, PinRef,
+    PinDirections, PinRef, SizeFamily,
 };
 use rustroad_formats::lef;
 use rustroad_formats::verilog::{self, Netlist, VerilogLimits};
@@ -49,6 +49,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 pub const DELAY_PROFILE_SCHEMA: &str = "rustroad.delay-cells.v1";
+pub const SIZING_PROFILE_SCHEMA: &str = "rustroad.sizing-profile.v1";
 pub const HOLD_PLAN_SCHEMA: &str = "rustroad.hold-eco-plan.v1";
 const MAX_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PROFILE_BYTES: u64 = 4 * 1024 * 1024;
@@ -189,6 +190,8 @@ impl DelayCellProfile {
                 .collect(),
             // Filled by `load_pin_directions` where an ECO buffers a sink.
             pin_directions: PinDirections::new(),
+            // Filled by `load_sizing_profile` where an ECO resizes cells.
+            families: Vec::new(),
         };
         for b in &cells.buffers {
             b.check_identity().map_err(|e| fail("DELAY_PROFILE", e))?;
@@ -1178,6 +1181,85 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
     Ok(plan)
 }
 
+// ----------------------------------------------------------------- sizing
+
+/// One member of a sizing family (scripts/build_sizing_profile.py).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SizedCell {
+    pub name: String,
+    pub width_dbu: i64,
+    pub area_um2: f64,
+    pub max_capacitance_pf: Option<f64>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SizingFamily {
+    pub id: String,
+    pub order: String,
+    pub pins: BTreeMap<String, String>,
+    pub functions: BTreeMap<String, String>,
+    pub sequential: serde_json::Value,
+    pub cells: Vec<SizedCell>,
+}
+/// `fixtures/pdk/<pdk>-sizing.json`: drive-strength families from Liberty.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SizingProfile {
+    pub schema: String,
+    pub pdk: String,
+    pub library: String,
+    pub generator: String,
+    pub sources: Vec<ProfileSource>,
+    pub dbu_per_um: u32,
+    pub rule: String,
+    pub families: Vec<SizingFamily>,
+    pub excluded: Vec<serde_json::Value>,
+}
+
+/// Load and check a sizing profile: every family has members with the same
+/// declared pins, every output pin has a function, no master is listed twice.
+pub fn load_sizing_profile(path: &Path) -> Result<(Vec<SizeFamily>, Artifact)> {
+    let (text, pin) = read_file(path, MAX_PROFILE_BYTES, "sizing_profile")?;
+    let profile: SizingProfile = serde_json::from_str(&text)?;
+    if profile.schema != SIZING_PROFILE_SCHEMA {
+        return Err(fail(
+            "SIZING_PROFILE",
+            format!("schema {} is not {SIZING_PROFILE_SCHEMA}", profile.schema),
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::with_capacity(profile.families.len());
+    for f in &profile.families {
+        let outputs: BTreeSet<&String> = f
+            .pins
+            .iter()
+            .filter(|(_, d)| d.as_str() == "output")
+            .map(|(p, _)| p)
+            .collect();
+        let functions: BTreeSet<&String> = f.functions.keys().collect();
+        if f.cells.is_empty()
+            || outputs.is_empty()
+            || outputs != functions
+            || f.pins.values().any(|d| d != "input" && d != "output")
+            || f.cells
+                .iter()
+                .any(|c| c.width_dbu <= 0 || !seen.insert(c.name.clone()))
+        {
+            return Err(fail(
+                "SIZING_PROFILE",
+                format!("family {} is malformed (pins, functions or members)", f.id),
+            ));
+        }
+        out.push(SizeFamily {
+            id: f.id.clone(),
+            pins: f.pins.clone(),
+            cells: f.cells.iter().map(|c| c.name.clone()).collect(),
+        });
+    }
+    Ok((out, artifact_of(&pin)))
+}
+
 // ----------------------------------------------------------------- apply
 
 #[derive(Clone, Debug, Serialize)]
@@ -1187,16 +1269,21 @@ pub struct ApplyReport {
     pub plan: Artifact,
     pub profile: Artifact,
     pub cell_lef: Artifact,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sizing_profile: Option<Artifact>,
     pub eco_report: EcoReport,
     pub output: Artifact,
 }
 
-/// Apply a given typed ECO plan (e.g. a planted control) and write the netlist.
+/// Apply a given typed ECO plan (a planted control, or a sizing plan with
+/// `sizing`: the sizing profile `resize_cell` operations are checked against)
+/// and write the netlist.
 pub fn apply_plan(
     netlist: &Path,
     plan: &Path,
     profile: &Path,
     cell_lef: Option<&Path>,
+    sizing: Option<&Path>,
     out: &Path,
 ) -> Result<ApplyReport> {
     if same_file(netlist, out) {
@@ -1212,6 +1299,14 @@ pub fn apply_plan(
     let mut cells = prof.eco_cells()?;
     let (directions, lef_pin) = load_pin_directions(&prof, cell_lef, &masters_of(&[&n], &prof))?;
     cells.pin_directions = directions;
+    let sizing_profile = match sizing {
+        Some(path) => {
+            let (families, art) = load_sizing_profile(path)?;
+            cells.families = families;
+            Some(art)
+        }
+        None => None,
+    };
     let (edited, report) = eco::apply(
         &n,
         &p,
@@ -1227,6 +1322,7 @@ pub fn apply_plan(
         plan: artifact_of(&ppin),
         profile: fpin,
         cell_lef: lef_pin,
+        sizing_profile,
         eco_report: report,
         output,
     })

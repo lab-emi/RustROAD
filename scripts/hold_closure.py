@@ -24,9 +24,13 @@ Reported (not gating): OpenSTA on OpenRCX SPEF of the collinear-merged DEF.
 Third-party tools run only as black-box executables. Exit 0 passed, 1 failed, 3 partial.
 
 `Flow` is also the physical/closure engine of scripts/rtl2gds.py: an optional
-`Design` (top, RTL files, tracked floorplan, rendered SDC) replaces the
-pipeline.v defaults, and `Flow.close()` runs the bounded loop alone. Without a
-`Design` every command and verdict of this script is unchanged.
+`Design` (top, RTL files, tracked floorplan, rendered SDC, physical recipe,
+clocked or combinational, optional literal mapped netlist) replaces the
+pipeline.v defaults, and `Flow.close()` runs the bounded loop alone. The
+`legacy` recipe is this script's fixed-order placer + lattice router (clock
+route then all nets); the `track` recipe is the analytic placer + track router
+of scripts/scale_flow.py (route --scope all) with its larger workspace limits.
+Without a `Design` every command and verdict of this script is unchanged.
 """
 from __future__ import annotations
 
@@ -50,6 +54,7 @@ from verify_physical import PhysicalHarness, run_ok, fingerprint, external_cec, 
 from verify_logic import bounded_text, sha256, write_json, tcl_path  # noqa: E402
 from verify_taps import clock_function_proof  # noqa: E402
 import verify_routing  # noqa: E402
+from scale_flow import deconflict, SITES  # noqa: E402
 
 # RustSTA 0.4.0 fix-round-2 binaries (RustSTA d1f61e6), copied unchanged from the
 # timing stream's .work/sta-signoff/bin/round2 into this checkout's .work/tools/sta;
@@ -78,21 +83,105 @@ PLANT = {'sky130': dict(port='a[1]', length_um=600, gds_layer='70/20'),
 ROW = re.compile(r'^(\S+)\s+\([^\n]*?\)\s+(-?[0-9.eE+]+)\s+(-?[0-9.eE+]+)\s+(-?[0-9.eE+]+)\s+\((?:MET|VIOLATED)\)\s*$', re.M)
 
 
+# Workspace limits (rustroad global options) per physical recipe. The legacy
+# values are this script's original ones (pipeline.v); the track values are
+# the scale flow's (scripts/scale_flow.py), sized for blocks up to SERV.
+ROAD_LIMITS = {
+    'legacy': ['--max-cells', '2000', '--max-rows', '128'],
+    'track': ['--max-cells', '250000', '--max-rows', '100000', '--max-expansions', '100000000'],
+}
+# Native extraction work budget per recipe (comparisons; memory is bounded by
+# the shape/node caps, not by this count). The default 2e8 is the legacy
+# value; regfile-size track layouts need ~2e8 and SERV more than 1.6e9, so
+# the track recipe allows 1.28e10 (the extractor's hard ceiling, 64x).
+EXTRACT_LIMITS = {'legacy': [], 'track': ['--max-extract-work', '12800000000', '--max-coupling-caps', '8000000',
+                                          '--max-rc-nodes', '4000000', '--max-spef-mib', '256']}
+# RustSTA SPEF import limits per recipe (legacy: this script's original
+# values; track: SERV-size blocks, below the engine's own hard limits).
+STA_RC_LIMITS = {'legacy': ['--max-rc-nodes', '200000', '--max-rc-elements', '200000'],
+                 'track': ['--max-rc-nodes', '2000000', '--max-rc-elements', '4000000']}
+# Gate-sizing ECO bounds (size_eco): resizes per iteration, worst setup
+# endpoints traced per iteration, and the utilization the resized cells may
+# reach in the fixed core (taps/fillers excluded).
+SIZE_MAX_RESIZES = 256
+SIZE_MAX_SETUP_ENDPOINTS = 48
+SIZE_MAX_UTILIZATION = 0.70
+
+
 class Design:
     """What `Flow` builds. The default is this script's pipeline fixture.
 
     top: top module; rtl: RTL source files; floorplan: tracked floorplan JSON
     copied byte-for-byte (None: the generated pipeline floorplan); sdc_text:
     the complete post-route SDC (None: the CTS SDC + POSTROUTE_SDC_TAIL);
-    control_sink: (instance, pin) the native ECO polarity controls buffer.
+    control_sink: (instance, pin) the native ECO polarity controls buffer;
+    recipe: 'legacy' or 'track' (ROAD_LIMITS, physical()); clocked: False for
+    a combinational design (virtual I/O clock: no CTS, ideal clock model);
+    netlist: a literal mapped netlist replacing synthesis; physical_profile and
+    floorplan_recipe: the track recipe's `rustroad floorplan` inputs;
+    sizing_profile: enables the gate-sizing ECO for setup and DRV repair.
     """
 
-    def __init__(self, top='lane_smoke', rtl=None, floorplan=None, sdc_text=None, control_sink=('r0', 'D')):
+    def __init__(self, top='lane_smoke', rtl=None, floorplan=None, sdc_text=None, control_sink=('r0', 'D'),
+                 recipe='legacy', clocked=True, netlist=None, physical_profile=None, floorplan_recipe=None,
+                 sizing_profile=None):
+        if recipe not in ROAD_LIMITS:
+            raise ValueError(f'unknown physical recipe {recipe!r}')
         self.top = top
         self.rtl = [Path(x) for x in (rtl or [ROOT / 'fixtures/flow/pipeline.v'])]
         self.floorplan = Path(floorplan) if floorplan else None
         self.sdc_text = sdc_text
         self.control_sink = tuple(control_sink)
+        self.recipe = recipe
+        self.clocked = bool(clocked)
+        self.netlist = Path(netlist) if netlist else None
+        self.physical_profile = Path(physical_profile) if physical_profile else None
+        self.floorplan_recipe = floorplan_recipe
+        # Gate-sizing ECO (size_eco) in the closure loop; None: the loop is
+        # exactly the hold/antenna loop of this script.
+        self.sizing_profile = Path(sizing_profile) if sizing_profile else None
+
+
+INSTANCE_LINE = re.compile(r'^\s*(\S+)\s+(\S+)\s+\((.*)\);\s*$')
+CONNECTION = re.compile(r'\.(\w+)\(([^()]*)\)')
+
+
+def netlist_instances(text: str) -> dict:
+    """instance -> (master, {pin: net}) of a flat mapped netlist (bounded by its text)."""
+    out = {}
+    for line in text.splitlines():
+        m = INSTANCE_LINE.match(line)
+        if m and m[1] not in ('module', 'input', 'output', 'wire', 'assign', 'inout'):
+            out[m[2].lstrip('\\')] = (m[1], {p: n.strip() for p, n in CONNECTION.findall(m[3])})
+    return out
+
+
+def constant_pins(netlist: Path, config: Path) -> set[str]:
+    """``instance/pin`` connected to a constant: a tie-cell output net (physical
+    configuration tie_high/tie_low), a literal 1'b0/1'b1, or an assign alias of
+    either. Independent of the timing engine (used to accept its no-arrival
+    endpoints only when they are constant-driven)."""
+    text = bounded_text(Path(netlist), 64 * 1024 ** 2)
+    cfg = json.loads(Path(config).read_text())
+    ties = {(cfg[k]['cell'], cfg[k]['pin']) for k in ('tie_high', 'tie_low') if cfg.get(k)}
+    insts = netlist_instances(text)
+    constant = {n for name, (master, conns) in insts.items() for p, n in conns.items() if (master, p) in ties}
+    constant |= {"1'b0", "1'b1"}
+    aliases = re.findall(r'(?m)^\s*assign\s+(\S+)\s*=\s*(\S+?)\s*;', text)
+    for _ in range(len(aliases) + 1):
+        grown = {a.lstrip('\\') for a, b in aliases if b.lstrip('\\') in constant and a.lstrip('\\') not in constant}
+        if not grown:
+            break
+        constant |= grown
+    return {f'{name}/{p}' for name, (master, conns) in insts.items() for p, n in conns.items()
+            if n.lstrip('\\') in constant and (master, p) not in ties}
+
+
+def lef_widths(path: Path, dbu: int) -> dict[str, int]:
+    """MACRO -> SIZE width in DBU (rounded; used only for a utilization bound)."""
+    text = bounded_text(Path(path), 64 * 1024 ** 2)
+    return {m[1]: round(float(m[2]) * dbu) for m in
+            re.finditer(r'(?ms)^MACRO\s+(\S+)\s*$.*?^\s*SIZE\s+([0-9.]+)\s+BY', text)}
 
 
 def jdump(path: Path, value) -> Path:
@@ -113,7 +202,9 @@ class Flow:
         self.delay_cells = ROOT / f'fixtures/pdk/{self.tag}-delay-cells.json'
         self.config = Path(args.physical_config.get(self.tag, p['config']))
         self.routing = Path(p['routing_config'])
-        self.sink_pin = json.loads(self.config.read_text())['clock']['sink_pin']
+        self.sink_pin = (json.loads(self.config.read_text()).get('clock') or {}).get('sink_pin')
+        if self.design.clocked and not self.sink_pin:
+            raise ValueError(f'{self.tag}: a clocked design needs clock.sink_pin in {self.config}')
         self.sdc = h.root / f'{self.tag}_postroute.sdc'
         self.sdc.write_text(self.design.sdc_text if self.design.sdc_text is not None
                             else Path(p['cts_sdc']).read_text() + POSTROUTE_SDC_TAIL)
@@ -131,16 +222,51 @@ class Flow:
                      cell_gds=Path(self.p['tap_reference']['gds']['path']),
                      gds_layer_map=ROOT / f'fixtures/pdk/{self.tag}-gds-map.json')
         files.update({f'openrcx_rules_{c}': v for c, v in self.openrcx_rules.items()})
+        if self.design.sizing_profile is not None:
+            files['sizing_profile'] = self.design.sizing_profile
         return {k: fingerprint(v) for k, v in sorted(files.items())}
 
     # ------------------------------------------------------------ physical
     def synth(self) -> Path:
+        """RustSys with the cell policy (or the design's literal mapped netlist).
+
+        Escaped scalar wires that collide with a vector port bit (RustSys
+        register outputs ``\\p_q[0]``) are renamed (scale_flow.deconflict);
+        the raw producer output is kept as ``<tag>_rustsys.v`` when renamed.
+        Every CEC of the gate checks the renamed netlist against the RTL.
+        """
         mapped = self.h.root / f'{self.tag}_mapped.v'
-        args = self.policy['pdks'][self.tag]['rustsys_args']
-        run_ok(self.h, f'{self.tag}_synth', [self.tools['rustsys'], '--threads', '2', '--progress', 'off', 'synth', '--backend', 'cpu',
-                                            '--top', self.top, '--lib', self.libs['tt'], *args, '--out', mapped, '--print', 'json',
-                                            *self.design.rtl])
+        if self.design.netlist is not None:
+            mapped.write_bytes(self.design.netlist.read_bytes())
+        else:
+            args = self.policy['pdks'][self.tag]['rustsys_args']
+            run_ok(self.h, f'{self.tag}_synth', [self.tools['rustsys'], '--threads', '2', '--progress', 'off', 'synth', '--backend', 'cpu',
+                                                '--top', self.top, '--lib', self.libs['tt'], *args, '--out', mapped, '--print', 'json',
+                                                *self.design.rtl])
+        text = mapped.read_text()
+        renamed_text, self.renamed_wires = deconflict(text)
+        if self.renamed_wires:
+            mapped.rename(self.h.root / f'{self.tag}_rustsys.v')
+            mapped.write_text(renamed_text)
         return mapped
+
+    def reproduce_floorplan(self, mapped: Path) -> dict:
+        """Track recipe: `rustroad floorplan` from the recipe must regenerate the
+        tracked floorplan and physical configuration byte for byte."""
+        fp = self.design.floorplan_recipe
+        floor, phys = self.h.root / f'{self.tag}_floorplan_check.json', self.h.root / f'{self.tag}_physical_check.json'
+        clock = ['--clock-port', self.p['clock_port']] if self.design.clocked else ['--no-clock']
+        rep = self.h.json_command(f'{self.tag}_floorplan', [str(x) for x in [
+            self.tools['rustroad'], 'floorplan', '--tech-lef', self.p['technology_lef']['path'], '--cell-lef', self.p['cell_lef']['path'],
+            '--netlist', mapped, '--physical-config', self.design.physical_profile, '--routing-config', self.routing,
+            '--site', SITES[self.tag], '--utilization', fp['utilization'], '--aspect', fp['aspect'],
+            '--margin-um', fp['margin_um'], *clock, '--out-floorplan', floor, '--out-physical-config', phys]])
+        same_floor = floor.read_bytes() == self.design.floorplan.read_bytes()
+        same_phys = phys.read_bytes() == self.config.read_bytes()
+        return dict(status='passed' if same_floor and same_phys else 'failed', floorplan_identical=same_floor,
+                    physical_config_identical=same_phys, recipe=fp,
+                    report={k: rep.get(k) for k in ('die_area', 'core_area', 'rows', 'estimated_utilization', 'io_pins',
+                                                    'clock_buffers_estimate', 'cell_area_um2')})
 
     def floorplan(self) -> Path:
         sky = self.tag == 'sky130'
@@ -158,16 +284,23 @@ class Flow:
     def physical(self, it: int, netlist: Path) -> dict:
         t, h = f'{self.tag}_i{it}', self.h
         ws = h.root / f'{t}_physical'
-        road = [self.tools['rustroad'], '--workspace', ws, '--threads', '2', '--max-cells', '2000', '--max-rows', '128']
-        rec = {}
+        road = [self.tools['rustroad'], '--workspace', ws, '--threads', '2', *ROAD_LIMITS[self.design.recipe]]
+        rec = dict(recipe=self.design.recipe)
         a = h.json_command(f'{t}_import', list(map(str, road + ['import-pdk', '--base-rev', 'rev0', '--tech-lef', self.p['technology_lef']['path'],
                                                                  '--cell-lef', self.p['cell_lef']['path'], '--netlist', netlist,
                                                                  '--floorplan', self.floorplan(), '--physical-config', self.config])))
         a = h.json_command(f'{t}_place', list(map(str, road + ['place', '--base-rev', a['revision']])))
-        a = h.json_command(f'{t}_cts', list(map(str, road + ['clock-tree', '--base-rev', a['revision'], '--sdc', self.p['cts_sdc']])))
-        rec['cts'] = a
-        a = h.json_command(f'{t}_clock_route', list(map(str, road + ['route', '--base-rev', a['revision'], '--scope', 'clock', '--config', self.routing])))
+        rec['placement'] = a.get('placement')
+        if self.design.clocked:
+            a = h.json_command(f'{t}_cts', list(map(str, road + ['clock-tree', '--base-rev', a['revision'], '--sdc', self.p['cts_sdc']])))
+            rec['cts'] = a
+        else:
+            rec['cts'] = dict(status='not_applicable', reason='combinational design: no clock port, no clock tree')
+        if self.design.recipe == 'legacy':
+            a = h.json_command(f'{t}_clock_route', list(map(str, road + ['route', '--base-rev', a['revision'], '--scope', 'clock', '--config', self.routing])))
         a = h.json_command(f'{t}_all_route', list(map(str, road + ['route', '--base-rev', a['revision'], '--scope', 'all', '--config', self.routing])))
+        rec['route'] = {k: a.get(k) for k in ('routed_nets', 'routing_segments', 'routing_expansions', 'cells', 'tap_cells',
+                                              'filler_cells', 'route_memory') if k in a}
         rec['routed_revision'] = a['revision']
         out = {}
         for label, extra, suffix in (('def', ['export-def'], '.def'), ('netlist', ['export-verilog'], '_exported.v'),
@@ -186,7 +319,8 @@ class Flow:
         for c in self.libs:
             spef = h.root / f'{t}_{self.rc[c]}.spef'
             x = h.json_command(f'{t}_extract_{self.rc[c]}', list(map(str, road + ['extract', '--rc-profile', self.rc_profiles[c],
-                                                                                    '--corner', self.rc[c], '--out', spef])))
+                                                                                    '--corner', self.rc[c], '--out', spef,
+                                                                                    *EXTRACT_LIMITS[self.design.recipe]])))
             require(x['status'] == 'ok' and not x['unannotated_signal_nets'], f'{t}: native extraction incomplete')
             rec['spef'][c] = dict(path=str(spef), sha256=x['output']['sha256'], rc=self.rc[c], diagnostics=x['diagnostics'])
         return rec
@@ -206,13 +340,23 @@ class Flow:
         argv += ['--netlist', str(timed), '--sdc', str(self.sdc)]
         for c in self.libs:
             argv += ['--spef', str((spefs or {}).get(c) or phys['spef'][c]['path']), '--spef-corner', c]
-        argv += ['--max-rc-nodes', '200000', '--max-rc-elements', '200000']
+        argv += STA_RC_LIMITS[self.design.recipe]
         a = h.json_command(f'{t}_import', argv, True)
         r = h.json_command(f'{t}_run', [ruststa, *common, 'run', '--base-rev', a['new_rev'], '--backend', 'cpu', '--precision', 'f64',
                                         '--max-paths', '16', '--max-state-gib', '1', '--require-wire-model', 'spef_rc'], True)
-        require(r['scope'].get('clock_model') == 'propagated' and r['scope'].get('wire_model') == 'spef_rc', f'{t}: wrong timing scope')
-        require(r['completeness']['unconstrained_endpoints'] == 0, f'{t}: unconstrained endpoints')
+        require(r['scope'].get('clock_model') == self.clock_model() and r['scope'].get('wire_model') == 'spef_rc'
+                and (self.design.clocked or r['scope'].get('physical_clock_domains') == 0), f'{t}: wrong timing scope')
         rev = r['new_rev']
+        constant_endpoints = []
+        if r['completeness']['unconstrained_endpoints']:
+            rows = json.loads(bounded_text(Path(run_ok(h, f'{t}_unconstrained', [ruststa, *common[:-2], 'report', '--rev', rev,
+                                                                                 '--section', 'unconstrained', '--limit', '0'])['stdout'])))
+            rows = rows['sections']['unconstrained']['rows']
+            constant = constant_pins(timed, self.config)
+            bad = [x for x in rows if x['reason'] != 'no_arrival' or x['pin'] not in constant]
+            require(len(rows) == r['completeness']['unconstrained_endpoints'] and not bad,
+                    f'{t}: unconstrained endpoints that are not constant-driven: {bad[:5]}')
+            constant_endpoints = sorted(x['pin'] for x in rows)
         files = {}
         hold = h.root / f'{t}_hold_fix.json'
         rr = run_ok(h, f'{t}_hold_fix', [ruststa, *common[:-2], 'report', '--rev', rev, '--section', 'hold_fix',
@@ -226,31 +370,64 @@ class Flow:
                                                   '--corner', c, '--limit', '0'])
             ep.write_bytes(Path(rr['stdout']).read_bytes())
             files[f'endpoints_{c}'] = ep
-            rows = json.loads(bounded_text(ep))['sections']['endpoints']['rows']
-            pins = json.loads(bounded_text(Path(run_ok(h, f'{t}_clock_pins_{c}', [ruststa, *common[:-2], 'report', '--rev', rev, '--section', 'pins',
-                                                                                  '--corner', c, '--filter', f'pin~/{self.sink_pin}', '--limit', '0'])['stdout'])))
-            sinks = [x for x in pins['sections']['pins']['rows'] if x['pin'].endswith('/' + self.sink_pin)]
-            require(sinks and all(x['arrival_late_ns'] is not None for x in sinks), f'{t}: clock sink arrivals missing at {c}')
-            clock = dict(sinks=len(sinks), latency_max_ns=max(x['arrival_late_ns'] for x in sinks),
-                         latency_min_ns=min(x['arrival_early_ns'] for x in sinks), slew_max_ns=max(x['slew_late_ns'] for x in sinks))
+            rows = [x for x in json.loads(bounded_text(ep))['sections']['endpoints']['rows']
+                    if x['endpoint'] not in constant_endpoints]
+            if self.design.clocked:
+                pins = json.loads(bounded_text(Path(run_ok(h, f'{t}_clock_pins_{c}', [ruststa, *common[:-2], 'report', '--rev', rev, '--section', 'pins',
+                                                                                      '--corner', c, '--filter', f'pin~/{self.sink_pin}', '--limit', '0'])['stdout'])))
+                sinks = [x for x in pins['sections']['pins']['rows'] if x['pin'].endswith('/' + self.sink_pin)]
+                require(sinks and all(x['arrival_late_ns'] is not None for x in sinks), f'{t}: clock sink arrivals missing at {c}')
+                clock = dict(sinks=len(sinks), latency_max_ns=max(x['arrival_late_ns'] for x in sinks),
+                             latency_min_ns=min(x['arrival_early_ns'] for x in sinks), slew_max_ns=max(x['slew_late_ns'] for x in sinks))
+            else:
+                clock = dict(sinks=0, model='virtual I/O clock (combinational design)')
             corners[c] = dict(clock=clock, worst_setup_ns=min(x['setup_slack_ns'] for x in rows), worst_hold_ns=min(x['hold_slack_ns'] for x in rows),
                               setup_violations=sum(x['setup_slack_ns'] < 0 for x in rows),
                               hold_below_margin=sum(x['hold_slack_ns'] < self.args.target_margin for x in rows),
                               endpoints={x['endpoint']: dict(setup=x['setup_slack_ns'], hold=x['hold_slack_ns']) for x in rows})
         clocks = run_ok(h, f'{t}_clocks', [ruststa, *common[:-2], 'report', '--rev', rev, '--section', 'clocks', '--limit', '0'])
         closed = all(v['worst_hold_ns'] >= self.args.target_margin and v['worst_setup_ns'] >= 0 for v in corners.values())
+        drv = None
+        if self.design.sizing_profile is not None:
+            path = h.root / f'{t}_drv.json'
+            rr = run_ok(h, f'{t}_drv', [ruststa, *common[:-2], 'report', '--rev', rev, '--section', 'drv', '--limit', '0'])
+            path.write_bytes(Path(rr['stdout']).read_bytes())
+            files['drv'] = path
+            rows = json.loads(bounded_text(path, 64 * 1024 ** 2))['sections']['drv']['rows']
+            bad = [x for x in rows if x['slack'] < 0]
+            drv = dict(violations=len(bad), by_kind={k: sum(1 for x in bad if x['kind'] == k) for k in sorted({x['kind'] for x in bad})},
+                       status=r['metrics'].get('drv_status'))
         return dict(workspace=str(ws), revision=rev, timed_netlist=str(timed), timed_netlist_sha256=timed_sha,
                     scope=r['scope'], metrics=r['metrics'], completeness=r['completeness'],
                     diagnostics=[d for d in r.get('diagnostics', []) if d.get('severity') != 'note'][:20],
                     corners=corners, closed=closed, files={k: str(v) for k, v in files.items()},
-                    clocks_report=str(clocks['stdout']))
+                    clocks_report=str(clocks['stdout']), constant_endpoints=constant_endpoints, drv=drv)
 
-    def hold_eco(self, it: int, netlist: Path, sta: dict) -> tuple[Path, dict]:
+    def sta_rc_limits(self) -> list[str]:
+        return list(STA_RC_LIMITS[self.design.recipe])
+
+    def clock_model(self) -> str:
+        """RustSTA scope the gate requires: propagated clocks through the
+        RustROAD clock tree, or the ideal model of a virtual I/O clock."""
+        return 'propagated' if self.design.clocked else 'ideal'
+
+    def hold_eco(self, it: int, netlist: Path, sta: dict, target: float | None = None) -> tuple[Path, dict]:
         t = f'{self.tag}_i{it}'
         out, plan = self.h.root / f'{self.tag}_i{it + 1}_mapped.v', self.h.root / f'{t}_hold_plan.json'
+        hold_report = sta['files']['hold_fix']
+        if target is None:
+            target = self.args.target_margin
+        else:
+            # A raised target (reference-SPEF guard band): the hold_fix report
+            # of the same native STA revision, at that target.
+            hold_report = self.h.root / f'{t}_hold_fix_{target:.4f}.json'
+            rr = run_ok(self.h, f'{t}_hold_fix_raised', [self.tools['ruststa'], '--workspace', sta['workspace'], '--threads', '2',
+                                                        '--format', 'json', 'report', '--rev', sta['revision'], '--section', 'hold_fix',
+                                                        '--target-margin', str(target), '--limit', '0'])
+            hold_report.write_bytes(Path(rr['stdout']).read_bytes())
         argv = [self.tools['rustroad'], 'hold-eco', '--netlist', netlist, '--timed-netlist', sta['timed_netlist'],
-                '--timed-netlist-sha256', sta['timed_netlist_sha256'], '--hold-report', sta['files']['hold_fix'],
-                '--delay-cells', self.delay_cells, '--setup-corner', 'ss', '--target-margin-ns', self.args.target_margin,
+                '--timed-netlist-sha256', sta['timed_netlist_sha256'], '--hold-report', hold_report,
+                '--delay-cells', self.delay_cells, '--setup-corner', 'ss', '--target-margin-ns', target,
                 '--setup-margin-ns', self.args.setup_margin, '--out', out, '--plan-out', plan]
         for c in self.libs:
             argv += ['--hold-corner', c, '--setup-report', sta['files'][f'endpoints_{c}']]
@@ -258,6 +435,129 @@ class Flow:
         result = json.loads(bounded_text(plan)) if plan.exists() else None
         require(r['exit_code'] == 0, f'{t}: hold-eco failed: ' + bounded_text(Path(r['stderr']))[-600:])
         return out, result
+
+    # ------------------------------------------------------------ gate sizing
+    def size_eco(self, it: int, netlist: Path, sta: dict, phys: dict) -> tuple[Path | None, dict]:
+        """Plan and apply one gate-sizing step (resize_cell, same Liberty family).
+
+        Candidates: the driver of every net with a max_transition /
+        max_capacitance violation (RustSTA drv report, any corner; one to three
+        sizes up by the violation ratio), and every cell on the worst setup
+        path of up to SIZE_MAX_SETUP_ENDPOINTS endpoints with setup slack < 0
+        at tt/ss (one size up). Only instances of the mapped netlist are
+        resized (not CTS, hold, tie or diode cells); the new width must fit the
+        tap clear gap and the resized cells must keep the core utilization at
+        or below SIZE_MAX_UTILIZATION. Bounded by SIZE_MAX_RESIZES. Returns
+        (None, summary) when nothing can be resized.
+        """
+        import rtl2gds_logic as L  # noqa: E402 - gate helper (LEF pin reader)
+        t, h = f'{self.tag}_i{it}', self.h
+        prof = json.loads(self.design.sizing_profile.read_text())
+        family, widths = {}, {}
+        for f in prof['families']:
+            for k, c in enumerate(f['cells']):
+                family[c['name']] = (f['id'], k, [x['name'] for x in f['cells']])
+                widths[c['name']] = c['width_dbu']
+        cfg = json.loads(self.config.read_text())
+        floor = json.loads(self.design.floorplan.read_text() if self.design.floorplan else self.floorplan().read_text())
+        site_w = floor['site']['width']
+        spacing = int(cfg.get('cell_spacing_sites') or 0) * site_w
+        max_width = (cfg['tap']['max_gap'] // site_w) * site_w - spacing if cfg.get('tap') else None
+        core = floor['core_area']
+        rows_area = sum((r['x_end'] - r['x_start']) for r in floor['rows']) * floor['site']['height']
+        lef = L.lef_pins(Path(self.p['cell_lef']['path']))
+        mapped = netlist_instances(bounded_text(netlist, 64 * 1024 ** 2))
+        timed = netlist_instances(bounded_text(Path(sta['timed_netlist']), 64 * 1024 ** 2))
+        driver = {}
+        for name, (master, conns) in timed.items():
+            for pin, net in conns.items():
+                if ((lef.get(master) or {}).get(pin) or {}).get('direction', '') and \
+                        lef[master][pin]['direction'].startswith('OUTPUT'):
+                    driver[net.lstrip('\\')] = name
+        steps, reasons, skipped = {}, {}, {}
+
+        def want(inst, n, why):
+            if inst not in mapped:
+                skipped[inst] = 'not in the mapped netlist (CTS/inserted cell)'
+                return
+            if inst.startswith(('rr_eco_hold_', 'rr_eco_ant_', 'rr_tie_', 'rr_clk')):
+                skipped[inst] = 'ECO, tie or clock cell'
+                return
+            steps[inst] = max(steps.get(inst, 0), n)
+            reasons.setdefault(inst, set()).add(why)
+        drv_rows = json.loads(bounded_text(Path(sta['files']['drv']), 64 * 1024 ** 2))['sections']['drv']['rows']
+        for row in sorted(drv_rows, key=lambda x: x['slack']):
+            if row['slack'] >= 0 or row['kind'] not in ('max_transition', 'max_capacitance'):
+                continue
+            inst = driver.get((row.get('net') or '').lstrip('\\'))
+            if inst is None:
+                skipped[row.get('net') or row['pin']] = 'driven by a port or unknown driver'
+                continue
+            ratio = row['value'] / row['limit'] if row['limit'] else 9.0
+            want(inst, 1 if ratio < 1.5 else 2 if ratio < 3.0 else 3, row['kind'])
+        failing = sorted(((v['setup'], c, e) for c in ('tt', 'ss') for e, v in sta['corners'][c]['endpoints'].items()
+                          if v['setup'] is not None and v['setup'] < 0), key=lambda x: x[0])
+        seen = set()
+        traced = 0
+        ruststa = str(self.tools['ruststa'])
+        for slack, corner, ep in failing:
+            if ep in seen or traced >= SIZE_MAX_SETUP_ENDPOINTS:
+                continue
+            seen.add(ep)
+            traced += 1
+            r = run_ok(h, f'{t}_size_path_{traced}', [ruststa, 'path', '-w', sta['workspace'], '--rev', sta['revision'],
+                                                     '--to', ep, '--kind', 'setup', '--corner', corner, '--format', 'json', '-q'])
+            data = json.loads(bounded_text(Path(r['stdout']), 64 * 1024 ** 2))
+            for path in data.get('paths') or ([data['path']] if data.get('path') else []):
+                for point in path.get('points') or []:
+                    if point.get('arc') == 'cell' and point.get('inst'):
+                        want(point['inst'], 1, 'setup')
+        # Apply the steps within families, width and utilization bounds.
+        height = floor['site']['height']
+        sizes = lef_widths(Path(self.p['cell_lef']['path']), floor['units_per_micron'])
+        used = sum(sizes.get(m, 0) for m, _ in mapped.values()) * height
+        ops, unsizable = [], {}
+        order = sorted(steps, key=lambda i: (-steps[i], i))
+        for inst in order:
+            if len(ops) >= SIZE_MAX_RESIZES:
+                unsizable[inst] = 'resize budget per iteration reached'
+                continue
+            master = mapped[inst][0]
+            if master not in family:
+                unsizable[inst] = f'{master} is in no sizing family'
+                continue
+            _, k, members = family[master]
+            target = None
+            for j in range(min(len(members) - 1, k + steps[inst]), k, -1):
+                if max_width is None or widths[members[j]] <= max_width:
+                    target = members[j]
+                    break
+            if target is None:
+                unsizable[inst] = f'{master} is the largest member that fits the tap gap'
+                continue
+            grow = (widths[target] - widths[master]) * height
+            if (used + grow) > SIZE_MAX_UTILIZATION * rows_area:
+                unsizable[inst] = 'core utilization bound reached'
+                continue
+            used += grow
+            ops.append(dict(op='resize_cell', instance=inst, cell=target))
+        summary = dict(resized=len(ops), candidates=len(steps), traced_setup_endpoints=traced,
+                       failing_setup_endpoints=len({e for _, _, e in failing}),
+                       drv_violations=sum(1 for x in drv_rows if x['slack'] < 0),
+                       by_reason={r: sum(1 for i in reasons if r in reasons[i] and any(o['instance'] == i for o in ops))
+                                  for r in ('setup', 'max_transition', 'max_capacitance')},
+                       unsizable=dict(sorted(unsizable.items())[:40]), skipped=dict(sorted(skipped.items())[:40]),
+                       utilization_after=round(used / rows_area, 4), max_width_dbu=max_width)
+        if not ops:
+            return None, summary
+        plan = jdump(h.root / f'{t}_size_plan.json', dict(schema='rustroad.eco-plan.v1', module=self.top, operations=ops))
+        out = h.root / f'{self.tag}_i{it + 1}_mapped_sized.v'
+        run_ok(h, f'{t}_size_eco', [self.tools['rustroad'], 'apply-eco', '--netlist', netlist, '--plan', plan,
+                                    '--delay-cells', self.delay_cells, '--sizing-profile', self.design.sizing_profile,
+                                    '--out', out])
+        summary['plan'] = fingerprint(plan)
+        summary['ops'] = ops
+        return out, summary
 
     # ------------------------------------------------------------ antenna
     def check_antenna(self, label: str, workspace: str, extra: Path | None = None) -> dict:
@@ -284,8 +584,8 @@ class Flow:
         require(r['exit_code'] == 0, f'{label}: antenna-eco failed: ' + bounded_text(Path(r['stderr']))[-600:])
         return result
 
-    def plant_shape(self, phys: dict, port: str | None = None) -> dict:
-        cfg = dict(PLANT[self.tag], **({'port': port} if port else {}))
+    def plant_shape(self, phys: dict, port: str | None = None, length_um: int | None = None) -> dict:
+        cfg = dict(PLANT[self.tag], **({'port': port} if port else {}), **({'length_um': length_um} if length_um else {}))
         text = bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2)
         die = re.search(r'(?m)^DIEAREA \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \) ;', text)
         pin = re.search(r'(?m)^- ' + re.escape(cfg['port']) + r' \+ NET \S+ .*?\+ LAYER (\S+) \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \) '
@@ -302,15 +602,21 @@ class Flow:
         length = cfg['length_um'] * dbu
         require(width <= min(ux - lx, uy - ly), f'{self.tag}: planted wire wider than the pin')
         d = [int(v) for v in die.groups()]
+        # The strip runs through the pin centre (where routes land on the
+        # track floorplans' I/O pins), on a 10-DBU grid (GDS divisor 2).
+        cx = ((lx + ux) // 2 - width // 2) // 10 * 10
+        cy = ((ly + uy) // 2 - width // 2) // 10 * 10
+        require(lx <= cx and cx + width <= ux and ly <= cy and cy + width <= uy,
+                f'{self.tag}: planted strip does not fit the pin')
         if ly == d[1]:
-            rect = [lx, ly - length, lx + width, uy]
+            rect = [cx, ly - length, cx + width, uy]
         elif uy == d[3]:
-            rect = [lx, ly, lx + width, uy + length]
+            rect = [cx, ly, cx + width, uy + length]
         elif lx == d[0]:
-            rect = [lx - length, ly, ux, ly + width]
+            rect = [lx - length, cy, ux, cy + width]
         else:
             require(ux == d[2], f'{self.tag}: port pin is not on the die boundary')
-            rect = [lx, ly, ux + length, ly + width]
+            rect = [lx, cy, ux + length, cy + width]
         return dict(net=cfg['port'], layer=layer, rect=rect, length_um=cfg['length_um'], width_dbu=width, pin_rect=[lx, ly, ux, uy])
 
     def export_gds(self, label: str, phys: dict) -> tuple[Path, dict]:
@@ -524,9 +830,9 @@ exit
         run_ok(self.h, f'{self.tag}_control_buffer_eco', [self.tools['rustroad'], 'apply-eco', '--netlist', netlist, '--plan', ok_plan,
                                                           '--delay-cells', self.delay_cells, '--out', ok_out])
         # Clock-tree masters actually instantiated (default cell and any level_cells).
-        clock = json.loads(self.config.read_text())['clock']
-        clock_cells = sorted({c for c in [clock['cell'], *clock.get('level_cells', [])]
-                              if re.search(rf'(?m)^\s*{re.escape(c)}\s', text)})
+        clock = json.loads(self.config.read_text()).get('clock') or {}
+        clock_cells = sorted({c for c in [clock.get('cell'), *clock.get('level_cells', [])]
+                              if c and re.search(rf'(?m)^\s*{re.escape(c)}\s', text)})
         for name in clock_cells:
             for c in self.libs:
                 proofs[f'{name}@{c}'] = clock_function_proof(self.h, f'{self.tag}_proof_{name}_{c}',
@@ -571,8 +877,18 @@ exit
         of the final iteration."""
         iterations, final = [], None
         for it in range(self.args.max_iterations):
-            phys = self.physical(it, netlist)
-            sta = self.sta(it, phys)
+            try:
+                phys = self.physical(it, netlist)
+                sta = self.sta(it, phys)
+            except RuntimeError as error:
+                # Track recipe: an ECO layout that cannot be built ends the
+                # loop; the last complete layout stays final (closure failed
+                # if it was not closed) and every oracle still runs on it.
+                if final is None or self.design.sizing_profile is None:
+                    raise
+                iterations[-1]['next_iteration_failed'] = dict(iteration=it, netlist=fingerprint(netlist),
+                                                              reason=str(error)[-1500:])
+                break
             record = dict(iteration=it, netlist=fingerprint(netlist), physical={k: v for k, v in phys.items() if k not in ('road',)},
                           timing=dict(closed=sta['closed'], corners={c: {k: v for k, v in d.items() if k != 'endpoints'} for c, d in sta['corners'].items()},
                                       endpoints={c: d['endpoints'] for c, d in sta['corners'].items()}, files=sta['files'],
@@ -581,6 +897,12 @@ exit
             record['antenna'] = antenna
             iterations.append(record)
             final = (it, netlist, phys, sta, antenna)
+            if self.design.sizing_profile is not None:
+                record['drv'] = sta['drv']
+                netlist, stop = self.sized_step(it, netlist, sta, phys, antenna, record)
+                if stop:
+                    break
+                continue
             # 'partial' (unmodeled LEF antenna statements) cannot be repaired here;
             # it ends the loop like 'passed' and fails the native_antenna gate.
             if sta['closed'] and antenna['status'] != 'violated':
@@ -600,6 +922,74 @@ exit
                 record['antenna_eco'] = dict(status=plan['status'], nets=plan['nets'])
                 netlist = repaired
         return iterations, final
+
+    def sized_step(self, it: int, netlist: Path, sta: dict, phys: dict, antenna: dict, record: dict) -> tuple[Path, bool]:
+        """One decision of the closure loop with gate sizing (track recipe).
+
+        Order: setup or DRV violated -> gate-sizing ECO (if anything can be
+        resized); hold below the target -> hold ECO; antenna violated on a
+        timing- and DRV-clean layout -> antenna ECO. Returns (netlist for the
+        next iteration, stop). A hold ECO that is infeasible ends the loop with
+        the last layout (closure failed, every oracle still runs on it).
+        """
+        corners = sta['corners'].values()
+        setup_ok = all(v['worst_setup_ns'] >= 0 for v in corners)
+        hold_ok = all(v['worst_hold_ns'] >= self.args.target_margin for v in corners)
+        drv_ok = not (sta['drv'] or {}).get('violations')
+        raised = None
+        if setup_ok and hold_ok and drv_ok and antenna['status'] != 'violated':
+            ref = self.reference_hold(it, phys)
+            record['reference_hold'] = ref
+            short = ref.get('shortfall_ns')
+            if not short:
+                return netlist, True
+            # Native closed but the reference SPEF is below the gate margin:
+            # raise the native target by the measured shortfall (+10 ps).
+            raised = round(self.args.target_margin + short + 0.01, 4)
+            hold_ok = False
+        if it + 1 == self.args.max_iterations:
+            record['stopped'] = 'iteration bound reached'
+            return netlist, True
+        if not (setup_ok and drv_ok):
+            out, summary = self.size_eco(it, netlist, sta, phys)
+            record['size_eco'] = summary
+            if out is not None:
+                return out, False
+        if not hold_ok:
+            try:
+                out, plan = self.hold_eco(it, netlist, sta, target=raised)
+            except RuntimeError as error:
+                record['hold_eco'] = dict(status='failed', reason=str(error)[-1500:])
+                return netlist, True
+            record['hold_eco'] = dict(status=plan['status'], totals=plan['totals'], sinks=plan['sinks'],
+                                      plan=fingerprint(self.h.root / f'{self.tag}_i{it}_hold_plan.json'))
+            return out, False
+        if antenna['status'] == 'violated' and setup_ok and drv_ok:
+            repaired = self.h.root / f'{self.tag}_i{it + 1}_mapped_ant.v'
+            plan = self.antenna_eco(f'{self.tag}_i{it}', netlist, antenna['report'], repaired)
+            record['antenna_eco'] = dict(status=plan['status'], nets=plan['nets'])
+            return repaired, False
+        record['stopped'] = 'no repair applies (setup/DRV not resizable further)'
+        return netlist, True
+
+    def reference_hold(self, it: int, phys: dict) -> dict:
+        """Worst hold per corner on OpenRCX SPEF of the same DEF (RustSTA), and
+        the shortfall below the gate's hold margin (None: none, or unknown)."""
+        import compare_spef  # noqa: E402
+        spefs = {}
+        try:
+            for c in self.libs:
+                spefs[c], _ = compare_spef.openrcx(self.h, f'{self.tag}_i{it}_ref', self.tag, self.rc[c],
+                                                   Path(phys['paths']['def']), f'{self.tag}_i{it}_ref_{self.rc[c]}',
+                                                   timeout_s=max(25, self.h.args.timeout_seconds - 30))
+            ref = self.sta(it, phys, label='sta_ref', spefs=spefs)
+        except (RuntimeError, OSError, KeyError, ValueError) as error:
+            return dict(status='unverified', reason=str(error)[-600:], shortfall_ns=None)
+        worst = {c: v['worst_hold_ns'] for c, v in ref['corners'].items()}
+        margin = getattr(self.args, 'gate_margin', self.args.target_margin)
+        short = max(0.0, max(margin - h for h in worst.values()))
+        return dict(status='checked', worst_hold_ns=worst, gate_margin_ns=margin,
+                    shortfall_ns=round(short, 6) if short > 0 else None)
 
     def run(self) -> dict:
         start = time.monotonic()

@@ -1,0 +1,4560 @@
+{
+ "schema": "rustroad.sizing-profile.v1",
+ "pdk": "sky130",
+ "library": "sky130_fd_sc_hd",
+ "generator": "scripts/build_sizing_profile.py",
+ "sources": [
+  {
+   "role": "liberty_tt",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+   "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+   "bytes": 12841637
+  },
+  {
+   "role": "cell_lef",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lef/sky130_fd_sc_hd.lef",
+   "sha256": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+   "bytes": 1415362
+  },
+  {
+   "role": "cell_policy",
+   "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/final/fixtures/flow/cell-policy.json",
+   "sha256": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+   "bytes": 10704
+  }
+ ],
+ "dbu_per_um": 1000,
+ "rule": "same pins, directions, output functions and sequential description; policy synth_dont_use and pnr_exclude removed; ordered by output max_capacitance",
+ "families": [
+  {
+   "id": "sky130_fd_sc_hd__a2111o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "C1": "input",
+    "D1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&A2)|(B1)|(C1)|(D1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a2111o_1",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.175791
+    },
+    {
+     "name": "sky130_fd_sc_hd__a2111o_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.324107
+    },
+    {
+     "name": "sky130_fd_sc_hd__a2111o_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.535593
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a2111oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "C1": "input",
+    "D1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1&!C1&!D1)|(!A2&!B1&!C1&!D1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a2111oi_0",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.021067
+    },
+    {
+     "name": "sky130_fd_sc_hd__a2111oi_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.031138
+    },
+    {
+     "name": "sky130_fd_sc_hd__a2111oi_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.056773
+    },
+    {
+     "name": "sky130_fd_sc_hd__a2111oi_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.105296
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a211o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "C1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&A2)|(B1)|(C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a211o_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.176707
+    },
+    {
+     "name": "sky130_fd_sc_hd__a211o_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.325022
+    },
+    {
+     "name": "sky130_fd_sc_hd__a211o_4",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.559397
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a211oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "C1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1&!C1)|(!A2&!B1&!C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a211oi_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.047617
+    },
+    {
+     "name": "sky130_fd_sc_hd__a211oi_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.088816
+    },
+    {
+     "name": "sky130_fd_sc_hd__a211oi_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.141917
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a21bo",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1_N": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&A2)|(!B1_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a21bo_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.183115
+    },
+    {
+     "name": "sky130_fd_sc_hd__a21bo_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.288401
+    },
+    {
+     "name": "sky130_fd_sc_hd__a21bo_4",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.475169
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a21boi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1_N": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&B1_N)|(!A2&B1_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a21boi_0",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.048533
+    },
+    {
+     "name": "sky130_fd_sc_hd__a21boi_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.075999
+    },
+    {
+     "name": "sky130_fd_sc_hd__a21boi_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.129099
+    },
+    {
+     "name": "sky130_fd_sc_hd__a21boi_4",
+     "width_dbu": 6900,
+     "area_um2": 18.768,
+     "max_capacitance_pf": 0.215159
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a21o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&A2)|(B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a21o_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.177622
+    },
+    {
+     "name": "sky130_fd_sc_hd__a21o_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.309458
+    },
+    {
+     "name": "sky130_fd_sc_hd__a21o_4",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.568552
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a21oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1)|(!A2&!B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a21oi_1",
+     "width_dbu": 1840,
+     "area_um2": 5.0048,
+     "max_capacitance_pf": 0.074168
+    },
+    {
+     "name": "sky130_fd_sc_hd__a21oi_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.128184
+    },
+    {
+     "name": "sky130_fd_sc_hd__a21oi_4",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.221568
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a221o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "C1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(B1&B2)|(A1&A2)|(C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a221o_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.158396
+    },
+    {
+     "name": "sky130_fd_sc_hd__a221o_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.299387
+    },
+    {
+     "name": "sky130_fd_sc_hd__a221o_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.537424
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a221oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "C1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1&!C1)|(!A1&!B2&!C1)|(!A2&!B1&!C1)|(!A2&!B2&!C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a221oi_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.054942
+    },
+    {
+     "name": "sky130_fd_sc_hd__a221oi_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.09614
+    },
+    {
+     "name": "sky130_fd_sc_hd__a221oi_4",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.166636
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a222oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "C1": "input",
+    "C2": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1&!C1)|(!A1&!B1&!C2)|(!A1&!B2&!C1)|(!A2&!B1&!C1)|(!A1&!B2&!C2)|(!A2&!B1&!C2)|(!A2&!B2&!C1)|(!A2&!B2&!C2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a222oi_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.065928
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a22o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(B1&B2)|(A1&A2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a22o_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.159312
+    },
+    {
+     "name": "sky130_fd_sc_hd__a22o_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.301218
+    },
+    {
+     "name": "sky130_fd_sc_hd__a22o_4",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.55665
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a22oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1)|(!A1&!B2)|(!A2&!B1)|(!A2&!B2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a22oi_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.088816
+    },
+    {
+     "name": "sky130_fd_sc_hd__a22oi_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.170298
+    },
+    {
+     "name": "sky130_fd_sc_hd__a22oi_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.293894
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a2bb2o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1_N": "input",
+    "A2_N": "input",
+    "B1": "input",
+    "B2": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(B1&B2)|(!A1_N&!A2_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a2bb2o_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.158396
+    },
+    {
+     "name": "sky130_fd_sc_hd__a2bb2o_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.300303
+    },
+    {
+     "name": "sky130_fd_sc_hd__a2bb2o_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.502634
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a2bb2oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1_N": "input",
+    "A2_N": "input",
+    "B1": "input",
+    "B2": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(A1_N&!B1)|(A1_N&!B2)|(A2_N&!B1)|(A2_N&!B2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a2bb2oi_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.06959
+    },
+    {
+     "name": "sky130_fd_sc_hd__a2bb2oi_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.130015
+    },
+    {
+     "name": "sky130_fd_sc_hd__a2bb2oi_4",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.226145
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a311o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "C1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&A2&A3)|(B1)|(C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a311o_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.142832
+    },
+    {
+     "name": "sky130_fd_sc_hd__a311o_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.298472
+    },
+    {
+     "name": "sky130_fd_sc_hd__a311o_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.453196
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a311oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "C1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1&!C1)|(!A2&!B1&!C1)|(!A3&!B1&!C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a311oi_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.043955
+    },
+    {
+     "name": "sky130_fd_sc_hd__a311oi_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.084238
+    },
+    {
+     "name": "sky130_fd_sc_hd__a311oi_4",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.133677
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a31o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&A2&A3)|(B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a31o_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.160227
+    },
+    {
+     "name": "sky130_fd_sc_hd__a31o_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.271922
+    },
+    {
+     "name": "sky130_fd_sc_hd__a31o_4",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.498972
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a31oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1)|(!A2&!B1)|(!A3&!B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a31oi_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.065928
+    },
+    {
+     "name": "sky130_fd_sc_hd__a31oi_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.118113
+    },
+    {
+     "name": "sky130_fd_sc_hd__a31oi_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.211497
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a32o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "B2": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&A2&A3)|(B1&B2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a32o_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.151072
+    },
+    {
+     "name": "sky130_fd_sc_hd__a32o_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.264597
+    },
+    {
+     "name": "sky130_fd_sc_hd__a32o_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.536509
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a32oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "B2": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1)|(!A1&!B2)|(!A2&!B1)|(!A3&!B1)|(!A2&!B2)|(!A3&!B2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a32oi_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.085154
+    },
+    {
+     "name": "sky130_fd_sc_hd__a32oi_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.15565
+    },
+    {
+     "name": "sky130_fd_sc_hd__a32oi_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.25178
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a41o",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "A4": "input",
+    "B1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&A2&A3&A4)|(B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a41o_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.16572
+    },
+    {
+     "name": "sky130_fd_sc_hd__a41o_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.325022
+    },
+    {
+     "name": "sky130_fd_sc_hd__a41o_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.560313
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__a41oi",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "A4": "input",
+    "B1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!B1)|(!A2&!B1)|(!A3&!B1)|(!A4&!B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__a41oi_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.065928
+    },
+    {
+     "name": "sky130_fd_sc_hd__a41oi_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.124522
+    },
+    {
+     "name": "sky130_fd_sc_hd__a41oi_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.194102
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__and2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A&B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__and2_0",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.108958
+    },
+    {
+     "name": "sky130_fd_sc_hd__and2_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.158396
+    },
+    {
+     "name": "sky130_fd_sc_hd__and2_2",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.303049
+    },
+    {
+     "name": "sky130_fd_sc_hd__and2_4",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.539255
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__and2b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A_N": "input",
+    "B": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(!A_N&B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__and2b_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.169383
+    },
+    {
+     "name": "sky130_fd_sc_hd__and2b_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.310374
+    },
+    {
+     "name": "sky130_fd_sc_hd__and2b_4",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.46876
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__and3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A&B&C)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__and3_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.157481
+    },
+    {
+     "name": "sky130_fd_sc_hd__and3_2",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.309458
+    },
+    {
+     "name": "sky130_fd_sc_hd__and3_4",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.532847
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__and3b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A_N": "input",
+    "B": "input",
+    "C": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(!A_N&B&C)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__and3b_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.157481
+    },
+    {
+     "name": "sky130_fd_sc_hd__and3b_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.309458
+    },
+    {
+     "name": "sky130_fd_sc_hd__and3b_4",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.46052
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__and4",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "D": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A&B&C&D)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__and4_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.161143
+    },
+    {
+     "name": "sky130_fd_sc_hd__and4_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.300303
+    },
+    {
+     "name": "sky130_fd_sc_hd__and4_4",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.531931
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__and4b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A_N": "input",
+    "B": "input",
+    "C": "input",
+    "D": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(!A_N&B&C&D)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__and4b_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.15565
+    },
+    {
+     "name": "sky130_fd_sc_hd__and4b_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.297556
+    },
+    {
+     "name": "sky130_fd_sc_hd__and4b_4",
+     "width_dbu": 5060,
+     "area_um2": 13.7632,
+     "max_capacitance_pf": 0.463267
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__and4bb",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A_N": "input",
+    "B_N": "input",
+    "C": "input",
+    "D": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(!A_N&!B_N&C&D)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__and4bb_1",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.156565
+    },
+    {
+     "name": "sky130_fd_sc_hd__and4bb_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.27009
+    },
+    {
+     "name": "sky130_fd_sc_hd__and4bb_4",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.461436
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__buf",
+   "order": "max_capacitance_pf then area_um2 (ties present)",
+   "pins": {
+    "A": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__buf_1",
+     "width_dbu": 1380,
+     "area_um2": 3.7536,
+     "max_capacitance_pf": 0.130015
+    },
+    {
+     "name": "sky130_fd_sc_hd__buf_2",
+     "width_dbu": 1840,
+     "area_um2": 5.0048,
+     "max_capacitance_pf": 0.315867
+    },
+    {
+     "name": "sky130_fd_sc_hd__buf_4",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.561228
+    },
+    {
+     "name": "sky130_fd_sc_hd__buf_6",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.785532
+    },
+    {
+     "name": "sky130_fd_sc_hd__bufbuf_8",
+     "width_dbu": 6900,
+     "area_um2": 18.768,
+     "max_capacitance_pf": 0.941172
+    },
+    {
+     "name": "sky130_fd_sc_hd__bufbuf_16",
+     "width_dbu": 11960,
+     "area_um2": 32.5312,
+     "max_capacitance_pf": 1.49415
+    },
+    {
+     "name": "sky130_fd_sc_hd__buf_8",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 5.0
+    },
+    {
+     "name": "sky130_fd_sc_hd__buf_12",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 5.0
+    },
+    {
+     "name": "sky130_fd_sc_hd__buf_16",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 5.0
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__conb",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "HI": "output",
+    "LO": "output"
+   },
+   "functions": {
+    "HI": "1",
+    "LO": "0"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__conb_1",
+     "width_dbu": 1380,
+     "area_um2": 3.7536,
+     "max_capacitance_pf": 1.9038
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dfbbn",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK_N": "input",
+    "D": "input",
+    "Q": "output",
+    "Q_N": "output",
+    "RESET_B": "input",
+    "SET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "!CLK_N"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "clear",
+      "!RESET_B"
+     ],
+     [
+      "preset",
+      "!SET_B"
+     ],
+     [
+      "clear_preset_var1",
+      "H"
+     ],
+     [
+      "clear_preset_var2",
+      "L"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dfbbn_1",
+     "width_dbu": 11960,
+     "area_um2": 32.5312,
+     "max_capacitance_pf": 0.168467
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfbbn_2",
+     "width_dbu": 12880,
+     "area_um2": 35.0336,
+     "max_capacitance_pf": 0.31312
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dfbbp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output",
+    "Q_N": "output",
+    "RESET_B": "input",
+    "SET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "clear",
+      "!RESET_B"
+     ],
+     [
+      "preset",
+      "!SET_B"
+     ],
+     [
+      "clear_preset_var1",
+      "H"
+     ],
+     [
+      "clear_preset_var2",
+      "L"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dfbbp_1",
+     "width_dbu": 11960,
+     "area_um2": 32.5312,
+     "max_capacitance_pf": 0.168467
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dfrbp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output",
+    "Q_N": "output",
+    "RESET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "clear",
+      "!RESET_B"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dfrbp_1",
+     "width_dbu": 10580,
+     "area_um2": 28.7776,
+     "max_capacitance_pf": 0.16572
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfrbp_2",
+     "width_dbu": 11040,
+     "area_um2": 30.0288,
+     "max_capacitance_pf": 0.253611
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dfrtn",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK_N": "input",
+    "D": "input",
+    "Q": "output",
+    "RESET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "!CLK_N"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "clear",
+      "!RESET_B"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dfrtn_1",
+     "width_dbu": 9200,
+     "area_um2": 25.024,
+     "max_capacitance_pf": 0.174876
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dfrtp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output",
+    "RESET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "clear",
+      "!RESET_B"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dfrtp_1",
+     "width_dbu": 9200,
+     "area_um2": 25.024,
+     "max_capacitance_pf": 0.174876
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfrtp_2",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.322276
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfrtp_4",
+     "width_dbu": 10580,
+     "area_um2": 28.7776,
+     "max_capacitance_pf": 0.551157
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dfsbp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output",
+    "Q_N": "output",
+    "SET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "preset",
+      "!SET_B"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dfsbp_1",
+     "width_dbu": 10580,
+     "area_um2": 28.7776,
+     "max_capacitance_pf": 0.166636
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfsbp_2",
+     "width_dbu": 11040,
+     "area_um2": 30.0152,
+     "max_capacitance_pf": 0.311289
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dfstp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output",
+    "SET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "preset",
+      "!SET_B"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dfstp_1",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.167551
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfstp_2",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.311289
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfstp_4",
+     "width_dbu": 11040,
+     "area_um2": 30.0288,
+     "max_capacitance_pf": 0.622568
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dfxbp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output",
+    "Q_N": "output"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dfxbp_1",
+     "width_dbu": 8740,
+     "area_um2": 23.7728,
+     "max_capacitance_pf": 0.159312
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfxbp_2",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.292063
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dfxtp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output"
+   },
+   "functions": {
+    "Q": "IQ"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dfxtp_1",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.162058
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfxtp_2",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.303049
+    },
+    {
+     "name": "sky130_fd_sc_hd__dfxtp_4",
+     "width_dbu": 8740,
+     "area_um2": 23.7728,
+     "max_capacitance_pf": 0.54658
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dlrbn",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "GATE_N": "input",
+    "Q": "output",
+    "Q_N": "output",
+    "RESET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clear",
+      "!RESET_B"
+     ],
+     [
+      "enable",
+      "!GATE_N"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dlrbn_1",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.162058
+    },
+    {
+     "name": "sky130_fd_sc_hd__dlrbn_2",
+     "width_dbu": 8280,
+     "area_um2": 22.5216,
+     "max_capacitance_pf": 0.285654
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dlrbp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "GATE": "input",
+    "Q": "output",
+    "Q_N": "output",
+    "RESET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clear",
+      "!RESET_B"
+     ],
+     [
+      "enable",
+      "GATE"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dlrbp_1",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.161143
+    },
+    {
+     "name": "sky130_fd_sc_hd__dlrbp_2",
+     "width_dbu": 8280,
+     "area_um2": 22.5216,
+     "max_capacitance_pf": 0.287486
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dlrtn",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "GATE_N": "input",
+    "Q": "output",
+    "RESET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clear",
+      "!RESET_B"
+     ],
+     [
+      "enable",
+      "!GATE_N"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dlrtn_1",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.158396
+    },
+    {
+     "name": "sky130_fd_sc_hd__dlrtn_2",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.285654
+    },
+    {
+     "name": "sky130_fd_sc_hd__dlrtn_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.545664
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dlrtp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "GATE": "input",
+    "Q": "output",
+    "RESET_B": "input"
+   },
+   "functions": {
+    "Q": "IQ"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clear",
+      "!RESET_B"
+     ],
+     [
+      "enable",
+      "GATE"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dlrtp_1",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.157481
+    },
+    {
+     "name": "sky130_fd_sc_hd__dlrtp_2",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.285654
+    },
+    {
+     "name": "sky130_fd_sc_hd__dlrtp_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.545664
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dlxbn",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "GATE_N": "input",
+    "Q": "output",
+    "Q_N": "output"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "enable",
+      "!GATE_N"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dlxbn_1",
+     "width_dbu": 6900,
+     "area_um2": 18.768,
+     "max_capacitance_pf": 0.161143
+    },
+    {
+     "name": "sky130_fd_sc_hd__dlxbn_2",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.293894
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dlxbp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "GATE": "input",
+    "Q": "output",
+    "Q_N": "output"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "enable",
+      "GATE"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dlxbp_1",
+     "width_dbu": 6900,
+     "area_um2": 18.768,
+     "max_capacitance_pf": 0.161143
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dlxtn",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "GATE_N": "input",
+    "Q": "output"
+   },
+   "functions": {
+    "Q": "IQ"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "enable",
+      "!GATE_N"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dlxtn_1",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.162058
+    },
+    {
+     "name": "sky130_fd_sc_hd__dlxtn_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.303965
+    },
+    {
+     "name": "sky130_fd_sc_hd__dlxtn_4",
+     "width_dbu": 6900,
+     "area_um2": 18.768,
+     "max_capacitance_pf": 0.545664
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__dlxtp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "GATE": "input",
+    "Q": "output"
+   },
+   "functions": {
+    "Q": "IQ"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "enable",
+      "GATE"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__dlxtp_1",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.160227
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__edfxbp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "DE": "input",
+    "Q": "output",
+    "Q_N": "output"
+   },
+   "functions": {
+    "Q": "IQ",
+    "Q_N": "IQ_N"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "(D&DE)|(IQ&!DE)"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__edfxbp_1",
+     "width_dbu": 11960,
+     "area_um2": 32.5312,
+     "max_capacitance_pf": 0.170298
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__edfxtp",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "DE": "input",
+    "Q": "output"
+   },
+   "functions": {
+    "Q": "IQ"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ",
+      "IQ_N"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "(D&DE)|(IQ&!DE)"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__edfxtp_1",
+     "width_dbu": 11040,
+     "area_um2": 30.0288,
+     "max_capacitance_pf": 0.171214
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__fa",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "CIN": "input",
+    "COUT": "output",
+    "SUM": "output"
+   },
+   "functions": {
+    "COUT": "(A&B)|(A&CIN)|(B&CIN)",
+    "SUM": "(A&!B&!CIN)|(!A&B&!CIN)|(!A&!B&CIN)|(A&B&CIN)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__fa_1",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.156565
+    },
+    {
+     "name": "sky130_fd_sc_hd__fa_2",
+     "width_dbu": 8280,
+     "area_um2": 22.5216,
+     "max_capacitance_pf": 0.292979
+    },
+    {
+     "name": "sky130_fd_sc_hd__fa_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.532847
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__fah",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "CI": "input",
+    "COUT": "output",
+    "SUM": "output"
+   },
+   "functions": {
+    "COUT": "(A&B)|(A&CI)|(B&CI)",
+    "SUM": "(A&!B&!CI)|(!A&B&!CI)|(!A&!B&CI)|(A&B&CI)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__fah_1",
+     "width_dbu": 12420,
+     "area_um2": 33.7824,
+     "max_capacitance_pf": 0.162974
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__fahcin",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "CIN": "input",
+    "COUT": "output",
+    "SUM": "output"
+   },
+   "functions": {
+    "COUT": "(A&!CIN)|(A&B)|(B&!CIN)",
+    "SUM": "(!A&!B&!CIN)|(A&B&!CIN)|(A&!B&CIN)|(!A&B&CIN)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__fahcin_1",
+     "width_dbu": 12420,
+     "area_um2": 33.7824,
+     "max_capacitance_pf": 0.071421
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__fahcon",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "CI": "input",
+    "COUT_N": "output",
+    "SUM": "output"
+   },
+   "functions": {
+    "COUT_N": "(!A&!CI)|(!A&!B)|(!B&!CI)",
+    "SUM": "(A&!B&!CI)|(!A&B&!CI)|(!A&!B&CI)|(A&B&CI)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__fahcon_1",
+     "width_dbu": 12420,
+     "area_um2": 33.7824,
+     "max_capacitance_pf": 0.068675
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__ha",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "COUT": "output",
+    "SUM": "output"
+   },
+   "functions": {
+    "COUT": "(A&B)",
+    "SUM": "(A&!B)|(!A&B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__ha_1",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.157481
+    },
+    {
+     "name": "sky130_fd_sc_hd__ha_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.295725
+    },
+    {
+     "name": "sky130_fd_sc_hd__ha_4",
+     "width_dbu": 9200,
+     "area_um2": 25.024,
+     "max_capacitance_pf": 0.523691
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__inv",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__inv_1",
+     "width_dbu": 1380,
+     "area_um2": 3.7536,
+     "max_capacitance_pf": 0.181284
+    },
+    {
+     "name": "sky130_fd_sc_hd__inv_2",
+     "width_dbu": 1380,
+     "area_um2": 3.7536,
+     "max_capacitance_pf": 0.331431
+    },
+    {
+     "name": "sky130_fd_sc_hd__inv_4",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.563059
+    },
+    {
+     "name": "sky130_fd_sc_hd__inv_6",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.782786
+    },
+    {
+     "name": "sky130_fd_sc_hd__bufinv_8",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.942087
+    },
+    {
+     "name": "sky130_fd_sc_hd__inv_8",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 1.035471
+    },
+    {
+     "name": "sky130_fd_sc_hd__inv_12",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 1.417246
+    },
+    {
+     "name": "sky130_fd_sc_hd__bufinv_16",
+     "width_dbu": 11040,
+     "area_um2": 30.0288,
+     "max_capacitance_pf": 1.509714
+    },
+    {
+     "name": "sky130_fd_sc_hd__inv_16",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 1.681833
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__maj3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A&B)|(A&C)|(B&C)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__maj3_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.15565
+    },
+    {
+     "name": "sky130_fd_sc_hd__maj3_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.30488
+    },
+    {
+     "name": "sky130_fd_sc_hd__maj3_4",
+     "width_dbu": 5060,
+     "area_um2": 13.7632,
+     "max_capacitance_pf": 0.534678
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__mux2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A0": "input",
+    "A1": "input",
+    "S": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A0&!S)|(A1&S)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__mux2_1",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.173045
+    },
+    {
+     "name": "sky130_fd_sc_hd__mux2_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.297556
+    },
+    {
+     "name": "sky130_fd_sc_hd__mux2_4",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.536509
+    },
+    {
+     "name": "sky130_fd_sc_hd__mux2_8",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.931101
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__mux2i",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A0": "input",
+    "A1": "input",
+    "S": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A0&!S)|(!A1&S)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__mux2i_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.068675
+    },
+    {
+     "name": "sky130_fd_sc_hd__mux2i_2",
+     "width_dbu": 5060,
+     "area_um2": 13.7632,
+     "max_capacitance_pf": 0.108042
+    },
+    {
+     "name": "sky130_fd_sc_hd__mux2i_4",
+     "width_dbu": 8280,
+     "area_um2": 22.5216,
+     "max_capacitance_pf": 0.19044
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__mux4",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A0": "input",
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "S0": "input",
+    "S1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A0&!S0&!S1)|(A1&S0&!S1)|(A2&!S0&S1)|(A3&S0&S1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__mux4_1",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.161143
+    },
+    {
+     "name": "sky130_fd_sc_hd__mux4_2",
+     "width_dbu": 8280,
+     "area_um2": 22.5216,
+     "max_capacitance_pf": 0.301218
+    },
+    {
+     "name": "sky130_fd_sc_hd__mux4_4",
+     "width_dbu": 9200,
+     "area_um2": 25.024,
+     "max_capacitance_pf": 0.548411
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nand2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A)|(!B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nand2_1",
+     "width_dbu": 1380,
+     "area_um2": 3.7536,
+     "max_capacitance_pf": 0.166636
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand2_2",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.295725
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand2_4",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.5301
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand2_8",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.933848
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nand2b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A_N": "input",
+    "B": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(A_N)|(!B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nand2b_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.150156
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand2b_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.285654
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand2b_4",
+     "width_dbu": 5060,
+     "area_um2": 13.7632,
+     "max_capacitance_pf": 0.52186
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nand3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A)|(!B)|(!C)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nand3_1",
+     "width_dbu": 1840,
+     "area_um2": 5.0048,
+     "max_capacitance_pf": 0.146494
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand3_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.26002
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand3_4",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.469675
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nand3b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A_N": "input",
+    "B": "input",
+    "C": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(A_N)|(!B)|(!C)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nand3b_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.143748
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand3b_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.263682
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand3b_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.479746
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nand4",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "D": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A)|(!B)|(!C)|(!D)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nand4_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.124522
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand4_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.20051
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand4_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.357981
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nand4b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A_N": "input",
+    "B": "input",
+    "C": "input",
+    "D": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(A_N)|(!B)|(!C)|(!D)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nand4b_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.124522
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand4b_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.20051
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand4b_4",
+     "width_dbu": 8740,
+     "area_um2": 23.7728,
+     "max_capacitance_pf": 0.36439
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nand4bb",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A_N": "input",
+    "B_N": "input",
+    "C": "input",
+    "D": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(A_N)|(B_N)|(!C)|(!D)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nand4bb_1",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.123606
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand4bb_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.20051
+    },
+    {
+     "name": "sky130_fd_sc_hd__nand4bb_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.35615
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nor2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A&!B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nor2_1",
+     "width_dbu": 1380,
+     "area_um2": 3.7536,
+     "max_capacitance_pf": 0.08607
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor2_2",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.141917
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor2_4",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.25178
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor2_8",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.433054
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nor2b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B_N": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A&B_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nor2b_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.082407
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor2b_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.142832
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor2b_4",
+     "width_dbu": 5060,
+     "area_um2": 13.7632,
+     "max_capacitance_pf": 0.254527
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nor3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A&!B&!C)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nor3_1",
+     "width_dbu": 1840,
+     "area_um2": 5.0048,
+     "max_capacitance_pf": 0.052195
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor3_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.092478
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor3_4",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.153819
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nor3b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C_N": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A&!B&C_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nor3b_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.049448
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor3b_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.093394
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor3b_4",
+     "width_dbu": 6900,
+     "area_um2": 18.768,
+     "max_capacitance_pf": 0.146494
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nor4",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "D": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A&!B&!C&!D)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nor4_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.036631
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor4_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.064097
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor4_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.11262
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nor4b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "D_N": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A&!B&!C&D_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nor4b_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.033884
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor4b_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.065012
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor4b_4",
+     "width_dbu": 8740,
+     "area_um2": 23.7728,
+     "max_capacitance_pf": 0.113535
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__nor4bb",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C_N": "input",
+    "D_N": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A&!B&C_N&D_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__nor4bb_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.036631
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor4bb_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.060435
+    },
+    {
+     "name": "sky130_fd_sc_hd__nor4bb_4",
+     "width_dbu": 9200,
+     "area_um2": 25.024,
+     "max_capacitance_pf": 0.111704
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o2111a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "C1": "input",
+    "D1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&B1&C1&D1)|(A2&B1&C1&D1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o2111a_1",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.161143
+    },
+    {
+     "name": "sky130_fd_sc_hd__o2111a_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.299387
+    },
+    {
+     "name": "sky130_fd_sc_hd__o2111a_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.551157
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o2111ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "C1": "input",
+    "D1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!A2)|(!B1)|(!C1)|(!D1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o2111ai_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.071421
+    },
+    {
+     "name": "sky130_fd_sc_hd__o2111ai_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.129099
+    },
+    {
+     "name": "sky130_fd_sc_hd__o2111ai_4",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.215159
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o211a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "C1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&B1&C1)|(A2&B1&C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o211a_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.183115
+    },
+    {
+     "name": "sky130_fd_sc_hd__o211a_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.268259
+    },
+    {
+     "name": "sky130_fd_sc_hd__o211a_4",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.509043
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o211ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "C1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!A2)|(!B1)|(!C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o211ai_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.074168
+    },
+    {
+     "name": "sky130_fd_sc_hd__o211ai_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.133677
+    },
+    {
+     "name": "sky130_fd_sc_hd__o211ai_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.215159
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o21a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&B1)|(A2&B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o21a_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.162974
+    },
+    {
+     "name": "sky130_fd_sc_hd__o21a_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.29481
+    },
+    {
+     "name": "sky130_fd_sc_hd__o21a_4",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.509959
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o21ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!A2)|(!B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o21ai_0",
+     "width_dbu": 1840,
+     "area_um2": 5.0048,
+     "max_capacitance_pf": 0.050364
+    },
+    {
+     "name": "sky130_fd_sc_hd__o21ai_1",
+     "width_dbu": 1840,
+     "area_um2": 5.0048,
+     "max_capacitance_pf": 0.080576
+    },
+    {
+     "name": "sky130_fd_sc_hd__o21ai_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.13917
+    },
+    {
+     "name": "sky130_fd_sc_hd__o21ai_4",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.224314
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o21ba",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1_N": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&!B1_N)|(A2&!B1_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o21ba_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.156565
+    },
+    {
+     "name": "sky130_fd_sc_hd__o21ba_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.264597
+    },
+    {
+     "name": "sky130_fd_sc_hd__o21ba_4",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.45228
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o21bai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1_N": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!A2)|(B1_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o21bai_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.07783
+    },
+    {
+     "name": "sky130_fd_sc_hd__o21bai_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.140086
+    },
+    {
+     "name": "sky130_fd_sc_hd__o21bai_4",
+     "width_dbu": 6900,
+     "area_um2": 18.768,
+     "max_capacitance_pf": 0.245371
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o221a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "C1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&B1&C1)|(A2&B1&C1)|(A1&B2&C1)|(A2&B2&C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o221a_1",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.152903
+    },
+    {
+     "name": "sky130_fd_sc_hd__o221a_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.281077
+    },
+    {
+     "name": "sky130_fd_sc_hd__o221a_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.487986
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o221ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "C1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!B1&!B2)|(!A1&!A2)|(!C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o221ai_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.070506
+    },
+    {
+     "name": "sky130_fd_sc_hd__o221ai_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.128184
+    },
+    {
+     "name": "sky130_fd_sc_hd__o221ai_4",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.216074
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o22a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&B1)|(A2&B1)|(A1&B2)|(A2&B2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o22a_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.162058
+    },
+    {
+     "name": "sky130_fd_sc_hd__o22a_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.30488
+    },
+    {
+     "name": "sky130_fd_sc_hd__o22a_4",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.5301
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o22ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!B1&!B2)|(!A1&!A2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o22ai_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.073252
+    },
+    {
+     "name": "sky130_fd_sc_hd__o22ai_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.137339
+    },
+    {
+     "name": "sky130_fd_sc_hd__o22ai_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.21699
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o2bb2a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1_N": "input",
+    "A2_N": "input",
+    "B1": "input",
+    "B2": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(!A1_N&B1)|(!A2_N&B1)|(!A1_N&B2)|(!A2_N&B2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o2bb2a_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.156565
+    },
+    {
+     "name": "sky130_fd_sc_hd__o2bb2a_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.29481
+    },
+    {
+     "name": "sky130_fd_sc_hd__o2bb2a_4",
+     "width_dbu": 7360,
+     "area_um2": 20.0192,
+     "max_capacitance_pf": 0.497141
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o2bb2ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1_N": "input",
+    "A2_N": "input",
+    "B1": "input",
+    "B2": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!B1&!B2)|(A1_N&A2_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o2bb2ai_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.075999
+    },
+    {
+     "name": "sky130_fd_sc_hd__o2bb2ai_2",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.134592
+    },
+    {
+     "name": "sky130_fd_sc_hd__o2bb2ai_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.246287
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o311a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "C1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&B1&C1)|(A2&B1&C1)|(A3&B1&C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o311a_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.15565
+    },
+    {
+     "name": "sky130_fd_sc_hd__o311a_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.293894
+    },
+    {
+     "name": "sky130_fd_sc_hd__o311a_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.539255
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o311ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "C1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!A2&!A3)|(!B1)|(!C1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o311ai_0",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.029307
+    },
+    {
+     "name": "sky130_fd_sc_hd__o311ai_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.045786
+    },
+    {
+     "name": "sky130_fd_sc_hd__o311ai_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.082407
+    },
+    {
+     "name": "sky130_fd_sc_hd__o311ai_4",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.142832
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o31a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&B1)|(A2&B1)|(A3&B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o31a_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.149241
+    },
+    {
+     "name": "sky130_fd_sc_hd__o31a_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.285654
+    },
+    {
+     "name": "sky130_fd_sc_hd__o31a_4",
+     "width_dbu": 6440,
+     "area_um2": 17.5168,
+     "max_capacitance_pf": 0.544749
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o31ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!A2&!A3)|(!B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o31ai_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.047617
+    },
+    {
+     "name": "sky130_fd_sc_hd__o31ai_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.080576
+    },
+    {
+     "name": "sky130_fd_sc_hd__o31ai_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.144663
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o32a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "B2": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&B1)|(A1&B2)|(A2&B1)|(A3&B1)|(A2&B2)|(A3&B2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o32a_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.150156
+    },
+    {
+     "name": "sky130_fd_sc_hd__o32a_2",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.300303
+    },
+    {
+     "name": "sky130_fd_sc_hd__o32a_4",
+     "width_dbu": 8280,
+     "area_um2": 22.5216,
+     "max_capacitance_pf": 0.55665
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o32ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "B1": "input",
+    "B2": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!A2&!A3)|(!B1&!B2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o32ai_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.046702
+    },
+    {
+     "name": "sky130_fd_sc_hd__o32ai_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.088816
+    },
+    {
+     "name": "sky130_fd_sc_hd__o32ai_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.153819
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o41a",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "A4": "input",
+    "B1": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A1&B1)|(A2&B1)|(A3&B1)|(A4&B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o41a_1",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.14741
+    },
+    {
+     "name": "sky130_fd_sc_hd__o41a_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.305796
+    },
+    {
+     "name": "sky130_fd_sc_hd__o41a_4",
+     "width_dbu": 7820,
+     "area_um2": 21.2704,
+     "max_capacitance_pf": 0.544749
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__o41ai",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "A4": "input",
+    "B1": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A1&!A2&!A3&!A4)|(!B1)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__o41ai_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.033884
+    },
+    {
+     "name": "sky130_fd_sc_hd__o41ai_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.062266
+    },
+    {
+     "name": "sky130_fd_sc_hd__o41ai_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.108958
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__or2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A)|(B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__or2_0",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.100718
+    },
+    {
+     "name": "sky130_fd_sc_hd__or2_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.164805
+    },
+    {
+     "name": "sky130_fd_sc_hd__or2_2",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.299387
+    },
+    {
+     "name": "sky130_fd_sc_hd__or2_4",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.514536
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__or2b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B_N": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A)|(!B_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__or2b_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.169383
+    },
+    {
+     "name": "sky130_fd_sc_hd__or2b_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.312205
+    },
+    {
+     "name": "sky130_fd_sc_hd__or2b_4",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.515452
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__or3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A)|(B)|(C)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__or3_1",
+     "width_dbu": 2300,
+     "area_um2": 6.256,
+     "max_capacitance_pf": 0.167551
+    },
+    {
+     "name": "sky130_fd_sc_hd__or3_2",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.310374
+    },
+    {
+     "name": "sky130_fd_sc_hd__or3_4",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.531931
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__or3b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C_N": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A)|(B)|(!C_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__or3b_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.167551
+    },
+    {
+     "name": "sky130_fd_sc_hd__or3b_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.269175
+    },
+    {
+     "name": "sky130_fd_sc_hd__or3b_4",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.469675
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__or4",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "D": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A)|(B)|(C)|(D)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__or4_1",
+     "width_dbu": 2760,
+     "area_um2": 7.5072,
+     "max_capacitance_pf": 0.167551
+    },
+    {
+     "name": "sky130_fd_sc_hd__or4_2",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.310374
+    },
+    {
+     "name": "sky130_fd_sc_hd__or4_4",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.534678
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__or4b",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "D_N": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A)|(B)|(C)|(!D_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__or4b_1",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.167551
+    },
+    {
+     "name": "sky130_fd_sc_hd__or4b_2",
+     "width_dbu": 3680,
+     "area_um2": 10.0096,
+     "max_capacitance_pf": 0.265513
+    },
+    {
+     "name": "sky130_fd_sc_hd__or4b_4",
+     "width_dbu": 5060,
+     "area_um2": 13.7632,
+     "max_capacitance_pf": 0.533762
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__or4bb",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C_N": "input",
+    "D_N": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A)|(B)|(!C_N)|(!D_N)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__or4bb_1",
+     "width_dbu": 4140,
+     "area_um2": 11.2608,
+     "max_capacitance_pf": 0.167551
+    },
+    {
+     "name": "sky130_fd_sc_hd__or4bb_2",
+     "width_dbu": 4600,
+     "area_um2": 12.512,
+     "max_capacitance_pf": 0.312205
+    },
+    {
+     "name": "sky130_fd_sc_hd__or4bb_4",
+     "width_dbu": 5520,
+     "area_um2": 15.0144,
+     "max_capacitance_pf": 0.532847
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__xnor2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "Y": "output"
+   },
+   "functions": {
+    "Y": "(!A&!B)|(A&B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__xnor2_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.06959
+    },
+    {
+     "name": "sky130_fd_sc_hd__xnor2_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.121775
+    },
+    {
+     "name": "sky130_fd_sc_hd__xnor2_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.211497
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__xnor3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(!A&!B&!C)|(A&B&!C)|(A&!B&C)|(!A&B&C)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__xnor3_1",
+     "width_dbu": 8280,
+     "area_um2": 22.5216,
+     "max_capacitance_pf": 0.154734
+    },
+    {
+     "name": "sky130_fd_sc_hd__xnor3_2",
+     "width_dbu": 8740,
+     "area_um2": 23.7728,
+     "max_capacitance_pf": 0.301218
+    },
+    {
+     "name": "sky130_fd_sc_hd__xnor3_4",
+     "width_dbu": 9660,
+     "area_um2": 26.2752,
+     "max_capacitance_pf": 0.554819
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__xor2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A&!B)|(!A&B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__xor2_1",
+     "width_dbu": 3220,
+     "area_um2": 8.7584,
+     "max_capacitance_pf": 0.076914
+    },
+    {
+     "name": "sky130_fd_sc_hd__xor2_2",
+     "width_dbu": 5980,
+     "area_um2": 16.2656,
+     "max_capacitance_pf": 0.130015
+    },
+    {
+     "name": "sky130_fd_sc_hd__xor2_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.219736
+    }
+   ]
+  },
+  {
+   "id": "sky130_fd_sc_hd__xor3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "C": "input",
+    "X": "output"
+   },
+   "functions": {
+    "X": "(A&!B&!C)|(!A&B&!C)|(!A&!B&C)|(A&B&C)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "sky130_fd_sc_hd__xor3_1",
+     "width_dbu": 8740,
+     "area_um2": 23.7728,
+     "max_capacitance_pf": 0.151072
+    },
+    {
+     "name": "sky130_fd_sc_hd__xor3_2",
+     "width_dbu": 9200,
+     "area_um2": 25.024,
+     "max_capacitance_pf": 0.285654
+    },
+    {
+     "name": "sky130_fd_sc_hd__xor3_4",
+     "width_dbu": 10120,
+     "area_um2": 27.5264,
+     "max_capacitance_pf": 0.506296
+    }
+   ]
+  }
+ ],
+ "excluded": [
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_16",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s15_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s15_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s18_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s18_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s25_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s25_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s50_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s50_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_16",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinvlp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinvlp_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__decap_12",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__decap_3",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__decap_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__decap_6",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__decap_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__diode_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlclkp_1",
+   "reason": "state table or clock-gating cell"
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlclkp_2",
+   "reason": "state table or clock-gating cell"
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlclkp_4",
+   "reason": "state table or clock-gating cell"
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlygate4sd1_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlygate4sd2_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlygate4sd3_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlymetal6s2s_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlymetal6s4s_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlymetal6s6s_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__ebufn_1",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__ebufn_2",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__ebufn_4",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__ebufn_8",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__einvn_0",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__einvn_1",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__einvn_2",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__einvn_4",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__einvn_8",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__einvp_1",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__einvp_2",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__einvp_4",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__einvp_8",
+   "reason": "three-state output"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_bleeder_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkbufkapwr_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkbufkapwr_16",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkbufkapwr_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkbufkapwr_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkbufkapwr_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkinvkapwr_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkinvkapwr_16",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkinvkapwr_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkinvkapwr_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_clkinvkapwr_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_decapkapwr_12",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_decapkapwr_3",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_decapkapwr_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_decapkapwr_6",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_decapkapwr_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_inputiso0n_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_inputiso0p_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_inputiso1n_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_inputiso1p_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_inputisolatch_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_isobufsrc_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_isobufsrc_16",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_isobufsrc_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_isobufsrc_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_isobufsrc_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_isobufsrckapwr_16",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_lsbuf_lh_hl_isowell_tap_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_lsbuf_lh_hl_isowell_tap_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_lsbuf_lh_hl_isowell_tap_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_lsbuf_lh_isowell_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_lsbuf_lh_isowell_tap_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_lsbuf_lh_isowell_tap_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__lpflow_lsbuf_lh_isowell_tap_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__macro_sparecell",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__probe_p_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__probec_p_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfbbn_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfbbn_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfbbp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfrbp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfrbp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfrtn_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfrtp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfrtp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfrtp_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfsbp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfsbp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfstp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfstp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfstp_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfxbp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfxbp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfxtp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfxtp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdfxtp_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdlclkp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdlclkp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sdlclkp_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sedfxbp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sedfxbp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sedfxtp_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sedfxtp_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "sky130_fd_sc_hd__sedfxtp_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  }
+ ]
+}

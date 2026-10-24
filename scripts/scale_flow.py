@@ -280,10 +280,10 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str, facts: 
     netlist.write_text(text)
     facts["renamed_escaped_wires"] = renamed
     done.append("synth")
-    fp = m["floorplan_recipe"]
+    fp = m["recipe"]["floorplan"]
     floor, phys = run_dir / "floorplan.json", run_dir / "physical.json"
     road = [args.rustroad]
-    clock = ["--no-clock"] if m["clock"] is None else ["--clock-port", m["clock"]["port"]]
+    clock = ["--no-clock"] if m["clock"]["port"] is None else ["--clock-port", m["clock"]["port"]]
     rep = r.json(f"{label}_floorplan", road + [
         "floorplan", "--tech-lef", p["technology_lef"]["path"], "--cell-lef", p["cell_lef"]["path"],
         "--netlist", netlist, "--physical-config", resolve(spec["physical_profile"]["path"]),
@@ -315,7 +315,7 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str, facts: 
                                                  "--physical-config", tracked_phys])
         a = r.json(f"{label}_place{eco}", rr + ["place", "--base-rev", a["revision"]])
         facts["placement"] = a.get("placement")
-        if m["clock"] is not None:
+        if m["clock"]["port"] is not None:
             a = r.json(f"{label}_cts{eco}", rr + ["clock-tree", "--base-rev", a["revision"], "--sdc",
                                                   resolve(m["sdc"]["clock"]["path"])])
             facts["placement_after_cts"] = a.get("placement")
@@ -612,8 +612,8 @@ def main(argv=None) -> int:
                     help="skip the planted-mutation control (the CEC item then stays unverified)")
     args = ap.parse_args(argv)
     m = json.loads(resolve(args.design).read_text())
-    if m.get("schema") != "rustroad.design.v1":
-        raise SystemExit("design manifest schema must be rustroad.design.v1")
+    if m.get("schema") != "rustroad.design.v2" or (m.get("recipe") or {}).get("physical") != "track":
+        raise SystemExit("design manifest must be rustroad.design.v2 with the track recipe")
     args.out.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     pdks = args.pdk or list(m["pdks"])

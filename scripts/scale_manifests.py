@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Write the scale design manifests (schema rustroad.design.v1).
+"""Write the track-recipe design manifests (schema rustroad.design.v2).
 
 usage: scale_manifests.py --rustroad BIN --rustsys BIN [--design NAME ...]
+       scale_manifests.py --refresh-manifest [--design NAME ...]
 
-For every design: writes the clock SDC (fixtures/designs/<name>/cts.sdc),
-synthesizes the RTL with the cell-policy RustSys arguments (or takes the
-literal mapped netlist), runs `rustroad floorplan` with the recipe below into
+For every design: writes the clock SDC (fixtures/designs/<name>/cts.sdc; a
+virtual-clock SDC for a combinational design), synthesizes the RTL with the
+cell-policy RustSys arguments (or takes the literal mapped netlist), runs
+`rustroad floorplan` with the recipe below into
 fixtures/designs/<name>/<pdk>-{floorplan,physical}.json and records every
-tracked file and frozen PDK input by SHA-256 in fixtures/designs/<name>.json.
-scripts/scale_flow.py regenerates the floorplans and requires identical bytes.
+tracked file and frozen PDK input by SHA-256 in fixtures/designs/<name>.json,
+including the SHA-256 of the signoff SDC rendered from the RTL port list
+(pinned Yosys, scripts/rtl2gds_design.render_sdc). scripts/rtl2gds.py and
+scripts/scale_flow.py regenerate the floorplans and require identical bytes.
+
+``--refresh-manifest`` rewrites only the SDC files and manifest JSON of
+existing designs (floorplans and physical configurations are kept byte for
+byte; their hashes are re-read). The SDC is fixed here, before any timing
+closure, and is never edited to make timing pass.
 """
 from __future__ import annotations
 
@@ -24,6 +33,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from scale_flow import SITES, CELL_GDS, deconflict  # noqa: E402
+import rtl2gds_design as D  # noqa: E402
 
 RUSTSYS = "fixtures/designs/rtl/PROVENANCE.md"
 DESIGNS = {
@@ -71,12 +81,27 @@ LIBRARY = {"sky130": "sky130_fd_sc_hd", "gf180": "gf180mcu_fd_sc_mcu7t5v0"}
 VARIANT = {"sky130": "sky130A", "gf180": "gf180mcuD"}
 # OpenRCX rule files the timing flow reads (sky130: Calibre-derived set).
 RCX_SUFFIX = {"sky130": ".calibre", "gf180": ""}
+# Block-level constraints, fixed before closure for every track design: 100 MHz,
+# 0.1 ns clock transition, 50 ps uncertainty; electrical DRV limits 0.3 pF and
+# 1.0 ns (clock domain); set_max_fanout 64 is a structural bound (power of two,
+# the same for every design, so the fanout check is active and gating; the
+# largest fanout in the required set, regfile rst_n, has 64 sinks).
 SDC = """set_units -time ns -capacitance pF
 create_clock -name core -period 10 -waveform {{0 5}} [get_ports {port}]
 set_clock_transition 0.1 [get_clocks core]
 set_clock_uncertainty 0.05 [get_clocks core]
+set_max_fanout 64 [current_design]
 set_max_capacitance 0.3 [current_design]
 set_max_transition 1.0 [get_clocks core]
+"""
+# Combinational design: a virtual clock only times the I/O (no clock port, no
+# clock network, no CTS); same limits.
+VIRTUAL_SDC = """set_units -time ns -capacitance pF
+create_clock -name core -period 10
+set_clock_uncertainty 0.05 [get_clocks core]
+set_max_fanout 64 [current_design]
+set_max_capacitance 0.3 [current_design]
+set_max_transition 1.0 [current_design]
 """
 IO_TEMPLATE = """set_input_delay 0.2 -clock ${clock} [get_ports {${data_inputs}}]
 set_output_delay 0.2 -clock ${clock} [get_ports {${outputs}}]
@@ -84,6 +109,13 @@ set_input_transition 0.1 [get_ports {${inputs}}]
 set_load 0.01 [get_ports {${outputs}}]
 set_propagated_clock [get_clocks ${clock}]
 """
+VIRTUAL_IO_TEMPLATE = """set_input_delay 0.2 -clock ${clock} [get_ports {${data_inputs}}]
+set_output_delay 0.2 -clock ${clock} [get_ports {${outputs}}]
+set_input_transition 0.1 [get_ports {${inputs}}]
+set_load 0.01 [get_ports {${outputs}}]
+"""
+TOOLS = "fixtures/flow/rtl2gds-tools.json"
+PROFILES = "fixtures/pdk/local-routing.json"
 
 
 def sha256(path: Path) -> str:
@@ -125,18 +157,7 @@ def build(name: str, spec: dict, args) -> dict:
     d = ROOT / "fixtures/designs" / name
     d.mkdir(parents=True, exist_ok=True)
     rtl = spec.get("rtl_paths") or [f"fixtures/designs/rtl/{x}" for x in spec["rtl"]]
-    sdc_rel = None
-    if spec["clock"]:
-        (d / "cts.sdc").write_text(SDC.format(port=spec["clock"]))
-        sdc_rel = f"fixtures/designs/{name}/cts.sdc"
-    else:
-        # Combinational design: a virtual clock for I/O constraints only.
-        (d / "cts.sdc").write_text("set_units -time ns -capacitance pF\ncreate_clock -name core -period 10\n"
-                                   "set_max_capacitance 0.3 [current_design]\n")
-        sdc_rel = f"fixtures/designs/{name}/cts.sdc"
-    tmpl = ROOT / "fixtures/designs/postroute-io.sdc.tmpl"
-    if not tmpl.exists():
-        tmpl.write_text(IO_TEMPLATE)
+    write_sdc(name, spec)
     pdks = {}
     unavailable = {}
     policy = json.loads((ROOT / "fixtures/flow/cell-policy.json").read_text())
@@ -185,39 +206,135 @@ def build(name: str, spec: dict, args) -> dict:
         if spec.get("literal"):
             e["netlist"] = entry(f"fixtures/designs/rtl/{name}/{tag}_mapped.v")
         pdks[tag] = e
-    return dict(
-        schema="rustroad.design.v1", name=name, description=spec["description"], top=spec["top"],
-        rtl=[entry(r) for r in rtl],
-        clock=None if not spec["clock"] else dict(port=spec["clock"], name="core"),
-        sdc=dict(clock=entry(sdc_rel), io_template=entry("fixtures/designs/postroute-io.sdc.tmpl"),
-                 note="signoff SDC = clock SDC + io_template filled from the RTL port list; the CTS reads the "
-                      "clock SDC" if spec["clock"] else "combinational: virtual clock for I/O constraints"),
-        pdk_profiles=entry("fixtures/pdk/local-real-pdks.json"),
-        cell_policy=entry("fixtures/flow/cell-policy.json"),
-        signoff_manifest=entry("fixtures/flow/signoff-pinned.json"),
-        tools=entry("fixtures/flow/local-pinned.json"),
-        floorplan_recipe=RECIPE,
-        stretch=bool(spec.get("stretch")),
-        pdks_unavailable=unavailable,
-        flow=dict(harness="scripts/scale_flow.py", router="track", placer="analytic"),
-        pdks=pdks,
-        verification=dict(cosim_vectors=4096, cosim_seed="0x5eed2026c0ffee01", rustsys_budget=10000,
-                          rustsys_model_budget=10000, rustsys_sweep_max_candidates=256, yosys_equiv_seq=2),
-        budgets=dict(hold_margin_ns=0.05, setup_margin_ns=0.0, hold_eco_setup_margin_ns=0.05, parity_ns=0.001,
-                     max_hold_iterations=4, process_timeout_s=600, process_memory_mib=2048,
-                     max_wall_s=14400 if spec.get("stretch") else 3600, container_memory="4g",
-                     container_timeout_s=7200 if spec.get("stretch") else 1800),
-    )
+    m = dict(name=name, description=spec["description"], top=spec["top"], rtl=[entry(r) for r in rtl],
+             stretch=bool(spec.get("stretch")), pdks_unavailable=unavailable, pdks=pdks)
+    return finish(m, spec)
+
+
+def write_sdc(name: str, spec: dict) -> None:
+    d = ROOT / "fixtures/designs" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "cts.sdc").write_text(SDC.format(port=spec["clock"]) if spec["clock"] else VIRTUAL_SDC)
+    for tmpl, text in (("postroute-io.sdc.tmpl", IO_TEMPLATE), ("postroute-io-virtual.sdc.tmpl", VIRTUAL_IO_TEMPLATE)):
+        path = ROOT / "fixtures/designs" / tmpl
+        if not path.exists():
+            path.write_text(text)
+        if path.read_text() != text:
+            raise RuntimeError(f"{path} differs from the template in this script")
+
+
+def rendered_sdc(m: dict) -> str:
+    """The signoff SDC exactly as scripts/rtl2gds.py renders it (pinned Yosys
+    port list, Verilator XML when Yosys cannot elaborate the RTL)."""
+    import argparse as _argparse
+    import rtl2gds_logic as L
+    from verify_physical import PhysicalHarness
+    tools = json.loads((ROOT / TOOLS).read_text())["tools"]
+    paths = {}
+    for name in ("yosys", "verilator"):
+        paths[name] = Path(tools[name]["path"])
+        if sha256(paths[name]) != tools[name]["sha256"]:
+            raise RuntimeError(f"pinned {name} differs from its sha256")
+    with tempfile.TemporaryDirectory(dir=ROOT / ".work") as tmp:
+        h = PhysicalHarness(Path(tmp), _argparse.Namespace(threads=2, memory_mib=2048, timeout_seconds=120,
+                                                          tolerance_ns=0.001))
+        ports, _ = L.rtl_ports(h, paths, [ROOT / r["path"] for r in m["rtl"]], m["top"])
+    return D.render_sdc((ROOT / m["sdc"]["clock"]["path"]).read_text(),
+                        (ROOT / m["sdc"]["io_template"]["path"]).read_text(), ports,
+                        m["clock"]["port"], m["clock"]["name"])
+
+
+def finish(m: dict, spec: dict) -> dict:
+    """Complete a track-recipe manifest: schema v2 fields, SDC and frozen hashes."""
+    name = m["name"]
+    sdc_rel = f"fixtures/designs/{name}/cts.sdc"
+    tmpl = "fixtures/designs/postroute-io.sdc.tmpl" if spec["clock"] else "fixtures/designs/postroute-io-virtual.sdc.tmpl"
+    out = dict(schema=D.DESIGN_SCHEMA, name=name, description=m["description"], top=m["top"], rtl=m["rtl"],
+               clock=dict(port=spec["clock"] or None, name="core"),
+               sdc=dict(clock=entry(sdc_rel), io_template=entry(tmpl),
+                        note=("signoff SDC = clock SDC + io_template filled from the RTL port list; the CTS reads "
+                              "the clock SDC") if spec["clock"] else
+                             ("combinational: a virtual clock times the I/O; no clock port, no CTS")),
+               recipe=dict(physical="track", floorplan={k: RECIPE[k] for k in D.FLOORPLAN_RECIPE_KEYS}),
+               stretch=bool(spec.get("stretch")), pdks_unavailable=m.get("pdks_unavailable") or {},
+               pdk_profiles=entry(PROFILES), cell_policy=entry("fixtures/flow/cell-policy.json"),
+               signoff_manifest=entry("fixtures/flow/signoff-pinned.json"), tools=entry(TOOLS))
+    out["sdc"]["rendered_sha256"] = hashlib.sha256(rendered_sdc(out).encode()).hexdigest()
+    pdks = {}
+    for tag, e in m["pdks"].items():
+        e = {k: v for k, v in e.items()}
+        e["sizing_profile"] = dict(path=f"fixtures/pdk/{tag}-sizing.json")
+        for key in ("floorplan", "physical_config", "physical_profile", "routing_config", "delay_cells",
+                    "gds_layer_map", "netlist", "sizing_profile"):
+            if key in e:
+                e[key] = entry(e[key]["path"])
+        e["rc_profiles"] = {rc: entry(v["path"]) for rc, v in e["rc_profiles"].items()}
+        e["frozen"] = dict(frozen(tag, e["physical_config"]["path"], e["routing_config"]["path"]),
+                           sdc_cts=sha256(ROOT / sdc_rel), sdc_postroute=out["sdc"]["rendered_sha256"],
+                           sizing_profile=e["sizing_profile"]["sha256"])
+        e["frozen"] = dict(sorted(e["frozen"].items()))
+        pdks[tag] = e
+    out["pdks"] = pdks
+    out["verification"] = dict(cosim_vectors=4096, cosim_seed="0x5eed2026c0ffee01", rustsys_budget=10000,
+                               rustsys_model_budget=10000, rustsys_sweep_max_candidates=256, yosys_equiv_seq=2)
+    # Track designs: the closure loop also sizes gates, so it needs more
+    # layouts (regfile gf180 took three hold rounds alone); the ECO hold target
+    # adds a 20 ps guard band for the native-vs-OpenRCX difference (the gate
+    # still checks >= 0.05 ns on both SPEFs).
+    out["budgets"] = dict(hold_margin_ns=0.05, hold_eco_target_margin_ns=0.07, setup_margin_ns=0.0,
+                          hold_eco_setup_margin_ns=0.05, parity_ns=0.001,
+                          max_hold_iterations=8, process_timeout_s=600, process_memory_mib=2048,
+                          max_wall_s=14400 if spec.get("stretch") else 3600, container_memory="4g",
+                          container_timeout_s=7200 if spec.get("stretch") else 1800)
+    problems = D.manifest_problems(out)
+    if problems:
+        raise RuntimeError(f"{name}: {problems}")
+    return out
+
+
+def refresh_hashes(name: str) -> dict:
+    """Legacy-recipe manifest (pipeline): re-read every tracked and frozen hash;
+    nothing else changes (its SDC and floorplans are the fixtures' own)."""
+    m = json.loads((ROOT / "fixtures/designs" / f"{name}.json").read_text())
+    if m["recipe"]["physical"] != "legacy":
+        raise RuntimeError(f"{name}: not a legacy-recipe manifest")
+    for key, e in D.tracked_entries(m).items():
+        e["sha256"] = sha256(ROOT / e["path"])
+    m["sdc"]["rendered_sha256"] = hashlib.sha256(rendered_sdc(m).encode()).hexdigest()
+    for tag, e in m["pdks"].items():
+        fresh = dict(frozen(tag, e["physical_config"]["path"], e["routing_config"]["path"]),
+                     sdc_cts=sha256(ROOT / m["sdc"]["clock"]["path"]), sdc_postroute=m["sdc"]["rendered_sha256"])
+        if set(fresh) != set(e["frozen"]):
+            raise RuntimeError(f"{name} {tag}: frozen keys differ {sorted(set(fresh) ^ set(e['frozen']))}")
+        e["frozen"] = dict(sorted(fresh.items()))
+    problems = D.manifest_problems(m)
+    if problems:
+        raise RuntimeError(f"{name}: {problems}")
+    return m
+
+
+def refresh(name: str, spec: dict) -> dict:
+    """Rewrite the SDC and manifest of an existing design; floorplans are kept."""
+    write_sdc(name, spec)
+    old = json.loads((ROOT / "fixtures/designs" / f"{name}.json").read_text())
+    return finish(dict(old, rtl=[entry(r["path"]) for r in old["rtl"]]), spec)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rustroad", type=Path, required=True)
-    ap.add_argument("--rustsys", type=Path, required=True)
+    ap.add_argument("--rustroad", type=Path)
+    ap.add_argument("--rustsys", type=Path)
     ap.add_argument("--design", action="append")
+    ap.add_argument("--refresh-manifest", action="store_true",
+                    help="rewrite SDC + manifest only (keep floorplans and physical configurations)")
     args = ap.parse_args()
-    for name in args.design or [d for d in DESIGNS if not DESIGNS[d].get("stretch")]:
-        m = build(name, DESIGNS[name], args)
+    if not args.refresh_manifest and (args.rustroad is None or args.rustsys is None):
+        ap.error("--rustroad and --rustsys are required unless --refresh-manifest")
+    for name in args.design or [d for d in DESIGNS if not DESIGNS[d].get("stretch")] + ["pipeline"]:
+        if args.refresh_manifest and name not in DESIGNS:
+            m = refresh_hashes(name)
+        else:
+            m = refresh(name, DESIGNS[name]) if args.refresh_manifest else build(name, DESIGNS[name], args)
         (ROOT / "fixtures/designs" / f"{name}.json").write_text(json.dumps(m, indent=2) + "\n")
         print(name, "written")
     return 0

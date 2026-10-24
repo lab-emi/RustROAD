@@ -156,6 +156,8 @@ pub struct ExtractReport {
     pub stats: ExtractStats,
     pub routed_nets: usize,
     pub unannotated_signal_nets: Vec<String>,
+    /// Declared signal nets with no connection at all (nothing to extract).
+    pub pinless_signal_nets: Vec<String>,
     pub diagnostics: Vec<String>,
 }
 
@@ -513,13 +515,30 @@ pub fn extract(
         spef_nets[ib].couplings.push((c.b.1, ia, c.a.1, c.pf));
     }
     let routed: std::collections::BTreeSet<u32> = network.nets.iter().map(|n| n.net).collect();
-    let unannotated: Vec<String> = model
-        .nets
-        .iter()
-        .enumerate()
-        .filter(|(i, n)| !n.use_.is_supply() && !routed.contains(&(*i as u32)))
-        .map(|(_, n)| n.name.clone())
-        .collect();
+    // A declared signal net without any connection (no driver, no load: e.g.
+    // a dangling wire of the synthesized netlist) has nothing to extract or
+    // time; it is listed separately. Every net with a pin and no routed tree
+    // stays unannotated.
+    let mut connected = vec![false; model.nets.len()];
+    for c in &model.pins {
+        if let Some(n) = c.net
+            && let Some(slot) = connected.get_mut(n as usize)
+        {
+            *slot = true;
+        }
+    }
+    let mut unannotated = Vec::new();
+    let mut pinless = Vec::new();
+    for (i, n) in model.nets.iter().enumerate() {
+        if n.use_.is_supply() || routed.contains(&(i as u32)) {
+            continue;
+        }
+        if connected[i] {
+            unannotated.push(n.name.clone());
+        } else {
+            pinless.push(n.name.clone());
+        }
+    }
     let header = spef::Header {
         design: design.name.clone(),
         vendor: "RustROAD".into(),
@@ -618,6 +637,12 @@ pub fn extract(
             unannotated.len()
         ));
     }
+    if !pinless.is_empty() {
+        diagnostics.push(format!(
+            "RC_PINLESS_NETS: {} declared signal nets have no pin (no driver, no load) and no D_NET",
+            pinless.len()
+        ));
+    }
     Ok(ExtractReport {
         status: "ok",
         schema: "rustroad.extract.v1",
@@ -670,6 +695,7 @@ pub fn extract(
         stats: network.stats,
         routed_nets: network.nets.len(),
         unannotated_signal_nets: unannotated,
+        pinless_signal_nets: pinless,
         diagnostics,
     })
 }

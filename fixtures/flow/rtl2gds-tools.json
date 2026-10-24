@@ -1,6 +1,6 @@
 {
   "schema": "rustroad.rtl2gds-tools.v1",
-  "note": "Pinned black-box and sibling tools of scripts/rtl2gds.py. Relative paths are relative to the RustROAD checkout. The RustSTA pair is a private copy of /mnt/data2/cgao/git/RustROAD/.work/sta-signoff/bin (RustSTA feat/signoff-checks 78ea7cc, cold release build) because that shared directory is replaced by later rounds: populate .work/tools/sta-gate with cp and check the sha256 below. The signoff image is pinned by fixtures/flow/signoff-pinned.json and verified by scripts/signoff.",
+  "note": "Pinned black-box and sibling tools of scripts/rtl2gds.py. Relative paths are relative to the RustROAD checkout. The RustSTA pair is a private copy of /mnt/data2/cgao/git/RustROAD/.work/sta-signoff/bin (see the provenance below and that directory's SOURCE_COMMIT / SHA256SUMS) because the shared directory is replaced by later rounds: populate .work/tools/sta-gate with cp and check the sha256 below. The signoff image is pinned by fixtures/flow/signoff-pinned.json and verified by scripts/signoff.",
   "tools": {
     "rustsys": {
       "path": "/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target/release/rustsys",
@@ -9,13 +9,13 @@
     },
     "rusteda": {
       "path": ".work/tools/sta-gate/rusteda",
-      "sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
-      "provenance": "RustSTA 0.4.0 78ea7cc (feat/signoff-checks), .work/sta-signoff/bin"
+      "sha256": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+      "provenance": "RustSTA feat/signoff-checks 06b1c9f (merge of the shared-crate convergence 0.4.1, 6af9936, into stream sta3 ebc7037: lumped nearly resistance-free pi loads, driver resistance at 1 fF), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS"
     },
     "ruststa": {
       "path": ".work/tools/sta-gate/ruststa",
-      "sha256": "c407c7423dbda69661825ad06db0b10f66bd8eae7e27b181ac40a5cca85b8f44",
-      "provenance": "RustSTA 0.4.0 78ea7cc (feat/signoff-checks), .work/sta-signoff/bin"
+      "sha256": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+      "provenance": "RustSTA feat/signoff-checks 06b1c9f (merge of the shared-crate convergence 0.4.1, 6af9936, into stream sta3 ebc7037: lumped nearly resistance-free pi loads, driver resistance at 1 fF), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS"
     },
     "yosys": {
       "path": "/mnt/data2/cgao/git/RustSys/.work/lec-verification/tools/yosys",

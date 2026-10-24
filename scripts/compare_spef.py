@@ -387,9 +387,10 @@ def tree_digest(root: Path) -> str:
     return h.hexdigest()
 
 
-def openrcx(h, tag, pdk, corner, def_path, label, threshold="0.1", cells_lef=None):
+def openrcx(h, tag, pdk, corner, def_path, label, threshold="0.1", cells_lef=None, timeout_s=25):
     """OpenRCX on a DEF. ``threshold`` is ``-coupling_threshold`` (fF);
-    ``cells_lef`` replaces the PDK cell LEF (black-box controls only)."""
+    ``cells_lef`` replaces the PDK cell LEF (black-box controls only);
+    ``timeout_s`` bounds the container (larger blocks need more than 25 s)."""
     spec = PDKS[pdk]
     base = PDK_ROOT / spec["base"]
     run_dir = h.root / f"{tag}_rcx"
@@ -419,7 +420,7 @@ exit
                f"--volume={run_dir}:/run:rw", f"--volume={base / spec['tlef']}:/technology.lef:ro",
                f"--volume={lef}:/cells.lef:ro",
                f"--volume={base / spec['lib'].format(spec['libs']['tt'])}:/library.lib:ro",
-               f"--volume={rules}:/extraction.rules:ro", "--entrypoint=/usr/bin/timeout", IMAGE, "25s",
+               f"--volume={rules}:/extraction.rules:ro", "--entrypoint=/usr/bin/timeout", IMAGE, f"{int(timeout_s)}s",
                "/usr/bin/time", "-v", "-o", f"/run/{label}.time", OPENROAD, "-no_init", "-no_splash",
                "-threads", "2", "-exit", f"/run/{script.name}"]
     receipt = h.run(label, command)

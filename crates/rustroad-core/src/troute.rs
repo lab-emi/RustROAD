@@ -33,8 +33,8 @@ use crate::route_rules;
 use crate::routing::{
     Access, AccessEntry, Blockage, LayerRect, RouteInput, RouteLimits, RouteStats, Routes, Soft,
     Spatial, Terminal, TrackPlan, Via, ViaPair, WIRE, Wire, access_table_at, budget, contains,
-    distance, expand, int, invalid, no_route, quartile_points, shifted, validate, via_pairs,
-    wire_rect,
+    distance, expand, int, invalid, no_route, overlap, quartile_points, shifted, validate,
+    via_pairs, wire_rect,
 };
 use crate::{Rect, Result};
 use std::cmp::Reverse;
@@ -1058,7 +1058,27 @@ impl<'a> Router<'a> {
                 return Err(budget("access path limit"));
             }
         }
-        let (li, at) = local.at(current);
+        let (li, mut at) = local.at(current);
+        let access_layer = self.graph.layers[slots[li]].layer;
+        // A leading escape wire that lies wholly inside the pin's own metal is
+        // redundant (the pin already conducts there) and would connect the pin
+        // twice (wire and the via at its end, both on the pin): start the
+        // escape where it leaves the pin instead.
+        while let Some(w) = wires.last() {
+            let rect = wire_rect(w, self.width(w.layer))?;
+            let pin: Vec<Rect> = t
+                .shapes
+                .iter()
+                .filter(|s| s.layer == w.layer)
+                .map(|s| s.rect)
+                .collect();
+            let inside = covered(rect, &pin);
+            if w.layer != access_layer || w.start != at || !inside {
+                break;
+            }
+            at = w.end;
+            wires.pop();
+        }
         let (tli, tat) = local.at(top);
         let top_node = self
             .graph
@@ -1085,7 +1105,7 @@ impl<'a> Router<'a> {
             access: Access {
                 pin: t.pin,
                 net: t.net,
-                layer: self.graph.layers[slots[li]].layer,
+                layer: access_layer,
                 at,
             },
             top: top_node,
@@ -1523,6 +1543,17 @@ impl<'a> Router<'a> {
         Ok(changed)
     }
 
+    /// Would via `kind` at `at` land on a pin of its own net other than at
+    /// that pin's escape top?
+    fn via_on_own_pin(&self, kind: usize, at: [i64; 2], own: &[(u32, Rect, [i64; 2])]) -> bool {
+        self.input.vias[kind].shapes.iter().any(|s| {
+            shifted(s.rect, at).is_ok_and(|r| {
+                own.iter()
+                    .any(|(l, pin, top)| *l == s.layer && overlap(r, *pin) && at != *top)
+            })
+        })
+    }
+
     fn edge_rect(&self, layer: u32, a: [i64; 2], b: [i64; 2], net: u32) -> Result<Rect> {
         wire_rect(
             &Wire {
@@ -1565,6 +1596,17 @@ impl<'a> Router<'a> {
         let near_cost = via_cost;
         let hist_unit = via_cost / 2;
         let mut nbuf = Vec::with_capacity(8);
+        // Own pin metal, except where a terminal's escape reaches the graph:
+        // a path that runs over, or drops a via onto, a pin of its own net
+        // would connect that pin a second time (an RC loop through the pin
+        // metal that extractors see as a mesh).
+        let own: Vec<(u32, Rect, [i64; 2])> = terminals
+            .iter()
+            .flat_map(|t| {
+                let top = self.graph.point(plans[&t.pin].top).1;
+                t.shapes.iter().map(move |s| (s.layer, s.rect, top))
+            })
+            .collect();
         for t in &terminals[1..] {
             let start = plans[&t.pin].top;
             let start_via = plans[&t.pin].top_via;
@@ -1669,6 +1711,10 @@ impl<'a> Router<'a> {
                             // A wire that ends here on this layer wants the
                             // pad elongated along it (end-of-line enclosure).
                             let mut kinds = self.graph.pairs[pi].kinds.clone();
+                            kinds.retain(|&k| !self.via_on_own_pin(k, p, &own));
+                            if kinds.is_empty() {
+                                continue;
+                            }
                             if id != start && self.via_kind[id as usize] == WIRE {
                                 let prev = self.graph.point(self.parent[id as usize]).1;
                                 let vertical = prev[0] == p[0];
@@ -1724,6 +1770,11 @@ impl<'a> Router<'a> {
                         }
                         _ => {
                             let rect = self.edge_rect(layer, p, q, net)?;
+                            if own.iter().any(|(l, r, top)| {
+                                *l == layer && overlap(rect, *r) && p != *top && q != *top
+                            }) {
+                                continue;
+                            }
                             if soft {
                                 match self.spatial.probe_soft(layer, rect, net)? {
                                     Soft::Blocked => continue,
@@ -2199,6 +2250,36 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
 
 /// Records of the current routing state (escapes plus routed edges), wires
 /// merged into maximal collinear runs split at junctions.
+/// Is `r` wholly covered by the union of `by` (rectilinear, coordinate
+/// compression; `by` is one pin's few rectangles)?
+fn covered(r: Rect, by: &[Rect]) -> bool {
+    if by.len() > 64 {
+        return false;
+    }
+    let mut xs = vec![r.lx, r.ux];
+    let mut ys = vec![r.ly, r.uy];
+    for b in by {
+        xs.extend([b.lx.clamp(r.lx, r.ux), b.ux.clamp(r.lx, r.ux)]);
+        ys.extend([b.ly.clamp(r.ly, r.uy), b.uy.clamp(r.ly, r.uy)]);
+    }
+    xs.sort_unstable();
+    xs.dedup();
+    ys.sort_unstable();
+    ys.dedup();
+    xs.windows(2).all(|x| {
+        ys.windows(2).all(|y| {
+            let (cx, cy) = (x[0] + (x[1] - x[0]) / 2, y[0] + (y[1] - y[0]) / 2);
+            by.iter().any(|b| {
+                b.lx <= x[0]
+                    && x[1] <= b.ux
+                    && b.ly <= y[0]
+                    && y[1] <= b.uy
+                    && contains(*b, [cx, cy])
+            })
+        })
+    })
+}
+
 fn assemble(
     r: &Router<'_>,
     groups: &BTreeMap<u32, Vec<&Terminal>>,
@@ -2272,6 +2353,16 @@ fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn covered_handles_unions_of_pin_rectangles() {
+        let l = [rect(0, 0, 10, 4), rect(0, 4, 4, 10)];
+        assert!(covered(rect(1, 1, 9, 3), &l));
+        assert!(covered(rect(1, 2, 3, 9), &l), "spans both rectangles");
+        assert!(!covered(rect(3, 3, 6, 6), &l), "pokes out of the L");
+        assert!(!covered(rect(-1, 1, 2, 2), &l));
+        assert!(!covered(rect(0, 0, 1, 1), &[]));
+    }
     use crate::routing::{LayerRect, RouteLayer, RouteVia, route_cpu_ref};
 
     fn rect(lx: i64, ly: i64, ux: i64, uy: i64) -> Rect {
