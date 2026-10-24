@@ -73,16 +73,29 @@ pub struct PhysicalBundle {
     pub routing: Option<crate::routing::RoutingState>,
     #[serde(default)]
     pub state: Option<crate::physical::PhysicalState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<crate::physical::PlacementReport>,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Floorplan {
-    name: String,
-    units_per_micron: u32,
-    die_area: Rect,
-    core_area: Rect,
-    site: Site,
-    rows: Vec<Row>,
+pub(crate) struct Floorplan {
+    pub(crate) name: String,
+    pub(crate) units_per_micron: u32,
+    pub(crate) die_area: Rect,
+    pub(crate) core_area: Rect,
+    pub(crate) site: Site,
+    pub(crate) rows: Vec<Row>,
+}
+pub(crate) type FloorplanSpec = Floorplan;
+/// `select_technology` for the file-only floorplan command.
+pub(crate) fn select_technology_for(
+    tech: &lef::LefDocument,
+    cells: &lef::LefDocument,
+    floor: &Floorplan,
+    netlist: &verilog::Netlist,
+    extra: &[String],
+) -> Result<(Technology, Vec<Master>)> {
+    select_technology(tech, cells, floor, netlist, extra)
 }
 
 pub(crate) fn read_input(path: &Path, limit: u64, role: &str) -> Result<(String, SourcePin)> {
@@ -479,6 +492,7 @@ pub fn import_pdk_with_config(
         clock_tree: None,
         routing: None,
         state: None,
+        placement: None,
     };
     validate_bundle(&physical, &design, connection_limits)?;
     let records = DesignDb::new(&design, limits)?.unplaced_records();

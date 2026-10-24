@@ -61,8 +61,23 @@ pub(crate) enum Violation {
         layer: u32,
         rect: Rect,
     },
+    /// Small hole enclosed by same-net metal (track router only); `rect` is
+    /// its bounding box.
+    Hole {
+        net: u32,
+        layer: u32,
+        rect: Rect,
+    },
 }
 impl Violation {
+    pub(crate) fn net(&self) -> u32 {
+        match self {
+            Self::Spacing { net, .. }
+            | Self::Area { net, .. }
+            | Self::Floating { net, .. }
+            | Self::Hole { net, .. } => *net,
+        }
+    }
     pub(crate) fn describe(&self) -> String {
         let r = |r: &Rect| format!("({},{})-({},{})", r.lx, r.ly, r.ux, r.uy);
         match self {
@@ -84,6 +99,9 @@ impl Violation {
             ),
             Self::Floating { net, layer, rect } => {
                 format!("floating patch net {net} layer {layer} {}", r(rect))
+            }
+            Self::Hole { net, layer, rect } => {
+                format!("enclosed hole net {net} layer {layer} {}", r(rect))
             }
         }
     }
@@ -304,6 +322,136 @@ pub(crate) fn fill_for(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
     r
 }
 
+/// Track-router patch: like `fill_for`, but a corner/point bridge overlaps
+/// each shape by at least the layer width (or the shape's full extent) in
+/// both axes, so the union never forms a sub-width neck at the junction.
+pub(crate) fn fill_for_robust(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
+    let (ox, oy) = (overlap_x(a, b), overlap_y(a, b));
+    if ox > 0 || oy > 0 {
+        return fill_for(a, b, width, grid);
+    }
+    let (left, right) = if a.ux <= b.lx { (a, b) } else { (b, a) };
+    let (bottom, top) = if a.uy <= b.ly { (a, b) } else { (b, a) };
+    let r = Rect {
+        lx: left.ux - width.min(left.ux - left.lx),
+        ux: right.lx + width.min(right.ux - right.lx),
+        ly: bottom.uy - width.min(bottom.uy - bottom.ly),
+        uy: top.ly + width.min(top.uy - top.ly),
+    };
+    Rect {
+        lx: floor_to(r.lx, grid),
+        ly: floor_to(r.ly, grid),
+        ux: ceil_to(r.ux, grid),
+        uy: ceil_to(r.uy, grid),
+    }
+}
+
+/// Bounding boxes of holes enclosed by a rectangle union (compressed grid
+/// flood fill from the outside). Work is O(cells) with cells <= (2n)^2.
+pub(crate) fn holes(rects: &[Rect], work: &mut usize, cap: usize) -> Result<Vec<Rect>> {
+    let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r.lx, r.ux]).collect();
+    let mut ys: Vec<i64> = rects.iter().flat_map(|r| [r.ly, r.uy]).collect();
+    xs.sort_unstable();
+    xs.dedup();
+    ys.sort_unstable();
+    ys.dedup();
+    if xs.len() < 2 || ys.len() < 2 {
+        return Ok(Vec::new());
+    }
+    let (nx, ny) = (xs.len() - 1, ys.len() - 1);
+    charge(work, nx.saturating_mul(ny), cap)?;
+    let mut covered = vec![false; nx * ny];
+    for r in rects {
+        let (x0, x1) = (
+            xs.binary_search(&r.lx).unwrap(),
+            xs.binary_search(&r.ux).unwrap(),
+        );
+        let (y0, y1) = (
+            ys.binary_search(&r.ly).unwrap(),
+            ys.binary_search(&r.uy).unwrap(),
+        );
+        charge(work, (x1 - x0) * (y1 - y0), cap)?;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                covered[y * nx + x] = true;
+            }
+        }
+    }
+    // 0 = unvisited free, 1 = outside, 2.. = hole label.
+    let mut label = vec![0u32; nx * ny];
+    let mut stack = Vec::new();
+    for y in 0..ny {
+        for x in 0..nx {
+            if (x == 0 || y == 0 || x + 1 == nx || y + 1 == ny) && !covered[y * nx + x] {
+                label[y * nx + x] = 1;
+                stack.push(y * nx + x);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut next = 1u32;
+    let mut seed = 0usize;
+    loop {
+        while let Some(c) = stack.pop() {
+            let (x, y) = (c % nx, c / nx);
+            let visit = |n: usize, stack: &mut Vec<usize>, label: &mut [u32], l: u32| {
+                if !covered[n] && label[n] == 0 {
+                    label[n] = l;
+                    stack.push(n);
+                }
+            };
+            let l = label[c];
+            if x > 0 {
+                visit(c - 1, &mut stack, &mut label, l);
+            }
+            if x + 1 < nx {
+                visit(c + 1, &mut stack, &mut label, l);
+            }
+            if y > 0 {
+                visit(c - nx, &mut stack, &mut label, l);
+            }
+            if y + 1 < ny {
+                visit(c + nx, &mut stack, &mut label, l);
+            }
+        }
+        while seed < nx * ny && (covered[seed] || label[seed] != 0) {
+            seed += 1;
+        }
+        if seed == nx * ny {
+            break;
+        }
+        next += 1;
+        label[seed] = next;
+        stack.push(seed);
+        out.push(next);
+    }
+    let mut boxes: BTreeMap<u32, Rect> = BTreeMap::new();
+    for y in 0..ny {
+        for x in 0..nx {
+            let l = label[y * nx + x];
+            if l >= 2 {
+                let cell = Rect {
+                    lx: xs[x],
+                    ly: ys[y],
+                    ux: xs[x + 1],
+                    uy: ys[y + 1],
+                };
+                boxes
+                    .entry(l)
+                    .and_modify(|b| {
+                        b.lx = b.lx.min(cell.lx);
+                        b.ly = b.ly.min(cell.ly);
+                        b.ux = b.ux.max(cell.ux);
+                        b.uy = b.uy.max(cell.uy);
+                    })
+                    .or_insert(cell);
+            }
+        }
+    }
+    let _ = out;
+    Ok(boxes.into_values().collect())
+}
+
 /// Exact area of a rectangle union by x slabs.
 pub(crate) fn union_area(rects: &[Rect], work: &mut usize, cap: usize) -> Result<i128> {
     let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r.lx, r.ux]).collect();
@@ -515,6 +663,25 @@ pub(crate) fn check(
                     });
                 }
                 continue;
+            }
+            if input.tracks.is_some()
+                && list.len() >= 3
+                && let Some(min) = rule.min_area
+            {
+                // Holes below four times the AREA rule are filled (the LEF
+                // MINENCLOSEDAREA is not retained; every same-net hole of
+                // this size can only be filled, never routed through).
+                let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
+                for h in holes(&rects, work, cap)? {
+                    let a = i128::from(h.ux - h.lx) * i128::from(h.uy - h.ly);
+                    if a < 4 * i128::from(min) {
+                        out.push(Violation::Hole {
+                            net,
+                            layer,
+                            rect: h,
+                        });
+                    }
+                }
             }
             if let Some(min) = rule.min_area {
                 let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();

@@ -310,6 +310,148 @@ pub fn place_boundary_io(
     Ok(pins)
 }
 
+/// Explicit I/O assignment: ordered pin names per side (increasing coordinate
+/// along the side) and optional along-edge track snapping `[pitch, offset]`
+/// of pin centres (x on south/north, y on west/east).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IoPlan {
+    pub west: Vec<String>,
+    pub east: Vec<String>,
+    pub south: Vec<String>,
+    pub north: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_track: Option<[i64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_track: Option<[i64; 2]>,
+}
+
+/// Place pins by an explicit plan: evenly spread along each side in plan
+/// order, centres snapped to the side's track grid, spacing preserved.
+/// Output order is identical to `names`; every name must appear exactly once.
+pub fn place_planned_io(
+    names: &[String],
+    plan: &IoPlan,
+    config: &IoConstraints,
+    limits: &IoLimits,
+) -> IoResult<Vec<IoPin>> {
+    let (width, gap) = config.validate()?;
+    if names.len() > limits.max_pins {
+        return Err(budget("max_pins exceeded"));
+    }
+    check_text(names.iter().map(String::as_str), &config.layer, limits)?;
+    let lists = [&plan.west, &plan.east, &plan.south, &plan.north];
+    let mut seen = HashSet::new();
+    for list in lists {
+        for n in list.iter() {
+            if !seen.insert(n.as_str()) {
+                return Err(invalid("I/O plan names a pin twice"));
+            }
+        }
+    }
+    if seen.len() != names.len() || names.iter().any(|n| !seen.contains(n.as_str())) {
+        return Err(invalid(
+            "I/O plan does not cover exactly the logical I/O pins",
+        ));
+    }
+    for t in [plan.x_track, plan.y_track].into_iter().flatten() {
+        if t[0] <= 0 || t[0] % config.grid != 0 || t[1] % config.grid != 0 {
+            return Err(invalid("I/O track must be positive and on the grid"));
+        }
+    }
+    let slots = planned_slots(config, plan, width, gap, limits)?;
+    let mut placed = std::collections::HashMap::new();
+    for (index, list) in lists.iter().enumerate() {
+        if list.is_empty() {
+            continue;
+        }
+        let (first, step, count) = slots[index];
+        if list.len() > count {
+            return Err(IoError::Capacity {
+                requested: list.len(),
+                capacity: count as u128,
+            });
+        }
+        let side = SIDES[index];
+        for (k, name) in list.iter().enumerate() {
+            let slot = if list.len() == 1 {
+                (count - 1) / 2
+            } else {
+                k * (count - 1) / (list.len() - 1)
+            };
+            let lower = first + step * slot as i128;
+            placed.insert(
+                name.as_str(),
+                IoPin {
+                    name: name.clone(),
+                    layer: config.layer.clone(),
+                    side,
+                    rect: at(config, side, lower, width)?,
+                },
+            );
+        }
+    }
+    let pins: Vec<IoPin> = names.iter().map(|n| placed[n.as_str()].clone()).collect();
+    validate_boundary_io(&pins, config, limits)?;
+    Ok(pins)
+}
+
+/// Slot lattice of each side under a plan: (first lower edge, step, count).
+/// With a track, pin centres sit on track lines and consecutive slots are
+/// the fewest whole tracks apart that keep width plus spacing.
+fn planned_slots(
+    config: &IoConstraints,
+    plan: &IoPlan,
+    width: i64,
+    gap: i64,
+    limits: &IoLimits,
+) -> IoResult<[(i128, i128, usize); 4]> {
+    let lanes = lanes(config, width, gap, limits.max_pins);
+    let g = i128::from(config.grid);
+    let half = i128::from(width / 2 / config.grid * config.grid);
+    let pitch = i128::from(width) + i128::from(gap);
+    let mut out = [(0i128, 1i128, 0usize); 4];
+    for (index, lane) in lanes.iter().enumerate() {
+        if lane.capacity == 0 {
+            continue;
+        }
+        let track = if SIDES[index].vertical() {
+            plan.y_track
+        } else {
+            plan.x_track
+        };
+        let (first, step) = match track {
+            Some([p, o]) => {
+                let (p, o) = (i128::from(p), i128::from(o));
+                let k = (lane.start + half - o + p - 1).div_euclid(p);
+                let mut first = o + k * p - half;
+                first = (first + g - 1).div_euclid(g) * g;
+                let step = (pitch + p - 1).div_euclid(p) * p;
+                (first, step)
+            }
+            None => (lane.start, pitch),
+        };
+        let count = if first > lane.end {
+            0
+        } else {
+            (((lane.end - first) / step) + 1).min(limits.max_pins as i128) as usize
+        };
+        out[index] = (first, step, count);
+    }
+    Ok(out)
+}
+
+/// Pins each side can hold under the plan's track snapping (W, E, S, N).
+pub fn planned_capacity(
+    config: &IoConstraints,
+    plan: &IoPlan,
+    limits: &IoLimits,
+) -> IoResult<[usize; 4]> {
+    let (width, gap) = config.validate()?;
+    let s = planned_slots(config, plan, width, gap, limits)?;
+    Ok([s[0].2, s[1].2, s[2].2, s[3].2])
+}
+
 /// Conservative axis-separation test, stronger than Euclidean spacing for
 /// diagonally adjacent rectangles. i128 prevents overflow near i64 endpoints.
 fn separated(a: Rect, b: Rect, gap: i64) -> bool {

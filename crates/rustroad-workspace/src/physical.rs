@@ -75,6 +75,26 @@ pub struct PhysicalConfig {
     pub tap: Option<TapConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<crate::clock::ClockConfig>,
+    /// Analytic placer (`rustroad_core::place`); absent keeps fixed-order
+    /// packing, the deterministic baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placer: Option<rustroad_core::place::PlaceConfig>,
+    /// Explicit I/O assignment (connectivity-aware order from `floorplan`);
+    /// absent keeps round-robin side assignment in port order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub io_plan: Option<rustroad_core::io::IoPlan>,
+}
+/// Wirelength record of the last placement (centre-to-centre HPWL, DBU).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlacementReport {
+    pub mode: String,
+    pub hpwl_dbu: u64,
+    /// Fixed-order packing of the same cells into the same intervals.
+    pub baseline_hpwl_dbu: u64,
+    pub global_hpwl_dbu: u64,
+    pub work: u64,
+    pub status: String,
 }
 impl PhysicalConfig {
     pub fn validate(&self) -> Result<()> {
@@ -470,6 +490,14 @@ pub(super) fn prepare(
         .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
     validate_tap_master(bundle)?;
     let mut tap_work = 0usize;
+    let gap = i64::from(cfg.cell_spacing_sites)
+        .checked_mul(design.site.width)
+        .ok_or_else(|| Error::Budget("cell spacing overflow".into()))?;
+    bundle.placement = if cfg.placer.is_some() {
+        Some(analytic(design, bundle, &mut placed, gap, limits)?)
+    } else {
+        None
+    };
     if let Some(tap) = &cfg.tap {
         let m = bundle
             .connectivity
@@ -487,18 +515,18 @@ pub(super) fn prepare(
             design,
             width,
             tap.max_gap,
-            i64::from(cfg.cell_spacing_sites)
-                .checked_mul(design.site.width)
-                .ok_or_else(|| Error::Budget("cell spacing overflow".into()))?,
+            gap,
             &rustroad_core::tap::TapLimits {
                 max_taps: remaining,
                 max_work: limits.max_expansions,
             },
         )?;
         tap_work = plan.report.work_units;
-        for (p, xy) in placed.iter_mut().zip(plan.cells) {
-            p.x = xy[0];
-            p.y = xy[1];
+        if cfg.placer.is_none() {
+            for (p, xy) in placed.iter_mut().zip(plan.cells) {
+                p.x = xy[0];
+                p.y = xy[1];
+            }
         }
         let mut used: HashSet<_> = design.cells.iter().map(|c| c.name.clone()).collect();
         let mut next = 0usize;
@@ -760,53 +788,7 @@ pub(super) fn layout(
     let grid = bundle.technology.manufacturing_grid.ok_or_else(|| {
         Error::Invalid("manufacturing grid required for physical preparation".into())
     })?;
-    let io_layer = layer(&bundle.technology, &cfg.io_layer)?;
-    // Smallest grid-aligned square side whose area meets the LEF AREA rule.
-    let area_side = match (cfg.io_min_area, io_layer.min_area) {
-        (true, Some(area)) => {
-            let area =
-                u128::try_from(area).map_err(|_| Error::Invalid("I/O layer area rule".into()))?;
-            let mut side = area.isqrt();
-            if side * side < area {
-                side += 1;
-            }
-            let g = u128::try_from(grid).map_err(|_| Error::Invalid("grid".into()))?;
-            i64::try_from(side.div_ceil(g) * g)
-                .map_err(|_| Error::Invalid("I/O area side overflow".into()))?
-        }
-        (true, None) => {
-            return Err(Error::Invalid(
-                "io_min_area requires a LEF AREA rule on the I/O layer".into(),
-            ));
-        }
-        _ => 0,
-    };
-    let io_constraints = IoConstraints {
-        die: design.die_area,
-        core: design.core_area,
-        grid,
-        layer: cfg.io_layer.clone(),
-        min_width: cfg
-            .io_width
-            .or(io_layer.width)
-            .ok_or_else(|| Error::Invalid("I/O minimum width missing".into()))?
-            .max(io_layer.width.unwrap_or(0))
-            .max(area_side),
-        min_spacing: cfg
-            .io_spacing
-            .or(io_layer.spacing)
-            .ok_or_else(|| Error::Invalid("I/O minimum spacing missing".into()))?
-            .max(io_layer.spacing.unwrap_or(0)),
-    };
-    let names = bundle
-        .connectivity
-        .ports
-        .iter()
-        .filter(|p| !p.use_.is_supply())
-        .flat_map(|p| p.bits.iter().cloned())
-        .collect::<Vec<_>>();
-    let io_pins = place_boundary_io(&names, &io_constraints, &IoLimits::default())
-        .map_err(|e| Error::Invalid(e.to_string()))?;
+    let io_pins = io_pins(design, bundle)?;
     let rail_layer = layer(&bundle.technology, &cfg.rail_layer)?;
     let strap_layer = layer(&bundle.technology, &cfg.strap_layer)?;
     let via = bundle
@@ -912,6 +894,214 @@ pub(super) fn layout(
     })
 }
 
+/// Signal I/O pin geometry (round-robin, or the explicit `io_plan`).
+pub(crate) fn io_pins(design: &Design, bundle: &PhysicalBundle) -> Result<Vec<IoPin>> {
+    let cfg = bundle
+        .config
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
+    let grid = bundle.technology.manufacturing_grid.ok_or_else(|| {
+        Error::Invalid("manufacturing grid required for physical preparation".into())
+    })?;
+    let io_layer = layer(&bundle.technology, &cfg.io_layer)?;
+    // Smallest grid-aligned square side whose area meets the LEF AREA rule.
+    let area_side = match (cfg.io_min_area, io_layer.min_area) {
+        (true, Some(area)) => {
+            let area =
+                u128::try_from(area).map_err(|_| Error::Invalid("I/O layer area rule".into()))?;
+            let mut side = area.isqrt();
+            if side * side < area {
+                side += 1;
+            }
+            let g = u128::try_from(grid).map_err(|_| Error::Invalid("grid".into()))?;
+            i64::try_from(side.div_ceil(g) * g)
+                .map_err(|_| Error::Invalid("I/O area side overflow".into()))?
+        }
+        (true, None) => {
+            return Err(Error::Invalid(
+                "io_min_area requires a LEF AREA rule on the I/O layer".into(),
+            ));
+        }
+        _ => 0,
+    };
+    let io_constraints = IoConstraints {
+        die: design.die_area,
+        core: design.core_area,
+        grid,
+        layer: cfg.io_layer.clone(),
+        min_width: cfg
+            .io_width
+            .or(io_layer.width)
+            .ok_or_else(|| Error::Invalid("I/O minimum width missing".into()))?
+            .max(io_layer.width.unwrap_or(0))
+            .max(area_side),
+        min_spacing: cfg
+            .io_spacing
+            .or(io_layer.spacing)
+            .ok_or_else(|| Error::Invalid("I/O minimum spacing missing".into()))?
+            .max(io_layer.spacing.unwrap_or(0)),
+    };
+    let names = bundle
+        .connectivity
+        .ports
+        .iter()
+        .filter(|p| !p.use_.is_supply())
+        .flat_map(|p| p.bits.iter().cloned())
+        .collect::<Vec<_>>();
+    match &cfg.io_plan {
+        Some(plan) => {
+            rustroad_core::io::place_planned_io(&names, plan, &io_constraints, &IoLimits::default())
+        }
+        None => place_boundary_io(&names, &io_constraints, &IoLimits::default()),
+    }
+    .map_err(|e| Error::Invalid(e.to_string()))
+}
+
+/// Free row intervals between reserved taps (whole rows without taps).
+pub(crate) fn free_intervals(
+    design: &Design,
+    bundle: &PhysicalBundle,
+) -> Result<Vec<rustroad_core::place::Interval>> {
+    let cfg = bundle
+        .config
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
+    let mut out = Vec::new();
+    if let Some(tap) = &cfg.tap {
+        let m = bundle
+            .connectivity
+            .masters
+            .iter()
+            .find(|m| m.name == tap.cell)
+            .ok_or_else(|| Error::Invalid("tap master absent".into()))?;
+        let report = rustroad_core::tap::reserve(
+            design,
+            m.size[0],
+            tap.max_gap,
+            &rustroad_core::tap::TapLimits::default(),
+        )?;
+        for pair in report.sites.windows(2) {
+            if pair[0].row == pair[1].row {
+                let x = pair[0].x + pair[0].width;
+                if x < pair[1].x {
+                    out.push(rustroad_core::place::Interval {
+                        y: pair[0].y,
+                        lx: x,
+                        ux: pair[1].x,
+                    });
+                }
+            }
+        }
+    } else {
+        for r in &design.rows {
+            out.push(rustroad_core::place::Interval {
+                y: r.y,
+                lx: r.x_start,
+                ux: r.x_end,
+            });
+        }
+    }
+    out.sort_unstable_by_key(|v| (v.y, v.lx));
+    Ok(out)
+}
+
+/// Analytic placement of every current instance (logic, ties and clock
+/// buffers; taps and fillers are added afterwards) plus the fixed-order
+/// baseline on the same intervals for the HPWL report.
+fn analytic(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    placed: &mut [Placed],
+    gap: i64,
+    limits: &Limits,
+) -> Result<PlacementReport> {
+    let cfg = bundle.config.as_ref().unwrap();
+    let pc = cfg.placer.as_ref().unwrap();
+    let model = &bundle.connectivity;
+    let io = io_pins(design, bundle)?;
+    let centre: HashMap<&str, [i64; 2]> = io
+        .iter()
+        .map(|p| {
+            (
+                p.name.as_str(),
+                [(p.rect.lx + p.rect.ux) / 2, (p.rect.ly + p.rect.uy) / 2],
+            )
+        })
+        .collect();
+    let mut nets: Vec<Vec<rustroad_core::place::PinRef>> = vec![Vec::new(); model.nets.len()];
+    for pin in &model.pins {
+        let Some(n) = pin.net else { continue };
+        if model.nets[n as usize].use_.is_supply() {
+            continue;
+        }
+        match pin.owner {
+            PinOwner::Instance { instance, terminal } => {
+                let m = &model.masters[model.instance_masters[instance as usize] as usize];
+                if m.pins[terminal as usize].use_.is_supply() {
+                    continue;
+                }
+                if (instance as usize) < placed.len() {
+                    nets[n as usize].push(rustroad_core::place::PinRef::Cell(instance));
+                }
+            }
+            PinOwner::Port { port, bit } => {
+                let name = &model.ports[port as usize].bits[bit as usize];
+                if let Some(c) = centre.get(name.as_str()) {
+                    nets[n as usize].push(rustroad_core::place::PinRef::Fixed(*c));
+                }
+            }
+        }
+    }
+    nets.retain(|n| n.len() >= 2);
+    let problem = rustroad_core::place::PlaceProblem {
+        widths: placed.iter().map(|p| p.width).collect(),
+        row_height: design.site.height,
+        site: design.site.width,
+        gap,
+        nets,
+        intervals: free_intervals(design, bundle)?,
+    };
+    let result = rustroad_core::place::place(
+        &problem,
+        pc,
+        &rustroad_core::place::PlaceLimits {
+            max_cells: limits.max_cells,
+            ..Default::default()
+        },
+    )?;
+    for (p, xy) in placed.iter_mut().zip(&result.positions) {
+        p.x = xy[0];
+        p.y = xy[1];
+    }
+    // Baseline: fixed netlist-order packing into the same free intervals.
+    let mut baseline = Vec::with_capacity(placed.len());
+    let mut iv = 0usize;
+    let mut x = problem.intervals[0].lx;
+    for w in &problem.widths {
+        loop {
+            let v = problem
+                .intervals
+                .get(iv)
+                .ok_or_else(|| Error::Invalid("baseline packing ran out of intervals".into()))?;
+            if x + w <= v.ux {
+                baseline.push([x, v.y]);
+                x += w + gap;
+                break;
+            }
+            iv += 1;
+            x = problem.intervals.get(iv).map_or(0, |v| v.lx);
+        }
+    }
+    Ok(PlacementReport {
+        mode: "analytic_b2b_bisection".into(),
+        hpwl_dbu: result.hpwl,
+        baseline_hpwl_dbu: rustroad_core::place::hpwl(&problem, &baseline),
+        global_hpwl_dbu: result.global_hpwl,
+        work: result.work,
+        status: "legal_checked".into(),
+    })
+}
+
 pub(super) fn validate_state(
     design: &Design,
     bundle: &PhysicalBundle,
@@ -930,6 +1120,90 @@ pub(super) fn validate_state(
     Ok(())
 }
 
+/// LVS netlist only: an `assign w = x;` between an internal scalar wire `w`
+/// (driven by nothing else) and a scalar signal `x` is folded away by
+/// renaming every use of `w` to `x` (e.g. tie-cell nets). Port-bit targets
+/// and vector aliases are kept, so netlists without such assigns are
+/// unchanged.
+fn fold_internal_aliases(netlist: &mut verilog::Netlist) {
+    let ports: HashSet<&str> = netlist.ports.iter().map(|p| p.name.as_str()).collect();
+    let scalar_ports: HashSet<&str> = netlist
+        .ports
+        .iter()
+        .filter(|p| p.range.is_none())
+        .map(|p| p.name.as_str())
+        .collect();
+    let scalar_wires: HashSet<&str> = netlist
+        .wires
+        .iter()
+        .filter(|w| w.range.is_none())
+        .map(|w| w.name.as_str())
+        .collect();
+    let mut lhs_count: HashMap<&str, usize> = HashMap::new();
+    for a in &netlist.assigns {
+        if let verilog::Expr::Ident(l) = &a.lhs {
+            *lhs_count.entry(l.as_str()).or_default() += 1;
+        }
+    }
+    let mut map: HashMap<String, String> = HashMap::new();
+    for a in &netlist.assigns {
+        if let (verilog::Expr::Ident(l), verilog::Expr::Ident(r)) = (&a.lhs, &a.rhs)
+            && scalar_wires.contains(l.as_str())
+            && !ports.contains(l.as_str())
+            && lhs_count[l.as_str()] == 1
+            && (scalar_wires.contains(r.as_str()) || scalar_ports.contains(r.as_str()))
+            && l != r
+        {
+            map.insert(l.clone(), r.clone());
+        }
+    }
+    if map.is_empty() {
+        return;
+    }
+    let resolve = |name: &str| -> String {
+        let mut cur = name.to_string();
+        for _ in 0..=map.len() {
+            match map.get(&cur) {
+                Some(next) if next != name => cur = next.clone(),
+                _ => break,
+            }
+        }
+        cur
+    };
+    // A cycle of aliases resolves to itself; keep those assigns.
+    let folded: HashMap<String, String> = map
+        .keys()
+        .map(|k| (k.clone(), resolve(k)))
+        .filter(|(k, v)| k != v && !map.contains_key(v))
+        .collect();
+    netlist.assigns.retain(|a| match &a.lhs {
+        verilog::Expr::Ident(l) => !folded.contains_key(l),
+        _ => true,
+    });
+    let rename = |e: &mut verilog::Expr| {
+        if let verilog::Expr::Ident(n) = e
+            && let Some(r) = folded.get(n)
+        {
+            *n = r.clone();
+        }
+    };
+    for a in &mut netlist.assigns {
+        rename(&mut a.rhs);
+        if let verilog::Expr::Concat(items) = &mut a.rhs {
+            items.iter_mut().for_each(rename);
+        }
+    }
+    for inst in &mut netlist.instances {
+        for c in &mut inst.connections {
+            rename(&mut c.signal);
+            if let verilog::Expr::Concat(items) = &mut c.signal {
+                items.iter_mut().for_each(rename);
+            }
+        }
+    }
+    netlist.wires.retain(|w| !folded.contains_key(&w.name));
+}
+
 pub(super) fn export_verilog(
     bundle: &PhysicalBundle,
     include_power: bool,
@@ -937,6 +1211,14 @@ pub(super) fn export_verilog(
 ) -> Result<()> {
     let mut netlist = bundle.netlist.clone();
     if include_power {
+        fold_internal_aliases(&mut netlist);
+        // An explicitly open connection `.PIN()` (e.g. the unused output of a
+        // two-output tie cell) is the same as an omitted one; LVS readers
+        // take omitted pins only.
+        for inst in &mut netlist.instances {
+            inst.connections
+                .retain(|c| !matches!(c.signal, verilog::Expr::Unconnected));
+        }
         if let Some(cfg) = &bundle.config {
             for name in [&cfg.power_net, &cfg.ground_net] {
                 netlist.ports.push(verilog::Port {

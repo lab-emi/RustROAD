@@ -95,6 +95,8 @@ fn config() -> PhysicalConfig {
         max_tie_fanout: 8,
         tap: None,
         clock: None,
+        placer: None,
+        io_plan: None,
     }
 }
 

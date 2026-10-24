@@ -112,6 +112,8 @@ fn config() -> PhysicalConfig {
             max_work: 1000,
             level_cells: Vec::new(),
         }),
+        placer: None,
+        io_plan: None,
     }
 }
 

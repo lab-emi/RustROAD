@@ -25,6 +25,69 @@ pub struct ViaPolicy {
     pub name: String,
     pub cut_spacing: i64,
 }
+/// One per-layer override of the LEF track PITCH/OFFSET (DBU at import).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrackOverride {
+    pub layer: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitch: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<i64>,
+}
+fn default_global_iterations() -> usize {
+    20
+}
+fn default_capacity_percent() -> u32 {
+    80
+}
+fn default_guide_margin() -> usize {
+    1
+}
+fn default_expand_margin() -> usize {
+    4
+}
+fn default_ripups() -> usize {
+    24
+}
+fn default_repair_rounds() -> usize {
+    200_000
+}
+fn default_wrong_way() -> u64 {
+    4
+}
+fn default_memory_mib() -> u64 {
+    2048
+}
+/// Track router (`rustroad_core::routing::TrackPlan`): per-layer tracks from
+/// LEF PITCH/OFFSET, GCell global routing, rip-up and reroute. Requires
+/// `lef_rules`. Budgets: docs/scaling.md.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrackRouterConfig {
+    /// GCell side in DBU.
+    pub gcell: i64,
+    /// Path cost of one via (DBU-equivalent).
+    pub via_cost: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracks: Vec<TrackOverride>,
+    #[serde(default = "default_global_iterations")]
+    pub global_iterations: usize,
+    #[serde(default = "default_capacity_percent")]
+    pub capacity_percent: u32,
+    #[serde(default = "default_guide_margin")]
+    pub guide_margin: usize,
+    #[serde(default = "default_expand_margin")]
+    pub expand_margin: usize,
+    #[serde(default = "default_ripups")]
+    pub max_ripups_per_net: usize,
+    #[serde(default = "default_repair_rounds")]
+    pub max_repair_rounds: usize,
+    #[serde(default = "default_wrong_way")]
+    pub wrong_way_factor: u64,
+    #[serde(default = "default_memory_mib")]
+    pub memory_mib: u64,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoutingConfig {
@@ -39,10 +102,27 @@ pub struct RoutingConfig {
     /// variant per policy via, the pin-access table and same-net cleanup.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lef_rules: bool,
+    /// Track router; absent keeps the lattice router (previous behavior).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_router: Option<TrackRouterConfig>,
 }
 impl RoutingConfig {
     fn validate(&self) -> Result<()> {
-        self.limits.validate()?;
+        if let Some(t) = &self.track_router {
+            self.limits.validate_track()?;
+            if !self.lef_rules
+                || t.tracks.len() > 16
+                || t.tracks
+                    .iter()
+                    .any(|o| !rustroad_core::valid_object_name(&o.layer))
+            {
+                return Err(Error::Invalid(
+                    "track router requires lef_rules and valid track overrides".into(),
+                ));
+            }
+        } else {
+            self.limits.validate()?;
+        }
         if self.layers.len() < 2
             || self.layers.len() > 8
             || self.vias.len() > 12
@@ -78,7 +158,125 @@ pub struct RoutingState {
     pub layers: Vec<String>,
     pub via_names: Vec<String>,
     pub via_lower_layers: Vec<u32>,
+    /// Schema 5: the full records. Schema 6: empty record lists (stats
+    /// only); the records live in the authoritative `routes.rbin`.
     pub routes: Routes,
+    /// Schema 6 only: identity of the authoritative `routes.rbin`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<RoutesTable>,
+}
+/// Identity and record counts of `routes.rbin` (64-byte i64 LE records:
+/// 1 wire, 2 via, 3 access, 4 patch, 5 routed net).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoutesTable {
+    pub file: String,
+    pub sha256: String,
+    pub bytes: u64,
+    pub wires: usize,
+    pub vias: usize,
+    pub access: usize,
+    pub patches: usize,
+    pub nets: usize,
+}
+/// Byte cap of the authoritative route table (8M records).
+pub const MAX_ROUTE_TABLE_BYTES: usize = 512 * 1024 * 1024;
+pub(crate) const ROUTE_TABLE: &str = "routes.rbin";
+/// Schema 6 route table: the schema-5 records followed by one net record each.
+pub(crate) fn route_table_bytes(routes: &Routes) -> Result<Vec<u8>> {
+    let n = routes
+        .wires
+        .len()
+        .checked_add(routes.vias.len())
+        .and_then(|n| n.checked_add(routes.access.len()))
+        .and_then(|n| n.checked_add(routes.patches.len()))
+        .and_then(|n| n.checked_add(routes.nets.len()))
+        .and_then(|n| n.checked_mul(64))
+        .ok_or_else(|| Error::Budget("route table overflow".into()))?;
+    if n > MAX_ROUTE_TABLE_BYTES {
+        return Err(Error::Budget("route table byte cap".into()));
+    }
+    let mut data = Vec::with_capacity(n);
+    records(routes, &mut data);
+    for net in &routes.nets {
+        for x in [5, i64::from(*net), 0, 0, 0, 0, 0, 0] {
+            data.extend_from_slice(&x.to_le_bytes());
+        }
+    }
+    Ok(data)
+}
+/// Decode a schema 6 route table; every count must match `table`.
+pub(crate) fn decode_route_table(bytes: &[u8], table: &RoutesTable) -> Result<Routes> {
+    let bad = |s: &str| Error::Invalid(format!("route table: {s}"));
+    if bytes.len() as u64 != table.bytes
+        || !bytes.len().is_multiple_of(64)
+        || bytes.len() > MAX_ROUTE_TABLE_BYTES
+    {
+        return Err(bad("length"));
+    }
+    use sha2::{Digest, Sha256};
+    if format!("{:x}", Sha256::digest(bytes)) != table.sha256 {
+        return Err(bad("sha256 differs from design.json"));
+    }
+    let mut routes = Routes {
+        wires: Vec::with_capacity(table.wires),
+        vias: Vec::with_capacity(table.vias),
+        access: Vec::with_capacity(table.access),
+        patches: Vec::with_capacity(table.patches),
+        nets: Vec::with_capacity(table.nets),
+        stats: Default::default(),
+    };
+    let u32_of = |v: i64| u32::try_from(v).map_err(|_| bad("index out of range"));
+    let mut last = 0i64;
+    for chunk in bytes.chunks_exact(64) {
+        let mut r = [0i64; 8];
+        for (i, b) in chunk.chunks_exact(8).enumerate() {
+            r[i] = i64::from_le_bytes(b.try_into().unwrap());
+        }
+        if r[0] < last || !(1..=5).contains(&r[0]) {
+            return Err(bad("record kind/order"));
+        }
+        last = r[0];
+        match r[0] {
+            1 => routes.wires.push(routing::Wire {
+                net: u32_of(r[1])?,
+                layer: u32_of(r[2])?,
+                start: [r[3], r[4]],
+                end: [r[5], r[6]],
+            }),
+            2 => routes.vias.push(routing::Via {
+                net: u32_of(r[1])?,
+                kind: u32_of(r[2])?,
+                at: [r[3], r[4]],
+            }),
+            3 => routes.access.push(routing::Access {
+                net: u32_of(r[1])?,
+                pin: u32_of(r[2])?,
+                layer: u32_of(r[3])?,
+                at: [r[4], r[5]],
+            }),
+            4 => routes.patches.push(routing::Patch {
+                net: u32_of(r[1])?,
+                layer: u32_of(r[2])?,
+                rect: Rect {
+                    lx: r[3],
+                    ly: r[4],
+                    ux: r[5],
+                    uy: r[6],
+                },
+            }),
+            _ => routes.nets.push(u32_of(r[1])?),
+        }
+    }
+    if routes.wires.len() != table.wires
+        || routes.vias.len() != table.vias
+        || routes.access.len() != table.access
+        || routes.patches.len() != table.patches
+        || routes.nets.len() != table.nets
+    {
+        return Err(bad("record counts differ from design.json"));
+    }
+    Ok(routes)
 }
 fn fail(s: &str) -> Error {
     Error::Invalid(s.into())
@@ -614,6 +812,11 @@ pub(crate) fn build_input_with_owners(
     let access_layer = *indices
         .get(config.access_layer.as_str())
         .ok_or_else(|| fail("configured access layer absent"))?;
+    let tracks = config
+        .track_router
+        .as_ref()
+        .map(|t| track_plan(bundle, t, &layers))
+        .transpose()?;
     Ok((
         RouteInput {
             die: design.die_area,
@@ -626,9 +829,63 @@ pub(crate) fn build_input_with_owners(
             terminals,
             rules: config.lef_rules,
             access_classes: classes,
+            tracks,
         },
         owners,
     ))
+}
+/// Track plan: LEF PITCH/OFFSET per routing layer (vertical: x component,
+/// horizontal: y component), replaced by explicit profile overrides.
+pub(crate) fn track_plan(
+    bundle: &PhysicalBundle,
+    config: &TrackRouterConfig,
+    layers: &[RouteLayer],
+) -> Result<rustroad_core::routing::TrackPlan> {
+    for o in &config.tracks {
+        if !layers
+            .iter()
+            .any(|l| l.name == o.layer && l.vertical.is_some())
+        {
+            return Err(fail("track override names no routing layer"));
+        }
+    }
+    let mut tracks = Vec::with_capacity(layers.len());
+    for l in layers {
+        let Some(vertical) = l.vertical else {
+            tracks.push(None);
+            continue;
+        };
+        let tech = bundle
+            .technology
+            .layers
+            .iter()
+            .find(|t| t.name == l.name)
+            .ok_or_else(|| fail("routing layer absent"))?;
+        let axis = usize::from(!vertical);
+        let over = config.tracks.iter().find(|o| o.layer == l.name);
+        let pitch = over
+            .and_then(|o| o.pitch)
+            .or(tech.pitch.map(|p| p[axis]))
+            .ok_or_else(|| fail("routing layer has no LEF PITCH or override"))?;
+        let offset = over
+            .and_then(|o| o.offset)
+            .or(tech.offset.map(|p| p[axis]))
+            .unwrap_or(0);
+        tracks.push(Some((pitch, offset)));
+    }
+    Ok(rustroad_core::routing::TrackPlan {
+        tracks,
+        gcell: config.gcell,
+        global_iterations: config.global_iterations,
+        capacity_percent: config.capacity_percent,
+        guide_margin: config.guide_margin,
+        expand_margin: config.expand_margin,
+        max_ripups_per_net: config.max_ripups_per_net,
+        max_repair_rounds: config.max_repair_rounds,
+        via_cost: config.via_cost,
+        wrong_way_factor: config.wrong_way_factor,
+        memory_mib: config.memory_mib,
+    })
 }
 /// Relative (origin 0,0) pin and same-master other-net geometry of one
 /// (master, orientation, pin) access class on the selected layers.
@@ -705,6 +962,7 @@ pub fn route(
         via_names: input.vias.iter().map(|v| v.name.clone()).collect(),
         via_lower_layers: input.vias.iter().map(|v| v.lower).collect(),
         routes,
+        table: None,
     });
     metadata.format_version = 5;
     metadata.parent_revision = current;
@@ -789,12 +1047,16 @@ pub(crate) fn table_bytes(state: &RoutingState) -> Result<Vec<u8>> {
         return Err(Error::Budget("routing table byte cap".into()));
     }
     let mut data = Vec::with_capacity(n);
+    records(&state.routes, &mut data);
+    Ok(data)
+}
+fn records(routes: &Routes, data: &mut Vec<u8>) {
     let mut record = |v: [i64; 8]| {
         for x in v {
             data.extend_from_slice(&x.to_le_bytes());
         }
     };
-    for w in &state.routes.wires {
+    for w in &routes.wires {
         record([
             1,
             w.net as i64,
@@ -806,10 +1068,10 @@ pub(crate) fn table_bytes(state: &RoutingState) -> Result<Vec<u8>> {
             0,
         ]);
     }
-    for v in &state.routes.vias {
+    for v in &routes.vias {
         record([2, v.net as i64, v.kind as i64, v.at[0], v.at[1], 0, 0, 0]);
     }
-    for p in &state.routes.access {
+    for p in &routes.access {
         record([
             3,
             p.net as i64,
@@ -821,7 +1083,7 @@ pub(crate) fn table_bytes(state: &RoutingState) -> Result<Vec<u8>> {
             0,
         ]);
     }
-    for p in &state.routes.patches {
+    for p in &routes.patches {
         record([
             4,
             p.net as i64,
@@ -833,7 +1095,6 @@ pub(crate) fn table_bytes(state: &RoutingState) -> Result<Vec<u8>> {
             0,
         ]);
     }
-    Ok(data)
 }
 pub(crate) fn write_def_paths(
     state: &RoutingState,
