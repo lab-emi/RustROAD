@@ -30,6 +30,12 @@ Evidence (all tracked): `docs/evidence/requalification.json`,
    structure (Sky130 `VIA_M1M2_PR_MR`; GF180 `VIA_Via1_VH`, `VIA_Via2_HH`,
    `VIA_Via2_HV`, `VIA_Via2_VH`); the XOR below confirms them. The output is
    5.7x (Sky130, 371 -> 65 kB) and 7.8x (GF180, 362 -> 46 kB) smaller.
+   KLayout's DEF reader does draw routing `RECT`s in NETS, so the reference
+   streamout covers patches without an overlay: on the same routed workspace,
+   the b813c34 native GDS (no patches) differed from the reference by XOR
+   shapes only on the patch layers (Sky130 68/20: 3, 69/20: 5, 70/20: 1 for 8
+   patches; GF180 36/0: 2 for 1 patch), and the new native GDS differs by 0.
+   `verify_gds.py` keeps this as a permanent control.
 3. **`extract` includes patches.** A patch adds ground, plane and lateral
    coupling capacitance on all four edges of its pieces not already covered by
    same-net metal, attached to the node of the same-net conductor it overlaps
