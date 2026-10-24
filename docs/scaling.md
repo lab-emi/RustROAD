@@ -187,15 +187,12 @@ expansions, 2^40 comparisons, 64M heap); the scale profiles use 8M nodes,
 comparisons. Every search counts expansions per search and in total;
 spatial queries count comparisons; every queue is capped.
 
-| design (cells incl. taps/fillers) | track nodes N | estimate (N + G + S) | measured route RSS |
-|---|---|---|---|
-| regfile sky130 (1,479) | 429k | ~17 MiB | 41 MiB |
-| regfile gf180 (1,737) | 464k | ~18 MiB | 46 MiB |
-| SERV sky130 (stretch, see below) | see below | | |
-
-The measured RSS includes the loaded workspace (design.json, LEF-derived
-masters, connectivity) and the output records; route RSS stays under
-50 MiB for every required design.
+Expected sizes by the formula above: the required designs have
+N <= 0.5M track nodes, G <= 10k GCells and S <= 50k shapes, i.e. an
+estimate below 20 MiB on top of the loaded workspace; SERV-size blocks
+(7-8k nets, ~25k placed instances) about 4-6M nodes and ~0.2-0.3 GiB. The
+measured values are in the results below (route RSS stays under 50 MiB for
+every required design).
 
 Placer: O(cells + pins): positions and targets (32 B/cell), the B2B system
 (at most 2(2p-3) entries per p-pin net and axis, 16 B each) and the CSR copy;
@@ -232,5 +229,74 @@ Liberty and OpenRCX rules per corner, RC profiles) and the
 `floorplan_recipe` (utilization 0.5, aspect 1, margin 10 um).
 `scripts/scale_manifests.py` regenerates them.
 
-Results: see the tables at the end of this file (filled from
-`docs/evidence/scale.json`).
+## Results (binary `d156a2a6…`, RustSys policy producer `3de13b3a…`)
+
+`docs/evidence/scale.json` holds every row below with hashes and receipts
+(`scripts/scale_evidence.py`). Signoff image `4c48415d8bd0` (Magic 8.3.678,
+Netgen 1.5.323, KLayout 0.30.9). Every design ran twice per PDK from RTL;
+DEF, GDS, Verilog and powered Verilog were byte-identical both times.
+Native GDS == KLayout's streamout of the DEF (XOR 0) everywhere.
+
+| design | PDK | logic cells (placed incl. taps/fillers) | routed nets | Magic | KLayout | antenna | Netgen LVS | KLayout LVS | CEC | HPWL / fixed order | route s / MiB | flow s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| counter | sky130 | 43 (264) | 53 | 0 | 0 | 0 | match | match | equivalent | 0.73 | 0.12 / 17 | 19 |
+| counter | gf180 | 46 (306) | 51 | 0 | 0 | 0 | match | match | equivalent | 0.53 | 0.08 / 21 | 21 |
+| uart_tx | sky130 | 89 (560) | 107 | 0 | 0 | 0 | match | match | equivalent | 0.55 | 0.30 / 18 | 25 |
+| uart_tx | gf180 | 100 (600) | 114 | 0 | 0 | 0 | match | match | equivalent | 0.47 | 0.16 / 23 | 25 |
+| fifo | sky130 | 81 (481) | 102 | 0 | 0 | 0 | match | match | equivalent | 0.44 | 0.22 / 19 | 27 |
+| fifo | gf180 | 114 (820) | 132 | 0 | 0 | 0 | match | match | equivalent | 0.38 | 0.20 / 24 | 27 |
+| alu | sky130 | 253 (1094) | 272 | 0 | 0 | 0 | match | match | equivalent | 0.54 | 0.58 / 27 | 50 |
+| alu | gf180 | 252 (1001) | 271 | 0 | 0 | 0 | match | match | equivalent | 0.41 | 0.42 / 27 | 37 |
+| regfile | sky130 | 372 (1479) | 425 | 0 | 0 | 0 | match | match | equivalent | 0.42 | 1.33 / 36 | 84 |
+| regfile | gf180 | 358 (1737) | 387 | 0 | 0 | 0 | match | match | equivalent | 0.38 | 2.01 / 42 | 50 |
+| mult | sky130 | 418 (1651) | 440 | 0 | 0 | 0 | match | match | equivalent | 0.41 | 0.82 / 36 | 67 |
+| mult | gf180 | 414 (1793) | 436 | 0 | 0 | 0 | match | match | equivalent | 0.41 | 0.82 / 41 | 44 |
+| dense | sky130 | 26 literal (258) | 31 | 0 | 0 | 0 | **failed** | **failed** | equivalent | 0.61 | 0.06 / 17 | 13 |
+| dense | gf180 | 30 literal (160) | 35 | 0 | 0 | 0 | match | match | equivalent | 0.62 | 0.04 / 21 | 17 |
+| pipeline_track | sky130 | 10 (77) | 17 | 0 | 0 | 0 | match | match | equivalent | 0.72 | 0.04 / 17 | 13 |
+| pipeline_track | gf180 | 10 (132) | 17 | 0 | 0 | 0 | match | match | equivalent | 0.63 | 0.02 / 21 | 17 |
+
+* Antenna: Magic `antennacheck` (sky130) and the KLayout antenna deck
+  (GF180), plus the native `check-antenna` (0 violations on every required
+  design, so no antenna ECO was needed).
+* Density (separate, never gating): GF180 fails the whole-block coverage
+  rules (7-8 items, no fill), sky130 windowed density is `unverified`
+  (block smaller than the window), as for `pipeline.v` before.
+* `route` = the `route --scope all` step (wall seconds / peak RSS of the
+  whole process including the loaded workspace); `flow` = one PDK of the
+  harness end to end: synthesis, floorplan, import, place, CTS, route,
+  antenna check, exports, native GDS, reference streamout, all signoff
+  checks, CEC and the full second run. Peak host-process RSS 61-105 MiB
+  (RustSys synthesis); signoff containers 449-532 MiB.
+* `dense` sky130: DRC 0/0, XOR, antenna and CEC pass. Both LVS checks fail
+  on the two `sky130_fd_sc_hd__conb_1` tie cells the literal netlist needs
+  (`high_bit <= 1`, `low_bit <= 0`): Netgen ends with "Circuits match
+  uniquely." but the harness rejects the four disconnected `VPB`/`VNB`
+  nodes that conb_1 (resistors only) has on both sides; KLayout's sky130
+  deck extracts conb_1 as HI shorted to VPWR and LO to VGND (no resistor
+  device) and reports the cell `NoMatch`, so the top is skipped. This is a
+  property of the PDK tie cell and the pinned decks, independent of
+  routing; the signoff status logic is frozen and was not changed. GF180
+  (separate tieh/tiel cells) passes. Raw receipts:
+  `.work/scale/runs/s4/dense/sky130/a/signoff/lvs_{netgen,klayout}.json`.
+* The lattice router (`pipeline.v`, `scripts/verify_routing.py` with the
+  integrated profiles) gives DEF `cb94ea92…` (sky130) and `3a07101c…`
+  (GF180), identical Verilog and powered Verilog with this binary and with
+  the e0d074d binary: the requalified DRC 0/0 and LVS match carry over.
+* Tap gap control: GF180 counter with a 60 um tap gap gives KLayout
+  DF.13_MV 31 + DF.14_MV 26 items (Magic 0); the 23 um scale gap gives 0.
+
+Memory estimate versus measurement (route step):
+
+| design | PDK | nodes N | GCells G | shapes S | estimate | route RSS |
+|---|---|---|---|---|---|---|
+| counter | sky130 | 110,032 | 529 | 5,866 | 3.4 MiB | 17.3 MiB |
+| alu | sky130 | 302,176 | 1,444 | 24,727 | 10.8 MiB | 26.9 MiB |
+| regfile | sky130 | 429,120 | 2,025 | 47,132 | 17.1 MiB | 36.4 MiB |
+| regfile | gf180 | 463,752 | 9,506 | 38,593 | 16.9 MiB | 41.9 MiB |
+| mult | gf180 | 463,752 | 9,506 | 35,947 | 16.5 MiB | 40.6 MiB |
+
+The difference is the process baseline (binary, loaded design.json, LEF
+masters, connectivity, output records: ~14-20 MiB for these sizes).
+`cargo test --workspace`: 158 passed, 4 ignored; each test binary peaks
+below 10 MiB RSS; the whole run 16 s.

@@ -51,7 +51,7 @@ import def2gds_reference  # noqa: E402
 import signoff as signoff_harness  # noqa: E402
 
 SCHEMA = "rustroad.scale-flow.v1"
-GATING = ("synth", "floorplan_reproduced", "route", "gds_xor", "drc_magic", "drc_klayout",
+GATING = ("inputs", "synth", "floorplan_reproduced", "route", "gds_xor", "drc_magic", "drc_klayout",
           "antenna", "lvs_netgen", "lvs_klayout", "cec", "determinism")
 HOST_AS_BYTES = 8 * 1024 ** 3
 SITES = {"sky130": "unithd", "gf180": "GF018hv5v_mcu_sc7"}

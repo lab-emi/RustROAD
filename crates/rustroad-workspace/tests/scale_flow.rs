@@ -346,3 +346,49 @@ fn lattice_profile_keeps_schema_5_and_track_budgets_fail_explicitly() {
         .is_err()
     );
 }
+
+#[test]
+fn floorplan_refuses_cells_wider_than_the_tap_gap_and_outputs_over_inputs() {
+    let f = Fixture::new();
+    let tap = "MACRO TAP CLASS CORE WELLTAP ; ORIGIN 0 0 ; SIZE 1 BY 2 ; SITE s ; SYMMETRY X Y ;\n\
+PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 1 2.1 ; END END VDD\n\
+PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M1 ; RECT 0 -0.1 1 0.1 ; END END VSS\n\
+END TAP\nEND LIBRARY\n";
+    fs::write(f.path("cells.lef"), library().replace("END LIBRARY\n", tap)).unwrap();
+    let mut cfg = config();
+    cfg.tap = Some(rustroad_workspace::physical::TapConfig {
+        cell: "TAP".into(),
+        max_gap: 500,
+        well_layer: "NW".into(),
+        substrate_layer: "PW".into(),
+    });
+    fs::write(f.path("profile.json"), serde_json::to_vec(&cfg).unwrap()).unwrap();
+    let err = f.floorplan("a").unwrap_err();
+    assert!(err.to_string().contains("FLOORPLAN_TAP_GAP"), "{err}");
+    // A gap that holds the widest cell gives rows of tap + k (tap + gap).
+    cfg.tap.as_mut().unwrap().max_gap = 3000;
+    fs::write(f.path("profile.json"), serde_json::to_vec(&cfg).unwrap()).unwrap();
+    let report = f.floorplan("b").unwrap();
+    let length = report["row_length_dbu"].as_i64().unwrap();
+    assert_eq!((length - 1000) % (1000 + 3000), 0, "{length}");
+    // Outputs must never overwrite inputs.
+    let refused = floorplan(&FloorplanRequest {
+        tech_lef: f.path("tech.lef"),
+        cell_lef: f.path("cells.lef"),
+        netlist: f.path("mapped.v"),
+        physical_config: f.path("profile.json"),
+        routing_config: f.path("track.json"),
+        site: "s".into(),
+        utilization: 0.4,
+        aspect: 1.0,
+        margin_um: 3.0,
+        clock_port: None,
+        no_clock: true,
+        fixed_order: false,
+        out_floorplan: f.path("mapped.v"),
+        out_physical_config: f.path("x.json"),
+    })
+    .err()
+    .expect("an output path equal to an input is refused");
+    assert!(refused.to_string().contains("OUTPUT_PATH"), "{refused}");
+}
