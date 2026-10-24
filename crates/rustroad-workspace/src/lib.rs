@@ -9,7 +9,9 @@ use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 pub mod access_test;
+pub mod antenna;
 pub mod clock;
+pub mod eco;
 pub mod extract;
 pub mod gds;
 pub mod pdk;

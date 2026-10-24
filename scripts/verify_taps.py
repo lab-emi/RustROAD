@@ -51,7 +51,8 @@ def check_clock_graph(before, after, cfg):
     """Trace unique drivers backwards from OpenDB sinks; no native tree report input."""
     require(len(after['instances']) <= 2000, 'clock checker instance budget')
     old_names = {i['name'] for i in before['instances']}
-    buffers = {i['name']: i for i in after['instances'] if i['name'] not in old_names and i['master'] == cfg['cell']}
+    masters = {cfg['cell'], *cfg.get('level_cells', [])}
+    buffers = {i['name']: i for i in after['instances'] if i['name'] not in old_names and i['master'] in masters}
     require(0 < len(buffers) <= cfg['max_buffers'], 'clock checker buffer budget')
     source = [p for p in after['io'] if p['name'] == cfg['port'] and p['direction'] == 'input']
     old_source = [p for p in before['io'] if p['name'] == cfg['port'] and p['direction'] == 'input']

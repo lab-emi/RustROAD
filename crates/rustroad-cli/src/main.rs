@@ -138,6 +138,94 @@ enum Command {
         #[arg(long)]
         manifest: PathBuf,
     },
+    /// Plan and apply hold-fix delay cells on a mapped netlist from RustSTA
+    /// hold_fix/endpoints reports (files only; no workspace is read or written).
+    HoldEco {
+        /// Flat mapped Verilog netlist to edit (never overwritten).
+        #[arg(long)]
+        netlist: PathBuf,
+        /// `ruststa report --section hold_fix --target-margin M --limit 0` JSON (repeatable).
+        #[arg(long = "hold-report", required = true)]
+        hold_reports: Vec<PathBuf>,
+        /// `ruststa report --section endpoints --corner C --limit 0` JSON (repeatable).
+        #[arg(long = "setup-report", required = true)]
+        setup_reports: Vec<PathBuf>,
+        /// Liberty-derived profile, schema rustroad.delay-cells.v1.
+        #[arg(long)]
+        delay_cells: PathBuf,
+        /// Corners whose hold slack must reach the target margin (repeatable).
+        #[arg(long = "hold-corner", required = true)]
+        hold_corners: Vec<String>,
+        #[arg(long, default_value = "ss")]
+        setup_corner: String,
+        #[arg(long, default_value_t = 0.05)]
+        target_margin_ns: f64,
+        #[arg(long, default_value_t = 0.05)]
+        setup_margin_ns: f64,
+        #[arg(long, default_value_t = 4)]
+        max_chain: usize,
+        #[arg(long, default_value_t = 8)]
+        max_total_chain: usize,
+        #[arg(long, default_value_t = 4096)]
+        max_sinks: usize,
+        #[arg(long, default_value_t = 200_000)]
+        max_combinations: usize,
+        #[arg(long, default_value = "rr_eco_hold_")]
+        prefix: String,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        plan_out: PathBuf,
+    },
+    /// Plan and apply antenna diodes for the violations of a check-antenna
+    /// report on a mapped netlist (files only; no workspace is read or written).
+    AntennaEco {
+        #[arg(long)]
+        netlist: PathBuf,
+        /// `rustroad check-antenna` JSON (schema rustroad.antenna-check.v1).
+        #[arg(long)]
+        antenna_report: PathBuf,
+        /// Profile whose antenna_cells name the diode (rustroad.delay-cells.v1).
+        #[arg(long)]
+        delay_cells: PathBuf,
+        #[arg(long)]
+        cell: Option<String>,
+        #[arg(long, default_value_t = 1)]
+        min_diodes: usize,
+        #[arg(long, default_value_t = 4)]
+        max_diodes_per_net: usize,
+        #[arg(long, default_value = "rr_eco_ant_")]
+        prefix: String,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        plan_out: PathBuf,
+    },
+    /// Read-only native process-antenna check of the routed HEAD (JSON report).
+    CheckAntenna {
+        /// What-if shapes [{net, layer, rect:[lx,ly,ux,uy]}] in DBU merged into nets.
+        #[arg(long)]
+        extra_shapes: Option<PathBuf>,
+        #[arg(long, default_value_t = 200_000)]
+        max_shapes_per_net: usize,
+        #[arg(long, default_value_t = 200_000_000)]
+        max_pair_checks: usize,
+        #[arg(long, default_value_t = 4_000_000)]
+        max_union_cells: usize,
+        #[arg(long, default_value_t = 100_000)]
+        max_rows: usize,
+    },
+    /// Apply a typed rustroad.eco-plan.v1 to a mapped netlist (files only).
+    ApplyEco {
+        #[arg(long)]
+        netlist: PathBuf,
+        #[arg(long)]
+        plan: PathBuf,
+        #[arg(long)]
+        delay_cells: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 fn emit(value: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
@@ -149,6 +237,86 @@ fn emit(value: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    // File-only ECO commands read netlists/reports and write new files; they
+    // never open a workspace, so --workspace is not required for them.
+    match &cli.command {
+        Command::HoldEco {
+            netlist,
+            hold_reports,
+            setup_reports,
+            delay_cells,
+            hold_corners,
+            setup_corner,
+            target_margin_ns,
+            setup_margin_ns,
+            max_chain,
+            max_total_chain,
+            max_sinks,
+            max_combinations,
+            prefix,
+            out,
+            plan_out,
+        } => {
+            return emit(&rustroad_workspace::eco::plan_hold(
+                &rustroad_workspace::eco::HoldEcoRequest {
+                    netlist: netlist.clone(),
+                    hold_reports: hold_reports.clone(),
+                    setup_reports: setup_reports.clone(),
+                    profile: delay_cells.clone(),
+                    hold_corners: hold_corners.clone(),
+                    setup_corner: setup_corner.clone(),
+                    target_margin_ns: *target_margin_ns,
+                    setup_margin_ns: *setup_margin_ns,
+                    max_chain: *max_chain,
+                    max_total_chain: *max_total_chain,
+                    max_sinks: *max_sinks,
+                    max_combinations: *max_combinations,
+                    prefix: prefix.clone(),
+                    out: out.clone(),
+                    plan_out: plan_out.clone(),
+                },
+            )?);
+        }
+        Command::ApplyEco {
+            netlist,
+            plan,
+            delay_cells,
+            out,
+        } => {
+            return emit(&rustroad_workspace::eco::apply_plan(
+                netlist,
+                plan,
+                delay_cells,
+                out,
+            )?);
+        }
+        Command::AntennaEco {
+            netlist,
+            antenna_report,
+            delay_cells,
+            cell,
+            min_diodes,
+            max_diodes_per_net,
+            prefix,
+            out,
+            plan_out,
+        } => {
+            return emit(&rustroad_workspace::eco::plan_antenna(
+                &rustroad_workspace::eco::AntennaEcoRequest {
+                    netlist: netlist.clone(),
+                    report: antenna_report.clone(),
+                    profile: delay_cells.clone(),
+                    cell: cell.clone(),
+                    min_diodes: *min_diodes,
+                    max_diodes_per_net: *max_diodes_per_net,
+                    prefix: prefix.clone(),
+                    out: out.clone(),
+                    plan_out: plan_out.clone(),
+                },
+            )?);
+        }
+        _ => {}
+    }
     let workspace = cli
         .workspace
         .ok_or("MISSING_WORKSPACE: --workspace <dir> is required")?;
@@ -322,6 +490,26 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::FlowCheck { manifest } => {
             let _snapshot = rustroad_workspace::read(&workspace, &limits)?;
             emit(&rustroad_flow::assess_path(&manifest)?)
+        }
+        Command::CheckAntenna {
+            extra_shapes,
+            max_shapes_per_net,
+            max_pair_checks,
+            max_union_cells,
+            max_rows,
+        } => emit(&rustroad_workspace::antenna::check_antenna(
+            &workspace,
+            &rustroad_workspace::antenna::AntennaRequest {
+                extra_shapes,
+                max_shapes_per_net,
+                max_pair_checks,
+                max_union_cells,
+                max_rows,
+            },
+            &limits,
+        )?),
+        Command::HoldEco { .. } | Command::ApplyEco { .. } | Command::AntennaEco { .. } => {
+            unreachable!("file-only commands return before the workspace check")
         }
     }
 }
