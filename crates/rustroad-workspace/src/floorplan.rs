@@ -245,21 +245,28 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let (netlist, _) =
-        crate::ties::dissolve_constant_cells(&netlist, &specs, &crate::ties::TieLimits::default())
-            .map_err(|e| invalid(e.to_string()))?;
+    let high = crate::ties::TieSpec {
+        cell: find(&cfg.tie_high.cell)?,
+        pin: &cfg.tie_high.pin,
+        rail: cfg.tie_high.rail(),
+    };
+    let low = crate::ties::TieSpec {
+        cell: find(&cfg.tie_low.cell)?,
+        pin: &cfg.tie_low.pin,
+        rail: cfg.tie_low.rail(),
+    };
+    let (netlist, _) = crate::ties::dissolve_constant_cells(
+        &netlist,
+        &specs,
+        high,
+        low,
+        &crate::ties::TieLimits::default(),
+    )
+    .map_err(|e| invalid(e.to_string()))?;
     let (netlist, ties) = crate::ties::materialize_constants_with(
         &netlist,
-        crate::ties::TieSpec {
-            cell: find(&cfg.tie_high.cell)?,
-            pin: &cfg.tie_high.pin,
-            rail: cfg.tie_high.rail(),
-        },
-        crate::ties::TieSpec {
-            cell: find(&cfg.tie_low.cell)?,
-            pin: &cfg.tie_low.pin,
-            rail: cfg.tie_low.rail(),
-        },
+        high,
+        low,
         &crate::ties::TieLimits::default(),
     )
     .map_err(|e| invalid(e.to_string()))?;

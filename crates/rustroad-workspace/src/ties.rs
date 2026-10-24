@@ -617,15 +617,21 @@ pub struct ConstantCellSpec<'a> {
     pub low: &'a [String],
 }
 
-/// Replace every instance of a listed constant cell by literal assignments
-/// of its connected outputs (`assign n = 1'b0;`), so the configured tie
-/// policy (`materialize_constants_with`) builds the constant instead.
-/// Returns the netlist and the number of dissolved instances. The cell must
-/// have only output signal pins (each listed once, as high or low) and
-/// supply pins; every connection must be a scalar net or bit (or open).
+/// Rebuild every instance of a listed constant cell with the tie policy:
+/// one connected output of value `v` becomes the tie master for `v` in the
+/// same place (same name and netlist position, so placement sees the same
+/// cell order), its rail input carrying the rail's literal (which
+/// `materialize_constants_with` ties to the rail); several connected
+/// outputs become literal assignments (`assign n = 1'b0;`) that the tie
+/// policy then builds. Returns the netlist and the number of rebuilt
+/// instances. The cell must have only output signal pins (each listed
+/// once, as high or low) and supply pins; every connection must be a
+/// scalar net or bit (or open).
 pub fn dissolve_constant_cells(
     netlist: &verilog::Netlist,
     cells: &[ConstantCellSpec<'_>],
+    high: TieSpec<'_>,
+    low: TieSpec<'_>,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, usize)> {
     if cells.is_empty() {
@@ -674,6 +680,7 @@ pub fn dissolve_constant_cells(
         assigns: netlist.assigns.clone(),
         instances: Vec::with_capacity(netlist.instances.len()),
     };
+    let literal = |value: bool| verilog::Expr::Constant(if value { "1'b1" } else { "1'b0" }.into());
     let mut dissolved = 0usize;
     for instance in &netlist.instances {
         work.charge(1)?;
@@ -681,6 +688,7 @@ pub fn dissolve_constant_cells(
             out.instances.push(instance.clone());
             continue;
         };
+        let mut driven = Vec::new();
         for c in &instance.connections {
             work.charge(1 + c.pin.len())?;
             let value = *map.get(c.pin.as_str()).ok_or_else(|| {
@@ -692,10 +700,7 @@ pub fn dissolve_constant_cells(
             match &c.signal {
                 verilog::Expr::Unconnected => {}
                 verilog::Expr::Ident(_) | verilog::Expr::BitSelect { .. } => {
-                    out.assigns.push(verilog::Assign {
-                        lhs: c.signal.clone(),
-                        rhs: verilog::Expr::Constant(if value { "1'b1" } else { "1'b0" }.into()),
-                    });
+                    driven.push((c.signal.clone(), value));
                 }
                 _ => {
                     return Err(invalid(format!(
@@ -706,6 +711,31 @@ pub fn dissolve_constant_cells(
             }
         }
         dissolved += 1;
+        if let [(signal, value)] = driven.as_slice() {
+            let spec = if *value { high } else { low };
+            let mut connections = vec![verilog::Connection {
+                pin: spec.pin.into(),
+                signal: signal.clone(),
+            }];
+            if let Some((pin, power)) = spec.rail {
+                connections.push(verilog::Connection {
+                    pin: pin.into(),
+                    signal: literal(power),
+                });
+            }
+            out.instances.push(verilog::Instance {
+                name: instance.name.clone(),
+                cell: spec.cell.name.clone(),
+                connections,
+            });
+            continue;
+        }
+        for (signal, value) in driven {
+            out.assigns.push(verilog::Assign {
+                lhs: signal,
+                rhs: literal(value),
+            });
+        }
     }
     verilog::validate_netlist(&out, &verilog::VerilogLimits::default())
         .map_err(|e| invalid(e.to_string()))?;
@@ -1103,65 +1133,101 @@ mod tests {
         assert!(materialize_constants_with(&n, high, bad, &TieLimits::default()).is_err());
     }
     #[test]
-    fn synthesized_constant_cells_dissolve_into_literals() {
+    fn synthesized_constant_cells_are_rebuilt_with_the_tie_policy() {
         let mut conb = cell("CONB");
         conb.pins[0].name = "HI".into();
         conb.pins[1].name = "LO".into();
         let high = vec!["HI".to_string()];
         let low = vec!["LO".to_string()];
+        let none: Vec<String> = Vec::new();
         let spec = ConstantCellSpec {
             cell: &conb,
             high: &high,
             low: &low,
         };
+        let mut inv = cell("INV");
+        inv.pins[1] = lef::LefPin {
+            name: "A".into(),
+            direction: Some("INPUT".into()),
+            use_: Some("SIGNAL".into()),
+            shape: None,
+            ports: vec![],
+        };
+        let tie = |power| TieSpec {
+            cell: &inv,
+            pin: "Y",
+            rail: Some(("A", power)),
+        };
+        let limits = TieLimits::default();
         let n = parse(
             "module m(output [1:0] y, output z); wire t; CONB c0 (.LO(t)); CONB c1 (.HI(y[1]), .LO()); assign y[0] = t; assign z = t; C u(.A(t)); endmodule",
         );
-        let (out, k) = dissolve_constant_cells(&n, &[spec], &TieLimits::default()).unwrap();
+        let (out, k) =
+            dissolve_constant_cells(&n, &[spec], tie(false), tie(true), &limits).unwrap();
         assert_eq!(k, 2);
-        assert!(out.instances.iter().all(|i| i.cell != "CONB"));
-        assert_eq!(out.instances.len(), 1);
-        let tail: Vec<_> = out.assigns[2..].iter().map(|a| (&a.lhs, &a.rhs)).collect();
+        // One driven output each: the tie master in place (same name and
+        // position), its rail input on the rail's literal.
         assert_eq!(
-            tail,
+            out.instances
+                .iter()
+                .map(|i| (i.name.as_str(), i.cell.as_str()))
+                .collect::<Vec<_>>(),
+            [("c0", "INV"), ("c1", "INV"), ("u", "C")]
+        );
+        assert_eq!(
+            out.instances[0].connections,
             [
-                (
-                    &verilog::Expr::Ident("t".into()),
-                    &verilog::Expr::Constant("1'b0".into())
-                ),
-                (
-                    &verilog::Expr::BitSelect {
-                        name: "y".into(),
-                        index: 1
-                    },
-                    &verilog::Expr::Constant("1'b1".into())
-                ),
+                verilog::Connection {
+                    pin: "Y".into(),
+                    signal: verilog::Expr::Ident("t".into())
+                },
+                verilog::Connection {
+                    pin: "A".into(),
+                    signal: verilog::Expr::Constant("1'b1".into())
+                },
             ]
         );
+        assert_eq!(
+            out.instances[1].connections[1].signal,
+            verilog::Expr::Constant("1'b0".into())
+        );
+        assert_eq!(out.assigns.len(), n.assigns.len());
+        // The tie policy then ties those literals to the rails: no new cell.
+        let (tied, report) =
+            materialize_constants_with(&out, tie(false), tie(true), &limits).unwrap();
+        assert_eq!(report.new_cells, 0);
+        assert_eq!(
+            tied.instances[0].connections[1].signal,
+            verilog::Expr::Ident(RAIL_POWER_WIRE.into())
+        );
+        // Both outputs driven: literal assignments instead.
+        let both_driven =
+            parse("module m(output y, output z); CONB c0 (.HI(y), .LO(z)); endmodule");
+        let (out, k) =
+            dissolve_constant_cells(&both_driven, &[spec], tie(false), tie(true), &limits).unwrap();
+        assert_eq!((k, out.instances.len(), out.assigns.len()), (1, 0, 2));
+        assert_eq!(out.assigns[0].rhs, verilog::Expr::Constant("1'b1".into()));
         // Every output must be listed once, as high or low.
-        let none: Vec<String> = Vec::new();
         let partial = ConstantCellSpec {
             cell: &conb,
             high: &high,
             low: &none,
         };
-        assert!(dissolve_constant_cells(&n, &[partial], &TieLimits::default()).is_err());
-        let both = ConstantCellSpec {
+        assert!(dissolve_constant_cells(&n, &[partial], tie(false), tie(true), &limits).is_err());
+        let twice = ConstantCellSpec {
             cell: &conb,
             high: &high,
             low: &high,
         };
-        assert!(dissolve_constant_cells(&n, &[both], &TieLimits::default()).is_err());
+        assert!(dissolve_constant_cells(&n, &[twice], tie(false), tie(true), &limits).is_err());
         // A cell with an input is not a constant cell.
-        let mut inv = cell("INV");
-        inv.pins[1].direction = Some("INPUT".into());
         let names = vec!["Y".to_string()];
         let bad = ConstantCellSpec {
             cell: &inv,
             high: &names,
             low: &none,
         };
-        assert!(dissolve_constant_cells(&n, &[bad], &TieLimits::default()).is_err());
+        assert!(dissolve_constant_cells(&n, &[bad], tie(false), tie(true), &limits).is_err());
     }
     #[test]
     fn budgets_fail_before_unbounded_generation() {

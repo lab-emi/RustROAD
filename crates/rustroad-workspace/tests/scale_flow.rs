@@ -441,7 +441,8 @@ fn rail_input_ties_are_routed_to_the_cells_own_rail() {
     assert!(f.flow("l", "lattice.json").is_err());
     let ws = f.flow("t", "track.json").unwrap();
     let snapshot = read(&ws, &limits()).unwrap();
-    assert_eq!(snapshot.summary().inserted_tie_cells, Some(2));
+    // b24 and the rebuilt k0 keep their places; only y[3] needs a new cell.
+    assert_eq!(snapshot.summary().inserted_tie_cells, Some(1));
     let verilog = |power: bool| {
         let mut out = Vec::new();
         snapshot.export_verilog_with_power(power, &mut out).unwrap();
@@ -457,11 +458,7 @@ fn rail_input_ties_are_routed_to_the_cells_own_rail() {
         "{logical}"
     );
     assert!(!logical.contains("rr_tie_rail"), "{logical}");
-    assert!(!logical.contains("LO k0"), "{logical}");
-    assert!(
-        logical.contains("BUF rr_tie_cell_1 (.Y(rr_tie_net_1), .A(1'b0));"),
-        "{logical}"
-    );
+    assert!(logical.contains("BUF k0 (.Y(n25), .A(1'b0));"), "{logical}");
     let powered = verilog(true);
     assert!(
         powered.contains(".A(VDD)") && powered.contains(".A(VSS)"),
@@ -478,7 +475,7 @@ fn rail_input_ties_are_routed_to_the_cells_own_rail() {
         "{nets}"
     );
     assert!(
-        nets.contains("- VSS ( rr_tie_cell_0 A ) ( rr_tie_cell_1 A ) + USE GROUND\n  + ROUTED"),
+        nets.contains("- VSS ( k0 A ) ( rr_tie_cell_0 A ) + USE GROUND\n  + ROUTED"),
         "{nets}"
     );
     assert!(text.contains("SPECIALNETS 2 ;"));

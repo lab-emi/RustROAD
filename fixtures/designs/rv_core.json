@@ -65,7 +65,7 @@
       },
       "physical_config": {
         "path": "fixtures/designs/rv_core/sky130-physical.json",
-        "sha256": "a8981c63e303825fc9fdc8e90e8f2ed5a1a92c27297a083daabd76cf3af7f09d"
+        "sha256": "8c4224541990af42c575db43c4552cff8bae823a2213e0677a0023aa2ded8e86"
       },
       "physical_profile": {
         "path": "fixtures/pdk/sky130-scale-physical.json",
@@ -126,7 +126,7 @@
         "openrcx_rules_ff": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
         "openrcx_rules_ss": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
         "openrcx_rules_tt": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
-        "physical_config": "a8981c63e303825fc9fdc8e90e8f2ed5a1a92c27297a083daabd76cf3af7f09d",
+        "physical_config": "8c4224541990af42c575db43c4552cff8bae823a2213e0677a0023aa2ded8e86",
         "rc_profile_ff": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
         "rc_profile_ss": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
         "rc_profile_tt": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
