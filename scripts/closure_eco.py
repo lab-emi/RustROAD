@@ -715,9 +715,9 @@ class Planner:
         its family for its own load plus that trunk, its input capacitance
         within the driver's share; `root` -- one new buffer next to the
         driver in front of all of them (it drives the existing trunk).
-        Setup guard as for new buffers: a buffer whose input pin keeps less
-        than SETUP_GUARD_NS of estimated slack after its extra delay blocks
-        the option. Returns the record or None (nothing feasible)."""
+        Setup guard as for new buffers: an extra delay in front of a buffer
+        input pin with less than CRITICAL_SLACK_NS of setup slack, or one that
+        leaves less than SETUP_GUARD_NS, blocks the option. Returns the record or None (nothing feasible)."""
         driver = self.n.driver[net]
         driver_pos = self.pos_of(driver)
         if driver_pos is None or "/" not in driver:
@@ -771,8 +771,11 @@ class Planner:
                 root = r[0]
                 spend = {it.name: root.delay_at(root_load) + SLEW_SENSITIVITY * root.slew_at(root_load)
                          for _, it, _, _, _ in bufs}
-            blocked = [n for n, d in spend.items() if d > 0 and any(
-                room(i) is not None and room(i) - d < SETUP_GUARD_NS for _, i, _, _, _ in bufs if i.name == n)]
+            # Same rule as for new buffers: no extra delay in front of a sink
+            # with less than CRITICAL_SLACK_NS, and SETUP_GUARD_NS left after it.
+            item = {i.name: i for _, i, _, _, _ in bufs}
+            blocked = [n for n, d in spend.items() if d > 0 and room(item[n]) is not None and
+                       (room(item[n]) < CRITICAL_SLACK_NS or room(item[n]) - d < SETUP_GUARD_NS)]
             if blocked:
                 tried.append(f"{mode}@{member}: setup guard ({len(blocked)} buffers)")
                 continue

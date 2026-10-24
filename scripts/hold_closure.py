@@ -771,7 +771,11 @@ class Flow:
             for pin, net in conns.items():
                 if (((lef.get(master) or {}).get(pin) or {}).get('direction') or '') == 'INPUT':
                     up = driver.get(net.lstrip('\\'))
-                    if up and up != name:
+                    # ECO buffers are not grown for their sinks' sake: a larger
+                    # buffer loads its own (often weak) driver, and wide cells
+                    # pack badly between taps (GF180 alu: a 0.73 netlist with
+                    # 32 buf_12 failed placement packing).
+                    if up and up != name and not up.startswith('rr_eco_buf_'):
                         fanin.setdefault(name, set()).add(up)
         violators = {}
         for row in drv_rows:
@@ -863,13 +867,14 @@ class Flow:
             if m['whs'] is not None and b['whs'] is not None and \
                     m['whs'] < min(b['whs'], target) - WHATIF_HOLD_LOSS_NS:
                 return False
-            # Never accept a worse worst DRV pin (WHATIF_DWS_TOLERANCE of the
-            # limit), whatever the count does.
-            if m['dws'] < b['dws'] - WHATIF_DWS_TOLERANCE and m['dws'] < 0:
-                return False
             setup_ok = m['wns'] >= min(b['wns'], 0.0) - 1e-9
             if m['drv'] < b['drv'] and setup_ok:
                 return True
+            # At an equal count a resize may not make the worst DRV pin worse
+            # (WHATIF_DWS_TOLERANCE of its limit): the count alone accepted alu
+            # g121 _2 -> _1 while its own transition went 1.84 -> 2.62 ns.
+            if m['drv'] == b['drv'] and m['dws'] < b['dws'] - WHATIF_DWS_TOLERANCE and m['dws'] < 0:
+                return False
             # Same count, a less severe worst violation.
             if m['drv'] <= b['drv'] and m['dws'] > b['dws'] + 1e-4 and b['dws'] < 0 and setup_ok:
                 return True
