@@ -125,11 +125,12 @@ HOLD_PLAN_EXTRA_NS = 0.03
 WHATIF_MAX_CANDIDATES = 160
 WHATIF_ROUNDS = 6
 WHATIF_ACCEPT_PER_ROUND = 12
-WHATIF_TIMEOUT_S = 240
-# Wall-clock budget of all whatif rounds of one iteration; the first round's
-# size assumes WHATIF_CANDIDATE_S per candidate per 1000 timed instances
-# (measured: 0.13 s at ~200, 1.1 s at ~2000 instances), later rounds use the
-# measured time per candidate.
+WHATIF_TIMEOUT_S = 600
+# Budget of all whatif rounds of one iteration, in ESTIMATED seconds:
+# WHATIF_CANDIDATE_S per candidate per 1000 timed instances (measured: 0.13 s
+# at ~200, 1.1 s at ~2000 instances). The estimate, not the measured time,
+# sizes the rounds, so the determinism rebuild evaluates the same candidates
+# (a whatif call that hits WHATIF_TIMEOUT_S is a failed round, recorded).
 WHATIF_BUDGET_S = 90
 # ... and of all whatif rounds of one closure loop (the gate runs the loop
 # twice per PDK, the determinism rebuild included, within its wall budget).
@@ -766,14 +767,13 @@ class Flow:
                 self.tools['ruststa'], '-w', sta['workspace'], '--format', 'json', 'whatif', '--rev', sta['revision'],
                 '--edits', ef, '--max-candidates', '1024', '--max-edits', '4096', '--timeout', WHATIF_TIMEOUT_S,
                 '--threads', '2', '-q']])
-            spent += r.get('elapsed_seconds') or 0.0
-            self.whatif_spent += r.get('elapsed_seconds') or 0.0
-            per_cand = max((r.get('elapsed_seconds') or 0.0) / len(cands), 1e-3)
+            spent += per_cand * len(cands)
+            self.whatif_spent += per_cand * len(cands)
             try:
                 d = json.loads(bounded_text(Path(r['stdout']), 256 * 1024 ** 2))
             except (ValueError, OSError):
                 d = {}
-            if not d.get('base'):
+            if not d.get('base') or r['exit_code'] != 0:
                 history.append(dict(round=rnd, status='failed', exit_code=r['exit_code'],
                                     stderr=bounded_text(Path(r['stderr']))[-400:]))
                 break
@@ -814,7 +814,7 @@ class Flow:
                 break
         ops = [dict(op='resize_cell', instance=i, cell=c) for i, c in sorted(accepted.items())]
         summary = dict(resized=len(ops), candidates=len(prio), traced_setup_endpoints=traced,
-                       whatif_seconds=round(spent, 1), whatif_loop_seconds=round(self.whatif_spent, 1),
+                       whatif_estimated_seconds=round(spent, 1), whatif_loop_estimated_seconds=round(self.whatif_spent, 1),
                        failing_setup_endpoints=len({e for _, _, e in failing}), evaluated=evaluated,
                        rounds=history, utilization_after=round(used / rows_area, 4), max_width_dbu=max_width,
                        oracle='ruststa whatif (resize on the layout SPEF)')

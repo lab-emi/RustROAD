@@ -104,9 +104,11 @@ better worst setup slack, or an equal worst and a better total; a resize
 may lower hold below the ECO target by at most 0.5 ns (the hold ECO repairs
 it next). The next round's base re-checks the accepted set as a whole and
 keeps only the single best edit of a round that made it worse. Bounds: 6
-rounds, 160 candidates per round, 90 s of `whatif` per layout and 360 s per closure loop (the
-measured cost per candidate decides the round size: 0.13 s at ~200
-instances, 1.1 s at ~2,000).
+rounds, 160 candidates per round, and an estimated 90 s of `whatif` per
+layout and 360 s per closure loop. The estimate (0.55 s per candidate per
+1,000 timed instances; measured 0.13 s at ~200 and 1.1 s at ~2,000) sizes
+the rounds, never the measured time, so the determinism rebuild evaluates
+exactly the same candidates.
 
 The earlier sizing step (one size up on every setup-path cell, model-free)
 is gone: on counter GF180 it took the netlist from +0.38 to -0.77 ns of
