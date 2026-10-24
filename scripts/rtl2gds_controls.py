@@ -368,7 +368,8 @@ def planted_hold_uncertainty(ctx, gate, b, work: Path) -> dict:
     netlist = Path(phys["paths"]["netlist"])
     hc = ctx.make_harness(work, ctx.budgets)
     rust = T.ruststa(hc, f"{gate.tag}_ctl_hold_unc", ctx.tool_paths, flow.libs, netlist, sdc, spefs,
-                     clock_model=flow.clock_model(), rc_limits=flow.sta_rc_limits())
+                     clock_model=flow.clock_model(), rc_limits=flow.sta_rc_limits(),
+                         state_gib=flow.sta_state_gib(), file_limit_bytes=flow.sta_file_limit())
     ref = {c: T.opensta(hc, f"{gate.tag}_ctl_hold_unc_opensta_{c}", ctx.tool_paths["opensta"], flow.libs[c], netlist,
                         ctx.top, sdc, spefs[c]) for c in gate.corners}
     res = T.evaluate_source(rust, ref, gate.corners, ctx.budgets, clocked=ctx.clocked)["timing_hold"]
@@ -424,7 +425,9 @@ def tampered_spef(ctx, gate, b, work: Path) -> dict:
     hc = ctx.make_harness(work, ctx.budgets)
     try:
         rust = T.ruststa(hc, f"{gate.tag}_ctl_spef", ctx.tool_paths, b["flow"].libs, Path(phys["paths"]["netlist"]),
-                         b["flow"].sdc, spefs, clock_model=b["flow"].clock_model(), rc_limits=b["flow"].sta_rc_limits())
+                         b["flow"].sdc, spefs, clock_model=b["flow"].clock_model(), rc_limits=b["flow"].sta_rc_limits(),
+                         state_gib=b["flow"].sta_state_gib(),
+                         file_limit_bytes=b["flow"].sta_file_limit())
         ss = rust["gating"]["endpoints"]["ss"]
         effect = dict(worst_setup_ns=T.worst_of(ss, "setup"), worst_hold_ns=T.worst_of(ss, "hold"),
                       bound_worst_setup_ns=b["sta"]["corners"]["ss"]["worst_setup_ns"],

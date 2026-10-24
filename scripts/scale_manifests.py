@@ -32,7 +32,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from scale_flow import SITES, CELL_GDS, deconflict  # noqa: E402
+from scale_flow import SITES, CELL_GDS, buffer_port_aliases, deconflict, port_buffer_cell, port_tie_cells  # noqa: E402
 import rtl2gds_design as D  # noqa: E402
 
 RUSTSYS = "fixtures/designs/rtl/PROVENANCE.md"
@@ -176,6 +176,7 @@ def build(name: str, spec: dict, args) -> dict:
                                 *policy["pdks"][tag]["rustsys_args"], "--out", str(mapped), "--print", "json",
                                 *[str(ROOT / r) for r in rtl]], check=True, capture_output=True)
             text, _ = deconflict(mapped.read_text())
+            text, _ = buffer_port_aliases(text, port_buffer_cell(tag), port_tie_cells(tag))
             netlist = tmp / "netlist.v"
             netlist.write_text(text)
             clock = ["--no-clock"] if not spec["clock"] else ["--clock-port", spec["clock"]]

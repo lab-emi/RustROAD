@@ -79,7 +79,11 @@ pub struct ExtractLimits {
     pub max_couplings: usize,
     /// Bin-entry scans plus candidate-by-interval comparisons, whole design.
     pub max_work: usize,
-    /// Candidate shapes considered for one wire run.
+    /// Candidate shapes considered for one wire run. Its scratch memory is
+    /// `CANDIDATE_SCRATCH_BYTES` per candidate (the per-run candidate list,
+    /// the interval cut points and the plane list); the ceiling keeps that
+    /// below `CANDIDATE_SCRATCH_CEILING_BYTES`. Work (intervals x candidates)
+    /// is charged to `max_work`.
     pub max_candidates: usize,
     /// Spatial-bin entries.
     pub max_bin_entries: usize,
@@ -100,7 +104,19 @@ impl Default for ExtractLimits {
         }
     }
 }
+/// Scratch bytes per wire-run candidate: the candidate id (u32), two clamped
+/// cut points (2 x i64) and at most one plane entry (u32, i64, i64, u32).
+pub const CANDIDATE_SCRATCH_BYTES: usize = 4 + 16 + 24;
+/// Rule-9 ceiling of the per-run candidate scratch (one run at a time).
+pub const CANDIDATE_SCRATCH_CEILING_BYTES: usize = 48 << 20;
+/// Absolute ceiling of `max_candidates` derived from the scratch ceiling
+/// (1,143,901 candidates; 48 MiB).
+pub const MAX_CANDIDATES_CEILING: usize = CANDIDATE_SCRATCH_CEILING_BYTES / CANDIDATE_SCRATCH_BYTES;
 impl ExtractLimits {
+    /// Upfront scratch estimate of the per-run candidate buffers (bytes).
+    pub fn candidate_scratch_bytes(&self) -> usize {
+        self.max_candidates.saturating_mul(CANDIDATE_SCRATCH_BYTES)
+    }
     pub fn validate(&self) -> Result<()> {
         let hard = Self::default();
         for (value, ceiling) in [
@@ -111,7 +127,7 @@ impl ExtractLimits {
             // Work counts comparisons, not memory (bounded by the shape,
             // node, element and bin caps): SERV-size blocks need ~2-5e9.
             (self.max_work, hard.max_work * 64),
-            (self.max_candidates, hard.max_candidates),
+            (self.max_candidates, MAX_CANDIDATES_CEILING),
             (self.max_bin_entries, hard.max_bin_entries),
         ] {
             if value == 0 || value > ceiling {
@@ -170,6 +186,9 @@ pub struct ExtractStats {
     pub shapes: usize,
     pub intervals: usize,
     pub work: usize,
+    /// Largest candidate list of one wire run (checked against
+    /// `ExtractLimits::max_candidates`).
+    pub max_run_candidates: usize,
     /// Intervals whose exact over/under calibration context was absent.
     pub context_fallback_intervals: usize,
     /// Different-net shapes overlapping a wire run (a short; not extracted).
@@ -1640,8 +1659,14 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                 }
             }
         }
+        stats.max_run_candidates = stats.max_run_candidates.max(candidates.len());
         if candidates.len() > limits.max_candidates {
-            return Err(budget("extraction candidates per wire run"));
+            return Err(budget(&format!(
+                "extraction candidates per wire run ({} > max_candidates {}; raise \
+                 --max-extract-candidates up to {MAX_CANDIDATES_CEILING})",
+                candidates.len(),
+                limits.max_candidates
+            )));
         }
         candidates.sort_unstable();
         points.clear();
@@ -3361,7 +3386,21 @@ mod tests {
             extract_cpu_ref(&crowded, &tight),
             Err(Error::Budget(_))
         ));
-        assert!(extract_cpu_ref(&crowded, &ExtractLimits::default()).is_ok());
+        let ok = extract_cpu_ref(&crowded, &ExtractLimits::default()).unwrap();
+        assert!(ok.stats.max_run_candidates > 1);
+        // The candidate cap is configurable up to the scratch-derived ceiling.
+        let ceiling = ExtractLimits {
+            max_candidates: MAX_CANDIDATES_CEILING,
+            ..Default::default()
+        };
+        assert!(ceiling.validate().is_ok());
+        assert!(ceiling.candidate_scratch_bytes() <= CANDIDATE_SCRATCH_CEILING_BYTES);
+        let over = ExtractLimits {
+            max_candidates: MAX_CANDIDATES_CEILING + 1,
+            ..Default::default()
+        };
+        assert!(over.validate().is_err());
+        assert!(extract_cpu_ref(&crowded, &ceiling).is_ok());
         let zero = ExtractLimits {
             max_shapes: 0,
             ..Default::default()

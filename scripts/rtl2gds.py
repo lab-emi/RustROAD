@@ -186,6 +186,7 @@ class PdkGate:
         with steps(h, tag, f"{label}synthesis"):
             out["mapped"] = flow.synth()
             out["renamed_wires"] = flow.renamed_wires
+            out["port_buffers"] = flow.port_buffers
         if self.recipe == "track":
             with steps(h, tag, f"{label}floorplan"):
                 out["floorplan_check"] = flow.reproduce_floorplan(out["mapped"])
@@ -199,7 +200,8 @@ class PdkGate:
                 rc = self.rc[c]
                 spef, info = compare_spef.openrcx(h, f"{tag}_final", tag, rc, Path(phys["paths"]["def"]),
                                                   f"{tag}_openrcx_{rc}",
-                                                  timeout_s=max(25, int(ctx.budgets["process_timeout_s"]) - 30))
+                                                  timeout_s=max(25, int(ctx.budgets["process_timeout_s"]) - 30),
+                                                  file_limit_bytes=flow.sta_file_limit())
                 out["openrcx"][c] = dict(path=spef, sha256=info["spef"]["sha256"], rules=info["rules"])
                 extra.append(info["container_peak_rss_kib"])
         with steps(h, tag, f"{label}gds_export"):
@@ -230,7 +232,9 @@ class PdkGate:
                                     recipe=self.recipe, iterations=len(b["iterations"]), final_iteration=b["final_iteration"],
                                     routed_nets=phys["routed_nets"], wires=phys["wires"], vias=phys["vias"],
                                     patches=phys["patches"], floorplan_reproduced=fpc, renamed_escaped_wires=b["renamed_wires"],
-                                    clock_tree=phys.get("cts"), placement=phys.get("placement"), route=phys.get("route"))
+                                    port_buffers=b.get("port_buffers"),
+                                    clock_tree=phys.get("cts"), placement=phys.get("placement"), route=phys.get("route"),
+                                    antenna_repair=phys.get("antenna_repair"))
         policy = ctx.flow_args.cell_policy
         with steps(h, tag, "cell_policy"):
             checks = {"synth": check_cell_policy.check(tag, "synth", [b["mapped"]], None, policy, None),
@@ -265,7 +269,8 @@ class PdkGate:
             for src, spefs in (("native", native), ("openrcx", rcx)):
                 try:
                     rust = T.ruststa(h, f"{tag}_final_{src}", ctx.tool_paths, flow.libs, final, flow.sdc, spefs,
-                                     clock_model=flow.clock_model(), rc_limits=flow.sta_rc_limits())
+                                     clock_model=flow.clock_model(), rc_limits=flow.sta_rc_limits(),
+                         state_gib=flow.sta_state_gib(), file_limit_bytes=flow.sta_file_limit())
                     ref = {c: T.opensta(h, f"{tag}_final_{src}_opensta_{c}", ctx.tool_paths["opensta"], flow.libs[c],
                                         final, ctx.top, flow.sdc, spefs[c]) for c in self.corners}
                 except GateError as error:
@@ -369,11 +374,16 @@ class PdkGate:
             t = rec["timing"]
             he = rec.get("hold_eco") or {}
             se = rec.get("size_eco") or {}
+            ar = (rec.get("physical") or {}).get("antenna_repair") or {}
             rows.append(dict(iteration=rec["iteration"], closed=t["closed"],
                              worst={c: dict(setup_ns=v["worst_setup_ns"], hold_ns=v["worst_hold_ns"])
                                     for c, v in t["corners"].items()},
                              antenna=rec["antenna"]["status"], hold_eco=he.get("totals") or he.get("reason"),
                              antenna_eco=rec.get("antenna_eco"), drv=rec.get("drv"),
+                             antenna_jumpers=dict(status=ar.get("status"), jumpers=len(ar.get("jumpers") or []),
+                                                  before=(ar.get("before") or {}).get("violations"),
+                                                  after=(ar.get("after") or {}).get("violations"),
+                                                  unrepaired=ar.get("unrepaired")) if ar else None,
                              size_eco={k: se.get(k) for k in ("resized", "candidates", "by_reason", "failing_setup_endpoints",
                                                               "drv_violations", "utilization_after", "buffers",
                                                               "buffer_nets", "driver_resizes", "library_limited")} if se else None,

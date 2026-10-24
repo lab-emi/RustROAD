@@ -51,8 +51,9 @@ DRV_KINDS = ("max_transition", "max_capacitance", "max_fanout")
 COMPAT = ["--pulse-groups", "last", "--pulse-pins", "clock-ends"]
 
 
-def run_json(h, label: str, argv: list) -> dict:
-    r = h.run(label, [str(a) for a in argv])
+def run_json(h, label: str, argv: list, file_limit_bytes: int | None = None) -> dict:
+    r = h.run(label, [str(a) for a in argv]) if file_limit_bytes is None else \
+        h.run(label, [str(a) for a in argv], file_limit_bytes=file_limit_bytes)
     if r["exit_code"] != 0:
         try:
             message = (json.loads(Path(r["stdout"]).read_text()).get("error") or {}).get("message")
@@ -81,7 +82,8 @@ def spef_binding(spefs: dict[str, Path], expected: dict[str, str]) -> dict:
 # ----------------------------------------------------------------------------- RustSTA
 
 def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spefs: dict,
-            clock_model: str = "propagated", rc_limits: list[str] | None = None) -> dict:
+            clock_model: str = "propagated", rc_limits: list[str] | None = None, state_gib: str = "1",
+            file_limit_bytes: int | None = None) -> dict:
     ws = h.root / f"{tag}_ws"
     common = ["--workspace", ws, "--threads", "2", "--format", "json", "--color", "never"]
     rusteda, sta = tools["rusteda"], tools["ruststa"]
@@ -93,13 +95,13 @@ def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spef
     for c in libs:
         argv += ["--spef", spefs[c], "--spef-corner", c]
     argv += rc_limits or ["--max-rc-nodes", "200000", "--max-rc-elements", "200000"]
-    imp = run_json(h, f"{tag}_import", argv)
+    imp = run_json(h, f"{tag}_import", argv, file_limit_bytes)
     out = dict(workspace=str(ws), import_metrics=imp.get("metrics"))
     base = imp["new_rev"]
     for mode, extra in (("gating", []), ("compat", COMPAT)):
         r = run_json(h, f"{tag}_run_{mode}", [sta, *common, "run", "--base-rev", base, "--backend", "cpu",
-                                               "--precision", "f64", "--max-paths", "16", "--max-state-gib", "1",
-                                               "--require-wire-model", "spef_rc", "-q", *extra])
+                                               "--precision", "f64", "--max-paths", "16", "--max-state-gib", state_gib,
+                                               "--require-wire-model", "spef_rc", "-q", *extra], file_limit_bytes)
         rev = r["new_rev"]
         base = rev
         if r["scope"].get("wire_model") != "spef_rc" or r["scope"].get("clock_model") != clock_model or \

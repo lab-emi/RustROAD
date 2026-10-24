@@ -387,10 +387,12 @@ def tree_digest(root: Path) -> str:
     return h.hexdigest()
 
 
-def openrcx(h, tag, pdk, corner, def_path, label, threshold="0.1", cells_lef=None, timeout_s=25):
+def openrcx(h, tag, pdk, corner, def_path, label, threshold="0.1", cells_lef=None, timeout_s=25,
+            file_limit_bytes=None):
     """OpenRCX on a DEF. ``threshold`` is ``-coupling_threshold`` (fF);
     ``cells_lef`` replaces the PDK cell LEF (black-box controls only);
-    ``timeout_s`` bounds the container (larger blocks need more than 25 s)."""
+    ``timeout_s`` bounds the container (larger blocks need more than 25 s);
+    ``file_limit_bytes`` raises the process file-size limit (SERV-size SPEF)."""
     spec = PDKS[pdk]
     base = PDK_ROOT / spec["base"]
     run_dir = h.root / f"{tag}_rcx"
@@ -423,7 +425,8 @@ exit
                f"--volume={rules}:/extraction.rules:ro", "--entrypoint=/usr/bin/timeout", IMAGE, f"{int(timeout_s)}s",
                "/usr/bin/time", "-v", "-o", f"/run/{label}.time", OPENROAD, "-no_init", "-no_splash",
                "-threads", "2", "-exit", f"/run/{script.name}"]
-    receipt = h.run(label, command)
+    receipt = h.run(label, command) if file_limit_bytes is None else \
+        h.run(label, command, file_limit_bytes=file_limit_bytes)
     require(receipt["exit_code"] == 0, f"{label}: OpenRCX failed")
     require("EXTRACTION_COMPLETE" in bounded_text(Path(receipt["stdout"])), "OpenRCX did not finish")
     m = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", bounded_text(run_dir / f"{label}.time"))

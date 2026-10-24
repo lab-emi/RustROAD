@@ -54,7 +54,7 @@ from verify_physical import PhysicalHarness, run_ok, fingerprint, external_cec, 
 from verify_logic import bounded_text, sha256, write_json, tcl_path  # noqa: E402
 from verify_taps import clock_function_proof  # noqa: E402
 import verify_routing  # noqa: E402
-from scale_flow import deconflict, SITES  # noqa: E402
+from scale_flow import deconflict, buffer_port_aliases, port_buffer_cell, port_tie_cells, SITES  # noqa: E402
 
 # RustSTA 0.4.0 fix-round-2 binaries (RustSTA d1f61e6), copied unchanged from the
 # timing stream's .work/sta-signoff/bin/round2 into this checkout's .work/tools/sta;
@@ -95,11 +95,36 @@ ROAD_LIMITS = {
 # value; regfile-size track layouts need ~2e8 and SERV more than 1.6e9, so
 # the track recipe allows 1.28e10 (the extractor's hard ceiling, 64x).
 EXTRACT_LIMITS = {'legacy': [], 'track': ['--max-extract-work', '12800000000', '--max-coupling-caps', '8000000',
-                                          '--max-rc-nodes', '4000000', '--max-spef-mib', '256']}
+                                          '--max-rc-nodes', '4000000', '--max-spef-mib', '256',
+                                          # SERV (scale-stream layout): 8,054 candidates on one wire run
+                                          # (44 B scratch each); RC elements 4.3M of the 8M ceiling.
+                                          '--max-extract-candidates', '65536', '--max-rc-elements', '8000000']}
+# check-antenna rows kept in a report (all rows of every required design;
+# a SERV-size report of every row exceeds the 64 MiB process output cap).
+ANTENNA_REPORT_ROWS = '16384'
+
+
+def spef_file_limit(argv: list[str]) -> int:
+    """Process file-size limit of an extract step: its --max-spef-mib cap
+    (default 32 MiB) plus 1 MiB, never below the harness log cap."""
+    mib = int(argv[argv.index('--max-spef-mib') + 1]) if '--max-spef-mib' in argv else 32
+    return max(64 * 1024 ** 2, (mib + 1) * 1024 ** 2)
+
+
 # RustSTA SPEF import limits per recipe (legacy: this script's original
 # values; track: SERV-size blocks, below the engine's own hard limits).
 STA_RC_LIMITS = {'legacy': ['--max-rc-nodes', '200000', '--max-rc-elements', '200000'],
-                 'track': ['--max-rc-nodes', '2000000', '--max-rc-elements', '4000000']}
+                 'track': ['--max-rc-nodes', '2000000', '--max-rc-elements', '4000000',
+                           # SERV GF180: 94 MB SPEF per corner, names above 16 MiB
+                           # (import 4.9 s, 533 MiB; the native cap is 256 MiB).
+                           '--max-spef-mib', '256', '--max-rc-name-mib', '64']}
+# RustSTA `run --max-state-gib` per recipe (it also bounds the RC numeric
+# work: SERV GF180 needs 3.2e10 > 8.6e9 of 1 GiB; measured 13 s, 408 MiB).
+STA_STATE_GIB = {'legacy': '1', 'track': '4'}
+# File-size limit of RustSTA import/run (they write the workspace tables:
+# SERV GF180 parasitics.rbin is 283 MB for three 94 MB SPEFs) and of the
+# OpenRCX container (its SPEF); None keeps the harness's 64 MiB log cap.
+STA_FILE_LIMIT = {'legacy': None, 'track': 1024 * 1024 ** 2}
 # Gate-sizing ECO bounds (size_eco): resizes per iteration, worst setup
 # endpoints traced per iteration, and the utilization the resized cells may
 # reach in the fixed core (taps/fillers excluded).
@@ -191,24 +216,42 @@ def netlist_instances(text: str) -> dict:
 
 
 def constant_pins(netlist: Path, config: Path) -> set[str]:
-    """``instance/pin`` connected to a constant: a tie-cell output net (physical
-    configuration tie_high/tie_low), a literal 1'b0/1'b1, or an assign alias of
-    either. Independent of the timing engine (used to accept its no-arrival
-    endpoints only when they are constant-driven)."""
+    """``instance/pin`` and output port bits connected to a constant: a
+    tie-cell output net (physical configuration tie_high/tie_low; a rail-input
+    tie only when its rail pin is a literal, so an ordinary inverter of the
+    same master never counts; constant_cells outputs), a literal 1'b0/1'b1,
+    or an assign alias of either. Independent of the timing engine (used to
+    accept its no-arrival endpoints only when they are constant-driven)."""
+    import scale_flow  # noqa: E402 - port declarations
     text = bounded_text(Path(netlist), 64 * 1024 ** 2)
     cfg = json.loads(Path(config).read_text())
-    ties = {(cfg[k]['cell'], cfg[k]['pin']) for k in ('tie_high', 'tie_low') if cfg.get(k)}
+    ties = {}
+    for k in ('tie_high', 'tie_low'):
+        if cfg.get(k):
+            ties[(cfg[k]['cell'], cfg[k]['pin'])] = (cfg[k].get('rail_input') or {}).get('pin')
+    for c in cfg.get('constant_cells') or []:
+        for pin in c.get('high', []) + c.get('low', []):
+            ties[(c['cell'], pin)] = None
+    literal = {"1'b0", "1'b1"}
+
+    def is_tie(master: str, pin: str, conns: dict) -> bool:
+        if (master, pin) not in ties:
+            return False
+        rail = ties[(master, pin)]
+        return rail is None or conns.get(rail, '').strip() in literal
     insts = netlist_instances(text)
-    constant = {n for name, (master, conns) in insts.items() for p, n in conns.items() if (master, p) in ties}
-    constant |= {"1'b0", "1'b1"}
+    constant = {n.strip().lstrip('\\') for name, (master, conns) in insts.items() for p, n in conns.items()
+                if is_tie(master, p, conns)}
+    constant |= literal
     aliases = re.findall(r'(?m)^\s*assign\s+(\S+)\s*=\s*(\S+?)\s*;', text)
     for _ in range(len(aliases) + 1):
         grown = {a.lstrip('\\') for a, b in aliases if b.lstrip('\\') in constant and a.lstrip('\\') not in constant}
         if not grown:
             break
         constant |= grown
-    return {f'{name}/{p}' for name, (master, conns) in insts.items() for p, n in conns.items()
-            if n.lstrip('\\') in constant and (master, p) not in ties}
+    pins = {f'{name}/{p}' for name, (master, conns) in insts.items() for p, n in conns.items()
+            if n.strip().lstrip('\\') in constant and not is_tie(master, p, conns)}
+    return pins | (scale_flow._port_bits(text, 'output') & constant)
 
 
 def lef_widths(path: Path, dbu: int) -> dict[str, int]:
@@ -266,7 +309,8 @@ class Flow:
 
         Escaped scalar wires that collide with a vector port bit (RustSys
         register outputs ``\\p_q[0]``) are renamed (scale_flow.deconflict);
-        the raw producer output is kept as ``<tag>_rustsys.v`` when renamed.
+        output ports that share a net are buffered (scale_flow.buffer_port_aliases);
+        the raw producer output is kept as ``<tag>_rustsys.v`` when changed.
         Every CEC of the gate checks the renamed netlist against the RTL.
         """
         mapped = self.h.root / f'{self.tag}_mapped.v'
@@ -279,7 +323,11 @@ class Flow:
                                                 *self.design.rtl])
         text = mapped.read_text()
         renamed_text, self.renamed_wires = deconflict(text)
-        if self.renamed_wires:
+        # Output ports sharing one net get identity buffers (LVS: one pin per
+        # port in the layout); a no-op for netlists without such aliases.
+        renamed_text, self.port_buffers = buffer_port_aliases(renamed_text, port_buffer_cell(self.tag),
+                                                               port_tie_cells(self.tag))
+        if self.renamed_wires or self.port_buffers:
             mapped.rename(self.h.root / f'{self.tag}_rustsys.v')
             mapped.write_text(renamed_text)
         return mapped
@@ -346,6 +394,13 @@ class Flow:
         rec['route'] = {k: a.get(k) for k in ('routed_nets', 'routing_segments', 'routing_expansions', 'cells', 'tap_cells',
                                               'filler_cells', 'route_memory') if k in a}
         rec['routed_revision'] = a['revision']
+        # Diode-free antenna repair on the routed revision: the native check
+        # inside repair-antenna finds the violating (net, layer) rows and the
+        # router cuts the run nearest the gates and bridges it one layer up
+        # (new revision only when a jumper was inserted; netlist, placement
+        # and every other net unchanged). Clean layouts are left untouched.
+        j = h.json_command(f'{t}_repair_antenna', list(map(str, road + ['repair-antenna', '--base-rev', a['revision']])))
+        rec['antenna_repair'] = {k: j[k] for k in ('status', 'revision', 'before', 'after', 'jumpers', 'unrepaired', 'stats')}
         out = {}
         for label, extra, suffix in (('def', ['export-def'], '.def'), ('netlist', ['export-verilog'], '_exported.v'),
                                      ('powered', ['export-verilog', '--include-power'], '_powered.v')):
@@ -362,9 +417,13 @@ class Flow:
         rec['spef'] = {}
         for c in self.libs:
             spef = h.root / f'{t}_{self.rc[c]}.spef'
-            x = h.json_command(f'{t}_extract_{self.rc[c]}', list(map(str, road + ['extract', '--rc-profile', self.rc_profiles[c],
-                                                                                    '--corner', self.rc[c], '--out', spef,
-                                                                                    *EXTRACT_LIMITS[self.design.recipe]])))
+            argv = list(map(str, road + ['extract', '--rc-profile', self.rc_profiles[c], '--corner', self.rc[c],
+                                         '--out', spef, *EXTRACT_LIMITS[self.design.recipe]]))
+            # The SPEF is capped by the extractor's own --max-spef-mib; the
+            # process file-size limit must not be tighter than that cap.
+            r = h.run(f'{t}_extract_{self.rc[c]}', argv, file_limit_bytes=spef_file_limit(argv))
+            require(r['exit_code'] == 0, f'{t}_extract_{self.rc[c]}: process exited {r["exit_code"]}; see receipt')
+            x = json.loads(bounded_text(Path(r['stdout'])))
             require(x['status'] == 'ok' and not x['unannotated_signal_nets'], f'{t}: native extraction incomplete')
             rec['spef'][c] = dict(path=str(spef), sha256=x['output']['sha256'], rc=self.rc[c], diagnostics=x['diagnostics'])
         return rec
@@ -385,9 +444,10 @@ class Flow:
         for c in self.libs:
             argv += ['--spef', str((spefs or {}).get(c) or phys['spef'][c]['path']), '--spef-corner', c]
         argv += STA_RC_LIMITS[self.design.recipe]
-        a = h.json_command(f'{t}_import', argv, True)
-        r = h.json_command(f'{t}_run', [ruststa, *common, 'run', '--base-rev', a['new_rev'], '--backend', 'cpu', '--precision', 'f64',
-                                        '--max-paths', '16', '--max-state-gib', '1', '--require-wire-model', 'spef_rc'], True)
+        a = self.sta_json(f'{t}_import', argv)
+        r = self.sta_json(f'{t}_run', [ruststa, *common, 'run', '--base-rev', a['new_rev'], '--backend', 'cpu', '--precision', 'f64',
+                                        '--max-paths', '16', '--max-state-gib', STA_STATE_GIB[self.design.recipe],
+                                        '--require-wire-model', 'spef_rc'])
         require(r['scope'].get('clock_model') == self.clock_model() and r['scope'].get('wire_model') == 'spef_rc'
                 and (self.design.clocked or r['scope'].get('physical_clock_domains') == 0), f'{t}: wrong timing scope')
         rev = r['new_rev']
@@ -456,6 +516,24 @@ class Flow:
 
     def sta_rc_limits(self) -> list[str]:
         return list(STA_RC_LIMITS[self.design.recipe])
+
+    def sta_state_gib(self) -> str:
+        return STA_STATE_GIB[self.design.recipe]
+
+    def sta_file_limit(self) -> int | None:
+        return STA_FILE_LIMIT[self.design.recipe]
+
+    def sta_json(self, label: str, argv: list) -> dict:
+        """A rusteda.v1 JSON command under the recipe's RustSTA file limit."""
+        limit = self.sta_file_limit()
+        if limit is None:
+            return self.h.json_command(label, argv, True)
+        r = self.h.run(label, [str(a) for a in argv], file_limit_bytes=limit)
+        require(r['exit_code'] == 0, f'{label}: process exited {r["exit_code"]}; see receipt')
+        value = json.loads(bounded_text(Path(r['stdout'])))
+        require(value.get('schema') == 'rusteda.v1' and value.get('ok') is True and value.get('error') is None,
+                f'{label}: unsuccessful rusteda.v1 envelope')
+        return value
 
     def clock_model(self) -> str:
         """RustSTA scope the gate requires: propagated clocks through the
@@ -904,7 +982,9 @@ class Flow:
 
     # ------------------------------------------------------------ antenna
     def check_antenna(self, label: str, workspace: str, extra: Path | None = None) -> dict:
-        argv = [self.tools['rustroad'], '--workspace', workspace, 'check-antenna']
+        # Rows are worst-first; ANTENNA_REPORT_ROWS keeps every row of the
+        # required designs (regfile 8,334) and bounds SERV-size reports.
+        argv = [self.tools['rustroad'], '--workspace', workspace, 'check-antenna', '--max-rows', ANTENNA_REPORT_ROWS]
         if extra is not None:
             argv += ['--extra-shapes', extra]
         out = self.h.root / f'{label}_antenna.json'
@@ -1428,7 +1508,8 @@ exit
             for c in self.libs:
                 spefs[c], _ = compare_spef.openrcx(self.h, f'{self.tag}_i{it}_ref', self.tag, self.rc[c],
                                                    Path(phys['paths']['def']), f'{self.tag}_i{it}_ref_{self.rc[c]}',
-                                                   timeout_s=max(25, self.h.args.timeout_seconds - 30))
+                                                   timeout_s=max(25, self.h.args.timeout_seconds - 30),
+                                                   file_limit_bytes=self.sta_file_limit())
             ref = self.sta(it, phys, label='sta_ref', spefs=spefs)
         except (RuntimeError, OSError, KeyError, ValueError) as error:
             return dict(status='unverified', reason=str(error)[-600:], shortfall_ns=None)

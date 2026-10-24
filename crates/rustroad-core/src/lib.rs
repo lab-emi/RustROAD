@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 pub mod connectivity;
 pub mod extract;
 pub mod io;
+pub mod jumper;
 pub mod memory;
 pub mod place;
 pub mod power;

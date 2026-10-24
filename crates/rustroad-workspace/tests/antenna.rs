@@ -6,7 +6,7 @@
 
 use rustroad_core::Limits;
 use rustroad_core::connectivity::ConnectivityLimits;
-use rustroad_workspace::antenna::{AntennaRequest, check_antenna};
+use rustroad_workspace::antenna::{AntennaRequest, RepairRequest, check_antenna, repair_antenna};
 use rustroad_workspace::pdk::{ImportSources, import_pdk_with_config};
 use rustroad_workspace::physical::{PhysicalConfig, TieCell};
 use rustroad_workspace::{place, read};
@@ -423,5 +423,118 @@ fn safety_margin_flags_ratios_just_below_the_lef_limit() {
         .unwrap_err()
         .to_string();
         assert!(e.contains("safety-margin"), "{e}");
+    }
+}
+
+#[test]
+fn layer_jumpers_repair_partial_net_violations_without_diodes() {
+    // A low M2 limit makes the routed M2 runs to the gates violate; the
+    // repair cuts each near its gates and bridges it on M3.
+    let tech = TECHNOLOGY.replace(
+        "ANTENNADIFFSIDEAREARATIO 400 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+        "ANTENNADIFFSIDEAREARATIO 20 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+    );
+    let f = routed_with_technology(PLAIN, &tech);
+    let head = || {
+        fs::read_to_string(f.workspace.join("HEAD"))
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let netlist = |w: &Path| {
+        let mut out = Vec::new();
+        read(w, &limits())
+            .unwrap()
+            .export_verilog_with_power(true, &mut out)
+            .unwrap();
+        out
+    };
+    let before = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    assert_eq!(before.status, "violated");
+    assert!(
+        before
+            .checks
+            .iter()
+            .filter(|c| c.violated)
+            .all(|c| c.layer == "M2")
+    );
+    let report = f.root.join("before.json");
+    fs::write(&report, serde_json::to_vec(&before).unwrap()).unwrap();
+    let base = head();
+    let verilog = netlist(&f.workspace);
+    // A wrong base revision or a stale report is refused, HEAD unchanged.
+    assert!(
+        repair_antenna(&f.workspace, "rev1", &RepairRequest::default(), &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("REVISION_CONFLICT")
+    );
+    let stale = f.root.join("stale.json");
+    let mut v: serde_json::Value = serde_json::to_value(&before).unwrap();
+    v["violations"] = serde_json::json!(0);
+    fs::write(&stale, serde_json::to_vec(&v).unwrap()).unwrap();
+    let e = repair_antenna(
+        &f.workspace,
+        &base,
+        &RepairRequest {
+            report: Some(stale),
+            ..RepairRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(e.contains("STALE_REPORT"), "{e}");
+    assert_eq!(head(), base);
+    let r = repair_antenna(
+        &f.workspace,
+        &base,
+        &RepairRequest {
+            report: Some(report),
+            ..RepairRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(r.before.violations, before.violations);
+    assert!(!r.jumpers.is_empty(), "{:?}", r.unrepaired);
+    assert!(
+        r.jumpers
+            .iter()
+            .all(|j| j.layer == "M2" && j.upper == "M3" && j.ratio_after < j.ratio_before)
+    );
+    assert_eq!((r.status, r.after.violations), ("repaired", 0));
+    assert!(r.unrepaired.is_empty());
+    assert_ne!(r.revision, base);
+    assert_eq!(head(), r.revision);
+    assert_eq!(
+        r.stats.vias_after,
+        r.stats.vias_before + 2 * r.jumpers.len()
+    );
+    assert_eq!(
+        r.stats.wire_length_dbu_after,
+        r.stats.wire_length_dbu_before
+    );
+    // The committed revision re-validates; the check agrees with the report;
+    // the netlist (no diode) is unchanged.
+    let after = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    assert_eq!(after.violations, r.after.violations);
+    assert_eq!(after.workspace_revision, r.revision);
+    assert_eq!(netlist(&f.workspace), verilog);
+    // A second repair of a repaired layout changes nothing further or
+    // reports what is left.
+    let again = repair_antenna(
+        &f.workspace,
+        &r.revision,
+        &RepairRequest::default(),
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(again.before.violations, r.after.violations);
+    if r.after.violations == 0 {
+        assert_eq!(
+            (again.status, again.revision.as_str()),
+            ("clean", r.revision.as_str())
+        );
     }
 }

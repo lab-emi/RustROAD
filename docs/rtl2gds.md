@@ -166,6 +166,42 @@ diodes" are the cells the hold, sizing and antenna ECOs planned over the
 closure loop (GF180 rows with 0 hold cells: the hold ECO was infeasible or
 never reached).
 
+### Antenna repair update (`feat/rtl2gds-antenna`, evidence `docs/evidence/rtl2gds-antenna.json`)
+
+Gate runs `.work/runs/A1-{pipeline,dense,uart_tx}` and `A2-{alu,regfile}`
+(worktree `.work/wt/antenna`) at `7872187` (clean tree, same RustSTA and
+RustSys pins), both PDKs, controls and determinism included. The antenna ECO
+no longer inserts diodes for these designs: `repair-antenna` (layer jumpers,
+`docs/hold-closure.md`) runs right after routing on every layout.
+
+| Design | PDK | Gate | Failed gating items | Jumpers on the final layout (net, layer, native ratio before -> after) | Wall s | Peak RSS MiB |
+|---|---|---|---|---|---|---|
+| pipeline | sky130 / gf180 | passed / passed | - | - | 113 | 283 |
+| dense | sky130 / gf180 | passed / passed | - | - | 118 | 283 |
+| uart_tx | sky130 | failed | timing_accuracy | `data_i[7]` met3 361.2 -> 18.7 | 222 | 282 |
+| uart_tx | gf180 | failed | hold_closure, timing_setup, timing_hold, drv, timing_accuracy | - | | |
+| alu | sky130 | failed | timing_accuracy | `a_i[3]` met3 396.4 -> 53.8 | 339 | 331 |
+| alu | gf180 | failed | hold_closure, timing_setup, drv, timing_accuracy | - | | |
+| regfile | sky130 | failed | drv, timing_accuracy | `raddr_a[0]` met3 396.6 -> 205.1 | 664 | 316 |
+| regfile | gf180 | failed | hold_closure, timing_hold, drv, timing_accuracy | - | | |
+
+On every row `antenna_native`, `antenna_deck`, `lvs_netgen`, `lvs_klayout`,
+`drc_magic`, `drc_klayout`, `gds_xor`, `extraction`, `cec_*`,
+`artifact_binding`, `determinism` and `controls` pass. The sky130 LVS
+failures of uart_tx and alu (root cause 3 below) and the regfile native
+antenna failure (root cause 4, first half) are gone; the remaining failures
+are the timing/DRV items owned by the RustSTA and closure streams (reported
+as-is). Pipeline sky130 took a jumper on its first layout only; its final
+layout needs none. Wall time and peak RSS are the whole gate (both PDKs) under
+`/usr/bin/time`. The later harness commits for SERV (port buffering, process
+file-size limits, RustSTA budgets, constant ports) are no-ops on these
+designs; dense (passed, both PDKs) and uart_tx (same statuses and jumpers)
+were rerun at `84d7dcb`/`d8ccbf4` to check that.
+
+Root causes of the failures. No threshold, Liberty, deck, harness status
+logic or SDC value was changed to address any of them (the SDC additions in
+"SDC" below were made before closure was run):
+
 Root causes of the E3 failures (items 2 and 4 are what `docs/closure.md`
 addresses; see the E6 table above). No threshold, Liberty, deck, harness
 status logic or SDC value was changed to address any of them (the SDC
@@ -194,20 +230,21 @@ additions in "SDC" below were made before closure was run):
    578 -> 330 violations) but upsizing also raises the load of the previous
    stage; it cannot close these blocks. Needs timing-driven placement,
    buffering and path-based hold fixing (not implemented).
-3. **sky130 `lvs_netgen`, `lvs_klayout` (uart_tx, alu).** The antenna ECO
-   inserts `sky130_fd_sc_hd__diode_2` on input-port nets (met3 runs from the
-   edge I/O pins, ratio 1.05-1.10 of 400). The frozen LVS setup cannot match
-   that cell: Netgen reports its device-less VGND/VPWR/VPB pins as
-   disconnected nodes, the KLayout deck gives `diode_2 NoMatch` and skips the
-   top (the same class as `conb_1`, which the scale stream removed). A
-   diode-free repair (router jumper to an upper layer near the gate) or an
-   owner decision on the deck is needed. DRC, XOR and both CECs pass on
-   these layouts.
-4. **regfile sky130 `antenna_native`, `drv`.** `raddr_a[0]` reaches 396.6 of
-   the 400 limit (native safety margin 0.10, so it is flagged; the Magic deck
-   passes), and the 57-64-sink input ports (`raddr_*`, `rst_n`) exceed
-   `set_max_capacitance 0.3` pF: port nets cannot be resized; port
-   buffering is not implemented. The loop stops when no repair applies.
+3. **sky130 `lvs_netgen`, `lvs_klayout` (uart_tx, alu) in E3: fixed.** The
+   antenna ECO inserted `sky130_fd_sc_hd__diode_2` on input-port nets (met3
+   runs from the edge I/O pins, ratio 1.0-1.1 of the 0.9 x 400 native
+   threshold). The reference netlist was correct; Netgen matched uniquely
+   but printed the cell's device-less VGND/VPWR/VPB pins as disconnected
+   nodes in both netlists (the frozen harness fails any), and the sky130
+   KLayout deck extracts no device from the diode_2 layout (`NoMatch`, top
+   skipped). Repair is now diode-free: layer jumpers (see the update above
+   and `docs/hold-closure.md`).
+4. **regfile sky130 `antenna_native` (fixed), `drv` (open).** `raddr_a[0]`
+   reached 396.6 of the 400 limit (native margin 0.10, so it was flagged;
+   the Magic deck passed); one met3 jumper brings it to 205.1. The 57-64-sink
+   input ports (`raddr_*`, `rst_n`) still exceed `set_max_capacitance 0.3`
+   pF: port nets are not resizable; port buffering for fanout is the
+   closure stream's.
 
 Cross-run determinism: pipeline, dense, counter and alu (both PDKs) give
 byte-identical netlists, DEF, routes, GDS and native SPEF in two independent
@@ -509,23 +546,64 @@ three hold plans differ (they now carry `inputs.binding.sta_record`).
 ## Stretch designs
 
 **SERV** (`serv_rf_top`, track recipe, regenerated GF180 floorplan for the
-clkbuf_8 clock tree) does not complete the gate on either PDK: synthesis,
-the floorplan check, placement, CTS and routing finish (sky130 185 s, GF180
-241 s, peak 470 MiB), then native extraction of the first layout stops on a
-hard bound. Two bounds were raised with justification on the way (work
-ceiling 64x the default, couplings 8M, RC nodes 4M, SPEF 256 MiB, RustSTA
-import 2M nodes / 4M elements); the third, 4,096 candidate shapes per wire
-run, is a hard per-run cap without a command-line option and was left as is
-(run `.work/runs/keep-S3`, gate wall 432 s, exit 1, `implementation`
-failed with `BUDGET_EXCEEDED: extraction candidates per wire run`). The
-previously known SERV problems stand and were not attempted further: the
-antenna ECO cannot repair clock-tree nets (29 sky130 / 45 GF180 deck
-violations in the scale stream), sky130 repairs would use `diode_2` (LVS,
-see above), and Netgen reports the unused inputs (`i_ibus_rdt[1:0]`,
-`i_ext_rd[31:0]`, ...) as disconnected nodes and the aliased outputs as a
-pin-list difference, which the frozen harness counts as failures (needs
-output buffering for aliased ports in the flow, and an owner decision on
-unused inputs). **rv_core** (optional) was not run.
+clkbuf_8 clock tree). E3 (`.work/runs/keep-S3` of the final stream) stopped
+in native extraction on the fixed 4,096-candidates-per-wire-run cap. On
+`feat/rtl2gds-antenna-dev` (`d8ccbf4`, evidence
+`docs/evidence/rtl2gds-antenna-serv.json`, run
+`.work/wt/antenna2/.work/runs/S6-serv-gf180`):
+
+- Extraction budgets are command-line options now
+  (`--max-extract-candidates`, scratch 44 B per candidate, ceiling 48 MiB;
+  `--max-rc-elements`, ceiling 8 M; `docs/extraction.md`); the track recipe
+  passes 65,536 candidates and 8 M elements. Unused input ports (one pin,
+  nothing to route) are `single_pin_signal_nets`, not unannotated.
+- The gate's own process limits were the next stops, all with explicit,
+  documented values for the track recipe only: the 64 MiB file-size limit
+  of every harness process (SIGXFSZ, exit 153) for the native SPEF (now the
+  extractor's `--max-spef-mib` + 1 MiB), RustSTA import/run (283 MB
+  parasitics table) and OpenRCX (1 GiB); a bounded check-antenna report
+  (16,384 worst rows, every row of the required designs); RustSTA
+  `--max-spef-mib 256 --max-rc-name-mib 64` and `--max-state-gib 4` (RC
+  numeric work 3.2e10).
+- Aliased output ports (`o_ext_rs1 = o_dbus_adr`, `o_ext_rs2 =
+  o_dbus_dat`, one constant on `o_dbus_adr[1:0]` and `o_mdu_valid`) are
+  given their own nets before layout (`scale_flow.buffer_port_aliases`,
+  the OpenROAD `buffer_ports` / OpenLane `insbuf` practice): 62 identity
+  buffers and 2 tie copies; a no-op for every other design. The constant
+  ports are tie-cell outputs, and `constant_pins` now covers output ports
+  (the documented rule) and only counts a rail-input tie whose rail pin is
+  a literal (an ordinary sky130 `inv_1` output used to count as a tie).
+  SERV physical configurations were regenerated (I/O plan only).
+
+GF180 completes the gate (wall 97 min, largest step peak RSS 1.23 GiB,
+843 MiB for the host process tree): `implementation`, `antenna_native` (16-27 native
+violations per closure layout, repaired by 16-28 jumpers, 0 left on every
+layout), `antenna_deck`, `drc_magic`, `drc_klayout`, `gds_xor`,
+`extraction`, `simulation`, `artifact_binding` and `determinism` pass.
+Failed or unverified, reported as-is:
+
+- `lvs_netgen`, `lvs_klayout`: only the 35 unused input ports
+  (`i_ibus_rdt[1:0]`, `i_ext_rd[31:0]`, `i_ext_ready`): Netgen lists them as
+  disconnected nodes in both netlists (pins match; the frozen harness fails
+  any disconnected node, the rule that catches a planted extra pin), KLayout
+  pairs them with unnamed layout pins (240 named of 275). The aliased-port
+  pin mismatch of E3 is gone. Needs an owner decision on unused ports
+  (harness/deck), not a netlist change.
+- `cec_*` unverified: RustSys passes; Yosys does not reach a verdict on
+  SERV (exit 134). `controls` failed for the same reason: `inverted_output`
+  is rejected by RustSys and the co-simulation but not by Yosys.
+- `mpw_min_period` unverified and the OpenRCX half of `timing_accuracy`:
+  RustSTA refuses the OpenRCX SPEF (`RC mesh/parallel edge in i_dbus_ack`,
+  a routed loop; not a jumpered net).
+- `hold_closure`, `timing_*`, `drv`: GF180 at 10 ns is far from closed on
+  SERV (closure stream).
+
+SKY130 SERV does not route with the buffered netlist: the track router
+stops on its expansion budget after 455-475 s (twice, with buffers and with
+tie copies) and on its comparison budget after 2,749 s with 5x budgets (E3,
+without the port buffers, routed in 185 s). The router is chaotic near its
+budget on SERV; any netlist or I/O-plan change is a re-qualification
+(router stream). **rv_core** (optional) was not run.
 
 ## Resources (rule 9)
 
@@ -573,5 +651,15 @@ containers run under podman and are counted in the step peaks).
 - The closure loop's DRV repair is bounded by its `whatif` budget (counts,
   for determinism) and its 8 layouts; regfile GF180 ends with nets the
   budget did not reach.
+- GF180 at ss with the 10 ns constraint set: setup, hold and DRV fail on six
+  track designs; RustROAD lacks timing-driven placement, buffering and
+  path-based hold fixing (gate sizing alone is not enough).
+- Antenna violations on the top routing layer (met4 / Metal4) cannot take
+  a jumper (no layer above in the routing profiles); none on the required
+  designs, 6 nets on an older SERV sky130 layout.
+- Port buffering for high-fanout input ports (regfile `set_max_capacitance`).
+- RustSTA refuses RC meshes in SPEF; the router no longer produces them on
+  these designs, but any real loop in routed metal would make OpenRCX timing
+  `unverified`.
 - Density is reported only; co-simulation starts from Verilator's zero
   state; one-bit vector ports are treated as scalars.

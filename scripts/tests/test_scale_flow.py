@@ -83,6 +83,61 @@ class Mutation(unittest.TestCase):
         self.assertEqual(what["mutated_to"], "gf180mcu_fd_sc_mcu7t5v0__nor2_1")
 
 
+class PortAliases(unittest.TestCase):
+    CELL = ("BUF", "A", "X")
+    NETLIST = """module top(
+  input wire a,
+  input wire [1:0] b,
+  output wire y,
+  output wire [2:0] z,
+  output wire w
+);
+  wire n1;
+  wire \\u.q[0] ;
+  INV g0 (.A(a), .Y(n1));
+  INV g1 (.A(b[0]), .Y(\\u.q[0] ));
+  assign y = n1;
+  assign z[0] = n1;
+  assign z[1] = \\u.q[0] ;
+  assign z[2] = b[1];
+  assign w = y;
+endmodule
+"""
+
+    def test_each_output_port_gets_its_own_net(self):
+        out, ins = scale_flow.buffer_port_aliases(self.NETLIST, self.CELL)
+        self.assertEqual([(x["port"], x["net"]) for x in ins],
+                         [("z[0]", "n1"), ("z[2]", "b[1]"), ("w", "y")])
+        self.assertIn("  assign y = n1;", out)
+        self.assertIn("  assign z[1] = \\u.q[0] ;", out)
+        self.assertIn("  BUF rr_portbuf_0 (.A(n1), .X(z[0]));", out)
+        self.assertIn("  BUF rr_portbuf_1 (.A(b[1]), .X(z[2]));", out)
+        self.assertIn("  BUF rr_portbuf_2 (.A(y), .X(w));", out)
+        self.assertNotIn("assign z[0]", out)
+        # Idempotent: the result has no aliased output left.
+        self.assertEqual(scale_flow.buffer_port_aliases(out, self.CELL), (out, []))
+
+    def test_constant_ports_get_their_own_tie_copy(self):
+        text = self.NETLIST.replace("  wire n1;\n", "  wire n1;\n  wire c0;\n  TIEL t0 (.ZN(c0));\n") \
+            .replace("assign y = n1;", "assign y = c0;").replace("assign z[0] = n1;", "assign z[0] = c0;")
+        out, ins = scale_flow.buffer_port_aliases(text, self.CELL, {"TIEL": {"ZN"}})
+        self.assertIn("  TIEL rr_porttie_0 (.ZN(z[0]));", out)
+        self.assertEqual(ins[0], dict(instance="rr_porttie_0", net="c0", port="z[0]", cell="TIEL"))
+        self.assertIn("  assign y = c0;", out)
+        self.assertEqual(scale_flow.port_tie_cells("gf180"), {"gf180mcu_fd_sc_mcu7t5v0__tieh": {"Z"},
+                                                              "gf180mcu_fd_sc_mcu7t5v0__tiel": {"ZN"}})
+        self.assertEqual(scale_flow.port_tie_cells("sky130"), {"sky130_fd_sc_hd__conb_1": {"HI", "LO"}})
+
+    def test_netlist_without_aliases_is_unchanged(self):
+        text = self.NETLIST.replace("  assign z[0] = n1;\n", "").replace("  assign z[2] = b[1];\n", "") \
+            .replace("  assign w = y;\n", "")
+        self.assertEqual(scale_flow.buffer_port_aliases(text, self.CELL), (text, []))
+
+    def test_profile_buffers_are_checked_identities(self):
+        self.assertEqual(scale_flow.port_buffer_cell("sky130"), ("sky130_fd_sc_hd__buf_1", "A", "X"))
+        self.assertEqual(scale_flow.port_buffer_cell("gf180"), ("gf180mcu_fd_sc_mcu7t5v0__buf_1", "I", "Z"))
+
+
 class Receipts(unittest.TestCase):
     def test_peak_rss_is_the_tool_and_timeouts_are_unmeasured(self):
         with tempfile.TemporaryDirectory() as d:

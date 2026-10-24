@@ -442,6 +442,22 @@ class ClosureHelpers(unittest.TestCase):
             cfg.write_text(json.dumps(dict(tie_high=dict(cell="TIEH", pin="Z"), tie_low=None)))
             self.assertEqual(H.constant_pins(n, cfg), {"r0/D", "r1/D"})
 
+    def test_constant_pins_ports_rail_ties_and_inverters(self):
+        import hold_closure as H
+        with tempfile.TemporaryDirectory() as d:
+            n, cfg = Path(d) / "n.v", Path(d) / "c.json"
+            # A rail tie (INV with a literal rail input) is a constant; the same
+            # master as an ordinary inverter is not. Ports aliased to a tie
+            # net or driven by a tie copy are constant-driven endpoints.
+            n.write_text("module t (\n  input wire a,\n  output wire [1:0] z,\n  output wire w,\n  output wire v\n);\n"
+                         "  wire rr_tie_net_0;\n  wire n2;\n"
+                         "  INV rr_tie_cell_0 (.Y(rr_tie_net_0), .A(1'b0));\n  INV g1 (.A(a), .Y(n2));\n"
+                         "  assign z[0] = rr_tie_net_0;\n  CONB rr_porttie_1 (.LO(z[1]));\n"
+                         "  assign w = n2;\n  DFF r0 (.D(n2), .CLK(a), .Q(v));\nendmodule\n")
+            cfg.write_text(json.dumps(dict(tie_high=dict(cell="INV", pin="Y", rail_input=dict(pin="A", supply="ground")),
+                                           tie_low=None, constant_cells=[dict(cell="CONB", high=["HI"], low=["LO"])])))
+            self.assertEqual(H.constant_pins(n, cfg), {"rr_tie_cell_0/A", "z[0]", "z[1]"})
+
 
 class Controls(unittest.TestCase):
     def test_remove_chain_and_two_terminal_via(self):
