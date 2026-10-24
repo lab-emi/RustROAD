@@ -12,6 +12,7 @@ pub(crate) mod route_rules;
 pub mod routing;
 pub mod supply;
 pub mod tap;
+pub mod wire_runs;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Orientation {

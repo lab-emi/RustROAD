@@ -1044,9 +1044,18 @@ pub(super) fn export_def(
     let mut routed_wires = HashMap::<u32, Vec<_>>::new();
     let mut routed_vias = HashMap::<u32, Vec<_>>::new();
     let mut routed_patches = HashMap::<u32, Vec<_>>::new();
+    // One DEF path per maximal collinear run (identical metal union), not one
+    // per stored lattice edge: per-edge paths each carry their own end
+    // extension, which reference extractors count again.
+    let runs = match &bundle.routing {
+        Some(routing) => {
+            crate::routing::validate_state(design, bundle, placed)?;
+            crate::routing::export_runs(bundle, routing)?
+        }
+        None => Vec::new(),
+    };
     if let Some(routing) = &bundle.routing {
-        crate::routing::validate_state(design, bundle, placed)?;
-        for wire in &routing.routes.wires {
+        for wire in &runs {
             routed_wires.entry(wire.net).or_default().push(wire);
         }
         for via in &routing.routes.vias {

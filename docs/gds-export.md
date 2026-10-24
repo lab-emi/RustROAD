@@ -2,10 +2,12 @@
 
 Status: implemented and black-box verified on the routed pipeline fixture for
 SKY130 (`sky130_fd_sc_hd`) and GF180 (`gf180mcu_fd_sc_mcu7t5v0`). Scope is a
-block/macro: no pad ring, no seal ring; IR/EM/SI/OCV/CPPR are unchecked. The
-streamed blocks still carry the known router DRC defects (work item W5), so a
-GDS export is **not** a DRC signoff. Resource contract: `docs/gds-budget.md`.
-Evidence: `docs/evidence/gds-verification.json`.
+block/macro: no pad ring, no seal ring; IR/EM/SI/OCV/CPPR are unchecked.
+`export-gds` itself reports `drc_status: "unchecked"`; the foundry checks run
+in the harnesses below. On the integrated LEF-rule flow the native GDS is DRC
+clean (Magic 0, KLayout 0) and LVS-matched on both PDKs; Sky130 has one Magic
+antenna item (see `docs/requalification.md`). Resource contract:
+`docs/gds-budget.md`. Evidence: `docs/evidence/gds-verification.json`.
 
 ## Command
 
@@ -32,8 +34,9 @@ rustroad --workspace W export-gds \
   {path, sha256, bytes}`, `records`, `cell_gds`/`layer_map`/`cell_lef`
   identities, `foreign_bindings_checked`, `lef_dbu_per_micron`,
   `gds_dbu_per_micron`, `coordinate_divisor`, `pdk_structures`,
-  `via_structures`, `elements {instances, routed_wires, routed_vias,
-  supply_wires, supply_vias, pin_shapes, labels, boundary}`, `routing_status`,
+  `via_structures`, `elements {instances, routed_wires (merged runs),
+  stored_wire_records, routed_vias, routed_patches, supply_wires,
+  supply_vias, pin_shapes, labels, boundary}`, `routing_status`,
   `drc_status: "unchecked"`, `lvs_status: "unchecked"`, `scope:
   "block_level_no_pad_or_seal_ring"`, `workspace_mutated: false`.
 - Errors exit 2 with `{"status":"error","code":...}`. GDS codes:
@@ -53,8 +56,9 @@ rustroad --workspace W export-gds \
 | PDK cells | Every used master plus its SREF/AREF closure (iterative DFS, depth cap 64, cycle guard), copied **byte-identically** from the cell GDS in library order. Missing structure: `GDS_CELL_MISSING`. |
 | `VIA_<name>` | One structure per used fixed LEF VIA (routed + supply), its RECT/POLYGON shapes on the map's `via` targets. Name collisions with any cell-GDS structure or the top: `GDS_NAME_COLLISION`. |
 | Instances | SREF per instance in instance order. Row `N`: no STRANS at (x, y). Row `FS`: STRANS x-reflection at (x, y + height). |
-| Routed wires | DEF NETS semantics: layer default `WIDTH`, half-width extension at both ends (exact `wire_rect`), one BOUNDARY per segment on `net` targets. |
-| Routed / supply vias | SREF to `VIA_<name>` at the via point. |
+| Routed wires | DEF NETS semantics: layer default `WIDTH`, half-width extension at both ends (exact `wire_rect`). One BOUNDARY per maximal collinear same-net run on `net` targets, the same runs `export-def` writes (`rustroad_core::wire_runs`): stored lattice records that touch or overlap on one track line are merged, and a run is split only at a strictly interior via landing (lower or upper metal), pin-access point or same-layer branch. The metal union equals the stored records'. |
+| Routed / supply vias | SREF to `VIA_<name>` at the via point. Every used LEF via variant (LEF-rule routing, e.g. `M1M2_PR_MR`, `Via1_VH`, `Via2_HH`) gets its own structure. |
+| Routing patches | Every `Routes.patches` rectangle (DEF routing `RECT`, same-net notch/corner fill) as one BOUNDARY on the routing layer's `net` targets. |
 | Supply rails/spines | SPECIALNETS geometry (explicit width, half-width extension) on `special_net` targets. |
 | Pins | I/O and supply pin rectangles on every `pin` target; one TEXT per pin at the rectangle centre on the `label` target. Bus bits are labelled `a[1]`; supply ports `VDD`/`VSS`. Escaped/non-printable names: `GDS_LABEL_UNSUPPORTED`. |
 | PR boundary | Die area on the map's boundary layer (SKY130 235/4, GF180 0/0). |
@@ -132,10 +136,39 @@ python3 -I scripts/verify_gds.py --run .work/<new dir> \
 The harness copies the routed workspaces (`<pdk>_physical`) of a finished
 flow run and runs every third-party tool only as a black box in the pinned
 image `4c48415d8bd0` (KLayout 0.30.9, Magic 8.3.678, Netgen 1.5.323). Exit
-codes are not trusted: reports are parsed, the Magic top cell must exist, and
-the known router DRC baseline must be reproduced as a positive control.
+codes are not trusted: reports are parsed, the Magic top cell must exist, both
+DRC decks must report 0 on the native GDS, and a planted 0.1 x 0.1 um square on
+the wire layer must raise both counts (positive control). Every DEF `RECT`
+patch must be streamed on its layer's net purpose, and deleting those
+rectangles must make the XOR fail. LVS runs the basic Netgen/KLayout checks and
+both LVS checks of `scripts/signoff` (named-net and port pairing).
 
-Final run (`.work/gds/final`, binary sha256 `7c34a6d3...acce`, 109.6 s wall
+Requalification run (stream b0, 2026-10-24; `.work/runs/gds5` on the
+policy-producer LEF-rule flow `.work/runs/r2`, binary `ff523a9d...`, 189.7 s
+wall, largest container 464 MiB):
+
+| Check | SKY130 | GF180 |
+|---|---|---|
+| strmxor native vs KLayout LEF/DEF reference | No differences found | No differences found |
+| Top labels / flattened texts equal | 12 / 668 equal | 12 / 1056 equal |
+| PDK cell structures byte-identical | 10 / 10 | 10 / 10 |
+| Re-export and independent-copy export identical | yes (`48cdfd7e...`, 65,110 B, 5,176 records) | yes (`d2c20a1e...`, 46,368 B, 3,768 records) |
+| Routing patches streamed (DEF `RECT`) | 8 / 8 | 1 / 1 |
+| Magic drc(full), KLayout main deck (native = reference) | 0, 0 | 0, 0 |
+| Planted sub-minimum square detected (Magic / KLayout) | 2 / m2.1 x2, m2.6 x1 | 2 / M2.1 x2, M2.3 x1 |
+| Density (separate) | passed, 0 items | failed, 8 items (no fill) |
+| LVS: Netgen, KLayout, signoff Netgen, signoff KLayout | match x4 (native and reference) | match x4 (native and reference) |
+| Layer-map citations | 36 claims, 0 problems | 30 claims, 0 problems |
+
+Controls (all detected): deleted signal wire (port `z[1]`; XOR 1 shape; Netgen
+and the signoff KLayout check fail, the basic KLayout check still says match,
+which is why the signoff checks are now required), wrong map entry, missing
+cell structure, patches removed (XOR only on the patch layers: Sky130
+68/20 x3, 69/20 x5, 70/20 x1; GF180 36/0 x2), planted DRC square, Sky130
+density without the boundary, GF180 odd coordinate (now refused by the
+workspace reader, `INVALID_WORKSPACE`, before streaming; no output file).
+
+Phase-A run on the earlier router (historical: `.work/gds/final`, binary sha256 `7c34a6d3...acce`, 109.6 s wall
 for both PDKs, largest external step 474 MB RSS; evidence written with
 `--evidence docs/evidence/gds-verification.json`):
 
@@ -191,10 +224,12 @@ clean. Full test run: 5.9 s, 461 MB peak (cargo + tests).
 ## Limitations
 
 - Only N and FS rows exist in RustROAD; other orientations are not emitted.
-- The exporter does not repair DRC; the router defects (W5) remain visible.
+- The exporter does not repair DRC; it streams exactly what was routed.
 - Labels for escaped Verilog identifiers are rejected rather than guessed.
 - The workspace loader does not re-verify stored technology VIA geometry against
-  its LEF; the odd-coordinate control relies on that by planting a defect in a
-  workspace copy. Export re-verifies the cell LEF (FOREIGN) by sha256 only.
+  its LEF byte for byte. With LEF-rule routing it does re-derive the routing
+  vias (cut ENCLOSURE, variant families) and the supply vias (manufacturing
+  grid), which now refuses the planted odd-coordinate via. Export re-verifies
+  the cell LEF (FOREIGN) by sha256 only.
 - Netgen/KLayout LVS references are RustROAD's own powered export; the
   independent RTL-to-powered CEC link is a separate work item (W10).

@@ -295,14 +295,25 @@ def lvs(r, p, label, gds, top, powered):
 
 
 def planted(def_text, tag, kind):
-    """Insert one deliberate defect into a copy of routed DEF NETS."""
-    m = re.search(r'(?m)^- (\S+) .*\n  \+ ROUTED (\S+) \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)', def_text)
-    require(m is not None, 'no routed wire for planted control')
-    layer, x0, y0, x1, y1 = m[2], *map(int, m.groups()[2:])
+    """Insert one deliberate defect into a copy of routed DEF NETS.
+
+    The defect is attached to the first vertical access-layer (met2/Metal2)
+    wire path of the NETS section that is at least four widths long; it is
+    inserted right after that path, so it belongs to the same net. Path order
+    inside a net is not assumed (export-def writes merged runs by layer).
+    """
     sky = tag == 'sky130'
     w, s = (140, 140) if sky else (560, 560)
-    if layer not in ('met2', 'Metal2'):
-        raise RuntimeError('planted control expects the first routed wire on the access layer')
+    access = 'met2' if sky else 'Metal2'
+    nets = def_text.index('\nNETS ')
+    m = None
+    for c in re.finditer(r'(?m)^  (?:\+ ROUTED|NEW) (\S+) \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)', def_text[nets:]):
+        x0, y0, x1, y1 = map(int, c.groups()[1:])
+        if c[1] == access and x0 == x1 and abs(y1 - y0) >= 4 * w:
+            m = c
+            break
+    require(m is not None, 'no vertical access-layer wire for planted control')
+    layer, x0, y0, x1, y1 = m[1], *map(int, m.groups()[1:])
     if kind == 'notch':
         # A same-net island parallel to the wire, half a spacing away.
         rect = (x0 + w // 2 + s // 2, min(y0, y1), x0 + w // 2 + s // 2 + w, min(y0, y1) + 4 * w)
@@ -310,7 +321,7 @@ def planted(def_text, tag, kind):
         # A lone same-net square below the layer minimum area.
         rect = (x0 + 10 * w, min(y0, y1), x0 + 10 * w + w, min(y0, y1) + w)
     patch = f'  NEW {layer} ( {rect[0]} {rect[1]} ) RECT ( 0 0 {rect[2] - rect[0]} {rect[3] - rect[1]} )\n'
-    end = m.end()
+    end = nets + m.end()
     return def_text[:end] + '\n' + patch.rstrip('\n') + def_text[end:]
 
 

@@ -148,7 +148,27 @@ pin-access points.
      ground. A partner pin is attached at that pin's tree node, a pad at its
      via node, and a run at its end nearest the interval. On the run's own side,
      each value is split between its two end nodes by position (pi model).
-5. **Coupling output.** Cross-net capacitors are written as SPEF coupling caps,
+5. **Routing patches.** `Routes.patches` (the router's same-net notch and
+   corner fills, DEF routing `RECT`) add capacitance, never a node or a
+   resistor. Each patch attaches to the RC node of the same-net conductor it
+   overlaps or touches: largest overlap area first, then the lowest shape
+   index; a wire run attaches at its end nearer the patch centre, a via pad at
+   its via node, a pin at its pin node. The part of the patch not already
+   covered by same-net metal on its layer (wire runs with end extensions, via
+   pads, pin shapes, earlier patches) is cut into disjoint rectangles by exact
+   integer subtraction (at most 256 pieces per patch). Every piece is a
+   conductor shape with two side strips, one along x and one along y, so all
+   four of its edges take the per-side model of step 4: ground with the
+   context and plane split, and lateral coupling to the nearest other-net
+   shape. Other nets' runs see the pieces as neighbours and planes. A strip
+   facing a wire run's end cap owns that coupling (factor 1), because the
+   wire's side model never counts its end caps; strip-to-run sides are split
+   half and half as for two runs. A floating patch, a patch on a net without
+   an RC tree and a patch off a routing layer are explicit errors. The JSON
+   `stats` report `patches` and `patch_pieces`; `scope.routing_patches`
+   states the model. Workspaces without patches extract byte-identically to
+   the previous binary (checked at min/nom/max on both PDKs).
+6. **Coupling output.** Cross-net capacitors are written as SPEF coupling caps,
    listed in both nets' `*CAP` sections. So each net's declared total equals
    its ground plus coupling, just as in the reference SPEF. RustSTA 0.3 grounds
    coupling at factor 1 (T0074), so for timing this equals a grounded model.
@@ -208,7 +228,12 @@ Builds and tests used `CARGO_BUILD_JOBS=4`, `RUST_TEST_THREADS=4` and
     hand); a parallel pair (coupling counted once, per-side ground); a branch,
     via and mid-run pin tree with exact resistor values; run splitting and loop
     opening; plane coupling with an explicit fallback and an exact hand total;
-    budgets; and profile-width mismatch.
+    budgets; and profile-width mismatch. Patches: a hand-computed patch beside
+    a wire (the covered wire side drops out, the three exposed patch edges are
+    added at the nearer end node, the tree is unchanged); an overlapping patch
+    counts only its uncovered piece; a fully covered patch adds nothing; a
+    patch couples once to a parallel net and owns the coupling to a facing
+    wire end; floating, unrouted and cut-layer patches fail.
   * `rustroad-formats::spef`: syntax, the name map, escaping, exact totals,
     determinism, and rejection of invalid values.
 * **Integration tests** (`crates/rustroad-workspace/tests/extraction.rs`, on a
@@ -339,6 +364,54 @@ caps is the next step. Because the reference deficit is now known, that change
 should also be validated against a second independent oracle (for example
 Magic extraction of the same metal) to avoid a correlated fit.
 
+## Re-measurement after integration (stream b0, 2026-10-24)
+
+`export-def` now writes maximal collinear runs (see `docs/requalification.md`),
+so the flow's own DEF is already at the merged level. The campaign was re-run
+on a fresh policy-producer flow (`--ready` = that run, RustSTA 0.4 binaries
+via `--sta-bin`, router with LEF rules and patches, native patch extraction):
+
+```sh
+python3 scripts/compare_spef.py campaign --workspace .work/runs/spef2 --base-rev empty \
+  --ready .work/runs/r2 --rustroad target/release/rustroad \
+  --sta-bin /mnt/data2/cgao/git/RustROAD/.work/sta-signoff/bin
+```
+
+Evidence: `docs/evidence/extraction-requalification.json` (28.9 s wall, 133 MiB
+peak child RSS, status `partial`: every control and self-check passes, not
+every target). "harness" is now the flow DEF itself; `merge-def` of it differs
+only where it merges through an upper-layer via landing (104 -> 100 Sky130,
+77 -> 72 GF180 paths), and the reference's total C moves by less than 0.05 %.
+
+| PDK | RC | total C | per-net C (n, min..max) | per-net R (n, min..max) |
+|---|---|---|---|---|
+| sky130 | min | -4.1 % pass | 7, -6.8..+0.3 % pass | 19, -74.9..-36.3 % **fail** |
+| sky130 | nom | -4.2 % pass | 9, -6.4..+2.4 % pass | 19, -20.9..-2.3 % **fail** |
+| sky130 | max | -4.8 % pass | 10, -5.2..+1.9 % pass | 19, +7.4..+137.8 % **fail** |
+| gf180 | min | -7.0 % pass | 12, -6.3..-0.2 % pass | 19, +0.9..+13.5 % pass |
+| gf180 | nom | -7.8 % pass | 13, -7.2..-0.2 % pass | 19, -2.5..-1.3 % pass |
+| gf180 | max | -8.9 % pass | 13, -8.4..-0.4 % pass | 19, +8.7..+178.3 % **fail** |
+
+| PDK | STA | max abs setup / hold delta | native WNS / WHS | reference WNS / WHS |
+|---|---|---|---|---|
+| sky130 | tt+nom | 4.91 / 6.42 ps pass | 9.1081 / -0.0045 ns | 9.1032 / -0.0086 ns |
+| sky130 | ss+max | 9.63 / 12.74 ps **fail** | 8.5310 / -0.0998 ns | 8.5214 / -0.1060 ns |
+| sky130 | ff+min | 3.06 / 3.59 ps pass | 9.3394 / +0.0574 ns | 9.3363 / +0.0548 ns |
+| gf180 | tt+nom | 10.12 / 7.20 ps **fail** | 7.7020 / -0.3945 ns | 7.6929 / -0.3966 ns |
+| gf180 | ss+max | 24.01 / 17.21 ps **fail** | 5.6606 / -0.8987 ns | 5.6387 / -0.9046 ns |
+| gf180 | ff+min | 4.86 / 3.41 ps pass | 8.5719 / -0.1805 ns | 8.5675 / -0.1814 ns |
+
+What changed and why (measured, nothing tuned): the routed design is now the
+LEF-rule router output of the policy producer, so per-net numbers moved. The
+Sky130 nominal per-net R floor moved from -19.4 % to -20.9 % (one net, the
+known 0.125 vs implied 0.173 ohm/sq met2 difference), and the GF180 tt+nom
+setup delta from 9.53 to 10.12 ps; both remain the capacitance and resistance
+causes analysed above. Patch capacitance is 8 x a few aF on Sky130 and one
+patch on GF180 (total-C change < 0.01 %). The omitted-metal estimate is now
+6.2 fF (Sky130 nom) against a 3.1 fF measured gap, and 3.6 fF against 7.5 fF
+on GF180. The controls (x3 R, dropped/renamed net, dropped connection) and the
+independent resistance accounting (max rel. error 3.0e-6) all pass.
+
 ## Reproduction
 
 ```sh
@@ -370,5 +443,9 @@ every target is met.
 * A lateral pair is split half-and-half. Where one side sees a wider via pad,
   that region is counted about 1.5x.
 * Same-net metal is joined only through the stored lattice graph, not through
-  geometric overlap.
+  geometric overlap; routing patches are the exception (attached by overlap,
+  capacitance only, see the physical model).
+* OpenRCX reads DEF `RECT` patches without error but does not extract them, so
+  the reference lacks the patch capacitance (sky130: 8 patches, gf180: 1, a few
+  aF each). The native extractor includes it.
 * Serial `cpu_ref` only. There is no GPU path and none is claimed.

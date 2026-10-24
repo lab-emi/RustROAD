@@ -1,5 +1,5 @@
 {
- "harness_sha256": "e13feb36c811ef28cfab5d2a596b6b51bd9df3270221b2b1d926b5b3c22f3912",
+ "harness_sha256": "e327697610372cae20378e427b3db0b97b4b4b6cff53f9657804c6c16aa4bbc3",
  "image": {
   "id": "4c48415d8bd08c04033f4777b65a96299e22c1e94d12a8ea1d9a062697c006ee",
   "identity": "4c48415d8bd08c04033f4777b65a96299e22c1e94d12a8ea1d9a062697c006ee [docker.io/hpretl/iic-osic-tools@sha256:344fadc67af8c64cc4750633392bb60e8ce05c5f0c3d94f26cde35c068ccf9bc docker.io/hpretl/iic-osic-tools@sha256:5d6adf1f437cd0f2f8f8614488ec3c247ba8c768f4663a25d5e997b30ccb13b0]"
@@ -17,18 +17,21 @@
    "cell_bytes": {
     "copied": [
      "sky130_fd_sc_hd__tapvpwrvgnd_1",
-     "sky130_fd_sc_hd__xor2_4",
+     "sky130_fd_sc_hd__xor2_2",
      "sky130_fd_sc_hd__fill_1",
      "sky130_fd_sc_hd__fill_2",
+     "sky130_fd_sc_hd__fill_4",
      "sky130_fd_sc_hd__fill_8",
      "sky130_fd_sc_hd__dfxtp_1",
      "sky130_fd_sc_hd__clkbuf_1",
-     "sky130_fd_sc_hd__and2_2"
+     "sky130_fd_sc_hd__and2_0",
+     "sky130_fd_sc_hd__and2_4"
     ],
-    "identical": 8,
+    "identical": 10,
     "non_pdk_structures": [
      "VIA_L1M1_PR",
      "VIA_M1M2_PR",
+     "VIA_M1M2_PR_MR",
      "VIA_M2M3_PR",
      "lane_smoke"
     ],
@@ -40,11 +43,12 @@
     "citations": true,
     "controls": true,
     "determinism": true,
-    "drc_baseline": true,
+    "drc_clean": true,
     "drc_equal": true,
     "labels": true,
     "lvs_equal": true,
     "lvs_match": true,
+    "patches": true,
     "read_only": true,
     "source_unchanged": true,
     "xor": true
@@ -57,96 +61,103 @@
     "scope": "PDK KLayout density deck (maximum density / minimum clear area, normalised by the 235/4 PR boundary); minimum density needs chip-level fill: unchecked",
     "status": "passed",
     "values": {
-     "li1": "0.9417957605143507",
-     "m1": "0.905255186132424",
-     "m2": "0.9756032431088377",
-     "m3": "0.9625734583688548",
+     "li1": "0.9454260976129583",
+     "m1": "0.9085916098323388",
+     "m2": "0.9767224797527707",
+     "m3": "0.9603992611537369",
      "m4": "1.0",
      "m5": "1.0"
     }
    },
    "determinism": {
-    "bytes": 374534,
+    "bytes": 65110,
     "independent_copy_identical": true,
-    "sha256": "b714fdf15b4c055dfb2263cbd36905cbf2bb3bef527ba8e922d7b098f580619e",
+    "sha256": "48cdfd7ebbb0a81c7db8570486b780aa7e538548980d047a9db72beb49eb9155",
     "status": "passed"
    },
    "drc": {
-    "drc_verdict": "failed",
-    "known_baseline": {
-     "klayout": {
-      "m1.2": 5,
-      "m2.2": 4
-     },
-     "magic_total": 26
-    },
-    "matches_known_router_baseline": true,
+    "clean": true,
+    "drc_verdict": "passed",
     "native": {
-     "klayout": {
-      "m1.2": 5,
-      "m2.2": 4
-     },
-     "klayout_cells": {
-      "lane_smoke": 9
-     },
+     "klayout": {},
+     "klayout_cells": {},
      "magic": {
-      "reasons": {
-       "Metal1 spacing < 0.14um (met1.2)": 25,
-       "Metal2 spacing < 0.14um (met2.2)": 16
-      },
-      "total": 26
+      "reasons": {},
+      "total": 0
      }
     },
-    "reference": {
+    "planted_control": {
+     "detected": true,
      "klayout": {
-      "m1.2": 5,
-      "m2.2": 4
+      "m2.1": 2,
+      "m2.6": 1
      },
-     "klayout_cells": {
-      "lane_smoke": 9
-     },
+     "layer": [
+      69,
+      20
+     ],
      "magic": {
       "reasons": {
-       "Metal1 spacing < 0.14um (met1.2)": 25,
-       "Metal2 spacing < 0.14um (met2.2)": 16
+       "Metal2 minimum area < 0.0676um^2 (met2.6)": 1,
+       "Metal2 width < 0.14um (met2.1)": 2
       },
-      "total": 26
+      "total": 2
+     },
+     "rect_gds": [
+      -5000,
+      -5000,
+      -4900,
+      -4900
+     ]
+    },
+    "reference": {
+     "klayout": {},
+     "klayout_cells": {},
+     "magic": {
+      "reasons": {},
+      "total": 0
      }
     },
     "status": "equal_to_reference"
    },
-   "flow_def_sha256": "23b4c5cf2692cc420fea5d35c499e22f37ee233a3ca44f385e19ae01bf21cbbb",
+   "flow_def_sha256": "cb94ea927e9ea7892a0bb5b5a6bef1b0cadac6942492f0b56a15ce8c4eb28424",
    "hierarchy": {
     "native_cells": [
      "VIA_L1M1_PR",
      "VIA_M1M2_PR",
+     "VIA_M1M2_PR_MR",
      "VIA_M2M3_PR",
      "lane_smoke",
-     "sky130_fd_sc_hd__and2_2",
+     "sky130_fd_sc_hd__and2_0",
+     "sky130_fd_sc_hd__and2_4",
      "sky130_fd_sc_hd__clkbuf_1",
      "sky130_fd_sc_hd__dfxtp_1",
      "sky130_fd_sc_hd__fill_1",
      "sky130_fd_sc_hd__fill_2",
+     "sky130_fd_sc_hd__fill_4",
      "sky130_fd_sc_hd__fill_8",
      "sky130_fd_sc_hd__tapvpwrvgnd_1",
-     "sky130_fd_sc_hd__xor2_4"
+     "sky130_fd_sc_hd__xor2_2"
     ],
-    "native_top_instances": 241,
+    "native_top_instances": 231,
     "reference_cells": [
      "VIA_L1M1_PR",
      "VIA_M1M2_PR",
+     "VIA_M1M2_PR_MR",
      "VIA_M2M3_PR",
      "lane_smoke",
-     "sky130_fd_sc_hd__and2_2",
+     "sky130_fd_sc_hd__and2_0",
+     "sky130_fd_sc_hd__and2_4",
      "sky130_fd_sc_hd__clkbuf_1",
      "sky130_fd_sc_hd__dfxtp_1",
      "sky130_fd_sc_hd__fill_1",
      "sky130_fd_sc_hd__fill_2",
+     "sky130_fd_sc_hd__fill_4",
      "sky130_fd_sc_hd__fill_8",
      "sky130_fd_sc_hd__tapvpwrvgnd_1",
-     "sky130_fd_sc_hd__xor2_4"
+     "sky130_fd_sc_hd__xor2_2"
     ],
-    "reference_top_instances": 241,
+    "reference_top_instances": 231,
     "same_cell_names": true
    },
    "labels": {
@@ -154,7 +165,7 @@
      0.001,
      0.001
     ],
-    "flat_texts": 677,
+    "flat_texts": 668,
     "names": [
      "VDD",
      "VSS",
@@ -189,8 +200,13 @@
        "Match"
       ],
       [
-       "sky130_fd_sc_hd__and2_2",
-       "SKY130_FD_SC_HD__AND2_2",
+       "sky130_fd_sc_hd__and2_0",
+       "SKY130_FD_SC_HD__AND2_0",
+       "Match"
+      ],
+      [
+       "sky130_fd_sc_hd__and2_4",
+       "SKY130_FD_SC_HD__AND2_4",
        "Match"
       ],
       [
@@ -204,8 +220,8 @@
        "Match"
       ],
       [
-       "sky130_fd_sc_hd__xor2_4",
-       "SKY130_FD_SC_HD__XOR2_4",
+       "sky130_fd_sc_hd__xor2_2",
+       "SKY130_FD_SC_HD__XOR2_2",
        "Match"
       ]
      ],
@@ -216,8 +232,13 @@
        "Match"
       ],
       [
-       "sky130_fd_sc_hd__and2_2",
-       "SKY130_FD_SC_HD__AND2_2",
+       "sky130_fd_sc_hd__and2_0",
+       "SKY130_FD_SC_HD__AND2_0",
+       "Match"
+      ],
+      [
+       "sky130_fd_sc_hd__and2_4",
+       "SKY130_FD_SC_HD__AND2_4",
        "Match"
       ],
       [
@@ -231,8 +252,8 @@
        "Match"
       ],
       [
-       "sky130_fd_sc_hd__xor2_4",
-       "SKY130_FD_SC_HD__XOR2_4",
+       "sky130_fd_sc_hd__xor2_2",
+       "SKY130_FD_SC_HD__XOR2_2",
        "Match"
       ]
      ]
@@ -240,16 +261,20 @@
     "lvs_verdict": "match",
     "netgen": {
      "native": {
-      "circuits": 8,
+      "circuits": 9,
       "final": "Circuits match uniquely.",
       "top_devices": [
        [
-        "sky130_fd_sc_hd__xor2_4",
+        "sky130_fd_sc_hd__xor2_2",
         2
        ],
        [
-        "sky130_fd_sc_hd__and2_2",
-        4
+        "sky130_fd_sc_hd__and2_4",
+        2
+       ],
+       [
+        "sky130_fd_sc_hd__and2_0",
+        2
        ],
        [
         "sky130_fd_sc_hd__clkbuf_1",
@@ -267,16 +292,20 @@
       "verdict": "match"
      },
      "reference": {
-      "circuits": 8,
+      "circuits": 9,
       "final": "Circuits match uniquely.",
       "top_devices": [
        [
-        "sky130_fd_sc_hd__xor2_4",
+        "sky130_fd_sc_hd__xor2_2",
         2
        ],
        [
-        "sky130_fd_sc_hd__and2_2",
-        4
+        "sky130_fd_sc_hd__and2_4",
+        2
+       ],
+       [
+        "sky130_fd_sc_hd__and2_0",
+        2
        ],
        [
         "sky130_fd_sc_hd__clkbuf_1",
@@ -296,66 +325,113 @@
     },
     "schematic": {
      "cells": [
-      "sky130_fd_sc_hd__and2_2",
-      "sky130_fd_sc_hd__xor2_4",
+      "sky130_fd_sc_hd__and2_4",
+      "sky130_fd_sc_hd__xor2_2",
+      "sky130_fd_sc_hd__and2_0",
       "sky130_fd_sc_hd__dfxtp_1",
       "sky130_fd_sc_hd__clkbuf_1"
      ],
      "dropped": {
-      "sky130_fd_sc_hd__fill_1": 1,
-      "sky130_fd_sc_hd__fill_2": 9,
-      "sky130_fd_sc_hd__fill_8": 76,
+      "sky130_fd_sc_hd__fill_1": 3,
+      "sky130_fd_sc_hd__fill_2": 7,
+      "sky130_fd_sc_hd__fill_4": 1,
+      "sky130_fd_sc_hd__fill_8": 78,
       "sky130_fd_sc_hd__tapvpwrvgnd_1": 32
      },
      "instances": 13
     },
+    "signoff": {
+     "native": {
+      "lvs_klayout": {
+       "failures": [],
+       "status": "passed",
+       "unverified_reasons": [],
+       "verdict": "match"
+      },
+      "lvs_netgen": {
+       "failures": [],
+       "status": "passed",
+       "unverified_reasons": [],
+       "verdict": "match"
+      }
+     },
+     "reference": {
+      "lvs_klayout": {
+       "failures": [],
+       "status": "passed",
+       "unverified_reasons": [],
+       "verdict": "match"
+      },
+      "lvs_netgen": {
+       "failures": [],
+       "status": "passed",
+       "unverified_reasons": [],
+       "verdict": "match"
+      }
+     }
+    },
     "status": "equal_to_reference",
+    "verdict_order": [
+     "netgen_basic",
+     "klayout_basic",
+     "signoff_netgen",
+     "signoff_klayout"
+    ],
     "verdicts": {
      "native": [
+      "match",
+      "match",
       "match",
       "match"
      ],
      "reference": [
+      "match",
+      "match",
       "match",
       "match"
      ]
     }
    },
    "native": {
-    "bytes": 374534,
+    "bytes": 65110,
     "cell_gds_sha256": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
     "cell_lef_sha256": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
     "coordinate_divisor": 1,
     "elements": {
      "boundary": 1,
-     "instances": 131,
+     "instances": 134,
      "labels": 12,
      "pin_shapes": 24,
-     "routed_vias": 101,
-     "routed_wires": 4964,
+     "routed_patches": 8,
+     "routed_vias": 88,
+     "routed_wires": 104,
+     "stored_wire_records": 4898,
      "supply_vias": 9,
      "supply_wires": 11
     },
-    "foreign_bindings_checked": 8,
+    "foreign_bindings_checked": 10,
     "gds_dbu_per_micron": 1000,
     "layer_map_sha256": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
     "lef_dbu_per_micron": 1000,
     "pdk_structures": [
      "sky130_fd_sc_hd__tapvpwrvgnd_1",
-     "sky130_fd_sc_hd__xor2_4",
+     "sky130_fd_sc_hd__xor2_2",
      "sky130_fd_sc_hd__fill_1",
      "sky130_fd_sc_hd__fill_2",
+     "sky130_fd_sc_hd__fill_4",
      "sky130_fd_sc_hd__fill_8",
      "sky130_fd_sc_hd__dfxtp_1",
      "sky130_fd_sc_hd__clkbuf_1",
-     "sky130_fd_sc_hd__and2_2"
+     "sky130_fd_sc_hd__and2_0",
+     "sky130_fd_sc_hd__and2_4"
     ],
-    "peak_rss_kib": 16432,
-    "records": 29286,
-    "sha256": "b714fdf15b4c055dfb2263cbd36905cbf2bb3bef527ba8e922d7b098f580619e",
+    "peak_rss_kib": 16824,
+    "records": 5176,
+    "sha256": "48cdfd7ebbb0a81c7db8570486b780aa7e538548980d047a9db72beb49eb9155",
     "via_structures": [
      "VIA_L1M1_PR",
      "VIA_M1M2_PR",
+     "VIA_M1M2_PR_MR",
      "VIA_M2M3_PR"
     ],
     "wall_seconds": 0.04
@@ -363,18 +439,34 @@
    "negative_controls": {
     "deleted_wire": {
      "detected": true,
-     "klayout_lvs": "mismatch",
+     "klayout_lvs_basic": "match",
      "netgen": "mismatch",
      "removed_rect": [
       [
-       40,
-       0
+       16215,
+       14055
       ],
       [
-       440,
-       35720
+       16355,
+       47370
       ]
      ],
+     "signoff_klayout": {
+      "failures": [
+       "KLayout LVS: top pin count layout 11 != schematic 12; unnamed top pin pairs [[None, 'Z[1]']]; labelled top-level layout nets not in the schematic (extra pins/labels): ['z[1]']; reference ports not paired with a layout pin: ['z[1]']"
+      ],
+      "status": "failed",
+      "unverified_reasons": [],
+      "verdict": "mismatch"
+     },
+     "signoff_netgen": {
+      "failures": [
+       "Netgen: lane_smoke: pin lists differ; final result 'Top level cell failed pin matching.'; comp.out reports port errors ('Netlists match uniquely with port errors.'); 1 pins without a matching pin: ['layout-only z[1]']; 1 disconnected nodes: lane_smoke(0):z[1]"
+      ],
+      "status": "failed",
+      "unverified_reasons": [],
+      "verdict": "mismatch"
+     },
      "xor_differences": [
       "69/20      -            1"
      ],
@@ -395,28 +487,43 @@
      "xor_identical": null
     },
     "missing_cell_structure": {
+     "cell": "sky130_fd_sc_hd__tapvpwrvgnd_1",
      "detected": true,
-     "export_error": "{\"code\":\"GDS_CELL_MISSING\",\"message\":\"GDS_CELL_MISSING: structure sky130_fd_sc_hd__and2_2 is absent from the library\",\"status\":\"error\"}",
+     "export_error": "{\"code\":\"GDS_CELL_MISSING\",\"message\":\"GDS_CELL_MISSING: structure sky130_fd_sc_hd__tapvpwrvgnd_1 is absent from the library\",\"status\":\"error\"}",
      "export_exit": 2,
      "xor_differences": [
-      "64/16      -            2",
-      "64/20      -            3",
-      "65/20      -            8",
-      "66/20      -            12",
-      "66/44      -            68",
-      "67/16      -            40",
-      "67/20      -            28",
-      "67/44      -            24",
-      "68/16      -            5",
-      "78/44      -            3",
-      "81/4       -            3",
-      "93/44      -            4",
-      "94/20      -            3",
-      "95/20      -            4",
-      "122/16     -            3",
-      "236/0      -            3"
+      "64/20      -            16",
+      "65/44      -            (no such layer in first layout)",
+      "66/44      -            96",
+      "67/20      -            36",
+      "67/44      -            36",
+      "68/16      -            36",
+      "78/44      -            16",
+      "81/4       -            4",
+      "93/44      -            52",
+      "94/20      -            48"
      ],
      "xor_identical": false
+    },
+    "patches_removed": {
+     "detected": true,
+     "removed": 8,
+     "xor_differences": [
+      "68/20      -            3",
+      "69/20      -            5",
+      "70/20      -            1"
+     ],
+     "xor_identical": false
+    },
+    "planted_drc": {
+     "detected": true,
+     "klayout": {
+      "m2.1": 2,
+      "m2.6": 1
+     },
+     "magic": 2,
+     "xor_differences": null,
+     "xor_identical": null
     },
     "wrong_map_entry": {
      "changed": [
@@ -433,11 +540,18 @@
      ],
      "detected": true,
      "xor_differences": [
-      "69/20      -            27",
+      "69/20      -            23",
       "69/21      -            (no such layer in second layout)"
      ],
      "xor_identical": false
     }
+   },
+   "patches": {
+    "def_rects": 8,
+    "missing": [],
+    "report_routed_patches": 8,
+    "status": "passed",
+    "streamed_elements": 8
    },
    "pdk": "sky130",
    "pdk_inputs": {
@@ -452,18 +566,18 @@
    "read_only": {
     "head": "rev6",
     "status": "passed",
-    "tree_sha256_after": "a539e96a8f5e4cfc4634f7064457aa5923d79babdff4794d6247ebc11cda0442",
-    "tree_sha256_before": "a539e96a8f5e4cfc4634f7064457aa5923d79babdff4794d6247ebc11cda0442"
+    "tree_sha256_after": "495df32c29beb9c293ac7c56931191211f2b79db3de2dac52ab16e7f8b4e6555",
+    "tree_sha256_before": "495df32c29beb9c293ac7c56931191211f2b79db3de2dac52ab16e7f8b4e6555"
    },
    "reference": {
-    "peak_rss_kib": 418168,
-    "sha256": "e2717905b412b8de5f537428fb6b3933af4c4223ed44fe86afc742ec4dd4f000",
+    "peak_rss_kib": 418068,
+    "sha256": "2ec500c25a30102e066c80043a3e2b3acd4a375612e3d5987507935a95a9857c",
     "tool": "KLayout LEF/DEF reader (black box)",
-    "wall_seconds": 1.35
+    "wall_seconds": 1.45
    },
-   "routed_def_sha256": "23b4c5cf2692cc420fea5d35c499e22f37ee233a3ca44f385e19ae01bf21cbbb",
+   "routed_def_sha256": "cb94ea927e9ea7892a0bb5b5a6bef1b0cadac6942492f0b56a15ce8c4eb28424",
    "source_workspace": {
-    "tree_sha256": "a539e96a8f5e4cfc4634f7064457aa5923d79babdff4794d6247ebc11cda0442",
+    "tree_sha256": "495df32c29beb9c293ac7c56931191211f2b79db3de2dac52ab16e7f8b4e6555",
     "unchanged": true
    },
    "status": "passed",
@@ -493,7 +607,10 @@
     "identical": 10,
     "non_pdk_structures": [
      "VIA_Via1_HV",
+     "VIA_Via1_VH",
+     "VIA_Via2_HH",
      "VIA_Via2_HV",
+     "VIA_Via2_VH",
      "lane_smoke"
     ],
     "status": "passed",
@@ -504,11 +621,12 @@
     "citations": true,
     "controls": true,
     "determinism": true,
-    "drc_baseline": true,
+    "drc_clean": true,
     "drc_equal": true,
     "labels": true,
     "lvs_equal": true,
     "lvs_match": true,
+    "patches": true,
     "read_only": true,
     "source_unchanged": true,
     "xor": true
@@ -540,9 +658,9 @@
     "status": "failed",
     "values": {
      "COMP": 3.5870242144476836,
-     "Metal1": 10.222232851473924,
-     "Metal2": 3.0074617346938775,
-     "Metal3": 3.8129211208292846,
+     "Metal1": 10.21131205458374,
+     "Metal2": 3.001329162617428,
+     "Metal3": 3.8171444768383544,
      "Metal4": 0.0,
      "Metal5": 0.0,
      "MetalTop": 0.0,
@@ -550,62 +668,64 @@
     }
    },
    "determinism": {
-    "bytes": 359540,
+    "bytes": 46368,
     "independent_copy_identical": true,
-    "sha256": "e877c9f6305e805642fc14bf6949f01e072a18a45ef7bec49b11f07cede0b4d6",
+    "sha256": "d2c20a1e3c8a149aca53146e9470bd6ddec1315b117da7af5722f3bcebd4996a",
     "status": "passed"
    },
    "drc": {
-    "drc_verdict": "failed",
-    "known_baseline": {
-     "klayout": {
-      "M1.2a": 4,
-      "M2.3": 3
-     },
-     "magic_total": 13
-    },
-    "matches_known_router_baseline": true,
+    "clean": true,
+    "drc_verdict": "passed",
     "native": {
-     "klayout": {
-      "M1.2a": 4,
-      "M2.3": 3
-     },
-     "klayout_cells": {
-      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1": 1,
-      "lane_smoke": 6
-     },
+     "klayout": {},
+     "klayout_cells": {},
      "magic": {
-      "reasons": {
-       "Metal1 spacing < 0.23um (M1.2a)": 6,
-       "Metal2 minimum area < 0.1444um^2 (M2.3)": 10
-      },
-      "total": 13
+      "reasons": {},
+      "total": 0
      }
     },
-    "reference": {
+    "planted_control": {
+     "detected": true,
      "klayout": {
-      "M1.2a": 4,
-      "M2.3": 3
+      "M2.1": 2,
+      "M2.3": 1
      },
-     "klayout_cells": {
-      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1": 1,
-      "lane_smoke": 6
-     },
+     "layer": [
+      36,
+      0
+     ],
      "magic": {
       "reasons": {
-       "Metal1 spacing < 0.23um (M1.2a)": 6,
-       "Metal2 minimum area < 0.1444um^2 (M2.3)": 10
+       "Metal2 minimum area < 0.1444um^2 (M2.3)": 1,
+       "Metal2 width < 0.28um (M2.1)": 2
       },
-      "total": 13
+      "total": 2
+     },
+     "rect_gds": [
+      -5000,
+      -5000,
+      -4900,
+      -4900
+     ]
+    },
+    "reference": {
+     "klayout": {},
+     "klayout_cells": {},
+     "magic": {
+      "reasons": {},
+      "total": 0
      }
     },
     "status": "equal_to_reference"
    },
-   "flow_def_sha256": "f5fd22114abf4e22ba7ea61f88251c7eddaa626fe110af4ff227215dbb5a3084",
+   "flow_def_sha256": "3a07101cc6cd5d74e51daed680bb157b3ba07693e4e46ace9f7f864b4b45876c",
    "hierarchy": {
     "native_cells": [
      "VIA_Via1_HV",
+     "VIA_Via1_VH",
+     "VIA_Via2_HH",
      "VIA_Via2_HV",
+     "VIA_Via2_VH",
      "gf180mcu_fd_sc_mcu7t5v0__and2_2",
      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
      "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
@@ -618,10 +738,13 @@
      "gf180mcu_fd_sc_mcu7t5v0__xor2_2",
      "lane_smoke"
     ],
-    "native_top_instances": 220,
+    "native_top_instances": 219,
     "reference_cells": [
      "VIA_Via1_HV",
+     "VIA_Via1_VH",
+     "VIA_Via2_HH",
      "VIA_Via2_HV",
+     "VIA_Via2_VH",
      "gf180mcu_fd_sc_mcu7t5v0__and2_2",
      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
      "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
@@ -634,7 +757,7 @@
      "gf180mcu_fd_sc_mcu7t5v0__xor2_2",
      "lane_smoke"
     ],
-    "reference_top_instances": 220,
+    "reference_top_instances": 219,
     "same_cell_names": true
    },
    "labels": {
@@ -799,20 +922,60 @@
      },
      "instances": 13
     },
+    "signoff": {
+     "native": {
+      "lvs_klayout": {
+       "failures": [],
+       "status": "passed",
+       "unverified_reasons": [],
+       "verdict": "match"
+      },
+      "lvs_netgen": {
+       "failures": [],
+       "status": "passed",
+       "unverified_reasons": [],
+       "verdict": "match"
+      }
+     },
+     "reference": {
+      "lvs_klayout": {
+       "failures": [],
+       "status": "passed",
+       "unverified_reasons": [],
+       "verdict": "match"
+      },
+      "lvs_netgen": {
+       "failures": [],
+       "status": "passed",
+       "unverified_reasons": [],
+       "verdict": "match"
+      }
+     }
+    },
     "status": "equal_to_reference",
+    "verdict_order": [
+     "netgen_basic",
+     "klayout_basic",
+     "signoff_netgen",
+     "signoff_klayout"
+    ],
     "verdicts": {
      "native": [
+      "match",
+      "match",
       "match",
       "match"
      ],
      "reference": [
+      "match",
+      "match",
       "match",
       "match"
      ]
     }
    },
    "native": {
-    "bytes": 359540,
+    "bytes": 46368,
     "cell_gds_sha256": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
     "cell_lef_sha256": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
     "coordinate_divisor": 2,
@@ -821,8 +984,10 @@
      "instances": 134,
      "labels": 12,
      "pin_shapes": 24,
-     "routed_vias": 77,
-     "routed_wires": 4982,
+     "routed_patches": 1,
+     "routed_vias": 76,
+     "routed_wires": 77,
+     "stored_wire_records": 5014,
      "supply_vias": 9,
      "supply_wires": 11
     },
@@ -842,36 +1007,56 @@
      "gf180mcu_fd_sc_mcu7t5v0__and2_2",
      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1"
     ],
-    "peak_rss_kib": 10328,
-    "records": 28238,
-    "sha256": "e877c9f6305e805642fc14bf6949f01e072a18a45ef7bec49b11f07cede0b4d6",
+    "peak_rss_kib": 10824,
+    "records": 3768,
+    "sha256": "d2c20a1e3c8a149aca53146e9470bd6ddec1315b117da7af5722f3bcebd4996a",
     "via_structures": [
      "VIA_Via1_HV",
-     "VIA_Via2_HV"
+     "VIA_Via1_VH",
+     "VIA_Via2_HH",
+     "VIA_Via2_HV",
+     "VIA_Via2_VH"
     ],
     "wall_seconds": 0.02
    },
    "negative_controls": {
     "deleted_wire": {
      "detected": true,
-     "klayout_lvs": "mismatch",
+     "klayout_lvs_basic": "match",
      "netgen": "mismatch",
      "removed_rect": [
       [
-       100,
-       0
+       21965,
+       20710
       ],
       [
-       500,
-       51350
+       22245,
+       69200
       ]
      ],
+     "signoff_klayout": {
+      "failures": [
+       "KLayout LVS: top pin count layout 11 != schematic 12; unnamed top pin pairs [[None, 'Z[1]']]; labelled top-level layout nets not in the schematic (extra pins/labels): ['z[1]']; reference ports not paired with a layout pin: ['z[1]']"
+      ],
+      "status": "failed",
+      "unverified_reasons": [],
+      "verdict": "mismatch"
+     },
+     "signoff_netgen": {
+      "failures": [
+       "Netgen: lane_smoke: pin lists differ; final result 'Top level cell failed pin matching.'; comp.out reports port errors ('Netlists match uniquely with port errors.'); 1 pins without a matching pin: ['layout-only z[1]']; 1 disconnected nodes: lane_smoke(0):z[1]"
+      ],
+      "status": "failed",
+      "unverified_reasons": [],
+      "verdict": "mismatch"
+     },
      "xor_differences": [
       "36/0       -            1"
      ],
      "xor_identical": false
     },
     "missing_cell_structure": {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and2_2",
      "detected": true,
      "export_error": "{\"code\":\"GDS_CELL_MISSING\",\"message\":\"GDS_CELL_MISSING: structure gf180mcu_fd_sc_mcu7t5v0__and2_2 is absent from the library\",\"status\":\"error\"}",
      "export_exit": 2,
@@ -882,7 +1067,7 @@
       "31/0       -            3",
       "32/0       -            4",
       "33/0       -            68",
-      "34/0       -            40",
+      "34/0       -            36",
       "55/0       -            3",
       "112/1      -            3",
       "204/0      -            4"
@@ -890,10 +1075,29 @@
      "xor_identical": false
     },
     "odd_gf180_coordinate": {
+     "caught_by": "INVALID_WORKSPACE",
      "detected": true,
-     "export_error": "{\"code\":\"GDS_ODD_COORDINATE\",\"message\":\"GDS_ODD_COORDINATE: VIA Via1_HV: coordinate -261 LEF DBU is not a multiple of 2; the GDS grid would need a fractional database unit\",\"status\":\"error\"}",
+     "export_error": "{\"code\":\"INVALID_WORKSPACE\",\"message\":\"INVALID_WORKSPACE: configured routing VIA violates LEF cut ENCLOSURE\",\"status\":\"error\"}",
      "export_exit": 2,
      "planted": "Via1_HV cut rect [-261, -260, 260, 260] (LEF DBU)",
+     "xor_differences": null,
+     "xor_identical": null
+    },
+    "patches_removed": {
+     "detected": true,
+     "removed": 1,
+     "xor_differences": [
+      "36/0       -            2"
+     ],
+     "xor_identical": false
+    },
+    "planted_drc": {
+     "detected": true,
+     "klayout": {
+      "M2.1": 2,
+      "M2.3": 1
+     },
+     "magic": 2,
      "xor_differences": null,
      "xor_identical": null
     },
@@ -918,6 +1122,13 @@
      "xor_identical": false
     }
    },
+   "patches": {
+    "def_rects": 1,
+    "missing": [],
+    "report_routed_patches": 1,
+    "status": "passed",
+    "streamed_elements": 1
+   },
    "pdk": "gf180",
    "pdk_inputs": {
     "cell_gds": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
@@ -931,18 +1142,18 @@
    "read_only": {
     "head": "rev6",
     "status": "passed",
-    "tree_sha256_after": "04cb922437017f20c3e103e02401988e45e2e9e6ebd10a6e63ffb50a70a45a27",
-    "tree_sha256_before": "04cb922437017f20c3e103e02401988e45e2e9e6ebd10a6e63ffb50a70a45a27"
+    "tree_sha256_after": "95358e13853e9b5b2bf96d224060ac31004b0bee0a4f9d947527ce2dcb36bc38",
+    "tree_sha256_before": "95358e13853e9b5b2bf96d224060ac31004b0bee0a4f9d947527ce2dcb36bc38"
    },
    "reference": {
-    "peak_rss_kib": 412588,
-    "sha256": "96c8b44ad31c180053c9b0724a1f00057412b0824b997987cdb2a34be7d822b8",
+    "peak_rss_kib": 412508,
+    "sha256": "42a4422f645dc294483ebda0bfea676da8e70974790274b401ac7c3574f3dd94",
     "tool": "KLayout LEF/DEF reader (black box)",
-    "wall_seconds": 1.32
+    "wall_seconds": 1.48
    },
-   "routed_def_sha256": "f5fd22114abf4e22ba7ea61f88251c7eddaa626fe110af4ff227215dbb5a3084",
+   "routed_def_sha256": "3a07101cc6cd5d74e51daed680bb157b3ba07693e4e46ace9f7f864b4b45876c",
    "source_workspace": {
-    "tree_sha256": "04cb922437017f20c3e103e02401988e45e2e9e6ebd10a6e63ffb50a70a45a27",
+    "tree_sha256": "95358e13853e9b5b2bf96d224060ac31004b0bee0a4f9d947527ce2dcb36bc38",
     "unchanged": true
    },
    "status": "passed",
@@ -956,430 +1167,466 @@
    }
   }
  ],
- "peak_external_rss_kib": 474272,
+ "peak_external_rss_kib": 475152,
  "receipts": [
   {
    "exit_code": 0,
    "name": "klayout_version",
-   "peak_rss_kib": 196956,
-   "wall_seconds": 0.17
+   "peak_rss_kib": 197384,
+   "wall_seconds": 0.16
   },
   {
    "exit_code": 0,
    "name": "magic_version",
-   "peak_rss_kib": 9976,
-   "wall_seconds": 0.02
+   "peak_rss_kib": 10116,
+   "wall_seconds": 0.01
   },
   {
    "exit_code": 0,
    "name": "sky130_export",
-   "peak_rss_kib": 16432,
+   "peak_rss_kib": 16824,
    "wall_seconds": 0.04
   },
   {
    "exit_code": 0,
    "name": "sky130_export_again",
-   "peak_rss_kib": 16388,
-   "wall_seconds": 0.05
+   "peak_rss_kib": 16896,
+   "wall_seconds": 0.04
   },
   {
    "exit_code": 0,
    "name": "sky130_export_other_copy",
-   "peak_rss_kib": 16452,
+   "peak_rss_kib": 16896,
    "wall_seconds": 0.04
   },
   {
    "exit_code": 0,
    "name": "sky130_export_def",
-   "peak_rss_kib": 7616,
+   "peak_rss_kib": 8864,
    "wall_seconds": 0.01
   },
   {
    "exit_code": 0,
    "name": "sky130_reference",
-   "peak_rss_kib": 418168,
-   "wall_seconds": 1.35
+   "peak_rss_kib": 418068,
+   "wall_seconds": 1.45
   },
   {
    "exit_code": 0,
    "name": "sky130_strmxor",
-   "peak_rss_kib": 95872,
-   "wall_seconds": 0.2
+   "peak_rss_kib": 93236,
+   "wall_seconds": 0.14
   },
   {
    "exit_code": 0,
    "name": "sky130_strmxor_self",
-   "peak_rss_kib": 95804,
-   "wall_seconds": 0.2
+   "peak_rss_kib": 92880,
+   "wall_seconds": 0.14
   },
   {
    "exit_code": 0,
    "name": "sky130_native_texts",
-   "peak_rss_kib": 409196,
-   "wall_seconds": 1.34
+   "peak_rss_kib": 408296,
+   "wall_seconds": 1.31
   },
   {
    "exit_code": 0,
    "name": "sky130_reference_texts",
-   "peak_rss_kib": 408164,
-   "wall_seconds": 1.36
+   "peak_rss_kib": 408856,
+   "wall_seconds": 1.45
+  },
+  {
+   "exit_code": 1,
+   "name": "sky130_control_patches_removed_xor",
+   "peak_rss_kib": 93148,
+   "wall_seconds": 0.16
   },
   {
    "exit_code": 0,
    "name": "sky130_native_magic_drc",
-   "peak_rss_kib": 88676,
-   "wall_seconds": 0.73
+   "peak_rss_kib": 88760,
+   "wall_seconds": 0.71
   },
   {
    "exit_code": 0,
    "name": "sky130_native_klayout_drc",
-   "peak_rss_kib": 439444,
-   "wall_seconds": 2.96
+   "peak_rss_kib": 437752,
+   "wall_seconds": 2.74
   },
   {
    "exit_code": 0,
    "name": "sky130_native_density",
-   "peak_rss_kib": 412712,
-   "wall_seconds": 1.54
+   "peak_rss_kib": 411752,
+   "wall_seconds": 1.5
   },
   {
    "exit_code": 0,
    "name": "sky130_reference_magic_drc",
-   "peak_rss_kib": 88836,
-   "wall_seconds": 0.64
+   "peak_rss_kib": 88808,
+   "wall_seconds": 0.61
   },
   {
    "exit_code": 0,
    "name": "sky130_reference_klayout_drc",
-   "peak_rss_kib": 438836,
-   "wall_seconds": 2.9
+   "peak_rss_kib": 436924,
+   "wall_seconds": 2.88
   },
   {
    "exit_code": 0,
    "name": "sky130_reference_density",
-   "peak_rss_kib": 412740,
-   "wall_seconds": 1.44
+   "peak_rss_kib": 412416,
+   "wall_seconds": 1.49
+  },
+  {
+   "exit_code": 0,
+   "name": "sky130_control_planted_magic_drc",
+   "peak_rss_kib": 88744,
+   "wall_seconds": 0.6
+  },
+  {
+   "exit_code": 0,
+   "name": "sky130_control_planted_klayout_drc",
+   "peak_rss_kib": 438268,
+   "wall_seconds": 2.79
   },
   {
    "exit_code": 0,
    "name": "sky130_export_powered",
-   "peak_rss_kib": 7368,
+   "peak_rss_kib": 7940,
    "wall_seconds": 0.01
   },
   {
    "exit_code": 0,
    "name": "sky130_native_lvs_extract",
-   "peak_rss_kib": 74584,
-   "wall_seconds": 1.38
+   "peak_rss_kib": 73748,
+   "wall_seconds": 1.45
   },
   {
    "exit_code": 0,
    "name": "sky130_native_lvs_netgen",
-   "peak_rss_kib": 474004,
+   "peak_rss_kib": 475152,
    "wall_seconds": 0.22
   },
   {
    "exit_code": 0,
    "name": "sky130_native_klayout_lvs",
-   "peak_rss_kib": 434724,
-   "wall_seconds": 2.7
+   "peak_rss_kib": 435512,
+   "wall_seconds": 2.4
   },
   {
    "exit_code": 0,
    "name": "sky130_native_klayout_lvs_xref",
-   "peak_rss_kib": 412416,
-   "wall_seconds": 1.32
+   "peak_rss_kib": 410340,
+   "wall_seconds": 1.31
   },
   {
    "exit_code": 0,
    "name": "sky130_reference_lvs_extract",
-   "peak_rss_kib": 74568,
-   "wall_seconds": 1.35
+   "peak_rss_kib": 74276,
+   "wall_seconds": 1.38
   },
   {
    "exit_code": 0,
    "name": "sky130_reference_lvs_netgen",
-   "peak_rss_kib": 474084,
-   "wall_seconds": 0.21
+   "peak_rss_kib": 474892,
+   "wall_seconds": 0.23
   },
   {
    "exit_code": 0,
    "name": "sky130_reference_klayout_lvs",
-   "peak_rss_kib": 436204,
-   "wall_seconds": 2.73
+   "peak_rss_kib": 437048,
+   "wall_seconds": 2.48
   },
   {
    "exit_code": 0,
    "name": "sky130_reference_klayout_lvs_xref",
-   "peak_rss_kib": 412748,
-   "wall_seconds": 1.32
+   "peak_rss_kib": 410856,
+   "wall_seconds": 1.33
   },
   {
    "exit_code": 1,
    "name": "sky130_control_deleted_wire_xor",
-   "peak_rss_kib": 95732,
-   "wall_seconds": 0.22
+   "peak_rss_kib": 93028,
+   "wall_seconds": 0.15
   },
   {
    "exit_code": 0,
    "name": "sky130_control_deleted_wire_lvs_extract",
-   "peak_rss_kib": 74648,
-   "wall_seconds": 1.47
+   "peak_rss_kib": 74396,
+   "wall_seconds": 1.37
   },
   {
    "exit_code": 0,
    "name": "sky130_control_deleted_wire_lvs_netgen",
-   "peak_rss_kib": 474272,
-   "wall_seconds": 0.24
+   "peak_rss_kib": 475064,
+   "wall_seconds": 0.25
   },
   {
-   "exit_code": 1,
+   "exit_code": 0,
    "name": "sky130_control_deleted_wire_klayout_lvs",
-   "peak_rss_kib": 432972,
-   "wall_seconds": 2.57
+   "peak_rss_kib": 436732,
+   "wall_seconds": 2.45
   },
   {
    "exit_code": 0,
    "name": "sky130_control_deleted_wire_klayout_lvs_xref",
-   "peak_rss_kib": 412088,
-   "wall_seconds": 1.43
+   "peak_rss_kib": 410656,
+   "wall_seconds": 1.33
   },
   {
    "exit_code": 0,
    "name": "sky130_control_wrong_map_export",
-   "peak_rss_kib": 16464,
-   "wall_seconds": 0.04
+   "peak_rss_kib": 16756,
+   "wall_seconds": 0.05
   },
   {
    "exit_code": 1,
    "name": "sky130_control_wrong_map_xor",
-   "peak_rss_kib": 94596,
-   "wall_seconds": 0.2
+   "peak_rss_kib": 93024,
+   "wall_seconds": 0.15
   },
   {
    "exit_code": 1,
    "name": "sky130_control_missing_cell_xor",
-   "peak_rss_kib": 96420,
-   "wall_seconds": 0.22
+   "peak_rss_kib": 93628,
+   "wall_seconds": 0.15
   },
   {
    "exit_code": 2,
    "name": "sky130_control_missing_cell_export",
-   "peak_rss_kib": 16428,
-   "wall_seconds": 0.03
+   "peak_rss_kib": 16948,
+   "wall_seconds": 0.04
   },
   {
    "exit_code": 0,
    "name": "sky130_control_no_boundary_density",
-   "peak_rss_kib": 413856,
-   "wall_seconds": 1.43
+   "peak_rss_kib": 412868,
+   "wall_seconds": 1.36
   },
   {
    "exit_code": 0,
    "name": "gf180_export",
-   "peak_rss_kib": 10328,
+   "peak_rss_kib": 10824,
    "wall_seconds": 0.02
   },
   {
    "exit_code": 0,
    "name": "gf180_export_again",
-   "peak_rss_kib": 10204,
+   "peak_rss_kib": 10744,
    "wall_seconds": 0.02
   },
   {
    "exit_code": 0,
    "name": "gf180_export_other_copy",
-   "peak_rss_kib": 10256,
-   "wall_seconds": 0.03
+   "peak_rss_kib": 10812,
+   "wall_seconds": 0.02
   },
   {
    "exit_code": 0,
    "name": "gf180_export_def",
-   "peak_rss_kib": 7516,
+   "peak_rss_kib": 8560,
    "wall_seconds": 0.01
   },
   {
    "exit_code": 0,
    "name": "gf180_reference",
-   "peak_rss_kib": 412588,
-   "wall_seconds": 1.32
+   "peak_rss_kib": 412508,
+   "wall_seconds": 1.48
   },
   {
    "exit_code": 0,
    "name": "gf180_strmxor",
-   "peak_rss_kib": 96532,
-   "wall_seconds": 0.19
+   "peak_rss_kib": 92868,
+   "wall_seconds": 0.14
   },
   {
    "exit_code": 0,
    "name": "gf180_strmxor_self",
-   "peak_rss_kib": 96004,
-   "wall_seconds": 0.18
+   "peak_rss_kib": 92420,
+   "wall_seconds": 0.14
   },
   {
    "exit_code": 0,
    "name": "gf180_native_texts",
-   "peak_rss_kib": 408456,
-   "wall_seconds": 1.36
+   "peak_rss_kib": 408636,
+   "wall_seconds": 1.45
   },
   {
    "exit_code": 0,
    "name": "gf180_reference_texts",
-   "peak_rss_kib": 409536,
-   "wall_seconds": 1.33
+   "peak_rss_kib": 409716,
+   "wall_seconds": 1.48
+  },
+  {
+   "exit_code": 1,
+   "name": "gf180_control_patches_removed_xor",
+   "peak_rss_kib": 93216,
+   "wall_seconds": 0.14
   },
   {
    "exit_code": 0,
    "name": "gf180_native_magic_drc",
-   "peak_rss_kib": 83680,
-   "wall_seconds": 0.56
+   "peak_rss_kib": 83420,
+   "wall_seconds": 0.6
   },
   {
    "exit_code": 0,
    "name": "gf180_native_klayout_drc",
-   "peak_rss_kib": 442112,
-   "wall_seconds": 9.48
+   "peak_rss_kib": 443984,
+   "wall_seconds": 8.47
   },
   {
    "exit_code": 0,
    "name": "gf180_native_density",
-   "peak_rss_kib": 422960,
-   "wall_seconds": 1.78
+   "peak_rss_kib": 422472,
+   "wall_seconds": 1.7
   },
   {
    "exit_code": 0,
    "name": "gf180_reference_magic_drc",
-   "peak_rss_kib": 83388,
-   "wall_seconds": 0.51
+   "peak_rss_kib": 83700,
+   "wall_seconds": 0.48
   },
   {
    "exit_code": 0,
    "name": "gf180_reference_klayout_drc",
-   "peak_rss_kib": 443144,
-   "wall_seconds": 9.41
+   "peak_rss_kib": 443676,
+   "wall_seconds": 8.3
   },
   {
    "exit_code": 0,
    "name": "gf180_reference_density",
-   "peak_rss_kib": 423308,
-   "wall_seconds": 1.77
+   "peak_rss_kib": 422956,
+   "wall_seconds": 1.8
+  },
+  {
+   "exit_code": 0,
+   "name": "gf180_control_planted_magic_drc",
+   "peak_rss_kib": 83544,
+   "wall_seconds": 0.56
+  },
+  {
+   "exit_code": 0,
+   "name": "gf180_control_planted_klayout_drc",
+   "peak_rss_kib": 441700,
+   "wall_seconds": 8.59
   },
   {
    "exit_code": 0,
    "name": "gf180_export_powered",
-   "peak_rss_kib": 7664,
+   "peak_rss_kib": 8256,
    "wall_seconds": 0.01
   },
   {
    "exit_code": 0,
    "name": "gf180_native_lvs_extract",
-   "peak_rss_kib": 69276,
-   "wall_seconds": 0.61
+   "peak_rss_kib": 68880,
+   "wall_seconds": 0.67
   },
   {
    "exit_code": 0,
    "name": "gf180_native_lvs_netgen",
-   "peak_rss_kib": 257052,
-   "wall_seconds": 0.13
+   "peak_rss_kib": 256788,
+   "wall_seconds": 0.12
   },
   {
    "exit_code": 0,
    "name": "gf180_native_klayout_lvs",
-   "peak_rss_kib": 430204,
-   "wall_seconds": 8.52
+   "peak_rss_kib": 428156,
+   "wall_seconds": 8.31
   },
   {
    "exit_code": 0,
    "name": "gf180_native_klayout_lvs_xref",
-   "peak_rss_kib": 410536,
-   "wall_seconds": 1.31
+   "peak_rss_kib": 409360,
+   "wall_seconds": 1.42
   },
   {
    "exit_code": 0,
    "name": "gf180_reference_lvs_extract",
-   "peak_rss_kib": 68844,
-   "wall_seconds": 0.71
+   "peak_rss_kib": 69048,
+   "wall_seconds": 0.67
   },
   {
    "exit_code": 0,
    "name": "gf180_reference_lvs_netgen",
-   "peak_rss_kib": 256864,
+   "peak_rss_kib": 256788,
    "wall_seconds": 0.13
   },
   {
    "exit_code": 0,
    "name": "gf180_reference_klayout_lvs",
-   "peak_rss_kib": 431588,
-   "wall_seconds": 8.65
+   "peak_rss_kib": 430604,
+   "wall_seconds": 8.5
   },
   {
    "exit_code": 0,
    "name": "gf180_reference_klayout_lvs_xref",
-   "peak_rss_kib": 411592,
-   "wall_seconds": 1.33
+   "peak_rss_kib": 409808,
+   "wall_seconds": 1.3
   },
   {
    "exit_code": 1,
    "name": "gf180_control_deleted_wire_xor",
-   "peak_rss_kib": 96632,
-   "wall_seconds": 0.2
-  },
-  {
-   "exit_code": 0,
-   "name": "gf180_control_deleted_wire_lvs_extract",
-   "peak_rss_kib": 69108,
-   "wall_seconds": 0.7
-  },
-  {
-   "exit_code": 0,
-   "name": "gf180_control_deleted_wire_lvs_netgen",
-   "peak_rss_kib": 257376,
+   "peak_rss_kib": 93260,
    "wall_seconds": 0.14
   },
   {
    "exit_code": 0,
+   "name": "gf180_control_deleted_wire_lvs_extract",
+   "peak_rss_kib": 68672,
+   "wall_seconds": 0.62
+  },
+  {
+   "exit_code": 0,
+   "name": "gf180_control_deleted_wire_lvs_netgen",
+   "peak_rss_kib": 256692,
+   "wall_seconds": 0.11
+  },
+  {
+   "exit_code": 0,
    "name": "gf180_control_deleted_wire_klayout_lvs",
-   "peak_rss_kib": 432240,
-   "wall_seconds": 9.01
+   "peak_rss_kib": 428416,
+   "wall_seconds": 8.9
   },
   {
    "exit_code": 0,
    "name": "gf180_control_deleted_wire_klayout_lvs_xref",
-   "peak_rss_kib": 411604,
-   "wall_seconds": 1.31
+   "peak_rss_kib": 408684,
+   "wall_seconds": 1.34
   },
   {
    "exit_code": 0,
    "name": "gf180_control_wrong_map_export",
-   "peak_rss_kib": 10404,
-   "wall_seconds": 0.05
+   "peak_rss_kib": 10996,
+   "wall_seconds": 0.02
   },
   {
    "exit_code": 1,
    "name": "gf180_control_wrong_map_xor",
-   "peak_rss_kib": 96068,
-   "wall_seconds": 0.16
+   "peak_rss_kib": 92956,
+   "wall_seconds": 0.12
   },
   {
    "exit_code": 1,
    "name": "gf180_control_missing_cell_xor",
-   "peak_rss_kib": 96852,
-   "wall_seconds": 0.17
+   "peak_rss_kib": 92936,
+   "wall_seconds": 0.12
   },
   {
    "exit_code": 2,
    "name": "gf180_control_missing_cell_export",
-   "peak_rss_kib": 10064,
-   "wall_seconds": 0.02
+   "peak_rss_kib": 10780,
+   "wall_seconds": 0.01
   },
   {
    "exit_code": 2,
    "name": "gf180_control_odd_coordinate",
-   "peak_rss_kib": 10312,
-   "wall_seconds": 0.02
+   "peak_rss_kib": 6348,
+   "wall_seconds": 0.0
   }
  ],
- "rustroad_sha256": "7c34a6d358edf278165b55b9ad763833a3957ef0fa0add9b78b5cd56ec66acce",
+ "rustroad_sha256": "ff523a9d542cfd3993b3093d1252346dfc6870e25d7578b872f2e58cd855f261",
  "schema": "rustroad.gds-verification-evidence.v1",
  "scope": {
   "density": "reported_separately",
@@ -1394,5 +1641,5 @@
   "magic": "8.3.678",
   "netgen": "Netgen 1.5.323"
  },
- "wall_seconds": 109.59
+ "wall_seconds": 189.65
 }

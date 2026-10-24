@@ -1,0 +1,701 @@
+{
+ "antenna": {
+  "gf180": {
+   "failures": [],
+   "magic_violations": [],
+   "result": {
+    "primary": {
+     "by_cell": {},
+     "by_rule": {},
+     "tool": "klayout gf180mcu.drc decks=antenna",
+     "total": 0
+    },
+    "secondary": {
+     "by_plane": {},
+     "done": true,
+     "note": "gf180mcuD.tech antenna section is marked incomplete; a clean result is not evidence",
+     "ran": true,
+     "samples": [],
+     "status": "secondary_incomplete_rules",
+     "tool": "magic antennacheck",
+     "top_missing": false,
+     "unparsed_violation_lines": 0,
+     "violations": 0
+    }
+   },
+   "status": "passed"
+  },
+  "sky130": {
+   "failures": [
+    "Magic antenna: 1 violations {'metal3': 1}"
+   ],
+   "magic_violations": [
+    {
+     "cell_use": "sky130_fd_sc_hd__clkbuf_1_0",
+     "limit": 400.0,
+     "plane": "metal3",
+     "ratio": 470.866
+    }
+   ],
+   "result": {
+    "primary": {
+     "by_plane": {
+      "metal3": 1
+     },
+     "done": true,
+     "ran": true,
+     "samples": [
+      {
+       "limit": 400.0,
+       "plane": "metal3",
+       "ratio": 470.866
+      }
+     ],
+     "tool": "magic antennacheck",
+     "top_missing": false,
+     "unparsed_violation_lines": 0,
+     "violations": 1
+    },
+    "secondary": {
+     "reason": "the sky130 KLayout DRC decks contain no antenna rules",
+     "status": "not_available",
+     "tool": "klayout"
+    }
+   },
+   "status": "failed"
+  }
+ },
+ "antenna_eco_handoff": {
+  "sky130": [
+   {
+    "connected_nets": {
+     "clk": {
+      "pins": [
+       "port clk",
+       "rr_clkbuf_2/A"
+      ],
+      "wire_um": {
+       "met2": 16.365,
+       "met3": 53.765
+      }
+     },
+     "rr_clock_2": {
+      "pins": [
+       "rr_clkbuf_0/A",
+       "rr_clkbuf_1/A",
+       "rr_clkbuf_2/X"
+      ],
+      "wire_um": {
+       "met1": 4.46
+      }
+     }
+    },
+    "gate_centre_um": [
+     53.81,
+     16.95
+    ],
+    "instances": [
+     [
+      "rr_clkbuf_2",
+      "sky130_fd_sc_hd__clkbuf_1"
+     ]
+    ],
+    "magic": {
+     "cell_use": "sky130_fd_sc_hd__clkbuf_1_0",
+     "limit": 400.0,
+     "plane": "metal3",
+     "ratio": 470.866
+    }
+   }
+  ]
+ },
+ "determinism": {
+  "gf180": {
+   "def_pass1": "3a07101cc6cd5d74e51daed680bb157b3ba07693e4e46ace9f7f864b4b45876c",
+   "def_pass2": "3a07101cc6cd5d74e51daed680bb157b3ba07693e4e46ace9f7f864b4b45876c",
+   "gds_pass1_native": "d2c20a1e3c8a149aca53146e9470bd6ddec1315b117da7af5722f3bcebd4996a",
+   "gds_pass2_export": "d2c20a1e3c8a149aca53146e9470bd6ddec1315b117da7af5722f3bcebd4996a",
+   "spef_max": [
+    "4ab57040f5a5735905d005a5e610592c41d8e292e72f7b070fcdd73d2f4fbcf9",
+    "4ab57040f5a5735905d005a5e610592c41d8e292e72f7b070fcdd73d2f4fbcf9"
+   ],
+   "spef_min": [
+    "e9df6e78009733329de2d5576aee0ba0b836fc843b3fd7ed5c36988e5f4ba4c2",
+    "e9df6e78009733329de2d5576aee0ba0b836fc843b3fd7ed5c36988e5f4ba4c2"
+   ],
+   "spef_nom": [
+    "79efa330145d88af33dad03beb3a408ec9e0660f9556b7b6b275a8094ee433b1",
+    "79efa330145d88af33dad03beb3a408ec9e0660f9556b7b6b275a8094ee433b1"
+   ],
+   "status": "passed"
+  },
+  "sky130": {
+   "def_pass1": "cb94ea927e9ea7892a0bb5b5a6bef1b0cadac6942492f0b56a15ce8c4eb28424",
+   "def_pass2": "cb94ea927e9ea7892a0bb5b5a6bef1b0cadac6942492f0b56a15ce8c4eb28424",
+   "gds_pass1_native": "48cdfd7ebbb0a81c7db8570486b780aa7e538548980d047a9db72beb49eb9155",
+   "gds_pass2_export": "48cdfd7ebbb0a81c7db8570486b780aa7e538548980d047a9db72beb49eb9155",
+   "spef_max": [
+    "946303746b85023ea5e9fbd0ae84bf17d804503df03c192767475153e021c421",
+    "946303746b85023ea5e9fbd0ae84bf17d804503df03c192767475153e021c421"
+   ],
+   "spef_min": [
+    "bfca9ed6d92b1055b51a8cb3ad2411f3570b431061e3776f3a337a66e65772b7",
+    "bfca9ed6d92b1055b51a8cb3ad2411f3570b431061e3776f3a337a66e65772b7"
+   ],
+   "spef_nom": [
+    "0088f5ab814d8b3f893c1167031cac92ae3af7c272e790d038764019e7236822",
+    "0088f5ab814d8b3f893c1167031cac92ae3af7c272e790d038764019e7236822"
+   ],
+   "status": "passed"
+  }
+ },
+ "pass1": {
+  "evidence_gds": "reference_klayout_streamout",
+  "functional_status": "passed",
+  "pdks": {
+   "gf180": {
+    "by_rule": {
+     "antenna": {},
+     "density": {
+      "DCF.1b": 1,
+      "M1.4": 1,
+      "M2.4": 1,
+      "M3.4": 1,
+      "M4.4": 1,
+      "M5.4": 1,
+      "MT.3": 1,
+      "PL.8": 1
+     },
+     "drc-klayout": {},
+     "drc-magic": {},
+     "lvs-klayout": {
+      "mismatch": 0
+     },
+     "lvs-netgen": {
+      "mismatch": 0
+     }
+    },
+    "cec": "equivalent",
+    "def_sha256": "3a07101cc6cd5d74e51daed680bb157b3ba07693e4e46ace9f7f864b4b45876c",
+    "flow_status": "passed",
+    "opensta_tt_parity": {
+     "clock_skew_rise_fall_ns": [
+      0.027891300619,
+      0.025246473029
+     ],
+     "max_difference_ns": 0.00015754382950383672,
+     "status": "passed"
+    },
+    "routed": {
+     "nets": 19,
+     "terminals": 46,
+     "vias": 76,
+     "wires": 77
+    },
+    "simulation": "passed",
+    "statuses": {
+     "antenna": {
+      "count": 0,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "passed"
+     },
+     "cell_policy": {
+      "status": "passed"
+     },
+     "density": {
+      "count": 8,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "failed"
+     },
+     "drc_klayout": {
+      "count": 0,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "passed"
+     },
+     "drc_magic": {
+      "count": 0,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "passed"
+     },
+     "drv": {
+      "status": "unchecked"
+     },
+     "gds": {
+      "status": "missing"
+     },
+     "lvs_klayout": {
+      "count": 0,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "passed"
+     },
+     "lvs_netgen": {
+      "count": 0,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "passed"
+     },
+     "mpw_min_period": {
+      "status": "unchecked"
+     },
+     "timing_ff_min_hold": {
+      "status": "missing"
+     },
+     "timing_ss_max_hold": {
+      "status": "missing"
+     },
+     "timing_ss_max_setup": {
+      "status": "missing"
+     },
+     "timing_tt_nom": {
+      "hold_violations": 4,
+      "setup_violations": 0,
+      "status": "failed",
+      "worst_hold_ns": -0.396618015239241,
+      "worst_setup_ns": 7.692921932306925
+     }
+    }
+   },
+   "sky130": {
+    "by_rule": {
+     "antenna": {
+      "metal3": 1
+     },
+     "density": null,
+     "drc-klayout": {},
+     "drc-magic": {},
+     "lvs-klayout": {
+      "mismatch": 0
+     },
+     "lvs-netgen": {
+      "mismatch": 0
+     }
+    },
+    "cec": "equivalent",
+    "def_sha256": "cb94ea927e9ea7892a0bb5b5a6bef1b0cadac6942492f0b56a15ce8c4eb28424",
+    "flow_status": "passed",
+    "opensta_tt_parity": {
+     "clock_skew_rise_fall_ns": [
+      0.020402569324,
+      0.011167511344
+     ],
+     "max_difference_ns": 0.0001598639679128988,
+     "status": "passed"
+    },
+    "routed": {
+     "nets": 19,
+     "terminals": 46,
+     "vias": 88,
+     "wires": 104
+    },
+    "simulation": "passed",
+    "statuses": {
+     "antenna": {
+      "count": 1,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "failed"
+     },
+     "cell_policy": {
+      "status": "passed"
+     },
+     "density": {
+      "count": null,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "unverified"
+     },
+     "drc_klayout": {
+      "count": 0,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "passed"
+     },
+     "drc_magic": {
+      "count": 0,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "passed"
+     },
+     "drv": {
+      "status": "unchecked"
+     },
+     "gds": {
+      "status": "missing"
+     },
+     "lvs_klayout": {
+      "count": 0,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "passed"
+     },
+     "lvs_netgen": {
+      "count": 0,
+      "evidence_gds": "reference_klayout_streamout",
+      "status": "passed"
+     },
+     "mpw_min_period": {
+      "status": "unchecked"
+     },
+     "timing_ff_min_hold": {
+      "status": "missing"
+     },
+     "timing_ss_max_hold": {
+      "status": "missing"
+     },
+     "timing_ss_max_setup": {
+      "status": "missing"
+     },
+     "timing_tt_nom": {
+      "hold_violations": 2,
+      "setup_violations": 0,
+      "status": "failed",
+      "worst_hold_ns": -0.00879265096532017,
+      "worst_setup_ns": 9.103182856058021
+     }
+    }
+   }
+  },
+  "peak_rss_kib": 402976,
+  "status": "failed",
+  "wall_seconds": 74.95405187300639
+ },
+ "pass2": {
+  "blocking": [
+   "*:postroute_timing=partial",
+   "sky130:antenna=failed",
+   "sky130:timing_ss_max_setup=missing",
+   "sky130:timing_ss_max_hold=missing",
+   "sky130:timing_ff_min_hold=missing",
+   "sky130:mpw_min_period=unchecked",
+   "sky130:drv=unchecked",
+   "gf180:timing_ss_max_setup=missing",
+   "gf180:timing_ss_max_hold=missing",
+   "gf180:timing_ff_min_hold=missing",
+   "gf180:mpw_min_period=unchecked",
+   "gf180:drv=unchecked"
+  ],
+  "evidence_gds": "native export-gds of pass 1",
+  "failed_items": [
+   "sky130:antenna"
+  ],
+  "functional_status": "passed",
+  "pdks": {
+   "gf180": {
+    "by_rule": {
+     "antenna": {},
+     "density": {
+      "DCF.1b": 1,
+      "M1.4": 1,
+      "M2.4": 1,
+      "M3.4": 1,
+      "M4.4": 1,
+      "M5.4": 1,
+      "MT.3": 1,
+      "PL.8": 1
+     },
+     "drc-klayout": {},
+     "drc-magic": {},
+     "lvs-klayout": {
+      "mismatch": 0
+     },
+     "lvs-netgen": {
+      "mismatch": 0
+     },
+     "xor": {}
+    },
+    "cec": "equivalent",
+    "def_sha256": "3a07101cc6cd5d74e51daed680bb157b3ba07693e4e46ace9f7f864b4b45876c",
+    "flow_status": "passed",
+    "opensta_tt_parity": {
+     "clock_skew_rise_fall_ns": [
+      0.027891300619,
+      0.025246473029
+     ],
+     "max_difference_ns": 0.00015754382950383672,
+     "status": "passed"
+    },
+    "routed": {
+     "nets": 19,
+     "terminals": 46,
+     "vias": 76,
+     "wires": 77
+    },
+    "simulation": "passed",
+    "statuses": {
+     "antenna": {
+      "count": 0,
+      "evidence_gds": "native",
+      "status": "passed"
+     },
+     "cell_policy": {
+      "status": "passed"
+     },
+     "density": {
+      "count": 8,
+      "evidence_gds": "native",
+      "status": "failed"
+     },
+     "drc_klayout": {
+      "count": 0,
+      "evidence_gds": "native",
+      "status": "passed"
+     },
+     "drc_magic": {
+      "count": 0,
+      "evidence_gds": "native",
+      "status": "passed"
+     },
+     "drv": {
+      "status": "unchecked"
+     },
+     "gds": {
+      "status": "passed"
+     },
+     "lvs_klayout": {
+      "count": 0,
+      "evidence_gds": "native",
+      "status": "passed"
+     },
+     "lvs_netgen": {
+      "count": 0,
+      "evidence_gds": "native",
+      "status": "passed"
+     },
+     "mpw_min_period": {
+      "status": "unchecked"
+     },
+     "timing_ff_min_hold": {
+      "status": "missing"
+     },
+     "timing_ss_max_hold": {
+      "status": "missing"
+     },
+     "timing_ss_max_setup": {
+      "status": "missing"
+     },
+     "timing_tt_nom": {
+      "hold_violations": 4,
+      "setup_violations": 0,
+      "status": "failed",
+      "worst_hold_ns": -0.396618015239241,
+      "worst_setup_ns": 7.692921932306925
+     }
+    }
+   },
+   "sky130": {
+    "by_rule": {
+     "antenna": {
+      "metal3": 1
+     },
+     "density": null,
+     "drc-klayout": {},
+     "drc-magic": {},
+     "lvs-klayout": {
+      "mismatch": 0
+     },
+     "lvs-netgen": {
+      "mismatch": 0
+     },
+     "xor": {}
+    },
+    "cec": "equivalent",
+    "def_sha256": "cb94ea927e9ea7892a0bb5b5a6bef1b0cadac6942492f0b56a15ce8c4eb28424",
+    "flow_status": "passed",
+    "opensta_tt_parity": {
+     "clock_skew_rise_fall_ns": [
+      0.020402569324,
+      0.011167511344
+     ],
+     "max_difference_ns": 0.0001598639679128988,
+     "status": "passed"
+    },
+    "routed": {
+     "nets": 19,
+     "terminals": 46,
+     "vias": 88,
+     "wires": 104
+    },
+    "simulation": "passed",
+    "statuses": {
+     "antenna": {
+      "count": 1,
+      "evidence_gds": "native",
+      "status": "failed"
+     },
+     "cell_policy": {
+      "status": "passed"
+     },
+     "density": {
+      "count": null,
+      "evidence_gds": "native",
+      "status": "unverified"
+     },
+     "drc_klayout": {
+      "count": 0,
+      "evidence_gds": "native",
+      "status": "passed"
+     },
+     "drc_magic": {
+      "count": 0,
+      "evidence_gds": "native",
+      "status": "passed"
+     },
+     "drv": {
+      "status": "unchecked"
+     },
+     "gds": {
+      "status": "passed"
+     },
+     "lvs_klayout": {
+      "count": 0,
+      "evidence_gds": "native",
+      "status": "passed"
+     },
+     "lvs_netgen": {
+      "count": 0,
+      "evidence_gds": "native",
+      "status": "passed"
+     },
+     "mpw_min_period": {
+      "status": "unchecked"
+     },
+     "timing_ff_min_hold": {
+      "status": "missing"
+     },
+     "timing_ss_max_hold": {
+      "status": "missing"
+     },
+     "timing_ss_max_setup": {
+      "status": "missing"
+     },
+     "timing_tt_nom": {
+      "hold_violations": 2,
+      "setup_violations": 0,
+      "status": "failed",
+      "worst_hold_ns": -0.00879265096532017,
+      "worst_setup_ns": 9.103182856058021
+     }
+    }
+   }
+  },
+  "peak_rss_kib": 403232,
+  "status": "failed",
+  "wall_seconds": 78.70780020696111
+ },
+ "producer": {
+  "cell_policy": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/fixtures/flow/cell-policy.json",
+  "mode": "policy",
+  "path": "/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target/release/rustsys",
+  "sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae"
+ },
+ "related": {
+  "def_segmentation": "docs/evidence/def-segmentation.json",
+  "extraction": "docs/evidence/extraction-requalification.json",
+  "gds": "docs/evidence/gds-verification.json",
+  "timing": "docs/evidence/timing-baseline.json"
+ },
+ "router_signoff": {
+  "pdks": {
+   "gf180": {
+    "access_test": {
+     "layouts": 22,
+     "status": "passed"
+    },
+    "antenna": {
+     "items": 0,
+     "oracle": "klayout_gf180mcu_antenna_deck",
+     "status": "passed"
+    },
+    "controls": {
+     "lvs_swapped_pins": "rejected",
+     "min_area": "rejected",
+     "notch": "rejected",
+     "placement_only": {
+      "klayout": 0,
+      "magic": 0
+     }
+    },
+    "density": {
+     "items": 8,
+     "status": "failed"
+    },
+    "drc": "passed",
+    "klayout": 0,
+    "lvs": "match",
+    "magic": 0
+   },
+   "sky130": {
+    "access_test": {
+     "layouts": 28,
+     "status": "passed"
+    },
+    "antenna": {
+     "items": 1,
+     "oracle": "magic_antennacheck",
+     "status": "failed"
+    },
+    "controls": {
+     "lvs_swapped_pins": "rejected",
+     "min_area": "rejected",
+     "notch": "rejected",
+     "placement_only": {
+      "klayout": 0,
+      "magic": 0
+     }
+    },
+    "density": {
+     "items": 0,
+     "status": "passed"
+    },
+    "drc": "passed",
+    "klayout": 0,
+    "lvs": "match",
+    "magic": 0
+   }
+  },
+  "peak_rss_kib": 475972,
+  "status": "failed",
+  "wall_seconds": 138.72305374301504
+ },
+ "schema": "rustroad.requalification.v1",
+ "scope": {
+  "cppr": "unchecked",
+  "density": "reported separately",
+  "drc": "foundry decks via scripts/signoff when requested, else missing",
+  "electromigration": "unchecked",
+  "ir_drop": "unchecked",
+  "level": "block/macro (no pad ring, no seal ring)",
+  "lvs": "Netgen + KLayout via scripts/signoff when requested, else missing",
+  "ocv": "unchecked",
+  "signal_integrity": "unchecked",
+  "timing_accuracy_gate_ns": 0.001
+ },
+ "tools": {
+  "klayout": {
+   "sha256": "32441e21747f7718500e6c36c028229f6f1ce2ffcfe5b11acf03305047639ee3",
+   "version": "KLayout 0.30.0"
+  },
+  "opensta": {
+   "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+   "version": "3.1.0"
+  },
+  "rusteda": {
+   "sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
+   "version": "rusteda 0.4.0"
+  },
+  "rustroad": {
+   "sha256": "ff523a9d542cfd3993b3093d1252346dfc6870e25d7578b872f2e58cd855f261",
+   "version": "rustroad-cli 0.5.0"
+  },
+  "ruststa": {
+   "sha256": "9535131cacca7245e3a0507d07c8899d6b0a0c2883cc97cff85b935339a2d8ed",
+   "version": "ruststa 0.4.0 (backends: cpu)"
+  },
+  "rustsys": {
+   "sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "version": "rustsys 0.1.0 (runtimes: cpu, cuda)"
+  },
+  "verilator": {
+   "sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+   "version": "Verilator 5.032 2025-01-01 rev (Debian 5.032-1)"
+  },
+  "yosys": {
+   "sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "version": "Yosys 0.67 (git sha1 2d1509d1b, Release, GNU /usr/bin/c++ 13.3.0)"
+  }
+ }
+}
