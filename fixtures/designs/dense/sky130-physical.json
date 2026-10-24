@@ -29,6 +29,17 @@
       "supply": "power"
     }
   },
+  "constant_cells": [
+    {
+      "cell": "sky130_fd_sc_hd__conb_1",
+      "high": [
+        "HI"
+      ],
+      "low": [
+        "LO"
+      ]
+    }
+  ],
   "filler_cells": [
     "sky130_fd_sc_hd__fill_8",
     "sky130_fd_sc_hd__fill_4",

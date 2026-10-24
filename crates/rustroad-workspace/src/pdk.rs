@@ -345,8 +345,25 @@ pub fn import_pdk_with_config(
                 .find(|m| m.name == name)
                 .ok_or_else(|| invalid(format!("missing tie master {name}")))
         };
-        let (updated, report) = crate::ties::materialize_constants_with(
+        let specs = cfg
+            .constant_cells
+            .iter()
+            .map(|c| {
+                Ok(crate::ties::ConstantCellSpec {
+                    cell: find(&c.cell)?,
+                    high: &c.high,
+                    low: &c.low,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let (dissolved, count) = crate::ties::dissolve_constant_cells(
             &netlist,
+            &specs,
+            &crate::ties::TieLimits::default(),
+        )
+        .map_err(|e| invalid(e.to_string()))?;
+        let (updated, mut report) = crate::ties::materialize_constants_with(
+            &dissolved,
             crate::ties::TieSpec {
                 cell: find(&cfg.tie_high.cell)?,
                 pin: &cfg.tie_high.pin,
@@ -365,6 +382,7 @@ pub fn import_pdk_with_config(
             },
         )
         .map_err(|e| invalid(e.to_string()))?;
+        report.dissolved_cells = count;
         netlist = updated;
         tie_report = Some(report);
     }

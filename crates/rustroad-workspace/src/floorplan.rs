@@ -234,6 +234,20 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
             .find(|m| m.name == name)
             .ok_or_else(|| invalid(format!("missing LEF master {name}")))
     };
+    let specs = cfg
+        .constant_cells
+        .iter()
+        .map(|c| {
+            Ok(crate::ties::ConstantCellSpec {
+                cell: find(&c.cell)?,
+                high: &c.high,
+                low: &c.low,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let (netlist, _) =
+        crate::ties::dissolve_constant_cells(&netlist, &specs, &crate::ties::TieLimits::default())
+            .map_err(|e| invalid(e.to_string()))?;
     let (netlist, ties) = crate::ties::materialize_constants_with(
         &netlist,
         crate::ties::TieSpec {

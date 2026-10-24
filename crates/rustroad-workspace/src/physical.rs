@@ -35,6 +35,18 @@ pub struct TieCell {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rail_input: Option<TieRailInput>,
 }
+/// A dedicated constant cell the input netlist may contain (e.g. sky130
+/// `conb_1` from synthesis): the import dissolves its instances into
+/// literals, which the `tie_high`/`tie_low` policy then implements.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstantCell {
+    pub cell: String,
+    #[serde(default)]
+    pub high: Vec<String>,
+    #[serde(default)]
+    pub low: Vec<String>,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TieRailInput {
@@ -73,6 +85,9 @@ pub struct PhysicalConfig {
     pub io_layer: String,
     pub tie_high: TieCell,
     pub tie_low: TieCell,
+    /// Constant cells of the input netlist to rebuild with the tie policy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constant_cells: Vec<ConstantCell>,
     pub filler_cells: Vec<String>,
     pub alternating_rows: bool,
     #[serde(default)]
@@ -137,6 +152,13 @@ impl PhysicalConfig {
             return Err(Error::Invalid("invalid tap policy".into()));
         }
         if self.max_added_cells > 250_000
+            || self.constant_cells.len() > 16
+            || self.constant_cells.iter().any(|c| {
+                c.high.len() + c.low.len() == 0
+                    || c.high.len() + c.low.len() > 64
+                    || c.cell == self.tie_high.cell
+                    || c.cell == self.tie_low.cell
+            })
             || self.max_tie_fanout == 0
             || self.max_tie_fanout > 10_000
             || self.filler_cells.is_empty()
@@ -165,6 +187,11 @@ impl PhysicalConfig {
             [&self.tie_high, &self.tie_low]
                 .into_iter()
                 .filter_map(|t| t.rail_input.as_ref().map(|r| &r.pin)),
+        )
+        .chain(
+            self.constant_cells
+                .iter()
+                .flat_map(|c| std::iter::once(&c.cell).chain(&c.high).chain(&c.low)),
         )
         .chain(self.filler_cells.iter())
         .chain(self.body_power_pins.iter())

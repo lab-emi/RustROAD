@@ -99,6 +99,7 @@ fn config() -> PhysicalConfig {
             pin: "Y".into(),
             rail_input: None,
         },
+        constant_cells: Vec::new(),
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,
         cell_spacing_sites: 0,
@@ -403,10 +404,14 @@ fn rail_input_ties_are_routed_to_the_cells_own_rail() {
     use rustroad_core::power::RailPolarity;
     let f = Fixture::new();
     let text = netlist()
-        .replace("wire n0;", "wire n0;\nwire n24;")
+        .replace("wire n0;", "wire n0;\nwire n24;\nwire n25;")
+        .replace("assign y[1] = n21;", "assign y[1] = n25;")
         .replace("assign y[2] = n22;", "assign y[2] = n24;")
         .replace("assign y[3] = n23;", "assign y[3] = 1'b0;")
-        .replace("endmodule", "BUF b24 (.A(1'b1), .Y(n24));\nendmodule");
+        .replace(
+            "endmodule",
+            "BUF b24 (.A(1'b1), .Y(n24));\nLO k0 (.Y(n25));\nendmodule",
+        );
     fs::write(f.path("mapped.v"), text).unwrap();
     let mut cfg = config();
     let rail = |supply| {
@@ -425,12 +430,18 @@ fn rail_input_ties_are_routed_to_the_cells_own_rail() {
         pin: "Y".into(),
         rail_input: rail(RailPolarity::Ground),
     };
+    // The synthesized constant cell LO is rebuilt with the tie policy.
+    cfg.constant_cells = vec![rustroad_workspace::physical::ConstantCell {
+        cell: "LO".into(),
+        high: Vec::new(),
+        low: vec!["Y".into()],
+    }];
     fs::write(f.path("profile.json"), serde_json::to_vec(&cfg).unwrap()).unwrap();
     // The lattice router does not take rail ties.
     assert!(f.flow("l", "lattice.json").is_err());
     let ws = f.flow("t", "track.json").unwrap();
     let snapshot = read(&ws, &limits()).unwrap();
-    assert_eq!(snapshot.summary().inserted_tie_cells, Some(1));
+    assert_eq!(snapshot.summary().inserted_tie_cells, Some(2));
     let verilog = |power: bool| {
         let mut out = Vec::new();
         snapshot.export_verilog_with_power(power, &mut out).unwrap();
@@ -446,6 +457,11 @@ fn rail_input_ties_are_routed_to_the_cells_own_rail() {
         "{logical}"
     );
     assert!(!logical.contains("rr_tie_rail"), "{logical}");
+    assert!(!logical.contains("LO k0"), "{logical}");
+    assert!(
+        logical.contains("BUF rr_tie_cell_1 (.Y(rr_tie_net_1), .A(1'b0));"),
+        "{logical}"
+    );
     let powered = verilog(true);
     assert!(
         powered.contains(".A(VDD)") && powered.contains(".A(VSS)"),
@@ -462,7 +478,7 @@ fn rail_input_ties_are_routed_to_the_cells_own_rail() {
         "{nets}"
     );
     assert!(
-        nets.contains("- VSS ( rr_tie_cell_0 A ) + USE GROUND\n  + ROUTED"),
+        nets.contains("- VSS ( rr_tie_cell_0 A ) ( rr_tie_cell_1 A ) + USE GROUND\n  + ROUTED"),
         "{nets}"
     );
     assert!(text.contains("SPECIALNETS 2 ;"));

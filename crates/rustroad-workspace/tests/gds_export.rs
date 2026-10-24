@@ -92,6 +92,7 @@ fn config() -> PhysicalConfig {
             pin: "Y".into(),
             rail_input: None,
         },
+        constant_cells: Vec::new(),
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,
         cell_spacing_sites: 0,

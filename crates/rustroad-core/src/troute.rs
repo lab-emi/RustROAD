@@ -2593,6 +2593,15 @@ mod tests {
             ..RouteLimits::default()
         };
         assert!(route_cpu_ref(&i, &absurd).is_err());
+        // The runtime guard: an estimate below a 1 MiB cap still stops once
+        // the process' peak resident set (any test process) is above it.
+        if crate::memory::peak_rss_bytes().is_some() {
+            let mut small = input(i.terminals.clone(), Vec::new());
+            small.tracks.as_mut().unwrap().memory_mib = 1;
+            assert!(estimate_for(&small, &limits()).unwrap().unwrap().total() < 1 << 20);
+            let err = route_cpu_ref(&small, &limits()).unwrap_err();
+            assert!(err.to_string().contains("peak resident set"), "{err}");
+        }
         let e = memory_estimate(&i, 1_000_000, 10_000).unwrap();
         assert!(e.search > 24_000_000 && e.total() > e.search + e.spatial);
         i.held_bytes = 1 << 40;
