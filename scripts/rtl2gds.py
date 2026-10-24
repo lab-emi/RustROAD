@@ -36,6 +36,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import resource
 import sys
 import time
@@ -462,10 +463,10 @@ def run_pdk(ctx: Context, tag: str, profile: dict) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog=__doc__)
-    ap.add_argument("--design", type=Path, required=True)
+    ap.add_argument("--design", type=Path)
     ap.add_argument("--pdk", default="sky130,gf180", help="comma-separated PDK tags of the manifest")
-    ap.add_argument("--run", type=Path, required=True, help="new evidence directory (must not exist)")
-    ap.add_argument("--base-rev", required=True)
+    ap.add_argument("--run", type=Path, help="new evidence directory (must not exist)")
+    ap.add_argument("--base-rev")
     ap.add_argument("--rustroad", type=Path, default=ROOT / "target/release/rustroad")
     ap.add_argument("--tools", type=Path, default=None, help="tool pin file (default: the manifest's)")
     ap.add_argument("--tool", action="append", default=[], metavar="NAME=PATH", help="override one pinned tool path")
@@ -473,7 +474,17 @@ def main(argv=None) -> int:
     ap.add_argument("--no-determinism", action="store_true")
     ap.add_argument("--preflight-only", action="store_true")
     ap.add_argument("--evidence", type=Path, help="also write the compact tracked evidence JSON")
+    ap.add_argument("--evidence-from", type=Path, metavar="SUMMARY",
+                    help="only rewrite --evidence from an existing summary.json (no run)")
     args = ap.parse_args(argv)
+    if args.evidence_from:
+        if args.evidence is None:
+            ap.error("--evidence-from needs --evidence")
+        data = json.loads(args.evidence_from.read_text())
+        args.evidence.write_text(json.dumps(evidence(data), indent=1, sort_keys=True, default=str) + "\n")
+        return 0
+    if args.design is None or args.run is None or args.base_rev is None:
+        ap.error("--design, --run and --base-rev are required")
     if args.base_rev != "empty":
         print(json.dumps(dict(status="error", code="REVISION_CONFLICT",
                               message="a fresh gate run directory requires --base-rev empty")))
@@ -590,7 +601,8 @@ def main(argv=None) -> int:
 
 
 def evidence(summary: dict) -> dict:
-    """Compact, path-free view for docs/evidence (tracked)."""
+    """Compact, path-free view for docs/evidence (tracked): absolute paths are
+    reduced to their file names; the run's summary.json keeps everything."""
     def strip(v):
         if isinstance(v, dict):
             return {k: strip(x) for k, x in v.items() if k not in ("path", "receipt", "traceback", "testbench",
@@ -598,8 +610,8 @@ def evidence(summary: dict) -> dict:
                                                                   "rerun_dir", "rustroad_path")}
         if isinstance(v, list):
             return [strip(x) for x in v]
-        if isinstance(v, str) and v.startswith("/"):
-            return Path(v).name
+        if isinstance(v, str):
+            return re.sub(r"(^|[\s'\"(=\[])(/[^\s'\"\],]+)", lambda m: m[1] + Path(m[2]).name, v)
         return v
     return strip({k: v for k, v in summary.items() if k not in ("memory_preflight",)})
 

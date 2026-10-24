@@ -220,6 +220,17 @@ class Timing(unittest.TestCase):
             self.assertEqual(T.spef_binding({"tt": s}, {"tt": good})["status"], "failed")
 
 
+class Evidence(unittest.TestCase):
+    def test_absolute_paths_are_reduced_to_names(self):
+        import rtl2gds
+        out = rtl2gds.evidence(dict(revision=dict(branch="feat/rtl2gds-gate"), memory_preflight="x",
+                                    pdks=[dict(reason="see /mnt/a/b/density.json now", path="/x/y",
+                                               files=["/a/b.v", "rel/c.v"])]))
+        self.assertEqual(out["revision"]["branch"], "feat/rtl2gds-gate")
+        self.assertEqual(out["pdks"][0], dict(reason="see density.json now", files=["b.v", "rel/c.v"]))
+        self.assertNotIn("memory_preflight", out)
+
+
 class Controls(unittest.TestCase):
     def test_remove_chain_and_two_terminal_via(self):
         text = ("module t (input wire a, output wire y);\n  wire n2;\n  wire rr_eco_hold_0_n;\n  wire rr_eco_hold_1_n;\n"
