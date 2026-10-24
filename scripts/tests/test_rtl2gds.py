@@ -461,6 +461,22 @@ class Controls(unittest.TestCase):
                       "  NEW met2 ( 20 60 ) M1M2_PR ;\nEND NETS\n")
         self.assertEqual(C.two_terminal_via("x\n" + definition, {"M1M2_PR"}, 2, {"clk"}), ("z", "M1M2_PR", 10, 30))
 
+    def test_remove_all_chains_bypasses_every_hold_cell(self):
+        text = ("module t (input wire a, output wire y);\n  wire rr_eco_hold_0_n;\n  wire rr_eco_hold_1_n;\n"
+                "  wire rr_eco_buf_2_n;\n  wire n1;\n"
+                "  BUF rr_eco_hold_1 (.A(a), .X(rr_eco_hold_1_n));\n"
+                "  BUF rr_eco_hold_0 (.A(rr_eco_hold_1_n), .X(rr_eco_hold_0_n));\n"
+                "  BUF4 rr_eco_buf_2 (.A(rr_eco_hold_0_n), .X(rr_eco_buf_2_n));\n"
+                "  AND2 g0 (.A(rr_eco_buf_2_n), .B(rr_eco_hold_0_n), .X(n1));\n"
+                "  DFF r0 (.CLK(a), .D(n1), .Q(y));\nendmodule\n")
+        out, removed = C.remove_all_chains(text, "rr_eco_hold_", {"BUF": ("A", "X")})
+        self.assertEqual(sorted(removed), ["rr_eco_hold_0", "rr_eco_hold_1"])
+        self.assertIn("BUF4 rr_eco_buf_2 (.A(a), .X(rr_eco_buf_2_n));", out)
+        self.assertIn("AND2 g0 (.A(rr_eco_buf_2_n), .B(a), .X(n1));", out)
+        self.assertNotIn("rr_eco_hold", out)
+        with self.assertRaises(D.GateError):
+            C.remove_all_chains(out, "rr_eco_hold_", {"BUF": ("A", "X")})
+
     def test_inverted_output_and_antenna_candidates(self):
         text = ("module t (input wire a, output wire [1:0] y, output wire z);\n  wire n1;\n"
                 "  assign y[1] = n1;\n  DFF r0 (.D(a), .CLK(a), .Q(y[0]));\n  AND2 g1 (.A(y[0]), .B(a), .X(n1));\n"
