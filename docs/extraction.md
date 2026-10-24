@@ -3,13 +3,17 @@
 `rustroad extract` turns the routed HEAD revision of a workspace into detailed
 IEEE 1481 SPEF. It is a read-only command. It reads the stored routing records
 (`routing.rbin`), the placed pin/obstruction geometry and the supply metal, and
-a per-PDK, per-corner RC profile built from PDK data files. OpenRCX is used only
-as a black-box differential oracle (`scripts/compare_spef.py`). No reference
-source was read, and no native coefficient was fitted to reference output.
+a per-PDK, per-corner RC profile built from PDK data files. Two independent
+black-box oracles check it: OpenRCX (`scripts/compare_spef.py`) and Magic
+(`scripts/magic_rc.py`); `scripts/rc_oracles.py` runs all three together. No
+reference source was read, and no native coefficient was fitted to either
+oracle's output.
 
 Scope is block level. Supply nets are not extracted. Pin capacitance stays in
-Liberty. Via cut and landing-pad self capacitance, wire end caps and diagonal
-coupling are not modeled (see "Limitations"). SI, IR/EM, OCV and CPPR remain
+Liberty. The routed metal is extracted completely: wire bodies, the half-width
+end extensions and the via landing pads. Via cut capacitance, diagonal coupling
+and the overlap coupling of parallel wires on other layers that do not form a
+plate are not modeled (see "Limitations"). SI, IR/EM, OCV and CPPR remain
 `unchecked`. DRC/LVS status is `unchecked`.
 
 ## Command
@@ -106,11 +110,16 @@ Data decisions:
   the nominal 4.5 ohm and states this in `diagnostics`
   (`VIA_R_CORNER_UNAVAILABLE`).
 * `DIAGUNDER` tables and the `RESOVER` tables are not used.
+* Which data source each quantity follows, and how far the PDK's sources
+  disagree, is measured in "Data sources" below
+  (`docs/evidence/rc-data-sources.json`).
 
 ## Physical model
 
 Each routed net is built from its stored lattice records: wires, fixed vias and
-pin-access points.
+pin-access points. Records may be lattice edges or longer collinear segments;
+the graph, the runs and the extracted network are the same either way (unit
+test `compact_segments_extract_like_lattice_edges`).
 
 1. **Graph.** Nodes are `(layer, x, y)` in integer DBU. Wires and vias are the
    edges. A node is a junction unless it is the interior point of a straight
@@ -124,56 +133,82 @@ pin-access points.
    in `opened_loop_resistors` with an `RC_LOOP_OPENED` diagnostic; the timing
    engine rejects meshes. Disconnected nodes are an error.
 3. **Resistance.** A run's resistance is `sheet * centerline_length / width`.
-   A via's resistance is the per-cut value divided by the number of cuts.
-4. **Capacitance.** Every run is cut into intervals along its axis at the
-   extents of nearby shapes. Nearby shapes are other runs, via pads, instance
-   pins, port pins, obstructions and supply metal on routing layers. For each
-   interval:
-   * The nearest conductor below and above selects the calibration context
-     `(over, under)`. A missing exact context falls back to `(over, -)`, then
-     to `(0, under)`, then to `(0, -)`, and is counted.
-   * Each side looks up the nearest same-layer shape within the table range.
-     The row at that edge spacing (linear interpolation, clamped to the first
-     row) gives coupling `cc` and ground `cg`. With no neighbour, the side
+   A via's resistance is the per-cut value divided by the number of cuts. The
+   centreline already runs to the via centre, so pads and end extensions add
+   no resistance.
+4. **Metal.** The routed metal of a net is tiled without overlap:
+   * the **body** of each run: its centreline extent times the width;
+   * **pieces**: the half-width end extension at both ends of every run (DEF
+     default extension; the GDS and DEF writers draw the same), then every via
+     landing pad (the LEF via geometry on routing layers), then every routing
+     patch. Each rectangle minus the same-net metal already present on its
+     layer (bodies, the net's own pins, earlier pieces) is cut into disjoint
+     rectangles by exact integer subtraction (at most 256 per rectangle). An
+     end extension attaches at its run's end node, a pad at its via's node, a
+     patch at the node of the same-net conductor it overlaps most (step 6).
+
+   The union of bodies and pieces is exactly the routed metal (the L corner and
+   via-pad unit tests check the exact union perimeter). Pieces add capacitance
+   only, never a node or a resistor. Each piece has two side strips, one along
+   x and one along y, so all four of its edges take the per-side model below.
+5. **Capacitance.** Every strip (a body or one side strip of a piece) is cut
+   into intervals along its axis at the extents of nearby shapes: other bodies
+   and pieces, instance pins, port pins, obstructions and supply metal on
+   routing layers. For each interval and each of the two sides:
+   * **Exposure.** A side touching same-net metal, or lying inside it (a
+     same-net shape spans the edge, for example an inner corner or the net's
+     own pin), is not exposed and carries no capacitance
+     (`covered_side_intervals`).
+   * **Lateral.** The nearest same-layer shape within the table range gives
+     the row at that edge spacing (linear interpolation, clamped to the first
+     row): coupling `cc` and ground `cg` per side. With no neighbour, the side
      takes the isolated last row. A same-net neighbour shields the side (`cg`
-     only). A touching same-net neighbour removes that side.
-   * The substrate share of `cg` (the OVER-0 row at the same spacing) is
-     grounded. The excess over it is the capacitance to the plane below or
-     above, which is attributed to that plane shape's net.
-   * Ownership: a lateral pair of runs is counted half from each side. A
-     crossing between two runs is owned by the upper run's OVER context.
-     Pins, pads, obstructions and supply metal are counted fully from the
-     run's side.
-   * A partner with no signal net (supply, obstruction, unconnected pin) is
-     ground. A partner pin is attached at that pin's tree node, a pad at its
-     via node, and a run at its end nearest the interval. On the run's own side,
-     each value is split between its two end nodes by position (pi model).
-5. **Routing patches.** `Routes.patches` (the router's same-net notch and
-   corner fills, DEF routing `RECT`) add capacitance, never a node or a
-   resistor. Each patch attaches to the RC node of the same-net conductor it
-   overlaps or touches: largest overlap area first, then the lowest shape
-   index; a wire run attaches at its end nearer the patch centre, a via pad at
-   its via node, a pin at its pin node. The part of the patch not already
-   covered by same-net metal on its layer (wire runs with end extensions, via
-   pads, pin shapes, earlier patches) is cut into disjoint rectangles by exact
-   integer subtraction (at most 256 pieces per patch). Every piece is a
-   conductor shape with two side strips, one along x and one along y, so all
-   four of its edges take the per-side model of step 4: ground with the
-   context and plane split, and lateral coupling to the nearest other-net
-   shape. Other nets' runs see the pieces as neighbours and planes. A strip
-   facing a wire run's end cap owns that coupling (factor 1), because the
-   wire's side model never counts its end caps; strip-to-run sides are split
-   half and half as for two runs. A floating patch, a patch on a net without
-   an RC tree and a patch off a routing layer are explicit errors. The JSON
-   `stats` report `patches` and `patch_pieces`; `scope.routing_patches`
-   states the model. Workspaces without patches extract byte-identically to
-   the previous binary (checked at min/nom/max on both PDKs).
-6. **Coupling output.** Cross-net capacitors are written as SPEF coupling caps,
+     only).
+   * **Plates.** The calibration contexts describe a plate. A conductor on
+     another layer is the plate below (above) only where the metal of its
+     layer covers the strip and reaches at least one strip width beyond both
+     side edges: crossings and clearly wider shapes. The nearest such layer
+     below and above selects the context `(over, under)`; the conductor under
+     each side edge owns that side's plate share. A missing exact context
+     falls back to `(over, -)`, then `(0, under)`, then `(0, -)`, and is
+     counted. Narrower, offset or barely wider metal on other layers is not a
+     plate; it is counted in `nonspanning_plane_intervals` and its overlap
+     coupling is not modeled.
+   * **Split.** A plate below shields the substrate: the whole context value
+     `cg` of the side goes to it. A plate above takes the excess over what
+     goes down (the substrate share `cg_sub`, the OVER-0 row at the same
+     spacing, or the OVER-only row when there is a plate below too). With no
+     plate, `cg` is ground.
+   * **Crossings count from both wires.** The upper wire's OVER cut covers the
+     lower wire's width; the lower wire's UNDER cut covers the upper wire's
+     width and adds its excess as coupling to the upper wire. These are
+     different field regions (the 2.5D two-cut construction); the area under
+     the overlap is in both, which overstates a crossing by about
+     `area_cap * w_upper * w_lower`.
+   * **Ownership of lateral pairs.** Every routed-net shape models its own
+     exposed sides, so a lateral pair is counted half from each side. Pins,
+     obstructions and supply metal do not model themselves and are counted
+     fully from the routed side. A partner with no signal net (supply,
+     obstruction, unconnected pin) is ground. A partner pin is attached at
+     that pin's tree node, a piece at its node, and a body at its end nearest
+     the interval. On the strip's own side, each value is split between its
+     two end nodes by position (pi model).
+6. **Routing patches.** `Routes.patches` (the router's same-net notch and
+   corner fills, DEF routing `RECT`) are pieces of step 4 attached to the RC
+   node of the same-net conductor they overlap or touch: largest overlap area
+   first, then the lowest shape index; a body attaches at its end nearer the
+   patch centre, a piece at its node, a pin at its pin node. A floating patch,
+   a patch on a net without an RC tree and a patch off a routing layer are
+   explicit errors. Patches do not conduct in the native tree (see
+   "Limitations").
+7. **Coupling output.** Cross-net capacitors are written as SPEF coupling caps,
    listed in both nets' `*CAP` sections. So each net's declared total equals
-   its ground plus coupling, just as in the reference SPEF. RustSTA 0.3 grounds
-   coupling at factor 1 (T0074), so for timing this equals a grounded model.
-   Keeping coupling explicit preserves the cross-net information for a later
-   crosstalk analysis and keeps per-net totals comparable.
+   its ground plus coupling, just as in the reference SPEF. RustSTA grounds
+   coupling at factor 1, so for timing this equals a grounded model.
+
+The JSON `stats` add `end_pieces`, `pad_pieces`, `covered_side_intervals` and
+`nonspanning_plane_intervals`; `scope` states `wire_ends`, `metal_union`,
+`via_capacitance`, `crossing_fringe` and `diagonal_coupling`.
 
 ## SPEF conventions
 
@@ -200,7 +235,9 @@ pin-access points.
 Estimate made before implementation, at the default caps with one corner and
 one thread (the extractor is serial and deterministic):
 
-* 2 M shapes x 56 B = 112 MiB;
+* 2 M shapes x 56 B = 112 MiB (bodies, pieces and passive shapes share this
+  cap; a run adds at most two end pieces and a via at most one pad per routing
+  layer before subtraction);
 * 8 M bin entries x 4 B, plus the map, < 128 MiB;
 * 500 k nodes with keys and adjacency, about 64 MiB;
 * 1 M couplings x about 64 B (BTreeMap) = 64 MiB;
@@ -208,209 +245,400 @@ one thread (the extractor is serial and deterministic):
 * the workspace read itself is under 16 MiB of `design.json`, about 200 MiB parsed.
 
 That is about 0.7 GiB peak, under the 2 GiB per-test-binary limit. There are no
-paths, cuts or cones. Each net is one linear walk, and the neighbour search is
-bounded by the window, `max_candidates` and `max_work`.
+paths, cuts or cones. Each net is one linear walk, the neighbour search is
+bounded by the window, `max_candidates` and `max_work`, and each piece
+subtraction by `max_candidates` and 256 pieces.
 
-Measured on the pipeline fixture:
+Measured on the pipeline designs (`docs/evidence/extraction-oracles-*.json`):
 
-* native extraction: 0.02-0.04 s and 8.0-8.2 MiB peak RSS per run (36 runs);
-* full comparison campaign (169 guarded processes): 28.4 s wall clock, 136 MiB
-  peak child RSS (RustSTA import);
-* OpenRCX container: 109-125 MiB, under 1 s per run.
+| run | wall | peak RSS |
+|---|---|---|
+| native extraction, per corner | 0.015-0.020 s | 8.5-9.4 MiB |
+| OpenRCX container, per corner | 0.32-0.45 s | 110-127 MiB |
+| Magic capacitance run (hierarchical + flat), per corner | 0.46-0.87 s | 67-73 MiB |
+| Magic resistance run (terminal layout), per corner | 0.26-0.36 s | 67-73 MiB |
+| `rc_oracles.py campaign`, one design, both PDKs, with four ablation binaries (about 780 guarded processes) | 44-50 s | 136 MiB (largest child, RustSTA import) |
+| `cargo build --release --bins` (4 jobs) | 10-12 s | 0.69 GiB |
+| `cargo test --workspace` (4 threads) | 4.4 s | 0.57 GiB |
+| ablation builds (three variants, 4 jobs each) | 50 s | 0.66 GiB |
 
-Builds and tests used `CARGO_BUILD_JOBS=4`, `RUST_TEST_THREADS=4` and
+No run exceeds 4 GiB, so no scale lock is needed. Builds and tests used
+`CARGO_BUILD_JOBS=4`, `RUST_TEST_THREADS=4` and
 `systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G`.
 
 ## Verification
 
-* **Unit tests.**
-  * `rustroad-core::extract`: an analytic straight wire (10 ohm, 8e-4 pF, by
-    hand); a parallel pair (coupling counted once, per-side ground); a branch,
-    via and mid-run pin tree with exact resistor values; run splitting and loop
-    opening; plane coupling with an explicit fallback and an exact hand total;
-    budgets; and profile-width mismatch. Patches: a hand-computed patch beside
-    a wire (the covered wire side drops out, the three exposed patch edges are
-    added at the nearer end node, the tree is unchanged); an overlapping patch
-    counts only its uncovered piece; a fully covered patch adds nothing; a
-    patch couples once to a parallel net and owns the coupling to a facing
-    wire end; floating, unrouted and cut-layer patches fail.
-  * `rustroad-formats::spef`: syntax, the name map, escaping, exact totals,
-    determinism, and rejection of invalid values.
-* **Integration tests** (`crates/rustroad-workspace/tests/extraction.rs`, on a
-  routed 7-net fixture):
-  * byte-identical rerun;
-  * unchanged workspace tree;
-  * one D_NET and one tree per net;
-  * refusals that leave no output and no temporary file: output inside the
-    workspace, corner mismatch, technology LEF mismatch, missing layer, byte
-    cap, and zero cap.
-* **Independent resistance accounting** (campaign). For each net, the Python
-  harness recomputes `sum(Rs*L/W) + vias` from the exported route records and
-  the profile, then compares it with the SPEF resistors. The maximum relative
-  error is 2.5e-6 on both PDKs at every corner.
-* **Negative controls** (campaign, both PDKs, all detected):
+* **Unit tests** (`rustroad-core::extract`, all values derived by hand from
+  the test rows):
+  * an analytic straight wire (10 ohm; ground 2 x 4e-5 x 10 um plus two end
+    extensions of 0.2 um exposed edge each);
+  * a parallel pair (coupling counted once over the bodies and the facing end
+    extensions, per-side ground);
+  * the exact union perimeter of an L corner (20.4 um; inner-corner sides are
+    covered, the outer corner is one piece);
+  * a via with 0.2 x 0.2 um pads: M1 union perimeter 10.7 um and M2 10.8 um,
+    five M1 pad pieces, a neighbour 0.45 um from the pad edge couples once;
+  * sides inside the net's own pin are not exposed;
+  * a crossing counted from both cross-sections (upper OVER cut with
+    substrate shielding, lower UNDER excess);
+  * narrower parallel metal below is not a plate;
+  * compact segments extract exactly like lattice edges;
+  * patch beside a wire, overlapping patch, fully covered patch, patch facing
+    a parallel net and a wire end, floating/unrouted/cut-layer patches;
+  * a branch, via and mid-run pin tree with exact resistor values; run
+    splitting and loop opening; budgets; profile-width mismatch.
+* **Integration tests** (`crates/rustroad-workspace/tests/extraction.rs`, a
+  routed 7-net fixture): byte-identical rerun; unchanged workspace tree; one
+  D_NET and one tree per net; refusals that leave no output and no temporary
+  file (output inside the workspace, corner mismatch, technology LEF mismatch,
+  missing layer, byte cap, zero cap).
+* **Python tests** (`scripts/tests/test_rc_oracles.py`): GDS record round trip
+  and truncation refusal; Magic `.ext` parsing with alias resolution and
+  record-order independence; instance mapping including flipped rows and a
+  wrong corner; `.res.ext` blocks; back-annotation scaling; the target bounds.
+* **Campaign self-checks and controls** (`scripts/rc_oracles.py`, both
+  designs and both PDKs, all passed): native byte-identical rerun; read-only
+  workspace; refusal of output inside the workspace and of a corner mismatch;
+  independent resistance accounting from the route records (max relative
+  error 3.0e-6); Magic determinism (two runs, exact per-net values);
+  back-annotation fidelity (OpenRCX's per-net totals on the native trees time
+  within 0.31 ps of OpenRCX's own SPEF at every corner); negative controls:
+  x3 resistance profile (fails the R target against both oracles), dropped
+  D_NET, renamed net, dropped `*I` connection (coverage fails; RustSTA
+  rejects), planted open in the GDS (Magic harness refuses the split net).
+* **Magic rule controls** (`scripts/magic_rc.py controls`,
+  `docs/evidence/rc-magic-controls.json`): isolated met2/met1 (Sky130) and
+  Metal2/Metal1 (GF180) wires extract to Magic's own
+  `areacap * area + perimeter * perimc` within 1.4e-6, so the `.ext` parsing,
+  units and style selection are right.
 
-  | control | detected by |
-  |---|---|
-  | x3 resistance profile | R target fails; C unchanged |
-  | dropped D_NET | coverage fails; RustSTA `missing SPEF annotation` |
-  | net renamed to an unknown name | coverage fails; RustSTA rejects |
-  | removed `*I` sink connection | `*CONN` mismatch; RustSTA rejects |
-  | output inside the workspace | refused |
-  | corner mismatch | refused |
+## Oracles
 
-## Comparison against OpenRCX (black box)
+**OpenRCX** (pinned `openroad/orfs` image `f152917e`) reads the DEF the flow
+writes (maximal collinear runs, geometry-identical to the native GDS), the PDK
+technology and cell LEF and the calibration table of the corner, with
+`-max_res 0 -coupling_threshold 0.1 -no_merge_via_res`. Its nominal SPEF equals
+the flow's own OpenRCX SPEF net for net on both designs. It reads the same
+calibration tables as the native profile, so for capacitance it checks the
+geometric model; its resistance comes from the tables' `RESOVER` rows and the
+LEF via resistances (see "Data sources").
 
-`scripts/compare_spef.py campaign --workspace .work/extract-final --base-rev empty`
-works on byte-checked copies of `.work/rc-timing/ready`. It runs:
+**Magic** (pinned signoff image `4c48415d8bd0`, Magic 8.3.678) is independent
+in both data and algorithm for capacitance (its own area, perimeter, sidewall
+and overlap rules per corner variant) and sees the real cell layouts. The
+harness (`scripts/magic_rc.py`):
 
-* the native extractor at min, nom and max;
-* OpenRCX in the pinned `openroad/orfs` image (`f152917e`), with the
-  harness's own flags (`-max_res 0 -coupling_threshold 0.1 -no_merge_via_res`)
-  and the same rules file per corner. It is run on two DEFs:
-  * **harness DEF**: the DEF exactly as the flow writes it, one path per
-    lattice edge. Its nominal output reproduces the ready run's SPEF byte for
-    byte, apart from `*DATE`.
-  * **merged DEF**: the same file with collinear lattice edges merged through
-    points that are not a via, a pin access or a branch. Each edge already
-    carries the DEF default half-width extension, so the metal union is
-    identical. The script checks this net by net, layer by layer and track by
-    track, and the via lists are identical.
-* RustSTA 0.3 at tt+nom, ss+max and ff+min, using the Liberty from owner
-  decision (f) with only its wire-load groups projected out, the frozen
-  post-route SDC, and each SPEF in turn.
+* exports the native GDS, DEF, routes and connectivity of the workspace
+  (read-only commands);
+* capacitance: reads the GDS with the GDS via structures flattened on input
+  (`gds flatglob VIA_*`; hierarchical via cells lose substrate capacitance in
+  Magic's hierarchical adjustment), extracts the hierarchy once (instance
+  transforms and a standalone extraction of every cell master) and then the
+  flattened design. A net's routing capacitance is its flat node capacitance
+  (substrate plus every coupling record) minus the standalone capacitance of
+  its cell pin nodes, which Liberty already holds. Values are read from the
+  raw `.ext` records with exactly rounded sums (`ext2spice` was not used:
+  in flat mode it drops some substrate capacitance);
+* resistance: extracts a routing-only terminal layout (cell instances
+  removed, one port cell at every routed pin access point) with
+  `extract do resistance` and zero `extresist` thresholds. A net's resistance
+  is the sum of its network's resistors; terminals are matched by position
+  (Magic sometimes names a terminal node after the net);
+* maps every Magic node to a native net through the instance placement
+  (transform against the DEF component corner) and the pin names, and refuses
+  any open, short, merged or unmapped net;
+* corner styles follow the profile's `magic_variant`: `ngspice(lrlc)`,
+  `ngspice()`, `ngspice(hrhc)`.
 
-Targets were fixed before measuring:
+Magic has no SPEF writer, so timing against Magic back-annotates its per-net
+totals onto the native RC trees (every node capacitance and resistor of a net
+scaled by one factor; couplings grounded at their own node, factor 1, as
+RustSTA does). The fidelity control shows this is sound on these designs: the
+same back-annotation of OpenRCX's totals reproduces OpenRCX's own timing
+within 0.31 ps at every corner. Per-net totals carry the timing; resistance and
+the distribution of capacitance along a net do not move slack measurably here.
 
-* total design wire C within +/-10 %;
-* per-net total C within +/-20 % for nets with reference C >= 5 fF;
-* per-net total R within +/-20 % for nets with reference R >= 20 ohm;
-* endpoint setup/hold slack delta <= 10 ps.
+## Three-way comparison (stream extract2, 2026-10-24)
 
-Results (native vs reference; the evidence is
-`docs/evidence/extraction-comparison.json`):
-
-| PDK | RC | reference DEF | total C | per-net C (n, min..max) | per-net R (n, min..max) |
-|---|---|---|---|---|---|
-| sky130 | min | merged | -5.9 % pass | 8, -18.5..+3.7 % pass | 19, -69.7..-36.4 % **fail** |
-| sky130 | nom | merged | -6.2 % pass | 9, -18.5..+3.9 % pass | 19, -19.4..-2.6 % pass |
-| sky130 | max | merged | -7.1 % pass | 11, -16.7..+5.8 % pass | 19, +7.0..+139 % **fail** |
-| gf180 | min | merged | -7.1 % pass | 12, -7.2..+1.3 % pass | 19, +0.9..+13.4 % pass |
-| gf180 | nom | merged | -7.9 % pass | 13, -8.1..+1.1 % pass | 19, -2.5..-1.3 % pass |
-| gf180 | max | merged | -9.0 % pass | 13, -9.2..+0.6 % pass | 19, +15.2..+177 % **fail** |
-| sky130 | min/nom/max | harness | -59.0/-59.3/-60.0 % **fail** | all **fail** (-73..-40 %) | all **fail** |
-| gf180 | min/nom/max | harness | -60.3/-60.8/-61.4 % **fail** | all **fail** (-76..-52 %) | all **fail** |
-
-Net coverage and every `*CONN` (pins, ports, directions) match the reference
-in all 12 comparisons.
-
-| PDK | STA | reference DEF | max abs setup / hold delta | native WNS / WHS | reference WNS / WHS |
-|---|---|---|---|---|---|
-| sky130 | tt+nom | merged | 5.76 / 5.28 ps pass | 9.0981 / +0.0369 ns | 9.0926 / +0.0362 ns |
-| sky130 | ss+max | merged | 13.27 / 12.36 ps **fail** | 8.5080 / -0.0371 ns | 8.4951 / -0.0410 ns |
-| sky130 | ff+min | merged | 3.39 / 3.06 ps pass | 9.3326 / +0.0819 ns | 9.3293 / +0.0818 ns |
-| gf180 | tt+nom | merged | 9.53 / 7.60 ps pass | 7.7025 / -0.4182 ns | 7.6930 / -0.4213 ns |
-| gf180 | ss+max | merged | 22.54 / 17.82 ps **fail** | 5.6614 / -0.9435 ns | 5.6389 / -0.9513 ns |
-| gf180 | ff+min | merged | 4.59 / 3.67 ps pass | 8.5722 / -0.1955 ns | 8.5676 / -0.1967 ns |
-| sky130 | tt/ss/ff | harness | 152 / 289 / 99 ps **fail** | | 8.9457 / +0.0002, 8.2193 / -0.1116, 9.2337 / +0.0606 ns |
-| gf180 | tt/ss/ff | harness | 387 / 810 / 213 ps **fail** | | 7.3157 / -0.6355, 4.8515 / -1.4080, 8.3587 / -0.3103 ns |
-
-### Dominant causes (measured, not tuned)
-
-1. **The harness-DEF reference depends on path segmentation, not on metal.**
-   On the identical metal, the reference's own result changes by -56.5 % to
-   -57.6 % in total C. Its STA changes by up to 147 ps (Sky130) and 377 ps
-   (GF180) at tt, and by 276 ps / 787 ps at ss, when only the DEF path
-   segmentation changes from 4964/4982 lattice-edge paths to 92/74 merged
-   paths. Every lattice edge carries its own half-width end extension, so the
-   overlapping metal is counted again per edge. The native extractor builds
-   runs from the connectivity graph and is independent of segmentation by
-   construction.
-   **Implication for the existing flow:** the current OpenRCX-based post-route
-   timing (`docs/postroute-timing.md`) overstates wire C by about 2.3x and wire
-   R by 1.2-2x. That includes the reported GF180 tt hold of -0.6355 ns; with the
-   merged reference it is -0.4213 ns. The DEF writer, or the reference step,
-   should merge collinear lattice edges before reference extraction. That
-   belongs to the router/DEF owners; it is not changed here.
-2. **Resistance at the min/max corners comes from different PDK corner data.**
-   * The native model uses the Magic high/low variants. Contacts there move
-     much more than metal: Sky130 m2c 2.0 / 4.5 / 15 ohm and GF180 via 4.5 /
-     4.5 (fallback) / 15 ohm, against metal ±16 %.
-   * The reference resistance is corner-invariant for vias: 9.3/4.5/3.41 ohm
-     on Sky130 and 4.5 ohm on GF180, observed at min, nom and max in its SPEF.
-     Its metal resistance scales like the calibration tables' fourth column
-     (Sky130 met2 min/nom/max 17.76/23.46/31.55 ohm on the same run, i.e.
-     0.757x/1.345x, matching the column ratios).
-   * At nominal on Sky130, a black-box observation of the clk net shows the
-     gap: an 18.815 um met2 run is 23.46 ohm in the reference and 16.80 ohm
-     natively; a 23.365 um met3 run is 4.04 vs 3.66 ohm. The reference value
-     corresponds to an effective 0.173 ohm/sq at 0.14 um width, against the
-     PDK sheet resistance of 0.125 (Magic and LEF agree). Vias are identical.
-   * GF180 nominal resistance agrees within -2.5 %.
-   The native model keeps the foundry sheet and contact data.
-3. **The ss+max slack delta is driven by capacitance, not resistance.** The
-   sensitivity runs replace only the max-corner resistance by the nominal
-   resistance, either all of it or the vias only. The deltas stay at
-   13.6 / 13.5 ps (Sky130) and 23.0 / 22.9 ps (GF180), so the -7.1 % / -9.0 %
-   total-C gap at the slow corner is the cause. The a priori size of the
-   omitted metal is 10.7 / 6.5 um^2 of via-pad area outside the net's wires
-   and 2.1 / 4.7 um^2 of end caps. Converted with the profile's isolated value,
-   that is 7.9 fF (Sky130) and 3.9 fF (GF180), against measured gaps of
-   6.1 fF and 9.5 fF. This is the most likely dominant omission on Sky130.
-   On GF180 it explains about 40 % of the gap.
-
-No coefficient was changed after these measurements. Modelling pads and end
-caps is the next step. Because the reference deficit is now known, that change
-should also be validated against a second independent oracle (for example
-Magic extraction of the same metal) to avoid a correlated fit.
-
-## Re-measurement after integration (stream b0, 2026-10-24)
-
-`export-def` now writes maximal collinear runs (see `docs/requalification.md`),
-so the flow's own DEF is already at the merged level. The campaign was re-run
-on a fresh policy-producer flow (`--ready` = that run, RustSTA 0.4 binaries
-via `--sta-bin`, router with LEF rules and patches, native patch extraction):
+Commands (final binary `de7428b9…`, RustSTA 0.4 `rusteda c8f71b63…`,
+`ruststa c407c742…`):
 
 ```sh
-python3 scripts/compare_spef.py campaign --workspace .work/runs/spef2 --base-rev empty \
-  --ready .work/runs/r2 --rustroad target/release/rustroad \
-  --sta-bin /mnt/data2/cgao/git/RustROAD/.work/sta-signoff/bin
+python3 scripts/rc_oracles.py campaign --workspace RUN --base-rev empty --inputs CASES.json \
+  --rustroad target/release/rustroad --sta-bin STA_BIN \
+  --variant e0d074d=BASE_BIN --variant pads_ends=... --variant any_overlap_plates=... \
+  --variant strict_plates=...
+python3 scripts/rc_oracles.py evidence --summary RUN/summary.json --out docs/evidence/extraction-oracles-<design>.json
 ```
 
-Evidence: `docs/evidence/extraction-requalification.json` (28.9 s wall, 133 MiB
-peak child RSS, status `partial`: every control and self-check passes, not
-every target). "harness" is now the flow DEF itself; `merge-def` of it differs
-only where it merges through an upper-layer via landing (104 -> 100 Sky130,
-77 -> 72 GF180 paths), and the reference's total C moves by less than 0.05 %.
+Designs (`pipeline.v`, policy producer, LEF-rule router):
 
-| PDK | RC | total C | per-net C (n, min..max) | per-net R (n, min..max) |
-|---|---|---|---|---|
-| sky130 | min | -4.1 % pass | 7, -6.8..+0.3 % pass | 19, -74.9..-36.3 % **fail** |
-| sky130 | nom | -4.2 % pass | 9, -6.4..+2.4 % pass | 19, -20.9..-2.3 % **fail** |
-| sky130 | max | -4.8 % pass | 10, -5.2..+1.9 % pass | 19, +7.4..+137.8 % **fail** |
-| gf180 | min | -7.0 % pass | 12, -6.3..-0.2 % pass | 19, +0.9..+13.5 % pass |
-| gf180 | nom | -7.8 % pass | 13, -7.2..-0.2 % pass | 19, -2.5..-1.3 % pass |
-| gf180 | max | -8.9 % pass | 13, -8.4..-0.4 % pass | 19, +8.7..+178.3 % **fail** |
+* **pre**: the routed flow of `scripts/verify_routing.py` before hold closure
+  (DEF byte-identical to the b0 requalification run);
+  `docs/evidence/extraction-oracles-pre.json`.
+* **hold**: the hold-closed final design of the hold stream (four delay cells
+  on each PDK), read-only copies; `docs/evidence/extraction-oracles-hold.json`.
 
-| PDK | STA | max abs setup / hold delta | native WNS / WHS | reference WNS / WHS |
-|---|---|---|---|---|
-| sky130 | tt+nom | 4.91 / 6.42 ps pass | 9.1081 / -0.0045 ns | 9.1032 / -0.0086 ns |
-| sky130 | ss+max | 9.63 / 12.74 ps **fail** | 8.5310 / -0.0998 ns | 8.5214 / -0.1060 ns |
-| sky130 | ff+min | 3.06 / 3.59 ps pass | 9.3394 / +0.0574 ns | 9.3363 / +0.0548 ns |
-| gf180 | tt+nom | 10.12 / 7.20 ps **fail** | 7.7020 / -0.3945 ns | 7.6929 / -0.3966 ns |
-| gf180 | ss+max | 24.01 / 17.21 ps **fail** | 5.6606 / -0.8987 ns | 5.6387 / -0.9046 ns |
-| gf180 | ff+min | 4.86 / 3.41 ps pass | 8.5719 / -0.1805 ns | 8.5675 / -0.1814 ns |
+No larger routed design existed in `.work/wt/scale` (that stream had not
+produced one), so none was measured.
 
-What changed and why (measured, nothing tuned): the routed design is now the
-LEF-rule router output of the policy producer, so per-net numbers moved. The
-Sky130 nominal per-net R floor moved from -19.4 % to -20.9 % (one net, the
-known 0.125 vs implied 0.173 ohm/sq met2 difference), and the GF180 tt+nom
-setup delta from 9.53 to 10.12 ps; both remain the capacitance and resistance
-causes analysed above. Patch capacitance is 8 x a few aF on Sky130 and one
-patch on GF180 (total-C change < 0.01 %). The omitted-metal estimate is now
-6.2 fF (Sky130 nom) against a 3.1 fF measured gap, and 3.6 fF against 7.5 fF
-on GF180. The controls (x3 R, dropped/renamed net, dropped connection) and the
-independent resistance accounting (max rel. error 3.0e-6) all pass.
+The targets are the fixed ones (total C +/-10 %, per-net C +/-20 % for nets
+>= 5 fF, per-net R +/-20 % for nets >= 20 ohm, endpoint slack delta <= 10 ps),
+evaluated against each oracle. Campaign status is `partial` on both designs:
+every control passes, not every target.
+
+### Endpoint slack delta (max abs setup / hold, ps)
+
+| design | PDK | corner | vs OpenRCX | vs Magic (back-annotated) | OpenRCX vs Magic |
+|---|---|---|---|---|---|
+| pre | sky130 | tt+nom | 1.6 / 4.2 **pass** | 12.8 / 6.2 | 14.1 / 6.4 |
+| pre | sky130 | ss+max | 3.2 / 7.8 **pass** | 57.2 / 23.7 | 60.4 / 22.3 |
+| pre | sky130 | ff+min | 0.9 / 2.5 **pass** | 7.3 / 3.7 **pass** | 8.2 / 6.1 |
+| pre | gf180 | tt+nom | 3.0 / 2.0 **pass** | 34.7 / 29.6 | 37.7 / 31.5 |
+| pre | gf180 | ss+max | 10.2 / 7.4 fail | 58.6 / 25.2 | 60.1 / 22.0 |
+| pre | gf180 | ff+min | 1.2 / 0.6 **pass** | 15.2 / 12.9 | 16.0 / 13.3 |
+| hold | sky130 | tt+nom | 7.4 / 6.3 **pass** | 12.0 / 4.9 | 5.8 / 5.8 |
+| hold | sky130 | ss+max | 12.1 / 11.2 fail | 45.9 / 21.5 | 33.7 / 21.3 |
+| hold | sky130 | ff+min | 4.8 / 3.5 **pass** | 5.9 / 4.1 **pass** | 6.0 / 6.0 |
+| hold | gf180 | tt+nom | 7.8 / 6.7 **pass** | 18.2 / 13.1 | 26.0 / 19.8 |
+| hold | gf180 | ss+max | 21.1 / 18.3 fail | 48.1 / 32.6 | 36.1 / 27.5 |
+| hold | gf180 | ff+min | 3.2 / 2.7 **pass** | 6.9 / 4.6 **pass** | 10.0 / 7.3 |
+
+### Capacitance and resistance targets
+
+| design | PDK | RC | total C vs OpenRCX | per-net C vs OpenRCX | total C vs Magic | per-net C vs Magic | per-net R vs OpenRCX | per-net R vs Magic |
+|---|---|---|---|---|---|---|---|---|
+| pre | sky130 | min | -2.0 % | 7, -4.2..+2.7 % pass | +10.7 % fail | 5, -2.0..+17.5 % pass | -74.9..-36.3 % fail | -65.7..-13.1 % fail |
+| pre | sky130 | nom | -2.3 % | 9, -4.1..+2.6 % pass | +1.6 % | 10, -10.6..+7.7 % pass | -20.9..-2.3 % fail | -37.4..-5.5 % fail |
+| pre | sky130 | max | -3.4 % | 10, -3.8..+3.6 % pass | -13.1 % fail | 10, -22.3..+1.0 % fail | +7.4..+137.8 % fail | -25.6..+11.5 % fail |
+| pre | gf180 | min | -5.9 % | 12, -4.2..+0.8 % pass | +15.5 % fail | 12, +3.9..+16.2 % pass | +0.9..+13.5 % pass | +32.3..+110.1 % fail |
+| pre | gf180 | nom | -6.8 % | 13, -5.0..+0.5 % pass | +18.0 % fail | 12, +5.3..+21.8 % fail | -2.5..-1.3 % pass | -1.2..0.0 % pass |
+| pre | gf180 | max | -8.2 % | 13, -6.1..+0.2 % pass | +3.2 % | 14, -12.6..+11.4 % pass | +8.7..+178.3 % fail | -0.8..0.0 % pass |
+| hold | sky130 | min | -4.3 % | 6, -12.9..+2.7 % pass | +8.9 % | 5, -0.7..+15.9 % pass | -75.4..-36.3 % fail | -66.4..-12.9 % fail |
+| hold | sky130 | nom | -4.7 % | 8, -12.9..+2.5 % pass | -0.6 % | 12, -16.0..+4.2 % pass | -20.9..-2.7 % fail | -37.6..-5.5 % fail |
+| hold | sky130 | max | -6.1 % | 11, -12.0..+1.6 % pass | -14.7 % fail | 15, -30.9..-5.7 % fail | +6.7..+134.2 % fail | -25.7..+11.5 % fail |
+| hold | gf180 | min | -8.6 % | 11, -5.6..+0.7 % pass | +13.0 % fail | 11, -1.2..+14.4 % pass | +0.4..+13.2 % pass | +32.5..+110.1 % fail |
+| hold | gf180 | nom | -9.7 % | 11, -6.7..+0.5 % pass | +14.8 % fail | 11, +1.3..+19.4 % pass | -3.6..-1.3 % pass | -1.2..+0.6 % pass |
+| hold | gf180 | max | -11.3 % fail | 13, -8.1..+0.1 % pass | +3.1 % | 13, -14.7..+11.3 % pass | +8.0..+175.9 % fail | -0.8..+0.5 % pass |
+
+Total C is `sum(ground) + sum(coupling) / 2`. OpenRCX grounds couplings below
+its 0.1 fF threshold in both nets, so its total counts those twice; per-net
+totals (what timing sees) are the fairer comparison and are within the
+per-net target everywhere against OpenRCX. The one total-C miss (hold, GF180
+max, -11.3 %) is on that metric.
+
+### Ablation (max abs slack delta in ps; total C)
+
+Each column is an extractor binary on the same workspaces and oracles:
+`e0d074d` (before this stream), `pads_ends` (pads, end extensions and covered
+sides only), `any_overlap_plates` (plus substrate shielding and both
+cross-sections, plates as before: any overlap on the nearest layer),
+`strict_plates` (plates must span the strip), `final` (plates must reach one
+strip width beyond both edges). The patches are produced by
+`scripts/extraction_ablation.py`.
+
+| design | PDK | corner | e0d074d | pads_ends | any_overlap_plates | strict_plates | final |
+|---|---|---|---|---|---|---|---|
+| pre | sky130 | tt+nom | 6.4 / 12.0 | 4.3 / 9.8 | 11.1 / 8.2 | 5.7 / 11.3 | 4.1 / 12.8 |
+| pre | sky130 | ss+max | 12.7 / 53.0 | 12.9 / 47.5 | 26.4 / 42.2 | 10.8 / 53.0 | 7.8 / 57.2 |
+| pre | sky130 | ff+min | 3.6 / 7.5 | 2.3 / 5.9 | 6.2 / 4.5 | 3.3 / 6.6 | 2.5 / 7.3 |
+| pre | gf180 | tt+nom | 10.1 / 28.6 | 6.5 / 36.9 | 9.4 / 28.3 | 8.3 / 29.4 | 3.0 / 34.7 |
+| pre | gf180 | ss+max | 24.0 / 84.2 | 16.4 / 76.6 | 20.0 / 72.9 | 19.6 / 63.3 | 10.2 / 58.6 |
+| pre | gf180 | ff+min | 4.9 / 11.6 | 3.0 / 16.3 | 4.9 / 11.1 | 4.0 / 12.0 | 1.2 / 15.2 |
+| hold | sky130 | tt+nom | 11.3 / 14.3 | 7.2 / 10.2 | 6.4 / 9.0 | 7.3 / 11.4 | 7.4 / 12.0 |
+| hold | sky130 | ss+max | 21.2 / 48.5 | 12.9 / 39.8 | 10.7 / 37.4 | 12.5 / 43.3 | 12.1 / 45.9 |
+| hold | sky130 | ff+min | 7.3 / 4.7 | 4.4 / 8.4 | 4.0 / 6.6 | 4.4 / 7.1 | 4.8 / 5.9 |
+| hold | gf180 | tt+nom | 18.1 / 19.5 | 9.5 / 24.0 | 13.9 / 33.0 | 10.3 / 17.1 | 7.8 / 18.2 |
+| hold | gf180 | ss+max | 41.4 / 36.6 | 24.3 / 24.8 | 36.4 / 33.6 | 25.5 / 42.6 | 21.1 / 48.1 |
+| hold | gf180 | ff+min | 9.0 / 7.8 | 4.2 / 10.3 | 7.1 / 14.8 | 4.8 / 6.7 | 3.2 / 6.9 |
+
+(each cell: against OpenRCX / against Magic). Every rule was motivated by a
+canonical structure measured against both oracles (next section), not by these
+numbers, and no coefficient changed. The final model improves on `e0d074d`
+against OpenRCX at every corner of both designs (largest: GF180 ss+max
+24.0 -> 10.2 ps and 41.4 -> 21.1 ps). Against Magic it moves both ways,
+because Magic and the calibration tables disagree on the data itself.
+
+### Per-net attribution of the missed corners
+
+For the worst endpoint of each missed comparison, one net at a time is set to
+the oracle's per-net totals on the native trees; the moves add up to the
+measured delta within 0.2 ps (first order holds).
+
+| design | PDK | corner | vs | endpoint | measured | largest moves: net (ps; native - oracle C, fF) |
+|---|---|---|---|---|---|---|
+| pre | gf180 | ss+max | OpenRCX | y[0] setup | -10.2 ps | y[0] (-6.8; -0.28), rr_clock_1 (-2.6; -0.08), rr_clock_2 (-0.7; -0.02) |
+| hold | sky130 | ss+max | OpenRCX | r3/D setup | -12.1 ps | rr_clock_0 (-10.7; -0.51), n5 (-5.5; -0.33), rr_eco_hold_2_n (+1.7; +0.12) |
+| hold | gf180 | ss+max | OpenRCX | y[0] setup | -21.1 ps | rr_clock_1 (-8.8; -0.26), y[0] (-7.1; -0.29), rr_clock_2 (-5.2; -0.16) |
+| pre | sky130 | ss+max | Magic | r2/D setup | -57.2 ps | rr_clock_0 (-33.4; -1.58), n4 (-19.9; -1.20), q[0] (-17.1; -1.64) |
+| pre | gf180 | ss+max | Magic | r3/D setup | -58.6 ps | q[1] (-43.6; -1.34), rr_clock_0 (-24.0; -0.69), rr_clock_1 (+15.5; -0.44) |
+| hold | gf180 | ss+max | Magic | r3/D setup | -48.1 ps | rr_clock_0 (-31.5; -0.91), rr_clock_1 (+16.7; -0.47), q[1] (-15.6; -0.48) |
+
+The slow corner is where the cells are weakest: a clock-buffer or flop output
+moves the endpoint by 20-35 ps per fF at ss (GF180 `clkbuf_1`, `dffq_1`,
+`dlya_1`; Sky130 `clkbuf_1`). A 10 ps budget therefore needs per-net agreement
+of about 0.1-0.3 fF (2-5 %) on the few clock and launch nets of a path.
+
+### Resistance against Magic, element by element
+
+Magic uses the same Magic sheet and contact values as the native profile, so
+for resistance it checks geometry and topology. Its network starts at the
+terminal square, so a terminal on a pin via adds the via's contact plus half a
+square of the pin layer (Sky130 li1: 15.70 ohm at nom against the native 9.3
+ohm cut; 6.85 / 31.5 at min / max). With that element taken out on both sides,
+every Sky130 net agrees within 2.0 % at every corner except `a[1]`, where a
+routing patch bridges two met1 regions: Magic conducts through it and skips two
+M1M2 vias (9 ohm at nom), the native tree does not (patches add capacitance
+only). GF180 agrees within 1.3 % at nom and max on every net; at min Magic's
+`(lrlc)` contacts are 0 (no data) while the native profile keeps 4.5 ohm.
+
+## Data sources
+
+`scripts/rc_data_sources.py` (`docs/evidence/rc-data-sources.json`) tabulates
+every interconnect value the PDK ships, per corner. Selected rows:
+
+| PDK | quantity | corner | native | Magic | LEF | SPICE corner model | calibration table (reference) | other table variants |
+|---|---|---|---|---|---|---|---|---|
+| sky130 | met1/met2 sheet, ohm/sq | min | 0.105 | 0.105 | 0.125 | 0.111 | 0.131 (calibre) | 0.106 (magic), 0.105 (spef_extractor) |
+| sky130 | met1/met2 sheet, ohm/sq | nom | 0.125 | 0.125 | 0.125 | 0.125 | 0.173 (calibre) | 0.126, 0.125 |
+| sky130 | met1/met2 sheet, ohm/sq | max | 0.145 | 0.145 | 0.125 | 0.139 | 0.233 (calibre) | 0.147, 0.145 |
+| sky130 | met3/met4 sheet, ohm/sq | nom | 0.047 | 0.047 | 0.047 | 0.047 | 0.051 | 0.047, 0.047 |
+| sky130 | via (M1M2) ohm/cut | min / nom / max | 2.0 / 4.5 / 15 | 2.0 / 4.5 / 15 | 4.5 | 2.75 / 4.5 / 11.85 | - | - |
+| sky130 | mcon ohm/cut | min / nom / max | 1.6 / 9.3 / 23 | 1.6 / 9.3 / 23 | 9.3 | 3.91 / 9.3 / 18.61 | - | - |
+| gf180 | Metal1-4 sheet, ohm/sq | min / nom / max | 0.076 / 0.090 / 0.104 | 0.076 / 0.090 / 0.104 | 0.090 | 0.078 / 0.090 / 0.102 | 0.063 / 0.091 / 0.145 (plain) | 0.077 / 0.091 / 0.105 (magic) |
+| gf180 | Via1-4 ohm/cut | min / nom / max | 4.5 / 4.5 / 15 | 0 (no data) / 4.5 / 15 | 4.5 | - | - | - |
+
+The calibration table's resistance is its `RESOVER` row (ohm per unit length
+at the table width); times the width it is the sheet value shown. The OpenRCX
+reference uses that row, and the LEF via resistance at every corner (observed
+in its SPEF: 9.3 / 4.5 / 3.41 ohm on Sky130, 4.5 on GF180).
+
+**Which source the native profile follows, and why.** Resistance follows the
+Magic extraction rules of the corner variant (`(lrlc)` / `()` / `(hrhc)`):
+
+* at nominal they agree with the technology LEF, the SPICE interconnect model
+  and two of the three shipped calibration variants (`magic`,
+  `spef_extractor`). The Sky130 `calibre` variant, the one the OpenRCX flow
+  reads, is the outlier: met1/met2 0.173 ohm/sq (+39 %) at nominal, 0.233
+  (+61 % on Magic, +68 % on SPICE) at max. Its met3/met4 is +9 %, li1 -9 %.
+  A width-dependent effective resistance would explain such a value, but no
+  other PDK source states one, so the native profile does not adopt it;
+* the Magic rules are a complete per-corner set, contacts included; the SPICE
+  corner models are the other complete set and lie between Magic's extremes
+  and the nominal value (Sky130 M1M2 max 11.85 against 15 ohm). GF180's
+  SPICE corners agree with Magic within 2 %;
+* the reference's corner-invariant via resistance is the LEF nominal value,
+  which no corner source supports.
+
+So the per-net R gap against OpenRCX is a data-source difference: at Sky130
+nominal it is the `calibre` met1/met2 row (one net misses -20 % by 0.9 %); at
+the min/max corners of both PDKs it is the calibration tables' wider metal
+spread and the corner-invariant LEF via values. Against Magic, which uses the
+same data, resistance agrees element by element (previous section).
+
+Capacitance follows the calibration table (`calibre` for Sky130, the plain
+table for GF180), the same table OpenRCX reads. The isolated-wire value of
+that table against Magic's area + perimeter rules (aF/um at default width):
+
+| PDK | corner | table / Magic - 1 over the routing layers |
+|---|---|---|
+| sky130 | min | +2.2 .. +25.0 % |
+| sky130 | nom | -3.7 .. +14.5 % (Magic nominal equals the LEF CPERSQDIST/EDGECAPACITANCE) |
+| sky130 | max | -11.1 .. +4.8 % |
+| gf180 | min | +3.0 .. +26.7 % |
+| gf180 | nom | +5.4 .. +27.3 % |
+| gf180 | max | +4.2 .. +27.6 % |
+
+On Sky130 Magic's capacitance corners spread -14 % / +22 % around nominal
+(met2 perimeter rule), the calibration table's -5 % / +4 %; on GF180 both
+spread about +/-5 %. This data disagreement explains most of the per-net
+capacitance difference against Magic: GF180 per-net C is above Magic on
+almost every net at min and nom (up to +22 %), as the isolated-wire data
+predict; Sky130 is above Magic at min and below it at max.
+
+## Canonical structures
+
+`scripts/rc_structures.py` (`docs/evidence/rc-structures.json`) puts the same
+geometry through both oracles and evaluates the native model on it (the
+formulas of the unit tests, with the profile's rows). Nominal corner, 40 um
+wires at default width:
+
+| PDK | structure | quantity | native | OpenRCX | Magic |
+|---|---|---|---|---|---|
+| sky130 | isolated met2 | total aF | 3519 | 3507 | 3140 |
+| sky130 | met2 pair at minimum space | total / coupling aF | 6299 / 4194 | 6286 / 4194 | 6233 / 4561 |
+| sky130 | met2 crossing met1 | upper / lower increment aF | 11.2 / 23.5 | 25.7 / 19.5 | 25.3 / 33.9 |
+| sky130 | met2 over met1, aligned | coupling aF | 0 | 3113 | 752 |
+| sky130 | met3 over met1, 0.085 um overlap | coupling aF | 0 | 1645 | 272 |
+| gf180 | isolated Metal2 | total aF | 3331 | 3308 | 2870 |
+| gf180 | Metal2 pair at minimum space | total / coupling aF | 6788 / 5109 | 6765 / 5109 | 5153 / 3552 |
+| gf180 | Metal2 crossing Metal1 | upper / lower increment aF | 26.2 / 45.1 | 31.7 / 26.3 | 28.5 / 41.0 |
+| gf180 | Metal2 over Metal1, aligned | coupling aF | 0 | 2052 | 595 |
+| gf180 | Metal3 over Metal1, 0.085 um overlap | coupling aF | 0 | 973 | 161 |
+
+* Native and OpenRCX agree on isolated wires and pairs within 0.7 % (the
+  remainder is the native end faces): same table, same geometry. Magic is
+  10-13 % lower on isolated wires and differs by +9 % (Sky130) and -30 %
+  (GF180) on pair coupling: different data.
+* Crossings: before this stream the native model gave the upper wire 5.3 aF
+  (Sky130) and the lower wire nothing; both oracles give each wire about
+  20-41 aF. The two-cut model gives 23-45 aF, except the Sky130 upper wire
+  (11.2 aF, about half of both oracles).
+* Stacked parallel wires: the oracles differ by a factor of 4 to 6 (OpenRCX
+  treats the lower wire like a plate; Magic counts the overlap area). The
+  calibration tables have no data for this case, so the native model counts
+  nothing and reports the overlap as `nonspanning_plane_intervals`; Magic's
+  area value (about 15-19 aF/um aligned) is the size of what is left out.
+
+## Acceptance status
+
+* **Slack delta <= 10 ps against a geometry-identical oracle at every corner:
+  not met.** Against OpenRCX the final model meets it at 9 of the 12
+  design x PDK x corner combinations; it misses GF180 ss+max on the pre-hold
+  design by 0.17 ps (10.17 ps) and Sky130 and GF180 ss+max on the hold-closed
+  design (12.1 and 21.1 ps). The attribution names the nets: clock and output
+  nets that are 0.1-0.5 fF (2-6 %) off OpenRCX, at 20-35 ps per fF at ss.
+* **Explained bound against the other oracle.** Against Magic the deltas are
+  up to 58.6 ps at ss+max and 34.7 ps at tt. The two oracles disagree with
+  each other by the same amount (OpenRCX vs Magic, both back-annotated: up to
+  60.4 ps at ss+max, 37.7 ps at tt). The cause is data, not geometry: on an
+  isolated wire the calibration tables are 11-14 % above Magic at nominal, the
+  corner spreads differ (tables +/-6 %, Magic -14 % / +22 %), and crossings and
+  stacked wires are modeled differently (canonical structures). Per net, the
+  attribution lists the nets and capacitance differences that make up each
+  missed delta.
+* **Why no further change was made.** Closing the remaining ss+max deltas
+  against OpenRCX needs per-net agreement of about 2-5 % on a few nets, which
+  is below the spread of the PDK's own data sources and below the difference
+  between the two oracles' structure models. Getting there would mean adopting
+  one oracle's treatment of crossings or stacked wires (fitting), which this
+  stream does not do.
+* Per-net C targets against OpenRCX are met at every corner on both designs.
+  Total C against OpenRCX is met except hold GF180 max (-11.3 %, a metric that
+  double counts OpenRCX's grounded couplings).
+* Resistance discrepancies are explained by data source (calibration `RESOVER`
+  rows and corner-invariant LEF vias against Magic/SPICE corner data) and,
+  against Magic, element by element (terminal element, one patch-bridged
+  net, GF180 `(lrlc)` contacts without data).
+* The hold-closed design keeps its hold margin with the new extractor: worst
+  hold on the native SPEF is +0.082 / +0.067 / +0.115 ns (Sky130 tt/ss/ff) and
+  +0.244 / +0.372 / +0.196 ns (GF180), against +0.076 / +0.056 / +0.112 and
+  +0.241 / +0.364 / +0.194 ns on OpenRCX. Setup stays positive everywhere.
+
+## Earlier comparisons (history)
+
+* Before this stream (`docs/evidence/extraction-comparison.json`,
+  `docs/evidence/extraction-requalification.json`): native was -4..-9 % low in
+  total C against OpenRCX, slack deltas 12.7 ps (Sky130 ss), 10.1 and 24.0 ps
+  (GF180 tt, ss) on the pre-hold design. Those campaigns attributed the gap to
+  pads and end caps; measured now (ablation `pads_ends`), pads and end caps
+  close most of the total-C gap (Sky130 max -4.8 % -> -0.1 %) and part of the
+  GF180 slack delta (ss+max 24.0 -> 16.4 ps); the rest came from the crossing
+  model and the plate rule (16.4 -> 10.2 ps; Sky130 ss+max 12.9 -> 7.8 ps).
+* The per-edge DEF of earlier flows made the OpenRCX reference depend on path
+  segmentation (+134..+144 % C on the same metal); the flow's DEF now writes
+  maximal runs and OpenRCX on it equals the merged level. The campaign checks
+  this per design (`openrcx.flow_reference_nominal`: 0.0 % difference).
 
 ## Reproduction
 
@@ -418,34 +646,52 @@ independent resistance accounting (max rel. error 3.0e-6) all pass.
 free -h
 export CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4
 systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G timeout 900s \
-  cargo build --release --workspace
+  cargo build --release --bins
 python3 scripts/build_rc_profile.py --check
-systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G \
-  /usr/bin/time -v timeout 900s python3 scripts/compare_spef.py campaign \
-  --workspace .work/extract-final --base-rev empty
-python3 scripts/compare_spef.py report --summary .work/extract-final/summary.json
-python3 scripts/compare_spef.py spef --native A.spef --reference B.spef
-python3 scripts/compare_spef.py merge-def --def IN.def --routes ROUTES.json --out OUT.def
+python3 scripts/extraction_ablation.py --out .work/abl --build     # optional ablation binaries
+python3 scripts/verify_routing.py --workspace .work/runs/flowA --base-rev empty \
+  --rustroad target/release/rustroad --rusteda STA/rusteda --ruststa STA/ruststa --producer policy
+systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G /usr/bin/time -v \
+  timeout 3000s python3 scripts/rc_oracles.py campaign --workspace .work/runs/final/pre \
+  --base-rev empty --inputs CASES.json --rustroad target/release/rustroad --sta-bin STA \
+  [--variant NAME=BIN ...]
+python3 scripts/rc_oracles.py report --summary .work/runs/final/pre/summary.json
+python3 scripts/rc_structures.py --out .work/runs/structures --evidence docs/evidence/rc-structures.json
+python3 scripts/magic_rc.py controls --pdk sky130 --out .work/runs/magic_controls/sky130
+python3 scripts/rc_data_sources.py --out docs/evidence/rc-data-sources.json --markdown
+python3 -m pytest -q scripts/tests
 ```
 
-The campaign exits 3 (`partial`): every self-check and control passes, but not
-every target is met.
+`CASES.json` lists, per PDK, the routed workspace, the post-route netlist and
+SDC, and optionally the flow's OpenRCX nominal SPEF (see the script's help).
+The historical OpenRCX-only campaign is `scripts/compare_spef.py campaign`.
 
 ## Limitations
 
 * Only default-width wires and fixed single-layer-cut vias are supported. The
   calibration tables have one width per layer.
-* Via cuts and landing pads are neighbours and planes for other nets, but
-  their own capacitance and wire end caps are omitted (estimated above).
-* Diagonal adjacent-layer coupling is not modeled. A crossing is approximated
-  by a full plane over the overlap interval, with no fringe beyond the
-  footprint.
-* A lateral pair is split half-and-half. Where one side sees a wider via pad,
-  that region is counted about 1.5x.
-* Same-net metal is joined only through the stored lattice graph, not through
-  geometric overlap; routing patches are the exception (attached by overlap,
-  capacitance only, see the physical model).
-* OpenRCX reads DEF `RECT` patches without error but does not extract them, so
-  the reference lacks the patch capacitance (sky130: 8 patches, gf180: 1, a few
-  aF each). The native extractor includes it.
+* Via cut capacitance is not modeled; the pads are.
+* Metal on other layers that does not form a plate (narrower, offset or
+  barely wider parallel wires, partial pad overlaps) adds no coupling. Magic's
+  overlap-area value bounds what is left out (about 15-19 aF/um for aligned
+  stacked minimum wires).
+* Diagonal adjacent-layer coupling (`DIAGUNDER`) is not modeled.
+* A crossing is counted from both cross-sections; the overlap area itself is
+  in both (about `area_cap * w_upper * w_lower`, 2.6 aF for Sky130 met2/met1,
+  against 23-35 aF per crossing).
+* Piece strips count area per strip, so a piece's area term is approximate
+  (under 5 % of a pad's or end's capacitance).
+* A lateral pair is split half-and-half; where one side's nearest shape
+  differs from the other's, the pair is counted unevenly.
+* Same-net metal is joined only through the stored lattice graph. Routing
+  patches add capacitance but do not conduct, so a patch that bridges two
+  same-net regions is not a parallel resistance path (Magic: `a[1]`, about
+  9 ohm at nom on Sky130).
+* OpenRCX reads DEF `RECT` patches without error but does not extract them
+  (Sky130: 8 patches, GF180: 1, a few aF each). The native extractor and Magic
+  include them.
+* Magic timing is a back-annotation of Magic's per-net totals onto the native
+  trees, not a Magic RC network (its `.res.ext` node names are not unique, so
+  the network cannot be rebuilt reliably); the fidelity control bounds the
+  effect on these designs to 0.31 ps.
 * Serial `cpu_ref` only. There is no GPU path and none is claimed.

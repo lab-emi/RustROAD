@@ -1,0 +1,555 @@
+{
+ "corner": "nom",
+ "length_um": 40.0,
+ "pdks": {
+  "gf180": {
+   "magic": {
+    "crossing": {
+     "A": {
+      "coupling_af": 40.9527,
+      "total_af": 1482.9927
+     },
+     "B": {
+      "coupling_af": 40.9527,
+      "total_af": 1790.8227
+     }
+    },
+    "crossing_increment": {
+     "A": {
+      "total_af": 28.512699999999995
+     },
+     "B": {
+      "total_af": 40.95270000000005
+     }
+    },
+    "isolated": {
+     "A": {
+      "coupling_af": 0,
+      "total_af": 2870.49
+     }
+    },
+    "lower_alone": {
+     "B": {
+      "coupling_af": 0,
+      "total_af": 1749.87
+     }
+    },
+    "pair_min_space": {
+     "A": {
+      "coupling_af": 3551.94,
+      "total_af": 5152.82
+     },
+     "B": {
+      "coupling_af": 3551.94,
+      "total_af": 5152.82
+     }
+    },
+    "stacked_aligned": {
+     "A": {
+      "coupling_af": 594.881,
+      "total_af": 3326.431
+     },
+     "B": {
+      "coupling_af": 594.881,
+      "total_af": 4056.781
+     }
+    },
+    "stacked_offset": {
+     "A": {
+      "coupling_af": 160.77,
+      "total_af": 2652.9
+     },
+     "B": {
+      "coupling_af": 160.77,
+      "total_af": 3622.67
+     }
+    },
+    "upper_alone": {
+     "A": {
+      "coupling_af": 0,
+      "total_af": 1454.48
+     }
+    }
+   },
+   "native": {
+    "crossing_increment": {
+     "A": {
+      "total_af": 26.163224
+     },
+     "B": {
+      "total_af": 45.050456000000004
+     },
+     "coupling_af": 45.050456000000004
+    },
+    "isolated": {
+     "A": {
+      "total_af": 3330.7223040000003
+     }
+    },
+    "pair_min_space": {
+     "A": {
+      "coupling_af": 5108.63184,
+      "total_af": 6787.6692195000005
+     },
+     "B": {
+      "coupling_af": 5108.63184,
+      "total_af": 6787.6692195000005
+     }
+    },
+    "stacked_aligned": {
+     "coupling_af": 0.0
+    },
+    "stacked_offset": {
+     "coupling_af": 0.0
+    }
+   },
+   "openrcx": {
+    "crossing": {
+     "A": {
+      "coupling_af": 0.0,
+      "total_af": 1697.036
+     },
+     "B": {
+      "coupling_af": 0.0,
+      "total_af": 1956.2640000000001
+     }
+    },
+    "crossing_increment": {
+     "A": {
+      "total_af": 31.673999999999978
+     },
+     "B": {
+      "total_af": 26.261999999999944
+     }
+    },
+    "isolated": {
+     "A": {
+      "coupling_af": 0.0,
+      "total_af": 3307.7200000000003
+     }
+    },
+    "lower_alone": {
+     "B": {
+      "coupling_af": 0.0,
+      "total_af": 1930.0020000000002
+     }
+    },
+    "pair_min_space": {
+     "A": {
+      "coupling_af": 5108.63,
+      "total_af": 6764.674
+     },
+     "B": {
+      "coupling_af": 5108.63,
+      "total_af": 6764.674
+     }
+    },
+    "stacked_aligned": {
+     "A": {
+      "coupling_af": 2051.94,
+      "total_af": 5359.660000000001
+     },
+     "B": {
+      "coupling_af": 2051.94,
+      "total_af": 5889.999999999999
+     }
+    },
+    "stacked_offset": {
+     "A": {
+      "coupling_af": 972.753,
+      "total_af": 4077.0930000000003
+     },
+     "B": {
+      "coupling_af": 972.753,
+      "total_af": 4810.813
+     }
+    },
+    "upper_alone": {
+     "A": {
+      "coupling_af": 0.0,
+      "total_af": 1665.362
+     }
+    }
+   },
+   "structures": {
+    "crossing": [
+     [
+      "A",
+      "Metal2",
+      30,
+      10,
+      30,
+      30
+     ],
+     [
+      "B",
+      "Metal1",
+      20,
+      20,
+      40,
+      20
+     ]
+    ],
+    "isolated": [
+     [
+      "A",
+      "Metal2",
+      10,
+      10,
+      50.0,
+      10
+     ]
+    ],
+    "lower_alone": [
+     [
+      "B",
+      "Metal1",
+      20,
+      20,
+      40,
+      20
+     ]
+    ],
+    "pair_min_space": [
+     [
+      "A",
+      "Metal2",
+      10,
+      10,
+      50.0,
+      10
+     ],
+     [
+      "B",
+      "Metal2",
+      10,
+      10.56,
+      50.0,
+      10.56
+     ]
+    ],
+    "stacked_aligned": [
+     [
+      "A",
+      "Metal2",
+      10,
+      10,
+      50.0,
+      10
+     ],
+     [
+      "B",
+      "Metal1",
+      10,
+      10,
+      50.0,
+      10
+     ]
+    ],
+    "stacked_offset": [
+     [
+      "A",
+      "Metal3",
+      10,
+      10,
+      50.0,
+      10
+     ],
+     [
+      "B",
+      "Metal1",
+      10,
+      10.17,
+      50.0,
+      10.17
+     ]
+    ],
+    "upper_alone": [
+     [
+      "A",
+      "Metal2",
+      30,
+      10,
+      30,
+      30
+     ]
+    ]
+   }
+  },
+  "sky130": {
+   "magic": {
+    "crossing": {
+     "A": {
+      "coupling_af": 33.9315,
+      "total_af": 1606.2115
+     },
+     "B": {
+      "coupling_af": 33.9315,
+      "total_af": 1752.1415
+     }
+    },
+    "crossing_increment": {
+     "A": {
+      "total_af": 25.321499999999787
+     },
+     "B": {
+      "total_af": 33.931499999999915
+     }
+    },
+    "isolated": {
+     "A": {
+      "coupling_af": 0,
+      "total_af": 3140.29
+     }
+    },
+    "lower_alone": {
+     "B": {
+      "coupling_af": 0,
+      "total_af": 1718.21
+     }
+    },
+    "pair_min_space": {
+     "A": {
+      "coupling_af": 4561.36,
+      "total_af": 6233.2
+     },
+     "B": {
+      "coupling_af": 4561.36,
+      "total_af": 6233.2
+     }
+    },
+    "stacked_aligned": {
+     "A": {
+      "coupling_af": 752.24,
+      "total_af": 3794.1899999999996
+     },
+     "B": {
+      "coupling_af": 752.24,
+      "total_af": 4165.43
+     }
+    },
+    "stacked_offset": {
+     "A": {
+      "coupling_af": 271.715,
+      "total_af": 3693.195
+     },
+     "B": {
+      "coupling_af": 271.715,
+      "total_af": 3684.905
+     }
+    },
+    "upper_alone": {
+     "A": {
+      "coupling_af": 0,
+      "total_af": 1580.89
+     }
+    }
+   },
+   "native": {
+    "crossing_increment": {
+     "A": {
+      "total_af": 11.245500000000002
+     },
+     "B": {
+      "total_af": 23.47772
+     },
+     "coupling_af": 23.47772
+    },
+    "isolated": {
+     "A": {
+      "total_af": 3519.3844400000003
+     }
+    },
+    "pair_min_space": {
+     "A": {
+      "coupling_af": 4194.10818,
+      "total_af": 6298.5363458
+     },
+     "B": {
+      "coupling_af": 4194.10818,
+      "total_af": 6298.5363458
+     }
+    },
+    "stacked_aligned": {
+     "coupling_af": 0.0
+    },
+    "stacked_offset": {
+     "coupling_af": 0.0
+    }
+   },
+   "openrcx": {
+    "crossing": {
+     "A": {
+      "coupling_af": 0.0,
+      "total_af": 1785.43
+     },
+     "B": {
+      "coupling_af": 0.0,
+      "total_af": 1897.98
+     }
+    },
+    "crossing_increment": {
+     "A": {
+      "total_af": 25.738000000000056
+     },
+     "B": {
+      "total_af": 19.470000000000027
+     }
+    },
+    "isolated": {
+     "A": {
+      "coupling_af": 0.0,
+      "total_af": 3507.16
+     }
+    },
+    "lower_alone": {
+     "B": {
+      "coupling_af": 0.0,
+      "total_af": 1878.51
+     }
+    },
+    "pair_min_space": {
+     "A": {
+      "coupling_af": 4194.11,
+      "total_af": 6286.3099999999995
+     },
+     "B": {
+      "coupling_af": 4194.11,
+      "total_af": 6286.3099999999995
+     }
+    },
+    "stacked_aligned": {
+     "A": {
+      "coupling_af": 3112.6499999999996,
+      "total_af": 6619.81
+     },
+     "B": {
+      "coupling_af": 3112.6499999999996,
+      "total_af": 6856.61
+     }
+    },
+    "stacked_offset": {
+     "A": {
+      "coupling_af": 1644.73,
+      "total_af": 5405.37
+     },
+     "B": {
+      "coupling_af": 1644.73,
+      "total_af": 5388.69
+     }
+    },
+    "upper_alone": {
+     "A": {
+      "coupling_af": 0.0,
+      "total_af": 1759.692
+     }
+    }
+   },
+   "structures": {
+    "crossing": [
+     [
+      "A",
+      "met2",
+      30,
+      10,
+      30,
+      30
+     ],
+     [
+      "B",
+      "met1",
+      20,
+      20,
+      40,
+      20
+     ]
+    ],
+    "isolated": [
+     [
+      "A",
+      "met2",
+      10,
+      10,
+      50.0,
+      10
+     ]
+    ],
+    "lower_alone": [
+     [
+      "B",
+      "met1",
+      20,
+      20,
+      40,
+      20
+     ]
+    ],
+    "pair_min_space": [
+     [
+      "A",
+      "met2",
+      10,
+      10,
+      50.0,
+      10
+     ],
+     [
+      "B",
+      "met2",
+      10,
+      10.28,
+      50.0,
+      10.28
+     ]
+    ],
+    "stacked_aligned": [
+     [
+      "A",
+      "met2",
+      10,
+      10,
+      50.0,
+      10
+     ],
+     [
+      "B",
+      "met1",
+      10,
+      10,
+      50.0,
+      10
+     ]
+    ],
+    "stacked_offset": [
+     [
+      "A",
+      "met3",
+      10,
+      10,
+      50.0,
+      10
+     ],
+     [
+      "B",
+      "met1",
+      10,
+      10.135,
+      50.0,
+      10.135
+     ]
+    ],
+    "upper_alone": [
+     [
+      "A",
+      "met2",
+      30,
+      10,
+      30,
+      30
+     ]
+    ]
+   }
+  }
+ },
+ "schema": "rustroad.rc-structures.v1"
+}
