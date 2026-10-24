@@ -36,8 +36,8 @@
   "tools": {
     "rustroad": {
       "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/target/release/rustroad",
-      "sha256": "796927a459d19e843e8a6dec98c29d9be74c6d8e2bd2d48e2959633ffe0df039",
-      "bytes": 26150576,
+      "sha256": "ff523a9d542cfd3993b3093d1252346dfc6870e25d7578b872f2e58cd855f261",
+      "bytes": 26151152,
       "version": "rustroad-cli 0.5.0"
     },
     "rusteda": {
@@ -592,8 +592,8 @@
       "status": "passed"
     }
   ],
-  "wall_seconds": 34.01617051998619,
-  "peak_child_rss_kib": 136456,
+  "wall_seconds": 28.936175951967016,
+  "peak_child_rss_kib": 136640,
   "receipts": 169,
   "pdks": [
     {
@@ -613,7 +613,7 @@
         },
         "sky130.spef": {
           "source": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/r2/sky130.spef",
-          "sha256": "e669941dd33c0383ded0ebb89523b0f28699405f76e0c87d5cd7cad699ea12c7"
+          "sha256": "661b94bf1ad948e6db2b76c0f2f01d6eaef31793e84850506ef374c20a265113"
         }
       },
       "read_only": {
@@ -690,13 +690,14 @@
             "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
             "diagonal_coupling": "unmodeled",
             "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "routing_patches": "extracted: each piece not covered by same-net metal adds ground and coupling on all four edges at the RC node of the same-net conductor it overlaps (no new node or resistor)",
             "max_segment_length_dbu": 25000,
             "drc_status": "unchecked",
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.03208862600149587,
-          "peak_rss_kib": 8636
+          "elapsed_seconds": 0.03474087704671547,
+          "peak_rss_kib": 8672
         },
         "nom": {
           "output": {
@@ -743,13 +744,14 @@
             "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
             "diagonal_coupling": "unmodeled",
             "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "routing_patches": "extracted: each piece not covered by same-net metal adds ground and coupling on all four edges at the RC node of the same-net conductor it overlaps (no new node or resistor)",
             "max_segment_length_dbu": 25000,
             "drc_status": "unchecked",
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.03456961998017505,
-          "peak_rss_kib": 8504
+          "elapsed_seconds": 0.03184437798336148,
+          "peak_rss_kib": 8444
         },
         "max": {
           "output": {
@@ -796,13 +798,14 @@
             "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
             "diagonal_coupling": "unmodeled",
             "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "routing_patches": "extracted: each piece not covered by same-net metal adds ground and coupling on all four edges at the RC node of the same-net conductor it overlaps (no new node or resistor)",
             "max_segment_length_dbu": 25000,
             "drc_status": "unchecked",
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.042679439997300506,
-          "peak_rss_kib": 8556
+          "elapsed_seconds": 0.0318628289969638,
+          "peak_rss_kib": 8532
         }
       },
       "reference_runs": {
@@ -815,11 +818,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_harness_rcx/sky130_harness_min.spef",
-              "sha256": "538a0a75676f351a3cfb71c3f0de739595e21a546d2b9606e9998b90d5c55375",
+              "sha256": "34df56736ee916486a0e0a8b2323a51e867ec2b0d393914a46c7c3cc7354895e",
               "bytes": 15884
             },
-            "container_peak_rss_kib": 112060,
-            "elapsed_seconds": 0.7025664140237495,
+            "container_peak_rss_kib": 110312,
+            "elapsed_seconds": 0.5476579549722373,
             "receipt": "sky130_harness_min"
           },
           "nom": {
@@ -830,11 +833,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_harness_rcx/sky130_harness_nom.spef",
-              "sha256": "3b88c16b129f0627eb38e8643eeeed25ee13544f77f51bc5ec97401490510f89",
+              "sha256": "d156dd4f93be27e5e16910b91bea58193b6136eeb2f78caff55f822b23bd2b06",
               "bytes": 15868
             },
-            "container_peak_rss_kib": 112344,
-            "elapsed_seconds": 0.7145929969847202,
+            "container_peak_rss_kib": 110492,
+            "elapsed_seconds": 0.6254195719957352,
             "receipt": "sky130_harness_nom"
           },
           "max": {
@@ -845,11 +848,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_harness_rcx/sky130_harness_max.spef",
-              "sha256": "6ad972cee34856d903c2bf6f84333a82e23fd0ea692a002a5c2ef92c48633464",
+              "sha256": "6f5d2497c380da37f053b2cf7354710c26b6c44e9563cb86157d942ae7ac097f",
               "bytes": 15876
             },
-            "container_peak_rss_kib": 111692,
-            "elapsed_seconds": 0.9740407960489392,
+            "container_peak_rss_kib": 110504,
+            "elapsed_seconds": 0.5709769999957643,
             "receipt": "sky130_harness_max"
           }
         },
@@ -862,11 +865,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_merged_rcx/sky130_merged_min.spef",
-              "sha256": "e58bd3aefd36bc69a3d6314c7ca323d0eea1fb84766a9f24a5e9db1e9798f081",
+              "sha256": "e29f8e9e747a0528ee10c73dfbb9ab440e42d85350e94ae7e42f361a068b2bdc",
               "bytes": 15776
             },
-            "container_peak_rss_kib": 111796,
-            "elapsed_seconds": 0.6604914229828864,
+            "container_peak_rss_kib": 109924,
+            "elapsed_seconds": 0.7163505750359036,
             "receipt": "sky130_merged_min"
           },
           "nom": {
@@ -877,11 +880,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_merged_rcx/sky130_merged_nom.spef",
-              "sha256": "977263edf098a37dcfac26765cd977ac0402dd6b87d924f1be2108037f502e8d",
+              "sha256": "e37e0455dad34011d4ea030adc3648da6c1f7890c62a4175cb284754d9f09037",
               "bytes": 15762
             },
-            "container_peak_rss_kib": 112040,
-            "elapsed_seconds": 0.9255843280116096,
+            "container_peak_rss_kib": 109600,
+            "elapsed_seconds": 0.6676706389989704,
             "receipt": "sky130_merged_nom"
           },
           "max": {
@@ -892,11 +895,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_merged_rcx/sky130_merged_max.spef",
-              "sha256": "51ec0ead43f0c591992a420f451c4a64e4a466b517378240f761192e0b819d13",
+              "sha256": "c0b875a198a871fc24e4a92c737b36fd172d3880e54a7f06245a6391f2ff2edd",
               "bytes": 15770
             },
-            "container_peak_rss_kib": 111940,
-            "elapsed_seconds": 0.6439376769703813,
+            "container_peak_rss_kib": 110544,
+            "elapsed_seconds": 0.595267586002592,
             "receipt": "sky130_merged_max"
           }
         }
@@ -907,7 +910,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_harness_rcx/sky130_harness_min.spef",
             "native_sha256": "bfca9ed6d92b1055b51a8cb3ad2411f3570b431061e3776f3a337a66e65772b7",
-            "reference_sha256": "538a0a75676f351a3cfb71c3f0de739595e21a546d2b9606e9998b90d5c55375",
+            "reference_sha256": "34df56736ee916486a0e0a8b2323a51e867ec2b0d393914a46c7c3cc7354895e",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -991,7 +994,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_merged_rcx/sky130_merged_min.spef",
             "native_sha256": "bfca9ed6d92b1055b51a8cb3ad2411f3570b431061e3776f3a337a66e65772b7",
-            "reference_sha256": "e58bd3aefd36bc69a3d6314c7ca323d0eea1fb84766a9f24a5e9db1e9798f081",
+            "reference_sha256": "e29f8e9e747a0528ee10c73dfbb9ab440e42d85350e94ae7e42f361a068b2bdc",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1074,8 +1077,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_merged_rcx/sky130_merged_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_harness_rcx/sky130_harness_min.spef",
-            "native_sha256": "e58bd3aefd36bc69a3d6314c7ca323d0eea1fb84766a9f24a5e9db1e9798f081",
-            "reference_sha256": "538a0a75676f351a3cfb71c3f0de739595e21a546d2b9606e9998b90d5c55375",
+            "native_sha256": "e29f8e9e747a0528ee10c73dfbb9ab440e42d85350e94ae7e42f361a068b2bdc",
+            "reference_sha256": "34df56736ee916486a0e0a8b2323a51e867ec2b0d393914a46c7c3cc7354895e",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1141,7 +1144,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_harness_rcx/sky130_harness_nom.spef",
             "native_sha256": "0088f5ab814d8b3f893c1167031cac92ae3af7c272e790d038764019e7236822",
-            "reference_sha256": "3b88c16b129f0627eb38e8643eeeed25ee13544f77f51bc5ec97401490510f89",
+            "reference_sha256": "d156dd4f93be27e5e16910b91bea58193b6136eeb2f78caff55f822b23bd2b06",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1207,7 +1210,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_merged_rcx/sky130_merged_nom.spef",
             "native_sha256": "0088f5ab814d8b3f893c1167031cac92ae3af7c272e790d038764019e7236822",
-            "reference_sha256": "977263edf098a37dcfac26765cd977ac0402dd6b87d924f1be2108037f502e8d",
+            "reference_sha256": "e37e0455dad34011d4ea030adc3648da6c1f7890c62a4175cb284754d9f09037",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1272,8 +1275,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_merged_rcx/sky130_merged_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_harness_rcx/sky130_harness_nom.spef",
-            "native_sha256": "977263edf098a37dcfac26765cd977ac0402dd6b87d924f1be2108037f502e8d",
-            "reference_sha256": "3b88c16b129f0627eb38e8643eeeed25ee13544f77f51bc5ec97401490510f89",
+            "native_sha256": "e37e0455dad34011d4ea030adc3648da6c1f7890c62a4175cb284754d9f09037",
+            "reference_sha256": "d156dd4f93be27e5e16910b91bea58193b6136eeb2f78caff55f822b23bd2b06",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1339,7 +1342,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_harness_rcx/sky130_harness_max.spef",
             "native_sha256": "946303746b85023ea5e9fbd0ae84bf17d804503df03c192767475153e021c421",
-            "reference_sha256": "6ad972cee34856d903c2bf6f84333a82e23fd0ea692a002a5c2ef92c48633464",
+            "reference_sha256": "6f5d2497c380da37f053b2cf7354710c26b6c44e9563cb86157d942ae7ac097f",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1419,7 +1422,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_merged_rcx/sky130_merged_max.spef",
             "native_sha256": "946303746b85023ea5e9fbd0ae84bf17d804503df03c192767475153e021c421",
-            "reference_sha256": "51ec0ead43f0c591992a420f451c4a64e4a466b517378240f761192e0b819d13",
+            "reference_sha256": "c0b875a198a871fc24e4a92c737b36fd172d3880e54a7f06245a6391f2ff2edd",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1498,8 +1501,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_merged_rcx/sky130_merged_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/sky130_harness_rcx/sky130_harness_max.spef",
-            "native_sha256": "51ec0ead43f0c591992a420f451c4a64e4a466b517378240f761192e0b819d13",
-            "reference_sha256": "6ad972cee34856d903c2bf6f84333a82e23fd0ea692a002a5c2ef92c48633464",
+            "native_sha256": "c0b875a198a871fc24e4a92c737b36fd172d3880e54a7f06245a6391f2ff2edd",
+            "reference_sha256": "6f5d2497c380da37f053b2cf7354710c26b6c44e9563cb86157d942ae7ac097f",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -1990,7 +1993,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67804
+              "peak_rss_kib": 67628
             },
             "harness": {
               "scope": {
@@ -2068,7 +2071,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67812
+              "peak_rss_kib": 67404
             },
             "merged": {
               "scope": {
@@ -2146,7 +2149,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67308
+              "peak_rss_kib": 67640
             }
           },
           "vs_merged_def": {
@@ -2282,7 +2285,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67720
+              "peak_rss_kib": 67796
             },
             "harness": {
               "scope": {
@@ -2360,7 +2363,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67724
+              "peak_rss_kib": 67804
             },
             "merged": {
               "scope": {
@@ -2438,7 +2441,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 67776
+              "peak_rss_kib": 67660
             }
           },
           "vs_merged_def": {
@@ -2574,7 +2577,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 63384
+              "peak_rss_kib": 63532
             },
             "harness": {
               "scope": {
@@ -2652,7 +2655,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 63172
+              "peak_rss_kib": 63132
             },
             "merged": {
               "scope": {
@@ -2730,7 +2733,7 @@
                 "T0074",
                 "T0076"
               ],
-              "peak_rss_kib": 63468
+              "peak_rss_kib": 63488
             }
           },
           "vs_merged_def": {
@@ -3021,7 +3024,7 @@
         },
         "gf180.spef": {
           "source": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/r2/gf180.spef",
-          "sha256": "a2485ca0f740f5227168488775ebe6e93d1f84b77aee441b98a2585bbf6dcdb9"
+          "sha256": "2b9d4c030dda589e73e4306a2ba198d1ec355acdaebeb903dc9c14c7315f51a5"
         }
       },
       "read_only": {
@@ -3098,13 +3101,14 @@
             "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
             "diagonal_coupling": "unmodeled",
             "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "routing_patches": "extracted: each piece not covered by same-net metal adds ground and coupling on all four edges at the RC node of the same-net conductor it overlaps (no new node or resistor)",
             "max_segment_length_dbu": 50000,
             "drc_status": "unchecked",
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.05595367099158466,
-          "peak_rss_kib": 8744
+          "elapsed_seconds": 0.03200960101094097,
+          "peak_rss_kib": 9024
         },
         "nom": {
           "output": {
@@ -3151,13 +3155,14 @@
             "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
             "diagonal_coupling": "unmodeled",
             "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "routing_patches": "extracted: each piece not covered by same-net metal adds ground and coupling on all four edges at the RC node of the same-net conductor it overlaps (no new node or resistor)",
             "max_segment_length_dbu": 50000,
             "drc_status": "unchecked",
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.03240705101052299,
-          "peak_rss_kib": 8828
+          "elapsed_seconds": 0.03319848602404818,
+          "peak_rss_kib": 8708
         },
         "max": {
           "output": {
@@ -3204,13 +3209,14 @@
             "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
             "diagonal_coupling": "unmodeled",
             "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "routing_patches": "extracted: each piece not covered by same-net metal adds ground and coupling on all four edges at the RC node of the same-net conductor it overlaps (no new node or resistor)",
             "max_segment_length_dbu": 50000,
             "drc_status": "unchecked",
             "lvs_status": "unchecked"
           },
           "byte_identical_rerun": true,
-          "elapsed_seconds": 0.05306461197324097,
-          "peak_rss_kib": 8552
+          "elapsed_seconds": 0.026404234988149256,
+          "peak_rss_kib": 8932
         }
       },
       "reference_runs": {
@@ -3223,11 +3229,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_harness_rcx/gf180_harness_min.spef",
-              "sha256": "93297e45d37dc89a8c7d7487d40505cc02e1fbe12707880aced1f7670d439e16",
+              "sha256": "a17556bc5d62d7f7cbf09235f1f2c52da71c732ffe58f923527ca8c6571d9e97",
               "bytes": 16194
             },
-            "container_peak_rss_kib": 119092,
-            "elapsed_seconds": 1.117105272016488,
+            "container_peak_rss_kib": 125552,
+            "elapsed_seconds": 0.7533949420321733,
             "receipt": "gf180_harness_min"
           },
           "nom": {
@@ -3238,11 +3244,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_harness_rcx/gf180_harness_nom.spef",
-              "sha256": "ef55d8e7a93dc044940b7456715587722b35bebcb9f00a26f49fd9b7af4b197d",
+              "sha256": "7505f26209ceb8f4f6b020fa5ad38027bcb2922c1e57586adda54a29d1d0abab",
               "bytes": 16162
             },
-            "container_peak_rss_kib": 118916,
-            "elapsed_seconds": 0.864327174029313,
+            "container_peak_rss_kib": 125268,
+            "elapsed_seconds": 0.8520114289713092,
             "receipt": "gf180_harness_nom"
           },
           "max": {
@@ -3253,11 +3259,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_harness_rcx/gf180_harness_max.spef",
-              "sha256": "ae13f8e55f028b650185605464fcd633387f8e7d4ea6a03f4653059d33c6d989",
+              "sha256": "f78721409110bd6fabea97e528422d2251575f7c9af3e62568fb1ee07889e29a",
               "bytes": 16155
             },
-            "container_peak_rss_kib": 118688,
-            "elapsed_seconds": 0.8699118899530731,
+            "container_peak_rss_kib": 124788,
+            "elapsed_seconds": 0.8602928899927065,
             "receipt": "gf180_harness_max"
           }
         },
@@ -3270,11 +3276,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_merged_rcx/gf180_merged_min.spef",
-              "sha256": "c9c4c6c60006a219d930a429aee17ad532b525731447576dbc7f82bb10cb1fdc",
+              "sha256": "aa9c7d86cebef75f8029cf8a4ea255285408c53819fc85e0757526586aebb66f",
               "bytes": 16194
             },
-            "container_peak_rss_kib": 119176,
-            "elapsed_seconds": 0.9556949759717099,
+            "container_peak_rss_kib": 124852,
+            "elapsed_seconds": 0.9100423700292595,
             "receipt": "gf180_merged_min"
           },
           "nom": {
@@ -3285,11 +3291,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_merged_rcx/gf180_merged_nom.spef",
-              "sha256": "b2a739d4977750a2258c810c0fa9c0d2350ea3b80641d811cfc0ac9728bfd9ab",
+              "sha256": "7505f26209ceb8f4f6b020fa5ad38027bcb2922c1e57586adda54a29d1d0abab",
               "bytes": 16162
             },
-            "container_peak_rss_kib": 118556,
-            "elapsed_seconds": 0.9337525780429132,
+            "container_peak_rss_kib": 125068,
+            "elapsed_seconds": 0.8517592250136659,
             "receipt": "gf180_merged_nom"
           },
           "max": {
@@ -3300,11 +3306,11 @@
             },
             "spef": {
               "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_merged_rcx/gf180_merged_max.spef",
-              "sha256": "151704ec03e1fd2a2b99fd4ff690091c7b0972065de74573444181fa2d5f292f",
+              "sha256": "ebf57a8cd4411cafeda43c4eb5c33a175ffcfdc5c99e462a1ce5b02faef00e32",
               "bytes": 16155
             },
-            "container_peak_rss_kib": 118748,
-            "elapsed_seconds": 0.8879807660123333,
+            "container_peak_rss_kib": 125372,
+            "elapsed_seconds": 0.8087512569618411,
             "receipt": "gf180_merged_max"
           }
         }
@@ -3315,7 +3321,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_harness_rcx/gf180_harness_min.spef",
             "native_sha256": "e9df6e78009733329de2d5576aee0ba0b836fc843b3fd7ed5c36988e5f4ba4c2",
-            "reference_sha256": "93297e45d37dc89a8c7d7487d40505cc02e1fbe12707880aced1f7670d439e16",
+            "reference_sha256": "a17556bc5d62d7f7cbf09235f1f2c52da71c732ffe58f923527ca8c6571d9e97",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3379,7 +3385,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_native_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_merged_rcx/gf180_merged_min.spef",
             "native_sha256": "e9df6e78009733329de2d5576aee0ba0b836fc843b3fd7ed5c36988e5f4ba4c2",
-            "reference_sha256": "c9c4c6c60006a219d930a429aee17ad532b525731447576dbc7f82bb10cb1fdc",
+            "reference_sha256": "aa9c7d86cebef75f8029cf8a4ea255285408c53819fc85e0757526586aebb66f",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3442,8 +3448,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_merged_rcx/gf180_merged_min.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_harness_rcx/gf180_harness_min.spef",
-            "native_sha256": "c9c4c6c60006a219d930a429aee17ad532b525731447576dbc7f82bb10cb1fdc",
-            "reference_sha256": "93297e45d37dc89a8c7d7487d40505cc02e1fbe12707880aced1f7670d439e16",
+            "native_sha256": "aa9c7d86cebef75f8029cf8a4ea255285408c53819fc85e0757526586aebb66f",
+            "reference_sha256": "a17556bc5d62d7f7cbf09235f1f2c52da71c732ffe58f923527ca8c6571d9e97",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3509,7 +3515,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_harness_rcx/gf180_harness_nom.spef",
             "native_sha256": "79efa330145d88af33dad03beb3a408ec9e0660f9556b7b6b275a8094ee433b1",
-            "reference_sha256": "ef55d8e7a93dc044940b7456715587722b35bebcb9f00a26f49fd9b7af4b197d",
+            "reference_sha256": "7505f26209ceb8f4f6b020fa5ad38027bcb2922c1e57586adda54a29d1d0abab",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3573,7 +3579,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_native_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_merged_rcx/gf180_merged_nom.spef",
             "native_sha256": "79efa330145d88af33dad03beb3a408ec9e0660f9556b7b6b275a8094ee433b1",
-            "reference_sha256": "b2a739d4977750a2258c810c0fa9c0d2350ea3b80641d811cfc0ac9728bfd9ab",
+            "reference_sha256": "7505f26209ceb8f4f6b020fa5ad38027bcb2922c1e57586adda54a29d1d0abab",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3636,8 +3642,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_merged_rcx/gf180_merged_nom.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_harness_rcx/gf180_harness_nom.spef",
-            "native_sha256": "b2a739d4977750a2258c810c0fa9c0d2350ea3b80641d811cfc0ac9728bfd9ab",
-            "reference_sha256": "ef55d8e7a93dc044940b7456715587722b35bebcb9f00a26f49fd9b7af4b197d",
+            "native_sha256": "7505f26209ceb8f4f6b020fa5ad38027bcb2922c1e57586adda54a29d1d0abab",
+            "reference_sha256": "7505f26209ceb8f4f6b020fa5ad38027bcb2922c1e57586adda54a29d1d0abab",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3703,7 +3709,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_harness_rcx/gf180_harness_max.spef",
             "native_sha256": "4ab57040f5a5735905d005a5e610592c41d8e292e72f7b070fcdd73d2f4fbcf9",
-            "reference_sha256": "ae13f8e55f028b650185605464fcd633387f8e7d4ea6a03f4653059d33c6d989",
+            "reference_sha256": "f78721409110bd6fabea97e528422d2251575f7c9af3e62568fb1ee07889e29a",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3784,7 +3790,7 @@
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_native_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_merged_rcx/gf180_merged_max.spef",
             "native_sha256": "4ab57040f5a5735905d005a5e610592c41d8e292e72f7b070fcdd73d2f4fbcf9",
-            "reference_sha256": "151704ec03e1fd2a2b99fd4ff690091c7b0972065de74573444181fa2d5f292f",
+            "reference_sha256": "ebf57a8cd4411cafeda43c4eb5c33a175ffcfdc5c99e462a1ce5b02faef00e32",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -3864,8 +3870,8 @@
           "reference_segmentation": {
             "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_merged_rcx/gf180_merged_max.spef",
             "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/.work/runs/spef2/gf180_harness_rcx/gf180_harness_max.spef",
-            "native_sha256": "151704ec03e1fd2a2b99fd4ff690091c7b0972065de74573444181fa2d5f292f",
-            "reference_sha256": "ae13f8e55f028b650185605464fcd633387f8e7d4ea6a03f4653059d33c6d989",
+            "native_sha256": "ebf57a8cd4411cafeda43c4eb5c33a175ffcfdc5c99e462a1ce5b02faef00e32",
+            "reference_sha256": "f78721409110bd6fabea97e528422d2251575f7c9af3e62568fb1ee07889e29a",
             "coverage": {
               "status": "passed",
               "only_native": [],
@@ -4357,7 +4363,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120536
+              "peak_rss_kib": 120344
             },
             "harness": {
               "scope": {
@@ -4436,7 +4442,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120756
+              "peak_rss_kib": 120592
             },
             "merged": {
               "scope": {
@@ -4515,7 +4521,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120592
+              "peak_rss_kib": 120848
             }
           },
           "vs_merged_def": {
@@ -4652,7 +4658,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120540
+              "peak_rss_kib": 120084
             },
             "harness": {
               "scope": {
@@ -4731,7 +4737,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120556
+              "peak_rss_kib": 119984
             },
             "merged": {
               "scope": {
@@ -4810,7 +4816,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 120388
+              "peak_rss_kib": 120332
             }
           },
           "vs_merged_def": {
@@ -4947,7 +4953,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 136312
+              "peak_rss_kib": 136248
             },
             "harness": {
               "scope": {
@@ -5026,7 +5032,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 136456
+              "peak_rss_kib": 136616
             },
             "merged": {
               "scope": {
@@ -5105,7 +5111,7 @@
                 "T0076",
                 "T0132"
               ],
-              "peak_rss_kib": 136332
+              "peak_rss_kib": 136620
             }
           },
           "vs_merged_def": {

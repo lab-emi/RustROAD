@@ -106,11 +106,13 @@ does not.
 
 Flow: `scripts/verify_routing.py`, policy producer (RustSys c5ec23c,
 `3de13b3a…`) with `fixtures/flow/cell-policy.json`, signoff manifest, RustSTA
-0.4 (`rusteda c8f71b63…`, `ruststa ac76f0f3…`), RustROAD `796927a4…`. Pass 1
+0.4 (`rusteda c8f71b63…`, `ruststa ac76f0f3…`), RustROAD `ff523a9d…` (built
+from this branch). Pass 1
 used `--signoff-reference`; pass 2 used `--signoff-gds <pdk>=<pass 1 native
 export-gds>`. Both passes produced byte-identical DEF; pass 2's workspaces
 export the same GDS bytes and the same native SPEF bytes (min/nom/max) as
-pass 1.
+pass 1. A complete earlier campaign with a binary that differed only in the
+`extract` JSON scope text gave the same DEF, GDS, SPEF and timing values.
 
 | item (native GDS) | Sky130 | GF180 |
 |---|---|---|
@@ -236,14 +238,15 @@ harness; no run above 4 GiB, so no scale lock. Measured:
 | run | wall | peak RSS |
 |---|---|---|
 | `cargo build --release` (4 jobs) | 46.5 s | 471 MiB |
-| verify_routing pass 1 / pass 2 | 78.9 s / 81.3 s | 391 / 394 MiB (host processes) |
-| export-gds (Sky130 / GF180) | 0.04 / 0.03 s | 16.5 / 10.9 MiB |
-| extract (per corner) | 0.03 s | 8.3-8.6 MiB |
-| verify_gds.py | 195.3 s | 464 MiB (largest container) |
-| verify_router_signoff.py | 139.4 s | 465 MiB (largest container) |
-| compare_spef.py campaign | 34.0 s | 133 MiB (largest child) |
-| def_segmentation.py | 46.5 s | 45 MiB (outer) |
-| timing_baseline.py | 13.3 s | 226 MiB (largest child) |
+| verify_routing pass 1 / pass 2 | 75.0 s / 78.7 s | 394 / 394 MiB (host processes) |
+| export-gds (Sky130 / GF180) | 0.04 / 0.02 s | 16.6 / 10.6 MiB |
+| extract (per corner) | 0.03-0.04 s | 8.2-8.6 MiB |
+| verify_gds.py | 189.7 s | 464 MiB (largest container) |
+| verify_router_signoff.py | 138.7 s | 465 MiB (largest container) |
+| compare_spef.py campaign | 28.9 s | 133 MiB (largest child) |
+| def_segmentation.py | 45.8 s | 45 MiB (outer) |
+| timing_baseline.py | 13.4 s | 226 MiB (largest child) |
+| whole evidence campaign (`.work/rerun.sh`) | 9 min 32 s | 394 MiB (host processes) |
 
 ## Reproduction
 

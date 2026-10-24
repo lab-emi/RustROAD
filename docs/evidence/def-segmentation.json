@@ -52,16 +52,16 @@
      },
      "openrcx": {
       "new": {
-       "peak_rss_kib": 104384,
-       "spef_sha256": "45b7be0a8806ca8f328bb0bb6c121fcfd34eaf27b1c4dfc3b2e19b75768889dc"
+       "peak_rss_kib": 105304,
+       "spef_sha256": "558ed5ffac7cbfeb032eb913b0a95e6fcc9434cccfa91310cff6732433f41645"
       },
       "old": {
-       "peak_rss_kib": 105716,
-       "spef_sha256": "5efead9f820cd6a638fe8ff84bda91894e416ad9a572a2d60a0d08641b16f6a7"
+       "peak_rss_kib": 106884,
+       "spef_sha256": "06b49c64d19408a11ff0bbe86df38ee8b9734c4debd564ab84e66dae9aedc6a9"
       },
       "old_merged": {
-       "peak_rss_kib": 104252,
-       "spef_sha256": "d4be6eb2794287fb39313a53973a36823d3c57ee6349f43102a6f6b86aab6347"
+       "peak_rss_kib": 105292,
+       "spef_sha256": "7ea3a3117dbb0d2401adfbdc6260215be0f03f0e1d352d840544726db8a0361b"
       }
      },
      "totals": {
@@ -112,16 +112,16 @@
      },
      "openrcx": {
       "new": {
-       "peak_rss_kib": 103900,
-       "spef_sha256": "b45edf0353c28692443569d27388ac67721b12b982520b8a7ec024202c780485"
+       "peak_rss_kib": 105668,
+       "spef_sha256": "9ebbc2977a85aaeb8de014a7275eb51a7085616c191b63189f222e15d0c1522b"
       },
       "old": {
-       "peak_rss_kib": 105416,
-       "spef_sha256": "69510ce172fdf981ab6a3c679435e3e2febe16d66afe5190fb30d556fa7875a0"
+       "peak_rss_kib": 106888,
+       "spef_sha256": "1e11b27e4157a021af7ab92adc288f38486643ca3a2e4a17b41b3c638f2319cb"
       },
       "old_merged": {
-       "peak_rss_kib": 104152,
-       "spef_sha256": "c54bed225e33a307ed930eb97a33842ec14f2976fc6d81ed4409f6a6fa978af3"
+       "peak_rss_kib": 105436,
+       "spef_sha256": "6da1b40066633f5421ce8351e0fe3d48c6296a82da6c27ba78e0711617e46058"
       }
      },
      "totals": {
@@ -172,16 +172,16 @@
      },
      "openrcx": {
       "new": {
-       "peak_rss_kib": 104100,
-       "spef_sha256": "2d3f4aefdc61922898d6e3dfa60301511c5cfa999cd12b217d96ad1f50ef235f"
+       "peak_rss_kib": 105948,
+       "spef_sha256": "33ab7610e7f1849a65a240574a4cc9cfa57d3d9d271687a5dd207703345106c4"
       },
       "old": {
-       "peak_rss_kib": 105656,
-       "spef_sha256": "c2c620896f7a316c4545fdf344aa4c2e7d4b1f76a3ee28b410f0d1f27bcd7674"
+       "peak_rss_kib": 106972,
+       "spef_sha256": "7cd902c32c3f9734bd607c1973f9e9cad314065d12afadede86d9fd819bf62d5"
       },
       "old_merged": {
-       "peak_rss_kib": 103408,
-       "spef_sha256": "77de541b2c5625761e17e7c12138127bf6f957d87852a36bb97bdbb5376f2ce0"
+       "peak_rss_kib": 106084,
+       "spef_sha256": "f605683a93c6c7d8d5ed670eae22316f8ee05340e8d9190b278ff255b8d7c654"
       }
      },
      "totals": {
@@ -316,16 +316,16 @@
      },
      "openrcx": {
       "new": {
-       "peak_rss_kib": 118800,
-       "spef_sha256": "b1528c7185b177eefa845aefe7d02f44a9312920f4f025d33120f643cfc69240"
+       "peak_rss_kib": 120204,
+       "spef_sha256": "54610af8e8fdf35f457684a6d564954c07d576ff14aa52ee7c75b5fe509cf0ea"
       },
       "old": {
-       "peak_rss_kib": 120392,
-       "spef_sha256": "103c70001a4a25fdc40816fd0874c7d47d2e78bd8855722020509248f0c53539"
+       "peak_rss_kib": 121648,
+       "spef_sha256": "bb0118aa316f805a56be6179976c4c64cd86e0fe54b889263dd86bfffb70000a"
       },
       "old_merged": {
-       "peak_rss_kib": 118880,
-       "spef_sha256": "4d9fcbd940f2851edbb1b6068579cbf80d8f097dc2d8b7f2c3e59ac8298fc2fa"
+       "peak_rss_kib": 119976,
+       "spef_sha256": "a6724ad5b4e0a1cfb587c31dd4f91275b3a8172c4baf1d8d9e03cba8375070bd"
       }
      },
      "totals": {
@@ -376,16 +376,16 @@
      },
      "openrcx": {
       "new": {
-       "peak_rss_kib": 119096,
-       "spef_sha256": "ce81366520b08b461cc939e04c48b98b6b08a1cc55cf34f33e8723abaf695f11"
+       "peak_rss_kib": 120252,
+       "spef_sha256": "bc35248e943cc83268c2db8a9da5bfed878594ed15783a232520e99bdbea5a8f"
       },
       "old": {
-       "peak_rss_kib": 120500,
-       "spef_sha256": "b4978002d32fc95185d73ec58e79c5bcce143fed45862e616d3c13ee07dbe114"
+       "peak_rss_kib": 121988,
+       "spef_sha256": "2531381857de051fcaebd5dfe8d428e9d385d4ae2a3fbe744839bd049488e54c"
       },
       "old_merged": {
-       "peak_rss_kib": 118100,
-       "spef_sha256": "c5484bce2bd0ff36bb18d72a81d531fff9e201450dcad0a061c1ef33acace06a"
+       "peak_rss_kib": 120444,
+       "spef_sha256": "e5d2cd5cdd3441aebee1d639764c90077b50ddb817174eba0d637ba9a4c20210"
       }
      },
      "totals": {
@@ -436,16 +436,16 @@
      },
      "openrcx": {
       "new": {
-       "peak_rss_kib": 118876,
-       "spef_sha256": "f1c13d7dd8f22bb4dd22aa73aaf0a0858ccc482a0e50b010bfeb87a20cc05454"
+       "peak_rss_kib": 120000,
+       "spef_sha256": "715afa1555643f26b9dfeafe19a708d2c3cfe5a82657afd2aa82921b046b5aba"
       },
       "old": {
-       "peak_rss_kib": 119676,
-       "spef_sha256": "09b0302cfaeac99a807b3477bd40382a71b46676fb62a5be46f81c61af295403"
+       "peak_rss_kib": 121192,
+       "spef_sha256": "1b04065d1438bf46a884407e0459f8bf6a427aedfb67ef5514429e0bb2ad3f36"
       },
       "old_merged": {
-       "peak_rss_kib": 118544,
-       "spef_sha256": "f1c13d7dd8f22bb4dd22aa73aaf0a0858ccc482a0e50b010bfeb87a20cc05454"
+       "peak_rss_kib": 120592,
+       "spef_sha256": "7c05d7b7a0761677f54f4df620e221d25785e2a29f8c890d7fe894c82578b73b"
       }
      },
      "totals": {
@@ -529,10 +529,10 @@
    }
   }
  ],
- "peak_rss_kib": 45748,
+ "peak_rss_kib": 45372,
  "receipts": 18,
  "schema": "rustroad.def-segmentation.v1",
  "scope": "same routed workspace; OLD = per-lattice-edge paths, NEW = merged collinear runs",
  "status": "passed",
- "wall_seconds": 46.52
+ "wall_seconds": 45.67
 }

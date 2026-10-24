@@ -377,7 +377,7 @@ python3 scripts/compare_spef.py campaign --workspace .work/runs/spef2 --base-rev
   --sta-bin /mnt/data2/cgao/git/RustROAD/.work/sta-signoff/bin
 ```
 
-Evidence: `docs/evidence/extraction-requalification.json` (34.0 s wall, 136 MiB
+Evidence: `docs/evidence/extraction-requalification.json` (28.9 s wall, 133 MiB
 peak child RSS, status `partial`: every control and self-check passes, not
 every target). "harness" is now the flow DEF itself; `merge-def` of it differs
 only where it merges through an upper-layer via landing (104 -> 100 Sky130,

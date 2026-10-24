@@ -2,10 +2,12 @@
 
 Status: implemented and black-box verified on the routed pipeline fixture for
 SKY130 (`sky130_fd_sc_hd`) and GF180 (`gf180mcu_fd_sc_mcu7t5v0`). Scope is a
-block/macro: no pad ring, no seal ring; IR/EM/SI/OCV/CPPR are unchecked. The
-streamed blocks still carry the known router DRC defects (work item W5), so a
-GDS export is **not** a DRC signoff. Resource contract: `docs/gds-budget.md`.
-Evidence: `docs/evidence/gds-verification.json`.
+block/macro: no pad ring, no seal ring; IR/EM/SI/OCV/CPPR are unchecked.
+`export-gds` itself reports `drc_status: "unchecked"`; the foundry checks run
+in the harnesses below. On the integrated LEF-rule flow the native GDS is DRC
+clean (Magic 0, KLayout 0) and LVS-matched on both PDKs; Sky130 has one Magic
+antenna item (see `docs/requalification.md`). Resource contract:
+`docs/gds-budget.md`. Evidence: `docs/evidence/gds-verification.json`.
 
 ## Command
 
@@ -134,10 +136,39 @@ python3 -I scripts/verify_gds.py --run .work/<new dir> \
 The harness copies the routed workspaces (`<pdk>_physical`) of a finished
 flow run and runs every third-party tool only as a black box in the pinned
 image `4c48415d8bd0` (KLayout 0.30.9, Magic 8.3.678, Netgen 1.5.323). Exit
-codes are not trusted: reports are parsed, the Magic top cell must exist, and
-the known router DRC baseline must be reproduced as a positive control.
+codes are not trusted: reports are parsed, the Magic top cell must exist, both
+DRC decks must report 0 on the native GDS, and a planted 0.1 x 0.1 um square on
+the wire layer must raise both counts (positive control). Every DEF `RECT`
+patch must be streamed on its layer's net purpose, and deleting those
+rectangles must make the XOR fail. LVS runs the basic Netgen/KLayout checks and
+both LVS checks of `scripts/signoff` (named-net and port pairing).
 
-Final run (`.work/gds/final`, binary sha256 `7c34a6d3...acce`, 109.6 s wall
+Requalification run (stream b0, 2026-10-24; `.work/runs/gds5` on the
+policy-producer LEF-rule flow `.work/runs/r2`, binary `ff523a9d...`, 189.7 s
+wall, largest container 464 MiB):
+
+| Check | SKY130 | GF180 |
+|---|---|---|
+| strmxor native vs KLayout LEF/DEF reference | No differences found | No differences found |
+| Top labels / flattened texts equal | 12 / 668 equal | 12 / 1056 equal |
+| PDK cell structures byte-identical | 10 / 10 | 10 / 10 |
+| Re-export and independent-copy export identical | yes (`48cdfd7e...`, 65,110 B, 5,176 records) | yes (`d2c20a1e...`, 46,368 B, 3,768 records) |
+| Routing patches streamed (DEF `RECT`) | 8 / 8 | 1 / 1 |
+| Magic drc(full), KLayout main deck (native = reference) | 0, 0 | 0, 0 |
+| Planted sub-minimum square detected (Magic / KLayout) | 2 / m2.1 x2, m2.6 x1 | 2 / M2.1 x2, M2.3 x1 |
+| Density (separate) | passed, 0 items | failed, 8 items (no fill) |
+| LVS: Netgen, KLayout, signoff Netgen, signoff KLayout | match x4 (native and reference) | match x4 (native and reference) |
+| Layer-map citations | 36 claims, 0 problems | 30 claims, 0 problems |
+
+Controls (all detected): deleted signal wire (port `z[1]`; XOR 1 shape; Netgen
+and the signoff KLayout check fail, the basic KLayout check still says match,
+which is why the signoff checks are now required), wrong map entry, missing
+cell structure, patches removed (XOR only on the patch layers: Sky130
+68/20 x3, 69/20 x5, 70/20 x1; GF180 36/0 x2), planted DRC square, Sky130
+density without the boundary, GF180 odd coordinate (now refused by the
+workspace reader, `INVALID_WORKSPACE`, before streaming; no output file).
+
+Phase-A run on the earlier router (historical: `.work/gds/final`, binary sha256 `7c34a6d3...acce`, 109.6 s wall
 for both PDKs, largest external step 474 MB RSS; evidence written with
 `--evidence docs/evidence/gds-verification.json`):
 
@@ -193,10 +224,12 @@ clean. Full test run: 5.9 s, 461 MB peak (cargo + tests).
 ## Limitations
 
 - Only N and FS rows exist in RustROAD; other orientations are not emitted.
-- The exporter does not repair DRC; the router defects (W5) remain visible.
+- The exporter does not repair DRC; it streams exactly what was routed.
 - Labels for escaped Verilog identifiers are rejected rather than guessed.
 - The workspace loader does not re-verify stored technology VIA geometry against
-  its LEF; the odd-coordinate control relies on that by planting a defect in a
-  workspace copy. Export re-verifies the cell LEF (FOREIGN) by sha256 only.
+  its LEF byte for byte. With LEF-rule routing it does re-derive the routing
+  vias (cut ENCLOSURE, variant families) and the supply vias (manufacturing
+  grid), which now refuses the planted odd-coordinate via. Export re-verifies
+  the cell LEF (FOREIGN) by sha256 only.
 - Netgen/KLayout LVS references are RustROAD's own powered export; the
   independent RTL-to-powered CEC link is a separate work item (W10).

@@ -118,7 +118,7 @@
   ],
   "setup_margin_ns": 0.0
  },
- "memory_preflight": "               total        used        free      shared  buff/cache   available\nMem:            59Gi        30Gi       6.2Gi       338Mi        24Gi        29Gi\nSwap:          127Gi        25Gi       102Gi\n",
+ "memory_preflight": "               total        used        free      shared  buff/cache   available\nMem:            59Gi        30Gi        13Gi       338Mi        17Gi        29Gi\nSwap:          127Gi        25Gi       102Gi\n",
  "parity_failures": [
   {
    "corner": "ss",
@@ -176,8 +176,8 @@
    },
    "native_extraction": {
     "max": {
-     "elapsed_seconds": 0.033707395021338016,
-     "peak_rss_kib": 8624,
+     "elapsed_seconds": 0.03484454896533862,
+     "peak_rss_kib": 8464,
      "profile": {
       "bytes": 57144,
       "sha256": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20"
@@ -199,8 +199,8 @@
      }
     },
     "min": {
-     "elapsed_seconds": 0.034378084004856646,
-     "peak_rss_kib": 8620,
+     "elapsed_seconds": 0.035976373008452356,
+     "peak_rss_kib": 8452,
      "profile": {
       "bytes": 57218,
       "sha256": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a"
@@ -222,8 +222,8 @@
      }
     },
     "nom": {
-     "elapsed_seconds": 0.030745305004529655,
-     "peak_rss_kib": 8732,
+     "elapsed_seconds": 0.03496612998424098,
+     "peak_rss_kib": 8760,
      "profile": {
       "bytes": 57146,
       "sha256": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27"
@@ -247,36 +247,36 @@
    },
    "openrcx": {
     "max": {
-     "peak_rss_kib": 104016,
+     "peak_rss_kib": 104940,
      "rules": {
       "bytes": 45404,
       "sha256": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220"
      },
      "spef": {
       "bytes": 15876,
-      "sha256": "34bd874d23bf6a2582989be51c4064ff6b56846508e5df9813e9fbf7396bf471"
+      "sha256": "129c8f0162cc94654a388492fdaed586d080431d8aae73cc4a3a0868cf2220d6"
      }
     },
     "min": {
-     "peak_rss_kib": 104632,
+     "peak_rss_kib": 105852,
      "rules": {
       "bytes": 45435,
       "sha256": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63"
      },
      "spef": {
       "bytes": 15884,
-      "sha256": "aad7f7f971991d13c3fe0a7a4c7f9fba887e24daf180cac9280f8c8e94e5d9a8"
+      "sha256": "e0d55b84fd96a8f31ba466e4bbb41aabf37f878221bf31addd9905547139c99c"
      }
     },
     "nom": {
-     "peak_rss_kib": 104028,
+     "peak_rss_kib": 105216,
      "rules": {
       "bytes": 45409,
       "sha256": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757"
      },
      "spef": {
       "bytes": 15868,
-      "sha256": "34945d1f51fd91d70b07fe8a3843d119a0cb0cea7794c45cff9d8efec1bae1db"
+      "sha256": "eab3ef3e4aa0d05474ff82718f8f1bc8b1d317d45ed22bc62fcff5c8de9bcc7c"
      }
     }
    },
@@ -649,7 +649,7 @@
        "worst_min_pulse_width_slack_ns": 4.296949438400159,
        "worst_setup_slack_ns": 8.531039603787493
       },
-      "peak_rss_kib": 64344,
+      "peak_rss_kib": 64232,
       "scope": {
        "backend": "cpu",
        "clock_model": "propagated",
@@ -1082,7 +1082,7 @@
        "worst_min_pulse_width_slack_ns": 4.284406859675739,
        "worst_setup_slack_ns": 8.521411365692938
       },
-      "peak_rss_kib": 64440,
+      "peak_rss_kib": 64072,
       "scope": {
        "backend": "cpu",
        "clock_model": "propagated",
@@ -1158,8 +1158,8 @@
    },
    "native_extraction": {
     "max": {
-     "elapsed_seconds": 0.03423163201659918,
-     "peak_rss_kib": 8800,
+     "elapsed_seconds": 0.031225509999785572,
+     "peak_rss_kib": 8600,
      "profile": {
       "bytes": 36982,
       "sha256": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635"
@@ -1181,8 +1181,8 @@
      }
     },
     "min": {
-     "elapsed_seconds": 0.031247341015841812,
-     "peak_rss_kib": 8480,
+     "elapsed_seconds": 0.036530982004478574,
+     "peak_rss_kib": 8504,
      "profile": {
       "bytes": 37674,
       "sha256": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c"
@@ -1204,8 +1204,8 @@
      }
     },
     "nom": {
-     "elapsed_seconds": 0.03231766598764807,
-     "peak_rss_kib": 8568,
+     "elapsed_seconds": 0.03181370801758021,
+     "peak_rss_kib": 8424,
      "profile": {
       "bytes": 36961,
       "sha256": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a"
@@ -1229,36 +1229,36 @@
    },
    "openrcx": {
     "max": {
-     "peak_rss_kib": 119260,
+     "peak_rss_kib": 120588,
      "rules": {
       "bytes": 31286,
       "sha256": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f"
      },
      "spef": {
       "bytes": 16155,
-      "sha256": "aa21c47dbc13ea3a362b904269e422195da7f289da53eec1e231a096df90f881"
+      "sha256": "4d9a8407aed4418e53c82498aaa181c5498f0e8394ce377ab1fd0d798d99d455"
      }
     },
     "min": {
-     "peak_rss_kib": 119204,
+     "peak_rss_kib": 120720,
      "rules": {
       "bytes": 31290,
       "sha256": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00"
      },
      "spef": {
       "bytes": 16194,
-      "sha256": "f86b285c6fd0e9bf29ff82c41cf2ac0cd682c8c93f25294a45814b70cce797b7"
+      "sha256": "a5e909decbc7a65011f7470c24d399a247117f114e498654ca15f60f79ea9271"
      }
     },
     "nom": {
-     "peak_rss_kib": 118104,
+     "peak_rss_kib": 120500,
      "rules": {
       "bytes": 31291,
       "sha256": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf"
      },
      "spef": {
       "bytes": 16162,
-      "sha256": "adf941a2d77087d3febf13f4722a9378cfb8ba4e0f0d4213edf37f01bdb29eae"
+      "sha256": "754f688493fa1591258d6b5bd00cc0ea0799f17d3fa1ff517c002f41745b49e9"
      }
     }
    },
@@ -1823,7 +1823,7 @@
        "worst_min_pulse_width_slack_ns": 3.4861860345314017,
        "worst_setup_slack_ns": 5.660602286410041
       },
-      "peak_rss_kib": 144568,
+      "peak_rss_kib": 144996,
       "scope": {
        "backend": "cpu",
        "clock_model": "propagated",
@@ -2411,7 +2411,7 @@
        "worst_min_pulse_width_slack_ns": 3.485941541535567,
        "worst_setup_slack_ns": 5.6387052160116795
       },
-      "peak_rss_kib": 145172,
+      "peak_rss_kib": 145308,
       "scope": {
        "backend": "cpu",
        "clock_model": "propagated",
@@ -2443,7 +2443,7 @@
    }
   }
  ],
- "peak_rss_kib": 231700,
+ "peak_rss_kib": 231920,
  "receipts": 63,
  "schema": "rustroad.timing-baseline.v1",
  "scope": {
@@ -2468,8 +2468,8 @@
    "version": "rusteda 0.4.0"
   },
   "rustroad": {
-   "bytes": 26150576,
-   "sha256": "796927a459d19e843e8a6dec98c29d9be74c6d8e2bd2d48e2959633ffe0df039",
+   "bytes": 26151152,
+   "sha256": "ff523a9d542cfd3993b3093d1252346dfc6870e25d7578b872f2e58cd855f261",
    "version": "rustroad-cli 0.5.0"
   },
   "ruststa": {
@@ -2478,5 +2478,5 @@
    "version": "ruststa 0.4.0 (backends: cpu)"
   }
  },
- "wall_seconds": 13.28
+ "wall_seconds": 13.41
 }

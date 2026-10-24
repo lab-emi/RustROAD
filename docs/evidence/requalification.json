@@ -349,9 +349,9 @@
     }
    }
   },
-  "peak_rss_kib": 400684,
+  "peak_rss_kib": 402976,
   "status": "failed",
-  "wall_seconds": 78.78762002603617
+  "wall_seconds": 74.95405187300639
  },
  "pass2": {
   "blocking": [
@@ -572,9 +572,9 @@
     }
    }
   },
-  "peak_rss_kib": 403272,
+  "peak_rss_kib": 403232,
   "status": "failed",
-  "wall_seconds": 81.20901121199131
+  "wall_seconds": 78.70780020696111
  },
  "producer": {
   "cell_policy": "/mnt/data2/cgao/git/RustROAD/.work/wt/b0/fixtures/flow/cell-policy.json",
@@ -647,9 +647,9 @@
     "magic": 0
    }
   },
-  "peak_rss_kib": 476192,
+  "peak_rss_kib": 475972,
   "status": "failed",
-  "wall_seconds": 139.39397704601288
+  "wall_seconds": 138.72305374301504
  },
  "schema": "rustroad.requalification.v1",
  "scope": {
@@ -678,11 +678,11 @@
    "version": "rusteda 0.4.0"
   },
   "rustroad": {
-   "sha256": "796927a459d19e843e8a6dec98c29d9be74c6d8e2bd2d48e2959633ffe0df039",
+   "sha256": "ff523a9d542cfd3993b3093d1252346dfc6870e25d7578b872f2e58cd855f261",
    "version": "rustroad-cli 0.5.0"
   },
   "ruststa": {
-   "sha256": "ac76f0f3765ce3c6d44f85257f7d836120a7e0bf6a7283a75357f37fd79aa838",
+   "sha256": "9535131cacca7245e3a0507d07c8899d6b0a0c2883cc97cff85b935339a2d8ed",
    "version": "ruststa 0.4.0 (backends: cpu)"
   },
   "rustsys": {
