@@ -38,6 +38,18 @@ PIPELINE_TAIL = ("set_input_delay 0.2 -clock core [get_ports {en a b}]\n"
 
 
 class Statuses(unittest.TestCase):
+    def test_not_applicable_is_explicit_and_restricted(self):
+        self.assertEqual(D.worst(["not_applicable", "passed"]), "passed")
+        self.assertEqual(D.worst(["not_applicable", "not_applicable"]), "not_applicable")
+        self.assertEqual(D.worst(["not_applicable", "unverified"]), "unverified")
+        per = {"sky130": {"mpw_min_period": D.item("not_applicable", "combinational"), "drv": D.item("passed")}}
+        v = D.overall(per, ["mpw_min_period", "drv"], {}, ["sky130"])
+        self.assertEqual((v["status"], v["not_applicable_items"]), ("passed", ["sky130:mpw_min_period"]))
+        # Only the items NOT_APPLICABLE names may be not_applicable.
+        per["sky130"]["drv"] = D.item("not_applicable", "x")
+        v = D.overall(per, ["mpw_min_period", "drv"], {}, ["sky130"])
+        self.assertEqual((v["status"], v["unverified_items"]), ("unverified", ["sky130:drv"]))
+
     def test_worst_and_overall(self):
         self.assertEqual(D.worst([]), "unverified")
         self.assertEqual(D.worst(["passed", "missing"]), "unverified")
@@ -69,8 +81,13 @@ class ManifestFreeze(unittest.TestCase):
     def test_budget_floors(self):
         m = D.load_manifest(D.ROOT / "fixtures/designs/pipeline.json")
         self.assertEqual(D.budget_floors(m["budgets"], m["verification"])["status"], "passed")
-        tight = dict(m["budgets"], hold_margin_ns=0.08, setup_margin_ns=0.01, parity_ns=0.0005)
+        tight = dict(m["budgets"], hold_margin_ns=0.08, hold_eco_target_margin_ns=0.1, setup_margin_ns=0.01,
+                     parity_ns=0.0005)
         self.assertEqual(D.budget_floors(tight, m["verification"])["status"], "passed")
+        # The ECO hold target may add a guard band, never undercut the gate margin.
+        r = D.budget_floors(dict(m["budgets"], hold_eco_target_margin_ns=0.04), m["verification"])
+        self.assertEqual(r["status"], "failed")
+        self.assertIn("hold_eco_target_margin_ns", r["reason"])
         for key, value in (("parity_ns", 0.003), ("hold_margin_ns", 0.049), ("setup_margin_ns", -0.01),
                            ("parity_ns", float("nan")), ("hold_margin_ns", "0.05"), ("parity_ns", None),
                            ("hold_margin_ns", True)):
@@ -122,7 +139,62 @@ class ManifestFreeze(unittest.TestCase):
             self.assertEqual(D.tool_pins_frozen(Path(d) / "absent.json", m)["status"], "failed")
 
 
+class ManifestSchema(unittest.TestCase):
+    def test_every_tracked_manifest_is_v2_and_valid(self):
+        names = sorted(p.stem for p in (SCRIPTS.parent / "fixtures/designs").glob("*.json"))
+        self.assertIn("pipeline", names)
+        for name in names:
+            m = json.loads((SCRIPTS.parent / "fixtures/designs" / f"{name}.json").read_text())
+            self.assertEqual(D.manifest_problems(m), [], name)
+            self.assertEqual(m["schema"], D.DESIGN_SCHEMA)
+        legacy = json.loads((SCRIPTS.parent / "fixtures/designs/pipeline.json").read_text())
+        self.assertEqual((legacy["recipe"]["physical"], legacy["recipe"]["floorplan"]), ("legacy", None))
+
+    def test_schema_rules(self):
+        m = json.loads((SCRIPTS.parent / "fixtures/designs/counter.json").read_text())
+        bad = json.loads(json.dumps(m))
+        bad["recipe"]["physical"] = "maze"
+        self.assertTrue(any("recipe.physical" in x for x in D.manifest_problems(bad)))
+        bad = json.loads(json.dumps(m))
+        bad["recipe"]["floorplan"] = None
+        self.assertTrue(any("track recipe" in x for x in D.manifest_problems(bad)))
+        bad = json.loads(json.dumps(m))
+        del bad["pdks"]["sky130"]["physical_profile"]
+        self.assertTrue(any("physical_profile" in x for x in D.manifest_problems(bad)))
+        bad = json.loads(json.dumps(m))
+        bad["pdks"]["sky130"]["surprise"] = {}
+        self.assertTrue(any("unknown keys" in x for x in D.manifest_problems(bad)))
+        bad = json.loads(json.dumps(m))
+        bad["clock"] = None
+        self.assertTrue(any("clock must be" in x for x in D.manifest_problems(bad)))
+        bad = json.loads(json.dumps(m))
+        bad["pdks_unavailable"] = {"sky130": "x"}
+        self.assertTrue(any("both available and unavailable" in x for x in D.manifest_problems(bad)))
+        del bad["budgets"]["hold_eco_target_margin_ns"]
+        self.assertTrue(any("hold_eco_target_margin_ns" in x for x in D.manifest_problems(bad)))
+
+
 class SdcAndPorts(unittest.TestCase):
+    def test_virtual_clock_rendering(self):
+        ports = [p for p in D.ports_from_yosys_json(PORTS_JSON) if p["name"] != "clk"]
+        tmpl = (SCRIPTS.parent / "fixtures/designs/postroute-io-virtual.sdc.tmpl").read_text()
+        out = D.render_sdc("H\n", tmpl, ports, None, "core")
+        self.assertIn("set_input_delay 0.2 -clock core [get_ports {en a b}]", out)
+        self.assertNotIn("set_propagated_clock", out)
+
+    def test_verilator_xml_ports(self):
+        xml = """<verilator_xml><netlist><module name="alu" topModule="1">
+<var name="op_i" dtype_id="1" dir="input" pinIndex="1"/><var name="a_i" dtype_id="2" dir="input" pinIndex="2"/>
+<var name="z" dtype_id="3" dir="output" pinIndex="3"/><var name="sum" dtype_id="2"/></module></netlist>
+<typetable><refdtype id="1" name="alu_op_e" sub_dtype_id="4"/><basicdtype id="4" name="logic" left="2" right="0"/>
+<basicdtype id="2" name="logic" left="7" right="0"/><basicdtype id="3" name="logic"/></typetable></verilator_xml>"""
+        ports = L.verilator_ports(xml, "alu")
+        self.assertEqual([(p["name"], p["direction"], p["width"], p["vector"]) for p in ports],
+                         [("op_i", "input", 3, True), ("a_i", "input", 8, True), ("z", "output", 1, False)])
+        self.assertEqual(ports[0]["bits"], ["op_i[0]", "op_i[1]", "op_i[2]"])
+        with self.assertRaises(D.GateError):
+            L.verilator_ports(xml, "other")
+
     def test_ports_and_rendering_reproduce_the_pipeline_sdc(self):
         ports = D.ports_from_yosys_json(PORTS_JSON)
         self.assertEqual([p["name"] for p in ports], ["clk", "en", "a", "b", "y", "z"])
@@ -195,6 +267,33 @@ class Logic(unittest.TestCase):
         self.assertIn("output wire x\n);", up)
         self.assertNotIn("VDD", up)
         self.assertEqual(log["supply_connections_removed"], 2)
+
+    def test_rail_constants_and_exhaustive_testbench(self):
+        pins = dict(self.PINS, INV={"A": dict(direction="INPUT", use="SIGNAL"),
+                                    "Y": dict(direction="OUTPUT", use="SIGNAL"),
+                                    "VPWR": dict(direction="INOUT", use="POWER")})
+        text = "  INV t0 (.Y(n0), .A(VSS), .VPWR(VDD));\n  INV t1 (.Y(n1), .A(VDD), .VPWR(VDD));\n"
+        out, log = L.rail_constant_view(text, pins, ["VDD", "VSS"])
+        self.assertIn("INV t0 (.Y(n0), .A(1'b0), .VPWR(VDD));", out)
+        self.assertIn("INV t1 (.Y(n1), .A(1'b1), .VPWR(VDD));", out)
+        self.assertEqual(log["rail_tied_signal_pins"], ["t0/A=VSS", "t1/A=VDD"])
+        ports = [p for p in D.ports_from_yosys_json(PORTS_JSON) if p["name"] != "clk"]
+        tb = L.xorshift_tb("top", ports, None, 32, 1, exhaustive=True)
+        self.assertIn("{en, a, b} = idx[4:0]; idx = idx + 1;", tb)
+        self.assertNotIn("s = s ^", tb)
+        with self.assertRaises(D.GateError):
+            L.xorshift_tb("top", ports, None, 16, 1, exhaustive=True)
+        with self.assertRaises(D.GateError):
+            L.xorshift_tb("top", D.ports_from_yosys_json(PORTS_JSON), "clk", 64, 1, exhaustive=True)
+        self.assertEqual(L.second_oracle(dict(yosys=D.item("unverified"), exhaustive=D.item("passed",
+                         expected=dict(cycles=32))))["status"], "passed")
+        self.assertEqual(L.second_oracle(dict(yosys=D.item("failed")))["oracle"], "Yosys equiv_simple")
+
+    def test_first_input_pin(self):
+        with tempfile.TemporaryDirectory() as d:
+            n = Path(d) / "n.v"
+            n.write_text(self.NET)
+            self.assertEqual(L.first_input_pin(n, self.PINS), "g0/A")
 
     def test_bad_rtl_wrapper_and_testbench_are_generic(self):
         ports = D.ports_from_yosys_json(PORTS_JSON)
@@ -285,6 +384,42 @@ class Timing(unittest.TestCase):
             self.assertEqual(T.spef_binding({"tt": s}, {"tt": good})["status"], "failed")
 
 
+class PulseScope(unittest.TestCase):
+    def source(self, unchecked, per_corner, rows, status="partial", ref_mpw=None):
+        lim = [dict(corner=c, kind=k, checked=True, unevaluated=False, violating=0)
+               for c in ("tt",) for k in T.DRV_KINDS]
+        g = dict(metrics=dict(pulse_width_status=status, drv_status="met"),
+                 completeness=dict(unchecked_pulse_width_pins=unchecked),
+                 unclocked_pulse_pins=per_corner, endpoints={"tt": {"r0/D": dict(setup=1.0, hold=0.2)}},
+                 reports=dict(pulse_width=dict(rows=rows), min_period=dict(rows=[]), drv=dict(rows=[]),
+                              limits=dict(rows=lim)))
+        ref = {"tt": dict(setup={"r0/D": 1.0}, hold={"r0/D": 0.2}, mpw=ref_mpw or {}, period={},
+                          max_transition={"x": dict(violated=False)}, max_capacitance={"x": dict(violated=False)},
+                          max_fanout={"x": dict(violated=False)}, unannotated=0, partially_unannotated=0)}
+        return dict(gating=g, compat=g), ref
+
+    def test_async_set_clear_pins_are_out_of_scope_only_when_matched(self):
+        budgets = dict(hold_margin_ns=0.05, setup_margin_ns=0.0, parity_ns=0.001)
+        row = dict(pin="r0/CLK", corner="tt", kind="min_pulse_width_high", slack=1.0, limit=0.5)
+        mpw = {"r0/CLK:high": dict(required=0.5, actual=1.5, slack=1.0, met=True)}
+        rust, ref = self.source(1, {"tt": 1}, [row], ref_mpw=mpw)
+        r = T.evaluate_source(rust, ref, ["tt"], budgets, async_pins=["r0/RESET_B"])["mpw_min_period"]
+        self.assertEqual(r["status"], "passed", r)
+        self.assertEqual(r["async_set_clear_pins_unchecked"]["pins"], ["r0/RESET_B"])
+        # A count that does not match the async pins stays unverified.
+        rust, ref = self.source(2, {"tt": 2}, [row], ref_mpw=mpw)
+        r = T.evaluate_source(rust, ref, ["tt"], budgets, async_pins=["r0/RESET_B"])["mpw_min_period"]
+        self.assertEqual(r["status"], "unverified")
+        # Combinational design: nothing to check in either engine -> not_applicable.
+        rust, ref = self.source(0, {}, [], status="unconstrained")
+        r = T.evaluate_source(rust, ref, ["tt"], budgets, clocked=False)["mpw_min_period"]
+        self.assertEqual(r["status"], "not_applicable")
+        r = T.evaluate_source(rust, ref, ["tt"], budgets, clocked=True)["mpw_min_period"]
+        self.assertEqual(r["status"], "unverified")
+        u = T.unverified_source("mesh")
+        self.assertEqual({v["status"] for k, v in u.items() if k != "matrix"}, {"unverified"})
+
+
 class Evidence(unittest.TestCase):
     def test_absolute_paths_are_reduced_to_names(self):
         import rtl2gds
@@ -294,6 +429,18 @@ class Evidence(unittest.TestCase):
         self.assertEqual(out["revision"]["branch"], "feat/rtl2gds-gate")
         self.assertEqual(out["pdks"][0], dict(reason="see density.json now", files=["b.v", "rel/c.v"]))
         self.assertNotIn("memory_preflight", out)
+
+
+class ClosureHelpers(unittest.TestCase):
+    def test_constant_pins_follow_ties_and_aliases(self):
+        import hold_closure as H
+        with tempfile.TemporaryDirectory() as d:
+            n, cfg = Path(d) / "n.v", Path(d) / "c.json"
+            n.write_text("module t (input wire clk, output wire q);\n  wire n1;\n  wire rr_tie_net_0;\n"
+                         "  assign n1 = rr_tie_net_0;\n  TIEH rr_tie_cell_0 (.Z(rr_tie_net_0));\n"
+                         "  DFF r0 (.D(n1), .CLK(clk), .Q(q));\n  DFF r1 (.D(1'b0), .CLK(clk), .Q());\nendmodule\n")
+            cfg.write_text(json.dumps(dict(tie_high=dict(cell="TIEH", pin="Z"), tie_low=None)))
+            self.assertEqual(H.constant_pins(n, cfg), {"r0/D", "r1/D"})
 
 
 class Controls(unittest.TestCase):

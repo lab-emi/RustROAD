@@ -15,6 +15,13 @@
   compared with ``!==`` before and after every clock edge, for N cycles. Both
   models start from Verilator's zero-initialised state; nothing in it is
   specific to a fixture.
+* When the pinned Yosys cannot elaborate the RTL (its frontend lacks e.g. a
+  package import in a module header) the port list comes from Verilator's
+  XML elaboration instead (recorded as ``port_source``), and for a
+  combinational design with at most ``EXHAUSTIVE_MAX_INPUT_BITS`` input bits
+  the second CEC oracle is an exhaustive co-simulation of the RTL against the
+  netlist (every input combination, complete for combinational logic). A
+  clocked design keeps the Yosys verdict (then ``unverified``).
 * ``bad_rtl`` builds a generic mutant: the top module is renamed in copies of
   the RTL and a wrapper with the original name inverts bit 0 of the first
   output port. Both CEC oracles must reject it.
@@ -31,6 +38,7 @@ from rtl2gds_design import GateError, item
 
 MAX_LEF_BYTES = 64 * 1024 * 1024
 MAX_NETLIST_BYTES = 64 * 1024 * 1024
+EXHAUSTIVE_MAX_INPUT_BITS = 22  # 4,194,304 vectors at most
 
 
 def _text(path: Path, limit: int) -> str:
@@ -44,8 +52,11 @@ def ystr(path: Path) -> str:
     return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def run(h, label: str, argv: list) -> dict:
-    return h.run(label, [str(a) for a in argv])
+COSIM_BUILD_FILE_BYTES = 512 * 1024 * 1024  # Verilator precompiled headers exceed the 64 MiB log cap
+
+
+def run(h, label: str, argv: list, **kw) -> dict:
+    return h.run(label, [str(a) for a in argv], **kw)
 
 
 def out_text(receipt: dict) -> str:
@@ -107,6 +118,29 @@ def physical_only_view(text: str, physical_globs: list[str], pins: dict) -> tupl
                               rule="cell-policy physical_only masters without any LEF OUTPUT pin")
 
 
+def rail_constant_view(text: str, pins: dict, supply_ports: list[str]) -> tuple[str, dict]:
+    """Signal pins (LEF USE not POWER/GROUND) wired to a supply rail get the
+    rail's logic constant: power -> 1'b1, ground -> 1'b0 (rail-input tie
+    cells). The supply pins themselves keep their rails. Listed."""
+    const = {supply_ports[0]: "1'b1", supply_ports[1]: "1'b0"}
+    lines, tied = [], []
+    for line in text.splitlines(keepends=True):
+        m = INSTANCE.match(line)
+        if m:
+            master = pins.get(m[2]) or {}
+            conns = CONN.findall(m[4])
+            new = []
+            for p, sig in conns:
+                if sig.strip() in const and (master.get(p) or {}).get("use") not in ("POWER", "GROUND"):
+                    tied.append(f"{m[3]}/{p}={sig.strip()}")
+                    sig = const[sig.strip()]
+                new.append((p, sig))
+            if new != conns:
+                line = f"{m[1]}{m[2]} {m[3]} (" + ", ".join(f".{p}({s_})" for p, s_ in new) + ");\n"
+        lines.append(line)
+    return "".join(lines), dict(rail_tied_signal_pins=tied, rule="signal pin on a supply rail -> that rail's constant")
+
+
 def unpowered_view(text: str, pins: dict, supply_ports: list[str]) -> tuple[str, dict]:
     """Drop supply-pin connections (LEF USE POWER/GROUND) and the supply ports."""
     lines, dropped, ports_removed = [], 0, []
@@ -143,6 +177,85 @@ def rtl_module(h, label: str, yosys: Path, rtl: list[Path], top: str) -> dict:
     if r["exit_code"] != 0 or not out.is_file():
         raise GateError(f"{label}: Yosys could not elaborate the RTL")
     return json.loads(_text(out, 64 * 1024 ** 2))["modules"][top]
+
+
+def verilator_ports(xml_text: str, top: str) -> list[dict]:
+    """Top-module ports (declaration order) from ``verilator --xml-only`` output."""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(xml_text)
+    dtypes = {}
+    for el in root.iter():
+        if el.get("id") is not None and el.tag.endswith("dtype"):
+            dtypes[el.get("id")] = el
+    module = next((m for m in root.iter("module") if m.get("name") == top and m.get("topModule") == "1"), None)
+    if module is None:
+        raise GateError(f"Verilator XML has no top module {top}")
+    ports = []
+    for var in module.findall("var"):
+        direction = var.get("dir")
+        if direction not in ("input", "output", "inout"):
+            continue
+        dt, hops = dtypes.get(var.get("dtype_id")), 0
+        while dt is not None and dt.get("left") is None and dt.get("sub_dtype_id") and hops < 16:
+            dt, hops = dtypes.get(dt.get("sub_dtype_id")), hops + 1
+        if dt is None or dt.tag not in ("basicdtype", "refdtype", "enumdtype"):
+            raise GateError(f"port {var.get('name')}: unsupported Verilator dtype")
+        if dt.get("left") is None:
+            msb = lsb = 0
+            vector = False
+        else:
+            msb, lsb = int(dt.get("left")), int(dt.get("right"))
+            vector = True
+        lo, hi = min(msb, lsb), max(msb, lsb)
+        width = hi - lo + 1
+        vector = vector and width > 1
+        ports.append(dict(name=var.get("name"), direction=direction, width=width, msb=msb if vector else 0,
+                          lsb=lsb if vector else 0, vector=vector,
+                          bits=[f"{var.get('name')}[{i}]" for i in range(lo, hi + 1)] if vector else [var.get("name")],
+                          pin_index=int(var.get("pinIndex") or 0)))
+    ports.sort(key=lambda p: p.pop("pin_index"))
+    return ports
+
+
+def rtl_ports(h, tools: dict, rtl: list[Path], top: str) -> tuple[list[dict], dict]:
+    """Ports of the RTL top: Yosys first; Verilator XML when Yosys cannot elaborate."""
+    from rtl2gds_design import ports_from_yosys_json
+    try:
+        return ports_from_yosys_json(rtl_module(h, "rtl_ports", tools["yosys"], rtl, top)), dict(tool="yosys")
+    except GateError as error:
+        yosys_error = str(error)
+    out = h.root / "rtl_ports_verilator"
+    r = run(h, "rtl_ports_verilator", [tools["verilator"], "--xml-only", "-Wno-fatal", "--Mdir", out,
+                                       "--top-module", top, *rtl])
+    xml = out / f"V{top}.xml"
+    if r["exit_code"] != 0 or not xml.is_file():
+        raise GateError(f"neither Yosys nor Verilator could elaborate the RTL ({yosys_error})")
+    return verilator_ports(_text(xml, 64 * 1024 ** 2), top), dict(
+        tool="verilator --xml-only", yosys=yosys_error, yosys_frontend=yosys_frontend_error(h, tools["yosys"], rtl, top))
+
+
+def yosys_frontend_error(h, yosys: Path, rtl: list[Path], top: str, label: str = "rtl_frontend_probe") -> str | None:
+    """The first Yosys frontend ERROR line when it cannot read the RTL (None: it can)."""
+    script = h.root / f"{label}.ys"
+    script.write_text("".join(f"read_verilog -sv {ystr(p)}\n" for p in rtl) + f"hierarchy -check -top {top}\n")
+    r = run(h, label, [yosys, "-Q", "-T", "-s", script])
+    if r["exit_code"] == 0:
+        return None
+    m = re.search(r"(?m)^.*ERROR:.*$", out_text(r))
+    return (m[0] if m else f"exit {r['exit_code']}")[:300]
+
+
+def first_input_pin(netlist: Path, pins: dict) -> str | None:
+    """``instance/pin`` of the first cell-LEF INPUT pin (non-supply) in a netlist."""
+    for line in _text(netlist, MAX_NETLIST_BYTES).splitlines():
+        m = INSTANCE.match(line)
+        if not m or m[2] not in pins:
+            continue
+        for pin, _net in CONN.findall(m[4]):
+            d = pins[m[2]].get(pin) or {}
+            if (d.get("direction") or "").startswith("INPUT") and d.get("use") not in ("POWER", "GROUND"):
+                return f"{m[3].lstrip(chr(92))}/{pin}"
+    return None
 
 
 def bad_rtl(rtl: list[Path], top: str, ports: list[dict], out_dir: Path) -> tuple[list[Path], dict]:
@@ -213,9 +326,17 @@ def yosys_equiv(h, label: str, yosys: Path, lib: Path, rtl: list[Path], top: str
         f"read_verilog {ystr(netlist)}\nhierarchy -top {top}\nproc\nflatten\nopt\nrename {top} gate\n"
         "design -stash gate\ndesign -reset\n" +
         "".join(f"read_verilog -sv {ystr(p)}\n" for p in rtl) +
-        f"hierarchy -top {top}\nproc\nopt\nrename {top} gold\ndesign -stash gold\n"
+        # splitnets: the netlist names register bits ``\\q[0]``; splitting the
+        # RTL's multi-bit wires gives the same names, so equiv_make pairs the
+        # state bits and equiv_induct can prove them by induction.
+        f"hierarchy -top {top}\nproc\nmemory\nopt\nsplitnets\nrename {top} gold\ndesign -stash gold\n"
         "design -copy-from gold -as gold gold\ndesign -copy-from gate -as gate gate\n"
-        f"equiv_make gold gate equiv\nhierarchy -top equiv\nequiv_simple -seq {int(seq)} -undef\nequiv_status -assert\n")
+        # async2sync on both sides: the SAT models have no asynchronous
+        # set/reset flip-flop; the same transformation of gold and gate models
+        # the reset as an immediate override.
+        "async2sync\n"
+        f"equiv_make gold gate equiv\nhierarchy -top equiv\nequiv_simple -seq {int(seq)} -undef\n"
+        f"equiv_induct -undef -seq {int(seq)}\nequiv_status -assert\n")
     r = run(h, label, [yosys, "-Q", "-T", "-s", script])
     stdout, stderr = _text(Path(r["stdout"]), 64 * 1024 ** 2), _text(Path(r["stderr"]), 64 * 1024 ** 2)
     if r["exit_code"] == 0 and "Equivalence successfully proven!" in stdout:
@@ -227,16 +348,36 @@ def yosys_equiv(h, label: str, yosys: Path, lib: Path, rtl: list[Path], top: str
 
 
 def cec_pair(h, tag: str, tools: dict, lib: Path, rtl: list[Path], top: str, netlist: Path, verification: dict,
-             supply_ports: list[str] = (), yosys_netlist: Path | None = None) -> dict:
-    return dict(rustsys=rustsys_check(h, f"{tag}_rustsys", tools["rustsys"], lib, rtl, top, netlist, verification,
-                                      supply_ports),
-                yosys=yosys_equiv(h, f"{tag}_yosys", tools["yosys"], lib, rtl, top, yosys_netlist or netlist,
-                                  verification["yosys_equiv_seq"]))
+             supply_ports: list[str] = (), yosys_netlist: Path | None = None, exhaustive: dict | None = None) -> dict:
+    """RustSys + Yosys; ``exhaustive`` (combinational designs only) adds the
+    exhaustive co-simulation as the second oracle when Yosys cannot read the RTL."""
+    out = dict(rustsys=rustsys_check(h, f"{tag}_rustsys", tools["rustsys"], lib, rtl, top, netlist, verification,
+                                     supply_ports),
+               yosys=yosys_equiv(h, f"{tag}_yosys", tools["yosys"], lib, rtl, top, yosys_netlist or netlist,
+                                 verification["yosys_equiv_seq"]))
+    if out["yosys"]["status"] == "unverified" and exhaustive is not None:
+        frontend = yosys_frontend_error(h, tools["yosys"], rtl, top, f"{tag}_frontend_probe")
+        if frontend is not None:
+            out["yosys"]["reason"] = f"Yosys frontend cannot elaborate the RTL: {frontend}"
+            out["exhaustive"] = cosim(h, f"{tag}_exhaustive", tools, lib, rtl, top, yosys_netlist or netlist,
+                                      exhaustive["ports"], None, 1 << exhaustive["input_bits"], exhaustive["seed"],
+                                      exhaustive=True)
+    return out
+
+
+def second_oracle(pair: dict) -> dict:
+    """The independent (non-RustSys) CEC verdict of a ``cec_pair`` result."""
+    if pair.get("exhaustive") is not None:
+        e = pair["exhaustive"]
+        return dict(oracle=f"exhaustive co-simulation ({(e.get('expected') or {}).get('cycles')} vectors, "
+                           "Yosys cannot read the RTL)", status=e["status"])
+    return dict(oracle="Yosys equiv_simple", status=pair["yosys"]["status"])
 
 
 # ----------------------------------------------------------------------------- co-simulation
 
-def xorshift_tb(top: str, ports: list[dict], clock: str | None, vectors: int, seed: int) -> str:
+def xorshift_tb(top: str, ports: list[dict], clock: str | None, vectors: int, seed: int,
+                exhaustive: bool = False) -> str:
     """Generic random RTL-vs-gate testbench (SystemVerilog, Verilator --timing).
 
     Every variable is initialised in its declaration and the loop is a
@@ -246,6 +387,10 @@ def xorshift_tb(top: str, ports: list[dict], clock: str | None, vectors: int, se
     comparison vacuous. The testbench therefore also prints how many cycles
     ran, how many port comparisons it made and the final simulation time; the
     harness requires all three to match (and builds with -O0).
+
+    ``exhaustive`` (combinational, no clock): the inputs are an index counter
+    instead of the random sequence, ``vectors`` must be 2**(input bits), and
+    every input combination is applied once.
     """
     if any(p["direction"] == "inout" for p in ports):
         raise GateError("co-simulation: inout ports are not supported")
@@ -272,8 +417,15 @@ def xorshift_tb(top: str, ports: list[dict], clock: str | None, vectors: int, se
         compare.append(f"      checks = checks + 1; if (gold_{p['name']} !== gate_{p['name']}) begin errors = errors + 1; "
                        f"if (errors <= 8) $display(\"RR_COSIM_MISMATCH cycle=%0d phase=%0d port={p['name']} "
                        f"gold=%b gate=%b\", cycle, phase, gold_{p['name']}, gate_{p['name']}); end")
+    if exhaustive:
+        bits = sum(p["width"] for p in ins)
+        if clock or vectors != 1 << bits or bits == 0:
+            raise GateError("exhaustive co-simulation needs a combinational design and 2**inputs vectors")
+        lines.append(f"  reg [{bits}:0] idx = '0;")
     lines += ["  initial begin", f"    repeat ({int(vectors)}) begin"]
-    for p in ins:
+    if exhaustive:
+        lines.append("      {" + ", ".join(p["name"] for p in ins) + f"}} = idx[{bits - 1}:0]; idx = idx + 1;")
+    for p in ([] if exhaustive else ins):
         for k in range((p["width"] + 63) // 64):
             hi = min(p["width"], (k + 1) * 64) - 1
             lo = k * 64
@@ -300,7 +452,7 @@ def expected_counts(ports: list[dict], clock: str | None, vectors: int) -> dict:
 
 
 def cosim(h, tag: str, tools: dict, lib: Path, rtl: list[Path], top: str, netlist: Path, ports: list[dict],
-          clock: str | None, vectors: int, seed: int) -> dict:
+          clock: str | None, vectors: int, seed: int, exhaustive: bool = False) -> dict:
     model = h.root / f"{tag}_gate_model.v"
     script = h.root / f"{tag}_gate_model.ys"
     script.write_text(f"read_liberty -ignore_miss_func -ignore_miss_dir -ignore_miss_data_latch {ystr(lib)}\n"
@@ -310,10 +462,11 @@ def cosim(h, tag: str, tools: dict, lib: Path, rtl: list[Path], top: str, netlis
     if r["exit_code"] != 0:
         return item("unverified", "Yosys gate model failed")
     tb = h.root / f"{tag}_cosim_tb.sv"
-    tb.write_text(xorshift_tb(top, ports, clock, vectors, seed))
+    tb.write_text(xorshift_tb(top, ports, clock, vectors, seed, exhaustive))
     build = h.root / f"{tag}_cosim_build"
     r = run(h, f"{tag}_cosim_build", [tools["verilator"], "--binary", "--timing", "-O0", "-Wno-fatal", "-j", "2",
-                                      "--top-module", "rr_cosim_tb", "--Mdir", build, *rtl, model, tb])
+                                      "--top-module", "rr_cosim_tb", "--Mdir", build, *rtl, model, tb],
+            file_limit_bytes=COSIM_BUILD_FILE_BYTES)
     if r["exit_code"] != 0:
         return item("unverified", "Verilator build failed")
     r = run(h, f"{tag}_cosim_run", [build / "Vrr_cosim_tb"])
@@ -321,7 +474,9 @@ def cosim(h, tag: str, tools: dict, lib: Path, rtl: list[Path], top: str, netlis
     want = expected_counts(ports, clock, int(vectors))
     done = re.search(r"RR_COSIM_DONE cycles=(\d+) checks=(\d+) errors=(\d+) time=(\d+)", text)
     got = dict(cycles=int(done[1]), checks=int(done[2]), time=int(done[4])) if done else None
-    common = dict(vectors=int(vectors), seed=f"0x{seed:016x}", expected=want, observed=got,
+    common = dict(vectors=int(vectors), seed=None if exhaustive else f"0x{seed:016x}",
+                  stimulus="exhaustive (every input combination)" if exhaustive else "xorshift64 random",
+                  expected=want, observed=got,
                   compared_outputs=[p["name"] for p in ports if p["direction"] == "output"],
                   initial_state="Verilator zero-initialised state in both models", testbench=str(tb))
     if r["exit_code"] != 0 or got != want:

@@ -14,6 +14,11 @@ bound artifact) and runs the oracle that must catch it; the control is
   removed_hold_cell the hold-buffer chain of the worst iteration-0 hold
                     endpoint removed from the final netlist, fresh layout and
                     extraction -> RustSTA AND OpenSTA hold below the margin
+  planted_hold_uncertainty
+                    only when no hold cell was inserted (removed_hold_cell is
+                    then not applicable): a copy of the rendered SDC with
+                    ``set_clock_uncertainty -hold 2.0`` re-times the bound final
+                    layout (native SPEF) -> RustSTA AND OpenSTA hold gate fail
   tampered_sdc      the rendered SDC edited -> frozen-input hash check fails
   tampered_spef     resistances of the native ss SPEF scaled x1000 -> SPEF
                     identity (extraction receipt) fails; re-timing reported
@@ -223,6 +228,33 @@ def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
                                                                 if r.get("peak_rss_kib")), default=None))
 
 
+def hold_cells_inserted(b) -> bool:
+    return any(r.get("hold_eco") for r in b["iterations"])
+
+
+def planted_hold_uncertainty(ctx, gate, b, work: Path) -> dict:
+    """No hold cell to remove: plant a hold violation in the constraints of a
+    copy instead and require both engines' hold gate to reject the bound layout."""
+    work.mkdir(parents=True, exist_ok=True)
+    sdc = work / "planted_hold.sdc"
+    sdc.write_text(Path(b["flow"].sdc).read_text() + f"set_clock_uncertainty -hold 2.0 [get_clocks {ctx.clock['name']}]\n")
+    phys, flow = b["phys"], b["flow"]
+    spefs = {c: Path(phys["spef"][c]["path"]) for c in gate.corners}
+    netlist = Path(phys["paths"]["netlist"])
+    hc = ctx.make_harness(work, ctx.budgets)
+    rust = T.ruststa(hc, f"{gate.tag}_ctl_hold_unc", ctx.tool_paths, flow.libs, netlist, sdc, spefs,
+                     clock_model=flow.clock_model())
+    ref = {c: T.opensta(hc, f"{gate.tag}_ctl_hold_unc_opensta_{c}", ctx.tool_paths["opensta"], flow.libs[c], netlist,
+                        ctx.top, sdc, spefs[c]) for c in gate.corners}
+    res = T.evaluate_source(rust, ref, gate.corners, ctx.budgets, clocked=ctx.clocked)["timing_hold"]
+    engines = {v["engine"] for v in res.get("violations") or []}
+    return control("RustSTA and OpenSTA hold gate on the bound layout with a planted 2 ns hold uncertainty",
+                   res["status"] == "failed" and engines == {"ruststa", "opensta"}, planted="set_clock_uncertainty -hold 2.0",
+                   violations=(res.get("violations") or [])[:6], margin_ns=ctx.budgets["hold_margin_ns"],
+                   processes=len(hc.receipts), peak_rss_kib=max((r["peak_rss_kib"] for r in hc.receipts
+                                                                if r.get("peak_rss_kib")), default=None))
+
+
 def tampered_sdc(ctx, gate, b, work: Path) -> dict:
     work.mkdir(parents=True, exist_ok=True)
     tampered = work / "tampered_postroute.sdc"
@@ -283,12 +315,15 @@ def bad_rtl(ctx, gate, b, work: Path) -> dict:
     files, info = L.bad_rtl(ctx.rtl, ctx.top, ctx.ports, work)
     final = Path(b["phys"]["paths"]["netlist"])
     lib = b["flow"].libs["tt"]
-    pair = L.cec_pair(ctx.h, f"{gate.tag}_ctl_bad_rtl", ctx.tool_paths, lib, files, ctx.top, final, ctx.verification)
+    pair = L.cec_pair(ctx.h, f"{gate.tag}_ctl_bad_rtl", ctx.tool_paths, lib, files, ctx.top, final, ctx.verification,
+                      exhaustive=ctx.exhaustive)
     sim = L.cosim(ctx.h, f"{gate.tag}_ctl_bad_rtl", ctx.tool_paths, lib, files, ctx.top, final, ctx.ports,
                   ctx.clock["port"], int(ctx.verification["cosim_vectors"]), int(str(ctx.verification["cosim_seed"]), 0))
-    return control("RustSys check synth, Yosys equiv and the random co-simulation",
-                   pair["rustsys"]["status"] == "failed" and pair["yosys"]["status"] == "failed"
+    second = L.second_oracle(pair)
+    return control(f"RustSys check synth, {second['oracle']} and the random co-simulation",
+                   pair["rustsys"]["status"] == "failed" and second["status"] == "failed"
                    and sim["status"] == "failed", rustsys=pair["rustsys"], yosys=pair["yosys"],
+                   exhaustive=pair.get("exhaustive"),
                    cosim=dict(status=sim["status"], mismatches=(sim.get("mismatches") or [])[:3]), **info)
 
 
@@ -395,11 +430,18 @@ def antenna_planted(ctx, gate, b, work: Path) -> dict:
 def run_all(ctx, gate, b, record) -> dict:
     root = ctx.h.root / f"{gate.tag}_controls"
     root.mkdir(exist_ok=True)
+    hold_control = ("removed_hold_cell", removed_hold_cell) if hold_cells_inserted(b) else \
+        ("planted_hold_uncertainty", planted_hold_uncertainty)
     plan = [("drc_spacing", drc_spacing), ("label_swap", label_swap), ("removed_via", removed_via),
-            ("removed_hold_cell", removed_hold_cell), ("tampered_sdc", tampered_sdc), ("tampered_spef", tampered_spef),
+            hold_control, ("tampered_sdc", tampered_sdc), ("tampered_spef", tampered_spef),
             ("bad_rtl", bad_rtl), ("missing_tool", missing_tool), ("relaxed_manifest", relaxed_manifest),
             ("antenna_planted", antenna_planted)]
     results = {}
+    if not hold_cells_inserted(b):
+        results["removed_hold_cell"] = dict(detected="not_applicable", oracle="RustSTA and OpenSTA hold gate",
+                                            reason="no hold cell was inserted (closed at iteration "
+                                                   f"{b['final_iteration']} without a hold ECO); replaced by "
+                                                   "planted_hold_uncertainty")
     for name, fn in plan:
         try:
             results[name] = fn(ctx, gate, b, root / name)
@@ -411,6 +453,9 @@ def run_all(ctx, gate, b, record) -> dict:
         results["tampered_artifact"] = dict(detected=None, error=repr(error)[:600])
     missed = [n for n, r in results.items() if r.get("detected") is False]
     crashed = [n for n, r in results.items() if r.get("detected") is None]
+    if results.get("removed_hold_cell", {}).get("detected") == "not_applicable" and \
+            results.get("planted_hold_uncertainty", {}).get("detected") is not True:
+        crashed.append("removed_hold_cell (its replacement was not detected)")
     status = "failed" if missed else "unverified" if crashed else "passed"
     return item(status, None if status == "passed" else f"not detected: {missed}; did not run: {crashed}",
                 controls=results)

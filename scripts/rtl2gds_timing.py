@@ -18,8 +18,15 @@ Statuses (each separately, both engines and both SPEF sources):
   timing_setup   setup slack >= setup margin at every gated setup corner (tt, ss)
   timing_hold    hold slack >= hold margin at tt, ss and ff
   mpw_min_period RustSTA default rules met with checked rows and no unchecked
-                 pins, OpenSTA met; minimum-period rows may be absent only when
-                 BOTH engines report none (no Liberty minimum_period on the cells)
+                 pins except the asynchronous set/clear inputs of sequential
+                 cells (their pulse comes from the reset source outside the
+                 block: no clock reaches them, neither engine checks them; they
+                 are matched pin for pin and listed as out of block scope),
+                 OpenSTA met; minimum-period rows may be absent only when
+                 BOTH engines report none (no Liberty minimum_period on the cells).
+                 ``not_applicable`` only for a combinational design (virtual
+                 I/O clock): RustSTA pulse_width_status unconstrained with zero
+                 rows and both engines without any pulse-width/period row.
   drv            RustSTA drv met with every kind checked, OpenSTA no violator
   timing_accuracy RustSTA vs OpenSTA: endpoint sets equal and every endpoint
                  slack within the parity tolerance per corner per SPEF, MPW /
@@ -36,6 +43,7 @@ import re
 
 from rtl2gds_design import GateError, item, sha256_file, worst
 
+T0133 = re.compile(r"corner '(\w+)': (\d+) pin\(s\) with min_pulse_width or minimum_period checks are reached by no clock")
 ROW = re.compile(r"^(\S+)(?:\s+\((high|low|[^)]*)\))?\s+(-?[0-9.]+)\s+(-?[0-9.]+)\s+(-?[0-9.]*)\s*\((MET|VIOLATED)\)")
 SETUP_CORNERS = ("tt", "ss")
 HOLD_CORNERS = ("tt", "ss", "ff")
@@ -46,7 +54,11 @@ COMPAT = ["--pulse-groups", "last", "--pulse-pins", "clock-ends"]
 def run_json(h, label: str, argv: list) -> dict:
     r = h.run(label, [str(a) for a in argv])
     if r["exit_code"] != 0:
-        raise GateError(f"{label}: exit {r['exit_code']}")
+        try:
+            message = (json.loads(Path(r["stdout"]).read_text()).get("error") or {}).get("message")
+        except (OSError, ValueError, AttributeError):
+            message = None
+        raise GateError(f"{label}: exit {r['exit_code']}" + (f": {message}" if message else ""))
     value = json.loads(Path(r["stdout"]).read_text())
     if value.get("schema") == "rusteda.v1" and (value.get("ok") is not True or value.get("error")):
         raise GateError(f"{label}: unsuccessful rusteda.v1 envelope")
@@ -68,7 +80,8 @@ def spef_binding(spefs: dict[str, Path], expected: dict[str, str]) -> dict:
 
 # ----------------------------------------------------------------------------- RustSTA
 
-def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spefs: dict) -> dict:
+def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spefs: dict,
+            clock_model: str = "propagated") -> dict:
     ws = h.root / f"{tag}_ws"
     common = ["--workspace", ws, "--threads", "2", "--format", "json", "--color", "never"]
     rusteda, sta = tools["rusteda"], tools["ruststa"]
@@ -89,11 +102,17 @@ def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spef
                                                "--require-wire-model", "spef_rc", "-q", *extra])
         rev = r["new_rev"]
         base = rev
-        if r["scope"].get("wire_model") != "spef_rc" or r["scope"].get("clock_model") != "propagated":
-            raise GateError(f"{tag} {mode}: wrong timing scope {r['scope']}")
+        if r["scope"].get("wire_model") != "spef_rc" or r["scope"].get("clock_model") != clock_model or \
+                (clock_model == "ideal" and r["scope"].get("physical_clock_domains") != 0):
+            raise GateError(f"{tag} {mode}: wrong timing scope {r['scope']} (required clock model {clock_model})")
+        unclocked = {}
+        for d in r.get("diagnostics", []):
+            m = T0133.search(d.get("message") or "") if d.get("code") == "T0133" else None
+            if m:
+                unclocked[m[1]] = int(m[2])
         entry = dict(revision=rev, scope=r["scope"], completeness=r["completeness"], metrics=r["metrics"],
                      diagnostics=sorted({d.get("code") for d in r.get("diagnostics", []) if d.get("code")}),
-                     endpoints={}, reports={})
+                     unclocked_pulse_pins=unclocked, endpoints={}, reports={})
         for c in libs:
             e = run_json(h, f"{tag}_{mode}_endpoints_{c}", [sta, *common, "report", "--rev", rev, "--section",
                                                             "endpoints", "--corner", c, "--limit", "0", "-q"])
@@ -111,6 +130,35 @@ def ruststa(h, tag: str, tools: dict, libs: dict, netlist: Path, sdc: Path, spef
             entry["reports"][section] = sec
         out[mode] = entry
     return out
+
+
+def async_pulse_pins(netlist: Path, lib: Path) -> list[str]:
+    """``instance/pin`` of every asynchronous set/clear input (Liberty ``ff`` /
+    ``latch`` ``clear`` or ``preset``) that carries a min-pulse-width check."""
+    import liberty_lite as LL
+    inst = re.compile(r"^\s*(\S+)\s+(\S+)\s+\((.*)\);\s*$")
+    conn = re.compile(r"\.(\w+)\(([^()]*)\)")
+    rows = []
+    for line in Path(netlist).read_text().splitlines():
+        m = inst.match(line)
+        if m and not m[1].startswith(("module", "input", "output", "wire", "assign")):
+            rows.append((m[1], m[2].lstrip("\\"), [p for p, _ in conn.findall(m[3])]))
+    masters = {r[0] for r in rows}
+    library = LL.Library(lib, wanted=masters)
+    async_pins = {}
+    for name, cell in library.cells.items():
+        pins = set()
+        for g in cell.groups:
+            if g.kind in ("ff", "latch"):
+                for key in ("clear", "preset"):
+                    pins |= set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", g.attr(key) or ""))
+        checked = set()
+        for pin in cell.sub("pin"):
+            if pin.name in pins and (pin.attrs.get("min_pulse_width_low") or pin.attrs.get("min_pulse_width_high") or
+                                     any(t.attr("timing_type") == "min_pulse_width" for t in pin.sub("timing"))):
+                checked.add(pin.name)
+        async_pins[name] = checked
+    return sorted(f"{i}/{p}" for master, i, conns in rows for p in conns if p in async_pins.get(master, ()))
 
 
 # ----------------------------------------------------------------------------- OpenSTA
@@ -251,8 +299,13 @@ def drv_parity(gating: dict, ref: dict, corner: str) -> dict:
     return out
 
 
-def evaluate_source(rust: dict, ref: dict, corners: list[str], budgets: dict) -> dict:
-    """Gating statuses of one SPEF source; `ref` maps corner -> OpenSTA result."""
+def evaluate_source(rust: dict, ref: dict, corners: list[str], budgets: dict, clocked: bool = True,
+                    async_pins: list[str] = ()) -> dict:
+    """Gating statuses of one SPEF source; `ref` maps corner -> OpenSTA result.
+
+    ``clocked`` False (combinational design, virtual I/O clock): the pulse
+    checks are ``not_applicable`` only when both engines prove there is
+    nothing to check; any pulse-width/period row makes them gate as usual."""
     g, compat = rust["gating"], rust["compat"]
     hold_m, setup_m, tol = budgets["hold_margin_ns"], budgets["setup_margin_ns"], budgets["parity_ns"]
     matrix, setup_bad, hold_bad, unverified = {}, [], [], []
@@ -287,13 +340,25 @@ def evaluate_source(rust: dict, ref: dict, corners: list[str], budgets: dict) ->
     pw_rows = g["reports"]["pulse_width"]["rows"]
     per_rows = g["reports"]["min_period"]["rows"]
     problems = []
-    if m.get("pulse_width_status") != "met":
+    # Unchecked pulse pins are accepted only when they are exactly the
+    # asynchronous set/clear pins of the netlist at every corner and neither
+    # engine has a pulse row for any of them.
+    unchecked = comp.get("unchecked_pulse_width_pins") or 0
+    per_corner = g.get("unclocked_pulse_pins") or {}
+    checked_pins = {r["pin"] for r in pw_rows + per_rows} | {k.rsplit(":", 1)[0] for c in corners for k in ref[c]["mpw"]} \
+        | {k for c in corners for k in ref[c]["period"]}
+    async_ok = bool(async_pins) and unchecked == len(async_pins) and \
+        all(per_corner.get(c) == len(async_pins) for c in corners) and not (set(async_pins) & checked_pins)
+    out_of_scope = list(async_pins) if unchecked and async_ok else []
+    if m.get("pulse_width_status") != "met" and not (m.get("pulse_width_status") == "partial" and out_of_scope):
         problems.append(f"RustSTA pulse_width_status {m.get('pulse_width_status')}")
     if not pw_rows:
         problems.append("RustSTA checked no min-pulse-width pin")
-    if comp.get("unchecked_pulse_width_pins") or comp.get("pass_through_pulse_pins") or \
+    if (unchecked and not out_of_scope) or comp.get("pass_through_pulse_pins") or \
             g["reports"]["pulse_width"].get("unevaluated") or g["reports"]["min_period"].get("unevaluated"):
-        problems.append("RustSTA left pulse-width/period pins unchecked or unevaluated")
+        problems.append("RustSTA left pulse-width/period pins unchecked or unevaluated"
+                        + (f" ({unchecked} unchecked, per corner {per_corner}; {len(async_pins)} async set/clear pins)"
+                           if unchecked else ""))
     if any(r["slack"] < 0 for r in pw_rows + per_rows):
         problems.append("RustSTA pulse-width/period violation")
     ref_mpw = {c: ref[c]["mpw"] for c in corners}
@@ -306,10 +371,24 @@ def evaluate_source(rust: dict, ref: dict, corners: list[str], budgets: dict) ->
     if (period_rows["ruststa"] == 0) != (period_rows["opensta"] == 0):
         problems.append(f"minimum-period coverage differs between engines {period_rows}")
     violated = any("violation" in p for p in problems)
-    mpw = item("failed" if violated else "unverified" if problems else "passed", "; ".join(problems) or None,
+    nothing = dict(ruststa_pulse_width_status=m.get("pulse_width_status"), ruststa_pulse_rows=len(pw_rows),
+                   ruststa_period_rows=len(per_rows), opensta_mpw_rows=sum(len(ref_mpw[c]) for c in corners),
+                   opensta_period_rows=period_rows["opensta"],
+                   ruststa_unchecked_pulse_pins=comp.get("unchecked_pulse_width_pins"))
+    combinational = (not clocked and m.get("pulse_width_status") == "unconstrained" and not pw_rows and not per_rows
+                     and not nothing["opensta_mpw_rows"] and not nothing["opensta_period_rows"]
+                     and not comp.get("unchecked_pulse_width_pins") and not comp.get("pass_through_pulse_pins"))
+    status = "not_applicable" if combinational else "failed" if violated else "unverified" if problems else "passed"
+    mpw = item(status, ("combinational design: no clocked cell; both engines report no pulse-width or period check "
+                        f"{nothing}") if combinational else "; ".join(problems) or None,
                rule="RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
                pulse_width_rows=len(pw_rows), min_period_rows=period_rows,
                worst_min_pulse_width_slack_ns=m.get("worst_min_pulse_width_slack_ns"),
+               async_set_clear_pins_unchecked=dict(
+                   count=len(out_of_scope), pins=out_of_scope[:64],
+                   scope="minimum pulse width of asynchronous set/clear inputs: the pulse is generated outside the "
+                         "block (no clock reaches these pins; neither engine checks them); recovery/removal of the "
+                         "same pins is timed (timing_setup/timing_hold)") if out_of_scope else None,
                worst_min_period_slack_ns=m.get("worst_min_period_slack_ns"),
                min_period_note=None if period_rows["ruststa"] else
                "no Liberty minimum_period constraint on the clocked cells (both engines report none)")
@@ -344,12 +423,24 @@ def evaluate_source(rust: dict, ref: dict, corners: list[str], budgets: dict) ->
                 matrix=matrix)
 
 
+def unverified_source(reason: str) -> dict:
+    """Statuses of a SPEF source that could not be timed (engine refused it)."""
+    out = {k: item("unverified", reason) for k in ("timing_setup", "timing_hold", "mpw_min_period", "drv",
+                                                  "timing_accuracy")}
+    out["timing_accuracy"]["corners"] = {}
+    out["matrix"] = {}
+    return out
+
+
 def combine(sources: dict[str, dict]) -> dict:
     """Per-status worst over SPEF sources; details keep every source."""
     out = {}
     for key in ("timing_setup", "timing_hold", "mpw_min_period", "drv", "timing_accuracy"):
         parts = {s: v[key] for s, v in sources.items()}
         st = worst(p["status"] for p in parts.values())
+        if "not_applicable" in [p["status"] for p in parts.values()] and st == "passed":
+            # One source not applicable, another passed: the sources disagree.
+            st = "unverified"
         reasons = [f"{s}: {p['reason']}" for s, p in parts.items() if p.get("reason")]
         out[key] = item(st, "; ".join(reasons) or None, by_spef=parts)
     return out

@@ -1,5 +1,5 @@
 {
-  "schema": "rustroad.design.v1",
+  "schema": "rustroad.design.v2",
   "name": "pipeline",
   "description": "Two-stage registered pipeline (fixtures/flow/pipeline.v): 4 flip-flops, XOR/AND datapath, one clock.",
   "top": "lane_smoke",
@@ -25,6 +25,12 @@
     "rendered_sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
     "note": "signoff SDC = clock SDC + io_template filled from the RTL port list; the CTS reads the clock SDC"
   },
+  "recipe": {
+    "physical": "legacy",
+    "floorplan": null
+  },
+  "stretch": false,
+  "pdks_unavailable": {},
   "pdk_profiles": {
     "path": "fixtures/pdk/local-routing.json",
     "sha256": "057a44b6061fada1dfb0222cee426e2498e890ce235794df2e68a1481c23dbfd"
@@ -39,7 +45,7 @@
   },
   "tools": {
     "path": "fixtures/flow/rtl2gds-tools.json",
-    "sha256": "fbccb5609e2a633930718c1cfcd23adb1df9b086bc5d251a0f14f807a441be6a"
+    "sha256": "f1b01f01eb282866515cca7b7a18917461088dfa5fb3f6f3405da05c7d1fb117"
   },
   "pdks": {
     "sky130": {
@@ -66,15 +72,15 @@
       "rc_profiles": {
         "min": {
           "path": "fixtures/pdk/sky130-rc-min.json",
-          "sha256": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a"
+          "sha256": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d"
         },
         "nom": {
           "path": "fixtures/pdk/sky130-rc-nom.json",
-          "sha256": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27"
+          "sha256": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a"
         },
         "max": {
           "path": "fixtures/pdk/sky130-rc-max.json",
-          "sha256": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20"
+          "sha256": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e"
         }
       },
       "corners": [
@@ -107,9 +113,9 @@
         "openrcx_rules_ss": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
         "openrcx_rules_tt": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
         "physical_config": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
-        "rc_profile_ff": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
-        "rc_profile_ss": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
-        "rc_profile_tt": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+        "rc_profile_ff": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+        "rc_profile_ss": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+        "rc_profile_tt": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
         "routing_profile": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
         "sdc_cts": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
         "sdc_postroute": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
@@ -140,15 +146,15 @@
       "rc_profiles": {
         "min": {
           "path": "fixtures/pdk/gf180-rc-min.json",
-          "sha256": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c"
+          "sha256": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55"
         },
         "nom": {
           "path": "fixtures/pdk/gf180-rc-nom.json",
-          "sha256": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a"
+          "sha256": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4"
         },
         "max": {
           "path": "fixtures/pdk/gf180-rc-max.json",
-          "sha256": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635"
+          "sha256": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8"
         }
       },
       "corners": [
@@ -181,9 +187,9 @@
         "openrcx_rules_ss": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
         "openrcx_rules_tt": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
         "physical_config": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
-        "rc_profile_ff": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
-        "rc_profile_ss": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
-        "rc_profile_tt": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+        "rc_profile_ff": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+        "rc_profile_ss": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+        "rc_profile_tt": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
         "routing_profile": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
         "sdc_cts": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
         "sdc_postroute": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
@@ -201,6 +207,7 @@
   },
   "budgets": {
     "hold_margin_ns": 0.05,
+    "hold_eco_target_margin_ns": 0.05,
     "setup_margin_ns": 0.0,
     "hold_eco_setup_margin_ns": 0.05,
     "parity_ns": 0.001,

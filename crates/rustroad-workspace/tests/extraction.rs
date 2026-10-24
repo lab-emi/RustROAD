@@ -124,8 +124,15 @@ impl Drop for Fixture {
     }
 }
 
+const NETLIST: &str = "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); \
+     BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule";
+
 /// Import, place, build the clock tree and route every signal net.
 fn routed() -> Fixture {
+    routed_netlist(NETLIST)
+}
+
+fn routed_netlist(netlist: &str) -> Fixture {
     let parent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.work/extraction-tests");
     fs::create_dir_all(&parent).unwrap();
     let root = parent.join(format!(
@@ -142,12 +149,7 @@ fn routed() -> Fixture {
     };
     fs::write(&sources.technology_lef, TECHNOLOGY).unwrap();
     fs::write(&sources.cell_lef, library()).unwrap();
-    fs::write(
-        &sources.netlist,
-        "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); \
-         BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule",
-    )
-    .unwrap();
+    fs::write(&sources.netlist, netlist).unwrap();
     let floorplan = serde_json::json!({
         "name":"chip", "units_per_micron":1000,
         "die_area":{"lx":0,"ly":0,"ux":20000,"uy":20000},
@@ -319,6 +321,7 @@ fn extraction_is_read_only_deterministic_and_complete() {
     assert!(report.stats.wire_length_dbu > 0 && report.stats.ground_pf > 0.0);
     assert_eq!(report.scope.corner, "nom");
     assert!(report.unannotated_signal_nets.is_empty());
+    assert!(report.pinless_signal_nets.is_empty());
     // No temporary file is left behind.
     assert!(
         fs::read_dir(&f.root).unwrap().all(|e| !e
@@ -327,6 +330,46 @@ fn extraction_is_read_only_deterministic_and_complete() {
             .to_string_lossy()
             .contains(".tmp-"))
     );
+}
+
+#[test]
+fn dangling_declared_nets_are_listed_as_pinless_not_unannotated() {
+    // RustSys can leave a declared wire without any connection; it has no
+    // driver and no load, so nothing is routed or extracted for it.
+    let f = routed_netlist(
+        "module chip(input a, output y, output h, output l); wire spare; BUF b0(.A(a),.Y(y)); \
+         BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule",
+    );
+    let tech = read(&f.workspace, &limits())
+        .unwrap()
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .sources
+        .iter()
+        .find(|s| s.role == "technology_lef")
+        .unwrap()
+        .sha256
+        .clone();
+    let p = profile(&f, "nom", &tech, None);
+    let out = f.root.join("spare.spef");
+    let report = extract(
+        &f.workspace,
+        &request(p, "nom", out.clone(), 1 << 20),
+        &limits(),
+    )
+    .unwrap();
+    assert!(report.unannotated_signal_nets.is_empty());
+    assert_eq!(report.pinless_signal_nets, vec!["spare".to_string()]);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.starts_with("RC_PINLESS_NETS: 1 "))
+    );
+    assert_eq!(report.routed_nets, 7);
+    assert!(!fs::read_to_string(&out).unwrap().contains("spare"));
 }
 
 #[test]

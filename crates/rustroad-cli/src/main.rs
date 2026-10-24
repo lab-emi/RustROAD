@@ -281,6 +281,9 @@ enum Command {
         /// Override of the profile's cell-LEF path (same SHA-256 required).
         #[arg(long)]
         cell_lef: Option<PathBuf>,
+        /// Sizing profile (scripts/build_sizing_profile.py); required for resize_cell
+        #[arg(long)]
+        sizing_profile: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -381,6 +384,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             plan,
             delay_cells,
             cell_lef,
+            sizing_profile,
             out,
         } => {
             return emit(&rustroad_workspace::eco::apply_plan(
@@ -388,6 +392,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 plan,
                 delay_cells,
                 cell_lef.as_deref(),
+                sizing_profile.as_deref(),
                 out,
             )?);
         }
