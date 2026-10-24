@@ -1,13 +1,53 @@
 //! Self-authored hold-ECO planner fixtures: a 4-register netlist, synthetic
-//! RustSTA-shaped reports and a three-cell profile. Each test writes < 64 KiB;
-//! no PDK, timing engine or path enumeration is involved. Real-PDK closure is
-//! verified separately by scripts/hold_closure.py with extracted parasitics.
+//! RustSTA-shaped reports, a toy cell LEF (pin directions) and a three-cell
+//! profile. Each test writes < 64 KiB; no PDK, timing engine or path
+//! enumeration is involved. Real-PDK closure is verified separately by
+//! scripts/hold_closure.py and scripts/rtl2gds.py with extracted parasitics.
 
 use rustroad_workspace::eco::{HoldEcoRequest, apply_plan, plan_hold};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Pin directions of every toy master (geometry is irrelevant here).
+const CELL_LEF: &str = "VERSION 5.8 ;
+MACRO AND2 CLASS CORE ; SIZE 1 BY 2 ;
+ PIN A DIRECTION INPUT ; USE SIGNAL ; END A
+ PIN B DIRECTION INPUT ; USE SIGNAL ; END B
+ PIN X DIRECTION OUTPUT ; USE SIGNAL ; END X
+END AND2
+MACRO DFF CLASS CORE ; SIZE 1 BY 2 ;
+ PIN D DIRECTION INPUT ; USE SIGNAL ; END D
+ PIN CLK DIRECTION INPUT ; USE CLOCK ; END CLK
+ PIN Q DIRECTION OUTPUT ; USE SIGNAL ; END Q
+END DFF
+MACRO CKBUF CLASS CORE ; SIZE 1 BY 2 ;
+ PIN A DIRECTION INPUT ; USE CLOCK ; END A
+ PIN X DIRECTION OUTPUT ; USE CLOCK ; END X
+END CKBUF
+MACRO BUF1 CLASS CORE ; SIZE 1 BY 2 ;
+ PIN A DIRECTION INPUT ; USE SIGNAL ; END A
+ PIN X DIRECTION OUTPUT ; USE SIGNAL ; END X
+END BUF1
+MACRO DLY1 CLASS CORE ; SIZE 1 BY 2 ;
+ PIN A DIRECTION INPUT ; USE SIGNAL ; END A
+ PIN X DIRECTION OUTPUT ; USE SIGNAL ; END X
+END DLY1
+MACRO DLY3 CLASS CORE ; SIZE 1 BY 2 ;
+ PIN A DIRECTION INPUT ; USE SIGNAL ; END A
+ PIN X DIRECTION OUTPUT ; USE SIGNAL ; END X
+END DLY3
+MACRO INV1 CLASS CORE ; SIZE 1 BY 2 ;
+ PIN A DIRECTION INPUT ; USE SIGNAL ; END A
+ PIN X DIRECTION OUTPUT ; USE SIGNAL ; END X
+END INV1
+MACRO DIODE CLASS CORE ANTENNACELL ; SIZE 1 BY 2 ;
+ PIN DIODE DIRECTION INPUT ; USE SIGNAL ; END DIODE
+END DIODE
+END LIBRARY
+";
 
 const NETLIST: &str =
     "module top(input wire clk, input wire en, input wire [1:0] a, output wire [1:0] y);
@@ -64,32 +104,78 @@ fn default_profile() -> Value {
         buffer("DLY3", 10.0, [0.55, 1.06, 0.38], "A"),
     ])
 }
-fn hold_report(margin: f64, rows: &[(&str, &str, f64, f64)], wire: &str) -> Value {
+/// Master, data net and net driver of each endpoint of NETLIST, as RustSTA
+/// reports them in hold_fix rows.
+fn binding_of(endpoint: &str) -> (&'static str, &'static str, &'static str) {
+    match endpoint {
+        "r0/D" => ("DFF", "n0", "g0/X"),
+        "r1/D" => ("DFF", "n1", "g1/X"),
+        "r2/D" => ("DFF", "a[0]", "a[0]"),
+        _ => ("PORT", "", ""),
+    }
+}
+fn hold_row(endpoint: &str, hold: f64, setup: f64, margin: f64) -> Value {
+    let (cell, net, driver) = binding_of(endpoint);
+    let mut row = json!({"endpoint": endpoint, "hold_slack_ns": hold, "setup_slack_ns": setup,
+                         "required_delay_ns": margin - hold});
+    if let Some((inst, _)) = endpoint.split_once('/') {
+        row["inst"] = json!(inst);
+        row["cell"] = json!(cell);
+        row["net"] = json!(net);
+        row["net_driver"] = json!(driver);
+        row["path"] =
+            json!({"stages": [{"pin": driver, "net": net}, {"pin": endpoint, "net": net}]});
+    }
+    row
+}
+/// Builds one hold_fix row from (endpoint, hold slack, setup slack).
+type RowFn<'a> = &'a dyn Fn(&str, f64, f64) -> Value;
+fn hold_report_rev(
+    margin: f64,
+    rows: &[(&str, &str, f64, f64)],
+    wire: &str,
+    rev: &str,
+    custom: Option<RowFn>,
+) -> Value {
     let mut corners = Vec::new();
     for c in ["tt", "ss", "ff"] {
         let endpoints: Vec<Value> = rows
             .iter()
             .filter(|r| r.0 == c)
-            .map(|r| {
-                json!({"endpoint": r.1, "hold_slack_ns": r.2, "setup_slack_ns": r.3,
-                            "required_delay_ns": margin - r.2})
+            .map(|r| match custom {
+                Some(f) => f(r.1, r.2, r.3),
+                None => hold_row(r.1, r.2, r.3, margin),
             })
             .collect();
         corners.push(json!({"corner": c, "hold_endpoints": 3, "hold_violating": endpoints.len(),
                             "listed": endpoints.len(), "shown": endpoints.len(), "endpoints": endpoints}));
     }
-    json!({"schema": "rusteda.v1", "ok": true,
+    json!({"schema": "rusteda.v1", "ok": true, "workspace": "/sta/ws", "rev": rev,
            "scope": {"corner": "tt", "wire_model": wire, "clock_model": "propagated"},
            "sections": {"hold_fix": {"target_margin_ns": margin, "corners": corners}}})
 }
-fn setup_report(corner: &str, rows: &[(&str, f64)]) -> Value {
+fn hold_report(margin: f64, rows: &[(&str, &str, f64, f64)], wire: &str) -> Value {
+    hold_report_rev(margin, rows, wire, "rev2", None)
+}
+fn setup_report_rev(corner: &str, rows: &[(&str, f64)], rev: &str) -> Value {
     let rows: Vec<Value> = rows
         .iter()
         .map(|r| json!({"endpoint": r.0, "setup_slack_ns": r.1, "hold_slack_ns": 1.0}))
         .collect();
-    json!({"schema": "rusteda.v1", "ok": true,
+    json!({"schema": "rusteda.v1", "ok": true, "workspace": "/sta/ws", "rev": rev,
            "scope": {"corner": corner, "wire_model": "spef_rc", "clock_model": "propagated"},
            "sections": {"endpoints": {"total": rows.len(), "matched": rows.len(), "shown": rows.len(), "rows": rows}}})
+}
+fn setup_report(corner: &str, rows: &[(&str, f64)]) -> Value {
+    setup_report_rev(corner, rows, "rev2")
+}
+/// The profile with a `cell_lef` source written next to it (pin directions).
+fn with_cell_lef(d: &Path, mut profile: Value) -> Value {
+    let lef = d.join("cells.lef");
+    fs::write(&lef, CELL_LEF).unwrap();
+    profile["sources"] = json!([{"role": "cell_lef", "path": lef,
+        "sha256": format!("{:x}", Sha256::digest(CELL_LEF.as_bytes())), "bytes": CELL_LEF.len()}]);
+    profile
 }
 
 struct Case {
@@ -124,8 +210,11 @@ fn case(rows: &[(&str, &str, f64, f64)], setup_ss: f64, profile: Value) -> Case 
         "setup_tt.json",
         &setup_report("tt", &[("r0/D", 9.0), ("r1/D", 9.0), ("r2/D", 9.0)]),
     );
-    let prof = write(&d, "profile.json", &profile);
+    let prof = write(&d, "profile.json", &with_cell_lef(&d, profile));
     let req = HoldEcoRequest {
+        timed_netlist: netlist.clone(),
+        timed_netlist_sha256: None,
+        cell_lef: None,
         netlist,
         hold_reports: vec![hold],
         setup_reports: vec![ss, tt],
@@ -238,9 +327,35 @@ fn existing_chain_is_extended_and_capped() {
     let rows = [("ss", "r0/D", -0.10, 8.0)];
     let c = case(&rows, 8.0, default_profile());
     plan_hold(&c.req).unwrap();
-    // Second iteration on the ECO netlist: r0/D still short at ss.
+    // Second iteration on the ECO netlist, re-timed: r0/D still short at ss.
+    // The new reports name the ECO net and driver at r0/D.
+    let rebound = |rev: &str, net: &'static str, driver: &'static str| {
+        let row = move |e: &str, h: f64, st: f64| {
+            json!({"endpoint": e, "hold_slack_ns": h, "setup_slack_ns": st, "inst": "r0",
+                   "cell": "DFF", "net": net, "net_driver": driver, "required_delay_ns": 0.05 - h})
+        };
+        hold_report_rev(0.05, &rows, "spef_rc", rev, Some(&row))
+    };
     let mut second = c.req.clone();
     second.netlist = c.req.out.clone();
+    second.timed_netlist = c.req.out.clone();
+    second.hold_reports = vec![write(
+        &c.d,
+        "hold_b.json",
+        &rebound("rev4", "rr_eco_hold_0_n", "rr_eco_hold_0/X"),
+    )];
+    second.setup_reports = vec![
+        write(
+            &c.d,
+            "ss_b.json",
+            &setup_report_rev("ss", &[("r0/D", 8.0)], "rev4"),
+        ),
+        write(
+            &c.d,
+            "tt_b.json",
+            &setup_report_rev("tt", &[("r0/D", 9.0)], "rev4"),
+        ),
+    ];
     second.out = c.d.join("out_b.v");
     second.plan_out = c.d.join("plan_b.json");
     let plan = plan_hold(&second).unwrap();
@@ -252,6 +367,24 @@ fn existing_chain_is_extended_and_capped() {
     );
     let mut third = second.clone();
     third.netlist = second.out.clone();
+    third.timed_netlist = second.out.clone();
+    third.hold_reports = vec![write(
+        &c.d,
+        "hold_c.json",
+        &rebound("rev6", "rr_eco_hold_1_n", "rr_eco_hold_1/X"),
+    )];
+    third.setup_reports = vec![
+        write(
+            &c.d,
+            "ss_c.json",
+            &setup_report_rev("ss", &[("r0/D", 8.0)], "rev6"),
+        ),
+        write(
+            &c.d,
+            "tt_c.json",
+            &setup_report_rev("tt", &[("r0/D", 9.0)], "rev6"),
+        ),
+    ];
     third.out = c.d.join("out_c.v");
     third.plan_out = c.d.join("plan_c.json");
     third.max_total_chain = 2;
@@ -367,20 +500,30 @@ fn inverting_profile_entries_are_refused() {
             {"op": "insert_buffer", "cell": "INV1", "instance": "x0", "net": "x0_n",
              "sink": {"instance": "r0", "pin": "D"}}]}),
     );
-    let e = apply_plan(&c.req.netlist, &plan, &c.req.profile, &c.d.join("x.v"))
-        .unwrap_err()
-        .to_string();
+    let e = apply_plan(
+        &c.req.netlist,
+        &plan,
+        &c.req.profile,
+        None,
+        &c.d.join("x.v"),
+    )
+    .unwrap_err()
+    .to_string();
     assert!(e.contains("ECO_NOT_BUFFER"), "{e}");
     assert!(!c.d.join("x.v").exists());
     // A diode plan through apply-eco on a port bit.
-    let good = write(&c.d, "good_profile.json", &default_profile());
+    let good = write(
+        &c.d,
+        "good_profile.json",
+        &with_cell_lef(&c.d, default_profile()),
+    );
     let plan = write(
         &c.d,
         "eco_d.json",
         &json!({"schema": "rustroad.eco-plan.v1", "module": "top", "operations": [
             {"op": "insert_diode", "cell": "DIODE", "instance": "rr_eco_ant_0", "net": "a[1]"}]}),
     );
-    let r = apply_plan(&c.req.netlist, &plan, &good, &c.d.join("d.v")).unwrap();
+    let r = apply_plan(&c.req.netlist, &plan, &good, None, &c.d.join("d.v")).unwrap();
     assert_eq!(r.eco_report.diodes_inserted, 1);
     assert!(
         fs::read_to_string(c.d.join("d.v"))
@@ -398,14 +541,17 @@ fn antenna_report(
     with_diff: Value,
     plus: Value,
 ) -> Value {
-    json!({"schema": "rustroad.antenna-check.v1", "status": "violated", "checks": [{
+    json!({"schema": "rustroad.antenna-check.v1", "status": "violated",
+        "safety_margin": {"fraction": 0.10, "rule": "test", "derivation": "test"},
+        "checks": [{
         "net": net, "layer": "M3", "kind": "side_area", "gates": ["g0/A"], "diffusions": [],
         "gate_area_um2": gate, "diff_area_um2": diff, "metal_um2": metal, "denominator_um2": gate,
-        "ratio": metal / gate, "limit": 400.0, "rule": "ANTENNADIFFSIDEAREARATIO",
+        "ratio": metal / gate, "limit": 400.0, "effective_limit": 360.0,
+        "rule": "ANTENNADIFFSIDEAREARATIO",
         "rules": {"keyword_no_diff": "ANTENNASIDEAREARATIO", "no_diff": limit_no_diff,
                   "keyword_with_diff": "ANTENNADIFFSIDEAREARATIO", "with_diff": with_diff,
                   "gate_plus_diff": plus},
-        "violated": true}]})
+        "violated": true, "exceeds_lef_limit": true}]})
 }
 
 #[test]
@@ -466,12 +612,11 @@ fn antenna_eco_counts_diodes_from_the_lef_rule() {
     assert!(e.contains("ANTENNA_ECO_INFEASIBLE"), "{e}");
     // A PWL limit in diffusion area (sky130-like) needs enough diodes to raise it:
     // ratio 3000; k = 1, 2, 3 give limits 2760, 2920, 3071 at 0.4 um^2 per diode.
+    // (Raw LEF limit: safety margin 0 for this arithmetic.)
     let pwl = json!({"kind": "pwl", "points": [[0.0, 400.0], [0.0225, 2609.0], [22.5, 11600.0]]});
-    let sky = write(
-        &d,
-        "sky.json",
-        &antenna_report("n0", 1500.0, 0.5, 0.0, Value::Null, pwl, Value::Null),
-    );
+    let mut sky = antenna_report("n0", 1500.0, 0.5, 0.0, Value::Null, pwl, Value::Null);
+    sky["safety_margin"]["fraction"] = json!(0.0);
+    let sky = write(&d, "sky.json", &sky);
     let plan = plan_antenna(&req(&sky, "sky")).unwrap();
     assert_eq!(plan.nets[0].diodes, 3);
     assert!(plan.nets[0].estimated_worst_ratio_over_limit <= 1.0);
@@ -495,4 +640,277 @@ fn antenna_eco_counts_diodes_from_the_lef_rule() {
             .to_string()
             .contains("not a net of the mapped netlist")
     );
+}
+
+#[test]
+fn apply_eco_refuses_an_output_pin_sink_and_a_foreign_cell_lef() {
+    // Phase-B1 verifier NB1: a sink on r0/Q used to be accepted and left two
+    // drivers on the new net.
+    let c = case(&[("tt", "r0/D", -0.01, 9.0)], 8.0, default_profile());
+    let plan = write(
+        &c.d,
+        "q_sink.json",
+        &json!({"schema": "rustroad.eco-plan.v1", "module": "top", "operations": [
+            {"op": "insert_buffer", "cell": "BUF1", "instance": "vx0", "net": "vx0_n",
+             "sink": {"instance": "r0", "pin": "Q"}}]}),
+    );
+    let out = c.d.join("q.v");
+    let e = apply_plan(&c.req.netlist, &plan, &c.req.profile, None, &out)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.starts_with("ECO_APPLY:") && e.contains("OUTPUT pin of DFF"),
+        "{e}"
+    );
+    assert!(!out.exists());
+    // The same plan on the input pin works.
+    let ok = write(
+        &c.d,
+        "d_sink.json",
+        &json!({"schema": "rustroad.eco-plan.v1", "module": "top", "operations": [
+            {"op": "insert_buffer", "cell": "BUF1", "instance": "vx0", "net": "vx0_n",
+             "sink": {"instance": "r0", "pin": "D"}}]}),
+    );
+    apply_plan(&c.req.netlist, &ok, &c.req.profile, None, &out).unwrap();
+    // A cell LEF other than the one the profile was built from is refused.
+    let other = c.d.join("other.lef");
+    fs::write(&other, CELL_LEF.replace("SIZE 1 BY 2", "SIZE 2 BY 2")).unwrap();
+    let e = apply_plan(
+        &c.req.netlist,
+        &ok,
+        &c.req.profile,
+        Some(&other),
+        &c.d.join("o.v"),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(e.starts_with("ECO_PIN_DIRECTIONS:"), "{e}");
+    // A profile without a cell LEF cannot prove sink directions.
+    let bare = write(&c.d, "bare.json", &default_profile());
+    let e = apply_plan(&c.req.netlist, &ok, &bare, None, &c.d.join("b.v"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("no cell_lef source"), "{e}");
+}
+
+#[test]
+fn stale_reports_are_refused_with_their_own_code() {
+    let rows = [("ss", "r0/D", -0.10, 8.0)];
+    let c = case(&rows, 8.0, default_profile());
+    plan_hold(&c.req).unwrap();
+    let eco = c.req.out.clone();
+    let expect_stale = |req: &HoldEcoRequest, what: &str| {
+        let e = plan_hold(req).unwrap_err().to_string();
+        assert!(e.starts_with("STALE_REPORT:"), "{what}: {e}");
+        assert!(!e.contains("INVALID_WORKSPACE"), "{what}: {e}");
+        assert!(!req.out.exists(), "{what}: output written");
+    };
+    let fresh = |name: &str| {
+        let mut r = c.req.clone();
+        r.out = c.d.join(format!("{name}.v"));
+        r.plan_out = c.d.join(format!("{name}.json"));
+        r
+    };
+    // Iteration-0 reports against the iteration-1 netlist (verifier NB4).
+    let mut r = fresh("stale_i1");
+    r.netlist = eco.clone();
+    r.timed_netlist = eco.clone();
+    expect_stale(&r, "old reports, new netlist");
+    // New netlist paired with the old timed netlist.
+    let mut r = fresh("stale_pair");
+    r.netlist = eco.clone();
+    expect_stale(&r, "timed netlist older than the edited netlist");
+    // Old netlist paired with a timed netlist that already has the ECO cell.
+    let mut r = fresh("stale_later");
+    r.timed_netlist = eco.clone();
+    expect_stale(&r, "timed netlist newer than the edited netlist");
+    // A timed-netlist hash other than the one recorded at timing time.
+    let mut r = fresh("stale_hash");
+    r.timed_netlist_sha256 = Some("00".repeat(32));
+    expect_stale(&r, "hash");
+    // Reports of two different STA revisions.
+    let mut r = fresh("stale_rev");
+    r.setup_reports[0] = write(
+        &c.d,
+        "setup_other_rev.json",
+        &setup_report_rev(
+            "ss",
+            &[("r0/D", 8.0), ("r1/D", 8.0), ("r2/D", 8.0), ("y[0]", 5.0)],
+            "rev9",
+        ),
+    );
+    expect_stale(&r, "mixed revisions");
+    // A row naming another master, or a path stage that does not exist.
+    let wrong_cell = |e: &str, h: f64, st: f64| {
+        let mut v = hold_row(e, h, st, 0.05);
+        v["cell"] = json!("AND2");
+        v
+    };
+    let mut r = fresh("stale_cell");
+    r.hold_reports = vec![write(
+        &c.d,
+        "hold_wrong_cell.json",
+        &hold_report_rev(0.05, &rows, "spef_rc", "rev2", Some(&wrong_cell)),
+    )];
+    expect_stale(&r, "master");
+    let wrong_stage = |e: &str, h: f64, st: f64| {
+        let mut v = hold_row(e, h, st, 0.05);
+        v["path"]["stages"][0]["pin"] = json!("g1/X");
+        v
+    };
+    let mut r = fresh("stale_stage");
+    r.hold_reports = vec![write(
+        &c.d,
+        "hold_wrong_stage.json",
+        &hold_report_rev(0.05, &rows, "spef_rc", "rev2", Some(&wrong_stage)),
+    )];
+    expect_stale(&r, "path stage");
+    // An endpoints row of a pin that the timed netlist lacks.
+    let mut r = fresh("stale_endpoint");
+    r.setup_reports[1] = write(
+        &c.d,
+        "tt_extra.json",
+        &setup_report("tt", &[("r0/D", 9.0), ("r7/D", 9.0)]),
+    );
+    expect_stale(&r, "endpoints row");
+    // The reports themselves stay accepted with the matching pair.
+    let r = fresh("good_again");
+    assert_eq!(plan_hold(&r).unwrap().status, "planned");
+}
+
+#[test]
+fn cts_buffered_timed_netlist_refines_the_mapped_netlist() {
+    let rows = [("ss", "r0/D", -0.10, 8.0)];
+    let mut c = case(&rows, 8.0, default_profile());
+    let cts = NETLIST
+        .replace(
+            "  wire n0;\n",
+            "  wire n0;\n  wire rr_clock_0;\n  CKBUF rr_clkbuf_0 (.A(clk), .X(rr_clock_0));\n",
+        )
+        .replace(".CLK(clk)", ".CLK(rr_clock_0)");
+    let timed = c.d.join("timed.v");
+    fs::write(&timed, &cts).unwrap();
+    c.req.timed_netlist = timed.clone();
+    c.req.timed_netlist_sha256 = Some(format!("{:x}", Sha256::digest(cts.as_bytes())));
+    let plan = plan_hold(&c.req).unwrap();
+    let b = &plan.inputs.binding;
+    assert_eq!(b.inserted_instances, ["rr_clkbuf_0"]);
+    assert_eq!(b.redirected_pins, 3);
+    assert_eq!((b.hold_rows_bound, b.path_stages_bound), (1, 2));
+    assert_eq!(b.sta_revision, "rev2");
+    // An inserted instance that is not a buffer (or tie) is not a refinement.
+    let foreign = cts.replace(
+        "  wire n0;\n",
+        "  wire n0;\n  wire zz;\n  AND2 gx (.A(en), .B(clk), .X(zz));\n",
+    );
+    fs::write(&timed, &foreign).unwrap();
+    c.req.timed_netlist_sha256 = None;
+    c.req.out = c.d.join("foreign.v");
+    c.req.plan_out = c.d.join("foreign.json");
+    let e = plan_hold(&c.req).unwrap_err().to_string();
+    assert!(
+        e.starts_with("STALE_REPORT:") && e.contains("neither"),
+        "{e}"
+    );
+}
+
+#[test]
+fn antenna_eco_carries_a_partial_input_status_forward() {
+    use rustroad_workspace::eco::{AntennaEcoRequest, plan_antenna};
+    let d = dir();
+    let netlist = d.join("in.v");
+    fs::write(&netlist, NETLIST).unwrap();
+    let prof = write(&d, "profile.json", &default_profile());
+    let req = |report: &Path, name: &str| AntennaEcoRequest {
+        netlist: netlist.clone(),
+        report: report.to_path_buf(),
+        profile: prof.clone(),
+        cell: None,
+        min_diodes: 1,
+        max_diodes_per_net: 4,
+        prefix: "rr_eco_ant_".into(),
+        out: d.join(format!("{name}.v")),
+        plan_out: d.join(format!("{name}.json")),
+    };
+    let base = antenna_report(
+        "a[1]",
+        1000.0,
+        1.0,
+        0.0,
+        Value::Null,
+        json!({"kind": "value", "ratio": 400.0}),
+        json!(15.0),
+    );
+    // Partial report (unmodeled rules) with nothing violated: never "clean".
+    let mut partial = base.clone();
+    partial["status"] = json!("partial");
+    partial["checks"][0]["violated"] = json!(false);
+    let p = write(&d, "partial.json", &partial);
+    let plan = plan_antenna(&req(&p, "partial")).unwrap();
+    assert_eq!(
+        (plan.status, plan.input_status.as_str()),
+        ("partial", "partial")
+    );
+    assert!(plan.diagnostics[0].starts_with("ANTENNA_INPUT_PARTIAL"));
+    // Partial with a violation: planned, and the partial input stays visible.
+    let mut pv = base.clone();
+    pv["status"] = json!("partial");
+    let p = write(&d, "partial_violated.json", &pv);
+    let plan = plan_antenna(&req(&p, "partial_violated")).unwrap();
+    assert_eq!(
+        (plan.status, plan.input_status.as_str()),
+        ("planned", "partial")
+    );
+    // A passed report that lists violated rows, or an unknown status, is refused.
+    let mut bad = base.clone();
+    bad["status"] = json!("passed");
+    let p = write(&d, "bad.json", &bad);
+    let e = plan_antenna(&req(&p, "bad")).unwrap_err().to_string();
+    assert!(e.starts_with("ANTENNA_REPORT:"), "{e}");
+    bad["status"] = json!("unverified");
+    let p = write(&d, "bad2.json", &bad);
+    assert!(plan_antenna(&req(&p, "bad2")).is_err());
+    // Clean report: clean.
+    let mut clean = base.clone();
+    clean["status"] = json!("passed");
+    clean["checks"][0]["violated"] = json!(false);
+    let p = write(&d, "clean.json", &clean);
+    assert_eq!(plan_antenna(&req(&p, "clean")).unwrap().status, "clean");
+}
+
+#[test]
+fn antenna_eco_sizes_diodes_against_the_safety_margin() {
+    use rustroad_workspace::eco::{AntennaEcoRequest, plan_antenna};
+    let d = dir();
+    let netlist = d.join("in.v");
+    fs::write(&netlist, NETLIST).unwrap();
+    let prof = write(&d, "profile.json", &default_profile());
+    let req = |report: &Path, name: &str| AntennaEcoRequest {
+        netlist: netlist.clone(),
+        report: report.to_path_buf(),
+        profile: prof.clone(),
+        cell: None,
+        min_diodes: 1,
+        max_diodes_per_net: 8,
+        prefix: "rr_eco_ant_".into(),
+        out: d.join(format!("{name}.v")),
+        plan_out: d.join(format!("{name}.json")),
+    };
+    // 2600 um^2 over 1 um^2 gate, gate-plus-diff 15, diode diff 0.4:
+    // k diodes give 2600 / (1 + 6k): k = 1 -> 371 (> 360 = 0.9 x 400), k = 2 -> 200.
+    let mut r = antenna_report(
+        "a[1]",
+        2600.0,
+        1.0,
+        0.0,
+        Value::Null,
+        json!({"kind": "value", "ratio": 400.0}),
+        json!(15.0),
+    );
+    let p = write(&d, "m10.json", &r);
+    let plan = plan_antenna(&req(&p, "m10")).unwrap();
+    assert_eq!((plan.nets[0].diodes, plan.safety_margin), (2, 0.10));
+    r["safety_margin"]["fraction"] = json!(0.0);
+    let p = write(&d, "m0.json", &r);
+    assert_eq!(plan_antenna(&req(&p, "m0")).unwrap().nets[0].diodes, 1);
 }

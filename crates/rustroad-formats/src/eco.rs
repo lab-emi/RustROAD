@@ -12,7 +12,10 @@
 //! Q-net names are never changed (state matching in CEC depends on them).
 //! Buffer cells are accepted only when the caller-supplied cell data, derived
 //! from Liberty `function` attributes, prove an identity function of the
-//! declared input pin; an inverting or multi-input cell is rejected.
+//! declared input pin; an inverting or multi-input cell is rejected. The sink
+//! of `insert_buffer` must be a pin whose cell-LEF `DIRECTION` is `INPUT`
+//! (caller-supplied `pin_directions`); an output, inout or unknown pin is
+//! rejected, so a plan can never detach a driver from its net.
 //!
 //! Memory/work preflight: at most `max_operations` (default 4096) operations;
 //! one lookup map of existing names (one `&str` per instance/wire/port, bounded
@@ -21,7 +24,7 @@
 //! clone; no traversal, path or cone is materialized.
 use crate::verilog::{self, Connection, Expr, Instance, Netlist, VerilogLimits, Wire};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub const ECO_PLAN_SCHEMA: &str = "rustroad.eco-plan.v1";
 
@@ -106,11 +109,33 @@ pub struct DiodeCell {
     pub name: String,
     pub pin: String,
 }
+/// Cell-LEF pin directions: master -> pin -> `INPUT` / `OUTPUT` / ...
+pub type PinDirections = BTreeMap<String, BTreeMap<String, String>>;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EcoCells {
     pub buffers: Vec<BufferCell>,
     pub diodes: Vec<DiodeCell>,
+    /// Directions of the pins `insert_buffer` may name as a sink. A sink
+    /// whose master/pin is missing here is refused (never assumed INPUT).
+    #[serde(default)]
+    pub pin_directions: PinDirections,
+}
+
+impl EcoCells {
+    /// `Ok` only for a pin whose cell-LEF direction is exactly `INPUT`.
+    pub fn check_sink(&self, master: &str, instance: &str, pin: &str) -> Result<()> {
+        match self.pin_directions.get(master).and_then(|p| p.get(pin)) {
+            Some(d) if d == "INPUT" => Ok(()),
+            Some(d) => Err(EcoError::Invalid(format!(
+                "sink {instance}/{pin} is a {d} pin of {master}; insert_buffer needs an INPUT pin"
+            ))),
+            None => Err(EcoError::Invalid(format!(
+                "direction of sink {instance}/{pin} ({master}) is unknown (no cell-LEF DIRECTION); refusing to buffer it"
+            ))),
+        }
+    }
 }
 
 /// What each operation did, in plan order.
@@ -355,6 +380,7 @@ pub fn apply(
                 let at = *index.get(&sink.instance).ok_or_else(|| {
                     EcoError::Invalid(format!("sink instance {} absent", sink.instance))
                 })?;
+                cells.check_sink(&out.instances[at].cell, &sink.instance, &sink.pin)?;
                 let connection = out.instances[at]
                     .connections
                     .iter_mut()
@@ -529,6 +555,27 @@ endmodule
                 name: "diode_2".into(),
                 pin: "DIODE".into(),
             }],
+            pin_directions: [
+                (
+                    "cellx",
+                    &[("A", "INPUT"), ("B", "INPUT"), ("X", "OUTPUT")][..],
+                ),
+                (
+                    "dff",
+                    &[("D", "INPUT"), ("CLK", "INPUT"), ("Q", "OUTPUT")][..],
+                ),
+                ("dly_1", &[("A", "INPUT"), ("X", "OUTPUT")][..]),
+            ]
+            .iter()
+            .map(|(m, pins)| {
+                (
+                    m.to_string(),
+                    pins.iter()
+                        .map(|(p, d)| (p.to_string(), d.to_string()))
+                        .collect(),
+                )
+            })
+            .collect(),
         }
     }
     fn plan(operations: Vec<EcoOp>) -> EcoPlan {
@@ -747,6 +794,49 @@ endmodule
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn output_inout_or_unknown_sink_pins_are_refused() {
+        // r0/Q is the flop's output: buffering it would leave two drivers on
+        // the new net and the old Q net undriven (phase-B1 verifier NB1).
+        let e = run(vec![buffer("dly_1", "e0", "e0_n", ("r0", "Q"))]).unwrap_err();
+        assert!(
+            matches!(&e, EcoError::Invalid(m) if m.contains("OUTPUT pin of dff")),
+            "{e}"
+        );
+        let mut c = cells();
+        c.pin_directions
+            .get_mut("dff")
+            .unwrap()
+            .insert("D".into(), "INOUT".into());
+        let e = apply(
+            &netlist(),
+            &plan(vec![buffer("dly_1", "e0", "e0_n", ("r0", "D"))]),
+            &c,
+            &EcoLimits::default(),
+            &VerilogLimits::default(),
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("INOUT pin"), "{e}");
+        // No direction data at all: refused, never assumed to be an input.
+        c.pin_directions.clear();
+        let e = apply(
+            &netlist(),
+            &plan(vec![buffer("dly_1", "e0", "e0_n", ("r0", "D"))]),
+            &c,
+            &EcoLimits::default(),
+            &VerilogLimits::default(),
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("unknown"), "{e}");
+        // The input pin of an earlier inserted buffer is a valid sink.
+        let (out, _) = run(vec![
+            buffer("dly_1", "e0", "e0_n", ("r0", "D")),
+            buffer("dly_1", "e1", "e1_n", ("e0", "A")),
+        ])
+        .unwrap();
+        assert!(out.instances.iter().any(|i| i.name == "e1"));
     }
 
     #[test]

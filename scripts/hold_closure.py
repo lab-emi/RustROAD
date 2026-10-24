@@ -22,6 +22,11 @@ SDC, RC-profile, delay-cell-profile and cell-policy hashes are unchanged.
 Reported (not gating): OpenSTA on OpenRCX SPEF of the collinear-merged DEF.
 
 Third-party tools run only as black-box executables. Exit 0 passed, 1 failed, 3 partial.
+
+`Flow` is also the physical/closure engine of scripts/rtl2gds.py: an optional
+`Design` (top, RTL files, tracked floorplan, rendered SDC) replaces the
+pipeline.v defaults, and `Flow.close()` runs the bounded loop alone. Without a
+`Design` every command and verdict of this script is unchanged.
 """
 from __future__ import annotations
 
@@ -73,14 +78,33 @@ PLANT = {'sky130': dict(port='a[1]', length_um=600, gds_layer='70/20'),
 ROW = re.compile(r'^(\S+)\s+\([^\n]*?\)\s+(-?[0-9.eE+]+)\s+(-?[0-9.eE+]+)\s+(-?[0-9.eE+]+)\s+\((?:MET|VIOLATED)\)\s*$', re.M)
 
 
+class Design:
+    """What `Flow` builds. The default is this script's pipeline fixture.
+
+    top: top module; rtl: RTL source files; floorplan: tracked floorplan JSON
+    copied byte-for-byte (None: the generated pipeline floorplan); sdc_text:
+    the complete post-route SDC (None: the CTS SDC + POSTROUTE_SDC_TAIL);
+    control_sink: (instance, pin) the native ECO polarity controls buffer.
+    """
+
+    def __init__(self, top='lane_smoke', rtl=None, floorplan=None, sdc_text=None, control_sink=('r0', 'D')):
+        self.top = top
+        self.rtl = [Path(x) for x in (rtl or [ROOT / 'fixtures/flow/pipeline.v'])]
+        self.floorplan = Path(floorplan) if floorplan else None
+        self.sdc_text = sdc_text
+        self.control_sink = tuple(control_sink)
+
+
 def jdump(path: Path, value) -> Path:
     write_json(path, value)
     return path
 
 
 class Flow:
-    def __init__(self, h, args, tools, p, policy):
+    def __init__(self, h, args, tools, p, policy, design: Design | None = None):
         self.h, self.args, self.tools, self.p, self.policy = h, args, tools, p, policy
+        self.design = design or Design()
+        self.top = self.design.top
         self.tag = p['tag']
         lib_tt = Path(p['liberty']['path'])
         self.libs = {c: Path(str(lib_tt).replace(CORNERS[self.tag][0][1], name)) for c, name, _ in CORNERS[self.tag]}
@@ -91,7 +115,8 @@ class Flow:
         self.routing = Path(p['routing_config'])
         self.sink_pin = json.loads(self.config.read_text())['clock']['sink_pin']
         self.sdc = h.root / f'{self.tag}_postroute.sdc'
-        self.sdc.write_text(Path(p['cts_sdc']).read_text() + POSTROUTE_SDC_TAIL)
+        self.sdc.write_text(self.design.sdc_text if self.design.sdc_text is not None
+                            else Path(p['cts_sdc']).read_text() + POSTROUTE_SDC_TAIL)
         rules = Path(p['extraction_rules']['path'])
         self.openrcx_rules = {c: rules.with_name(f'rules.openrcx.{"sky130A" if self.tag == "sky130" else "gf180mcuD"}.{rc}{OPENRCX_RULES[self.tag]}')
                               for c, _, rc in CORNERS[self.tag]}
@@ -113,14 +138,16 @@ class Flow:
         mapped = self.h.root / f'{self.tag}_mapped.v'
         args = self.policy['pdks'][self.tag]['rustsys_args']
         run_ok(self.h, f'{self.tag}_synth', [self.tools['rustsys'], '--threads', '2', '--progress', 'off', 'synth', '--backend', 'cpu',
-                                            '--top', 'lane_smoke', '--lib', self.libs['tt'], *args, '--out', mapped, '--print', 'json',
-                                            ROOT / 'fixtures/flow/pipeline.v'])
+                                            '--top', self.top, '--lib', self.libs['tt'], *args, '--out', mapped, '--print', 'json',
+                                            *self.design.rtl])
         return mapped
 
     def floorplan(self) -> Path:
         sky = self.tag == 'sky130'
         u, sw, sh = (1000, 460, 2720) if sky else (2000, 1120, 7840)
         floor = self.h.root / f'{self.tag}_floor.json'
+        if not floor.exists() and self.design.floorplan is not None:
+            floor.write_bytes(self.design.floorplan.read_bytes())
         if not floor.exists():
             write_json(floor, dict(name='lane_smoke', units_per_micron=u, die_area=dict(lx=0, ly=0, ux=125 * sw, uy=18 * sh),
                                    core_area=dict(lx=20 * sw, ly=5 * sh, ux=120 * sw, uy=13 * sh),
@@ -174,7 +201,9 @@ class Flow:
         argv = [rusteda, *common, 'import', '--base-rev', a['new_rev']]
         for c in self.libs:
             argv += ['--lib', str(self.libs[c]), '--corner', c]
-        argv += ['--netlist', str(netlist or phys['paths']['netlist']), '--sdc', str(self.sdc)]
+        timed = Path(netlist or phys['paths']['netlist'])
+        timed_sha = sha256(timed)  # bound into hold-eco (--timed-netlist-sha256)
+        argv += ['--netlist', str(timed), '--sdc', str(self.sdc)]
         for c in self.libs:
             argv += ['--spef', str((spefs or {}).get(c) or phys['spef'][c]['path']), '--spef-corner', c]
         argv += ['--max-rc-nodes', '200000', '--max-rc-elements', '200000']
@@ -210,7 +239,8 @@ class Flow:
                               endpoints={x['endpoint']: dict(setup=x['setup_slack_ns'], hold=x['hold_slack_ns']) for x in rows})
         clocks = run_ok(h, f'{t}_clocks', [ruststa, *common[:-2], 'report', '--rev', rev, '--section', 'clocks', '--limit', '0'])
         closed = all(v['worst_hold_ns'] >= self.args.target_margin and v['worst_setup_ns'] >= 0 for v in corners.values())
-        return dict(workspace=str(ws), revision=rev, scope=r['scope'], metrics=r['metrics'], completeness=r['completeness'],
+        return dict(workspace=str(ws), revision=rev, timed_netlist=str(timed), timed_netlist_sha256=timed_sha,
+                    scope=r['scope'], metrics=r['metrics'], completeness=r['completeness'],
                     diagnostics=[d for d in r.get('diagnostics', []) if d.get('severity') != 'note'][:20],
                     corners=corners, closed=closed, files={k: str(v) for k, v in files.items()},
                     clocks_report=str(clocks['stdout']))
@@ -218,7 +248,8 @@ class Flow:
     def hold_eco(self, it: int, netlist: Path, sta: dict) -> tuple[Path, dict]:
         t = f'{self.tag}_i{it}'
         out, plan = self.h.root / f'{self.tag}_i{it + 1}_mapped.v', self.h.root / f'{t}_hold_plan.json'
-        argv = [self.tools['rustroad'], 'hold-eco', '--netlist', netlist, '--hold-report', sta['files']['hold_fix'],
+        argv = [self.tools['rustroad'], 'hold-eco', '--netlist', netlist, '--timed-netlist', sta['timed_netlist'],
+                '--timed-netlist-sha256', sta['timed_netlist_sha256'], '--hold-report', sta['files']['hold_fix'],
                 '--delay-cells', self.delay_cells, '--setup-corner', 'ss', '--target-margin-ns', self.args.target_margin,
                 '--setup-margin-ns', self.args.setup_margin, '--out', out, '--plan-out', plan]
         for c in self.libs:
@@ -253,8 +284,8 @@ class Flow:
         require(r['exit_code'] == 0, f'{label}: antenna-eco failed: ' + bounded_text(Path(r['stderr']))[-600:])
         return result
 
-    def plant_shape(self, phys: dict) -> dict:
-        cfg = PLANT[self.tag]
+    def plant_shape(self, phys: dict, port: str | None = None) -> dict:
+        cfg = dict(PLANT[self.tag], **({'port': port} if port else {}))
         text = bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2)
         die = re.search(r'(?m)^DIEAREA \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \) ;', text)
         pin = re.search(r'(?m)^- ' + re.escape(cfg['port']) + r' \+ NET \S+ .*?\+ LAYER (\S+) \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \) '
@@ -308,7 +339,7 @@ class Flow:
 
     def deck_antenna(self, label: str, gds: Path, phys: dict) -> dict:
         import signoff as signoff_harness  # noqa: E402
-        ns = argparse.Namespace(gds=gds, top='lane_smoke', pdk=self.tag, out=self.h.root / f'{label}_signoff',
+        ns = argparse.Namespace(gds=gds, top=self.top, pdk=self.tag, out=self.h.root / f'{label}_signoff',
                                 netlist=Path(phys['paths']['powered']), against=None, against_top=None,
                                 manifest=self.args.manifest, threads=2, memory='4g', timeout=900, plant=None)
         summary = signoff_harness.run_checks(ns, ['antenna'])
@@ -353,7 +384,7 @@ class Flow:
         script = h.root / f'{label}.tcl'
         script.write_text(f'''read_liberty {tcl_path(self.libs[corner])}
 read_verilog {tcl_path(netlist)}
-link_design lane_smoke
+link_design {self.top}
 read_sdc {tcl_path(self.sdc)}
 read_spef {tcl_path(spef)}
 report_units
@@ -476,8 +507,9 @@ exit
         bad['buffers'].append(dict(profile['buffers'][0], name=inv_name, input_pin=pins[0], output_pin=pins[1], function=inv_fn[1]))
         bad_profile = jdump(self.h.root / f'{self.tag}_control_inverting_profile.json', bad)
         plan = jdump(self.h.root / f'{self.tag}_control_inverting_plan.json', dict(
-            schema='rustroad.eco-plan.v1', module='lane_smoke',
-            operations=[dict(op='insert_buffer', cell=inv_name, instance='rr_ctl_inv_0', net='rr_ctl_inv_0_n', sink=dict(instance='r0', pin='D'))]))
+            schema='rustroad.eco-plan.v1', module=self.top,
+            operations=[dict(op='insert_buffer', cell=inv_name, instance='rr_ctl_inv_0', net='rr_ctl_inv_0_n',
+                             sink=dict(instance=self.design.control_sink[0], pin=self.design.control_sink[1]))]))
         out = self.h.root / f'{self.tag}_control_inverting.v'
         r = self.h.run(f'{self.tag}_control_inverting_eco', [str(self.tools['rustroad']), 'apply-eco', '--netlist', str(netlist), '--plan', str(plan),
                                                               '--delay-cells', str(bad_profile), '--out', str(out)])
@@ -485,9 +517,9 @@ exit
         require(r['exit_code'] != 0 and 'ECO_NOT_BUFFER' in err and not out.exists(), 'inverting ECO cell was not rejected')
         # The same plan with a real profiled buffer is accepted (positive control).
         ok_plan = jdump(self.h.root / f'{self.tag}_control_buffer_plan.json', dict(
-            schema='rustroad.eco-plan.v1', module='lane_smoke',
+            schema='rustroad.eco-plan.v1', module=self.top,
             operations=[dict(op='insert_buffer', cell=profile['buffers'][0]['name'], instance='rr_ctl_buf_0', net='rr_ctl_buf_0_n',
-                             sink=dict(instance='r0', pin='D'))]))
+                             sink=dict(instance=self.design.control_sink[0], pin=self.design.control_sink[1]))]))
         ok_out = self.h.root / f'{self.tag}_control_buffer.v'
         run_ok(self.h, f'{self.tag}_control_buffer_eco', [self.tools['rustroad'], 'apply-eco', '--netlist', netlist, '--plan', ok_plan,
                                                           '--delay-cells', self.delay_cells, '--out', ok_out])
@@ -525,7 +557,7 @@ exit
         gds = h.root / f'{label}.gds'
         x = h.json_command(f'{label}_export_gds', [str(v) for v in phys['road'] + ['export-gds', '--cell-gds', self.p['tap_reference']['gds']['path'],
                                                                                  '--layer-map', ROOT / f'fixtures/pdk/{self.tag}-gds-map.json', '--out', gds]])
-        ns = argparse.Namespace(gds=gds, top='lane_smoke', pdk=self.tag, out=h.root / f'{label}_signoff', netlist=Path(phys['paths']['powered']),
+        ns = argparse.Namespace(gds=gds, top=self.top, pdk=self.tag, out=h.root / f'{label}_signoff', netlist=Path(phys['paths']['powered']),
                                 against=None, against_top=None, manifest=self.args.manifest, threads=2, memory='4g', timeout=900, plant=None)
         summary = signoff_harness.run_checks(ns, ['drc-magic', 'drc-klayout', 'antenna', 'lvs-netgen', 'lvs-klayout'])
         jdump(ns.out / 'signoff.json', summary)
@@ -533,10 +565,10 @@ exit
                     summary=str(ns.out / 'signoff.json'), peak_rss_kib=summary['resources']['peak_rss_kib'])
 
     # ------------------------------------------------------------ driver
-    def run(self) -> dict:
-        start = time.monotonic()
-        frozen_before = self.frozen()
-        netlist = self.synth()
+    def close(self, netlist: Path) -> tuple[list, tuple]:
+        """The bounded closure loop from a mapped netlist: returns the
+        per-iteration records and (iteration, netlist, physical, sta, antenna)
+        of the final iteration."""
         iterations, final = [], None
         for it in range(self.args.max_iterations):
             phys = self.physical(it, netlist)
@@ -567,6 +599,12 @@ exit
                 plan = self.antenna_eco(f'{self.tag}_i{it}', netlist, antenna['report'], repaired)
                 record['antenna_eco'] = dict(status=plan['status'], nets=plan['nets'])
                 netlist = repaired
+        return iterations, final
+
+    def run(self) -> dict:
+        start = time.monotonic()
+        frozen_before = self.frozen()
+        iterations, final = self.close(self.synth())
         it, netlist, phys, sta, antenna = final
         result = dict(pdk=self.tag, iterations=iterations, final_iteration=it, closed=sta['closed'], antenna=antenna,
                       config=fingerprint(self.config), delay_cells=fingerprint(self.delay_cells))

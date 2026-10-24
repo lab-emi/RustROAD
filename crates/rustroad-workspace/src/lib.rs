@@ -41,6 +41,12 @@ pub enum Error {
     /// Coded stream-export failure (e.g. GDS_ODD_COORDINATE, GDS_CELL_MISSING).
     #[error("{code}: {message}")]
     Gds { code: &'static str, message: String },
+    /// Coded failure of a file-only command (hold-eco, apply-eco,
+    /// antenna-eco) or of a command's own input file: no workspace is
+    /// involved, so the code is never INVALID_WORKSPACE (e.g. STALE_REPORT,
+    /// ECO_APPLY, TIMING_REPORT, OUTPUT_PATH).
+    #[error("{code}: {message}")]
+    Input { code: &'static str, message: String },
 }
 pub type Result<T> = std::result::Result<T, Error>;
 

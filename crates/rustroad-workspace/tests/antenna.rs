@@ -357,3 +357,66 @@ fn changed_sources_unsupported_rules_and_budgets_are_explicit() {
             .contains("ANTENNA_SOURCE_CHANGED")
     );
 }
+
+#[test]
+fn safety_margin_flags_ratios_just_below_the_lef_limit() {
+    // The native ratio reads low against the foundry deck (phase-B1 sweep),
+    // so the native verdict keeps 10 % of every limit as margin: a planted
+    // wire whose ratio lies between 0.9 x 400 and 400 passes the raw LEF
+    // comparison but is reported violated.
+    let f = routed(PLAIN);
+    let raw = |length: i64| {
+        let r = check_antenna(
+            &f.workspace,
+            &AntennaRequest {
+                safety_margin: 0.0,
+                ..request(Some(&long_wire(&f, length)))
+            },
+            &limits(),
+        )
+        .unwrap();
+        let m3 = r
+            .checks
+            .iter()
+            .find(|c| c.net == "a" && c.layer == "M3")
+            .unwrap()
+            .clone();
+        (r.status, m3)
+    };
+    let (length, (status, row)) = (20..50)
+        .map(|l| (l, raw(l)))
+        .find(|(_, (_, row))| row.ratio > 365.0 && row.ratio < 395.0)
+        .expect("a planted length in the 0.9..1.0 band");
+    assert_eq!(status, "passed", "{}", row.ratio);
+    assert!(!row.violated && !row.exceeds_lef_limit && row.effective_limit == row.limit);
+    let r = check_antenna(
+        &f.workspace,
+        &request(Some(&long_wire(&f, length))),
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(r.status, "violated");
+    assert_eq!((r.violations, r.lef_violations), (1, 0));
+    assert_eq!(r.safety_margin.fraction, 0.10);
+    let m3 = r
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "M3")
+        .unwrap();
+    assert!(m3.violated && !m3.exceeds_lef_limit);
+    assert!((m3.effective_limit - 0.9 * m3.limit).abs() < 1e-9);
+    // A margin outside 0 ..= 0.5 is refused.
+    for bad in [-0.1, 0.6, f64::NAN] {
+        let e = check_antenna(
+            &f.workspace,
+            &AntennaRequest {
+                safety_margin: bad,
+                ..request(None)
+            },
+            &limits(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("safety-margin"), "{e}");
+    }
+}

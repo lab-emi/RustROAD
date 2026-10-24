@@ -8,19 +8,34 @@
 //! at or above the setup margin, and applies the result through the typed ECO
 //! primitive (`rustroad_formats::eco`). Ordering is deterministic.
 //!
+//! Reports are bound to the netlist they timed (`--timed-netlist`, see
+//! `binding`): stale reports, reports of another revision and an edited
+//! netlist that the timed netlist does not refine are refused with
+//! STALE_REPORT. Sink pins must be cell-LEF INPUT pins; directions come from
+//! the profile's `cell_lef` source, re-verified by SHA-256.
+//!
+//! Errors of these file-only commands carry their own code (STALE_REPORT,
+//! TIMING_REPORT, ECO_APPLY, ...), never INVALID_WORKSPACE.
+//!
 //! Memory/work preflight (Rule 9): reports and profiles are capped at 64 MiB /
-//! 4 MiB; per sink the chain search evaluates at most `max_combinations`
-//! multisets (default 200,000, each O(max_chain x corners)); at most
-//! `max_sinks` sinks are planned. Peak memory is the netlist AST plus the
-//! parsed reports (well below 256 MiB at the input caps). No timing graph,
-//! path or cone is built here; slacks come from the timing engine.
+//! 4 MiB, the cell LEF at 64 MiB (one parse; only the touched masters' pin
+//! directions are kept); per sink the chain search evaluates at most
+//! `max_combinations` multisets (default 200,000, each O(max_chain x
+//! corners)); at most `max_sinks` sinks are planned. Peak memory is two
+//! netlist ASTs, the LEF document and the parsed reports (well below 512 MiB
+//! at the input caps). No timing graph, path or cone is built here; slacks
+//! come from the timing engine.
+mod binding;
+pub use binding::BindingSummary;
+
 use crate::pdk::read_input;
 use crate::{Error, Result};
 use rustroad_formats::eco::{
     self, BufferCell, DiodeCell, ECO_PLAN_SCHEMA, EcoCells, EcoLimits, EcoOp, EcoPlan, EcoReport,
-    PinRef,
+    PinDirections, PinRef,
 };
-use rustroad_formats::verilog::{self, Expr, Netlist, VerilogLimits};
+use rustroad_formats::lef;
+use rustroad_formats::verilog::{self, Netlist, VerilogLimits};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -33,9 +48,22 @@ pub const HOLD_PLAN_SCHEMA: &str = "rustroad.hold-eco-plan.v1";
 const MAX_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PROFILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_NETLIST_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_LEF_BYTES: u64 = 64 * 1024 * 1024;
 
-fn fail(code: &str, message: impl std::fmt::Display) -> Error {
-    Error::Invalid(format!("{code}: {message}"))
+pub(crate) fn fail(code: &'static str, message: impl std::fmt::Display) -> Error {
+    Error::Input {
+        code,
+        message: message.to_string(),
+    }
+}
+
+/// `read_input` for a command's own input file: a non-UTF-8 or oversized
+/// file is an INPUT_FILE error of this command, not a workspace error.
+fn read_file(path: &Path, limit: u64, role: &str) -> Result<(String, crate::pdk::SourcePin)> {
+    read_input(path, limit, role).map_err(|e| match e {
+        Error::Invalid(m) | Error::Budget(m) => fail("INPUT_FILE", m),
+        other => other,
+    })
 }
 
 // ----------------------------------------------------------------- profile
@@ -154,6 +182,8 @@ impl DelayCellProfile {
                     pin: d.pin.clone(),
                 })
                 .collect(),
+            // Filled by `load_pin_directions` where an ECO buffers a sink.
+            pin_directions: PinDirections::new(),
         };
         for b in &cells.buffers {
             b.check_identity().map_err(|e| fail("DELAY_PROFILE", e))?;
@@ -177,7 +207,7 @@ fn artifact_of(pin: &crate::pdk::SourcePin) -> Artifact {
 }
 
 pub fn load_profile(path: &Path) -> Result<(DelayCellProfile, Artifact)> {
-    let (text, pin) = read_input(path, MAX_PROFILE_BYTES, "delay_cell_profile")?;
+    let (text, pin) = read_file(path, MAX_PROFILE_BYTES, "delay_cell_profile")?;
     let profile: DelayCellProfile = serde_json::from_str(&text)?;
     if profile.schema != DELAY_PROFILE_SCHEMA {
         return Err(fail(
@@ -200,8 +230,75 @@ pub fn load_profile(path: &Path) -> Result<(DelayCellProfile, Artifact)> {
     Ok((profile, artifact_of(&pin)))
 }
 
+/// Cell-LEF pin directions of `masters`, read from the profile's `cell_lef`
+/// source (or `override_path`) and verified against the profile's SHA-256.
+pub fn load_pin_directions(
+    profile: &DelayCellProfile,
+    override_path: Option<&Path>,
+    masters: &BTreeSet<String>,
+) -> Result<(PinDirections, Artifact)> {
+    let source = profile
+        .sources
+        .iter()
+        .find(|s| s.role == "cell_lef")
+        .ok_or_else(|| {
+            fail(
+                "ECO_PIN_DIRECTIONS",
+                "the delay-cell profile lists no cell_lef source; sink pin directions are unknown",
+            )
+        })?;
+    let path = override_path.unwrap_or(&source.path);
+    let (text, pin) = read_file(path, MAX_LEF_BYTES, "cell_lef")?;
+    if pin.sha256 != source.sha256 {
+        return Err(fail(
+            "ECO_PIN_DIRECTIONS",
+            format!(
+                "cell LEF {} has sha256 {}, the profile was built from {}",
+                path.display(),
+                pin.sha256,
+                source.sha256
+            ),
+        ));
+    }
+    // Only names and directions are used; a fine DBU keeps every 0.1 nm
+    // coordinate exact so the strict geometry parser accepts any library.
+    let doc = lef::parse_lef(
+        &text,
+        10_000,
+        &lef::LefLimits {
+            max_input_bytes: MAX_LEF_BYTES as usize,
+            ..Default::default()
+        },
+    )
+    .map_err(|e| fail("ECO_PIN_DIRECTIONS", e))?;
+    let directions = doc
+        .macros
+        .iter()
+        .filter(|m| masters.contains(&m.name))
+        .map(|m| {
+            (
+                m.name.clone(),
+                m.pins
+                    .iter()
+                    .filter_map(|p| p.direction.clone().map(|d| (p.name.clone(), d)))
+                    .collect(),
+            )
+        })
+        .collect();
+    Ok((directions, artifact_of(&pin)))
+}
+
+fn masters_of(netlists: &[&Netlist], profile: &DelayCellProfile) -> BTreeSet<String> {
+    netlists
+        .iter()
+        .flat_map(|n| n.instances.iter().map(|i| i.cell.clone()))
+        .chain(profile.buffers.iter().map(|b| b.name.clone()))
+        .chain(profile.antenna_cells.iter().map(|d| d.name.clone()))
+        .collect()
+}
+
 pub fn load_netlist(path: &Path) -> Result<(Netlist, Artifact)> {
-    let (text, pin) = read_input(path, MAX_NETLIST_BYTES, "mapped_verilog")?;
+    let (text, pin) = read_file(path, MAX_NETLIST_BYTES, "mapped_verilog")?;
     let netlist = verilog::parse_verilog(&text, &VerilogLimits::default())
         .map_err(|e| fail("ECO_NETLIST", e))?;
     Ok((netlist, artifact_of(&pin)))
@@ -253,13 +350,16 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// The netlist output may not overwrite the input, and the netlist and plan
-/// outputs must be different files.
-fn check_outputs(input: &Path, out: &Path, plan: &Path) -> Result<()> {
-    if same_file(input, out) || same_file(input, plan) {
+/// The outputs may not overwrite an input, and the netlist and plan outputs
+/// must be different files.
+fn check_outputs(inputs: &[&Path], out: &Path, plan: &Path) -> Result<()> {
+    if inputs
+        .iter()
+        .any(|input| same_file(input, out) || same_file(input, plan))
+    {
         return Err(fail(
             "OUTPUT_PATH",
-            "outputs must not overwrite the input netlist",
+            "outputs must not overwrite an input netlist",
         ));
     }
     let resolve = |p: &Path| {
@@ -290,6 +390,10 @@ fn check_outputs(input: &Path, out: &Path, plan: &Path) -> Result<()> {
 struct Envelope {
     schema: String,
     ok: bool,
+    #[serde(default)]
+    workspace: Option<String>,
+    #[serde(default)]
+    rev: Option<String>,
     scope: serde_json::Value,
     sections: serde_json::Value,
 }
@@ -329,7 +433,7 @@ fn text<'a>(v: &'a serde_json::Value, key: &str, ctx: &str) -> Result<&'a str> {
 }
 
 fn read_envelope(path: &Path) -> Result<(Envelope, Artifact)> {
-    let (text, pin) = read_input(path, MAX_REPORT_BYTES, "timing_report")?;
+    let (text, pin) = read_file(path, MAX_REPORT_BYTES, "timing_report")?;
     let env: Envelope = serde_json::from_str(&text)?;
     if env.schema != "rusteda.v1" || !env.ok {
         return Err(fail(
@@ -388,6 +492,13 @@ pub struct HoldEcoRequest {
     pub prefix: String,
     pub out: PathBuf,
     pub plan_out: PathBuf,
+    /// The netlist the timing engine imported (post-CTS export of `netlist`).
+    pub timed_netlist: PathBuf,
+    /// SHA-256 the caller recorded when it handed `timed_netlist` to the
+    /// timing engine; a different file is refused.
+    pub timed_netlist_sha256: Option<String>,
+    /// Override of the profile's cell-LEF path (same SHA-256 required).
+    pub cell_lef: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -428,8 +539,11 @@ pub struct HoldParameters {
 #[derive(Clone, Debug, Serialize)]
 pub struct HoldPlanInputs {
     pub netlist: Artifact,
+    pub timed_netlist: Artifact,
+    pub cell_lef: Artifact,
     pub profile: Artifact,
     pub reports: Vec<ReportInput>,
+    pub binding: BindingSummary,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct HoldPlanTotals {
@@ -469,13 +583,7 @@ fn driver_map<'a>(
     }
     map
 }
-fn expr_key(e: &Expr) -> String {
-    match e {
-        Expr::Ident(n) => n.clone(),
-        Expr::BitSelect { name, index } => format!("{name}[{index}]"),
-        other => format!("{other:?}"),
-    }
-}
+use binding::expr_key;
 
 #[allow(clippy::too_many_arguments)]
 fn choose_chain(
@@ -579,15 +687,77 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
             "ECO name prefix is not a shell-safe handle",
         ));
     }
-    check_outputs(&r.netlist, &r.out, &r.plan_out)?;
+    check_outputs(&[&r.netlist, &r.timed_netlist], &r.out, &r.plan_out)?;
     let (netlist, netlist_pin) = load_netlist(&r.netlist)?;
+    let (timed, timed_pin) = load_netlist(&r.timed_netlist)?;
     let (profile, profile_pin) = load_profile(&r.profile)?;
-    let cells = profile.eco_cells()?;
+    let (directions, lef_pin) = load_pin_directions(
+        &profile,
+        r.cell_lef.as_deref(),
+        &masters_of(&[&netlist, &timed], &profile),
+    )?;
+    let mut cells = profile.eco_cells()?;
+    cells.pin_directions = directions;
+    let mut bind = BindingSummary {
+        method: "sha256 of the timed netlist (when given) + report rows and path stages \
+                 present in the timed netlist + one STA revision + edited netlist refined \
+                 by the timed netlist up to inserted buffers/ties",
+        timed_netlist_sha256: timed_pin.sha256.clone(),
+        expected_sha256: r.timed_netlist_sha256.clone(),
+        ..BindingSummary::default()
+    };
+    if let Some(want) = &r.timed_netlist_sha256
+        && !want.eq_ignore_ascii_case(&timed_pin.sha256)
+    {
+        return Err(fail(
+            "STALE_REPORT",
+            format!(
+                "timed netlist {} has sha256 {}, but the reports were produced from {want}",
+                r.timed_netlist.display(),
+                timed_pin.sha256
+            ),
+        ));
+    }
+    let tindex = binding::NetIndex::new(&timed);
+    binding::check_refinement(
+        &netlist,
+        &timed,
+        &tindex,
+        &cells.pin_directions,
+        &r.prefix,
+        &mut bind,
+    )?;
+    let mut revision: Option<(String, String)> = None;
+    let mut same_revision = |env: &Envelope, path: &Path| -> Result<()> {
+        let (Some(w), Some(v)) = (env.workspace.clone(), env.rev.clone()) else {
+            return Err(fail(
+                "TIMING_REPORT",
+                format!("{} names no STA workspace/revision", path.display()),
+            ));
+        };
+        match &revision {
+            None => {
+                revision = Some((w, v));
+                Ok(())
+            }
+            Some(first) if *first == (w.clone(), v.clone()) => Ok(()),
+            Some(first) => Err(fail(
+                "STALE_REPORT",
+                format!(
+                    "{} comes from {w} {v}, other reports from {} {}",
+                    path.display(),
+                    first.0,
+                    first.1
+                ),
+            )),
+        }
+    };
     let mut timing: BTreeMap<String, EndpointTiming> = BTreeMap::new();
     let mut reports = Vec::new();
     let mut hold_seen = BTreeSet::new();
     for path in &r.hold_reports {
         let (env, artifact) = read_envelope(path)?;
+        same_revision(&env, path)?;
         let (wire, clock) = scope_models(&env);
         if wire != "spef_rc" || clock != "propagated" {
             return Err(fail(
@@ -638,6 +808,7 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
             }
             for e in rows {
                 let name = text(e, "endpoint", "hold_fix row")?;
+                binding::bind_hold_row(&tindex, e, &mut bind)?;
                 let slack = num(e, "hold_slack_ns", name)?;
                 let t = timing.entry(name.to_string()).or_default();
                 merge_slack(&mut t.hold, &corner, slack, "hold", name)?;
@@ -659,6 +830,7 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
     let mut setup_seen = BTreeSet::new();
     for path in &r.setup_reports {
         let (env, artifact) = read_envelope(path)?;
+        same_revision(&env, path)?;
         let (wire, clock) = scope_models(&env);
         if wire != "spef_rc" || clock != "propagated" {
             return Err(fail(
@@ -691,6 +863,7 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
         }
         for row in rows {
             let name = text(row, "endpoint", "endpoints row")?;
+            binding::bind_endpoint(&tindex, name, &mut bind)?;
             let s = num(row, "setup_slack_ns", name)?;
             let t = timing.entry(name.to_string()).or_default();
             merge_slack(&mut t.setup, &corner, s, "setup", name)?;
@@ -703,6 +876,10 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
             wire_model: wire,
             clock_model: clock,
         });
+    }
+    if let Some((w, v)) = revision {
+        bind.sta_workspace = w;
+        bind.sta_revision = v;
     }
     for c in &r.hold_corners {
         if !hold_seen.contains(c) {
@@ -922,8 +1099,11 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
         tool: format!("rustroad {}", env!("CARGO_PKG_VERSION")),
         inputs: HoldPlanInputs {
             netlist: netlist_pin,
+            timed_netlist: timed_pin,
+            cell_lef: lef_pin,
             profile: profile_pin,
             reports,
+            binding: bind,
         },
         parameters: HoldParameters {
             target_margin_ns: r.target_margin_ns,
@@ -987,12 +1167,19 @@ pub struct ApplyReport {
     pub netlist: Artifact,
     pub plan: Artifact,
     pub profile: Artifact,
+    pub cell_lef: Artifact,
     pub eco_report: EcoReport,
     pub output: Artifact,
 }
 
 /// Apply a given typed ECO plan (e.g. a planted control) and write the netlist.
-pub fn apply_plan(netlist: &Path, plan: &Path, profile: &Path, out: &Path) -> Result<ApplyReport> {
+pub fn apply_plan(
+    netlist: &Path,
+    plan: &Path,
+    profile: &Path,
+    cell_lef: Option<&Path>,
+    out: &Path,
+) -> Result<ApplyReport> {
     if same_file(netlist, out) {
         return Err(fail(
             "OUTPUT_PATH",
@@ -1000,10 +1187,12 @@ pub fn apply_plan(netlist: &Path, plan: &Path, profile: &Path, out: &Path) -> Re
         ));
     }
     let (n, npin) = load_netlist(netlist)?;
-    let (text, ppin) = read_input(plan, MAX_REPORT_BYTES, "eco_plan")?;
+    let (text, ppin) = read_file(plan, MAX_REPORT_BYTES, "eco_plan")?;
     let p: EcoPlan = serde_json::from_str(&text)?;
     let (prof, fpin) = load_profile(profile)?;
-    let cells = prof.eco_cells()?;
+    let mut cells = prof.eco_cells()?;
+    let (directions, lef_pin) = load_pin_directions(&prof, cell_lef, &masters_of(&[&n], &prof))?;
+    cells.pin_directions = directions;
     let (edited, report) = eco::apply(
         &n,
         &p,
@@ -1018,6 +1207,7 @@ pub fn apply_plan(netlist: &Path, plan: &Path, profile: &Path, out: &Path) -> Re
         netlist: npin,
         plan: artifact_of(&ppin),
         profile: fpin,
+        cell_lef: lef_pin,
         eco_report: report,
         output,
     })
@@ -1044,6 +1234,7 @@ pub struct AntennaEcoRequest {
 struct AntennaReportIn {
     schema: String,
     status: String,
+    safety_margin: crate::antenna::SafetyMargin,
     checks: Vec<crate::antenna::CheckRow>,
 }
 
@@ -1059,7 +1250,14 @@ pub struct NetRepair {
 #[derive(Clone, Debug, Serialize)]
 pub struct AntennaPlan {
     pub schema: &'static str,
+    /// infeasible | planned | partial (input report partial, nothing to
+    /// repair: unmodeled rules, never "clean") | clean
     pub status: &'static str,
+    /// Status of the check-antenna report this plan was made from.
+    pub input_status: String,
+    /// Margin of the input report; diodes are sized to its effective limit.
+    pub safety_margin: f64,
+    pub diagnostics: Vec<String>,
     pub tool: String,
     pub netlist: Artifact,
     pub report: Artifact,
@@ -1095,16 +1293,35 @@ pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
             "ECO name prefix is not a shell-safe handle",
         ));
     }
-    check_outputs(&r.netlist, &r.out, &r.plan_out)?;
+    check_outputs(&[&r.netlist], &r.out, &r.plan_out)?;
     let (netlist, netlist_pin) = load_netlist(&r.netlist)?;
     let (profile, profile_pin) = load_profile(&r.profile)?;
     let cells = profile.eco_cells()?;
-    let (text, report_pin) = read_input(&r.report, MAX_REPORT_BYTES, "antenna_report")?;
+    let (text, report_pin) = read_file(&r.report, MAX_REPORT_BYTES, "antenna_report")?;
     let report: AntennaReportIn = serde_json::from_str(&text)?;
     if report.schema != crate::antenna::ANTENNA_SCHEMA {
         return Err(fail(
             "ANTENNA_REPORT",
             format!("schema {} unsupported", report.schema),
+        ));
+    }
+    if !matches!(report.status.as_str(), "passed" | "violated" | "partial") {
+        return Err(fail(
+            "ANTENNA_REPORT",
+            format!("unknown report status {:?}", report.status),
+        ));
+    }
+    let margin = report.safety_margin.fraction;
+    if !(margin.is_finite() && (0.0..=0.5).contains(&margin)) {
+        return Err(fail(
+            "ANTENNA_REPORT",
+            format!("safety margin {margin} outside 0 ..= 0.5"),
+        ));
+    }
+    if report.status == "passed" && report.checks.iter().any(|c| c.violated) {
+        return Err(fail(
+            "ANTENNA_REPORT",
+            "report status passed but it lists violated rows",
         ));
     }
     let diode = match &r.cell {
@@ -1133,8 +1350,11 @@ pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
             .map(|row| {
                 let g = row.gate_area_um2 + k as f64 * diode.lef_gate_area_um2;
                 let d = row.diff_area_um2 + k as f64 * diode.lef_diff_area_um2;
+                // Sized against the conservative (effective) limit.
                 match row.rules.limit(d) {
-                    Some((limit, _)) => row.metal_um2 / row.rules.denominator(g, d) / limit,
+                    Some((limit, _)) => {
+                        row.metal_um2 / row.rules.denominator(g, d) / (limit * (1.0 - margin))
+                    }
                     None => f64::INFINITY,
                 }
             })
@@ -1184,16 +1404,29 @@ pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
         module: netlist.module.clone(),
         operations: ops,
     };
+    let mut diagnostics = Vec::new();
+    if report.status == "partial" {
+        diagnostics.push(
+            "ANTENNA_INPUT_PARTIAL: the check-antenna report is partial (unmodeled LEF antenna \
+             statements); this plan cannot certify the layout antenna-clean"
+                .to_string(),
+        );
+    }
     let status = if !infeasible.is_empty() {
         "infeasible"
-    } else if nets.is_empty() {
-        "clean"
-    } else {
+    } else if !nets.is_empty() {
         "planned"
+    } else if report.status == "partial" {
+        "partial"
+    } else {
+        "clean"
     };
     let mut plan = AntennaPlan {
         schema: ANTENNA_PLAN_SCHEMA,
         status,
+        input_status: report.status.clone(),
+        safety_margin: margin,
+        diagnostics,
         tool: format!("rustroad {}", env!("CARGO_PKG_VERSION")),
         netlist: netlist_pin,
         report: artifact_of(&report_pin),
@@ -1202,7 +1435,8 @@ pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
         cell_gate_area_um2: diode.lef_gate_area_um2,
         cell_diff_area_um2: diode.lef_diff_area_um2,
         model: "each diode adds its LEF gate and diffusion area to the violating partial net; \
-                re-layout, check-antenna and the foundry deck verify the result",
+                diodes are counted against (1 - safety margin) x limit; re-layout, check-antenna \
+                and the foundry deck verify the result",
         nets,
         infeasible,
         eco: eco_plan,
