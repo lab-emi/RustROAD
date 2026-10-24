@@ -161,6 +161,10 @@ pub struct ExtractStats {
     pub foreign_overlaps: usize,
     /// Coupling to a pin shape whose net has no RC tree (grounded instead).
     pub unrouted_pin_partners: usize,
+    /// Routing patches (same-net fill metal) and their pieces not already
+    /// covered by same-net conductors; each piece adds capacitance only.
+    pub patches: usize,
+    pub patch_pieces: usize,
     pub wire_length_dbu: u64,
     pub ground_pf: f64,
     /// Each coupling capacitor counted once.
@@ -189,6 +193,11 @@ enum EdgeKind {
     Wire(u32),
     Via(u32),
 }
+/// One capacitance-bearing strip. A routed wire run has its two long sides at
+/// `cross -/+ width/2` and spans its centerline `lo..hi` (end caps are not
+/// modelled). A routing patch contributes two strips per uncovered piece: one
+/// along x (bottom and top edges) and one along y (left and right edges), so
+/// all four piece edges are sides; both strips share one shape.
 #[derive(Clone, Copy, Debug)]
 struct Run {
     net: u32,
@@ -197,6 +206,13 @@ struct Run {
     cross: i64,
     lo: i64,
     hi: i64,
+    /// Side edge coordinates across the axis (`minus < plus`).
+    minus: i64,
+    plus: i64,
+    /// Index of this strip's conductor shape (excluded from its own query).
+    shape: u32,
+    /// Strip of a routing patch piece (`Routes::patches`).
+    patch: bool,
     /// Local (tree-order) nodes at `lo` and `hi`.
     node_lo: u32,
     node_hi: u32,
@@ -641,13 +657,19 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
             let vertical = ka.1 == kb.1;
             let (pa, pb) = if vertical { (ka.2, kb.2) } else { (ka.1, kb.1) };
             let (lo_node, hi_node) = if pa <= pb { (a, b) } else { (b, a) };
+            let cross = if vertical { ka.1 } else { ka.2 };
+            let half = input.layers[layer as usize].width / 2;
             out.runs.push(Run {
                 net,
                 layer,
                 vertical,
-                cross: if vertical { ka.1 } else { ka.2 },
+                cross,
                 lo: pa.min(pb),
                 hi: pa.max(pb),
+                minus: cross - half,
+                plus: cross + half,
+                shape: out.runs.len() as u32,
+                patch: false,
                 node_lo: local[lo_node as usize],
                 node_hi: local[hi_node as usize],
             });
@@ -695,6 +717,210 @@ impl Bins {
     }
 }
 
+/// `a` minus `b` as disjoint rectangles (left, right, bottom, top slabs).
+fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
+    if !(a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy) {
+        return vec![a];
+    }
+    let mut out = Vec::with_capacity(4);
+    let (x0, x1) = (a.lx.max(b.lx), a.ux.min(b.ux));
+    if a.lx < x0 {
+        out.push(Rect { ux: x0, ..a });
+    }
+    if x1 < a.ux {
+        out.push(Rect { lx: x1, ..a });
+    }
+    if a.ly < b.ly {
+        out.push(Rect {
+            lx: x0,
+            ux: x1,
+            uy: b.ly,
+            ..a
+        });
+    }
+    if b.uy < a.uy {
+        out.push(Rect {
+            lx: x0,
+            ux: x1,
+            ly: b.uy,
+            ..a
+        });
+    }
+    out
+}
+
+/// Pieces of one patch that may exist per patch after subtraction.
+const MAX_PATCH_PIECES: usize = 256;
+
+/// Attach every routing patch to the RC node of a same-net conductor it
+/// overlaps or touches (largest overlap area, then lowest shape index; a wire
+/// run attaches at its end nearer the patch centre), and add each piece of the
+/// patch not already covered by same-net metal on its layer as a conductor
+/// shape with two side strips. Patches add capacitance only: they never add a
+/// node or a resistor (the tree stays the wire graph's tree).
+#[allow(clippy::too_many_arguments)]
+fn add_patches(
+    input: &ExtractInput<'_>,
+    limits: &ExtractLimits,
+    built: &mut Built,
+    shapes: &mut Vec<Shape>,
+    bins: &mut Bins,
+    entries: &mut usize,
+    net_index: &HashMap<u32, usize>,
+    stats: &mut ExtractStats,
+) -> Result<()> {
+    for patch in &input.routes.patches {
+        let r = patch.rect;
+        if !r.valid()
+            || patch.layer as usize >= input.layers.len()
+            || input.layers[patch.layer as usize].vertical.is_none()
+        {
+            return Err(invalid("routing patch is empty or not on a routing layer"));
+        }
+        layer_model(input, patch.layer)?;
+        if !net_index.contains_key(&patch.net) {
+            return Err(invalid("routing patch on a net without an RC tree"));
+        }
+        // Same-net conductors on the patch layer touching the patch (closed).
+        let (x0, x1) = bins.range(r.lx, r.ux);
+        let (y0, y1) = bins.range(r.ly, r.uy);
+        let mut near: Vec<u32> = Vec::new();
+        for bx in x0..=x1 {
+            for by in y0..=y1 {
+                let Some(list) = bins.map.get(&(patch.layer, bx, by)) else {
+                    continue;
+                };
+                stats.work = stats
+                    .work
+                    .checked_add(list.len())
+                    .ok_or_else(|| budget("extraction work"))?;
+                if stats.work > limits.max_work {
+                    return Err(budget("extraction work"));
+                }
+                near.extend(list.iter().copied());
+            }
+        }
+        near.sort_unstable();
+        near.dedup();
+        let net_of = |s: &Shape| match s.owner {
+            Owner::Run(o) => Some(built.runs[o as usize].net),
+            _ => s.net(),
+        };
+        let touching: Vec<u32> = near
+            .into_iter()
+            .filter(|&s| {
+                let q = shapes[s as usize].rect;
+                net_of(&shapes[s as usize]) == Some(patch.net)
+                    && q.lx <= r.ux
+                    && r.lx <= q.ux
+                    && q.ly <= r.uy
+                    && r.ly <= q.uy
+            })
+            .collect();
+        if touching.len() > limits.max_candidates {
+            return Err(budget("extraction candidates per routing patch"));
+        }
+        let overlap = |q: Rect| -> i128 {
+            let w = i128::from(q.ux.min(r.ux)) - i128::from(q.lx.max(r.lx));
+            let h = i128::from(q.uy.min(r.uy)) - i128::from(q.ly.max(r.ly));
+            w.max(0) * h.max(0)
+        };
+        let anchor = touching
+            .iter()
+            .copied()
+            .max_by_key(|&s| (overlap(shapes[s as usize].rect), std::cmp::Reverse(s)))
+            .ok_or_else(|| invalid("floating routing patch (touches no same-net conductor)"))?;
+        let node = match shapes[anchor as usize].owner {
+            Owner::Run(o) => {
+                let run = &built.runs[o as usize];
+                if run.patch {
+                    run.node_lo
+                } else {
+                    let centre = if run.vertical {
+                        r.ly + (r.uy - r.ly) / 2
+                    } else {
+                        r.lx + (r.ux - r.lx) / 2
+                    };
+                    if (centre - run.lo).abs() <= (run.hi - centre).abs() {
+                        run.node_lo
+                    } else {
+                        run.node_hi
+                    }
+                }
+            }
+            Owner::Pad { node, .. } => node,
+            Owner::Passive(PassiveOwner::Pin { pin, .. }) => built
+                .pin_nodes
+                .get(&pin)
+                .filter(|(n, _)| *n == patch.net)
+                .map(|(_, node)| *node)
+                .ok_or_else(|| invalid("routing patch touches an unrouted pin only"))?,
+            Owner::Passive(PassiveOwner::Ground) => unreachable!("ground has no net"),
+        };
+        // Uncovered pieces: subtract every same-net conductor overlapping it.
+        let mut pieces = vec![r];
+        for &s in &touching {
+            let q = shapes[s as usize].rect;
+            pieces = pieces.into_iter().flat_map(|p| subtract(p, q)).collect();
+            if pieces.len() > MAX_PATCH_PIECES {
+                return Err(budget("routing patch pieces"));
+            }
+        }
+        stats.patches += 1;
+        stats.patch_pieces += pieces.len();
+        for piece in pieces {
+            let shape = shapes.len() as u32;
+            let first = built.runs.len() as u32;
+            for vertical in [false, true] {
+                let (lo, hi, minus, plus) = if vertical {
+                    (piece.ly, piece.uy, piece.lx, piece.ux)
+                } else {
+                    (piece.lx, piece.ux, piece.ly, piece.uy)
+                };
+                built.runs.push(Run {
+                    net: patch.net,
+                    layer: patch.layer,
+                    vertical,
+                    cross: minus + (plus - minus) / 2,
+                    lo,
+                    hi,
+                    minus,
+                    plus,
+                    shape,
+                    patch: true,
+                    node_lo: node,
+                    node_hi: node,
+                });
+            }
+            shapes.push(Shape {
+                layer: patch.layer,
+                rect: piece,
+                owner: Owner::Run(first),
+            });
+            let (x0, x1) = bins.range(piece.lx, piece.ux);
+            let (y0, y1) = bins.range(piece.ly, piece.uy);
+            let cells =
+                usize::try_from((x1 - x0 + 1) * (y1 - y0 + 1)).map_err(|_| budget("bin span"))?;
+            *entries = entries
+                .checked_add(cells)
+                .ok_or_else(|| budget("bin entries"))?;
+            if *entries > limits.max_bin_entries {
+                return Err(budget("extraction spatial-bin entries"));
+            }
+            for bx in x0..=x1 {
+                for by in y0..=y1 {
+                    bins.map
+                        .entry((patch.layer, bx, by))
+                        .or_default()
+                        .push(shape);
+                }
+            }
+        }
+    }
+    stats.wire_runs = built.runs.iter().filter(|r| !r.patch).count();
+    Ok(())
+}
+
 fn sample(rows: &[[f64; 3]], spacing: Option<f64>) -> (f64, f64) {
     let last = rows[rows.len() - 1];
     let Some(s) = spacing else {
@@ -723,8 +949,8 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         let half = input.layers[r.layer as usize].width / 2;
         let rect = if r.vertical {
             Rect {
-                lx: r.cross - half,
-                ux: r.cross + half,
+                lx: r.minus,
+                ux: r.plus,
                 ly: r.lo - half,
                 uy: r.hi + half,
             }
@@ -732,8 +958,8 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             Rect {
                 lx: r.lo - half,
                 ux: r.hi + half,
-                ly: r.cross - half,
-                uy: r.cross + half,
+                ly: r.minus,
+                uy: r.plus,
             }
         };
         shapes.push(Shape {
@@ -799,6 +1025,20 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         .enumerate()
         .map(|(i, n)| (n.net, i))
         .collect();
+    add_patches(
+        input,
+        limits,
+        &mut built,
+        &mut shapes,
+        &mut bins,
+        &mut entries,
+        &net_index,
+        &mut stats,
+    )?;
+    stats.shapes = shapes.len();
+    if shapes.len() > limits.max_shapes {
+        return Err(budget("extraction shape count"));
+    }
     let mut coupling = BTreeMap::<((u32, u32), (u32, u32)), f64>::new();
     let mut stamp = vec![u32::MAX; shapes.len()];
     let mut candidates: Vec<u32> = Vec::new();
@@ -819,14 +1059,13 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     for (ri, run) in built.runs.iter().enumerate() {
         let model = layer_model(input, run.layer)?;
         let ctx_map = contexts[run.layer as usize].as_ref().unwrap();
-        let half = model.width / 2;
         let window = model
             .contexts
             .iter()
             .map(|c| c.rows[c.rows.len() - 1][0])
             .fold(0.0f64, f64::max);
         let window_dbu = (window * tech.dbu_per_um).ceil() as i64;
-        let (edge_minus, edge_plus) = (run.cross - half, run.cross + half);
+        let (edge_minus, edge_plus) = (run.minus, run.plus);
         // Query region: lateral window on the run layer, footprint elsewhere.
         let (c0, c1) = (edge_minus - window_dbu, edge_plus + window_dbu);
         let (bx, by) = if run.vertical {
@@ -849,7 +1088,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                         return Err(budget("extraction work"));
                     }
                     for &s in list {
-                        if stamp[s as usize] == ri as u32 || s as usize == ri {
+                        if stamp[s as usize] == ri as u32 || s == run.shape {
                             continue;
                         }
                         stamp[s as usize] = ri as u32;
@@ -1060,6 +1299,17 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                 let partner = match sh.owner {
                     Owner::Run(o) => {
                         let other = &built.runs[o as usize];
+                        // A patch strip facing the end cap of a wire run (axes
+                        // differ) is not counted from the wire's side: own it.
+                        let run_factor = if run.patch
+                            && !other.patch
+                            && other.vertical != run.vertical
+                            && run_factor < 1.0
+                        {
+                            1.0
+                        } else {
+                            run_factor
+                        };
                         if other.net == run.net {
                             None
                         } else {
@@ -1156,7 +1406,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::routing::{Access, LayerRect, RouteStats, Via, Wire};
+    use crate::routing::{Access, LayerRect, Patch, RouteStats, Via, Wire};
 
     const DBU: f64 = 1000.0;
     fn rows() -> Vec<[f64; 3]> {
@@ -1600,6 +1850,167 @@ mod tests {
         let want = 10.0 * (3e-5 + 4e-5 + 4e-5) - 0.1 * (4e-5 - 3e-5);
         assert!((g - want).abs() < 1e-15, "{g} {want}");
         assert_eq!(n.stats.foreign_overlaps, 0);
+    }
+
+    fn access(pin: u32, net: u32, at: [i64; 2]) -> Access {
+        Access {
+            pin,
+            net,
+            layer: 0,
+            at,
+        }
+    }
+    fn patch(net: u32, rect: [i64; 4]) -> Patch {
+        Patch {
+            net,
+            layer: 0,
+            rect: Rect {
+                lx: rect[0],
+                ly: rect[1],
+                ux: rect[2],
+                uy: rect[3],
+            },
+        }
+    }
+    /// Net 0: 10 um M1 wire on y = 0 (pins at both ends) plus `patches`.
+    fn patched(patches: Vec<Patch>) -> Routes {
+        let mut r = routes(
+            straight(0, 0, 10),
+            vec![],
+            vec![access(0, 0, [0, 0]), access(1, 0, [10_000, 0])],
+            vec![0],
+        );
+        r.patches = patches;
+        r
+    }
+
+    #[test]
+    fn patch_beside_wire_adds_its_exposed_edges_at_the_nearer_end_node() {
+        // 1 x 0.2 um patch on the wire's top edge (touching, no overlap).
+        // Wire: bottom side 10 um isolated, top side loses the 1 um the patch
+        // covers. Patch: top edge 1 um and two 0.2 um short edges isolated;
+        // its bottom edge touches the wire. Isolated ground 4e-5 pF/um/side.
+        let t = [terminal(0, 0, true), terminal(1, 0, false)];
+        let plain = run(&patched(vec![]), &t, &[], &tech(false)).unwrap();
+        let n = run(
+            &patched(vec![patch(0, [4000, 50, 5000, 250])]),
+            &t,
+            &[],
+            &tech(false),
+        )
+        .unwrap();
+        let net = &n.nets[0];
+        // No new node or resistor: the tree is unchanged.
+        assert_eq!(net.nodes, plain.nets[0].nodes);
+        assert_eq!(net.resistors, plain.nets[0].resistors);
+        let total: f64 = net.ground.iter().sum();
+        let want = 4e-5 * (10.0 + 9.0) + 4e-5 * (1.0 + 0.2 + 0.2);
+        assert!((total - want).abs() < 1e-15, "{total} {want}");
+        // Patch centre x = 4.5 um is nearer the driver end (node 0).
+        let wire0 = 4e-5 * (4.0 * 0.8 + 0.55 + 5.0 * 0.25) + 4e-5 * (4.0 * 0.8 + 5.0 * 0.25);
+        assert!(
+            (net.ground[0] - (wire0 + 5.6e-5)).abs() < 1e-15,
+            "{:?}",
+            net.ground
+        );
+        assert_eq!((n.stats.patches, n.stats.patch_pieces), (1, 1));
+        assert_eq!(n.stats.wire_runs, plain.stats.wire_runs);
+        // A patch overlapping the wire counts only its uncovered piece.
+        let overlapping = run(
+            &patched(vec![patch(0, [4000, 0, 5000, 250])]),
+            &t,
+            &[],
+            &tech(false),
+        )
+        .unwrap();
+        assert_eq!(overlapping.nets[0].ground, net.ground);
+        assert_eq!(overlapping.stats.patch_pieces, 1);
+        // A patch fully inside same-net metal adds nothing.
+        let inside = run(
+            &patched(vec![patch(0, [4000, -50, 5000, 50])]),
+            &t,
+            &[],
+            &tech(false),
+        )
+        .unwrap();
+        assert_eq!(inside.nets[0].ground, plain.nets[0].ground);
+        assert_eq!((inside.stats.patches, inside.stats.patch_pieces), (1, 0));
+    }
+
+    #[test]
+    fn patch_side_couples_once_and_owns_a_facing_wire_end() {
+        // Net 1 parallel to net 0 at y = 750 (edges 0.65 um apart; the patch
+        // top is 0.45 um away over 1 um). Lateral pairs count half per side.
+        let mut r = patched(vec![patch(0, [4000, 50, 5000, 250])]);
+        r.wires.extend(straight(1, 750, 5));
+        r.access
+            .extend([access(2, 1, [0, 750]), access(3, 1, [10_000, 750])]);
+        r.nets = vec![0, 1];
+        let t = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 1, true),
+            terminal(3, 1, false),
+        ];
+        let n = run(&r, &t, &[], &tech(false)).unwrap();
+        let coupling: f64 = n.couplings.iter().map(|c| c.pf).sum();
+        // cc(0.65) = 2.8e-5, cc(0.45) = 4.75e-5 pF/um (linear rows).
+        let want = 2.8e-5 * 9.0 + 4.75e-5 * 1.0;
+        assert!((coupling - want).abs() < 1e-15, "{coupling} {want}");
+        assert!(n.couplings.iter().all(|c| c.a.0 != c.b.0));
+        // Net 1 wire end cap 0.45 um right of the patch, over 0.1 um of the
+        // patch's right edge: no wire side faces it, so the patch owns it.
+        let mut r = routes(
+            straight(0, 0, 10)
+                .into_iter()
+                .filter(|w| w.end[0] <= 5000)
+                .collect(),
+            vec![],
+            vec![access(0, 0, [0, 0]), access(1, 0, [5000, 0])],
+            vec![0, 1],
+        );
+        r.patches = vec![patch(0, [4000, 50, 5000, 250])];
+        r.wires.push(Wire {
+            net: 1,
+            layer: 0,
+            start: [5500, 150],
+            end: [9000, 150],
+        });
+        r.access
+            .extend([access(2, 1, [5500, 150]), access(3, 1, [9000, 150])]);
+        let n = run(&r, &t, &[], &tech(false)).unwrap();
+        let coupling: f64 = n.couplings.iter().map(|c| c.pf).sum();
+        assert!((coupling - 4.75e-5 * 0.1).abs() < 1e-18, "{coupling}");
+    }
+
+    #[test]
+    fn floating_or_unrouted_patches_fail_explicitly() {
+        let t = [terminal(0, 0, true), terminal(1, 0, false)];
+        let floating = run(
+            &patched(vec![patch(0, [4000, 2000, 5000, 2200])]),
+            &t,
+            &[],
+            &tech(false),
+        )
+        .unwrap_err();
+        assert!(
+            floating.to_string().contains("floating routing patch"),
+            "{floating}"
+        );
+        let unrouted = run(
+            &patched(vec![patch(7, [4000, 50, 5000, 250])]),
+            &t,
+            &[],
+            &tech(false),
+        )
+        .unwrap_err();
+        assert!(
+            unrouted.to_string().contains("without an RC tree"),
+            "{unrouted}"
+        );
+        let mut on_cut = patch(0, [4000, 50, 5000, 250]);
+        on_cut.layer = 2;
+        assert!(run(&patched(vec![on_cut]), &t, &[], &tech(false)).is_err());
     }
 
     #[test]

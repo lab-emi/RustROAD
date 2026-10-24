@@ -116,6 +116,7 @@ pub struct ExtractScope {
     pub via_capacitance: &'static str,
     pub diagonal_coupling: &'static str,
     pub cell_internal_metal: &'static str,
+    pub routing_patches: &'static str,
     pub max_segment_length_dbu: i64,
     pub drc_status: &'static str,
     pub lvs_status: &'static str,
@@ -535,6 +536,9 @@ pub fn extract(
             via_capacitance: "unmodeled (cut and landing-pad self capacitance)",
             diagonal_coupling: "unmodeled",
             cell_internal_metal: "pins and obstructions are neighbours and planes, not extracted",
+            routing_patches: "extracted: each piece not covered by same-net metal adds ground and \
+                              coupling on all four edges at the RC node of the same-net conductor \
+                              it overlaps (no new node or resistor)",
             max_segment_length_dbu: request.limits.max_segment_length,
             drc_status: "unchecked",
             lvs_status: "unchecked",
