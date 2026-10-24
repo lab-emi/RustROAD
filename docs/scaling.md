@@ -380,12 +380,15 @@ parsed reports, never from exit codes; `failed` beats `unverified` beats
   receipt label as `failed_step`.
 
 Design manifests (`fixtures/designs/<name>.json`, schema
-`rustroad.design.v1`, the gate's schema) pin the RTL, the clock SDC, the
-I/O SDC template, the profiles, the generated floorplan and physical
-configuration per PDK, the frozen PDK inputs (cell GDS/LEF, technology LEF,
-Liberty and OpenRCX rules per corner, RC profiles) and the
-`floorplan_recipe` (utilization 0.5, aspect 1, margin 10 um).
-`scripts/scale_manifests.py` regenerates them.
+`rustroad.design.v2`, the RTL-to-GDS gate's single schema, see
+docs/rtl2gds.md) pin the RTL, the clock SDC, the I/O SDC template, the
+profiles, the generated floorplan and physical configuration per PDK, the
+frozen PDK inputs (cell GDS/LEF, technology LEF, Liberty and OpenRCX rules
+per corner, RC profiles) and `recipe.floorplan` (utilization 0.5, aspect 1,
+margin 10 um) with `recipe.physical: track`. `scripts/scale_manifests.py`
+regenerates them (`--refresh-manifest` re-reads the hashes only). Since the
+final round every track design also goes through `scripts/rtl2gds.py`
+(timing, closure, controls); the GF180 scale clock buffer is now clkbuf_8.
 
 ## Reproduction
 

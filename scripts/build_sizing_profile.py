@@ -162,10 +162,15 @@ def main() -> int:
     args = ap.parse_args()
     bad = []
     for tag in (("sky130", "gf180") if args.pdk == "all" else (args.pdk,)):
-        text = json.dumps(build(tag), indent=1) + "\n"
+        built = build(tag)
+        text = json.dumps(built, indent=1) + "\n"
         path = args.out_dir / f"{tag}-sizing.json"
         if args.check:
-            if not path.is_file() or path.read_text() != text:
+            # The cell-policy source path names the checkout it was built in;
+            # its sha256 (and everything else) must match.
+            def norm(d):
+                return dict(d, sources=[dict(x, path=None) if x["role"] == "cell_policy" else x for x in d["sources"]])
+            if not path.is_file() or norm(json.loads(path.read_text())) != norm(built):
                 bad.append(str(path))
         else:
             path.write_text(text)

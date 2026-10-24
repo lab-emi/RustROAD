@@ -48,14 +48,14 @@ def roles(netlist: Path, sizes: dict, physical: set[str]) -> dict:
         if not m or m[1] in ("module", "input", "output", "wire", "assign", "inout"):
             continue
         master, name = m[1], m[2].lstrip("\\")
-        if master in physical:
+        if name.startswith("rr_eco_ant"):
+            role = "antenna_diode"
+        elif master in physical:
             role = "physical_only"
         elif name.startswith("rr_clkbuf"):
             role = "clock_buffer"
         elif name.startswith("rr_eco_hold"):
             role = "hold_cell"
-        elif name.startswith("rr_eco_ant"):
-            role = "antenna_diode"
         elif name.startswith("rr_tie"):
             role = "tie"
         else:
@@ -150,6 +150,8 @@ def row(summary: dict, pdk: dict, run: Path, sizes: dict, policy: dict) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--extra", type=Path, action="append", default=[],
+                    help="JSON object merged into the output (e.g. a cross-run determinism record)")
     ap.add_argument("runs", type=Path, nargs="+")
     args = ap.parse_args(argv)
     profiles = {p["tag"]: p for p in json.loads((ROOT / "fixtures/pdk/local-routing.json").read_text())["pdks"]}
@@ -175,6 +177,8 @@ def main(argv=None) -> int:
                runs=runs, rows=rows,
                table={f"{r['design']}/{r['pdk']}": dict(status=r["gate_status"], failed=r["failed"],
                                                          unverified=r["unverified"]) for r in rows})
+    for path in args.extra:
+        out.update(json.loads(path.read_text()))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(out, indent=1, sort_keys=False, default=str) + "\n")
     print(json.dumps(out["table"], indent=1))
