@@ -1,0 +1,121 @@
+{
+ "schema": "rustroad.clock-period.v1",
+ "design": "uart_tx",
+ "rule": "period = max(10 ns, round_up(1.25 x pre-layout ss+max critical-path delay, 1 ns))",
+ "owner_decision": "2026-10-24 clock period rule",
+ "method": {
+  "netlist": "gate mapped netlist (RustSys + cell policy, deconflict, port-alias buffers)",
+  "constraints": "rendered signoff SDC on the reference clock SDC, set_propagated_clock removed (ideal clock)",
+  "engine": "RustSTA, ss Liberty only, no SPEF, --require-wire-model per PDK",
+  "wire_model": {
+   "gf180": "ideal",
+   "sky130": "wireload_lumped"
+  },
+  "critical_path_delay": "reference period - worst ss setup slack",
+  "rounding": "ceil to 1 ns, floor 10 ns"
+ },
+ "inputs": {
+  "rtl": [
+   {
+    "path": "fixtures/designs/rtl/uart_tx/uart_tx.sv",
+    "sha256": "05ec7b7572de1180a7e2689b400161e95c00de2988899d47afc5421285b39bb6"
+   }
+  ],
+  "reference_clock_sdc": {
+   "path": "fixtures/designs/uart_tx/cts.sdc",
+   "sha256": "1b2f13f03135503f10cf9854b32b6abd85a2da89e6dce47b18ebd5b4e39e80fb",
+   "period_ns": 10.0
+  },
+  "io_template": {
+   "path": "fixtures/designs/postroute-io.sdc.tmpl",
+   "sha256": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07"
+  },
+  "cell_policy": {
+   "path": "fixtures/flow/cell-policy.json",
+   "sha256": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37"
+  },
+  "tools": {
+   "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "rusteda": "c39dbde459db506ab3731be75900eae93bcb71691d8e4945e05c2013f4cdd11a",
+   "ruststa": "472de8e8980100310005a817709a68cdda7b376d1fbd51f8ae3ad684aad08fea",
+   "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252"
+  }
+ },
+ "pdks": {
+  "sky130": {
+   "liberty_ss": {
+    "name": "sky130_fd_sc_hd__ss_100C_1v60.lib",
+    "sha256": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361"
+   },
+   "netlist": {
+    "kind": "rustsys",
+    "cells": 89,
+    "area": 982.1920000000006,
+    "sha256": "8e1168bb17ecd595c1faf125cffd4caaa1b3db7a528ed8f96b104948515e176e",
+    "instances": 89
+   },
+   "prelayout": {
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "unconstrained_endpoints": null,
+    "startpoint": "r1/CLK",
+    "endpoint": "r5/D",
+    "arrival_ns": 2.2769328335366184,
+    "required_ns": 9.682553596091552,
+    "slack_ns": 7.405620762554934
+   },
+   "critical_path_delay_ns": 2.594379,
+   "scaled_ns": 3.242974,
+   "period_ns": 10,
+   "binding": "floor 10 ns",
+   "clock_sdc": {
+    "path": "fixtures/designs/uart_tx/sky130-cts.sdc",
+    "sha256": "1b2f13f03135503f10cf9854b32b6abd85a2da89e6dce47b18ebd5b4e39e80fb"
+   },
+   "self_check": {
+    "status": "passed",
+    "worst_slack_at_period_ns": 7.405620762554934,
+    "expected_ns": 7.405621,
+    "endpoint": "r5/D"
+   }
+  },
+  "gf180": {
+   "liberty_ss": {
+    "name": "gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib",
+    "sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6"
+   },
+   "netlist": {
+    "kind": "rustsys",
+    "cells": 106,
+    "area": 3782.329600000003,
+    "sha256": "40f79918e8036eeb2c8c17e14dde1a8aa04a6ae9c7b84c840fe73f2653c366cd",
+    "instances": 106
+   },
+   "prelayout": {
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "unconstrained_endpoints": null,
+    "startpoint": "r1/CLK",
+    "endpoint": "r6/D",
+    "arrival_ns": 7.7828802744611005,
+    "required_ns": 8.791387146474719,
+    "slack_ns": 1.0085068720136183
+   },
+   "critical_path_delay_ns": 8.991493,
+   "scaled_ns": 11.239366,
+   "period_ns": 12,
+   "binding": "1.25 x critical path",
+   "clock_sdc": {
+    "path": "fixtures/designs/uart_tx/gf180-cts.sdc",
+    "sha256": "4d1e56b79c66331bb5e56c309760e7f2a233662c1162e4230cb21cf92634da00"
+   },
+   "self_check": {
+    "status": "passed",
+    "worst_slack_at_period_ns": 3.0085068720136183,
+    "expected_ns": 3.008507,
+    "endpoint": "r6/D"
+   }
+  }
+ }
+}

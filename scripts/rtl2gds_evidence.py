@@ -150,8 +150,38 @@ def row(summary: dict, pdk: dict, run: Path, sizes: dict, policy: dict) -> dict:
                               artifacts=(pdk.get("binding") or {}).get("artifacts")),
         mpw_async_unchecked=((((st.get("mpw_min_period") or {}).get("by_spef") or {}).get("native") or {})
                              .get("async_set_clear_pins_unchecked") or {}).get("count"),
+        clock_period=clock_period(summary["design"]["name"], pdk["pdk"]),
         wall_seconds=pdk.get("wall_seconds"), steps=steps,
         peak_rss_kib=max((s["peak_rss_kib"] for s in steps if s["peak_rss_kib"]), default=None))
+
+
+def clock_period(design: str, tag: str) -> dict | None:
+    """The owner clock-period derivation of this row (fixtures/designs/<d>/clock-period.json)."""
+    path = ROOT / "fixtures/designs" / design / "clock-period.json"
+    if not path.is_file():
+        return None
+    r = (json.loads(path.read_text()).get("pdks") or {}).get(tag)
+    if r is None:
+        return None
+    pre = r["prelayout"]
+    return dict(period_ns=r["period_ns"], critical_path_delay_ns=r["critical_path_delay_ns"],
+                scaled_ns=r["scaled_ns"], binding=r["binding"], wire_model=pre["wire_model"],
+                worst_path=f"{pre['startpoint']} -> {pre['endpoint']}", prelayout_slack_at_10ns=pre["slack_ns"],
+                netlist_sha256=r["netlist"]["sha256"], self_check=r["self_check"]["status"])
+
+
+def drv_dont_use() -> dict | None:
+    """The owner GF180 DRV dont_use derivation (fixtures/flow/gf180-drv-dont-use.json)."""
+    path = ROOT / "fixtures/flow/gf180-drv-dont-use.json"
+    if not path.is_file():
+        return None
+    d = json.loads(path.read_text())
+    return dict(liberty=dict(name=Path(d["liberty"]["path"]).name, sha256=d["liberty"]["sha256"]), rule=d["rule"],
+                minimum_load=d["minimum_load"], families=d["drv_limited_families"],
+                measured={r["family"]: dict(best_member=r["best_member"], best_ns=r["best_ns"],
+                                            best_ns_at_table_min_load=r["best_ns_at_table_min_load"])
+                          for r in d["families"] if r["drv_limited"]},
+                limited_at_table_min_load=d["drv_limited_at_table_min_load"])
 
 
 def main(argv=None) -> int:
@@ -181,7 +211,7 @@ def main(argv=None) -> int:
             rows.append(row(summary, pdk, run, sizes[pdk["pdk"]], policy))
     out = dict(schema=SCHEMA, generator="scripts/rtl2gds_evidence.py",
                scope=json.loads((args.runs[0] / "summary.json").read_text())["scope"],
-               runs=runs, rows=rows,
+               runs=runs, rows=rows, gf180_drv_dont_use=drv_dont_use(),
                table={f"{r['design']}/{r['pdk']}": dict(status=r["gate_status"], failed=r["failed"],
                                                          unverified=r["unverified"]) for r in rows})
     for path in args.extra:

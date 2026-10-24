@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s scripts/tests -v
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -140,7 +141,7 @@ class ManifestFreeze(unittest.TestCase):
 
 
 class ManifestSchema(unittest.TestCase):
-    def test_every_tracked_manifest_is_v2_and_valid(self):
+    def test_every_tracked_manifest_is_v3_and_valid(self):
         names = sorted(p.stem for p in (SCRIPTS.parent / "fixtures/designs").glob("*.json"))
         self.assertIn("pipeline", names)
         for name in names:
@@ -168,10 +169,58 @@ class ManifestSchema(unittest.TestCase):
         bad["clock"] = None
         self.assertTrue(any("clock must be" in x for x in D.manifest_problems(bad)))
         bad = json.loads(json.dumps(m))
+        bad["sdc"]["clock"] = bad["sdc"]["reference_clock"]  # v2 single clock SDC
+        self.assertTrue(any("per PDK" in x for x in D.manifest_problems(bad)))
+        bad = json.loads(json.dumps(m))
+        del bad["pdks"]["gf180"]["sdc_clock"]
+        self.assertTrue(any("sdc_clock" in x for x in D.manifest_problems(bad)))
+        self.assertEqual(D.floorplan_recipe(m, "gf180")["utilization"], 0.35)  # per-PDK override
+        self.assertEqual(D.floorplan_recipe(m, "sky130"), m["recipe"]["floorplan"])
+        bad = json.loads(json.dumps(m))
+        bad["pdks"]["gf180"]["floorplan_recipe"] = {"utilization": "dense"}
+        self.assertTrue(any("floorplan_recipe" in x for x in D.manifest_problems(bad)))
+        bad = json.loads(json.dumps(m))
         bad["pdks_unavailable"] = {"sky130": "x"}
         self.assertTrue(any("both available and unavailable" in x for x in D.manifest_problems(bad)))
         del bad["budgets"]["hold_eco_target_margin_ns"]
         self.assertTrue(any("hold_eco_target_margin_ns" in x for x in D.manifest_problems(bad)))
+
+
+class ClockPeriodRule(unittest.TestCase):
+    """Owner rule 2026-10-24: max(10 ns, ceil(1.25 x pre-layout ss critical-path delay, 1 ns))."""
+
+    def test_rule_arithmetic(self):
+        self.assertEqual(D.clock_period_rule(3.6), 10)
+        self.assertEqual(D.clock_period_rule(8.0), 10)       # 10.0 exactly stays 10
+        self.assertEqual(D.clock_period_rule(8.0001), 11)
+        self.assertEqual(D.clock_period_rule(9.624356), 13)  # 12.03 rounds up
+        self.assertEqual(D.clock_period_rule(9.6), 12)       # 12.0 exactly (no float creep)
+
+    def test_tracked_records_match_their_manifests(self):
+        tools = {k: dict(sha256=v["sha256"]) for k, v in
+                 json.loads((SCRIPTS.parent / "fixtures/flow/rtl2gds-tools.json").read_text())["tools"].items()}
+        for name in ("pipeline", "counter", "alu", "mult"):
+            m = D.load_manifest(D.ROOT / f"fixtures/designs/{name}.json")
+            r = D.clock_period_status(m, tools)
+            self.assertEqual(r["status"], "passed", (name, r))
+            for tag, row in r["pdks"].items():
+                self.assertEqual(row["sdc_period_ns"], row["period_ns"])
+                self.assertGreaterEqual(row["period_ns"], 10)
+
+    def test_a_tampered_period_or_foreign_tool_fails(self):
+        tools = {k: dict(sha256=v["sha256"]) for k, v in
+                 json.loads((SCRIPTS.parent / "fixtures/flow/rtl2gds-tools.json").read_text())["tools"].items()}
+        m = D.load_manifest(D.ROOT / "fixtures/designs/counter.json")
+        with work_tmp() as d:
+            sdc = Path(d) / "gf180-cts.sdc"
+            text = D.resolve(m["pdks"]["gf180"]["sdc_clock"]["path"]).read_text()
+            sdc.write_text(re.sub(r"-period [0-9.]+", "-period 11", text))
+            bad = json.loads(json.dumps(m))
+            bad["pdks"]["gf180"]["sdc_clock"] = dict(path=str(sdc), sha256=D.sha256_file(sdc))
+            self.assertEqual(D.clock_period_status(bad, tools)["status"], "failed")
+        other = json.loads(json.dumps(tools))
+        other["ruststa"]["sha256"] = "0" * 64
+        self.assertEqual(D.clock_period_status(m, other)["status"], "failed")
 
 
 class SdcAndPorts(unittest.TestCase):
@@ -524,3 +573,24 @@ class Controls(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompareRuns(unittest.TestCase):
+    """Independent re-run check: only the documented normalizations are applied."""
+
+    def test_normalizations(self):
+        import compare_runs
+        with work_tmp() as d:
+            a, b = Path(d) / "a.spef", Path(d) / "b.spef"
+            a.write_bytes(b'*SPEF "x"\n*DATE "Mon"\n*D_NET n 1\n')
+            b.write_bytes(b'*SPEF "x"\n*DATE "Tue"\n*D_NET n 1\n')
+            self.assertEqual(compare_runs.normalized(a, "spef.openrcx.ss", "/p/"),
+                             compare_runs.normalized(b, "spef.openrcx.ss", "/q/"))
+            self.assertNotEqual(compare_runs.normalized(a, "spef.native.ss", "/p/"),
+                                compare_runs.normalized(b, "spef.native.ss", "/q/"))
+            j, k = Path(d) / "a.json", Path(d) / "b.json"
+            j.write_text('{"path": "/p/fixtures/x.json", "n": 1}')
+            k.write_text('{"path": "/q/fixtures/x.json", "n": 1}')
+            self.assertEqual(compare_runs.normalized(j, "routes", "/p/"), compare_runs.normalized(k, "routes", "/q/"))
+            k.write_text('{"path": "/q/fixtures/x.json", "n": 2}')
+            self.assertNotEqual(compare_runs.normalized(j, "routes", "/p/"), compare_runs.normalized(k, "routes", "/q/"))

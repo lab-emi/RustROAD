@@ -103,9 +103,9 @@ class Steps:
 
 
 class Context:
-    def __init__(self, args, h, manifest, tools, policy, ports, sdc_text):
+    def __init__(self, args, h, manifest, tools, policy, ports, sdc_texts):
         self.args, self.h, self.manifest, self.tools, self.policy = args, h, manifest, tools, policy
-        self.ports, self.sdc_text = ports, sdc_text
+        self.ports, self.sdc_texts = ports, sdc_texts  # signoff SDC per PDK (per-PDK clock period)
         self.steps = Steps(args.started + float(manifest["budgets"]["max_wall_s"]))
         self.make_harness = harness
         self.top = manifest["top"]
@@ -150,7 +150,7 @@ class PdkGate:
         p = dict(profile)
         p["config"] = str(D.resolve(self.spec["physical_config"]["path"]))
         p["routing_config"] = str(D.resolve(self.spec["routing_config"]["path"]))
-        p["cts_sdc"] = str(D.resolve(ctx.manifest["sdc"]["clock"]["path"]))
+        p["cts_sdc"] = str(D.resolve(self.spec["sdc_clock"]["path"]))
         p["clock_port"] = ctx.clock["port"]
         self.p = p
         self.recipe = ctx.manifest["recipe"]["physical"]
@@ -169,10 +169,10 @@ class PdkGate:
         profile = self.spec.get("physical_profile")
         sizing = self.spec.get("sizing_profile")
         design = Design(top=ctx.top, rtl=ctx.rtl, floorplan=D.resolve(self.spec["floorplan"]["path"]),
-                        sdc_text=ctx.sdc_text, recipe=self.recipe, clocked=ctx.clocked,
+                        sdc_text=ctx.sdc_texts[self.tag], recipe=self.recipe, clocked=ctx.clocked,
                         netlist=D.resolve(literal["path"]) if literal else None,
                         physical_profile=D.resolve(profile["path"]) if profile else None,
-                        floorplan_recipe=ctx.manifest["recipe"]["floorplan"],
+                        floorplan_recipe=D.floorplan_recipe(ctx.manifest, self.tag),
                         sizing_profile=D.resolve(sizing["path"]) if sizing else None)
         tools = {k: ctx.tool_paths[k] for k in ("yosys", "verilator", "opensta", "rustsys", "rustroad",
                                                   "rusteda", "ruststa")}
@@ -636,16 +636,24 @@ def main(argv=None) -> int:
             rtl_files = [D.resolve(r["path"]) for r in manifest["rtl"]]
             ports, port_source = L.rtl_ports(h, tool_paths, rtl_files, manifest["top"])
             summary["port_source"] = port_source
-            sdc_text = D.render_sdc(D.resolve(manifest["sdc"]["clock"]["path"]).read_text(),
-                                    D.resolve(manifest["sdc"]["io_template"]["path"]).read_text(), ports,
-                                    manifest["clock"]["port"], manifest["clock"]["name"])
-            sdc_sha = hashlib.sha256(sdc_text.encode()).hexdigest()
-            g["sdc_rendering"] = item("passed" if sdc_sha == manifest["sdc"]["rendered_sha256"] else "failed",
-                                      None if sdc_sha == manifest["sdc"]["rendered_sha256"] else
-                                      f"rendered SDC sha256 {sdc_sha} != frozen {manifest['sdc']['rendered_sha256']}",
-                                      sha256=sdc_sha)
+            # One signoff SDC per PDK: the clock SDC carries the per-PDK period
+            # of the owner rule (scripts/derive_clock_period.py), frozen by hash.
+            sdc_texts, rendering = {}, {}
+            for tag, spec in manifest["pdks"].items():
+                sdc_texts[tag] = D.render_sdc(D.resolve(spec["sdc_clock"]["path"]).read_text(),
+                                              D.resolve(manifest["sdc"]["io_template"]["path"]).read_text(), ports,
+                                              manifest["clock"]["port"], manifest["clock"]["name"])
+                got = hashlib.sha256(sdc_texts[tag].encode()).hexdigest()
+                want = spec["frozen"]["sdc_postroute"]
+                rendering[tag] = dict(sha256=got, frozen=want, period_ns=D.sdc_period(sdc_texts[tag]),
+                                      status="passed" if got == want else "failed")
+            bad = [t for t, r in rendering.items() if r["status"] != "passed"]
+            g["sdc_rendering"] = item("passed" if not bad else "failed",
+                                      None if not bad else f"rendered SDC differs from the frozen sha256: {bad}",
+                                      pdks=rendering)
+            g["clock_period"] = D.clock_period_status(manifest, tools)
             summary["ports"] = ports
-            ctx = Context(args, h, manifest, tools, policy, ports, sdc_text)
+            ctx = Context(args, h, manifest, tools, policy, ports, sdc_texts)
             profiles = json.loads(D.resolve(manifest["pdk_profiles"]["path"]).read_text())
             wanted = [t for t in args.pdk.split(",") if t]
             unknown = [t for t in wanted if t not in manifest["pdks"]]

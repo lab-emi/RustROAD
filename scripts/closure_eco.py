@@ -529,13 +529,17 @@ class Planner:
 
 def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, drv_rows: list, pins: dict,
                    corner: str, max_width: int | None, seq: int, row_h: int, widths: dict,
-                   setup_critical: bool, frozen: set | frozenset = frozenset()) -> dict:
+                   setup_critical: bool, frozen: set | frozenset = frozenset(),
+                   max_added_width: int | None = None) -> dict:
     """Plan buffers (and driver resizes) for one layout.
 
     drv_rows: RustSTA drv rows (every corner); pins: corner -> {pin: setup
     slack} (pins reports); corner: the planning corner (drive data, worst
     corner); frozen: `inst/pin` sinks another ECO of the same iteration
-    already moves (the hold ECO's chains), never moved here. Returns {ops,
+    already moves (the hold ECO's chains), never moved here;
+    max_added_width: the buffer width (DBU) this layout may still take (the
+    loop's utilization cap), a net whose buffers would exceed it is skipped.
+    Returns {ops,
     resizes, records, skipped, added_width_dbu, next_seq}.
     """
     n = parse_netlist(netlist_text, lef)
@@ -695,8 +699,13 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
                 # the driver is resized instead (whatif sizing).
                 skipped[net] = "sinks are ECO buffers already: left to sizing"
                 continue
+            m = pl.mark()
             rec = pl.guarded(net, "drv:" + "/".join(sorted(kinds)), items, [], fixed, total, cw, target,
                              CAPACITANCE_TARGET * cap_limit, slope, drv_cap, d_model, s_model)
+            if rec is not None and max_added_width is not None and pl.added_width > max_added_width:
+                pl.rollback(m)
+                skipped[net] = "area budget of this layout reached (utilization cap)"
+                continue
             if rec is None:
                 skipped[net] = f"every sink of {len(items)} would lose setup behind a buffer: left to sizing"
                 continue
@@ -713,8 +722,12 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
             if len(rest) < 2 or sum(i.cap for i in rest) < 0.25 * total:
                 continue
             kept = [i for i in items if i not in rest]
-            pl.guarded(net, "setup:critical-sink isolation", rest, kept, [], total, cw, target,
-                       CAPACITANCE_TARGET * cap_limit, slope, drv_cap, d_model, s_model)
+            m = pl.mark()
+            rec = pl.guarded(net, "setup:critical-sink isolation", rest, kept, [], total, cw, target,
+                             CAPACITANCE_TARGET * cap_limit, slope, drv_cap, d_model, s_model)
+            if rec is not None and max_added_width is not None and pl.added_width > max_added_width:
+                pl.rollback(m)
+                skipped[net] = "area budget of this layout reached (utilization cap)"
     return dict(ops=pl.ops, resizes=pl.resizes, records=pl.records, skipped=skipped, library_limited=library_limited,
                 added_width_dbu=pl.added_width, next_seq=pl.seq, nets_with_rows=len(nets))
 

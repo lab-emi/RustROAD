@@ -126,11 +126,16 @@ STA_STATE_GIB = {'legacy': '1', 'track': '4'}
 # OpenRCX container (its SPEF); None keeps the harness's 64 MiB log cap.
 STA_FILE_LIMIT = {'legacy': None, 'track': 1024 * 1024 ** 2}
 # Gate-sizing ECO bounds (size_eco): resizes per iteration, worst setup
-# endpoints traced per iteration, and the utilization the resized cells may
-# reach in the fixed core (taps/fillers excluded).
+# endpoints traced per iteration, and the utilization every ECO (buffers and
+# resizes) may reach in the fixed core (standard cells / row area; taps,
+# fillers and CTS buffers excluded). Measured on GF180 regfile at 12 ns: a
+# netlist at 0.76 no longer passed CTS packing ("baseline packing ran out of
+# intervals"), and with 0.70 for resizes only, buffers alone reached 0.76
+# while the sizing that fixes small-fanout nets (alu, 1-2 sites each) was
+# refused. One cap for both, below the packing failure.
 SIZE_MAX_RESIZES = 256
 SIZE_MAX_SETUP_ENDPOINTS = 48
-SIZE_MAX_UTILIZATION = 0.70
+SIZE_MAX_UTILIZATION = 0.74
 # Closure loop (track recipe): a setup ECO that improved the worst setup
 # slack by less than this over the previous layout counts as stagnant; the
 # loop then moves on to hold repair instead of spending the remaining
@@ -157,9 +162,11 @@ WHATIF_TIMEOUT_S = 600
 # the loop twice per PDK within its 3600 s wall budget). Measured cost per
 # candidate: 0.13 s (counter, 47 logic instances), 1.1 s (regfile, 367),
 # 1.9 s (mult, 417) on this host. Both scale with 200 / logic instances,
-# clamped to 0.5x..4x (counter 384 per layout, mult 48).
-WHATIF_LAYOUT_CANDIDATES = 96
-WHATIF_LOOP_CANDIDATES = 320
+# clamped to 0.5x..4x (counter 512 per layout, mult 64). Raised from 96/320
+# when violating drivers also try one step down (three candidates each):
+# GF180 alu/mult/regfile ran out of candidates with 20-40 violations left.
+WHATIF_LAYOUT_CANDIDATES = 128
+WHATIF_LOOP_CANDIDATES = 640
 WHATIF_HOLD_LOSS_NS = 0.5
 # DRV/setup ECOs stop (the loop goes on to hold) after this many consecutive
 # layouts on which the previous ECO improved neither the DRV count nor the
@@ -780,10 +787,12 @@ class Flow:
             master = mapped[inst][0]
             k, members = family[master]
             out = []
-            # A (near-)violating driver only grows, an ECO buffer loading such
-            # a net only shrinks.
+            # A (near-)violating driver grows (or steps down once, below), an
+            # ECO buffer loading such a net only shrinks.
             why = prio[inst][1]
-            for j in ((k + 1, k + 2) if why == 'drv' else (k - 1,) if why == 'drv_sink' else (k + 1, k - 1, k + 2)):
+            # A violating driver also tries one step down: the largest member is
+            # not always the fastest edge at a light load (GF180 aoi22_4 vs _2).
+            for j in ((k + 1, k + 2, k - 1) if why == 'drv' else (k - 1,) if why == 'drv_sink' else (k + 1, k - 1, k + 2)):
                 if 0 <= j < len(members) and members[j] != master and \
                         (max_width is None or widths[members[j]] <= max_width):
                     out.append(members[j])
@@ -821,6 +830,15 @@ class Flow:
         spent = 0
         scale = min(4.0, max(0.5, 200.0 / max(len(mapped), 1)))
         budget = min(int(WHATIF_LAYOUT_CANDIDATES * scale), int(WHATIF_LOOP_CANDIDATES * scale) - self.whatif_spent)
+        bulk = self.whatif_bulk(t, sta, order, prio, mapped, family, widths, max_width, floor, rows_area, used,
+                                budget - spent, metrics, better)
+        if bulk is not None:
+            spent += bulk['evaluated']
+            self.whatif_spent += bulk['evaluated']
+            for inst, cell in bulk.get('accepted') or []:
+                accepted[inst] = cell
+            used += bulk.get('grow') or 0
+            evaluated += bulk['evaluated']
         for rnd in range(WHATIF_ROUNDS):
             room = budget - spent
             if room < 4:
@@ -893,9 +911,87 @@ class Flow:
         summary = dict(resized=len(ops), candidates=len(prio), traced_setup_endpoints=traced,
                        whatif_candidates=spent, whatif_loop_candidates=self.whatif_spent,
                        failing_setup_endpoints=len({e for _, _, e in failing}), evaluated=evaluated,
-                       rounds=history, utilization_after=round(used / rows_area, 4), max_width_dbu=max_width,
+                       rounds=history, bulk=bulk, utilization_after=round(used / rows_area, 4), max_width_dbu=max_width,
                        oracle='ruststa whatif (resize on the layout SPEF)')
         return ops, summary
+
+    def whatif_bulk(self, t, sta, order, prio, mapped, family, widths, max_width, floor, rows_area, used, room,
+                    metrics, better) -> dict | None:
+        """Bulk DRV upsizing, decided by one RustSTA `whatif` call.
+
+        GF180 ss leaves many small-fanout nets marginally above the transition
+        limit; the planner leaves them to sizing, and one-instance-at-a-time
+        candidates exhaust the count budget long before they are all tried.
+        Two combined candidates are evaluated first: every DRV driver (worst
+        first) one step up, and two steps up, within the tap gap and the
+        utilization cap. The better of them is accepted as a whole only when
+        RustSTA says it improves (`better`, the same rule as single resizes:
+        fewer violations without setup going below zero, hold within its
+        allowance); the single-resize rounds then continue on top of it.
+        Costs two candidates of the budget.
+        """
+        drivers = [i for i in order if prio[i][1] == 'drv']
+        if not drivers or room < 2:
+            return None
+        h = self.h
+        height = floor['site']['height']
+        cap = SIZE_MAX_UTILIZATION * rows_area
+        bulks = []
+        for step in (1, 2):
+            edits, grow = [], 0
+            for inst in drivers:
+                master = mapped[inst][0]
+                k, members = family[master]
+                j = min(k + step, len(members) - 1)
+                while j > k and max_width is not None and widths[members[j]] > max_width:
+                    j -= 1
+                if j <= k:
+                    continue
+                g = (widths[members[j]] - widths[master]) * height
+                if used + grow + g > cap:
+                    continue
+                grow += g
+                edits.append((inst, members[j]))
+            if edits and all(edits != b[0] for b in bulks):
+                bulks.append((edits, grow))
+        if not bulks:
+            return dict(evaluated=0, candidates=0, accepted=[], grow=0, reason='no driver can grow within the caps')
+        doc = dict(schema='rusteda.edits.v1', base=[],
+                   candidates=[dict(id=f'b{k}', edits=[dict(op='resize', instance=i, cell=c) for i, c in e])
+                               for k, (e, _) in enumerate(bulks)],
+                   report=dict(endpoints=[], paths=[]))
+        ef = jdump(h.root / f'{t}_whatif_bulk.json', doc)
+        r = h.run(f'{t}_whatif_bulk', [str(x) for x in [
+            self.tools['ruststa'], '-w', sta['workspace'], '--format', 'json', 'whatif', '--rev', sta['revision'],
+            '--edits', ef, '--max-candidates', '1024', '--max-edits', '4096', '--timeout', WHATIF_TIMEOUT_S,
+            '--threads', '2', '-q']])
+        out = dict(evaluated=len(bulks), candidates=[len(e) for e, _ in bulks], accepted=[], grow=0,
+                   exit_code=r['exit_code'])
+        try:
+            d = json.loads(bounded_text(Path(r['stdout']), 256 * 1024 ** 2))
+        except (ValueError, OSError):
+            d = {}
+        if not d.get('base') or r['exit_code'] != 0:
+            out['reason'] = 'whatif failed'
+            return out
+        base = metrics(d['base'])
+        best = None
+        for c in d.get('candidates') or []:
+            if c.get('status') != 'evaluated' or not c.get('values'):
+                continue
+            m = metrics(c['values'])
+            k = int(c['id'][1:])
+            if better(m, base, 'drv'):
+                score = (m['drv'], -m['wns'], -m['tns'], k)
+                if best is None or score < best[0]:
+                    best = (score, k, m)
+        out['base'] = base
+        if best is None:
+            out['reason'] = 'no bulk candidate improves'
+            return out
+        _, k, m = best
+        out.update(accepted=bulks[k][0], grow=bulks[k][1], step=k + 1, after=m)
+        return out
 
     def closure_eco(self, it: int, netlist: Path, sta: dict, phys: dict, apply_to: Path | None = None,
                     frozen: frozenset = frozenset()) -> tuple[Path | None, dict]:
@@ -924,9 +1020,12 @@ class Flow:
                     ['sections']['pins']['rows']} for c in PATH_AWARE_SETUP_CORNERS}
         setup_failing = any(sta['corners'][c]['worst_setup_ns'] < 0 for c in ('tt', 'ss'))
         text = bounded_text(netlist, 64 * 1024 ** 2)
+        rows_area = sum((r['x_end'] - r['x_start']) for r in floor['rows']) * floor['site']['height']
+        used = sum(widths.get(m, 0) for m, _ in netlist_instances(text).values()) * floor['site']['height']
+        room = max(0, int((SIZE_MAX_UTILIZATION * rows_area - used) // floor['site']['height']))
         buf = CE.plan_buffering(text, lef, bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2), prof, drv_rows, pins,
                                 'ss', max_width, CE.next_sequence(text), floor['site']['height'], widths, setup_failing,
-                                frozen)
+                                frozen, room)
         skip = set(buf['resizes'])
         n = CE.parse_netlist(text, lef)
         for rec in buf['records']:

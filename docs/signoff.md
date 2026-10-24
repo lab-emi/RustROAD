@@ -546,8 +546,12 @@ holds:
 
 - the exact `--dont-use` globs per PDK: the PDK `synth_exclude` list, plus
   the `pnr_exclude` list, plus, for GF180, `dly*`, `clkbuf*` and `clkinv*`
-  reserved for CTS/hold. Sky130's synthesis list already reserves its
-  clock/delay cells. Both source files are recorded with sha256;
+  reserved for CTS/hold, and (owner decision 2026-10-24) the GF180 families
+  that cannot reach 1.0 ns output transition at ss (aoi211, aoi221, aoi222,
+  nor4, oai22, oai221, oai222, oai31, oai32, oai33; derived from Liberty by
+  `scripts/derive_drv_dont_use.py`, see `docs/rtl2gds.md`). Sky130's
+  synthesis list already reserves its clock/delay cells. Every source file
+  is recorded with sha256;
 - the `pnr_exclude` list;
 - the cells that may be inserted after synthesis (physical-only and CTS/hold);
 - the producer build receipt;

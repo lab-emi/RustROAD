@@ -141,6 +141,32 @@
             "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
             "gf180mcu_fd_sc_mcu7t5v0__oai33_2"
           ]
+        },
+        {
+          "role": "owner_drv_limit",
+          "path": "fixtures/flow/gf180-drv-dont-use.json",
+          "sha256": "04b26ee38ec196b627641b909fc111061b7def1c6237b0df2dcdc96962faecd4",
+          "entries": [
+            "gf180mcu_fd_sc_mcu7t5v0__aoi211_*",
+            "gf180mcu_fd_sc_mcu7t5v0__aoi221_*",
+            "gf180mcu_fd_sc_mcu7t5v0__aoi222_*",
+            "gf180mcu_fd_sc_mcu7t5v0__nor4_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai22_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai221_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai222_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai31_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai32_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai33_*"
+          ],
+          "liberty_sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+          "rule": {
+            "max_transition_ns": 1.0,
+            "input_transition_ns": 0.2,
+            "load": "smallest input-pin capacitance of a cell synthesis may instantiate (one sink, no wire); PDK-excluded, owner-reserved and output-less cells are not sinks; raised to a table's smallest load index where that is larger",
+            "member": "worst over every output pin, timing arc and rise/fall transition table (three_state_disable skipped), bilinear, no extrapolation",
+            "family": "DRV-limited when even its best member exceeds max_transition_ns",
+            "source": "owner decision 2026-10-24 (GF180 DRV / cell policy); SDC set_max_transition 1.0 unchanged"
+          }
         }
       ],
       "reserved_for_cts_hold": [
@@ -165,7 +191,17 @@
         "gf180mcu_fd_sc_mcu7t5v0__oai33_2",
         "gf180mcu_fd_sc_mcu7t5v0__dly*",
         "gf180mcu_fd_sc_mcu7t5v0__clkbuf*",
-        "gf180mcu_fd_sc_mcu7t5v0__clkinv*"
+        "gf180mcu_fd_sc_mcu7t5v0__clkinv*",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi211_*",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi221_*",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi222_*",
+        "gf180mcu_fd_sc_mcu7t5v0__nor4_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai22_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai221_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai222_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai31_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai32_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai33_*"
       ],
       "pnr_exclude": [
         "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
@@ -219,7 +255,27 @@
         "--dont-use",
         "gf180mcu_fd_sc_mcu7t5v0__clkbuf*",
         "--dont-use",
-        "gf180mcu_fd_sc_mcu7t5v0__clkinv*"
+        "gf180mcu_fd_sc_mcu7t5v0__clkinv*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi211_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi221_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi222_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__nor4_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai22_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai221_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai222_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai31_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai32_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai33_*"
       ]
     }
   },
