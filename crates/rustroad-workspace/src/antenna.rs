@@ -42,7 +42,7 @@ use rustroad_core::routing::{self as core_routing, LayerRect};
 use rustroad_core::{Limits, Rect};
 use rustroad_formats::lef::{self, AntennaRatio, LayerAntenna, RATIO_SCALE};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 pub const ANTENNA_SCHEMA: &str = "rustroad.antenna-check.v1";
@@ -402,11 +402,7 @@ fn rules_for(a: &LayerAntenna, dbu2: f64, side: bool) -> RulePair {
     }
 }
 
-pub fn check_antenna(
-    workspace: &Path,
-    request: &AntennaRequest,
-    limits: &Limits,
-) -> Result<AntennaReport> {
+fn check_budgets(request: &AntennaRequest) -> Result<()> {
     if request.max_shapes_per_net == 0
         || request.max_shapes_per_net > 1_000_000
         || request.max_pair_checks == 0
@@ -427,18 +423,34 @@ pub fn check_antenna(
             "--safety-margin must be within 0 ..= 0.5",
         ));
     }
-    let keep = 1.0 - request.safety_margin;
-    let snapshot = crate::read(workspace, limits)?;
-    let metadata = snapshot.metadata();
-    let design = &metadata.design;
-    let bundle = metadata
-        .physical
-        .as_ref()
-        .ok_or_else(|| fail("NO_PHYSICAL", "import a PDK design first"))?;
-    let state = bundle
-        .routing
-        .as_ref()
-        .ok_or_else(|| fail("NO_ROUTING", "route before the antenna check"))?;
+    Ok(())
+}
+
+/// The LEF antenna data, route technology and layer order of one routed
+/// revision, read once per command.
+struct Prepared {
+    dbu: u32,
+    dbu2: f64,
+    sources: Vec<SourceCheck>,
+    input: core_routing::RouteInput,
+    order: Vec<u32>,
+    cut_adjacent: HashMap<u32, (u32, u32)>,
+    layer_rules: HashMap<String, LayerAntenna>,
+    pin_area: HashMap<(String, String), (i64, i64, bool)>,
+    checked_layers: Vec<String>,
+    rule_free_layers: Vec<String>,
+    diagnostics: Vec<String>,
+    partial: bool,
+    cumulative: String,
+    unsupported: Vec<lef::AntennaUnsupported>,
+}
+
+fn prepare(
+    design: &rustroad_core::Design,
+    bundle: &crate::pdk::PhysicalBundle,
+    placed: &[rustroad_core::Placed],
+    state: &crate::routing::RoutingState,
+) -> Result<Prepared> {
     // Re-read both LEF sources and require the imported identity.
     let dbu = design.units_per_micron;
     let dbu2 = f64::from(dbu) * f64::from(dbu);
@@ -488,16 +500,16 @@ pub fn check_antenna(
         .enumerate()
         .map(|(i, l)| (l.name.as_str(), i))
         .collect();
-    let layer_rules: HashMap<&str, &LayerAntenna> = docs
+    let layer_rules: HashMap<String, LayerAntenna> = docs
         .iter()
         .flat_map(|d| d.antenna.layers.iter())
-        .map(|a| (a.layer.as_str(), a))
+        .map(|a| (a.layer.clone(), a.clone()))
         .collect();
-    let mut pin_area: HashMap<(&str, &str), (i64, i64, bool)> = HashMap::new();
+    let mut pin_area: HashMap<(String, String), (i64, i64, bool)> = HashMap::new();
     for d in &docs {
         for p in &d.antenna.pins {
             pin_area.insert(
-                (p.macro_name.as_str(), p.pin.as_str()),
+                (p.macro_name.clone(), p.pin.clone()),
                 (p.gate_area, p.diff_area, p.layer_qualified),
             );
         }
@@ -506,10 +518,8 @@ pub fn check_antenna(
         .iter()
         .flat_map(|d| d.antenna.unsupported.iter().cloned())
         .collect();
-    let placed: Vec<_> = snapshot.records().collect();
     let (input, _owners) =
-        build_input_with_owners(design, bundle, &placed, &state.config, state.scope)?;
-    let model = &bundle.connectivity;
+        build_input_with_owners(design, bundle, placed, &state.config, state.scope)?;
     // Stack position of every route layer and the cut adjacency from the vias.
     let mut position = Vec::with_capacity(input.layers.len());
     for l in &input.layers {
@@ -543,7 +553,7 @@ pub fn check_antenna(
     let mut partial = false;
     for &i in &order {
         let name = input.layers[i as usize].name.as_str();
-        let has_ratio = |a: &&&LayerAntenna| {
+        let has_ratio = |a: &&LayerAntenna| {
             a.area_ratio.is_some()
                 || a.diff_area_ratio.is_some()
                 || a.side_area_ratio.is_some()
@@ -592,24 +602,47 @@ pub fn check_antenna(
             unsupported.len()
         ));
     }
-    // Per-net shapes (logical nets only; rail-tie router nets have ids past
-    // the connectivity nets and are skipped).
-    let mut per_net: BTreeMap<u32, Vec<Shape>> = BTreeMap::new();
-    let logical = model.nets.len() as u32;
-    let routed: std::collections::BTreeSet<u32> = state
-        .routes
+    Ok(Prepared {
+        dbu,
+        dbu2,
+        sources,
+        input,
+        order,
+        cut_adjacent,
+        layer_rules,
+        pin_area,
+        checked_layers,
+        rule_free_layers,
+        diagnostics,
+        partial,
+        cumulative,
+        unsupported,
+    })
+}
+
+/// Logical routed nets of `routes` (rail-tie router nets have ids past the
+/// connectivity nets and are skipped).
+fn logical_routed(routes: &core_routing::Routes, logical: u32) -> BTreeSet<u32> {
+    routes
         .nets
         .iter()
         .copied()
         .filter(|&n| n < logical)
-        .collect();
-    let supply_ties = state.routes.nets.len() - routed.len();
-    if supply_ties > 0 {
-        diagnostics.push(format!(
-            "ANTENNA_SUPPLY_TIES: {supply_ties} rail-tie nets (tie-cell input to its own supply rail) are supply metal and not checked natively"
-        ));
-    }
-    for w in state.routes.wires.iter().filter(|w| w.net < logical) {
+        .collect()
+}
+
+/// Conductor shapes of the nets in `only` (all logical routed nets when
+/// `None`): wires (LEF width), vias, patches and routing-layer pin shapes.
+fn net_shapes(
+    prep: &Prepared,
+    routes: &core_routing::Routes,
+    routed: &BTreeSet<u32>,
+    only: Option<u32>,
+) -> Result<BTreeMap<u32, Vec<Shape>>> {
+    let input = &prep.input;
+    let keep = |n: u32| routed.contains(&n) && only.is_none_or(|o| o == n);
+    let mut per_net: BTreeMap<u32, Vec<Shape>> = BTreeMap::new();
+    for w in routes.wires.iter().filter(|w| keep(w.net)) {
         let width = input.layers[w.layer as usize].width;
         per_net.entry(w.net).or_default().push(Shape {
             layer: w.layer,
@@ -617,7 +650,7 @@ pub fn check_antenna(
             terminal: None,
         });
     }
-    for v in state.routes.vias.iter().filter(|v| v.net < logical) {
+    for v in routes.vias.iter().filter(|v| keep(v.net)) {
         let via = input
             .vias
             .get(v.kind as usize)
@@ -630,7 +663,7 @@ pub fn check_antenna(
             });
         }
     }
-    for p in state.routes.patches.iter().filter(|p| p.net < logical) {
+    for p in routes.patches.iter().filter(|p| keep(p.net)) {
         per_net.entry(p.net).or_default().push(Shape {
             layer: p.layer,
             rect: p.rect,
@@ -638,7 +671,7 @@ pub fn check_antenna(
         });
     }
     for (ti, t) in input.terminals.iter().enumerate() {
-        if !routed.contains(&t.net) {
+        if !keep(t.net) {
             continue;
         }
         for s in &t.shapes {
@@ -649,7 +682,303 @@ pub fn check_antenna(
             });
         }
     }
-    let mut extra_count = 0;
+    Ok(per_net)
+}
+
+/// Terminal name, LEF gate and diffusion area (DBU^2) and LAYER qualification.
+fn terminal_info(
+    prep: &Prepared,
+    design: &rustroad_core::Design,
+    model: &rustroad_core::connectivity::ConnectedDesign,
+    ti: usize,
+) -> (String, i64, i64, bool) {
+    let t = &prep.input.terminals[ti];
+    match model.pins[t.pin as usize].owner {
+        PinOwner::Instance { instance, terminal } => {
+            let master = &model.masters[model.instance_masters[instance as usize] as usize];
+            let pin = &master.pins[terminal as usize].name;
+            let (g, d, q) = prep
+                .pin_area
+                .get(&(master.name.clone(), pin.clone()))
+                .copied()
+                .unwrap_or((0, 0, false));
+            (
+                format!("{}/{}", design.cells[instance as usize].name, pin),
+                g,
+                d,
+                q,
+            )
+        }
+        PinOwner::Port { port, bit } => (
+            model.ports[port as usize].bits[bit as usize].clone(),
+            0,
+            0,
+            false,
+        ),
+    }
+}
+
+/// Partial-net rows of one net (every checked layer with gate area).
+#[allow(clippy::too_many_arguments)]
+fn evaluate_net(
+    prep: &Prepared,
+    design: &rustroad_core::Design,
+    model: &rustroad_core::connectivity::ConnectedDesign,
+    net: u32,
+    shapes: &[Shape],
+    request: &AntennaRequest,
+    stats: &mut AntennaStats,
+    qualified: &mut bool,
+) -> Result<Vec<CheckRow>> {
+    let input = &prep.input;
+    let dbu2 = prep.dbu2;
+    let keep = 1.0 - request.safety_margin;
+    let mut rows = Vec::new();
+    stats.nets += 1;
+    stats.shapes += shapes.len();
+    if shapes.len() > request.max_shapes_per_net {
+        return Err(Error::Budget(format!(
+            "ANTENNA: net {} has {} shapes (max_shapes_per_net {})",
+            model.nets[net as usize].name,
+            shapes.len(),
+            request.max_shapes_per_net
+        )));
+    }
+    let net_name = model.nets[net as usize].name.clone();
+    let mut by_layer: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (i, s) in shapes.iter().enumerate() {
+        by_layer.entry(s.layer).or_default().push(i);
+    }
+    for list in by_layer.values_mut() {
+        list.sort_by_key(|&i| (shapes[i].rect.lx, i));
+    }
+    let mut dsu = Dsu((0..shapes.len()).collect());
+    let mut first_of_terminal: HashMap<usize, usize> = HashMap::new();
+    let mut added = vec![false; shapes.len()];
+    for &layer in &prep.order {
+        // No metal of this net on this layer: nothing to add or check.
+        let Some(list) = by_layer.get(&layer) else {
+            continue;
+        };
+        for &i in list {
+            added[i] = true;
+            if let Some(t) = shapes[i].terminal {
+                match first_of_terminal.get(&t) {
+                    Some(&f) => dsu.union(f, i),
+                    None => {
+                        first_of_terminal.insert(t, i);
+                    }
+                }
+            }
+        }
+        // Same-layer touching, swept by lx.
+        for (k, &i) in list.iter().enumerate() {
+            for &j in &list[k + 1..] {
+                if shapes[j].rect.lx > shapes[i].rect.ux {
+                    break;
+                }
+                stats.pair_checks += 1;
+                if stats.pair_checks > request.max_pair_checks {
+                    return Err(Error::Budget("ANTENNA: max_pair_checks".into()));
+                }
+                if touch(shapes[i].rect, shapes[j].rect) {
+                    dsu.union(i, j);
+                }
+            }
+        }
+        // Cut <-> adjacent routing layers (both already added when present).
+        let joins: Vec<(u32, u32)> = if input.layers[layer as usize].vertical.is_none() {
+            prep.cut_adjacent
+                .get(&layer)
+                .map(|&(lo, hi)| vec![(layer, lo), (layer, hi)])
+                .unwrap_or_default()
+        } else {
+            prep.cut_adjacent
+                .iter()
+                .filter(|(_, (lo, hi))| *lo == layer || *hi == layer)
+                .map(|(&c, _)| (c, layer))
+                .collect()
+        };
+        for (cut, metal) in joins {
+            let (Some(cs), Some(ms)) = (by_layer.get(&cut), by_layer.get(&metal)) else {
+                continue;
+            };
+            for &c in cs {
+                if !added[c] {
+                    continue;
+                }
+                for &m in ms {
+                    if !added[m] {
+                        continue;
+                    }
+                    stats.pair_checks += 1;
+                    if stats.pair_checks > request.max_pair_checks {
+                        return Err(Error::Budget("ANTENNA: max_pair_checks".into()));
+                    }
+                    if overlap(shapes[c].rect, shapes[m].rect) {
+                        dsu.union(c, m);
+                    }
+                }
+            }
+        }
+        let lname = input.layers[layer as usize].name.as_str();
+        let Some(rule) = prep.layer_rules.get(lname) else {
+            continue;
+        };
+        if rule.model.as_deref().is_some_and(|m| m != "OXIDE1") {
+            continue;
+        }
+        // Components with gate area: gate/diff sums and pin names.
+        let mut comp: BTreeMap<usize, (i64, i64, Vec<String>, Vec<String>)> = BTreeMap::new();
+        for (&t, &first) in &first_of_terminal {
+            let root = dsu.find(first);
+            let (name, g, d, q) = terminal_info(prep, design, model, t);
+            *qualified |= q;
+            let e = comp.entry(root).or_default();
+            e.0 += g;
+            e.1 += d;
+            if g > 0 {
+                e.2.push(name.clone());
+            }
+            if d > 0 {
+                e.3.push(name);
+            }
+        }
+        let mut metal: BTreeMap<usize, Vec<Rect>> = BTreeMap::new();
+        for &i in list {
+            metal.entry(dsu.find(i)).or_default().push(shapes[i].rect);
+        }
+        let is_cut = input.layers[layer as usize].vertical.is_none();
+        for (root, rects) in metal {
+            let Some((gate, diff, gates, diffs)) = comp.get(&root) else {
+                continue;
+            };
+            if *gate <= 0 {
+                continue;
+            }
+            stats.partial_nets_checked += 1;
+            let (area, perimeter) =
+                union_area_perimeter(&rects, request.max_union_cells, &mut stats.union_cells)?;
+            let gate_um2 = *gate as f64 / dbu2;
+            let diff_um2 = *diff as f64 / dbu2;
+            let mut kinds = vec![(false, area as f64 / dbu2)];
+            if !is_cut && let Some(t) = rule.thickness {
+                kinds.push((true, (perimeter * i128::from(t)) as f64 / dbu2));
+            }
+            for (side, metal_um2) in kinds {
+                let rules = rules_for(rule, dbu2, side);
+                let Some((limit, keyword)) = rules.limit(diff_um2) else {
+                    continue;
+                };
+                let denominator = rules.denominator(gate_um2, diff_um2);
+                let ratio = metal_um2 / denominator;
+                let effective_limit = limit * keep;
+                let violated = ratio > effective_limit;
+                let mut g = gates.clone();
+                g.sort();
+                let mut d = diffs.clone();
+                d.sort();
+                rows.push(CheckRow {
+                    net: net_name.clone(),
+                    layer: lname.to_string(),
+                    kind: if side { "side_area" } else { "area" }.into(),
+                    gates: g,
+                    diffusions: d,
+                    gate_area_um2: gate_um2,
+                    diff_area_um2: diff_um2,
+                    metal_um2,
+                    denominator_um2: denominator,
+                    ratio,
+                    limit,
+                    effective_limit,
+                    rule: if diff_um2 > 0.0 && rules.with_diff.is_some() {
+                        format!("{keyword}@diffusion {diff_um2:.6}um2")
+                    } else {
+                        keyword
+                    },
+                    rules,
+                    violated,
+                    exceeds_lef_limit: ratio > limit,
+                });
+            }
+        }
+    }
+    Ok(rows)
+}
+
+fn sort_rows(rows: &mut [CheckRow]) {
+    rows.sort_by(|a, b| {
+        (b.ratio / b.limit)
+            .total_cmp(&(a.ratio / a.limit))
+            .then_with(|| a.net.cmp(&b.net))
+            .then_with(|| a.layer.cmp(&b.layer))
+            .then_with(|| a.kind.cmp(&b.kind))
+    });
+}
+
+/// Rows of every routed logical net (plus what-if shapes), unsorted, with
+/// the per-net worst ratio over limit.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn evaluate_all(
+    prep: &Prepared,
+    design: &rustroad_core::Design,
+    model: &rustroad_core::connectivity::ConnectedDesign,
+    routes: &core_routing::Routes,
+    request: &AntennaRequest,
+    stats: &mut AntennaStats,
+    qualified: &mut bool,
+    extra: Vec<(u32, Shape)>,
+) -> Result<(Vec<CheckRow>, BTreeMap<String, (f64, bool)>)> {
+    let routed = logical_routed(routes, model.nets.len() as u32);
+    let mut per_net = net_shapes(prep, routes, &routed, None)?;
+    for (net, shape) in extra {
+        per_net.entry(net).or_default().push(shape);
+    }
+    let mut rows = Vec::new();
+    let mut worst: BTreeMap<String, (f64, bool)> = BTreeMap::new();
+    for (&net, shapes) in &per_net {
+        let net_rows = evaluate_net(prep, design, model, net, shapes, request, stats, qualified)?;
+        for r in &net_rows {
+            let w = worst.entry(r.net.clone()).or_insert((0.0, false));
+            w.0 = w.0.max(r.ratio / r.limit);
+            w.1 |= r.violated;
+        }
+        rows.extend(net_rows);
+    }
+    Ok((rows, worst))
+}
+
+pub fn check_antenna(
+    workspace: &Path,
+    request: &AntennaRequest,
+    limits: &Limits,
+) -> Result<AntennaReport> {
+    check_budgets(request)?;
+    let snapshot = crate::read(workspace, limits)?;
+    let metadata = snapshot.metadata();
+    let design = &metadata.design;
+    let bundle = metadata
+        .physical
+        .as_ref()
+        .ok_or_else(|| fail("NO_PHYSICAL", "import a PDK design first"))?;
+    let state = bundle
+        .routing
+        .as_ref()
+        .ok_or_else(|| fail("NO_ROUTING", "route before the antenna check"))?;
+    let placed: Vec<_> = snapshot.records().collect();
+    let prep = prepare(design, bundle, &placed, state)?;
+    let model = &bundle.connectivity;
+    let mut diagnostics = prep.diagnostics.clone();
+    let mut partial = prep.partial;
+    let logical = model.nets.len() as u32;
+    let routed = logical_routed(&state.routes, logical);
+    let supply_ties = state.routes.nets.len() - routed.len();
+    if supply_ties > 0 {
+        diagnostics.push(format!(
+            "ANTENNA_SUPPLY_TIES: {supply_ties} rail-tie nets (tie-cell input to its own supply rail) are supply metal and not checked natively"
+        ));
+    }
+    let mut extra_shapes = Vec::new();
     if let Some(path) = &request.extra_shapes {
         let (text, _) = read_input(path, 16 * 1024 * 1024, "extra_shapes")?;
         let extra: Vec<ExtraShape> = serde_json::from_str(&text)?;
@@ -665,7 +994,8 @@ pub fn check_antenna(
                 .position(|n| n.name == e.net)
                 .ok_or_else(|| fail("ANTENNA_EXTRA", format!("net {} absent", e.net)))?
                 as u32;
-            let layer = input
+            let layer = prep
+                .input
                 .layers
                 .iter()
                 .position(|l| l.name == e.layer && l.vertical.is_some())
@@ -688,232 +1018,37 @@ pub fn check_antenna(
                     format!("net {} is not routed", e.net),
                 ));
             }
-            per_net.entry(net).or_default().push(Shape {
-                layer,
-                rect: Rect { lx, ly, ux, uy },
-                terminal: None,
-            });
-            extra_count += 1;
+            extra_shapes.push((
+                net,
+                Shape {
+                    layer,
+                    rect: Rect { lx, ly, ux, uy },
+                    terminal: None,
+                },
+            ));
         }
     }
-    // Terminal names and antenna areas.
-    let terminal_info = |ti: usize| -> (String, i64, i64, bool) {
-        let t = &input.terminals[ti];
-        match model.pins[t.pin as usize].owner {
-            PinOwner::Instance { instance, terminal } => {
-                let master = &model.masters[model.instance_masters[instance as usize] as usize];
-                let pin = &master.pins[terminal as usize].name;
-                let (g, d, q) = pin_area
-                    .get(&(master.name.as_str(), pin.as_str()))
-                    .copied()
-                    .unwrap_or((0, 0, false));
-                (
-                    format!("{}/{}", design.cells[instance as usize].name, pin),
-                    g,
-                    d,
-                    q,
-                )
-            }
-            PinOwner::Port { port, bit } => (
-                model.ports[port as usize].bits[bit as usize].clone(),
-                0,
-                0,
-                false,
-            ),
-        }
-    };
+    let extra_count = extra_shapes.len();
     let mut stats = AntennaStats {
         supply_tie_nets_unchecked: supply_ties,
         ..AntennaStats::default()
     };
-    let mut rows: Vec<CheckRow> = Vec::new();
-    let mut worst: BTreeMap<String, (f64, bool)> = BTreeMap::new();
     let mut qualified = false;
-    for (&net, shapes) in &per_net {
-        stats.nets += 1;
-        stats.shapes += shapes.len();
-        if shapes.len() > request.max_shapes_per_net {
-            return Err(Error::Budget(format!(
-                "ANTENNA: net {} has {} shapes (max_shapes_per_net {})",
-                model.nets[net as usize].name,
-                shapes.len(),
-                request.max_shapes_per_net
-            )));
-        }
-        let net_name = model.nets[net as usize].name.clone();
-        let mut by_layer: HashMap<u32, Vec<usize>> = HashMap::new();
-        for (i, s) in shapes.iter().enumerate() {
-            by_layer.entry(s.layer).or_default().push(i);
-        }
-        for list in by_layer.values_mut() {
-            list.sort_by_key(|&i| (shapes[i].rect.lx, i));
-        }
-        let mut dsu = Dsu((0..shapes.len()).collect());
-        let mut first_of_terminal: HashMap<usize, usize> = HashMap::new();
-        let mut added = vec![false; shapes.len()];
-        for &layer in &order {
-            // No metal of this net on this layer: nothing to add or check.
-            let Some(list) = by_layer.get(&layer) else {
-                continue;
-            };
-            for &i in list {
-                added[i] = true;
-                if let Some(t) = shapes[i].terminal {
-                    match first_of_terminal.get(&t) {
-                        Some(&f) => dsu.union(f, i),
-                        None => {
-                            first_of_terminal.insert(t, i);
-                        }
-                    }
-                }
-            }
-            // Same-layer touching, swept by lx.
-            for (k, &i) in list.iter().enumerate() {
-                for &j in &list[k + 1..] {
-                    if shapes[j].rect.lx > shapes[i].rect.ux {
-                        break;
-                    }
-                    stats.pair_checks += 1;
-                    if stats.pair_checks > request.max_pair_checks {
-                        return Err(Error::Budget("ANTENNA: max_pair_checks".into()));
-                    }
-                    if touch(shapes[i].rect, shapes[j].rect) {
-                        dsu.union(i, j);
-                    }
-                }
-            }
-            // Cut <-> adjacent routing layers (both already added when present).
-            let joins: Vec<(u32, u32)> = if input.layers[layer as usize].vertical.is_none() {
-                cut_adjacent
-                    .get(&layer)
-                    .map(|&(lo, hi)| vec![(layer, lo), (layer, hi)])
-                    .unwrap_or_default()
-            } else {
-                cut_adjacent
-                    .iter()
-                    .filter(|(_, (lo, hi))| *lo == layer || *hi == layer)
-                    .map(|(&c, _)| (c, layer))
-                    .collect()
-            };
-            for (cut, metal) in joins {
-                let (Some(cs), Some(ms)) = (by_layer.get(&cut), by_layer.get(&metal)) else {
-                    continue;
-                };
-                for &c in cs {
-                    if !added[c] {
-                        continue;
-                    }
-                    for &m in ms {
-                        if !added[m] {
-                            continue;
-                        }
-                        stats.pair_checks += 1;
-                        if stats.pair_checks > request.max_pair_checks {
-                            return Err(Error::Budget("ANTENNA: max_pair_checks".into()));
-                        }
-                        if overlap(shapes[c].rect, shapes[m].rect) {
-                            dsu.union(c, m);
-                        }
-                    }
-                }
-            }
-            let lname = input.layers[layer as usize].name.as_str();
-            let Some(rule) = layer_rules.get(lname) else {
-                continue;
-            };
-            if rule.model.as_deref().is_some_and(|m| m != "OXIDE1") {
-                continue;
-            }
-            // Components with gate area: gate/diff sums and pin names.
-            let mut comp: BTreeMap<usize, (i64, i64, Vec<String>, Vec<String>)> = BTreeMap::new();
-            for (&t, &first) in &first_of_terminal {
-                let root = dsu.find(first);
-                let (name, g, d, q) = terminal_info(t);
-                qualified |= q;
-                let e = comp.entry(root).or_default();
-                e.0 += g;
-                e.1 += d;
-                if g > 0 {
-                    e.2.push(name.clone());
-                }
-                if d > 0 {
-                    e.3.push(name);
-                }
-            }
-            let mut metal: BTreeMap<usize, Vec<Rect>> = BTreeMap::new();
-            for &i in list {
-                metal.entry(dsu.find(i)).or_default().push(shapes[i].rect);
-            }
-            let is_cut = input.layers[layer as usize].vertical.is_none();
-            for (root, rects) in metal {
-                let Some((gate, diff, gates, diffs)) = comp.get(&root) else {
-                    continue;
-                };
-                if *gate <= 0 {
-                    continue;
-                }
-                stats.partial_nets_checked += 1;
-                let (area, perimeter) =
-                    union_area_perimeter(&rects, request.max_union_cells, &mut stats.union_cells)?;
-                let gate_um2 = *gate as f64 / dbu2;
-                let diff_um2 = *diff as f64 / dbu2;
-                let mut kinds = vec![(false, area as f64 / dbu2)];
-                if !is_cut && let Some(t) = rule.thickness {
-                    kinds.push((true, (perimeter * i128::from(t)) as f64 / dbu2));
-                }
-                for (side, metal_um2) in kinds {
-                    let rules = rules_for(rule, dbu2, side);
-                    let Some((limit, keyword)) = rules.limit(diff_um2) else {
-                        continue;
-                    };
-                    let denominator = rules.denominator(gate_um2, diff_um2);
-                    let ratio = metal_um2 / denominator;
-                    let effective_limit = limit * keep;
-                    let violated = ratio > effective_limit;
-                    let w = worst.entry(net_name.clone()).or_insert((0.0, false));
-                    w.0 = w.0.max(ratio / limit);
-                    w.1 |= violated;
-                    let mut g = gates.clone();
-                    g.sort();
-                    let mut d = diffs.clone();
-                    d.sort();
-                    rows.push(CheckRow {
-                        net: net_name.clone(),
-                        layer: lname.to_string(),
-                        kind: if side { "side_area" } else { "area" }.into(),
-                        gates: g,
-                        diffusions: d,
-                        gate_area_um2: gate_um2,
-                        diff_area_um2: diff_um2,
-                        metal_um2,
-                        denominator_um2: denominator,
-                        ratio,
-                        limit,
-                        effective_limit,
-                        rule: if diff_um2 > 0.0 && rules.with_diff.is_some() {
-                            format!("{keyword}@diffusion {diff_um2:.6}um2")
-                        } else {
-                            keyword
-                        },
-                        rules,
-                        violated,
-                        exceeds_lef_limit: ratio > limit,
-                    });
-                }
-            }
-        }
-    }
+    let (mut rows, worst) = evaluate_all(
+        &prep,
+        design,
+        model,
+        &state.routes,
+        request,
+        &mut stats,
+        &mut qualified,
+        extra_shapes,
+    )?;
     if qualified {
         partial = true;
         diagnostics.push("ANTENNA_LAYER_QUALIFIED_PIN: some pin areas are LAYER-qualified and were summed over all layers".into());
     }
-    rows.sort_by(|a, b| {
-        (b.ratio / b.limit)
-            .total_cmp(&(a.ratio / a.limit))
-            .then_with(|| a.net.cmp(&b.net))
-            .then_with(|| a.layer.cmp(&b.layer))
-            .then_with(|| a.kind.cmp(&b.kind))
-    });
+    sort_rows(&mut rows);
     let violations = rows.iter().filter(|r| r.violated).count();
     let lef_violations = rows.iter().filter(|r| r.exceeds_lef_limit).count();
     if violations > request.max_rows {
@@ -943,17 +1078,17 @@ pub fn check_antenna(
         lef_violations,
         workspace_revision: metadata.revision.clone(),
         design: design.name.clone(),
-        dbu_per_micron: dbu,
-        sources,
+        dbu_per_micron: prep.dbu,
+        sources: prep.sources,
         scope: AntennaScope {
             model: "LEF process-antenna partial-net ratio per routing/cut layer",
             oxide: "OXIDE1",
-            cumulative,
+            cumulative: prep.cumulative,
             side_area: "union perimeter x LEF THICKNESS",
             block_ports: "top-level ports carry no gate or diffusion area",
             cell_internal_metal: "routing-layer pin port geometry counted; other cell-internal metal not modeled",
-            checked_layers,
-            rule_free_layers,
+            checked_layers: prep.checked_layers,
+            rule_free_layers: prep.rule_free_layers,
             extra_shapes: extra_count,
             drc_status: "unchecked",
         },
@@ -968,8 +1103,516 @@ pub fn check_antenna(
             })
             .collect(),
         checks: rows,
-        unsupported,
+        unsupported: prep.unsupported,
         diagnostics,
+    })
+}
+
+pub const REPAIR_SCHEMA: &str = "rustroad.antenna-repair.v1";
+
+/// `repair-antenna`: diode-free repair of the native antenna violations of
+/// HEAD by layer jumpers (`rustroad_core::jumper`).
+#[derive(Clone, Debug)]
+pub struct RepairRequest {
+    /// Budgets and safety margin of the native check (no what-if shapes).
+    pub antenna: AntennaRequest,
+    /// `check-antenna` report of the base revision; when given, its revision,
+    /// margin and violated rows must equal the recomputed ones.
+    pub report: Option<PathBuf>,
+    pub max_jumpers_per_net: usize,
+    pub max_jumpers: usize,
+    pub jumper: rustroad_core::jumper::JumperLimits,
+}
+impl Default for RepairRequest {
+    fn default() -> Self {
+        Self {
+            antenna: AntennaRequest::default(),
+            report: None,
+            max_jumpers_per_net: 16,
+            max_jumpers: 4096,
+            jumper: rustroad_core::jumper::JumperLimits::default(),
+        }
+    }
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct JumperRecord {
+    pub net: String,
+    pub layer: String,
+    pub upper: String,
+    pub via: String,
+    pub gate_side: [i64; 2],
+    pub far_side: [i64; 2],
+    pub gate_distance_um: f64,
+    pub run_length_um: f64,
+    /// Worst ratio of the net's rows on `layer` before and after (kind with
+    /// the largest ratio over limit), and that row's effective limit.
+    pub ratio_before: f64,
+    pub ratio_after: f64,
+    pub effective_limit: f64,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct Unrepaired {
+    pub net: String,
+    pub layer: String,
+    pub ratio: f64,
+    pub effective_limit: f64,
+    pub reason: String,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct RepairCount {
+    pub violations: usize,
+    pub lef_violations: usize,
+    pub nets: Vec<String>,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct RepairStats {
+    pub candidates_evaluated: usize,
+    pub planner_work: usize,
+    pub wire_length_dbu_before: u64,
+    pub wire_length_dbu_after: u64,
+    pub wires_before: usize,
+    pub wires_after: usize,
+    pub vias_before: usize,
+    pub vias_after: usize,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct RepairReport {
+    pub schema: &'static str,
+    /// clean (nothing violated), repaired (no native violation left),
+    /// partial (some left; jumpers inserted), unrepaired (none inserted).
+    pub status: &'static str,
+    pub method: &'static str,
+    pub design: String,
+    pub base_revision: String,
+    /// New revision when jumpers were committed, else the base revision.
+    pub revision: String,
+    pub safety_margin: f64,
+    pub before: RepairCount,
+    pub after: RepairCount,
+    pub jumpers: Vec<JumperRecord>,
+    pub unrepaired: Vec<Unrepaired>,
+    pub stats: RepairStats,
+    pub drc_status: &'static str,
+    pub antenna_status: &'static str,
+}
+
+fn count(rows: &[CheckRow]) -> RepairCount {
+    let nets: BTreeSet<String> = rows
+        .iter()
+        .filter(|r| r.violated)
+        .map(|r| r.net.clone())
+        .collect();
+    RepairCount {
+        violations: rows.iter().filter(|r| r.violated).count(),
+        lef_violations: rows.iter().filter(|r| r.exceeds_lef_limit).count(),
+        nets: nets.into_iter().collect(),
+    }
+}
+
+/// Worst (ratio / effective limit) per layer name of one net's rows.
+fn excess_by_layer(rows: &[CheckRow]) -> BTreeMap<String, (f64, f64, f64)> {
+    let mut out: BTreeMap<String, (f64, f64, f64)> = BTreeMap::new();
+    for r in rows {
+        let x = r.ratio / r.effective_limit;
+        let e = out
+            .entry(r.layer.clone())
+            .or_insert((x, r.ratio, r.effective_limit));
+        if x > e.0 {
+            *e = (x, r.ratio, r.effective_limit);
+        }
+    }
+    out
+}
+
+/// Check the caller's report against the recomputed rows (same revision,
+/// margin and violated row set).
+fn bind_report(path: &Path, revision: &str, margin: f64, rows: &[CheckRow]) -> Result<()> {
+    let (text, _) = read_input(path, 512 * 1024 * 1024, "antenna_report")?;
+    let v: serde_json::Value = serde_json::from_str(&text)?;
+    let stale = |m: &str| fail("STALE_REPORT", format!("{}: {m}", path.display()));
+    if v["schema"] != ANTENNA_SCHEMA {
+        return Err(stale("not a rustroad.antenna-check.v1 report"));
+    }
+    if v["workspace_revision"] != revision {
+        return Err(stale("report revision differs from --base-rev"));
+    }
+    if v["safety_margin"]["fraction"].as_f64() != Some(margin) {
+        return Err(stale("report safety margin differs"));
+    }
+    if v["scope"]["extra_shapes"].as_u64() != Some(0) {
+        return Err(stale("report contains what-if shapes"));
+    }
+    let key = |net: &str, layer: &str, kind: &str| format!("{net}\u{0}{layer}\u{0}{kind}");
+    let theirs: BTreeSet<String> = v["checks"]
+        .as_array()
+        .ok_or_else(|| stale("report has no checks"))?
+        .iter()
+        .filter(|c| c["violated"] == true)
+        .map(|c| {
+            key(
+                c["net"].as_str().unwrap_or(""),
+                c["layer"].as_str().unwrap_or(""),
+                c["kind"].as_str().unwrap_or(""),
+            )
+        })
+        .collect();
+    let ours: BTreeSet<String> = rows
+        .iter()
+        .filter(|r| r.violated)
+        .map(|r| key(&r.net, &r.layer, &r.kind))
+        .collect();
+    if v["violations"].as_u64() != Some(ours.len() as u64) || theirs != ours {
+        return Err(stale("violated rows differ from the recomputed check"));
+    }
+    Ok(())
+}
+
+pub fn repair_antenna(
+    path: &Path,
+    base_rev: &str,
+    request: &RepairRequest,
+    limits: &Limits,
+) -> Result<RepairReport> {
+    use rustroad_core::jumper::{Jumper, JumperPlanner, apply};
+    check_budgets(&request.antenna)?;
+    if request.antenna.extra_shapes.is_some() {
+        return Err(fail(
+            "INVALID_ARGUMENT",
+            "repair-antenna takes no what-if shapes",
+        ));
+    }
+    if request.max_jumpers_per_net == 0
+        || request.max_jumpers_per_net > 64
+        || request.max_jumpers == 0
+        || request.max_jumpers > 1_000_000
+    {
+        return Err(fail(
+            "INVALID_ARGUMENT",
+            "jumper budgets outside hard bounds",
+        ));
+    }
+    request.jumper.validate()?;
+    let lock = crate::lock(path, false, true)?;
+    let current = crate::head(path)?;
+    crate::check_base(base_rev, &current)?;
+    let snapshot = crate::load(path, lock, limits)?;
+    let mut metadata = snapshot.metadata().clone();
+    let placed: Vec<_> = snapshot.records().collect();
+    let design = metadata.design.clone();
+    let bundle = metadata
+        .physical
+        .as_ref()
+        .ok_or_else(|| fail("NO_PHYSICAL", "import a PDK design first"))?;
+    let state = bundle
+        .routing
+        .as_ref()
+        .ok_or_else(|| fail("NO_ROUTING", "route before the antenna repair"))?;
+    let prep = prepare(&design, bundle, &placed, state)?;
+    let model = &bundle.connectivity;
+    let route_limits = state.config.limits.clone();
+    let mut stats = AntennaStats::default();
+    let mut qualified = false;
+    let (rows_before, _) = evaluate_all(
+        &prep,
+        &design,
+        model,
+        &state.routes,
+        &request.antenna,
+        &mut stats,
+        &mut qualified,
+        Vec::new(),
+    )?;
+    if let Some(report) = &request.report {
+        bind_report(
+            report,
+            &current,
+            request.antenna.safety_margin,
+            &rows_before,
+        )?;
+    }
+    let before = count(&rows_before);
+    let mut routes = state.routes.clone();
+    let wire_stats =
+        |r: &core_routing::Routes| (r.stats.wire_length_dbu, r.wires.len(), r.vias.len());
+    let (len0, wires0, vias0) = wire_stats(&routes);
+    let mut jumpers = Vec::new();
+    let mut unrepaired = Vec::new();
+    let mut evaluated = 0usize;
+    let mut planner_work = 0usize;
+    if !before.nets.is_empty() {
+        let input = &prep.input;
+        let routed = logical_routed(&routes, model.nets.len() as u32);
+        let mut planner = JumperPlanner::new(input, &routes, &route_limits)?;
+        let trace = std::env::var_os("RUSTROAD_JUMPER_TRACE").is_some();
+        let name_of = |l: u32| input.layers[l as usize].name.clone();
+        let layer_id = |name: &str| -> Option<u32> {
+            input
+                .layers
+                .iter()
+                .position(|l| l.name == name)
+                .map(|i| i as u32)
+        };
+        let rank: HashMap<u32, usize> = prep
+            .order
+            .iter()
+            .enumerate()
+            .map(|(i, &l)| (l, i))
+            .collect();
+        for net_name in &before.nets {
+            let net = model
+                .nets
+                .iter()
+                .position(|n| &n.name == net_name)
+                .ok_or_else(|| fail("ANTENNA_REPAIR", format!("net {net_name} absent")))?
+                as u32;
+            let gate_names: Vec<(String, u32)> = input
+                .terminals
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.net == net)
+                .filter_map(|(ti, t)| {
+                    let (name, gate, _, _) = terminal_info(&prep, &design, model, ti);
+                    (gate > 0).then_some((name, t.pin))
+                })
+                .collect();
+            let mut scratch = AntennaStats::default();
+            let eval =
+                |r: &core_routing::Routes, scratch: &mut AntennaStats| -> Result<Vec<CheckRow>> {
+                    let shapes = net_shapes(&prep, r, &routed, Some(net))?;
+                    let empty = Vec::new();
+                    evaluate_net(
+                        &prep,
+                        &design,
+                        model,
+                        net,
+                        shapes.get(&net).unwrap_or(&empty),
+                        &request.antenna,
+                        scratch,
+                        &mut false,
+                    )
+                };
+            let mut inserted = 0usize;
+            loop {
+                let rows = eval(&routes, &mut scratch)?;
+                let bad: Vec<&CheckRow> = rows.iter().filter(|r| r.violated).collect();
+                let Some(row) = bad
+                    .iter()
+                    .min_by_key(|r| layer_id(&r.layer).and_then(|l| rank.get(&l)).copied())
+                    .copied()
+                else {
+                    break;
+                };
+                let stop = |reason: &str| Unrepaired {
+                    net: net_name.clone(),
+                    layer: row.layer.clone(),
+                    ratio: row.ratio,
+                    effective_limit: row.effective_limit,
+                    reason: reason.into(),
+                };
+                if inserted >= request.max_jumpers_per_net || jumpers.len() >= request.max_jumpers {
+                    unrepaired.push(stop("jumper budget reached"));
+                    break;
+                }
+                let layer = layer_id(&row.layer)
+                    .ok_or_else(|| fail("ANTENNA_REPAIR", "row layer is not a route layer"))?;
+                if input.layers[layer as usize].vertical.is_none() {
+                    unrepaired.push(stop(
+                        "cut-layer rule: a jumper cannot shorten a via partial net",
+                    ));
+                    break;
+                }
+                if planner.upper_of(layer).is_none() {
+                    unrepaired.push(stop("no routing layer above the violating layer"));
+                    break;
+                }
+                let excess0 = excess_by_layer(&rows);
+                let violated0: BTreeSet<String> = bad
+                    .iter()
+                    .map(|r| format!("{}\u{0}{}", r.layer, r.kind))
+                    .collect();
+                let x0 = excess0[&row.layer].0;
+                let tried = evaluated;
+                // (layer excess after, clean, edited routes, jumpers, rows)
+                type Choice = (f64, bool, core_routing::Routes, Vec<Jumper>, Vec<CheckRow>);
+                let judge = |trial: core_routing::Routes,
+                             chosen: Vec<Jumper>,
+                             scratch: &mut AntennaStats|
+                 -> Result<Option<Choice>> {
+                    let after = eval(&trial, scratch)?;
+                    let fresh = after.iter().any(|r| {
+                        r.violated && !violated0.contains(&format!("{}\u{0}{}", r.layer, r.kind))
+                    });
+                    let x = excess_by_layer(&after).get(&row.layer).map_or(0.0, |e| e.0);
+                    if trace {
+                        eprintln!(
+                            "[jumper] {net_name} {} x0 {x0:.3} -> {x:.3} fresh {fresh} jumpers {:?}",
+                            row.layer,
+                            chosen
+                                .iter()
+                                .map(|c| (c.gate_side, c.far_side))
+                                .collect::<Vec<_>>()
+                        );
+                    }
+                    if fresh || x >= x0 {
+                        return Ok(None);
+                    }
+                    let clean = !after.iter().any(|r| r.violated);
+                    Ok(Some((x, clean, trial, chosen, after)))
+                };
+                let better = |a: &Choice, b: &Option<Choice>| -> bool {
+                    b.as_ref()
+                        .is_none_or(|b| (a.1 && !b.1) || (a.1 == b.1 && a.0 < b.0))
+                };
+                // A: one jumper on the longest runs of the gates' partial
+                // net; the first that clears the net, else the largest drop.
+                // Seeds: the gates of the violating partial nets of this layer.
+                let row_gates: BTreeSet<&String> = bad
+                    .iter()
+                    .filter(|r| r.layer == row.layer)
+                    .flat_map(|r| r.gates.iter())
+                    .collect();
+                let seeds: Vec<u32> = gate_names
+                    .iter()
+                    .filter(|(n, _)| row_gates.contains(n))
+                    .map(|(_, p)| *p)
+                    .collect();
+                let candidates =
+                    planner.candidates(&routes, net, layer, &seeds, &request.jumper)?;
+                let mut best: Option<Choice> = None;
+                for c in candidates {
+                    evaluated += 1;
+                    let trial = apply(input, &routes, &c)?;
+                    if let Some(choice) = judge(trial, vec![c], &mut scratch)?
+                        && better(&choice, &best)
+                    {
+                        let clean = choice.1;
+                        best = Some(choice);
+                        if clean {
+                            break;
+                        }
+                    }
+                }
+                // B: isolate every gate of the violating partial net with a
+                // jumper on its nearest run (multi-sink trees: the trunk
+                // keeps no gate once each sink is cut off).
+                if !best.as_ref().is_some_and(|b| b.1) {
+                    let nearest = rustroad_core::jumper::JumperLimits {
+                        nearest_first: true,
+                        per_run: 1,
+                        ..request.jumper.clone()
+                    };
+                    let mut trial = routes.clone();
+                    let mut chosen = Vec::new();
+                    for (name, pin) in &gate_names {
+                        if !row_gates.contains(name)
+                            || inserted + chosen.len() >= request.max_jumpers_per_net
+                        {
+                            continue;
+                        }
+                        let c = planner.candidates(&trial, net, layer, &[*pin], &nearest)?;
+                        if let Some(c) = c.into_iter().next() {
+                            evaluated += 1;
+                            trial = apply(input, &trial, &c)?;
+                            chosen.push(c);
+                        }
+                    }
+                    if !chosen.is_empty()
+                        && let Some(choice) = judge(trial, chosen, &mut scratch)?
+                        && better(&choice, &best)
+                    {
+                        best = Some(choice);
+                    }
+                }
+                let Some((_, _, trial, chosen, after)) = best else {
+                    unrepaired.push(stop(if evaluated == tried {
+                        "no legal jumper position on the gates' partial net"
+                    } else {
+                        "no jumper candidate lowers the partial-net ratio"
+                    }));
+                    break;
+                };
+                let e1 = excess_by_layer(&after);
+                let (_, r0, lim) = excess0[&row.layer];
+                for c in &chosen {
+                    planner.commit(c)?;
+                    jumpers.push(JumperRecord {
+                        net: net_name.clone(),
+                        layer: name_of(c.layer),
+                        upper: name_of(c.upper),
+                        via: input.vias[c.via as usize].name.clone(),
+                        gate_side: c.gate_side,
+                        far_side: c.far_side,
+                        gate_distance_um: c.gate_distance as f64 / f64::from(prep.dbu),
+                        run_length_um: c.run_length as f64 / f64::from(prep.dbu),
+                        ratio_before: r0,
+                        ratio_after: e1.get(&row.layer).map_or(0.0, |e| e.1),
+                        effective_limit: lim,
+                    });
+                }
+                routes = trial;
+                inserted += chosen.len();
+            }
+        }
+        planner_work = planner.work();
+    }
+    let mut stats_after = AntennaStats::default();
+    let (rows_after, _) = evaluate_all(
+        &prep,
+        &design,
+        model,
+        &routes,
+        &request.antenna,
+        &mut stats_after,
+        &mut qualified,
+        Vec::new(),
+    )?;
+    let after = count(&rows_after);
+    let (len1, wires1, vias1) = wire_stats(&routes);
+    let status = if before.violations == 0 {
+        "clean"
+    } else if jumpers.is_empty() {
+        "unrepaired"
+    } else if after.violations == 0 {
+        "repaired"
+    } else {
+        "partial"
+    };
+    let mut revision = current.clone();
+    if !jumpers.is_empty() {
+        core_routing::validate(&prep.input, &routes, &route_limits)?;
+        let bundle = metadata.physical.as_mut().unwrap();
+        bundle.routing.as_mut().unwrap().routes = routes;
+        metadata.parent_revision = current.clone();
+        drop(prep);
+        revision = crate::commit(path, metadata, &placed)?.revision;
+    }
+    Ok(RepairReport {
+        schema: REPAIR_SCHEMA,
+        status,
+        method: "layer jumpers: the violating layer's straight run nearest the gates is cut and \
+                 bridged on the next routing layer up (two vias and a short wire); candidates \
+                 are accepted only when the native partial-net ratio of the net drops without a \
+                 new violated row; netlist and placement unchanged",
+        design: design.name.clone(),
+        base_revision: current,
+        revision,
+        safety_margin: request.antenna.safety_margin,
+        before,
+        after,
+        jumpers,
+        unrepaired,
+        stats: RepairStats {
+            candidates_evaluated: evaluated,
+            planner_work,
+            wire_length_dbu_before: len0,
+            wire_length_dbu_after: len1,
+            wires_before: wires0,
+            wires_after: wires1,
+            vias_before: vias0,
+            vias_after: vias1,
+        },
+        drc_status: "unchecked",
+        antenna_status: "native_only",
     })
 }
 

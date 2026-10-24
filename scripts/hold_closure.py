@@ -95,7 +95,10 @@ ROAD_LIMITS = {
 # value; regfile-size track layouts need ~2e8 and SERV more than 1.6e9, so
 # the track recipe allows 1.28e10 (the extractor's hard ceiling, 64x).
 EXTRACT_LIMITS = {'legacy': [], 'track': ['--max-extract-work', '12800000000', '--max-coupling-caps', '8000000',
-                                          '--max-rc-nodes', '4000000', '--max-spef-mib', '256']}
+                                          '--max-rc-nodes', '4000000', '--max-spef-mib', '256',
+                                          # SERV (scale-stream layout): 8,054 candidates on one wire run
+                                          # (44 B scratch each); RC elements 4.3M of the 8M ceiling.
+                                          '--max-extract-candidates', '65536', '--max-rc-elements', '8000000']}
 # RustSTA SPEF import limits per recipe (legacy: this script's original
 # values; track: SERV-size blocks, below the engine's own hard limits).
 STA_RC_LIMITS = {'legacy': ['--max-rc-nodes', '200000', '--max-rc-elements', '200000'],
@@ -302,6 +305,13 @@ class Flow:
         rec['route'] = {k: a.get(k) for k in ('routed_nets', 'routing_segments', 'routing_expansions', 'cells', 'tap_cells',
                                               'filler_cells', 'route_memory') if k in a}
         rec['routed_revision'] = a['revision']
+        # Diode-free antenna repair on the routed revision: the native check
+        # inside repair-antenna finds the violating (net, layer) rows and the
+        # router cuts the run nearest the gates and bridges it one layer up
+        # (new revision only when a jumper was inserted; netlist, placement
+        # and every other net unchanged). Clean layouts are left untouched.
+        j = h.json_command(f'{t}_repair_antenna', list(map(str, road + ['repair-antenna', '--base-rev', a['revision']])))
+        rec['antenna_repair'] = {k: j[k] for k in ('status', 'revision', 'before', 'after', 'jumpers', 'unrepaired', 'stats')}
         out = {}
         for label, extra, suffix in (('def', ['export-def'], '.def'), ('netlist', ['export-verilog'], '_exported.v'),
                                      ('powered', ['export-verilog', '--include-power'], '_powered.v')):

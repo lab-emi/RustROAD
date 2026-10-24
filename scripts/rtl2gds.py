@@ -230,7 +230,8 @@ class PdkGate:
                                     recipe=self.recipe, iterations=len(b["iterations"]), final_iteration=b["final_iteration"],
                                     routed_nets=phys["routed_nets"], wires=phys["wires"], vias=phys["vias"],
                                     patches=phys["patches"], floorplan_reproduced=fpc, renamed_escaped_wires=b["renamed_wires"],
-                                    clock_tree=phys.get("cts"), placement=phys.get("placement"), route=phys.get("route"))
+                                    clock_tree=phys.get("cts"), placement=phys.get("placement"), route=phys.get("route"),
+                                    antenna_repair=phys.get("antenna_repair"))
         policy = ctx.flow_args.cell_policy
         with steps(h, tag, "cell_policy"):
             checks = {"synth": check_cell_policy.check(tag, "synth", [b["mapped"]], None, policy, None),
@@ -369,11 +370,16 @@ class PdkGate:
             t = rec["timing"]
             he = rec.get("hold_eco") or {}
             se = rec.get("size_eco") or {}
+            ar = (rec.get("physical") or {}).get("antenna_repair") or {}
             rows.append(dict(iteration=rec["iteration"], closed=t["closed"],
                              worst={c: dict(setup_ns=v["worst_setup_ns"], hold_ns=v["worst_hold_ns"])
                                     for c, v in t["corners"].items()},
                              antenna=rec["antenna"]["status"], hold_eco=he.get("totals") or he.get("reason"),
                              antenna_eco=rec.get("antenna_eco"), drv=rec.get("drv"),
+                             antenna_jumpers=dict(status=ar.get("status"), jumpers=len(ar.get("jumpers") or []),
+                                                  before=(ar.get("before") or {}).get("violations"),
+                                                  after=(ar.get("after") or {}).get("violations"),
+                                                  unrepaired=ar.get("unrepaired")) if ar else None,
                              size_eco={k: se.get(k) for k in ("resized", "candidates", "by_reason", "failing_setup_endpoints",
                                                               "drv_violations", "utilization_after")} if se else None,
                              stopped=rec.get("stopped")))

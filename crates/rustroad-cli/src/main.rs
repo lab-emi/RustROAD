@@ -109,8 +109,15 @@ enum Command {
         max_rc_nodes: usize,
         #[arg(long, default_value_t = 1_000_000)]
         max_coupling_caps: usize,
+        /// Resistors + nodes + 2 x couplings (hard ceiling 8x the default).
+        #[arg(long, default_value_t = 1_000_000)]
+        max_rc_elements: usize,
         #[arg(long, default_value_t = 200_000_000)]
         max_extract_work: usize,
+        /// Candidate shapes per wire run (scratch 44 B each; ceiling
+        /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 48 MiB of scratch).
+        #[arg(long, default_value_t = 4096)]
+        max_extract_candidates: usize,
     },
     /// Write the linked connectivity/LEF geometry snapshot as JSON.
     ExportConnectivity,
@@ -233,6 +240,28 @@ enum Command {
         /// (default derived from the measured native-vs-deck under-read).
         #[arg(long, default_value_t = rustroad_workspace::antenna::DEFAULT_SAFETY_MARGIN)]
         safety_margin: f64,
+    },
+    /// Diode-free antenna repair of HEAD: layer jumpers on the violating
+    /// nets of the native check (new revision; netlist and placement kept).
+    RepairAntenna {
+        #[arg(long)]
+        base_rev: String,
+        /// `check-antenna` report of --base-rev (same revision, margin and
+        /// violated rows required; STALE_REPORT otherwise).
+        #[arg(long)]
+        antenna_report: Option<PathBuf>,
+        #[arg(long, default_value_t = rustroad_workspace::antenna::DEFAULT_SAFETY_MARGIN)]
+        safety_margin: f64,
+        #[arg(long, default_value_t = 16)]
+        max_jumpers_per_net: usize,
+        #[arg(long, default_value_t = 4096)]
+        max_jumpers: usize,
+        /// Cut positions probed per straight run of the violating layer.
+        #[arg(long, default_value_t = 512)]
+        max_positions: usize,
+        /// Legal candidates evaluated per jumper decision.
+        #[arg(long, default_value_t = 32)]
+        max_candidates: usize,
     },
     /// Derive die/core/rows and a connectivity-aware I/O plan from cell area,
     /// utilization and aspect (files only; writes a floorplan and a physical
@@ -565,7 +594,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             max_segment_um,
             max_rc_nodes,
             max_coupling_caps,
+            max_rc_elements,
             max_extract_work,
+            max_extract_candidates,
         } => {
             if !(max_segment_um.is_finite() && (0.1..=10_000.0).contains(&max_segment_um)) {
                 return Err("INVALID_ARGUMENT: --max-segment-um must be within 0.1..=10000".into());
@@ -577,7 +608,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let extract_limits = rustroad_core::extract::ExtractLimits {
                 max_nodes: max_rc_nodes,
                 max_couplings: max_coupling_caps,
+                max_elements: max_rc_elements,
                 max_work: max_extract_work,
+                max_candidates: max_extract_candidates,
                 max_segment_length: (max_segment_um * f64::from(snapshot_units)).round() as i64,
                 ..Default::default()
             };
@@ -613,6 +646,33 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 max_union_cells,
                 max_rows,
                 safety_margin,
+            },
+            &limits,
+        )?),
+        Command::RepairAntenna {
+            base_rev,
+            antenna_report,
+            safety_margin,
+            max_jumpers_per_net,
+            max_jumpers,
+            max_positions,
+            max_candidates,
+        } => emit(&rustroad_workspace::antenna::repair_antenna(
+            &workspace,
+            &base_rev,
+            &rustroad_workspace::antenna::RepairRequest {
+                antenna: rustroad_workspace::antenna::AntennaRequest {
+                    safety_margin,
+                    ..Default::default()
+                },
+                report: antenna_report,
+                max_jumpers_per_net,
+                max_jumpers,
+                jumper: rustroad_core::jumper::JumperLimits {
+                    max_positions,
+                    max_candidates,
+                    ..Default::default()
+                },
             },
             &limits,
         )?),

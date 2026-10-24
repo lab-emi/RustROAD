@@ -141,6 +141,10 @@ pub struct ExtractScope {
     pub cell_internal_metal: &'static str,
     pub routing_patches: &'static str,
     pub max_segment_length_dbu: i64,
+    /// Candidate shapes per wire run and the upfront scratch estimate of
+    /// the per-run candidate buffers (bytes).
+    pub max_candidates_per_run: usize,
+    pub candidate_scratch_bytes: usize,
     pub drc_status: &'static str,
     pub lvs_status: &'static str,
 }
@@ -158,6 +162,10 @@ pub struct ExtractReport {
     pub unannotated_signal_nets: Vec<String>,
     /// Declared signal nets with no connection at all (nothing to extract).
     pub pinless_signal_nets: Vec<String>,
+    /// Signal nets with exactly one pin (unused input port, unloaded output
+    /// pin): not routed, no wire to extract, no D_NET.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub single_pin_signal_nets: Vec<String>,
     pub diagnostics: Vec<String>,
 }
 
@@ -517,26 +525,29 @@ pub fn extract(
     let routed: std::collections::BTreeSet<u32> = network.nets.iter().map(|n| n.net).collect();
     // A declared signal net without any connection (no driver, no load: e.g.
     // a dangling wire of the synthesized netlist) has nothing to extract or
-    // time; it is listed separately. Every net with a pin and no routed tree
-    // stays unannotated.
-    let mut connected = vec![false; model.nets.len()];
+    // time; it is listed separately. So is a net with exactly one pin (an
+    // unused input port, an unloaded output pin): the router routes nets of
+    // two or more terminals only, and one terminal has no wire to extract.
+    // Every net with two or more pins and no routed tree stays unannotated.
+    let mut pins_per_net = vec![0usize; model.nets.len()];
     for c in &model.pins {
         if let Some(n) = c.net
-            && let Some(slot) = connected.get_mut(n as usize)
+            && let Some(slot) = pins_per_net.get_mut(n as usize)
         {
-            *slot = true;
+            *slot += 1;
         }
     }
     let mut unannotated = Vec::new();
     let mut pinless = Vec::new();
+    let mut single = Vec::new();
     for (i, n) in model.nets.iter().enumerate() {
         if n.use_.is_supply() || routed.contains(&(i as u32)) {
             continue;
         }
-        if connected[i] {
-            unannotated.push(n.name.clone());
-        } else {
-            pinless.push(n.name.clone());
+        match pins_per_net[i] {
+            0 => pinless.push(n.name.clone()),
+            1 => single.push(n.name.clone()),
+            _ => unannotated.push(n.name.clone()),
         }
     }
     let header = spef::Header {
@@ -643,6 +654,12 @@ pub fn extract(
             pinless.len()
         ));
     }
+    if !single.is_empty() {
+        diagnostics.push(format!(
+            "RC_SINGLE_PIN_NETS: {} signal nets have exactly one pin (nothing to route) and no D_NET",
+            single.len()
+        ));
+    }
     Ok(ExtractReport {
         status: "ok",
         schema: "rustroad.extract.v1",
@@ -689,6 +706,8 @@ pub fn extract(
                               coupling on all four edges at the RC node of the same-net conductor \
                               it overlaps (no new node or resistor)",
             max_segment_length_dbu: request.limits.max_segment_length,
+            max_candidates_per_run: request.limits.max_candidates,
+            candidate_scratch_bytes: request.limits.candidate_scratch_bytes(),
             drc_status: "unchecked",
             lvs_status: "unchecked",
         },
@@ -696,6 +715,7 @@ pub fn extract(
         routed_nets: network.nets.len(),
         unannotated_signal_nets: unannotated,
         pinless_signal_nets: pinless,
+        single_pin_signal_nets: single,
         diagnostics,
     })
 }
