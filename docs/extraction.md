@@ -257,7 +257,7 @@ Measured on the pipeline designs (`docs/evidence/extraction-oracles-*.json`):
 | OpenRCX container, per corner | 0.32-0.45 s | 110-127 MiB |
 | Magic capacitance run (hierarchical + flat), per corner | 0.46-0.87 s | 67-73 MiB |
 | Magic resistance run (terminal layout), per corner | 0.26-0.36 s | 67-73 MiB |
-| `rc_oracles.py campaign`, one design, both PDKs, with four ablation binaries (about 780 guarded processes) | 44-50 s | 136 MiB (largest child, RustSTA import) |
+| `rc_oracles.py campaign`, one design, both PDKs, with four ablation binaries (730-830 guarded processes) | 44-48 s | 136 MiB (largest child, RustSTA import) |
 | `cargo build --release --bins` (4 jobs) | 10-12 s | 0.69 GiB |
 | `cargo test --workspace` (4 threads) | 4.4 s | 0.57 GiB |
 | ablation builds (three variants, 4 jobs each) | 50 s | 0.66 GiB |
