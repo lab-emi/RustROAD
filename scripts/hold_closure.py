@@ -130,7 +130,9 @@ WHATIF_TIMEOUT_S = 600
 # the same candidates (a whatif call that fails or hits WHATIF_TIMEOUT_S is a
 # failed round, recorded): per layout and per closure loop (the gate runs
 # the loop twice per PDK within its 3600 s wall budget). Measured cost per
-# candidate: 0.13 s (counter), 1.1 s (regfile), 1.9 s (mult) on this host.
+# candidate: 0.13 s (counter, 47 logic instances), 1.1 s (regfile, 367),
+# 1.9 s (mult, 417) on this host. Both scale with 200 / logic instances,
+# clamped to 0.5x..4x (counter 384 per layout, mult 48).
 WHATIF_LAYOUT_CANDIDATES = 96
 WHATIF_LOOP_CANDIDATES = 320
 WHATIF_HOLD_LOSS_NS = 0.5
@@ -739,7 +741,8 @@ class Flow:
         accepted, history, evaluated = {}, [], 0
         prev_base = None
         spent = 0
-        budget = min(WHATIF_LAYOUT_CANDIDATES, WHATIF_LOOP_CANDIDATES - self.whatif_spent)
+        scale = min(4.0, max(0.5, 200.0 / max(len(mapped), 1)))
+        budget = min(int(WHATIF_LAYOUT_CANDIDATES * scale), int(WHATIF_LOOP_CANDIDATES * scale) - self.whatif_spent)
         for rnd in range(WHATIF_ROUNDS):
             room = budget - spent
             if room < 4:
