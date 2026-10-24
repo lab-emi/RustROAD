@@ -581,6 +581,49 @@ mod tests {
         (0..count).map(|i| format!("port[{i}]")).collect()
     }
     #[test]
+    fn planned_pins_follow_order_side_and_track() {
+        let c = constraints();
+        let ports = names(6);
+        let plan = IoPlan {
+            west: vec!["port[2]".into(), "port[0]".into()],
+            east: vec!["port[1]".into()],
+            south: vec!["port[3]".into(), "port[4]".into()],
+            north: vec!["port[5]".into()],
+            x_track: Some([10, 4]),
+            y_track: Some([8, 0]),
+        };
+        let pins = place_planned_io(&ports, &plan, &c, &IoLimits::default()).unwrap();
+        assert_eq!(
+            pins.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ports
+        );
+        let side = |n: &str| pins.iter().find(|p| p.name == n).unwrap();
+        assert_eq!(side("port[2]").side, IoSide::West);
+        assert!(side("port[2]").rect.ly < side("port[0]").rect.ly);
+        // Centres sit on the side's track (within one grid step).
+        for p in &pins {
+            let (centre, [pitch, offset]) = match p.side {
+                IoSide::West | IoSide::East => ((p.rect.ly + p.rect.uy) / 2, [8, 0]),
+                _ => ((p.rect.lx + p.rect.ux) / 2, [10, 4]),
+            };
+            let d = (centre - offset).rem_euclid(pitch);
+            assert!(d <= 2 || pitch - d <= 2, "{p:?}");
+        }
+        assert_eq!(
+            pins,
+            place_planned_io(&ports, &plan, &c, &IoLimits::default()).unwrap()
+        );
+        // Every pin must be planned exactly once.
+        let mut missing = plan.clone();
+        missing.north.clear();
+        assert!(place_planned_io(&ports, &missing, &c, &IoLimits::default()).is_err());
+        let mut twice = plan.clone();
+        twice.north.push("port[0]".into());
+        assert!(place_planned_io(&ports, &twice, &c, &IoLimits::default()).is_err());
+        let cap = planned_capacity(&c, &plan, &IoLimits::default()).unwrap();
+        assert!(cap.iter().all(|n| *n >= 2));
+    }
+    #[test]
     fn balanced_deterministic_and_grid_rounded() {
         let c = constraints();
         let ports = names(16);

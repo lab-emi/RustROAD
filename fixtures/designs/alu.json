@@ -68,7 +68,7 @@
       },
       "routing_config": {
         "path": "fixtures/pdk/sky130-scale-routing.json",
-        "sha256": "fb73700fa9857a105ea1cd95abb9f8aa9bc576c7787ace833e27734d0c038add"
+        "sha256": "f1420e3afbce37e77ad3ad56b939c2c7b2874f0befdb0a13df4d7e754c476051"
       },
       "delay_cells": {
         "path": "fixtures/pdk/sky130-delay-cells.json",
@@ -125,7 +125,7 @@
         "rc_profile_ff": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
         "rc_profile_ss": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
         "rc_profile_tt": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
-        "routing_profile": "fb73700fa9857a105ea1cd95abb9f8aa9bc576c7787ace833e27734d0c038add",
+        "routing_profile": "f1420e3afbce37e77ad3ad56b939c2c7b2874f0befdb0a13df4d7e754c476051",
         "technology_lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519"
       }
     },
@@ -144,7 +144,7 @@
       },
       "routing_config": {
         "path": "fixtures/pdk/gf180-scale-routing.json",
-        "sha256": "e2f02fc520bef4e2739b7f8bd21b9aeb9bc92a780fa6c89f9c1ae496ee04ca32"
+        "sha256": "2e895962d5de944c4015aa2392f350567758b54239c4472072b515efe979f103"
       },
       "delay_cells": {
         "path": "fixtures/pdk/gf180-delay-cells.json",
@@ -201,7 +201,7 @@
         "rc_profile_ff": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
         "rc_profile_ss": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
         "rc_profile_tt": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
-        "routing_profile": "e2f02fc520bef4e2739b7f8bd21b9aeb9bc92a780fa6c89f9c1ae496ee04ca32",
+        "routing_profile": "2e895962d5de944c4015aa2392f350567758b54239c4472072b515efe979f103",
         "technology_lef": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd"
       }
     }

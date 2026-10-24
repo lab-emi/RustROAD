@@ -78,3 +78,20 @@ cleanup changes. All caps above are unchanged and still cannot be raised.
 Unresolvable same-net violations fail the command with `ROUTING_RULE` and HEAD
 stays unchanged. The native same-net check is a self-check; foundry decks are
 the DRC oracle (see router-drc.md).
+
+## Track-router mode (`track_router`, schema 6)
+
+Written before implementing the track router (stream W14-W16); details in
+`docs/scaling.md`. The lattice caps above stay hard caps for the lattice
+router. A profile with `track_router` may raise every `RouteLimits` field up
+to `RouteLimits::ceiling()` (64M graph nodes, 8M obstacles, 64M bin entries,
+8M segments, 2e9 expansions, 5e7 per search, 2^40 comparisons, 64M heap
+entries). Before allocating, the router estimates
+`24 N + 48 G + 160 (obstacles + 16 terminals)` bytes (N track-graph nodes,
+G GCells) and refuses a plan above `track_router.memory_mib` (default 2048,
+at most 65536). Every search, queue, repair round and rip-up count is capped
+(`max_search_expansions`, `max_heap`, `max_repair_rounds`,
+`max_ripups_per_net`); a reached cap fails with `BUDGET_EXCEEDED` or
+`NO_ROUTE` naming the pin and net, HEAD unchanged. Route records live in
+`routes.rbin` (at most 512 MiB); design.json is capped at 64 MiB (was
+16 MiB) so ~25k-instance blocks fit.

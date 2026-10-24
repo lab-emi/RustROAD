@@ -474,6 +474,9 @@ struct Router<'a> {
     /// Per input layer: may two vias stack through it (every via pad on the
     /// layer meets the LEF AREA alone)?
     stack_ok: Vec<bool>,
+    /// Per input layer: wire run (DBU) between an entering and a leaving via
+    /// on a layer that is not `stack_ok` (AREA / width, rounded up).
+    min_run: Vec<u64>,
 }
 
 /// One routed net: graph edges (a, b, kind) and its spatial shape ids.
@@ -1316,6 +1319,93 @@ impl<'a> Router<'a> {
         }
     }
 
+    /// Is the pad of via `kind` on `layer` at least as long along the given
+    /// direction as across it?
+    fn pad_along(&self, kind: usize, layer: u32, vertical: bool) -> bool {
+        self.input.vias[kind]
+            .shapes
+            .iter()
+            .filter(|s| s.layer == layer)
+            .all(|s| {
+                let (w, h) = (s.rect.ux - s.rect.lx, s.rect.uy - s.rect.ly);
+                if vertical { h >= w } else { w >= h }
+            })
+    }
+
+    /// Re-pick routed via variants so that on each layer where exactly one
+    /// wire ends at the via, the pad is elongated along that wire (LEF58
+    /// end-of-line enclosure rules are not modelled natively). A variant is
+    /// taken only when it clears every other net.
+    fn orient_vias(&mut self, routed: &mut BTreeMap<u32, NetRoute>) -> Result<usize> {
+        let mut changed = 0usize;
+        for (&net, route) in routed.iter_mut() {
+            // (layer, point) -> incident wire directions and sides.
+            type Ends = HashMap<(u32, [i64; 2]), Vec<(bool, i8)>>;
+            let mut ends: Ends = HashMap::new();
+            let mut vias = Vec::new();
+            for (&(a, b), &kind) in &route.edges {
+                let (la, pa) = self.graph.point(a);
+                let (lb, pb) = self.graph.point(b);
+                if la == lb {
+                    let vertical = pa[0] == pb[0];
+                    let (axis, lo, hi) = if vertical { (1, pa, pb) } else { (0, pa, pb) };
+                    let (lo, hi) = if lo[axis] <= hi[axis] {
+                        (lo, hi)
+                    } else {
+                        (hi, lo)
+                    };
+                    ends.entry((la, lo)).or_default().push((vertical, 1));
+                    ends.entry((la, hi)).or_default().push((vertical, -1));
+                } else {
+                    vias.push(((a.min(b), a.max(b)), kind, if la < lb { pa } else { pb }));
+                }
+            }
+            for (key, kind, at) in vias {
+                let v = &self.input.vias[kind as usize];
+                let need = |layer: u32| -> Option<bool> {
+                    let list = ends.get(&(layer, at))?;
+                    let first = list[0];
+                    (list.len() == 1).then_some(first.0)
+                };
+                let wants: Vec<(u32, bool)> = [v.lower, v.upper]
+                    .into_iter()
+                    .filter_map(|l| need(l).map(|d| (l, d)))
+                    .collect();
+                if wants
+                    .iter()
+                    .all(|&(l, d)| self.pad_along(kind as usize, l, d))
+                {
+                    continue;
+                }
+                let pair = self
+                    .graph
+                    .pairs
+                    .iter()
+                    .find(|p| p.kinds.contains(&(kind as usize)))
+                    .map(|p| p.kinds.clone())
+                    .unwrap_or_default();
+                for k in pair {
+                    if k == kind as usize || !wants.iter().all(|&(l, d)| self.pad_along(k, l, d)) {
+                        continue;
+                    }
+                    if self.spatial.via_clear(k, at, net)? {
+                        for s in &self.input.vias[k].shapes {
+                            route.shapes.push(self.spatial.add_routed(Blockage {
+                                layer: s.layer,
+                                rect: shifted(s.rect, at)?,
+                                net: Some(net),
+                            })?);
+                        }
+                        route.edges.insert(key, k as u32);
+                        changed += 1;
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(changed)
+    }
+
     fn edge_rect(&self, layer: u32, a: [i64; 2], b: [i64; 2], net: u32) -> Result<Rect> {
         wire_rect(
             &Wire {
@@ -1345,6 +1435,12 @@ impl<'a> Router<'a> {
         let mut out = NetRoute::default();
         let root = plans[&terminals[0].pin].top;
         let mut tree: HashSet<u32> = HashSet::from([root]);
+        // Tree nodes with an incident via: a path may not join them with
+        // another via through a layer whose single pads are below AREA.
+        let mut via_nodes: HashSet<u32> = HashSet::new();
+        if plans[&terminals[0].pin].top_via {
+            via_nodes.insert(root);
+        }
         let mut victims_all: BTreeSet<u32> = BTreeSet::new();
         let via_cost = self.plan.via_cost;
         let wrong = self.plan.wrong_way_factor;
@@ -1401,18 +1497,43 @@ impl<'a> Router<'a> {
                 let layer = self.graph.layers[l].layer;
                 let p = self.graph.xy(l, t_, s_);
                 self.graph.neighbors(id, &mut nbuf);
-                let arrived_via = if id == start {
-                    start_via
-                } else {
-                    self.via_kind[id as usize] != WIRE
+                // On a layer whose single via pads are below AREA, a via may
+                // leave only after a wire run of at least AREA / width since
+                // the via that entered the layer (no pad-only islands).
+                let no_stack = !self.stack_ok[layer as usize] && {
+                    let need = self.min_run[layer as usize];
+                    let mut run = 0u64;
+                    let mut cur = id;
+                    let mut steps = 0usize;
+                    loop {
+                        if cur == start {
+                            break start_via && run < need;
+                        }
+                        if self.via_kind[cur as usize] != WIRE {
+                            break run < need;
+                        }
+                        let prev = self.parent[cur as usize];
+                        run += distance(self.graph.point(cur).1, self.graph.point(prev).1)?;
+                        cur = prev;
+                        steps += 1;
+                        if run >= need || steps > 64 {
+                            break false;
+                        }
+                    }
                 };
-                let no_stack = arrived_via && !self.stack_ok[layer as usize];
                 for &(next, mv) in nbuf.iter() {
                     if no_stack && matches!(mv, Move::Via(_)) {
                         continue;
                     }
                     let (nl, q) = self.graph.point(next);
-                    if self.gmark[self.cells.of(q) as usize] != self.gepoch && !tree.contains(&next)
+                    let joins = tree.contains(&next);
+                    if self.gmark[self.cells.of(q) as usize] != self.gepoch && !joins {
+                        continue;
+                    }
+                    if joins
+                        && matches!(mv, Move::Via(_))
+                        && !self.stack_ok[nl as usize]
+                        && via_nodes.contains(&next)
                     {
                         continue;
                     }
@@ -1428,7 +1549,14 @@ impl<'a> Router<'a> {
                     }
                     let (kind, extra) = match mv {
                         Move::Via(pi) => {
-                            let kinds = self.graph.pairs[pi].kinds.clone();
+                            // A wire that ends here on this layer wants the
+                            // pad elongated along it (end-of-line enclosure).
+                            let mut kinds = self.graph.pairs[pi].kinds.clone();
+                            if id != start && self.via_kind[id as usize] == WIRE {
+                                let prev = self.graph.point(self.parent[id as usize]).1;
+                                let vertical = prev[0] == p[0];
+                                kinds.sort_by_key(|k| !self.pad_along(*k, layer, vertical));
+                            }
                             if soft {
                                 let mut best: Option<(u64, usize)> = None;
                                 for k in kinds {
@@ -1504,7 +1632,6 @@ impl<'a> Router<'a> {
                             }
                         }
                     };
-                    let _ = nl;
                     let nc = base.saturating_add(extra);
                     if self.tag[next as usize] == epoch && self.cost[next as usize] <= nc {
                         continue;
@@ -1535,6 +1662,10 @@ impl<'a> Router<'a> {
                     return Err(budget("routing trace limit"));
                 }
             }
+            // Collinear new wire edges of one track line become one shape.
+            type Line = (u32, bool, i64);
+            type Spans = (Vec<(i64, i64)>, Vec<u32>);
+            let mut lines: BTreeMap<Line, Spans> = BTreeMap::new();
             for &(a, b, kind) in &path {
                 let (la, pa) = self.graph.point(a);
                 let (lb, pb) = self.graph.point(b);
@@ -1546,21 +1677,18 @@ impl<'a> Router<'a> {
                 tree.insert(a);
                 tree.insert(b);
                 if la == lb {
-                    let rect = self.edge_rect(la, pa, pb, net)?;
-                    if soft
-                        && let Soft::Clear { victims, .. } =
-                            self.spatial.probe_soft(la, rect, net)?
-                        && !victims.is_empty()
-                    {
-                        victims_all.extend(victims);
-                        self.history[b as usize] = self.history[b as usize].saturating_add(1);
-                    }
-                    out.shapes.push(self.spatial.add_routed(Blockage {
-                        layer: la,
-                        rect,
-                        net: Some(net),
-                    })?);
+                    let vertical = pa[0] == pb[0];
+                    let (cross, lo, hi) = if vertical {
+                        (pa[0], pa[1].min(pb[1]), pa[1].max(pb[1]))
+                    } else {
+                        (pa[1], pa[0].min(pb[0]), pa[0].max(pb[0]))
+                    };
+                    let e = lines.entry((la, vertical, cross)).or_default();
+                    e.0.push((lo, hi));
+                    e.1.push(b);
                 } else {
+                    via_nodes.insert(a);
+                    via_nodes.insert(b);
                     if soft
                         && let Soft::Clear { victims, .. } =
                             self.spatial.via_probe_soft(kind as usize, pa, net)?
@@ -1578,7 +1706,43 @@ impl<'a> Router<'a> {
                     }
                 }
             }
+            for ((layer, vertical, cross), (mut spans, nodes)) in lines {
+                spans.sort_unstable();
+                let mut merged: Vec<(i64, i64)> = Vec::with_capacity(spans.len());
+                for (lo, hi) in spans {
+                    match merged.last_mut() {
+                        Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+                        _ => merged.push((lo, hi)),
+                    }
+                }
+                for (lo, hi) in merged {
+                    let (pa, pb) = if vertical {
+                        ([cross, lo], [cross, hi])
+                    } else {
+                        ([lo, cross], [hi, cross])
+                    };
+                    let rect = self.edge_rect(layer, pa, pb, net)?;
+                    if soft
+                        && let Soft::Clear { victims, .. } =
+                            self.spatial.probe_soft(layer, rect, net)?
+                        && !victims.is_empty()
+                    {
+                        victims_all.extend(victims);
+                        for &n in &nodes {
+                            self.history[n as usize] = self.history[n as usize].saturating_add(1);
+                        }
+                    }
+                    out.shapes.push(self.spatial.add_routed(Blockage {
+                        layer,
+                        rect,
+                        net: Some(net),
+                    })?);
+                }
+            }
             tree.insert(start);
+            if start_via {
+                via_nodes.insert(start);
+            }
         }
         victims_all.remove(&net);
         Ok(Outcome::Routed(out, victims_all.into_iter().collect()))
@@ -1608,6 +1772,18 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         .len()
         .saturating_add(input.terminals.len().saturating_mul(16));
     let estimate = memory_estimate(graph.len, cells.len(), shapes_estimate);
+    trace(
+        "estimate",
+        t0,
+        format_args!(
+            "nodes {} gcells {} shapes {} bytes {} (cap {} MiB)",
+            graph.len,
+            cells.len(),
+            shapes_estimate,
+            estimate,
+            plan.memory_mib
+        ),
+    );
     if estimate > plan.memory_mib.saturating_mul(1 << 20) {
         return Err(budget(&format!(
             "track router memory estimate {} MiB exceeds {} MiB",
@@ -1656,11 +1832,15 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         gmark: vec![0; gl],
         gepoch: 0,
         stack_ok: vec![true; input.layers.len()],
+        min_run: vec![0; input.layers.len()],
     };
     for (i, l) in input.layers.iter().enumerate() {
         let Some(min) = l.min_area else {
             continue;
         };
+        r.min_run[i] = u64::try_from(min)
+            .unwrap_or(0)
+            .div_ceil(l.width.max(1) as u64);
         r.stack_ok[i] = input.vias.iter().all(|v| {
             v.shapes.iter().filter(|s| s.layer == i as u32).all(|s| {
                 i128::from(s.rect.ux - s.rect.lx) * i128::from(s.rect.uy - s.rect.ly)
@@ -1814,6 +1994,8 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 r.expansions
             ),
         );
+        let oriented = r.orient_vias(&mut routed)?;
+        trace("orient", t0, format_args!("vias re-picked {oriented}"));
         let mut out = assemble(&r, &groups, &plans, &routed, input, limits, &via_layers)?;
         let (work, remaining) = crate::routing::cleanup_report(input, &mut out, limits)?;
         trace(
@@ -1934,4 +2116,293 @@ fn assemble(
             wire_length_dbu: 0,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::routing::{LayerRect, RouteLayer, RouteVia, route_cpu_ref};
+
+    fn rect(lx: i64, ly: i64, ux: i64, uy: i64) -> Rect {
+        Rect { lx, ly, ux, uy }
+    }
+    fn layer(name: &str, vertical: Option<bool>) -> RouteLayer {
+        RouteLayer {
+            name: name.into(),
+            width: 20,
+            spacing: 20,
+            vertical,
+            min_area: None,
+            min_step: None,
+        }
+    }
+    fn via(name: &str, lower: u32, cut: u32, upper: u32) -> RouteVia {
+        let pad = rect(-10, -10, 10, 10);
+        RouteVia {
+            name: name.into(),
+            lower,
+            upper,
+            shapes: vec![
+                LayerRect {
+                    layer: lower,
+                    rect: pad,
+                },
+                LayerRect {
+                    layer: cut,
+                    rect: rect(-5, -5, 5, 5),
+                },
+                LayerRect {
+                    layer: upper,
+                    rect: pad,
+                },
+            ],
+        }
+    }
+    fn plan() -> TrackPlan {
+        TrackPlan {
+            tracks: vec![Some((40, 20)), Some((40, 20)), Some((40, 20)), None, None],
+            gcell: 200,
+            global_iterations: 10,
+            capacity_percent: 80,
+            guide_margin: 1,
+            expand_margin: 4,
+            max_ripups_per_net: 8,
+            max_repair_rounds: 1000,
+            via_cost: 80,
+            wrong_way_factor: 4,
+            memory_mib: 64,
+        }
+    }
+    fn terminal(pin: u32, net: u32, driver: bool, r: Rect) -> Terminal {
+        Terminal {
+            pin,
+            net,
+            driver,
+            shapes: vec![LayerRect { layer: 0, rect: r }],
+            class: None,
+        }
+    }
+    /// M1 (H) / M2 (V) / M3 (H) on a 40-DBU track pitch, pins on M1 tracks.
+    fn input(terminals: Vec<Terminal>, obstacles: Vec<Blockage>) -> RouteInput {
+        RouteInput {
+            die: rect(0, 0, 1000, 1000),
+            grid: 5,
+            step: 40,
+            access_layer: 1,
+            layers: vec![
+                layer("M1", Some(false)),
+                layer("M2", Some(true)),
+                layer("M3", Some(false)),
+                layer("V1", None),
+                layer("V2", None),
+            ],
+            vias: vec![via("V12", 0, 3, 1), via("V23", 1, 4, 2)],
+            obstacles,
+            terminals,
+            rules: true,
+            access_classes: Vec::new(),
+            tracks: Some(plan()),
+        }
+    }
+    fn limits() -> RouteLimits {
+        RouteLimits::default()
+    }
+
+    #[test]
+    fn track_graph_nodes_follow_pitch_and_offset() {
+        let i = input(Vec::new(), Vec::new());
+        let g = Graph::new(&i, i.tracks.as_ref().unwrap(), &limits()).unwrap();
+        // 25 tracks per layer (20..980 step 40), 25 stops each.
+        assert_eq!(g.len, 3 * 25 * 25);
+        assert_eq!(g.layers[0].tracks.first(), Some(&20));
+        assert_eq!(g.layers[1].stops, g.layers[0].tracks);
+        let id = g.find(1, [100, 220]).unwrap();
+        assert_eq!(g.point(id), (1, [100, 220]));
+        let mut n = Vec::new();
+        g.neighbors(id, &mut n);
+        // Two along-track, two wrong-way, via down and via up.
+        assert_eq!(n.len(), 6);
+        assert_eq!(graph_nodes(&i, &limits()).unwrap(), g.len);
+    }
+
+    #[test]
+    fn routes_several_nets_validates_and_is_deterministic() {
+        let mut t = Vec::new();
+        // Three nets crossing each other between the die corners.
+        let pins = [
+            ((100, 100), (900, 900)),
+            ((100, 900), (900, 100)),
+            ((500, 100), (500, 900)),
+        ];
+        for (n, (a, b)) in pins.iter().enumerate() {
+            let n = n as u32;
+            t.push(terminal(
+                2 * n,
+                n,
+                true,
+                rect(a.0 - 10, a.1 - 10, a.0 + 10, a.1 + 10),
+            ));
+            t.push(terminal(
+                2 * n + 1,
+                n,
+                false,
+                rect(b.0 - 10, b.1 - 10, b.0 + 10, b.1 + 10),
+            ));
+        }
+        let i = input(t, Vec::new());
+        let a = route_cpu_ref(&i, &limits()).unwrap();
+        let b = route_cpu_ref(&i, &limits()).unwrap();
+        assert_eq!(a.wires, b.wires);
+        assert_eq!(a.vias, b.vias);
+        assert_eq!(a.nets, vec![0, 1, 2]);
+        crate::routing::validate(&i, &a, &limits()).unwrap();
+        // Output wires are runs: no same-net collinear pair overlaps.
+        for (k, w) in a.wires.iter().enumerate() {
+            for v in &a.wires[k + 1..] {
+                if w.net == v.net && w.layer == v.layer {
+                    let collinear_x = w.start[0] == w.end[0]
+                        && v.start[0] == v.end[0]
+                        && w.start[0] == v.start[0];
+                    let collinear_y = w.start[1] == w.end[1]
+                        && v.start[1] == v.end[1]
+                        && w.start[1] == v.start[1];
+                    if collinear_x {
+                        let (a0, a1) = (w.start[1].min(w.end[1]), w.start[1].max(w.end[1]));
+                        let (b0, b1) = (v.start[1].min(v.end[1]), v.start[1].max(v.end[1]));
+                        assert!(a1 <= b0 || b1 <= a0, "{w:?} overlaps {v:?}");
+                    }
+                    if collinear_y {
+                        let (a0, a1) = (w.start[0].min(w.end[0]), w.start[0].max(w.end[0]));
+                        let (b0, b1) = (v.start[0].min(v.end[0]), v.start[0].max(v.end[0]));
+                        assert!(a1 <= b0 || b1 <= a0, "{w:?} overlaps {v:?}");
+                    }
+                }
+            }
+        }
+        // Removing a via disconnects a net: validate rejects it.
+        let mut bad = a.clone();
+        bad.vias.pop();
+        assert!(crate::routing::validate(&i, &bad, &limits()).is_err());
+    }
+
+    #[test]
+    fn blocked_corridor_forces_a_detour_or_fails_explicitly() {
+        // A full-height M2 and M3 wall with a single gap on M1 track 500.
+        let mut obstacles = Vec::new();
+        for l in [0u32, 1, 2] {
+            obstacles.push(Blockage {
+                layer: l,
+                rect: rect(480, 0, 520, 470),
+                net: None,
+            });
+            obstacles.push(Blockage {
+                layer: l,
+                rect: rect(480, 530, 520, 1000),
+                net: None,
+            });
+        }
+        let t = vec![
+            terminal(0, 0, true, rect(90, 490, 110, 510)),
+            terminal(1, 0, false, rect(890, 490, 910, 510)),
+        ];
+        let i = input(t, obstacles.clone());
+        let r = route_cpu_ref(&i, &limits()).unwrap();
+        crate::routing::validate(&i, &r, &limits()).unwrap();
+        // Close the gap: no path, a structured NO_ROUTE, never a panic.
+        let mut closed = obstacles;
+        for l in [0u32, 1, 2] {
+            closed.push(Blockage {
+                layer: l,
+                rect: rect(480, 460, 520, 540),
+                net: None,
+            });
+        }
+        let t = vec![
+            terminal(0, 0, true, rect(90, 490, 110, 510)),
+            terminal(1, 0, false, rect(890, 490, 910, 510)),
+        ];
+        let err = route_cpu_ref(&input(t, closed), &limits()).unwrap_err();
+        assert!(err.to_string().contains("NO_ROUTE"), "{err}");
+    }
+
+    #[test]
+    fn plan_budgets_and_memory_estimate_are_enforced() {
+        let t = vec![
+            terminal(0, 0, true, rect(90, 90, 110, 110)),
+            terminal(1, 0, false, rect(890, 890, 910, 910)),
+        ];
+        let mut i = input(t, Vec::new());
+        let tight = RouteLimits {
+            max_grid_nodes: 100,
+            ..RouteLimits::default()
+        };
+        assert!(matches!(
+            route_cpu_ref(&i, &tight),
+            Err(crate::Error::Budget(_))
+        ));
+        let few = RouteLimits {
+            max_search_expansions: 1,
+            ..RouteLimits::default()
+        };
+        assert!(matches!(
+            route_cpu_ref(&i, &few),
+            Err(crate::Error::Budget(_))
+        ));
+        // Above the lattice defaults is fine for the track router, above the
+        // absolute ceiling is not.
+        let raised = RouteLimits {
+            max_grid_nodes: 10_000_000,
+            ..RouteLimits::default()
+        };
+        route_cpu_ref(&i, &raised).unwrap();
+        let absurd = RouteLimits {
+            max_grid_nodes: usize::MAX,
+            ..RouteLimits::default()
+        };
+        assert!(route_cpu_ref(&i, &absurd).is_err());
+        assert!(memory_estimate(1_000_000, 10_000, 100_000) > 24_000_000);
+        if let Some(p) = i.tracks.as_mut() {
+            p.capacity_percent = 0;
+        }
+        assert!(route_cpu_ref(&i, &limits()).is_err());
+        i.tracks.as_mut().unwrap().capacity_percent = 80;
+        i.tracks.as_mut().unwrap().tracks[0] = Some((43, 20));
+        assert!(route_cpu_ref(&i, &limits()).is_err(), "off-grid pitch");
+        i.tracks.as_mut().unwrap().tracks[0] = Some((40, 20));
+        i.rules = false;
+        assert!(
+            route_cpu_ref(&i, &limits()).is_err(),
+            "track mode needs rules"
+        );
+    }
+
+    #[test]
+    fn soft_probe_reports_routed_victims_but_fixed_shapes_block() {
+        let i = input(Vec::new(), Vec::new());
+        let l = limits();
+        let mut s = Spatial::new(&i, &l).unwrap();
+        let routed = s
+            .add_routed(Blockage {
+                layer: 1,
+                rect: rect(100, 100, 120, 300),
+                net: Some(7),
+            })
+            .unwrap();
+        s.add_fixed(Blockage {
+            layer: 1,
+            rect: rect(400, 100, 420, 300),
+            net: Some(8),
+        })
+        .unwrap();
+        let probe = |s: &mut Spatial<'_>, r: Rect| match s.probe_soft(1, r, 1).unwrap() {
+            Soft::Blocked => None,
+            Soft::Clear { victims, .. } => Some(victims),
+        };
+        assert_eq!(probe(&mut s, rect(100, 200, 200, 220)), Some(vec![7]));
+        assert_eq!(probe(&mut s, rect(380, 200, 400, 220)), None);
+        assert_eq!(probe(&mut s, rect(600, 200, 620, 220)), Some(vec![]));
+        s.remove(routed);
+        assert_eq!(probe(&mut s, rect(100, 200, 200, 220)), Some(vec![]));
+        assert!(s.clear(1, rect(100, 200, 200, 220), 1).unwrap());
+    }
 }

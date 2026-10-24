@@ -927,6 +927,10 @@ pub(super) fn link(
                     ));
                 }
                 None
+            } else if expr.is_none() && spec.direction == Some(Direction::Output) {
+                // An omitted output pin is unconnected (e.g. the unused output
+                // of a two-output tie cell); omitted inputs stay an error.
+                None
             } else {
                 let expr = expr.ok_or_else(|| {
                     invalid(format!(

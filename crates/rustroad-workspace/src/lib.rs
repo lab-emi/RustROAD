@@ -21,7 +21,10 @@ pub mod routing;
 pub mod ties;
 use rustroad_core::connectivity::{ConnectedDesign, ConnectivityLimits, PinOwner};
 
-pub const MAX_METADATA_BYTES: u64 = 16 * 1024 * 1024;
+/// design.json cap (also bounds the schema-5 mirrors). 64 MiB holds the
+/// netlist, connectivity and filler records of ~25k-instance blocks; route
+/// records of schema 6 live in routes.rbin (`routing::MAX_ROUTE_TABLE_BYTES`).
+pub const MAX_METADATA_BYTES: u64 = 64 * 1024 * 1024;
 const RECORD_BYTES: usize = 40;
 const MAX_ORPHAN_SLOTS: u64 = 128;
 

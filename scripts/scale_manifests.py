@@ -43,6 +43,16 @@ DESIGNS = {
                   description="Dense six-register fixture: literal mapped netlists per PDK (tap-release fixture)."),
     "pipeline_track": dict(top="lane_smoke", rtl_paths=["fixtures/flow/pipeline.v"], clock="clk",
                            description="fixtures/flow/pipeline.v through the scale flow (track router)."),
+    # Stretch designs.
+    "serv": dict(top="serv_rf_top", clock="clk", stretch=True,
+                 rtl=[f"serv/serv_{n}.v" for n in (
+                     "aligner", "alu", "bufreg", "bufreg2", "compdec", "csr", "ctrl", "debug", "decode",
+                     "immdec", "mem_if", "rf_if", "rf_ram", "rf_ram_if", "rf_top", "state", "synth_wrapper",
+                     "top")],
+                 description="SERV bit-serial RV32I core with its register file (serv_rf_top, upstream "
+                             "f200eb2, ISC); stretch."),
+    "rv_core": dict(top="rv_core", rtl=["rv_core/rv_pkg.sv", "rv_core/rv_core.sv"], clock="clk_i",
+                    stretch=True, description="Single-cycle RV32I-subset core (RustSys fixture); stretch."),
 }
 RECIPE = dict(utilization=0.5, aspect=1.0, margin_um=10.0, command="rustroad floorplan")
 CORNERS = {
@@ -124,6 +134,7 @@ def build(name: str, spec: dict, args) -> dict:
     if not tmpl.exists():
         tmpl.write_text(IO_TEMPLATE)
     pdks = {}
+    unavailable = {}
     policy = json.loads((ROOT / "fixtures/flow/cell-policy.json").read_text())
     for tag in ("sky130", "gf180"):
         p = pdk(tag)
@@ -147,13 +158,19 @@ def build(name: str, spec: dict, args) -> dict:
             for f in (floor, phys):
                 if f.exists():
                     f.unlink()
-            subprocess.run([str(args.rustroad), "floorplan", "--tech-lef", p["technology_lef"]["path"],
-                            "--cell-lef", p["cell_lef"]["path"], "--netlist", str(netlist),
-                            "--physical-config", str(ROOT / profile), "--routing-config", str(ROOT / routing),
-                            "--site", SITES[tag], "--utilization", str(RECIPE["utilization"]),
-                            "--aspect", str(RECIPE["aspect"]), "--margin-um", str(RECIPE["margin_um"]), *clock,
-                            "--out-floorplan", str(floor), "--out-physical-config", str(phys)],
-                           check=True, capture_output=True)
+            res = subprocess.run([str(args.rustroad), "floorplan", "--tech-lef", p["technology_lef"]["path"],
+                                  "--cell-lef", p["cell_lef"]["path"], "--netlist", str(netlist),
+                                  "--physical-config", str(ROOT / profile), "--routing-config",
+                                  str(ROOT / routing), "--site", SITES[tag], "--utilization",
+                                  str(RECIPE["utilization"]), "--aspect", str(RECIPE["aspect"]),
+                                  "--margin-um", str(RECIPE["margin_um"]), *clock,
+                                  "--out-floorplan", str(floor), "--out-physical-config", str(phys)],
+                                 capture_output=True, text=True)
+            if res.returncode != 0:
+                if not spec.get("stretch"):
+                    raise RuntimeError(f"{name} {tag}: floorplan failed: {res.stdout[-500:]}")
+                unavailable[tag] = json.loads(res.stdout or "{}").get("message", res.stderr[-300:])
+                continue
         physical = f"fixtures/designs/{name}/{tag}-physical.json"
         e = dict(floorplan=entry(f"fixtures/designs/{name}/{tag}-floorplan.json"),
                  physical_config=entry(physical), physical_profile=entry(profile),
@@ -176,13 +193,16 @@ def build(name: str, spec: dict, args) -> dict:
         signoff_manifest=entry("fixtures/flow/signoff-pinned.json"),
         tools=entry("fixtures/flow/local-pinned.json"),
         floorplan_recipe=RECIPE,
+        stretch=bool(spec.get("stretch")),
+        pdks_unavailable=unavailable,
         flow=dict(harness="scripts/scale_flow.py", router="track", placer="analytic"),
         pdks=pdks,
         verification=dict(cosim_vectors=4096, cosim_seed="0x5eed2026c0ffee01", rustsys_budget=10000,
                           rustsys_model_budget=10000, rustsys_sweep_max_candidates=256, yosys_equiv_seq=2),
         budgets=dict(hold_margin_ns=0.05, setup_margin_ns=0.0, hold_eco_setup_margin_ns=0.05, parity_ns=0.001,
-                     max_hold_iterations=4, process_timeout_s=600, process_memory_mib=2048, max_wall_s=3600,
-                     container_memory="4g", container_timeout_s=1800),
+                     max_hold_iterations=4, process_timeout_s=600, process_memory_mib=2048,
+                     max_wall_s=14400 if spec.get("stretch") else 3600, container_memory="4g",
+                     container_timeout_s=7200 if spec.get("stretch") else 1800),
     )
 
 
@@ -192,7 +212,7 @@ def main() -> int:
     ap.add_argument("--rustsys", type=Path, required=True)
     ap.add_argument("--design", action="append")
     args = ap.parse_args()
-    for name in args.design or list(DESIGNS):
+    for name in args.design or [d for d in DESIGNS if not DESIGNS[d].get("stretch")]:
         m = build(name, DESIGNS[name], args)
         (ROOT / "fixtures/designs" / f"{name}.json").write_text(json.dumps(m, indent=2) + "\n")
         print(name, "written")

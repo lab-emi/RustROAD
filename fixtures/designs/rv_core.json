@@ -1,0 +1,160 @@
+{
+  "schema": "rustroad.design.v1",
+  "name": "rv_core",
+  "description": "Single-cycle RV32I-subset core (RustSys fixture); stretch.",
+  "top": "rv_core",
+  "rtl": [
+    {
+      "path": "fixtures/designs/rtl/rv_core/rv_pkg.sv",
+      "sha256": "b7a76ec4ea37389eb80bf425af58c667a413acf9c78f902a2b4e9287e730afa7"
+    },
+    {
+      "path": "fixtures/designs/rtl/rv_core/rv_core.sv",
+      "sha256": "74568e50a2faa77591fa6449e85f016cd85e4199ef52a5b63119db617514e037"
+    }
+  ],
+  "clock": {
+    "port": "clk_i",
+    "name": "core"
+  },
+  "sdc": {
+    "clock": {
+      "path": "fixtures/designs/rv_core/cts.sdc",
+      "sha256": "cc62822e182013b898af3dc5fbf8f4be6b09ea65ab637f850b1b16c3614c42df"
+    },
+    "io_template": {
+      "path": "fixtures/designs/postroute-io.sdc.tmpl",
+      "sha256": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07"
+    },
+    "note": "signoff SDC = clock SDC + io_template filled from the RTL port list; the CTS reads the clock SDC"
+  },
+  "pdk_profiles": {
+    "path": "fixtures/pdk/local-real-pdks.json",
+    "sha256": "97b3907839728d4c8370e94f4b825d791b3cc536575614b4f704dfec9f008176"
+  },
+  "cell_policy": {
+    "path": "fixtures/flow/cell-policy.json",
+    "sha256": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61"
+  },
+  "signoff_manifest": {
+    "path": "fixtures/flow/signoff-pinned.json",
+    "sha256": "446347653af195e1337997f57309fa4d8efec1c31be55b9b3a41067ea8775c24"
+  },
+  "tools": {
+    "path": "fixtures/flow/local-pinned.json",
+    "sha256": "a9f6f95052ef4a480589458985346eb7227996e60d15af84f18299b38531af06"
+  },
+  "floorplan_recipe": {
+    "utilization": 0.5,
+    "aspect": 1.0,
+    "margin_um": 10.0,
+    "command": "rustroad floorplan"
+  },
+  "stretch": true,
+  "pdks_unavailable": {
+    "gf180": "{\"code\":\"FLOORPLAN_TAP_GAP\",\"message\":\"FLOORPLAN_TAP_GAP: widest cell 48160 DBU (+ spacing 0) exceeds the tap clear gap 45920 DBU; widen tap.max_gap in the physical profile\",\"status\":\"error\"}\n"
+  },
+  "flow": {
+    "harness": "scripts/scale_flow.py",
+    "router": "track",
+    "placer": "analytic"
+  },
+  "pdks": {
+    "sky130": {
+      "floorplan": {
+        "path": "fixtures/designs/rv_core/sky130-floorplan.json",
+        "sha256": "3ff236ee2295efb74f954c21ee2eff1e58c97816b54f4165f3349c1f6486dd42"
+      },
+      "physical_config": {
+        "path": "fixtures/designs/rv_core/sky130-physical.json",
+        "sha256": "d6620d103c00f227ed8cbf653cb25998e950253cca0a7634c6344ca6e9a1a70d"
+      },
+      "physical_profile": {
+        "path": "fixtures/pdk/sky130-scale-physical.json",
+        "sha256": "060f69439095d39145138bc65f04b61a857b069a223c345858175ada5a81e24d"
+      },
+      "routing_config": {
+        "path": "fixtures/pdk/sky130-scale-routing.json",
+        "sha256": "f1420e3afbce37e77ad3ad56b939c2c7b2874f0befdb0a13df4d7e754c476051"
+      },
+      "delay_cells": {
+        "path": "fixtures/pdk/sky130-delay-cells.json",
+        "sha256": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50"
+      },
+      "gds_layer_map": {
+        "path": "fixtures/pdk/sky130-gds-map.json",
+        "sha256": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46"
+      },
+      "rc_profiles": {
+        "min": {
+          "path": "fixtures/pdk/sky130-rc-min.json",
+          "sha256": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a"
+        },
+        "nom": {
+          "path": "fixtures/pdk/sky130-rc-nom.json",
+          "sha256": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27"
+        },
+        "max": {
+          "path": "fixtures/pdk/sky130-rc-max.json",
+          "sha256": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20"
+        }
+      },
+      "corners": [
+        {
+          "name": "tt",
+          "liberty": "tt_025C_1v80",
+          "rc": "nom"
+        },
+        {
+          "name": "ss",
+          "liberty": "ss_100C_1v60",
+          "rc": "max"
+        },
+        {
+          "name": "ff",
+          "liberty": "ff_n40C_1v95",
+          "rc": "min"
+        }
+      ],
+      "frozen": {
+        "cell_gds": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "cell_lef": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "cell_policy": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "delay_cells": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "gds_layer_map": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "liberty_ff": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "liberty_ss": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "liberty_tt": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "openrcx_rules_ff": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "openrcx_rules_ss": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "openrcx_rules_tt": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "physical_config": "d6620d103c00f227ed8cbf653cb25998e950253cca0a7634c6344ca6e9a1a70d",
+        "rc_profile_ff": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+        "rc_profile_ss": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+        "rc_profile_tt": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+        "routing_profile": "f1420e3afbce37e77ad3ad56b939c2c7b2874f0befdb0a13df4d7e754c476051",
+        "technology_lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519"
+      }
+    }
+  },
+  "verification": {
+    "cosim_vectors": 4096,
+    "cosim_seed": "0x5eed2026c0ffee01",
+    "rustsys_budget": 10000,
+    "rustsys_model_budget": 10000,
+    "rustsys_sweep_max_candidates": 256,
+    "yosys_equiv_seq": 2
+  },
+  "budgets": {
+    "hold_margin_ns": 0.05,
+    "setup_margin_ns": 0.0,
+    "hold_eco_setup_margin_ns": 0.05,
+    "parity_ns": 0.001,
+    "max_hold_iterations": 4,
+    "process_timeout_s": 600,
+    "process_memory_mib": 2048,
+    "max_wall_s": 14400,
+    "container_memory": "4g",
+    "container_timeout_s": 7200
+  }
+}

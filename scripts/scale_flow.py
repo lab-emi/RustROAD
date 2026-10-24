@@ -262,20 +262,28 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str) -> dict
                    env={"RUSTROAD_ROUTE_TRACE": "1"})
         facts["route"] = {k: a.get(k) for k in ("routed_nets", "routing_segments", "routing_expansions",
                                                  "cells", "tap_cells", "filler_cells")}
-        ant = r.json(f"{label}_antenna{eco}", rr + ["check-antenna"])
+        # Rows are sorted worst first and every violated row is kept; the
+        # cap only bounds the report size for large blocks.
+        ant = r.json(f"{label}_antenna{eco}", rr + ["check-antenna", "--max-rows", "5000"])
         facts.setdefault("native_antenna", []).append(dict(
             status=ant.get("status"), violations=ant.get("violations"),
             checks=(ant.get("stats") or {}).get("checks")))
         if not ant.get("violations") or eco >= 2:
             break
-        eco += 1
-        report = run_dir / f"antenna{eco}.json"
+        report = run_dir / f"antenna{eco + 1}.json"
         report.write_text(Path(r.receipts[-1]["stdout"]).read_text())
-        fixed = run_dir / f"netlist_eco{eco}.v"
-        r.json(f"{label}_antenna_eco{eco}", [args.rustroad, "antenna-eco", "--netlist", current,
-                                             "--antenna-report", report,
-                                             "--delay-cells", resolve(spec["delay_cells"]["path"]),
-                                             "--out", fixed, "--plan-out", run_dir / f"antenna_plan{eco}.json"])
+        fixed = run_dir / f"netlist_eco{eco + 1}.v"
+        try:
+            r.json(f"{label}_antenna_eco{eco + 1}", [
+                args.rustroad, "antenna-eco", "--netlist", current, "--antenna-report", report,
+                "--delay-cells", resolve(spec["delay_cells"]["path"]), "--out", fixed,
+                "--plan-out", run_dir / f"antenna_plan{eco + 1}.json"])
+        except StepError as e:
+            # e.g. violations on clock-tree nets, which antenna-eco does not
+            # repair: keep the routed result; the foundry antenna check reports.
+            facts["antenna_eco_error"] = str(e)[:1500]
+            break
+        eco += 1
         current = fixed
     facts["antenna_eco_iterations"] = eco
     facts["final_netlist"] = str(current)
@@ -302,7 +310,7 @@ def build(r: Runner, run_dir: Path, m: dict, tag: str, args, label: str) -> dict
     return dict(outputs=outs, facts=facts, workspace=ws)
 
 
-def signoff_checks(run_dir: Path, tag: str, top: str, outs: dict) -> dict:
+def signoff_checks(run_dir: Path, tag: str, top: str, outs: dict, timeout: int = 1800) -> dict:
     ref = run_dir / "reference.gds"
     receipt = def2gds_reference.stream(outs["def"], tag, ref, ROOT / "fixtures/flow/signoff-pinned.json")
     if receipt["status"] != "passed":
@@ -311,7 +319,7 @@ def signoff_checks(run_dir: Path, tag: str, top: str, outs: dict) -> dict:
                     reference=receipt)
     ns = argparse.Namespace(gds=outs["gds"], top=top, pdk=tag, out=run_dir / "signoff", netlist=outs["powered"],
                             against=ref, against_top=top, manifest=ROOT / "fixtures/flow/signoff-pinned.json",
-                            threads=4, memory="4g", timeout=1800, plant=None)
+                            threads=4, memory="4g", timeout=timeout, plant=None)
     summary = signoff_harness.run_checks(ns, list(signoff_harness.CHECKS))
     (run_dir / "signoff").mkdir(exist_ok=True)
     (run_dir / "signoff" / "signoff.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -371,7 +379,8 @@ def flow(m: dict, tag: str, args, out: Path) -> dict:
                                       "regenerated floorplan/physical config differ from the tracked files")
     st["route"] = item("passed", **facts["route"])
     if not args.no_signoff:
-        s = signoff_checks(root / "a", tag, m["top"], a["outputs"])
+        s = signoff_checks(root / "a", tag, m["top"], a["outputs"],
+                           int(m["budgets"].get("container_timeout_s", 1800)))
         st.update(s["statuses"])
         result["signoff"] = {k: v for k, v in s.items() if k != "statuses"}
     else:

@@ -38,8 +38,8 @@
   "limits": {
     "max_axis": 1048576,
     "max_grid_nodes": 8000000,
-    "max_obstacles": 2000000,
-    "max_bin_entries": 16000000,
+    "max_obstacles": 4000000,
+    "max_bin_entries": 32000000,
     "max_segments": 2000000,
     "max_expansions": 400000000,
     "max_search_expansions": 4000000,

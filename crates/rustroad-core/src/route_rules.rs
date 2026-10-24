@@ -781,3 +781,54 @@ mod tests {
         assert!(local_ok(inside, &[leg, bar], 230, &mut w, 10_000).unwrap());
     }
 }
+
+#[cfg(test)]
+mod scale_tests {
+    use super::*;
+    fn r(lx: i64, ly: i64, ux: i64, uy: i64) -> Rect {
+        Rect { lx, ly, ux, uy }
+    }
+    #[test]
+    fn enclosed_holes_are_found_and_open_regions_are_not() {
+        let mut w = 0;
+        // A ring of four rectangles around a 20 x 20 hole.
+        let ring = [
+            r(0, 0, 60, 20),
+            r(0, 40, 60, 60),
+            r(0, 20, 20, 40),
+            r(40, 20, 60, 40),
+        ];
+        assert_eq!(
+            holes(&ring, &mut w, 10_000).unwrap(),
+            vec![r(20, 20, 40, 40)]
+        );
+        // A U shape has no hole.
+        assert!(holes(&ring[..3], &mut w, 10_000).unwrap().is_empty());
+        assert!(holes(&ring, &mut 0, 1).is_err());
+    }
+    #[test]
+    fn robust_corner_bridge_overlaps_both_shapes_by_a_width() {
+        // Pin corner (2000, 259260) and via pad corner (2420, 259560).
+        let pin = r(0, 257260, 2000, 259260);
+        let pad = r(2420, 259560, 3180, 260120);
+        let f = fill_for_robust(pin, pad, 560, 10);
+        let ov = |a: Rect, b: Rect| {
+            (
+                a.ux.min(b.ux) - a.lx.max(b.lx),
+                a.uy.min(b.uy) - a.ly.max(b.ly),
+            )
+        };
+        let (x, y) = ov(f, pin);
+        assert!(x >= 560 && y >= 560, "{f:?}");
+        let (x, y) = ov(f, pad);
+        assert!(x >= 560 && y >= 560, "{f:?}");
+        // The legacy corner bridge overlaps by less than a width (a neck).
+        let g = fill_for(pin, pad, 560, 10);
+        let (x, _) = ov(g, pin);
+        assert!(x < 560);
+        // Overlapping projections keep the legacy fill.
+        let a = r(0, 0, 100, 20);
+        let b = r(10, 30, 90, 50);
+        assert_eq!(fill_for_robust(a, b, 20, 5), fill_for(a, b, 20, 5));
+    }
+}

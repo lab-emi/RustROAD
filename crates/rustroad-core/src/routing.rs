@@ -1658,6 +1658,15 @@ pub(crate) fn cleanup_report(
             break;
         }
         let mut changed = false;
+        let cache = if input.tracks.is_some()
+            && violations
+                .iter()
+                .any(|v| matches!(v, Violation::Area { .. }))
+        {
+            Some(route_rules::collect(input, out)?)
+        } else {
+            None
+        };
         for v in &violations {
             match v {
                 Violation::Spacing { net, layer, a, b } => {
@@ -1695,6 +1704,7 @@ pub(crate) fn cleanup_report(
                         shapes,
                         limits,
                         &mut work,
+                        cache.as_ref(),
                     )? {
                         spatial.add_wire(&w)?;
                         out.wires.push(w);
@@ -1750,6 +1760,7 @@ fn area_stub(
     shapes: &[Rect],
     limits: &RouteLimits,
     work: &mut usize,
+    cache: Option<&BTreeMap<(u32, u32), Vec<route_rules::Shape>>>,
 ) -> Result<Option<Wire>> {
     let rule = &input.layers[layer as usize];
     let Some(min) = rule.min_area else {
@@ -1780,12 +1791,20 @@ fn area_stub(
         .filter(|p| inside(*p))
         .collect();
     anchors.extend(ends.into_iter().filter(|p| !vias.contains(p)));
-    let others: Vec<Rect> = route_rules::collect(input, out)?
-        .remove(&(net, layer))
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| s.rect)
-        .collect();
+    let others: Vec<Rect> = match cache {
+        // Track mode: one same-net collection per repair round (shapes of
+        // this round's own patches are re-checked in the next round).
+        Some(groups) => groups
+            .get(&(net, layer))
+            .map(|g| g.iter().map(|s| s.rect).collect())
+            .unwrap_or_default(),
+        None => route_rules::collect(input, out)?
+            .remove(&(net, layer))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| s.rect)
+            .collect(),
+    };
     let span = shapes
         .iter()
         .map(|s| (s.ux - s.lx).max(s.uy - s.ly))

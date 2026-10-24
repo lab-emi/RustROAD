@@ -1212,13 +1212,45 @@ pub(super) fn export_verilog(
     let mut netlist = bundle.netlist.clone();
     if include_power {
         fold_internal_aliases(&mut netlist);
-        // An explicitly open connection `.PIN()` (e.g. the unused output of a
-        // two-output tie cell) is the same as an omitted one; LVS readers
-        // take omitted pins only.
-        for inst in &mut netlist.instances {
-            inst.connections
-                .retain(|c| !matches!(c.signal, verilog::Expr::Unconnected));
+        // An open signal pin (`.PIN()` or omitted, e.g. the unused output of
+        // a two-output tie cell) gets its own one-pin net `rr_open_N`: the
+        // same connectivity, in the form every LVS reader takes.
+        let mut used: HashSet<String> = netlist
+            .ports
+            .iter()
+            .map(|p| p.name.clone())
+            .chain(netlist.wires.iter().map(|w| w.name.clone()))
+            .collect();
+        let mut next = 0usize;
+        let mut opened = Vec::new();
+        for (i, inst) in netlist.instances.iter_mut().enumerate() {
+            let m = &bundle.connectivity.masters[bundle.connectivity.instance_masters[i] as usize];
+            for pin in m.pins.iter().filter(|p| !p.use_.is_supply()) {
+                let open = match inst.connections.iter().position(|c| c.pin == pin.name) {
+                    Some(k) => matches!(inst.connections[k].signal, verilog::Expr::Unconnected)
+                        .then_some(k),
+                    None => {
+                        inst.connections.push(verilog::Connection {
+                            pin: pin.name.clone(),
+                            signal: verilog::Expr::Unconnected,
+                        });
+                        Some(inst.connections.len() - 1)
+                    }
+                };
+                if let Some(k) = open {
+                    let name = loop {
+                        let n = format!("rr_open_{next}");
+                        next += 1;
+                        if used.insert(n.clone()) {
+                            break n;
+                        }
+                    };
+                    inst.connections[k].signal = verilog::Expr::Ident(name.clone());
+                    opened.push(verilog::Wire { name, range: None });
+                }
+            }
         }
+        netlist.wires.extend(opened);
         if let Some(cfg) = &bundle.config {
             for name in [&cfg.power_net, &cfg.ground_net] {
                 netlist.ports.push(verilog::Port {
