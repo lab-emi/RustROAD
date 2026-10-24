@@ -328,6 +328,49 @@ PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 2 2.1 ; END END
 }
 
 #[test]
+fn antenna_diode_stays_a_passive_load_on_the_clock_root() {
+    let diode = "MACRO DIO\nCLASS CORE ANTENNACELL ; ORIGIN 0 0 ; SIZE 1 BY 2 ; SITE s ; SYMMETRY X Y ;\n\
+PIN D DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M1 ; RECT 0.3 0.4 0.5 0.6 ; END END D\n\
+PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M1 ; RECT 0 -0.1 1 0.1 ; END END VSS\n\
+PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 1 2.1 ; END END VDD\nEND DIO\nEND LIBRARY\n";
+    let mut c = config();
+    c.clock = Some(rustroad_workspace::clock::ClockConfig {
+        port: "a".into(),
+        cell: "BUF".into(),
+        input_pin: "A".into(),
+        output_pin: "Y".into(),
+        sink_pin: "A".into(),
+        max_fanout: 2,
+        max_buffers: 10,
+        max_work: 1000,
+        level_cells: Vec::new(),
+    });
+    let f = Fixture::new(
+        "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); DIO d0(.D(a)); endmodule",
+        &c,
+    );
+    fs::write(
+        &f.sources.cell_lef,
+        library().replace("END LIBRARY\n", diode),
+    )
+    .unwrap();
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+    let s = read(&f.workspace, &limits()).unwrap();
+    let bundle = s.metadata().physical.as_ref().unwrap();
+    let report = bundle.clock_tree.as_ref().unwrap();
+    assert_eq!(report.sinks.len(), 3);
+    let d0 = bundle
+        .netlist
+        .instances
+        .iter()
+        .find(|i| i.name == "d0")
+        .unwrap();
+    assert_eq!(d0.connections[0].signal, verilog::Expr::Ident("a".into()));
+}
+
+#[test]
 fn clock_budget_failure_keeps_previous_revision() {
     let f = clock_fixture(1);
     f.import().unwrap();

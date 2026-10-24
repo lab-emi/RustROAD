@@ -168,6 +168,18 @@ fn master<'a>(
     Ok(m)
 }
 
+/// A LEF `ANTENNACELL` master with exactly one non-supply pin, an input: an
+/// antenna diode. It may stay on the clock source net as a passive load (it
+/// still counts toward the net's fanout); it is never a clock sink.
+pub(crate) fn is_passive_antenna(master: &rustroad_core::connectivity::Master) -> bool {
+    let signal: Vec<_> = master.pins.iter().filter(|p| !p.use_.is_supply()).collect();
+    master.class.as_deref().is_some_and(|c| {
+        c.split_whitespace()
+            .any(|w| w.eq_ignore_ascii_case("ANTENNACELL"))
+    }) && signal.len() == 1
+        && signal[0].direction == Some(Direction::Input)
+}
+
 pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
     let Some(report) = &bundle.clock_tree else {
         return Ok(());
@@ -281,7 +293,11 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
             if work > cfg.max_work {
                 return Err(budget("clock validation max_work"));
             }
-            let pin = &model.masters[model.instance_masters[instance] as usize].pins[terminal];
+            let master = &model.masters[model.instance_masters[instance] as usize];
+            let pin = &master.pins[terminal];
+            if depth == 0 && !buffers.contains(&instance) && is_passive_antenna(master) {
+                continue;
+            }
             if buffers.contains(&instance) {
                 if pin.name != cfg.input_pin || !seen_buffers.insert(instance) {
                     return Err(fail("clock buffer wiring error"));
@@ -380,9 +396,12 @@ pub fn synthesize_with_sdc(
         if pin.net == Some(root)
             && let PinOwner::Instance { instance, terminal } = pin.owner
         {
-            let p = &bundle.connectivity.masters
-                [bundle.connectivity.instance_masters[instance as usize] as usize]
-                .pins[terminal as usize];
+            let m = &bundle.connectivity.masters
+                [bundle.connectivity.instance_masters[instance as usize] as usize];
+            if is_passive_antenna(m) {
+                continue;
+            }
+            let p = &m.pins[terminal as usize];
             if p.name != cfg.sink_pin || p.direction != Some(Direction::Input) {
                 return Err(fail("clock root drives an unsupported non-clock pin"));
             }

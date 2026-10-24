@@ -996,3 +996,220 @@ pub fn apply_plan(netlist: &Path, plan: &Path, profile: &Path, out: &Path) -> Re
         output,
     })
 }
+
+// ----------------------------------------------------------------- antenna
+
+pub const ANTENNA_PLAN_SCHEMA: &str = "rustroad.antenna-eco-plan.v1";
+
+#[derive(Clone, Debug)]
+pub struct AntennaEcoRequest {
+    pub netlist: PathBuf,
+    pub report: PathBuf,
+    pub profile: PathBuf,
+    pub cell: Option<String>,
+    pub min_diodes: usize,
+    pub max_diodes_per_net: usize,
+    pub prefix: String,
+    pub out: PathBuf,
+    pub plan_out: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+struct AntennaReportIn {
+    schema: String,
+    status: String,
+    checks: Vec<crate::antenna::CheckRow>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct NetRepair {
+    pub net: String,
+    pub violations: usize,
+    pub worst_ratio_over_limit: f64,
+    pub diodes: usize,
+    pub estimated_worst_ratio_over_limit: f64,
+    pub instances: Vec<String>,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct AntennaPlan {
+    pub schema: &'static str,
+    pub status: &'static str,
+    pub tool: String,
+    pub netlist: Artifact,
+    pub report: Artifact,
+    pub profile: Artifact,
+    pub cell: String,
+    pub cell_gate_area_um2: f64,
+    pub cell_diff_area_um2: f64,
+    pub model: &'static str,
+    pub nets: Vec<NetRepair>,
+    pub infeasible: Vec<String>,
+    pub eco: EcoPlan,
+    pub eco_report: Option<EcoReport>,
+    pub output: Option<Artifact>,
+}
+
+/// Plan antenna diodes for every violating net of a `check-antenna` report,
+/// assuming each diode joins the violating partial net (verified afterwards
+/// by re-layout, the native check and the foundry deck).
+pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
+    if r.min_diodes == 0
+        || r.max_diodes_per_net == 0
+        || r.max_diodes_per_net > 64
+        || r.min_diodes > r.max_diodes_per_net
+    {
+        return Err(fail(
+            "INVALID_ARGUMENT",
+            "need 1 <= min_diodes <= max_diodes_per_net <= 64",
+        ));
+    }
+    if !eco::handle_name_ok(&format!("{}0", r.prefix), &EcoLimits::default()) {
+        return Err(fail(
+            "INVALID_ARGUMENT",
+            "ECO name prefix is not a shell-safe handle",
+        ));
+    }
+    if same_file(&r.netlist, &r.out) {
+        return Err(fail(
+            "OUTPUT_PATH",
+            "--out must not overwrite the input netlist",
+        ));
+    }
+    let (netlist, netlist_pin) = load_netlist(&r.netlist)?;
+    let (profile, profile_pin) = load_profile(&r.profile)?;
+    let cells = profile.eco_cells()?;
+    let (text, report_pin) = read_input(&r.report, MAX_REPORT_BYTES, "antenna_report")?;
+    let report: AntennaReportIn = serde_json::from_str(&text)?;
+    if report.schema != crate::antenna::ANTENNA_SCHEMA {
+        return Err(fail(
+            "ANTENNA_REPORT",
+            format!("schema {} unsupported", report.schema),
+        ));
+    }
+    let diode = match &r.cell {
+        Some(c) => profile.antenna_cells.iter().find(|d| &d.name == c),
+        None if profile.antenna_cells.len() == 1 => profile.antenna_cells.first(),
+        None => None,
+    }
+    .ok_or_else(|| {
+        fail(
+            "DELAY_PROFILE",
+            "choose exactly one profiled antenna cell (--cell)",
+        )
+    })?;
+    let mut by_net: BTreeMap<&str, Vec<&crate::antenna::CheckRow>> = BTreeMap::new();
+    for row in report.checks.iter().filter(|c| c.violated) {
+        by_net.entry(row.net.as_str()).or_default().push(row);
+    }
+    if report.status == "violated" && by_net.is_empty() {
+        return Err(fail(
+            "ANTENNA_REPORT",
+            "violated report lists no violated rows",
+        ));
+    }
+    let worst = |rows: &[&crate::antenna::CheckRow], k: usize| -> f64 {
+        rows.iter()
+            .map(|row| {
+                let g = row.gate_area_um2 + k as f64 * diode.lef_gate_area_um2;
+                let d = row.diff_area_um2 + k as f64 * diode.lef_diff_area_um2;
+                match row.rules.limit(d) {
+                    Some((limit, _)) => row.metal_um2 / row.rules.denominator(g, d) / limit,
+                    None => f64::INFINITY,
+                }
+            })
+            .fold(0.0, f64::max)
+    };
+    let mut seq = eco::next_sequence(&netlist, &r.prefix);
+    let mut ops = Vec::new();
+    let mut nets = Vec::new();
+    let mut infeasible = Vec::new();
+    for (net, rows) in &by_net {
+        if eco::resolve_net(&netlist, net).is_err() {
+            infeasible.push(format!(
+                "{net}: not a net of the mapped netlist (clock-tree or generated nets are not repaired here)"
+            ));
+            continue;
+        }
+        let Some(k) = (r.min_diodes..=r.max_diodes_per_net).find(|&k| worst(rows, k) <= 1.0) else {
+            infeasible.push(format!(
+                "{net}: {} diodes leave ratio/limit {:.3}",
+                r.max_diodes_per_net,
+                worst(rows, r.max_diodes_per_net)
+            ));
+            continue;
+        };
+        let mut instances = Vec::new();
+        for _ in 0..k {
+            let name = format!("{}{seq}", r.prefix);
+            seq += 1;
+            instances.push(name.clone());
+            ops.push(EcoOp::InsertDiode {
+                cell: diode.name.clone(),
+                instance: name,
+                net: net.to_string(),
+            });
+        }
+        nets.push(NetRepair {
+            net: net.to_string(),
+            violations: rows.len(),
+            worst_ratio_over_limit: worst(rows, 0),
+            diodes: k,
+            estimated_worst_ratio_over_limit: worst(rows, k),
+            instances,
+        });
+    }
+    let eco_plan = EcoPlan {
+        schema: ECO_PLAN_SCHEMA.into(),
+        module: netlist.module.clone(),
+        operations: ops,
+    };
+    let status = if !infeasible.is_empty() {
+        "infeasible"
+    } else if nets.is_empty() {
+        "clean"
+    } else {
+        "planned"
+    };
+    let mut plan = AntennaPlan {
+        schema: ANTENNA_PLAN_SCHEMA,
+        status,
+        tool: format!("rustroad {}", env!("CARGO_PKG_VERSION")),
+        netlist: netlist_pin,
+        report: artifact_of(&report_pin),
+        profile: profile_pin,
+        cell: diode.name.clone(),
+        cell_gate_area_um2: diode.lef_gate_area_um2,
+        cell_diff_area_um2: diode.lef_diff_area_um2,
+        model: "each diode adds its LEF gate and diffusion area to the violating partial net; \
+                re-layout, check-antenna and the foundry deck verify the result",
+        nets,
+        infeasible,
+        eco: eco_plan,
+        eco_report: None,
+        output: None,
+    };
+    if plan.status != "infeasible" {
+        let (edited, rep) = eco::apply(
+            &netlist,
+            &plan.eco,
+            &cells,
+            &EcoLimits::default(),
+            &VerilogLimits::default(),
+        )
+        .map_err(|e| fail("ECO_APPLY", e))?;
+        plan.output = Some(write_atomic(&r.out, &verilog_bytes(&edited)?)?);
+        plan.eco_report = Some(rep);
+    }
+    write_atomic(&r.plan_out, &serde_json::to_vec_pretty(&plan)?)?;
+    if plan.status == "infeasible" {
+        return Err(fail(
+            "ANTENNA_ECO_INFEASIBLE",
+            format!(
+                "{} (plan written to {})",
+                plan.infeasible.join("; "),
+                r.plan_out.display()
+            ),
+        ));
+    }
+    Ok(plan)
+}

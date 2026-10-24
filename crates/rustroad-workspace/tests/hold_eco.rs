@@ -380,3 +380,111 @@ fn inverting_profile_entries_are_refused() {
             .contains("DIODE rr_eco_ant_0 (.DIODE(a[1]));")
     );
 }
+
+fn antenna_report(
+    net: &str,
+    metal: f64,
+    gate: f64,
+    diff: f64,
+    limit_no_diff: Value,
+    with_diff: Value,
+    plus: Value,
+) -> Value {
+    json!({"schema": "rustroad.antenna-check.v1", "status": "violated", "checks": [{
+        "net": net, "layer": "M3", "kind": "side_area", "gates": ["g0/A"], "diffusions": [],
+        "gate_area_um2": gate, "diff_area_um2": diff, "metal_um2": metal, "denominator_um2": gate,
+        "ratio": metal / gate, "limit": 400.0, "rule": "ANTENNADIFFSIDEAREARATIO",
+        "rules": {"keyword_no_diff": "ANTENNASIDEAREARATIO", "no_diff": limit_no_diff,
+                  "keyword_with_diff": "ANTENNADIFFSIDEAREARATIO", "with_diff": with_diff,
+                  "gate_plus_diff": plus},
+        "violated": true}]})
+}
+
+#[test]
+fn antenna_eco_counts_diodes_from_the_lef_rule() {
+    use rustroad_workspace::eco::{AntennaEcoRequest, plan_antenna};
+    let d = dir();
+    let netlist = d.join("in.v");
+    fs::write(&netlist, NETLIST).unwrap();
+    let prof = write(&d, "profile.json", &default_profile());
+    let req = |report: &Path, name: &str| AntennaEcoRequest {
+        netlist: netlist.clone(),
+        report: report.to_path_buf(),
+        profile: prof.clone(),
+        cell: None,
+        min_diodes: 1,
+        max_diodes_per_net: 4,
+        prefix: "rr_eco_ant_".into(),
+        out: d.join(format!("{name}.v")),
+        plan_out: d.join(format!("{name}.json")),
+    };
+    // GF180-like: diff rule 400 with gate-plus-diff 15. 1000 um^2 over 1 um^2 gate:
+    // k diodes of 0.4 um^2 give 1000 / (1 + 6k) <= 400 at k = 1.
+    let gf = write(
+        &d,
+        "gf.json",
+        &antenna_report(
+            "a[1]",
+            1000.0,
+            1.0,
+            0.0,
+            Value::Null,
+            json!({"kind": "value", "ratio": 400.0}),
+            json!(15.0),
+        ),
+    );
+    let plan = plan_antenna(&req(&gf, "gf")).unwrap();
+    assert_eq!(plan.nets[0].diodes, 1);
+    assert!(
+        fs::read_to_string(d.join("gf.v"))
+            .unwrap()
+            .contains("DIODE rr_eco_ant_0 (.DIODE(a[1]));")
+    );
+    // Without gate-plus-diff and a scalar limit, diodes cannot help: infeasible.
+    let none = write(
+        &d,
+        "none.json",
+        &antenna_report(
+            "a[1]",
+            1000.0,
+            1.0,
+            0.0,
+            json!({"kind": "value", "ratio": 400.0}),
+            Value::Null,
+            Value::Null,
+        ),
+    );
+    let e = plan_antenna(&req(&none, "none")).unwrap_err().to_string();
+    assert!(e.contains("ANTENNA_ECO_INFEASIBLE"), "{e}");
+    // A PWL limit in diffusion area (sky130-like) needs enough diodes to raise it:
+    // ratio 3000; k = 1, 2, 3 give limits 2760, 2920, 3071 at 0.4 um^2 per diode.
+    let pwl = json!({"kind": "pwl", "points": [[0.0, 400.0], [0.0225, 2609.0], [22.5, 11600.0]]});
+    let sky = write(
+        &d,
+        "sky.json",
+        &antenna_report("n0", 1500.0, 0.5, 0.0, Value::Null, pwl, Value::Null),
+    );
+    let plan = plan_antenna(&req(&sky, "sky")).unwrap();
+    assert_eq!(plan.nets[0].diodes, 3);
+    assert!(plan.nets[0].estimated_worst_ratio_over_limit <= 1.0);
+    // Nets absent from the mapped netlist (clock-tree nets) are not repaired here.
+    let clk = write(
+        &d,
+        "clk.json",
+        &antenna_report(
+            "rr_clock_0",
+            1000.0,
+            1.0,
+            0.0,
+            Value::Null,
+            json!({"kind": "value", "ratio": 400.0}),
+            json!(15.0),
+        ),
+    );
+    assert!(
+        plan_antenna(&req(&clk, "clk"))
+            .unwrap_err()
+            .to_string()
+            .contains("not a net of the mapped netlist")
+    );
+}
