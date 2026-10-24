@@ -28,7 +28,7 @@
     },
     "period_derivation": {
       "path": "fixtures/designs/alu/clock-period.json",
-      "sha256": "b68913394a5e2bad22dcdc1fefff026e4c9f28dc9f6f2f092d1dfb0f59fdd773"
+      "sha256": "d4a7fedaac0a302c01aee44aa99903998f158ea49ea2e0831b424c326a24ddc5"
     },
     "note": "combinational: a virtual clock times the I/O; no clock port, no CTS; per-PDK period as above"
   },
@@ -56,7 +56,7 @@
   },
   "tools": {
     "path": "fixtures/flow/rtl2gds-tools.json",
-    "sha256": "bc76b72c5523e0955193946448e3e91284a79c0861f8674efd1eb64c74534fde"
+    "sha256": "66e7f6915a7b89ad601d63ca63cec08a23e2450d4c60bc1f57b8c20f3f7409e3"
   },
   "pdks": {
     "sky130": {

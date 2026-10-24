@@ -24,7 +24,7 @@
     },
     "period_derivation": {
       "path": "fixtures/designs/counter/clock-period.json",
-      "sha256": "940ff0eab97c331ef44714c26602d23aea62c9a96d537b0260ed7d34a6cf184e"
+      "sha256": "94ffbac9a9d714ed579c672f2c77ee6aeacc3713329f6463bd9cfad512466800"
     },
     "note": "signoff SDC per PDK = pdks.<tag>.sdc_clock (reference_clock with the period of the owner rule, period_derivation) + io_template filled from the RTL port list; the CTS reads the clock SDC"
   },
@@ -52,7 +52,7 @@
   },
   "tools": {
     "path": "fixtures/flow/rtl2gds-tools.json",
-    "sha256": "bc76b72c5523e0955193946448e3e91284a79c0861f8674efd1eb64c74534fde"
+    "sha256": "66e7f6915a7b89ad601d63ca63cec08a23e2450d4c60bc1f57b8c20f3f7409e3"
   },
   "pdks": {
     "sky130": {

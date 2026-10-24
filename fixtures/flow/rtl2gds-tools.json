@@ -9,13 +9,13 @@
     },
     "rusteda": {
       "path": ".work/tools/sta-gate/rusteda",
-      "sha256": "9ed84d6cec7fdf691c26c017d628f4cb3492f8f7da581f2f0cde9a93ec994dc0",
-      "provenance": "RustSTA feat/signoff-checks bdeec7e (0.4.2: one-step effective capacitance STA-REQ-0728 and driver-waveform wires STA-REQ-0729; all 96 E3 parity comparisons <= 1 ps), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS"
+      "sha256": "c39dbde459db506ab3731be75900eae93bcb71691d8e4945e05c2013f4cdd11a",
+      "provenance": "RustSTA feat/signoff-checks 26bd6eb (0.4.3: resistor loops solved on the nodal conductance system STA-REQ-0730, components without a resistor path joined to the driver STA-REQ-0731; on top of 0.4.2 bdeec7e one-step effective capacitance), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS"
     },
     "ruststa": {
       "path": ".work/tools/sta-gate/ruststa",
-      "sha256": "ebb418b83db2fcf273f5b1ed8ff2ee92b4779acc9b2843eceed6812ad23db48e",
-      "provenance": "RustSTA feat/signoff-checks bdeec7e (0.4.2: one-step effective capacitance STA-REQ-0728 and driver-waveform wires STA-REQ-0729; all 96 E3 parity comparisons <= 1 ps), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS"
+      "sha256": "472de8e8980100310005a817709a68cdda7b376d1fbd51f8ae3ad684aad08fea",
+      "provenance": "RustSTA feat/signoff-checks 26bd6eb (0.4.3: resistor loops solved on the nodal conductance system STA-REQ-0730, components without a resistor path joined to the driver STA-REQ-0731; on top of 0.4.2 bdeec7e one-step effective capacitance), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS"
     },
     "yosys": {
       "path": "/mnt/data2/cgao/git/RustSys/.work/lec-verification/tools/yosys",

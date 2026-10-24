@@ -36,8 +36,8 @@
   },
   "tools": {
    "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
-   "rusteda": "9ed84d6cec7fdf691c26c017d628f4cb3492f8f7da581f2f0cde9a93ec994dc0",
-   "ruststa": "ebb418b83db2fcf273f5b1ed8ff2ee92b4779acc9b2843eceed6812ad23db48e",
+   "rusteda": "c39dbde459db506ab3731be75900eae93bcb71691d8e4945e05c2013f4cdd11a",
+   "ruststa": "472de8e8980100310005a817709a68cdda7b376d1fbd51f8ae3ad684aad08fea",
    "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
    "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252"
   }
