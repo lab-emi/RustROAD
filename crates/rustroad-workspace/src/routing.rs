@@ -1,7 +1,7 @@
 //! Revisioned routing bridge. Geometry/search live in the independent CPU view.
 use crate::pdk::{PhysicalBundle, SourcePin};
 use crate::{Error, Result, Stage, Summary};
-use rustroad_core::connectivity::{Direction, Geometry, PinOwner};
+use rustroad_core::connectivity::{Direction, Geometry, PinOwner, PinUse};
 use rustroad_core::routing::{
     self, AccessClass, Blockage, LayerRect, RouteInput, RouteLayer, RouteLimits, RouteVia, Routes,
     Terminal,
@@ -634,15 +634,38 @@ pub(crate) fn build_input_with_owners(
     };
     let mut classes = Vec::<AccessClass>::new();
     let mut class_ids = HashMap::<(u32, bool, usize), u32>::new();
+    let cfg = bundle
+        .config
+        .as_ref()
+        .ok_or_else(|| fail("physical config absent"))?;
+    // Rail-input tie pins: router net nets.len() + k joins pin k to the
+    // instance's own rail (all-net scope only).
+    let tie_index: HashMap<u32, (u32, u32)> = if scope == RouteScope::All {
+        crate::physical::rail_tie_pins(bundle)
+            .into_iter()
+            .enumerate()
+            .map(|(k, (pin, supply))| (pin, (k as u32, supply)))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    let rail_layer = indices.get(cfg.rail_layer.as_str()).copied();
+    let mut ties = Vec::new();
+    let mut tie_terminals = Vec::new();
     for (i, p) in placed.iter().enumerate() {
         let master = &model.masters[model.instance_masters[i] as usize];
         let orientation = rustroad_core::placed_orientation(design, p)?;
+        let mut pending: Vec<(u32, u32)> = Vec::new();
         for (ti, pin) in master.pins.iter().enumerate() {
             let owner = PinOwner::Instance {
                 instance: i as u32,
                 terminal: ti as u32,
             };
-            let net = pin_nets[&owner];
+            let tie = tie_index.get(&pin_ids[&owner]).copied();
+            let net = match tie {
+                Some((k, _)) => Some(tie_net(model, k)?),
+                None => pin_nets[&owner],
+            };
             let mut shapes = Vec::new();
             for geometry in pin.ports.iter().flatten() {
                 let layer = match geometry {
@@ -658,8 +681,11 @@ pub(crate) fn build_input_with_owners(
                     shapes.push(LayerRect { layer: li, rect: r });
                 }
             }
+            if let Some((k, supply)) = tie {
+                pending.push((k, supply));
+            }
             if let Some(n) = net
-                && selected.contains(&n)
+                && (selected.contains(&n) || tie.is_some())
                 && !pin.use_.is_supply()
             {
                 let class = if config.lef_rules {
@@ -711,7 +737,58 @@ pub(crate) fn build_input_with_owners(
                 )?;
             }
         }
+        // Each tie pin's pseudo-driver: the largest rail-layer rectangle of
+        // this instance's own supply pin of the tied polarity.
+        for (k, supply) in pending {
+            let rail = rail_layer.ok_or_else(|| fail("rail layer not selected for routing"))?;
+            let want = if model.nets[supply as usize].use_ == PinUse::Power {
+                &cfg.power_pin
+            } else {
+                &cfg.ground_pin
+            };
+            let mut zone: Option<Rect> = None;
+            for pin in master.pins.iter().filter(|p| &p.name == want) {
+                for geometry in pin.ports.iter().flatten() {
+                    let (name, r) = rectangle(geometry)?;
+                    if name != cfg.rail_layer {
+                        continue;
+                    }
+                    let r = rustroad_core::transform_rect(r, p.x, p.y, p.height, orientation)?;
+                    let area = |r: &Rect| i128::from(r.ux - r.lx) * i128::from(r.uy - r.ly);
+                    if zone.is_none_or(|z| area(&r) > area(&z)) {
+                        zone = Some(r);
+                    }
+                }
+            }
+            let zone =
+                zone.ok_or_else(|| fail("tie instance has no rail-layer shape on its supply pin"))?;
+            let net = tie_net(model, k)?;
+            tie_terminals.push(Terminal {
+                pin: u32::try_from(model.pins.len() + k as usize)
+                    .map_err(|_| fail("tie pin id overflow"))?,
+                net,
+                driver: true,
+                shapes: vec![LayerRect {
+                    layer: rail,
+                    rect: zone,
+                }],
+                class: None,
+            });
+            ties.push(routing::SupplyTie {
+                net,
+                supply,
+                zone: LayerRect {
+                    layer: rail,
+                    rect: zone,
+                },
+            });
+        }
     }
+    if !ties.is_empty() && config.track_router.is_none() {
+        return Err(fail("rail-input tie cells need the track router"));
+    }
+    terminals.extend(tie_terminals);
+    ties.sort_by_key(|t| t.net);
     let io: HashMap<_, _> = state.io_pins.iter().map(|p| (p.name.as_str(), p)).collect();
     for (i, port) in model
         .ports
@@ -748,7 +825,6 @@ pub(crate) fn build_input_with_owners(
             }
         }
     }
-    let cfg = bundle.config.as_ref().unwrap();
     let supply_net = |p: rustroad_core::power::RailPolarity| -> Result<u32> {
         let name = if p == rustroad_core::power::RailPolarity::Power {
             &cfg.power_net
@@ -830,9 +906,43 @@ pub(crate) fn build_input_with_owners(
             rules: config.lef_rules,
             access_classes: classes,
             tracks,
+            ties,
+            held_bytes: 0,
         },
         owners,
     ))
+}
+
+/// Router net id of rail tie `k` (after every connectivity net).
+pub(crate) fn tie_net(model: &rustroad_core::connectivity::ConnectedDesign, k: u32) -> Result<u32> {
+    u32::try_from(model.nets.len() + k as usize).map_err(|_| fail("tie net id overflow"))
+}
+
+/// Exported net of every stored route net id: connectivity nets map to
+/// themselves, rail tie `k` (id `nets + k`) to its supply net.
+pub(crate) struct ExportNets {
+    nets: usize,
+    ties: Vec<u32>,
+}
+impl ExportNets {
+    pub(crate) fn new(bundle: &PhysicalBundle) -> Self {
+        Self {
+            nets: bundle.connectivity.nets.len(),
+            ties: crate::physical::rail_tie_pins(bundle)
+                .into_iter()
+                .map(|(_, supply)| supply)
+                .collect(),
+        }
+    }
+    pub(crate) fn of(&self, net: u32) -> Result<u32> {
+        if (net as usize) < self.nets {
+            return Ok(net);
+        }
+        self.ties
+            .get(net as usize - self.nets)
+            .copied()
+            .ok_or_else(|| fail("route net outside connectivity and ties"))
+    }
 }
 /// Track plan: LEF PITCH/OFFSET per routing layer (vertical: x component,
 /// horizontal: y component), replaced by explicit profile overrides.
@@ -930,6 +1040,23 @@ pub(crate) fn access_class(
     Ok(class)
 }
 
+/// Upfront memory estimate of one track-router run (MiB, rounded up), the
+/// cap it was checked against and its parts.
+#[derive(Clone, Debug, Serialize)]
+pub struct RouteMemory {
+    pub estimate_mib: u64,
+    pub memory_mib: u64,
+    pub workspace_bytes: u64,
+    pub held_mib: u64,
+    pub search_mib: u64,
+    pub spatial_mib: u64,
+    pub routed_mib: u64,
+    pub check_mib: u64,
+}
+fn mib(bytes: u64) -> u64 {
+    bytes.div_ceil(1 << 20)
+}
+
 pub fn route(
     path: &Path,
     base_rev: &str,
@@ -940,20 +1067,57 @@ pub fn route(
     let lock = crate::lock(path, false, true)?;
     let current = crate::head(path)?;
     crate::check_base(base_rev, &current)?;
+    rustroad_core::memory::trace("start");
+    let (text, source) = crate::pdk::read_input(config_path, 1024 * 1024, "routing_config")?;
+    let config: RoutingConfig = serde_json::from_str(&text)?;
+    // Track mode: the loaded workspace is part of the memory budget; refuse
+    // before loading when it alone cannot fit.
+    let workspace_bytes = revision_bytes(path, &current)?;
+    if let Some(t) = &config.track_router {
+        let load = routing::PROCESS_BASE_BYTES
+            .saturating_add(workspace_bytes.saturating_mul(routing::WORKSPACE_LOAD_FACTOR));
+        if load > t.memory_mib.saturating_mul(1 << 20) {
+            return Err(Error::Budget(format!(
+                "route memory: loading {} MiB of workspace needs about {} MiB, above memory_mib {}",
+                workspace_bytes >> 20,
+                load >> 20,
+                t.memory_mib
+            )));
+        }
+    }
     let snapshot = crate::load(path, lock, limits)?;
     if snapshot.metadata().stage != Stage::Placed {
         return Err(fail("place before routing"));
     }
+    rustroad_core::memory::trace("loaded");
     let mut metadata = snapshot.metadata().clone();
     let placed: Vec<_> = snapshot.records().collect();
+    rustroad_core::memory::trace("cloned");
     let bundle = metadata
         .physical
         .as_mut()
         .ok_or_else(|| fail("physical design required"))?;
-    let (text, source) = crate::pdk::read_input(config_path, 1024 * 1024, "routing_config")?;
-    let config: RoutingConfig = serde_json::from_str(&text)?;
-    let input = build_input(&metadata.design, bundle, &placed, &config, scope)?;
+    let mut input = build_input(&metadata.design, bundle, &placed, &config, scope)?;
+    input.held_bytes = routing::held_estimate(workspace_bytes, &input);
+    rustroad_core::memory::trace("input");
+    let memory = match (
+        &config.track_router,
+        routing::track_memory_estimate(&input, &config.limits)?,
+    ) {
+        (Some(t), Some(e)) => Some(RouteMemory {
+            estimate_mib: mib(e.total()),
+            memory_mib: t.memory_mib,
+            workspace_bytes,
+            held_mib: mib(e.held),
+            search_mib: mib(e.search),
+            spatial_mib: mib(e.spatial),
+            routed_mib: mib(e.routed),
+            check_mib: mib(e.check),
+        }),
+        _ => None,
+    };
     let routes = routing::route_cpu_ref(&input, &config.limits)?;
+    rustroad_core::memory::trace("routed");
     bundle.routing = Some(RoutingState {
         source,
         config,
@@ -964,9 +1128,25 @@ pub fn route(
         routes,
         table: None,
     });
+    // The commit re-validates from its own input; free this one first.
+    drop(input);
     metadata.format_version = 5;
     metadata.parent_revision = current;
-    crate::commit(path, metadata, &placed)
+    let mut summary = crate::commit(path, metadata, &placed)?;
+    rustroad_core::memory::trace("committed");
+    summary.route_memory = memory;
+    Ok(summary)
+}
+/// On-disk bytes of one workspace revision (metadata and binary tables).
+fn revision_bytes(path: &Path, revision: &str) -> Result<u64> {
+    let mut total = 0u64;
+    for entry in std::fs::read_dir(path.join("revisions").join(revision))? {
+        let meta = entry?.metadata()?;
+        if meta.is_file() {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    Ok(total)
 }
 pub(crate) fn validate_state(
     design: &Design,

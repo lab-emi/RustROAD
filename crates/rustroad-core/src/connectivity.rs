@@ -367,9 +367,14 @@ impl ConnectedDesign {
                 return Err(Error::Invalid("pin net index".into()));
             }
             if self.nets[net_index].use_.is_supply() {
-                return Err(Error::Invalid(
-                    "signal pin is shorted to supply without a tie cell".into(),
-                ));
+                // A cell input on a supply net is a rail tie (the input of a
+                // rail-input tie cell); outputs and ports never are.
+                if is_port || direction != Some(Direction::Input) {
+                    return Err(Error::Invalid(
+                        "signal pin is shorted to supply without a tie cell".into(),
+                    ));
+                }
+                continue;
             }
             let driver = match direction {
                 Some(Direction::Input) => is_port,

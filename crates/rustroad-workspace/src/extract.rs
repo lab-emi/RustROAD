@@ -6,12 +6,12 @@
 use crate::pdk::read_input;
 use crate::routing::{ObstacleOwner, build_input_with_owners};
 use crate::{Error, Result};
-use rustroad_core::Limits;
 use rustroad_core::connectivity::{Direction, PinOwner};
 use rustroad_core::extract::{
     self, ExtractLimits, ExtractStats, PassiveOwner, PassiveShape, RcContext, RcLayer, RcNode,
     RcTech,
 };
+use rustroad_core::{Limits, Rect};
 use rustroad_formats::spef;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -320,7 +320,11 @@ pub fn extract(
     };
     let model = &bundle.connectivity;
     let supply: Vec<bool> = model.nets.iter().map(|n| n.use_.is_supply()).collect();
-    let passive: Vec<PassiveShape> = input
+    // Rail-tie router nets (ids past the connectivity nets) are supply
+    // metal: their pins and routed shapes are grounded passive conductors,
+    // not extracted nets.
+    let signal = |net: u32| (net as usize) < supply.len() && !supply[net as usize];
+    let mut passive: Vec<PassiveShape> = input
         .obstacles
         .iter()
         .zip(&owners)
@@ -329,7 +333,7 @@ pub fn extract(
             rect: b.rect,
             owner: match (o, b.net) {
                 (ObstacleOwner::InstancePin(pin) | ObstacleOwner::PortPin(pin), Some(net))
-                    if !supply[net as usize] =>
+                    if signal(net) =>
                 {
                     PassiveOwner::Pin { net, pin: *pin }
                 }
@@ -337,12 +341,64 @@ pub fn extract(
             },
         })
         .collect();
+    let has_ties = state.routes.nets.iter().any(|&n| !signal(n));
+    let filtered;
+    let (routes, terminals): (&rustroad_core::routing::Routes, Vec<_>) = if has_ties {
+        let r = &state.routes;
+        let mut ground = |layer: u32, rect: Rect| {
+            passive.push(PassiveShape {
+                layer,
+                rect,
+                owner: PassiveOwner::Ground,
+            });
+        };
+        for w in r.wires.iter().filter(|w| !signal(w.net)) {
+            let width = input.layers[w.layer as usize].width;
+            ground(w.layer, rustroad_core::routing::wire_rect(w, width)?);
+        }
+        for v in r.vias.iter().filter(|v| !signal(v.net)) {
+            for sh in &input.vias[v.kind as usize].shapes {
+                ground(sh.layer, rustroad_core::routing::shifted(sh.rect, v.at)?);
+            }
+        }
+        for patch in r.patches.iter().filter(|p| !signal(p.net)) {
+            ground(patch.layer, patch.rect);
+        }
+        filtered = rustroad_core::routing::Routes {
+            wires: r.wires.iter().filter(|w| signal(w.net)).cloned().collect(),
+            vias: r.vias.iter().filter(|v| signal(v.net)).cloned().collect(),
+            access: r.access.iter().filter(|a| signal(a.net)).cloned().collect(),
+            patches: r
+                .patches
+                .iter()
+                .filter(|p| signal(p.net))
+                .cloned()
+                .collect(),
+            nets: r.nets.iter().copied().filter(|&n| signal(n)).collect(),
+            stats: r.stats.clone(),
+        };
+        (
+            &filtered,
+            input
+                .terminals
+                .iter()
+                .filter(|t| signal(t.net))
+                .cloned()
+                .collect(),
+        )
+    } else {
+        (&state.routes, Vec::new())
+    };
     let network = extract::extract_cpu_ref(
         &extract::ExtractInput {
             layers: &input.layers,
             vias: &input.vias,
-            routes: &state.routes,
-            terminals: &input.terminals,
+            routes,
+            terminals: if has_ties {
+                &terminals
+            } else {
+                &input.terminals
+            },
             passive: &passive,
             tech: &tech,
         },

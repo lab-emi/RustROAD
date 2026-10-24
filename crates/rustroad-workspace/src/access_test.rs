@@ -337,6 +337,8 @@ pub fn export_access_test(
         rules: config.lef_rules,
         access_classes: classes,
         tracks: None,
+        ties: Vec::new(),
+        held_bytes: 0,
     };
     // The access test always uses the lattice router; a track-router profile
     // may carry limits above the lattice caps.

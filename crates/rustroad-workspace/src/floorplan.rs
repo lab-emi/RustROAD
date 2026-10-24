@@ -234,12 +234,18 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
             .find(|m| m.name == name)
             .ok_or_else(|| invalid(format!("missing LEF master {name}")))
     };
-    let (netlist, ties) = crate::ties::materialize_constants(
+    let (netlist, ties) = crate::ties::materialize_constants_with(
         &netlist,
-        find(&cfg.tie_high.cell)?,
-        &cfg.tie_high.pin,
-        find(&cfg.tie_low.cell)?,
-        &cfg.tie_low.pin,
+        crate::ties::TieSpec {
+            cell: find(&cfg.tie_high.cell)?,
+            pin: &cfg.tie_high.pin,
+            rail: cfg.tie_high.rail(),
+        },
+        crate::ties::TieSpec {
+            cell: find(&cfg.tie_low.cell)?,
+            pin: &cfg.tie_low.pin,
+            rail: cfg.tie_low.rail(),
+        },
         &crate::ties::TieLimits::default(),
     )
     .map_err(|e| invalid(e.to_string()))?;

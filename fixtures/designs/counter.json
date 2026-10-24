@@ -46,6 +46,8 @@
     "margin_um": 10.0,
     "command": "rustroad floorplan"
   },
+  "stretch": false,
+  "pdks_unavailable": {},
   "flow": {
     "harness": "scripts/scale_flow.py",
     "router": "track",
@@ -59,11 +61,11 @@
       },
       "physical_config": {
         "path": "fixtures/designs/counter/sky130-physical.json",
-        "sha256": "993defa5fb3393ac4223102e94dff5875b2d7c199b385cf80493c2473da6b0f7"
+        "sha256": "4127628f28e8ce0a074639e1e2c4f81ae41f78292ec20f2c675ce9958e380074"
       },
       "physical_profile": {
         "path": "fixtures/pdk/sky130-scale-physical.json",
-        "sha256": "060f69439095d39145138bc65f04b61a857b069a223c345858175ada5a81e24d"
+        "sha256": "8a9d15f9a84d911c1b4f4852d66cf88fbb273ef8c775cb50f101925ad6f305e4"
       },
       "routing_config": {
         "path": "fixtures/pdk/sky130-scale-routing.json",
@@ -120,7 +122,7 @@
         "openrcx_rules_ff": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
         "openrcx_rules_ss": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
         "openrcx_rules_tt": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
-        "physical_config": "993defa5fb3393ac4223102e94dff5875b2d7c199b385cf80493c2473da6b0f7",
+        "physical_config": "4127628f28e8ce0a074639e1e2c4f81ae41f78292ec20f2c675ce9958e380074",
         "rc_profile_ff": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
         "rc_profile_ss": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
         "rc_profile_tt": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",

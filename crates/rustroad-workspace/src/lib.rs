@@ -103,6 +103,9 @@ pub struct Summary {
     /// Analytic placement record (absent for fixed-order packing).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub placement: Option<physical::PlacementReport>,
+    /// Track-router memory estimate of this route command (route only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_memory: Option<routing::RouteMemory>,
 }
 impl Metadata {
     pub fn summary(&self) -> Summary {
@@ -225,6 +228,7 @@ impl Metadata {
                 .as_ref()
                 .and_then(|p| p.routing.as_ref().map(|r| r.routes.stats.expansions)),
             placement: self.physical.as_ref().and_then(|p| p.placement.clone()),
+            route_memory: None,
         }
     }
 }

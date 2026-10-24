@@ -14,12 +14,20 @@
   "via": "M1M2_PR",
   "io_layer": "met3",
   "tie_high": {
-    "cell": "sky130_fd_sc_hd__conb_1",
-    "pin": "HI"
+    "cell": "sky130_fd_sc_hd__inv_1",
+    "pin": "Y",
+    "rail_input": {
+      "pin": "A",
+      "supply": "ground"
+    }
   },
   "tie_low": {
-    "cell": "sky130_fd_sc_hd__conb_1",
-    "pin": "LO"
+    "cell": "sky130_fd_sc_hd__inv_1",
+    "pin": "Y",
+    "rail_input": {
+      "pin": "A",
+      "supply": "power"
+    }
   },
   "filler_cells": [
     "sky130_fd_sc_hd__fill_8",

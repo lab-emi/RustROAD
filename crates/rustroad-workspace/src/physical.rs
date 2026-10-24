@@ -27,6 +27,27 @@ fn default_fanout() -> usize {
 pub struct TieCell {
     pub cell: String,
     pub pin: String,
+    /// A logic cell used as the constant source (e.g. sky130 `inv_1` with
+    /// `A` on ground for a logic 1) instead of a dedicated tie master: its
+    /// one input is joined to the cell's own `supply` rail by the track
+    /// router. Absent: `cell` has only outputs and supply pins (`conb_1`,
+    /// `tieh`/`tiel`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rail_input: Option<TieRailInput>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TieRailInput {
+    pub pin: String,
+    pub supply: RailPolarity,
+}
+impl TieCell {
+    /// Rail input pin and whether it is tied to power.
+    pub fn rail(&self) -> Option<(&str, bool)> {
+        self.rail_input
+            .as_ref()
+            .map(|r| (r.pin.as_str(), r.supply == RailPolarity::Power))
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -140,6 +161,11 @@ impl PhysicalConfig {
             &self.tie_low.pin,
         ]
         .into_iter()
+        .chain(
+            [&self.tie_high, &self.tie_low]
+                .into_iter()
+                .filter_map(|t| t.rail_input.as_ref().map(|r| &r.pin)),
+        )
         .chain(self.filler_cells.iter())
         .chain(self.body_power_pins.iter())
         .chain(self.body_ground_pins.iter())
@@ -185,10 +211,25 @@ impl PhysicalConfig {
         if power.iter().any(|p| ground.contains(p)) {
             return Err(Error::Invalid("ambiguous power/ground pin role".into()));
         }
-        if self.tie_high.cell == self.tie_low.cell && self.tie_high.pin == self.tie_low.pin {
+        // One master may serve both values only through rail inputs of
+        // opposite supplies (same input pin, different rail).
+        if self.tie_high.cell == self.tie_low.cell
+            && self.tie_high.pin == self.tie_low.pin
+            && !matches!(
+                (&self.tie_high.rail_input, &self.tie_low.rail_input),
+                (Some(h), Some(l)) if h.pin == l.pin && h.supply != l.supply
+            )
+        {
             return Err(Error::Invalid(
                 "high/low tie outputs must be distinct".into(),
             ));
+        }
+        for t in [&self.tie_high, &self.tie_low] {
+            if t.rail_input.as_ref().is_some_and(|r| r.pin == t.pin) {
+                return Err(Error::Invalid(
+                    "tie rail input and output must be different pins".into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -295,7 +336,7 @@ pub(super) fn attach_supplies(
             net: Some(nets.len() as u32 - 1),
         });
     }
-    for pin in pins {
+    for pin in pins.iter_mut() {
         if let PinOwner::Instance { instance, terminal } = pin.owner {
             let spec =
                 &masters[instance_masters[instance as usize] as usize].pins[terminal as usize];
@@ -316,7 +357,93 @@ pub(super) fn attach_supplies(
             }
         }
     }
+    fold_tie_rails(masters, instance_masters, nets, pins, first)
+}
+
+/// The reserved rail-input tie wires (`ties::RAIL_*_WIRE`) are the supply
+/// nets: their pins (tie-cell inputs only) move to the power/ground net and
+/// the wire nets are removed (net indices above them shift down).
+fn fold_tie_rails(
+    masters: &[rustroad_core::connectivity::Master],
+    instance_masters: &[u32],
+    nets: &mut Vec<Net>,
+    pins: &mut [Connection],
+    first: u32,
+) -> Result<()> {
+    let mut fold: Vec<(u32, u32)> = Vec::new();
+    for (wire, target) in [
+        (crate::ties::RAIL_POWER_WIRE, first),
+        (crate::ties::RAIL_GROUND_WIRE, first + 1),
+    ] {
+        if let Some(i) = nets
+            .iter()
+            .position(|n| n.aliases.iter().any(|a| a == wire))
+        {
+            if nets[i].aliases.len() != 1 || i as u32 >= first {
+                return Err(Error::Invalid(format!("tie rail wire {wire} is aliased")));
+            }
+            fold.push((i as u32, target));
+        }
+    }
+    if fold.is_empty() {
+        return Ok(());
+    }
+    for pin in pins.iter_mut() {
+        let Some(n) = pin.net else { continue };
+        let Some(&(_, target)) = fold.iter().find(|(r, _)| *r == n) else {
+            continue;
+        };
+        let input = match pin.owner {
+            PinOwner::Instance { instance, terminal } => {
+                let spec =
+                    &masters[instance_masters[instance as usize] as usize].pins[terminal as usize];
+                !spec.use_.is_supply() && spec.direction == Some(Direction::Input)
+            }
+            PinOwner::Port { .. } => false,
+        };
+        if !input {
+            return Err(Error::Invalid(
+                "tie rail wire drives something other than a cell input".into(),
+            ));
+        }
+        pin.net = Some(target);
+    }
+    let mut removed: Vec<u32> = fold.iter().map(|(r, _)| *r).collect();
+    removed.sort_unstable();
+    let mut index = 0u32;
+    nets.retain(|_| {
+        let keep = removed.binary_search(&index).is_err();
+        index += 1;
+        keep
+    });
+    for pin in pins.iter_mut() {
+        if let Some(n) = pin.net {
+            pin.net = Some(n - removed.partition_point(|&r| r < n) as u32);
+        }
+    }
     Ok(())
+}
+
+/// Instance signal pins tied to a supply net (rail-input tie cells), in
+/// connectivity pin order: (pin index, supply net). The track router joins
+/// each to the instance's own rail; exports report them on the supply net.
+pub(crate) fn rail_tie_pins(bundle: &PhysicalBundle) -> Vec<(u32, u32)> {
+    let model = &bundle.connectivity;
+    model
+        .pins
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| {
+            let net = p.net?;
+            let PinOwner::Instance { instance, terminal } = p.owner else {
+                return None;
+            };
+            let spec = &model.masters[model.instance_masters[instance as usize] as usize].pins
+                [terminal as usize];
+            (model.nets[net as usize].use_.is_supply() && !spec.use_.is_supply())
+                .then_some((i as u32, net))
+        })
+        .collect()
 }
 
 pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
@@ -391,6 +518,27 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
         };
         if bundle.netlist.instances[i].cell != spec.cell || binding.pin != spec.pin {
             return Err(Error::Invalid("tie report binding mismatch".into()));
+        }
+        if let Some((rail_pin, power)) = spec.rail() {
+            let terminal = *terminal_names[model.instance_masters[i] as usize]
+                .get(rail_pin)
+                .ok_or_else(|| Error::Invalid("tie rail input absent".into()))?;
+            let net = pin_nets
+                .get(&PinOwner::Instance {
+                    instance: i as u32,
+                    terminal: terminal as u32,
+                })
+                .copied()
+                .flatten()
+                .ok_or_else(|| Error::Invalid("tie rail input unconnected".into()))?;
+            let want = if power {
+                &cfg.power_net
+            } else {
+                &cfg.ground_net
+            };
+            if &model.nets[net as usize].name != want {
+                return Err(Error::Invalid("tie rail input on the wrong supply".into()));
+            }
         }
         let terminal = *terminal_names[model.instance_masters[i] as usize]
             .get(binding.pin.as_str())
@@ -1204,12 +1352,49 @@ fn fold_internal_aliases(netlist: &mut verilog::Netlist) {
     netlist.wires.retain(|w| !folded.contains_key(&w.name));
 }
 
+/// Replace the reserved tie-rail wires by `power`/`ground` (supply port
+/// names in the powered export, `1'b1`/`1'b0` in the logical one) and drop
+/// their declarations.
+fn bind_tie_rails(netlist: &mut verilog::Netlist, power: &verilog::Expr, ground: &verilog::Expr) {
+    use crate::ties::{RAIL_GROUND_WIRE, RAIL_POWER_WIRE};
+    let bind = |e: &mut verilog::Expr| {
+        if let verilog::Expr::Ident(name) = e {
+            if name == RAIL_POWER_WIRE {
+                *e = power.clone();
+            } else if name == RAIL_GROUND_WIRE {
+                *e = ground.clone();
+            }
+        }
+    };
+    for inst in &mut netlist.instances {
+        for c in &mut inst.connections {
+            bind(&mut c.signal);
+        }
+    }
+    netlist
+        .wires
+        .retain(|w| w.name != RAIL_POWER_WIRE && w.name != RAIL_GROUND_WIRE);
+}
+
 pub(super) fn export_verilog(
     bundle: &PhysicalBundle,
     include_power: bool,
     output: &mut impl Write,
 ) -> Result<()> {
     let mut netlist = bundle.netlist.clone();
+    if let Some(cfg) = bundle.config.as_ref().filter(|_| include_power) {
+        bind_tie_rails(
+            &mut netlist,
+            &verilog::Expr::Ident(cfg.power_net.clone()),
+            &verilog::Expr::Ident(cfg.ground_net.clone()),
+        );
+    } else {
+        bind_tie_rails(
+            &mut netlist,
+            &verilog::Expr::Constant("1'b1".into()),
+            &verilog::Expr::Constant("1'b0".into()),
+        );
+    }
     if include_power {
         fold_internal_aliases(&mut netlist);
         // An open signal pin (`.PIN()` or omitted, e.g. the unused output of
@@ -1368,31 +1553,64 @@ pub(super) fn export_def(
         }
         None => Vec::new(),
     };
+    // Rail ties are supply metal: their regular wiring is written under
+    // the supply net's own NETS entry (the net is in both sections).
+    let export = crate::routing::ExportNets::new(bundle);
     if let Some(routing) = &bundle.routing {
         for wire in &runs {
-            routed_wires.entry(wire.net).or_default().push(wire);
+            routed_wires
+                .entry(export.of(wire.net)?)
+                .or_default()
+                .push(wire);
         }
         for via in &routing.routes.vias {
-            routed_vias.entry(via.net).or_default().push(via);
+            routed_vias
+                .entry(export.of(via.net)?)
+                .or_default()
+                .push(via);
         }
         for patch in &routing.routes.patches {
-            routed_patches.entry(patch.net).or_default().push(patch);
+            routed_patches
+                .entry(export.of(patch.net)?)
+                .or_default()
+                .push(patch);
         }
     }
+    let tied: HashSet<u32> = routed_wires
+        .keys()
+        .chain(routed_vias.keys())
+        .copied()
+        .filter(|&n| model.nets[n as usize].use_.is_supply())
+        .collect();
+    let signal_pin = |pi: u32| match model.pins[pi as usize].owner {
+        PinOwner::Instance { instance, terminal } => !model.masters
+            [model.instance_masters[instance as usize] as usize]
+            .pins[terminal as usize]
+            .use_
+            .is_supply(),
+        PinOwner::Port { .. } => false,
+    };
     for special in [false, true] {
         let count = model
             .nets
             .iter()
-            .filter(|n| n.use_.is_supply() == special)
+            .enumerate()
+            .filter(|(i, n)| {
+                n.use_.is_supply() == special || (!special && tied.contains(&(*i as u32)))
+            })
             .count();
         let section = if special { "SPECIALNETS" } else { "NETS" };
         writeln!(output, "{section} {count} ;")?;
         for (ni, net) in model.nets.iter().enumerate() {
-            if net.use_.is_supply() != special {
+            let tie_entry = !special && tied.contains(&(ni as u32));
+            if net.use_.is_supply() != special && !tie_entry {
                 continue;
             }
             write!(output, "- {}", def_name(&net.name))?;
             for &pi in &csr.pin_indices[csr.offsets[ni] as usize..csr.offsets[ni + 1] as usize] {
+                if tie_entry && !signal_pin(pi) {
+                    continue;
+                }
                 match model.pins[pi as usize].owner {
                     PinOwner::Instance { instance, terminal } => write!(
                         output,

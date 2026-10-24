@@ -14,6 +14,14 @@
 //! high/low semantics are selected by the caller and require an independent
 //! Liberty/simulation/equivalence oracle. Power/ground pins remain omitted for
 //! the explicit power-network construction stage, never guessed here.
+//!
+//! A tie master may instead be a logic cell with one input tied to a supply
+//! rail (`TieSpec::rail`, e.g. sky130 `inv_1` with `A` on ground for a 1):
+//! that input is connected to the reserved wire `rr_tie_rail_power` or
+//! `rr_tie_rail_ground`, which the physical import folds into the supply net
+//! and the router joins to the cell's own rail. A re-imported netlist whose
+//! rail-input tie instance carries the matching literal on that pin keeps the
+//! instance (the literal becomes the reserved wire again; no new cell).
 
 use rustroad_core::valid_object_name;
 use rustroad_formats::{lef, verilog};
@@ -87,21 +95,39 @@ impl Work<'_> {
         Ok(())
     }
 }
+/// Reserved wire joined to the power net by the physical import.
+pub const RAIL_POWER_WIRE: &str = "rr_tie_rail_power";
+/// Reserved wire joined to the ground net by the physical import.
+pub const RAIL_GROUND_WIRE: &str = "rr_tie_rail_ground";
+
+/// One constant source: master, selected output and optional rail input
+/// (pin, tied to power?).
+#[derive(Clone, Copy)]
+pub struct TieSpec<'a> {
+    pub cell: &'a lef::LefMacro,
+    pub pin: &'a str,
+    pub rail: Option<(&'a str, bool)>,
+}
+
 struct Master<'a> {
     name: &'a str,
     selected: &'a str,
     outputs: Vec<&'a str>,
+    rail: Option<(&'a str, bool)>,
 }
-fn master<'a>(
-    cell: &'a lef::LefMacro,
-    selected: &'a str,
-    work: &mut Work<'_>,
-) -> TieResult<Master<'a>> {
-    if !valid_object_name(&cell.name) || !valid_object_name(selected) {
-        return Err(invalid("invalid tie master or output name"));
+fn master<'a>(spec: TieSpec<'a>, work: &mut Work<'_>) -> TieResult<Master<'a>> {
+    let (cell, selected) = (spec.cell, spec.pin);
+    if !valid_object_name(&cell.name)
+        || !valid_object_name(selected)
+        || spec
+            .rail
+            .is_some_and(|(p, _)| !valid_object_name(p) || p == selected)
+    {
+        return Err(invalid("invalid tie master, output or rail input name"));
     }
     let mut names = HashSet::new();
     let mut outputs = Vec::new();
+    let mut rail_seen = false;
     for pin in &cell.pins {
         work.charge(1 + pin.name.len())?;
         if !valid_object_name(&pin.name) || !names.insert(pin.name.as_str()) {
@@ -111,9 +137,17 @@ fn master<'a>(
         if matches!(usage, "POWER" | "GROUND") {
             continue;
         }
+        if usage == "SIGNAL"
+            && pin.direction.as_deref() == Some("INPUT")
+            && spec.rail.is_some_and(|(p, _)| p == pin.name)
+        {
+            rail_seen = true;
+            continue;
+        }
         if usage != "SIGNAL" || pin.direction.as_deref() != Some("OUTPUT") {
             return Err(invalid(
-                "tie masters may contain only output SIGNAL pins and POWER/GROUND pins",
+                "tie masters may contain only output SIGNAL pins, POWER/GROUND pins and the \
+                 configured rail input",
             ));
         }
         outputs.push(pin.name.as_str());
@@ -123,10 +157,14 @@ fn master<'a>(
             "selected tie output pin does not exist as an output SIGNAL",
         ));
     }
+    if spec.rail.is_some() && !rail_seen {
+        return Err(invalid("tie rail input is not an INPUT SIGNAL pin"));
+    }
     Ok(Master {
         name: &cell.name,
         selected,
         outputs,
+        rail: spec.rail,
     })
 }
 
@@ -237,8 +275,51 @@ struct Transform<'a> {
     cells: Vec<verilog::Instance>,
     wires: Vec<verilog::Wire>,
     report: TieReport,
+    /// Reserved rail wires referenced so far (power, ground).
+    rails_used: [bool; 2],
 }
 impl Transform<'_> {
+    /// Reserved rail wire for a rail-input tie pin.
+    fn rail_wire(&mut self, power: bool) -> verilog::Expr {
+        self.rails_used[usize::from(!power)] = true;
+        verilog::Expr::Ident(
+            if power {
+                RAIL_POWER_WIRE
+            } else {
+                RAIL_GROUND_WIRE
+            }
+            .into(),
+        )
+    }
+    /// An existing rail-input tie instance whose rail pin carries its own
+    /// supply literal (an exported netlist re-imported): keep it tied.
+    fn existing_rail(
+        &mut self,
+        cell: &str,
+        pin: &str,
+        signal: &verilog::Expr,
+    ) -> TieResult<Option<verilog::Expr>> {
+        let verilog::Expr::Constant(text) = signal else {
+            return Ok(None);
+        };
+        for (name, rail) in [
+            (self.high.name, self.high.rail),
+            (self.low.name, self.low.rail),
+        ] {
+            let Some((rail_pin, power)) = rail else {
+                continue;
+            };
+            if name != cell || rail_pin != pin {
+                continue;
+            }
+            let bits = self.decode(text, Some(1))?;
+            self.report.constant_bits -= 1;
+            if bits == [power] {
+                return Ok(Some(self.rail_wire(power)));
+            }
+        }
+        Ok(None)
+    }
     fn range_width(&self, range: verilog::Range) -> TieResult<usize> {
         let n = (i128::from(range.msb) - i128::from(range.lsb)).unsigned_abs() + 1;
         if n > self.work.limits.max_bits as u128 {
@@ -414,7 +495,7 @@ impl Transform<'_> {
         let master = if value { &self.high } else { &self.low };
         self.connections = self
             .connections
-            .checked_add(master.outputs.len())
+            .checked_add(master.outputs.len() + usize::from(master.rail.is_some()))
             .ok_or_else(|| budget("connection count overflow"))?;
         if self.connections > vlimits.max_connections {
             return Err(budget("rewritten AST connection limit exceeded"));
@@ -424,7 +505,8 @@ impl Transform<'_> {
         )?;
         self.names.insert(instance.clone());
         self.names.insert(net.clone());
-        let mut connections = Vec::with_capacity(master.outputs.len());
+        let mut connections = Vec::with_capacity(master.outputs.len() + 1);
+        let rail = master.rail;
         for pin in &master.outputs {
             self.work.charge(1 + pin.len())?;
             connections.push(verilog::Connection {
@@ -434,6 +516,21 @@ impl Transform<'_> {
                 } else {
                     verilog::Expr::Unconnected
                 },
+            });
+        }
+        if let Some((pin, power)) = rail {
+            self.work.charge(1 + pin.len())?;
+            self.rails_used[usize::from(!power)] = true;
+            connections.push(verilog::Connection {
+                pin: pin.into(),
+                signal: verilog::Expr::Ident(
+                    if power {
+                        RAIL_POWER_WIRE
+                    } else {
+                        RAIL_GROUND_WIRE
+                    }
+                    .into(),
+                ),
             });
         }
         self.cells.push(verilog::Instance {
@@ -514,17 +611,43 @@ pub fn materialize_constants(
     low_pin: &str,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, TieReport)> {
+    materialize_constants_with(
+        netlist,
+        TieSpec {
+            cell: high,
+            pin: high_pin,
+            rail: None,
+        },
+        TieSpec {
+            cell: low,
+            pin: low_pin,
+            rail: None,
+        },
+        limits,
+    )
+}
+
+/// `materialize_constants` with optional rail-input tie masters.
+pub fn materialize_constants_with(
+    netlist: &verilog::Netlist,
+    high: TieSpec<'_>,
+    low: TieSpec<'_>,
+    limits: &TieLimits,
+) -> TieResult<(verilog::Netlist, TieReport)> {
     verilog::validate_netlist(netlist, &verilog::VerilogLimits::default())
         .map_err(|e| invalid(e.to_string()))?;
     input_bound(netlist)?;
-    if high.name == low.name && high_pin == low_pin {
+    if high.cell.name == low.cell.name
+        && high.pin == low.pin
+        && !matches!((high.rail, low.rail), (Some(h), Some(l)) if h.0 == l.0 && h.1 != l.1)
+    {
         return Err(invalid(
             "one master output cannot be selected as both high and low",
         ));
     }
     let mut work = Work { used: 0, limits };
-    let high = master(high, high_pin, &mut work)?;
-    let low = master(low, low_pin, &mut work)?;
+    let high = master(high, &mut work)?;
+    let low = master(low, &mut work)?;
     let mut declared = HashMap::new();
     let mut names = HashSet::new();
     let mut reserve = |name: &str| -> TieResult<()> {
@@ -555,6 +678,12 @@ pub fn materialize_constants(
     for pin in high.outputs.iter().chain(&low.outputs) {
         reserve(pin)?;
     }
+    for wire in [RAIL_POWER_WIRE, RAIL_GROUND_WIRE] {
+        if declared.contains_key(wire) || netlist.instances.iter().any(|i| i.name == wire) {
+            return Err(invalid(format!("{wire} is a reserved tie-rail name")));
+        }
+        reserve(wire)?;
+    }
     let mut transform = Transform {
         work,
         high,
@@ -574,6 +703,7 @@ pub fn materialize_constants(
             low_cells: 0,
             bindings: Vec::new(),
         },
+        rails_used: [false; 2],
     };
     let mut rewritten = verilog::Netlist {
         module: netlist.module.clone(),
@@ -592,9 +722,17 @@ pub fn materialize_constants(
     for instance in &netlist.instances {
         let mut connections = Vec::with_capacity(instance.connections.len());
         for connection in &instance.connections {
+            let signal = match transform.existing_rail(
+                &instance.cell,
+                &connection.pin,
+                &connection.signal,
+            )? {
+                Some(rail) => rail,
+                None => transform.rewrite(&connection.signal, Some(1), 1)?,
+            };
             connections.push(verilog::Connection {
                 pin: connection.pin.clone(),
-                signal: transform.rewrite(&connection.signal, Some(1), 1)?,
+                signal,
             });
         }
         rewritten.instances.push(verilog::Instance {
@@ -604,6 +742,18 @@ pub fn materialize_constants(
         });
     }
     transform.report.new_cells = transform.cells.len();
+    for (used, wire) in transform
+        .rails_used
+        .into_iter()
+        .zip([RAIL_POWER_WIRE, RAIL_GROUND_WIRE])
+    {
+        if used {
+            rewritten.wires.push(verilog::Wire {
+                name: wire.into(),
+                range: None,
+            });
+        }
+    }
     rewritten.wires.extend(transform.wires);
     rewritten.instances.extend(transform.cells);
     verilog::validate_netlist(&rewritten, &verilog::VerilogLimits::default())
@@ -779,6 +929,66 @@ mod tests {
                 "accepted {constant}"
             );
         }
+    }
+    #[test]
+    fn rail_input_masters_tie_their_input_and_reimport_without_new_cells() {
+        let mut inv = cell("INV");
+        inv.pins[1] = lef::LefPin {
+            name: "A".into(),
+            direction: Some("INPUT".into()),
+            use_: Some("SIGNAL".into()),
+            shape: None,
+            ports: vec![],
+        };
+        let spec = |power| TieSpec {
+            cell: &inv,
+            pin: "Y",
+            rail: Some(("A", power)),
+        };
+        let (high, low) = (spec(false), spec(true));
+        let n = parse("module m(output [1:0] y); assign y=2'b10; endmodule");
+        let (out, report) =
+            materialize_constants_with(&n, high, low, &TieLimits::default()).unwrap();
+        assert_eq!((report.high_cells, report.low_cells), (1, 1));
+        assert_eq!(out.instances[0].cell, "INV");
+        assert_eq!(
+            out.instances[0].connections[1],
+            verilog::Connection {
+                pin: "A".into(),
+                signal: verilog::Expr::Ident(RAIL_GROUND_WIRE.into()),
+            }
+        );
+        assert_eq!(
+            out.instances[1].connections[1].signal,
+            verilog::Expr::Ident(RAIL_POWER_WIRE.into())
+        );
+        let wires: Vec<_> = out.wires.iter().map(|w| w.name.as_str()).collect();
+        assert!(wires.contains(&RAIL_POWER_WIRE) && wires.contains(&RAIL_GROUND_WIRE));
+        // An exported netlist (rail inputs written as literals) re-imports
+        // with the same instance tied again, not a second tie cell.
+        let exported = parse(
+            "module m(output y); wire t; INV rr_tie_cell_0 (.Y(t), .A(1'b0)); assign y=t; endmodule",
+        );
+        let (out, report) =
+            materialize_constants_with(&exported, high, low, &TieLimits::default()).unwrap();
+        assert_eq!((report.new_cells, report.constant_bits), (0, 0));
+        assert_eq!(
+            out.instances[0].connections[1].signal,
+            verilog::Expr::Ident(RAIL_GROUND_WIRE.into())
+        );
+        // The reserved names cannot come from the input; the same master
+        // needs opposite rails to serve both values; an output is no rail.
+        let reserved = parse(&format!(
+            "module m(output y); wire {RAIL_POWER_WIRE}; assign y=1'b0; endmodule"
+        ));
+        assert!(materialize_constants_with(&reserved, high, low, &TieLimits::default()).is_err());
+        assert!(materialize_constants_with(&n, high, high, &TieLimits::default()).is_err());
+        let bad = TieSpec {
+            cell: &inv,
+            pin: "Y",
+            rail: Some(("Y", true)),
+        };
+        assert!(materialize_constants_with(&n, high, bad, &TieLimits::default()).is_err());
     }
     #[test]
     fn budgets_fail_before_unbounded_generation() {

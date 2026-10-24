@@ -85,10 +85,12 @@ fn config() -> PhysicalConfig {
         tie_high: TieCell {
             cell: "HI".into(),
             pin: "Y".into(),
+            rail_input: None,
         },
         tie_low: TieCell {
             cell: "LO".into(),
             pin: "Y".into(),
+            rail_input: None,
         },
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,

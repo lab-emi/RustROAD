@@ -46,8 +46,54 @@ const NONE: u32 = u32::MAX;
 const NODE_BYTES: u64 = 24;
 /// Bytes per GCell (search state and guide marks) and per GCell edge.
 const GCELL_BYTES: u64 = 48;
-/// Conservative bytes per spatial shape including bin references.
-const SHAPE_BYTES: u64 = 160;
+/// Bytes per spatial shape: the blockage (48), query mark (8), alive and
+/// routed flags, rounded up.
+const SHAPE_BYTES: u64 = 64;
+/// Bytes per spatial bin entry: 8, doubled for vector growth.
+const ENTRY_BYTES: u64 = 16;
+/// Bytes per grid bin of one layer (head and tail entry index).
+const GRID_BYTES: u64 = 8;
+/// Shapes the router adds per terminal (escape, routed runs and vias,
+/// ripped-up shapes that stay indexed; measured 13-16), and bin entries per
+/// added shape (measured 2.4-4 over all shapes).
+const SHAPES_PER_TERMINAL: u64 = 20;
+const ENTRIES_PER_SHAPE: u64 = 4;
+/// Output records per terminal (wires, vias, patches, access; measured
+/// 5.2-7.0) and bytes per record across the output and the same-net groups.
+const RECORDS_PER_TERMINAL: u64 = 10;
+const RECORD_BYTES: u64 = 128;
+/// Routed state per terminal (per-net edge maps, escape plans, guides,
+/// queues), calibrated on the scale blocks (docs/scaling.md: 2.8-4.8 KiB
+/// per terminal measured with the per-node term below).
+const ROUTED_BYTES_PER_TERMINAL: u64 = 4096;
+/// Routed graph edges are bounded by the nodes they occupy (one net per
+/// node): bytes per node of per-net edge maps.
+const ROUTED_BYTES_PER_NODE: u64 = 8;
+
+/// Upfront whole-route memory estimate (bytes) of the track router.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MemoryEstimate {
+    /// Held by the caller before routing (`RouteInput::held_bytes`).
+    pub held: u64,
+    /// Detailed-search arrays and GCell state.
+    pub search: u64,
+    /// The router's spatial index (grid, fixed and routed shapes, entries).
+    pub spatial: u64,
+    /// Routed state (per-net edges, escape plans, guides).
+    pub routed: u64,
+    /// Rule repair and validation: a second index over fixed shapes and the
+    /// result, same-net groups and the output records.
+    pub check: u64,
+}
+impl MemoryEstimate {
+    pub fn total(&self) -> u64 {
+        self.held
+            .saturating_add(self.search)
+            .saturating_add(self.spatial)
+            .saturating_add(self.routed)
+            .saturating_add(self.check)
+    }
+}
 
 struct GLayer {
     layer: u32,
@@ -340,12 +386,64 @@ pub(crate) fn graph_nodes(input: &RouteInput, limits: &RouteLimits) -> Result<us
     Ok(Graph::new(input, plan, limits)?.len)
 }
 
-/// Upfront estimate (bytes) of the router's own state for this input.
-pub fn memory_estimate(nodes: usize, gcells: usize, shapes: usize) -> u64 {
-    (nodes as u64)
-        .saturating_mul(NODE_BYTES)
-        .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES))
-        .saturating_add((shapes as u64).saturating_mul(SHAPE_BYTES))
+/// Upfront whole-route estimate for this input (graph `nodes`, `gcells`),
+/// computed without allocating router state: fixed bin entries are counted
+/// shape by shape, the bin grid from the die and obstacle extent.
+pub fn memory_estimate(input: &RouteInput, nodes: usize, gcells: usize) -> Result<MemoryEstimate> {
+    let bin = crate::routing::bin_side(input)?;
+    let (.., cells) = crate::routing::bin_extent(input, bin);
+    let layers = input.layers.len() as u64;
+    let grid = cells.saturating_mul(layers).saturating_mul(GRID_BYTES);
+    let mut fixed_entries = 0u64;
+    for b in &input.obstacles {
+        let span = |lo: i64, hi: i64| (hi.div_euclid(bin) - lo.div_euclid(bin) + 1).max(0) as u64;
+        fixed_entries = fixed_entries
+            .saturating_add(span(b.rect.lx, b.rect.ux).saturating_mul(span(b.rect.ly, b.rect.uy)));
+    }
+    let o = input.obstacles.len() as u64;
+    let t = input.terminals.len() as u64;
+    let added = t.saturating_mul(SHAPES_PER_TERMINAL);
+    let index = |shapes: u64| {
+        grid.saturating_add((o + shapes).saturating_mul(SHAPE_BYTES))
+            .saturating_add(
+                fixed_entries
+                    .saturating_add(shapes.saturating_mul(ENTRIES_PER_SHAPE))
+                    .saturating_mul(ENTRY_BYTES),
+            )
+    };
+    let records = t.saturating_mul(RECORDS_PER_TERMINAL);
+    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+        eprintln!(
+            "[troute] estimate inputs grid_cells {cells} layers {layers} fixed_entries {fixed_entries} obstacles {o} terminals {t} nodes {nodes} gcells {gcells} held {}",
+            input.held_bytes
+        );
+    }
+    Ok(MemoryEstimate {
+        held: input.held_bytes,
+        search: (nodes as u64)
+            .saturating_mul(NODE_BYTES)
+            .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES)),
+        spatial: index(added),
+        routed: t
+            .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
+            .saturating_add((nodes as u64).saturating_mul(ROUTED_BYTES_PER_NODE)),
+        check: index(records.saturating_mul(2))
+            .saturating_add(records.saturating_mul(RECORD_BYTES)),
+    })
+}
+
+/// `memory_estimate` for a track-router input (graph and GCell counts
+/// derived as `route` derives them); `None` without a track plan.
+pub(crate) fn estimate_for(
+    input: &RouteInput,
+    limits: &RouteLimits,
+) -> Result<Option<MemoryEstimate>> {
+    let Some(plan) = input.tracks.as_ref() else {
+        return Ok(None);
+    };
+    let graph = Graph::new(input, plan, limits)?;
+    let cells = Cells::new(input.die, plan.gcell)?;
+    memory_estimate(input, graph.len, cells.len()).map(Some)
 }
 
 /// GCell grid over the die.
@@ -495,9 +593,26 @@ impl<'a> Router<'a> {
     fn width(&self, layer: u32) -> i64 {
         self.input.layers[layer as usize].width
     }
+    /// Runtime guard: the process's peak resident set (where the platform
+    /// reports it) must stay within `memory_mib`; checked at phase
+    /// boundaries and every 65536 expansions.
+    fn guard(&self, what: &str) -> Result<()> {
+        let cap = self.plan.memory_mib.saturating_mul(1 << 20);
+        match crate::memory::peak_rss_bytes() {
+            Some(rss) if rss > cap => Err(budget(&format!(
+                "memory_mib {}: peak resident set {} MiB at {what}",
+                self.plan.memory_mib,
+                rss >> 20
+            ))),
+            _ => Ok(()),
+        }
+    }
     fn tick(&mut self, search: &mut usize, what: &str, pin: u32, net: u32) -> Result<()> {
         *search += 1;
         self.expansions += 1;
+        if self.expansions.is_multiple_of(1 << 16) {
+            self.guard(what)?;
+        }
         if *search > self.limits.max_search_expansions {
             return Err(budget(&format!(
                 "routing expansion limit: per-search {what}, pin {pin} net {net}"
@@ -1753,9 +1868,12 @@ impl<'a> Router<'a> {
 
 fn trace(what: &str, start: std::time::Instant, extra: std::fmt::Arguments<'_>) {
     if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+        let mib = |b: Option<u64>| b.map_or_else(|| "-".into(), |b| format!("{}", b >> 20));
         eprintln!(
-            "[troute] {what} {:.3}s {extra}",
-            start.elapsed().as_secs_f64()
+            "[troute] {what} {:.3}s rss {} MiB peak {} MiB {extra}",
+            start.elapsed().as_secs_f64(),
+            mib(crate::memory::rss_bytes()),
+            mib(crate::memory::peak_rss_bytes()),
         );
     }
 }
@@ -1769,28 +1887,32 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         .ok_or_else(|| invalid("track plan absent"))?;
     let graph = Graph::new(input, plan, limits)?;
     let cells = Cells::new(input.die, plan.gcell)?;
-    let shapes_estimate = input
-        .obstacles
-        .len()
-        .saturating_add(input.terminals.len().saturating_mul(16));
-    let estimate = memory_estimate(graph.len, cells.len(), shapes_estimate);
+    let estimate = memory_estimate(input, graph.len, cells.len())?;
     trace(
         "estimate",
         t0,
         format_args!(
-            "nodes {} gcells {} shapes {} bytes {} (cap {} MiB)",
+            "nodes {} gcells {} obstacles {} terminals {} {estimate:?} total {} MiB (cap {} MiB)",
             graph.len,
             cells.len(),
-            shapes_estimate,
-            estimate,
+            input.obstacles.len(),
+            input.terminals.len(),
+            estimate.total() >> 20,
             plan.memory_mib
         ),
     );
-    if estimate > plan.memory_mib.saturating_mul(1 << 20) {
+    let cap = plan.memory_mib.saturating_mul(1 << 20);
+    if estimate.total() > cap {
         return Err(budget(&format!(
-            "track router memory estimate {} MiB exceeds {} MiB",
-            estimate >> 20,
-            plan.memory_mib
+            "track router memory estimate {} MiB exceeds memory_mib {} \
+             (held {} search {} spatial {} routed {} check {} MiB)",
+            estimate.total() >> 20,
+            plan.memory_mib,
+            estimate.held >> 20,
+            estimate.search >> 20,
+            estimate.spatial >> 20,
+            estimate.routed >> 20,
+            estimate.check >> 20
         )));
     }
     let mut groups = BTreeMap::<u32, Vec<&Terminal>>::new();
@@ -1850,8 +1972,10 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
             })
         });
     }
+    r.guard("setup")?;
     let all: Vec<&Terminal> = groups.values().flatten().copied().collect();
     let plans = r.reserve(&all)?;
+    r.guard("pin access")?;
     trace(
         "access",
         t0,
@@ -1879,6 +2003,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         })
         .collect();
     let guides = r.global(&nets)?;
+    r.guard("global routing")?;
     trace(
         "global",
         t0,
@@ -1996,10 +2121,12 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 r.expansions
             ),
         );
+        r.guard("repair")?;
         let oriented = r.orient_vias(&mut routed)?;
         trace("orient", t0, format_args!("vias re-picked {oriented}"));
         let mut out = assemble(&r, &groups, &plans, &routed, input, limits, &via_layers)?;
         let (work, remaining) = crate::routing::cleanup_report(input, &mut out, limits)?;
+        r.guard("rule repair")?;
         trace(
             "cleanup",
             t0,
@@ -2023,6 +2150,28 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                     .ok_or_else(|| budget("total wire length"))
             })?;
             validate(input, &out, limits)?;
+            r.guard("validation")?;
+            let fp = r.spatial.footprint();
+            trace(
+                "validated",
+                t0,
+                format_args!(
+                    "records {} wires {} vias {} access {} patches {} bins {} entries {} shapes {} bin {} obstacles {} terminals {} die {:?} layers {}",
+                    out.wires.len() + out.vias.len(),
+                    out.wires.len(),
+                    out.vias.len(),
+                    out.access.len(),
+                    out.patches.len(),
+                    fp.0,
+                    fp.1,
+                    fp.2,
+                    fp.3,
+                    input.obstacles.len(),
+                    input.terminals.len(),
+                    input.die,
+                    input.layers.len()
+                ),
+            );
             return Ok(out);
         }
         if pass == 4 {
@@ -2204,6 +2353,8 @@ mod tests {
             rules: true,
             access_classes: Vec::new(),
             tracks: Some(plan()),
+            ties: Vec::new(),
+            held_bytes: 0,
         }
     }
     fn limits() -> RouteLimits {
@@ -2328,6 +2479,86 @@ mod tests {
     }
 
     #[test]
+    fn supply_tie_joins_a_pin_to_its_own_rail_zone_only() {
+        use crate::routing::SupplyTie;
+        // Ground rail (net 9) and power rail (net 8) on M1 tracks y=20/980.
+        let ground = rect(0, 0, 1000, 40);
+        let obstacles = vec![
+            Blockage {
+                layer: 0,
+                rect: ground,
+                net: Some(9),
+            },
+            Blockage {
+                layer: 0,
+                rect: rect(0, 960, 1000, 1000),
+                net: Some(8),
+            },
+        ];
+        let zone = rect(200, 0, 400, 40);
+        let tie = |zone: Rect| {
+            vec![
+                terminal(0, 5, false, rect(290, 490, 310, 510)),
+                Terminal {
+                    pin: 1,
+                    net: 5,
+                    driver: true,
+                    shapes: vec![LayerRect {
+                        layer: 0,
+                        rect: zone,
+                    }],
+                    class: None,
+                },
+            ]
+        };
+        let mut i = input(tie(zone), obstacles.clone());
+        // Undeclared, the rail is foreign metal and the zone has no start.
+        assert!(route_cpu_ref(&i, &limits()).is_err());
+        i.ties = vec![SupplyTie {
+            net: 5,
+            supply: 9,
+            zone: LayerRect {
+                layer: 0,
+                rect: zone,
+            },
+        }];
+        let r = route_cpu_ref(&i, &limits()).unwrap();
+        crate::routing::validate(&i, &r, &limits()).unwrap();
+        assert_eq!(r.nets, vec![5]);
+        // Every tie shape that reaches rail metal does so inside its zone.
+        let mut shapes: Vec<(u32, Rect)> = r
+            .wires
+            .iter()
+            .map(|w| (w.layer, crate::routing::wire_rect(w, 20).unwrap()))
+            .collect();
+        for v in &r.vias {
+            for sh in &i.vias[v.kind as usize].shapes {
+                shapes.push((sh.layer, shifted(sh.rect, v.at).unwrap()));
+            }
+        }
+        let touching: Vec<_> = shapes
+            .iter()
+            .filter(|(l, s)| *l == 0 && crate::routing::overlap(*s, ground))
+            .collect();
+        assert!(!touching.is_empty(), "the tie reaches its rail");
+        assert!(
+            touching
+                .iter()
+                .all(|(_, s)| crate::routing::overlap(*s, zone)),
+            "{touching:?}"
+        );
+        // A tie whose pseudo-driver is not its zone, or that names a routed
+        // net as its supply, is refused before search.
+        let mut bad = input(tie(rect(200, 0, 420, 40)), obstacles.clone());
+        bad.ties = i.ties.clone();
+        assert!(route_cpu_ref(&bad, &limits()).is_err());
+        let mut bad = input(tie(zone), obstacles);
+        bad.ties = i.ties.clone();
+        bad.ties[0].supply = 5;
+        assert!(route_cpu_ref(&bad, &limits()).is_err());
+    }
+
+    #[test]
     fn plan_budgets_and_memory_estimate_are_enforced() {
         let t = vec![
             terminal(0, 0, true, rect(90, 90, 110, 110)),
@@ -2362,7 +2593,14 @@ mod tests {
             ..RouteLimits::default()
         };
         assert!(route_cpu_ref(&i, &absurd).is_err());
-        assert!(memory_estimate(1_000_000, 10_000, 100_000) > 24_000_000);
+        let e = memory_estimate(&i, 1_000_000, 10_000).unwrap();
+        assert!(e.search > 24_000_000 && e.total() > e.search + e.spatial);
+        i.held_bytes = 1 << 40;
+        assert!(matches!(
+            route_cpu_ref(&i, &limits()),
+            Err(crate::Error::Budget(_))
+        ));
+        i.held_bytes = 0;
         if let Some(p) = i.tracks.as_mut() {
             p.capacity_percent = 0;
         }

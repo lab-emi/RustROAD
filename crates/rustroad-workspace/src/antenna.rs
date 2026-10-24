@@ -198,10 +198,17 @@ pub struct AntennaScope {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct AntennaStats {
     pub nets: usize,
+    /// Rail-tie router nets (a tie-cell input joined to its own supply
+    /// rail): supply metal, not checked here; the foundry decks check them.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub supply_tie_nets_unchecked: usize,
     pub shapes: usize,
     pub partial_nets_checked: usize,
     pub pair_checks: usize,
     pub union_cells: usize,
+}
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct NetWorst {
@@ -542,10 +549,24 @@ pub fn check_antenna(
             unsupported.len()
         ));
     }
-    // Per-net shapes.
+    // Per-net shapes (logical nets only; rail-tie router nets have ids past
+    // the connectivity nets and are skipped).
     let mut per_net: BTreeMap<u32, Vec<Shape>> = BTreeMap::new();
-    let routed: std::collections::BTreeSet<u32> = state.routes.nets.iter().copied().collect();
-    for w in &state.routes.wires {
+    let logical = model.nets.len() as u32;
+    let routed: std::collections::BTreeSet<u32> = state
+        .routes
+        .nets
+        .iter()
+        .copied()
+        .filter(|&n| n < logical)
+        .collect();
+    let supply_ties = state.routes.nets.len() - routed.len();
+    if supply_ties > 0 {
+        diagnostics.push(format!(
+            "ANTENNA_SUPPLY_TIES: {supply_ties} rail-tie nets (tie-cell input to its own supply rail) are supply metal and not checked natively"
+        ));
+    }
+    for w in state.routes.wires.iter().filter(|w| w.net < logical) {
         let width = input.layers[w.layer as usize].width;
         per_net.entry(w.net).or_default().push(Shape {
             layer: w.layer,
@@ -553,7 +574,7 @@ pub fn check_antenna(
             terminal: None,
         });
     }
-    for v in &state.routes.vias {
+    for v in state.routes.vias.iter().filter(|v| v.net < logical) {
         let via = input
             .vias
             .get(v.kind as usize)
@@ -566,7 +587,7 @@ pub fn check_antenna(
             });
         }
     }
-    for p in &state.routes.patches {
+    for p in state.routes.patches.iter().filter(|p| p.net < logical) {
         per_net.entry(p.net).or_default().push(Shape {
             layer: p.layer,
             rect: p.rect,
@@ -658,7 +679,10 @@ pub fn check_antenna(
             ),
         }
     };
-    let mut stats = AntennaStats::default();
+    let mut stats = AntennaStats {
+        supply_tie_nets_unchecked: supply_ties,
+        ..AntennaStats::default()
+    };
     let mut rows: Vec<CheckRow> = Vec::new();
     let mut worst: BTreeMap<String, (f64, bool)> = BTreeMap::new();
     let mut qualified = false;

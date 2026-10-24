@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 pub mod connectivity;
 pub mod extract;
 pub mod io;
+pub mod memory;
 pub mod place;
 pub mod power;
 pub(crate) mod route_rules;
@@ -14,6 +15,7 @@ pub mod routing;
 pub mod supply;
 pub mod tap;
 pub(crate) mod troute;
+pub use troute::MemoryEstimate;
 pub mod wire_runs;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
