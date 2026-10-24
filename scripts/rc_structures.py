@@ -20,8 +20,8 @@ Structures (A is the upper or studied wire):
 * an upper-layer wire running along such a rail (aligned, the rail slightly
   wider) and along a 3x wider rail;
 * a wire over dense crossings (minimum pitch) and over sparse crossings;
-* the same sparse crossings under a wire with minimum-space neighbours on
-  both sides (a sandwiched wire);
+* the same sparse crossings under a wire with a minimum-space neighbour on
+  one side, and on both sides (a sandwiched wire);
 * parallel stacked wires on other layers (aligned; offset by most of a width).
 
 Every structure that only adds conductors next to the studied wire must not
@@ -103,6 +103,8 @@ def structures(pdk: str) -> dict:
         "top_along_rail_3x": [("A", top, 10, 30, 10 + T, 30), (GROUND, lo, 5, 30, 15 + T, 30, 3 * rail)],
         "top_over_sparse_crossings": [("A", top, 10, 10, 10 + T, 10)] + sparse,
         "top_over_dense_crossings": [("A", top, 10, 10, 10 + T, 10)] + dense,
+        "top_beside": [("A", top, 10, 10, 10 + T, 10)] + beside[:1],
+        "top_beside_over_sparse_crossings": [("A", top, 10, 10, 10 + T, 10)] + beside[:1] + sparse,
         "top_sandwiched": [("A", top, 10, 10, 10 + T, 10)] + beside,
         "top_sandwiched_over_sparse_crossings": [("A", top, 10, 10, 10 + T, 10)] + beside + sparse,
         "stacked_aligned": [("A", hi, 10, 10, 10 + T, 10), ("B", lo, 10, 10, 10 + T, 10)],
@@ -227,6 +229,8 @@ def increments(table: dict) -> None:
         table[f"{name}_increment"] = dict(A=dict(total_af=total(name, "A") - total("upper_alone", "A")))
     for name in ("top_along_rail", "top_along_rail_3x", "top_over_sparse_crossings", "top_over_dense_crossings"):
         table[f"{name}_increment"] = dict(A=dict(total_af=total(name, "A") - total("top_alone", "A")))
+    table["top_beside_over_sparse_crossings_increment"] = dict(A=dict(
+        total_af=total("top_beside_over_sparse_crossings", "A") - total("top_beside", "A")))
     table["top_sandwiched_over_sparse_crossings_increment"] = dict(A=dict(
         total_af=total("top_sandwiched_over_sparse_crossings", "A") - total("top_sandwiched", "A")))
 
@@ -236,7 +240,8 @@ MONOTONE = [("crossing", "upper_alone", "A"), ("crossing", "lower_alone", "B"),
             ("crossing_rail", "upper_alone", "A"), ("crossing_rail_3x", "upper_alone", "A"),
             ("crossing_plane", "upper_alone", "A"), ("top_along_rail", "top_alone", "A"),
             ("top_along_rail_3x", "top_alone", "A"), ("top_over_sparse_crossings", "top_alone", "A"),
-            ("top_over_dense_crossings", "top_alone", "A"), ("top_sandwiched", "top_alone", "A"),
+            ("top_over_dense_crossings", "top_alone", "A"), ("top_beside", "top_alone", "A"),
+            ("top_beside_over_sparse_crossings", "top_beside", "A"), ("top_sandwiched", "top_alone", "A"),
             ("top_sandwiched_over_sparse_crossings", "top_sandwiched", "A")]
 
 
@@ -340,6 +345,8 @@ ROWS = [
     ("top_along_rail_3x_increment", "A", "total_af", "upper-layer wire along a 3x rail, increment aF"),
     ("top_over_sparse_crossings_increment", "A", "total_af", "over 2 um-pitch crossings, increment aF"),
     ("top_over_dense_crossings_increment", "A", "total_af", "over minimum-pitch crossings, increment aF"),
+    ("top_beside_over_sparse_crossings_increment", "A", "total_af",
+     "over 2 um-pitch crossings with a minimum-space neighbour on one side, increment aF"),
     ("top_sandwiched_over_sparse_crossings_increment", "A", "total_af",
      "over 2 um-pitch crossings with minimum-space neighbours on both sides, increment aF"),
     ("stacked_aligned", "A", "coupling_af", "stacked aligned, coupling aF"),
