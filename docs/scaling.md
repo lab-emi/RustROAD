@@ -48,6 +48,16 @@ below describe the earlier small-block release.
   eviction recomputes the same geometry. Object/work limits, the whole-process
   memory estimate and the runtime RSS guard remain active. Resource limits
   are independent of geometric and timing acceptance checks.
+- After decoding, the routing estimate uses resident plus swapped process
+  bytes with 25% headroom, while future search, index, route and checking
+  allocations stay separately budgeted. Pre-load and unavailable-probe paths
+  retain the conservative serialized-size estimate.
+- Access tables share the exact relative landing geometry. Local escape repair
+  queries a bounded interval index and keeps the original ascending-pin repair
+  order. Both construction and candidate scans count toward the work cap.
+- Optional `port_buffer` roles isolate output aliases and feedthroughs. SPEF
+  formatting generates one labeled net at a time; it does not copy the complete
+  extracted network into a second string-rich representation.
 - Constant fanout repair covers inserted and in-place converted tie sources,
   including top-level output aliases. Mixed signal/constant buses preserve
   their declared bit order. Independent Yosys equivalence and wrong-output
@@ -163,7 +173,7 @@ on stdout.
    coordinates of the layers up to the access layer, and stops at the first
    on-graph node of the access layer (met2 / Metal2). Candidates are the
    on-graph points inside the pin plus the quartile points, checked once per
-   (master, orientation, pin, origin modulo the track period) by the
+   (master, orientation, pin, exact relative landing points) by the
    existing LEF-rule access table (other-net blockers, same-pin notches,
    MINSTEP, pads inside the pin first); escapes keep the via-variant and
    same-pin checks. Terminals with the fewest candidates go first. A terminal
@@ -375,8 +385,9 @@ both PDKs and against the previous evidence), and peak RSS drops: SERV
 594 MiB.
 
 Limits in track mode may exceed the lattice defaults up to
-`RouteLimits::ceiling()` (64M nodes, 8M obstacles, 64M bin entries, 8M
-segments, 2e9 expansions, 2^40 comparisons, 64M heap); the grid's bins over
+`RouteLimits::ceiling()` (4,294,967,294 implicit nodes, 256M retained obstacle
+records, 512M bin entries, 128M segments, 2e9 expansions, 2^40 comparisons,
+64M heap entries); the grid's bins over
 all layers count against `max_bin_entries`. The scale profiles use 8M nodes,
 4M obstacles, 32M bin entries, 2M segments, 4e8 expansions, 4e6 per search,
 4e10 comparisons (`gf180-scale-routing-large.json`, used by rv_core only:

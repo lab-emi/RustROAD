@@ -84,20 +84,33 @@ the DRC oracle (see router-drc.md).
 Written before implementing the track router (stream W14-W16); details in
 `docs/scaling.md`. The lattice caps above stay hard caps for the lattice
 router. A profile with `track_router` may raise every `RouteLimits` field up
-to `RouteLimits::ceiling()` (64M graph nodes, 8M obstacles, 64M bin entries,
-8M segments, 2e9 expansions, 5e7 per search, 2^40 comparisons, 64M heap
-entries). `route` checks a whole-process estimate against
-`track_router.memory_mib` (default 2048, at most 65536): before loading,
-the process baseline plus 3x the revision's bytes on disk; before the
-router allocates, that plus the input, the search arrays (24 B per track
-node, 48 B per GCell), the spatial index (8 B per grid bin and layer,
-64 B per shape, 16 B per bin entry), the routed state and the rule-check
-index with the output records (formula and calibration in
-`docs/scaling.md`, "Budgets and memory estimate"). While routing, the
-process' peak RSS is compared with `memory_mib` at every phase and every
-65536 expansions. Every search, queue, repair round and rip-up count is capped
-(`max_search_expansions`, `max_heap`, `max_repair_rounds`,
-`max_ripups_per_net`); a reached cap fails with `BUDGET_EXCEEDED` or
-`NO_ROUTE` naming the pin and net, HEAD unchanged. Route records live in
-`routes.rbin` (at most 512 MiB); design.json is capped at 64 MiB (was
-16 MiB) so ~25k-instance blocks fit.
+to `RouteLimits::ceiling()` (4,294,967,294 implicit graph nodes, 256M
+retained obstacle records, 512M bin entries, 128M segments, 2e9 expansions,
+5e7 per search, 2^40 comparisons and 64M heap entries). These are independent
+ceilings, not a promise that all maxima fit in memory at once.
+
+`route` checks a whole-process estimate against `track_router.memory_mib`
+(default 2048, at most 65536). Before loading it uses the process baseline plus
+3x the revision's serialized size. Once the complete routing input is decoded,
+it uses the live resident plus swapped footprint with 25% headroom and a floor
+at the structural input estimate. Platforms without that probe retain the
+conservative serialized-size estimate. Future allocations are counted
+separately: bounded search state, GCells, spatial indexes, retained routes and
+the rule-checking workspace. Large implicit grids use sparse search state;
+shared master geometry is translated on query instead of being flattened.
+
+Spatial bins use dense grids for small extents and 32x32 pages for populated
+large extents. Completed routes retain collinear runs. Access memoization is
+capped at 64 MiB, and `max_history_entries` separately bounds congestion history.
+Local pin-repair interval queries charge candidate scans to the work budget.
+While routing, the process' peak RSS is checked at phase boundaries and during
+search and access reservation. Every search, queue, repair round and rip-up
+count remains bounded. Reaching a limit returns `BUDGET_EXCEEDED` or `NO_ROUTE`
+and leaves HEAD unchanged.
+
+Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
+remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared
+state into framed, hash-checked `model.rbin` records (16 GiB file bound,
+1 MiB per frame) and fixed-width `physical.rbin` (2 GiB). These storage limits
+do not certify completion or quality of a full-chip flow. Full OpenC910
+RTL-to-GDS qualification remains in progress; see [scaling](scaling.md).
