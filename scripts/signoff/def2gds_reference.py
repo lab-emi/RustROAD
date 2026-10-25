@@ -11,6 +11,7 @@ hierarchy (SREFs), uses a 0.001 um database unit and no timestamps. For a
 
 usage: def2gds_reference.py --def ROUTED.def --pdk sky130|gf180 --out OUT.gds
            [--manifest fixtures/flow/signoff-pinned.json] [--timeout 600]
+           [--memory-gib 4] [--threads 2]
 Writes OUT.gds and OUT.gds.json (receipt with identities, checks, resources).
 Exit 0 only when the identity check and every output assertion pass.
 """
@@ -51,7 +52,82 @@ def def_summary(text: str) -> dict:
                 masters=masters)
 
 
-def stream(def_path: Path, pdk: str, out: Path, manifest_path: Path, timeout: int = 600) -> dict:
+def def_records(path: Path, max_record_bytes: int = 16 * 1024**2):
+    """Records emitted by the supported DEF writers, with bounded scratch."""
+    if path.stat().st_size > 16 * 1024**3:
+        raise ValueError("DEF file exceeds 16 GiB metadata-scan budget")
+    pending, size = [], 0
+    with path.open('rb') as handle:
+        while line := handle.readline(max_record_bytes + 1):
+            if len(line) > max_record_bytes:
+                raise ValueError("DEF line exceeds record budget")
+            stripped = line.strip()
+            if not stripped or stripped.startswith(b'#'):
+                continue
+            if stripped.startswith(b'END ') and not pending:
+                yield stripped
+                continue
+            size += len(line)
+            if size > max_record_bytes or len(pending) >= 65_536:
+                raise ValueError("DEF record exceeds metadata-scan budget")
+            pending.append(line)
+            if stripped.endswith(b';'):
+                yield b''.join(pending)
+                pending, size = [], 0
+    if pending:
+        raise ValueError("unterminated DEF record")
+
+
+def def_file_summary(path: Path, check_odd: bool = False) -> tuple[dict, dict]:
+    design = units = declared = None
+    components, masters, in_components, in_properties = 0, set(), False, False
+    odd = dict(checked=0, odd=0, examples=[])
+    for record in def_records(path):
+        head = record.lstrip().split(None, 4)
+        if not head:
+            continue
+        if head[0] == b'PROPERTYDEFINITIONS':
+            in_properties = True
+        elif head[:2] == [b'END', b'PROPERTYDEFINITIONS']:
+            in_properties = False
+        if in_properties:
+            continue
+        if head[0] == b'DESIGN' and len(head) >= 2:
+            design = head[1].rstrip(b';').decode('utf-8')
+        elif head[:3] == [b'UNITS', b'DISTANCE', b'MICRONS'] and len(head) >= 4:
+            units = int(head[3].rstrip(b';'))
+        elif head[0] == b'COMPONENTS' and len(head) >= 2:
+            if declared is not None:
+                raise ValueError("duplicate DEF COMPONENTS section")
+            declared = int(head[1].rstrip(b';'))
+            if not 0 <= declared <= 64_000_000:
+                raise ValueError("DEF component-count budget")
+            in_components = True
+        elif head[:2] == [b'END', b'COMPONENTS']:
+            if not in_components or components != declared:
+                raise ValueError("DEF component records differ from declared count")
+            in_components = False
+        elif in_components:
+            if len(head) < 3 or head[0] != b'-':
+                raise ValueError("unsupported DEF component record")
+            components += 1
+            masters.add(head[2].rstrip(b';').decode('utf-8'))
+            if components > 64_000_000 or len(masters) > 65_536:
+                raise ValueError("DEF component/master metadata budget")
+        if check_odd:
+            counts = parsers.count_def_odd_coordinates(record.decode('utf-8'))
+            odd['checked'] += counts['checked']
+            odd['odd'] += counts['odd']
+            odd['examples'].extend(counts['examples'][:max(0, 10-len(odd['examples']))])
+    if in_components or declared is None or components != declared:
+        raise ValueError("incomplete DEF COMPONENTS section")
+    return dict(design=design, units=units, masters=sorted(masters)), odd
+
+
+def stream(def_path: Path, pdk: str, out: Path, manifest_path: Path, timeout: int = 600,
+           memory_gib: int = 4, threads: int = 2) -> dict:
+    if not 1 <= memory_gib <= 64 or not 1 <= threads <= 64:
+        raise ValueError("reference GDS memory/thread budget outside supported bounds")
     out = out.resolve()
     work = out.parent / (out.name + ".work")
     work.mkdir(parents=True, exist_ok=True)
@@ -64,14 +140,20 @@ def stream(def_path: Path, pdk: str, out: Path, manifest_path: Path, timeout: in
                                                   manifest=str(manifest_path), manifest_sha256=identity.get("manifest_sha256")),
                    tool="KLayout 0.30.9 LEF/DEF reader (black box) in image " + container.SIGNOFF_IMAGE[:12],
                    status="unverified", problems=[])
-    text = def_path.read_text(errors="replace")
-    summary = def_summary(text)
+    receipt['adapter_sha256'] = {name: sha256(HERE / name) for name in
+                                 ('def2gds_reference.py', 'kl_def2gds.py', 'gds_hierarchy.py')}
+    try:
+        summary, odd = def_file_summary(def_path, spec['lef_dbu_per_um'] != 1000)
+    except ValueError as error:
+        receipt['status'] = 'failed'
+        receipt['problems'].append(str(error))
+        out.with_suffix(out.suffix + '.json').write_text(json.dumps(receipt, indent=2) + '\n')
+        return receipt
     receipt["def"] = summary
     problems = receipt["problems"]
     if summary["units"] != spec["lef_dbu_per_um"]:
         problems.append(f"DEF UNITS {summary['units']} != PDK LEF DBU {spec['lef_dbu_per_um']}")
     if summary["units"] and summary["units"] != 1000:
-        odd = parsers.count_def_odd_coordinates(text)
         receipt["odd_coordinate_check"] = odd
         factor = summary["units"] // 1000
         if summary["units"] % 1000 or factor != 2:
@@ -95,8 +177,9 @@ def stream(def_path: Path, pdk: str, out: Path, manifest_path: Path, timeout: in
                          "-rd", f"report=/out/{work.name}/{report.name}"],
                         out_dir=out.parent, label=label, ro=[(str(HERE), "/scripts"),
                                                              (str(def_path.resolve()), "/in/design.def")],
-                        memory="4g", cpus=2, threads=2, timeout=timeout)
+                        memory=f"{memory_gib}g", cpus=threads, threads=threads, timeout=timeout)
     receipt["resources"] = dict(wall_seconds=run["wall_seconds"], peak_rss_kib=run["peak_rss_kib"],
+                                memory_limit_gib=memory_gib, threads=threads,
                                 receipt=str(Path(run["stdout"]).parent / "receipt.json"))
     log = container.read_capture(run["stdout"]) + container.read_capture(run["stderr"])
     if "KL_DEF2GDS_DONE" not in log or not out.is_file() or not report.is_file():
@@ -130,8 +213,11 @@ def main(argv=None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, default=manifest_mod.DEFAULT_MANIFEST)
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--memory-gib", type=int, default=4, choices=range(1, 65))
+    parser.add_argument("--threads", type=int, default=2, choices=range(1, 65))
     args = parser.parse_args(argv)
-    receipt = stream(args.def_path.resolve(), args.pdk, args.out, args.manifest.resolve(), args.timeout)
+    receipt = stream(args.def_path.resolve(), args.pdk, args.out, args.manifest.resolve(),
+                     args.timeout, args.memory_gib, args.threads)
     print(json.dumps(dict(status=receipt["status"], problems=receipt["problems"],
                           output=receipt.get("output"), receipt=str(args.out.resolve()) + ".json")))
     return {"passed": 0, "failed": 1}.get(receipt["status"], 3)

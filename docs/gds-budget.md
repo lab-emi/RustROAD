@@ -67,3 +67,12 @@ are propagated without walking every instantiated leaf shape. It rejects
 cycles, overflowing counts and configured cell, reference, edge, layer, work
 and count-entry limits. A real nested-array fixture matches KLayout's flattened
 shape iterator exactly. This reporting change does not alter written geometry.
+
+The reference DEF metadata scan also streams bounded statements rather than
+copying a complete COMPONENTS section: at most16GiB/file,16MiB/statement,
+65536 statement lines,64M components and65536 distinct masters. Declared counts,
+unterminated records and GF180 coordinate parity are checked. Large reference
+streamout jobs may explicitly set `--memory-gib` (1..64) and `--threads` (1..64);
+defaults remain4GiB and2 workers. Adapter hashes and the selected limits are
+recorded in the receipt. These are validation/streamout limits, not a statement
+that a full OpenC910 layout has passed signoff.
