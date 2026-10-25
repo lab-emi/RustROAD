@@ -30,6 +30,7 @@ incomplete oracle). Third-party tools run only as black-box executables.
 from __future__ import annotations
 
 import argparse
+import copy
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -147,7 +148,7 @@ def guard(statuses: dict, keys: list[str], status: str, reason: str):
 class PdkGate:
     def __init__(self, ctx: Context, tag: str, profile: dict):
         self.ctx, self.tag = ctx, tag
-        self.spec = ctx.manifest["pdks"][tag]
+        self.spec = copy.deepcopy(ctx.manifest["pdks"][tag])
         p = dict(profile)
         p["config"] = str(D.resolve(self.spec["physical_config"]["path"]))
         p["routing_config"] = str(D.resolve(self.spec["routing_config"]["path"]))
@@ -160,13 +161,20 @@ class PdkGate:
         batch = getattr(ctx.args, "route_batch_terminals", None)
         if batch is not None:
             original = Path(p["routing_config"])
-            routing = json.loads(original.read_text())
+            source = original.read_bytes()
+            source_hash = hashlib.sha256(source).hexdigest()
+            if source_hash != self.spec["routing_config"]["sha256"] or source_hash != self.spec["frozen"]["routing_profile"]:
+                raise GateError("cannot derive batch configuration from an unpinned routing profile")
+            routing = json.loads(source)
             routing["batch_terminals"] = batch
             derived = ctx.h.root / f"{tag}_batch_routing.json"
-            derived.write_text(json.dumps(routing, indent=2) + "\n")
+            encoded = (json.dumps(routing, indent=2) + "\n").encode()
+            expected_hash = hashlib.sha256(encoded).hexdigest()
+            derived.write_bytes(encoded)
+            self.spec["frozen"]["routing_profile"] = expected_hash
             p["routing_config"] = str(derived)
-            self.details["batch_routing_config"] = dict(path=str(derived), sha256=D.sha256_file(derived),
-                                                        source_sha256=D.sha256_file(original), terminals=batch)
+            self.details["batch_routing_config"] = dict(path=str(derived), sha256=expected_hash,
+                                                        source_sha256=source_hash, terminals=batch)
         self.container_peaks: list = []  # peak RSS of every signoff container run (steps)
         want = [(c["name"], c["liberty"], c["rc"]) for c in self.spec["corners"]]
         if want != CORNERS[tag]:
