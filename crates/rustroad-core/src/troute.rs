@@ -2237,11 +2237,9 @@ impl<'a> Router<'a> {
         let mut victims_all: BTreeSet<u32> = BTreeSet::new();
         let via_cost = self.plan.via_cost;
         let wrong = self.plan.wrong_way_factor;
-        // Negotiation escalates for this net's repeated conflicts. The total
-        // repair count includes unrelated nets and must not scale path costs.
-        let conflict = via_cost
-            .saturating_mul(10)
-            .saturating_mul(1 + rips.get(&net).copied().unwrap_or(0) as u64);
+        // Each crossed net is charged by its own rip-up history below. Neither
+        // unrelated repairs nor this net's attempts multiply that penalty again.
+        let conflict = via_cost.saturating_mul(10);
         let near_cost = via_cost;
         let hist_unit = via_cost / 2;
         let mut nbuf = Vec::with_capacity(8);
@@ -2352,8 +2350,9 @@ impl<'a> Router<'a> {
                 if search == self.limits.max_search_expansions {
                     if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
                         eprintln!(
-                            "[troute] search cap net {net} pin {} soft {soft} repair_step {round} start {:?} root {:?} current {:?} tree_nodes {} targets {} cost {cost}",
+                            "[troute] search cap net {net} pin {} soft {soft} repair_step {round} ripups {} start {:?} root {:?} current {:?} tree_nodes {} targets {} cost {cost}",
                             t.pin,
+                            rips.get(&net).copied().unwrap_or(0),
                             self.graph.point(start),
                             (root_layer, root_point),
                             self.graph.point(id),
@@ -3562,11 +3561,12 @@ mod tests {
         design.die = rect(0, 0, 10000, 10000);
         design.tracks.as_mut().unwrap().memory_mib = 256;
         design.tracks.as_mut().unwrap().heuristic_weight = 4;
+        design.tracks.as_mut().unwrap().max_ripups_per_net = 24;
         let limits = RouteLimits {
             max_search_expansions: 2000,
             ..limits()
         };
-        for round in [0, 750] {
+        for (round, current_rips, victim_rips) in [(0, 0, 0), (750, 0, 0), (750, 23, 23)] {
             let plan = design.tracks.as_ref().unwrap();
             let graph = Graph::new(&design, plan, &limits).unwrap();
             let nodes = graph.len;
@@ -3615,11 +3615,20 @@ mod tests {
                     .unwrap();
             }
             let outcome = r
-                .route_net(0, &terminals, &plans, true, false, &BTreeMap::new(), round)
+                .route_net(
+                    0,
+                    &terminals,
+                    &plans,
+                    true,
+                    false,
+                    &BTreeMap::from([(0, current_rips), (9, victim_rips)]),
+                    round,
+                )
                 .unwrap();
             let Outcome::Routed(route, victims) = outcome else {
                 panic!(
-                    "crossing must finish within 2000 expansions after {round} unrelated repairs"
+                    "crossing must finish within 2000 expansions after repair {round}, \
+                     current rip-ups {current_rips}, victim rip-ups {victim_rips}"
                 );
             };
             assert_eq!(victims, [9], "the crossing must declare the ripped net");

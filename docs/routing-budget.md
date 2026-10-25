@@ -165,10 +165,11 @@ attempts. Soft-search and aggregate resource limits remain terminal failures.
 `max_hard_search_expansions` can hand off earlier; it defaults to the full
 per-search limit and cannot exceed it. Lowering this optional limit does not
 increase soft-search, total-work, frontier or memory allowances.
-Soft crossing penalties escalate with reroutes of the affected nets, not the
-total number of unrelated repairs. The repair counter still enforces the global
-work bound. This keeps the same local conflict from becoming arbitrarily costly
-when more independent nets are present in a batch.
+Soft crossing penalties escalate with the crossed net's rip-up history. Neither
+the current net's attempts nor the total unrelated repair count multiplies that
+penalty again. Spatial congestion history remains active. The repair counter
+still enforces the global work bound, without making the same local conflict
+arbitrarily costly as independent nets are added to a batch.
 
 Preferred-track moves can span 16, 64 or 256 stops. Each full wire is checked
 against geometry, and every intermediate point must obey the guide and tree
