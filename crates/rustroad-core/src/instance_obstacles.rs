@@ -21,7 +21,8 @@ pub struct ObstacleTemplate {
     height: i64,
     pin_count: u32,
     bounds: Option<Rect>,
-    layers: BTreeMap<u32, Vec<TemplateObstacle>>,
+    layers: BTreeMap<u32, Vec<(usize, TemplateObstacle)>>,
+    order: Vec<(u32, usize)>,
     shape_count: usize,
 }
 impl ObstacleTemplate {
@@ -31,8 +32,9 @@ impl ObstacleTemplate {
         }
         let shape_count = shapes.len();
         let mut bounds: Option<Rect> = None;
-        let mut layers: BTreeMap<u32, Vec<TemplateObstacle>> = BTreeMap::new();
-        for shape in shapes {
+        let mut layers: BTreeMap<u32, Vec<(usize, TemplateObstacle)>> = BTreeMap::new();
+        let mut order = Vec::with_capacity(shape_count);
+        for (ordinal, shape) in shapes.into_iter().enumerate() {
             if !shape.rect.valid() || shape.pin.is_some_and(|p| p >= pin_count) {
                 return Err(invalid("cell obstacle template geometry/pin"));
             }
@@ -45,7 +47,9 @@ impl ObstacleTemplate {
                     uy: b.uy.max(shape.rect.uy),
                 },
             });
-            layers.entry(shape.layer).or_default().push(shape);
+            let layer = layers.entry(shape.layer).or_default();
+            order.push((shape.layer, layer.len()));
+            layer.push((ordinal, shape));
         }
         Ok(Self {
             height,
@@ -53,6 +57,7 @@ impl ObstacleTemplate {
             bounds,
             layers,
             shape_count,
+            order,
         })
     }
 }
@@ -135,40 +140,36 @@ impl InstanceObstacles {
             .get(instance)
             .map(|i| self.templates[i.template as usize].shape_count)
     }
-    /// One rectangle in stable (layer, original layer-local order), with its
-    /// global pin identity when the extraction column is present. No shapes
-    /// of other instances are materialized.
-    pub fn shape(&self, instance: usize, mut ordinal: usize) -> Result<(Blockage, Option<u32>)> {
+    /// One rectangle in original template order, with its global pin identity
+    /// when the extraction column is present. No other instance is expanded.
+    pub fn shape(&self, instance: usize, ordinal: usize) -> Result<(Blockage, Option<u32>)> {
         let cell = self
             .instances
             .get(instance)
             .ok_or_else(|| invalid("instance shape owner"))?;
         let master = &self.templates[cell.template as usize];
-        for (&layer, shapes) in &master.layers {
-            if ordinal >= shapes.len() {
-                ordinal -= shapes.len();
-                continue;
-            }
-            let shape = &shapes[ordinal];
-            let pin = shape.pin.map(|p| (cell.pin_start + p) as usize);
-            let net = pin.map(|p| self.pin_nets[p]).filter(|&n| n != NO_NET);
-            let owner = pin.and_then(|p| self.pin_ids.as_ref().map(|ids| ids[p]));
-            return Ok((
-                Blockage {
-                    layer,
-                    rect: transform_rect(
-                        shape.rect,
-                        cell.at[0],
-                        cell.at[1],
-                        master.height,
-                        cell.orientation,
-                    )?,
-                    net,
-                },
-                owner,
-            ));
-        }
-        Err(invalid("instance shape ordinal"))
+        let &(layer, local) = master
+            .order
+            .get(ordinal)
+            .ok_or_else(|| invalid("instance shape ordinal"))?;
+        let shape = &master.layers[&layer][local].1;
+        let pin = shape.pin.map(|p| (cell.pin_start + p) as usize);
+        let net = pin.map(|p| self.pin_nets[p]).filter(|&n| n != NO_NET);
+        let owner = pin.and_then(|p| self.pin_ids.as_ref().map(|ids| ids[p]));
+        Ok((
+            Blockage {
+                layer,
+                rect: transform_rect(
+                    shape.rect,
+                    cell.at[0],
+                    cell.at[1],
+                    master.height,
+                    cell.orientation,
+                )?,
+                net,
+            },
+            owner,
+        ))
     }
     /// Visit one layer with the same ordinals as `shape`. Ordinals remain
     /// stable when another instance queries the shared master template.
@@ -183,10 +184,8 @@ impl InstanceObstacles {
             .get(instance)
             .ok_or_else(|| invalid("instance shape owner"))?;
         let master = &self.templates[cell.template as usize];
-        let first: usize = master.layers.range(..layer).map(|(_, v)| v.len()).sum();
         if let Some(shapes) = master.layers.get(&layer) {
-            for offset in 0..shapes.len() {
-                let ordinal = first + offset;
+            for &(ordinal, _) in shapes {
                 let (shape, pin) = self.shape(instance, ordinal)?;
                 if !visitor(ordinal, shape, pin)? {
                     return Ok(false);
@@ -200,12 +199,17 @@ impl InstanceObstacles {
             .templates
             .iter()
             .flat_map(|t| t.layers.values())
-            .map(|v| v.capacity() * size_of::<TemplateObstacle>())
+            .map(|v| v.capacity() * size_of::<(usize, TemplateObstacle)>())
             .sum();
         (self.instances.capacity() * size_of::<ObstacleInstance>()
             + self.pin_nets.capacity() * 4
             + self.pin_ids.as_ref().map_or(0, |v| v.capacity() * 4)
             + shapes
+            + self
+                .templates
+                .iter()
+                .map(|t| t.order.capacity() * size_of::<(u32, usize)>())
+                .sum::<usize>()
             + self.templates.len() * 4096) as u64
     }
     pub(crate) fn validate(&self, layer_count: usize, limits: &RouteLimits) -> Result<()> {
@@ -244,7 +248,7 @@ impl InstanceObstacles {
         let cell = self.instances[index];
         let t = &self.templates[cell.template as usize];
         if let Some(shapes) = t.layers.get(&layer) {
-            for shape in shapes {
+            for (_, shape) in shapes {
                 let net = shape
                     .pin
                     .map(|pin| self.pin_nets[(cell.pin_start + pin) as usize])

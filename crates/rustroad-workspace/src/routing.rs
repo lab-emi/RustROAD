@@ -665,7 +665,7 @@ pub(crate) fn build_input(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<RouteInput> {
-    build_input_impl(design, bundle, placed, config, scope, true).map(|(input, _)| input)
+    build_input_impl(design, bundle, placed, config, scope, true, false).map(|(input, _)| input)
 }
 
 /// Same routing input plus one owner per obstacle (parallel vector).
@@ -676,7 +676,18 @@ pub(crate) fn build_input_with_owners(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
-    build_input_impl(design, bundle, placed, config, scope, false)
+    build_input_impl(design, bundle, placed, config, scope, false, false)
+}
+
+/// Shared master geometry with global pin ownership, without expanding cells.
+pub(crate) fn build_compact_input_with_owners(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    placed: &[Placed],
+    config: &RoutingConfig,
+    scope: RouteScope,
+) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
+    build_input_impl(design, bundle, placed, config, scope, true, true)
 }
 
 fn obstacle_templates(
@@ -717,6 +728,7 @@ fn build_input_impl(
     config: &RoutingConfig,
     scope: RouteScope,
     compact_instances: bool,
+    instance_owners: bool,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
     let trace = std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some();
     config.validate()?;
@@ -737,6 +749,7 @@ fn build_input_impl(
     };
     let mut instance_records = Vec::new();
     let mut instance_pin_nets = Vec::new();
+    let mut instance_pin_ids = Vec::new();
     if compact_instances {
         instance_records
             .try_reserve_exact(placed.len())
@@ -744,6 +757,11 @@ fn build_input_impl(
         instance_pin_nets
             .try_reserve_exact(model.pins.len())
             .map_err(|_| Error::Budget("instance pin-net allocation".into()))?;
+        if instance_owners {
+            instance_pin_ids
+                .try_reserve_exact(model.pins.len())
+                .map_err(|_| Error::Budget("instance pin-identity allocation".into()))?;
+        }
     }
     let selected: BTreeSet<_> = match scope {
         RouteScope::Clock => {
@@ -826,6 +844,9 @@ fn build_input_impl(
             };
             if compact_instances {
                 instance_pin_nets.push(net.unwrap_or(u32::MAX));
+                if instance_owners {
+                    instance_pin_ids.push(pin_id);
+                }
             }
             let selected_pin = !pin.use_.is_supply()
                 && net.is_some_and(|n| {
@@ -1097,11 +1118,12 @@ fn build_input_impl(
             tracks,
             ties,
             instances: if compact_instances {
-                Some(InstanceObstacles::new(
-                    templates,
-                    instance_records,
-                    instance_pin_nets,
-                )?)
+                let mut geometry =
+                    InstanceObstacles::new(templates, instance_records, instance_pin_nets)?;
+                if instance_owners {
+                    geometry = geometry.with_pin_ids(instance_pin_ids)?;
+                }
+                Some(geometry)
             } else {
                 None
             },

@@ -9,6 +9,8 @@
 use crate::routing::{RouteLayer, RouteVia, Routes, Terminal};
 use crate::{Error, Rect, Result};
 use std::collections::{BTreeMap, HashMap};
+mod geometry;
+use geometry::{InstanceGeometry, Shapes};
 
 /// One vertical context of a calibration table.
 #[derive(Clone, Debug)]
@@ -66,12 +68,24 @@ pub struct ExtractInput<'a> {
     pub routes: &'a Routes,
     pub terminals: &'a [Terminal],
     pub passive: &'a [PassiveShape],
+    /// Shared cell pin/obstruction geometry, decoded only for local queries.
+    pub instances: Option<InstancedPassive<'a>>,
     pub tech: &'a RcTech,
+}
+#[derive(Clone, Copy)]
+pub struct InstancedPassive<'a> {
+    pub geometry: &'a crate::instance_obstacles::InstanceObstacles,
+    /// True for signal net ids; supply and synthetic rail-tie nets are ground.
+    pub signal_nets: &'a [bool],
 }
 #[derive(Clone, Debug)]
 pub struct ExtractLimits {
     /// All conductor shapes (wire runs, via pads, pins, obstructions, supply).
     pub max_shapes: usize,
+    /// Virtual shared-template shapes, distinct from retained route records.
+    pub max_virtual_shapes: usize,
+    /// Entries in the cell-instance spatial index, not per-rectangle entries.
+    pub max_instance_bin_entries: usize,
     /// Electrical nodes over all nets.
     pub max_nodes: usize,
     /// Resistors plus ground and coupling capacitors.
@@ -94,6 +108,8 @@ impl Default for ExtractLimits {
     fn default() -> Self {
         Self {
             max_shapes: 2_000_000,
+            max_virtual_shapes: 256_000_000,
+            max_instance_bin_entries: 64_000_000,
             max_nodes: 500_000,
             max_elements: 1_000_000,
             max_couplings: 1_000_000,
@@ -121,6 +137,8 @@ impl ExtractLimits {
         let hard = Self::default();
         for (value, ceiling) in [
             (self.max_shapes, hard.max_shapes),
+            (self.max_virtual_shapes, 1_000_000_000),
+            (self.max_instance_bin_entries, 512_000_000),
             (self.max_nodes, hard.max_nodes * 8),
             (self.max_elements, hard.max_elements * 8),
             (self.max_couplings, hard.max_couplings * 8),
@@ -891,13 +909,50 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
     Ok((out, stats))
 }
 
-struct Bins {
+struct Bins<'a> {
     size: i64,
     map: HashMap<(u32, i64, i64), Vec<u32>>,
+    instances: Option<InstanceGeometry<'a>>,
 }
-impl Bins {
+impl Bins<'_> {
     fn range(&self, lo: i64, hi: i64) -> (i64, i64) {
         (lo.div_euclid(self.size), hi.div_euclid(self.size))
+    }
+    fn visit(
+        &mut self,
+        layer: u32,
+        query: Rect,
+        shapes: &Shapes<'_>,
+        stats: &mut ExtractStats,
+        limits: &ExtractLimits,
+        mut visitor: impl FnMut(u32, Shape) -> Result<()>,
+    ) -> Result<()> {
+        let (x0, x1) = self.range(query.lx, query.ux);
+        let (y0, y1) = self.range(query.ly, query.uy);
+        let cells = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        if cells > limits.max_bin_entries as i128 {
+            return Err(budget("extraction query extent"));
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                let list = self.map.get(&(layer, x, y)).map_or(&[][..], Vec::as_slice);
+                stats.work = stats
+                    .work
+                    .checked_add(list.len().max(1))
+                    .filter(|&n| n <= limits.max_work)
+                    .ok_or_else(|| budget("extraction work"))?;
+                for &id in list {
+                    visitor(id, shapes.get(id))?;
+                }
+            }
+        }
+        if let Some(instances) = &mut self.instances {
+            instances.visit(shapes, layer, query, &mut stats.work, |id, shape| {
+                visitor(id, shape)?;
+                Ok(true)
+            })?;
+        }
+        Ok(())
     }
 }
 
@@ -945,50 +1000,36 @@ fn same_net_near(
     net: u32,
     layer: u32,
     built: &Built,
-    shapes: &[Shape],
-    bins: &Bins,
+    shapes: &Shapes<'_>,
+    bins: &mut Bins<'_>,
     limits: &ExtractLimits,
     stats: &mut ExtractStats,
 ) -> Result<Vec<u32>> {
-    let (x0, x1) = bins.range(r.lx, r.ux);
-    let (y0, y1) = bins.range(r.ly, r.uy);
-    let mut near: Vec<u32> = Vec::new();
-    for bx in x0..=x1 {
-        for by in y0..=y1 {
-            let Some(list) = bins.map.get(&(layer, bx, by)) else {
-                continue;
-            };
-            stats.work = stats
-                .work
-                .checked_add(list.len())
-                .ok_or_else(|| budget("extraction work"))?;
-            if stats.work > limits.max_work {
-                return Err(budget("extraction work"));
-            }
-            near.extend(list.iter().copied());
-        }
-    }
-    near.sort_unstable();
-    near.dedup();
-    near.retain(|&s| {
-        let q = shapes[s as usize].rect;
-        shape_net(&built.runs, &shapes[s as usize]) == Some(net)
+    let mut found = std::collections::BTreeSet::new();
+    bins.visit(layer, r, shapes, stats, limits, |id, shape| {
+        let q = shape.rect;
+        if shape_net(&built.runs, &shape) == Some(net)
             && q.lx <= r.ux
             && r.lx <= q.ux
             && q.ly <= r.uy
             && r.ly <= q.uy
-    });
-    if near.len() > limits.max_candidates {
-        return Err(budget("extraction candidates per metal piece"));
-    }
+        {
+            found.insert(id);
+            if found.len() > limits.max_candidates {
+                return Err(budget("extraction candidates per metal piece"));
+            }
+        }
+        Ok(())
+    })?;
+    let near = found.into_iter().collect();
     Ok(near)
 }
 
 /// `r` minus every listed shape, as disjoint rectangles (exact integers).
-fn uncovered(r: Rect, covering: &[u32], shapes: &[Shape]) -> Result<Vec<Rect>> {
+fn uncovered(r: Rect, covering: &[u32], shapes: &Shapes<'_>) -> Result<Vec<Rect>> {
     let mut pieces = vec![r];
     for &s in covering {
-        let q = shapes[s as usize].rect;
+        let q = shapes.get(s).rect;
         pieces = pieces.into_iter().flat_map(|p| subtract(p, q)).collect();
         if pieces.len() > MAX_PATCH_PIECES {
             return Err(budget("metal pieces per rectangle"));
@@ -1007,8 +1048,8 @@ fn add_piece(
     layer: u32,
     node: u32,
     built: &mut Built,
-    shapes: &mut Vec<Shape>,
-    bins: &mut Bins,
+    shapes: &mut Shapes<'_>,
+    bins: &mut Bins<'_>,
     entries: &mut usize,
     limits: &ExtractLimits,
 ) -> Result<()> {
@@ -1041,7 +1082,7 @@ fn add_piece(
         rect: piece,
         owner: Owner::Run(first),
     });
-    if shapes.len() > limits.max_shapes {
+    if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
     let (x0, x1) = bins.range(piece.lx, piece.ux);
@@ -1072,8 +1113,8 @@ fn add_metal_pieces(
     input: &ExtractInput<'_>,
     limits: &ExtractLimits,
     built: &mut Built,
-    shapes: &mut Vec<Shape>,
-    bins: &mut Bins,
+    shapes: &mut Shapes<'_>,
+    bins: &mut Bins<'_>,
     entries: &mut usize,
     stats: &mut ExtractStats,
 ) -> Result<()> {
@@ -1152,8 +1193,8 @@ fn add_patches(
     input: &ExtractInput<'_>,
     limits: &ExtractLimits,
     built: &mut Built,
-    shapes: &mut Vec<Shape>,
-    bins: &mut Bins,
+    shapes: &mut Shapes<'_>,
+    bins: &mut Bins<'_>,
     entries: &mut usize,
     net_index: &HashMap<u32, usize>,
     stats: &mut ExtractStats,
@@ -1189,9 +1230,9 @@ fn add_patches(
         let anchor = touching
             .iter()
             .copied()
-            .max_by_key(|&s| (overlap(shapes[s as usize].rect), std::cmp::Reverse(s)))
+            .max_by_key(|&s| (overlap(shapes.get(s).rect), std::cmp::Reverse(s)))
             .ok_or_else(|| invalid("floating routing patch (touches no same-net conductor)"))?;
-        let node = match shapes[anchor as usize].owner {
+        let node = match shapes.get(anchor).owner {
             Owner::Run(o) => {
                 let run = &built.runs[o as usize];
                 if run.piece {
@@ -1330,14 +1371,14 @@ fn add_passive_strips(
     input: &ExtractInput<'_>,
     limits: &ExtractLimits,
     built: &mut Built,
-    shapes: &[Shape],
-    bins: &Bins,
+    shapes: &Shapes<'_>,
+    bins: &mut Bins<'_>,
     stats: &mut ExtractStats,
 ) -> Result<()> {
     let routing: Vec<u32> = (0..input.layers.len() as u32)
         .filter(|&l| input.tech.layers[l as usize].is_some())
         .collect();
-    for (si, sh) in shapes.iter().enumerate() {
+    for (si, sh) in shapes.owned() {
         let Owner::Passive(owner) = sh.owner else {
             continue;
         };
@@ -1359,7 +1400,7 @@ fn add_passive_strips(
                         return Err(budget("extraction work"));
                     }
                     for &o in list {
-                        let q = &shapes[o as usize];
+                        let q = &shapes.get(o);
                         if matches!(q.owner, Owner::Run(_))
                             && q.rect.lx < r.ux
                             && r.lx < q.rect.ux
@@ -1395,7 +1436,7 @@ fn add_passive_strips(
                 hi,
                 minus,
                 plus,
-                shape: si as u32,
+                shape: si,
                 piece: true,
                 passive: Some(owner),
                 node_lo: 0,
@@ -1408,6 +1449,76 @@ fn add_passive_strips(
         }
     }
     Ok(())
+}
+
+/// Mark only virtual conductors crossed by routed metal. One bit per virtual
+/// shape replaces a retained rectangle plus two passive-strip records.
+fn virtual_crossings(
+    shapes: &Shapes<'_>,
+    bins: &mut Bins<'_>,
+    layers: &[u32],
+    stats: &mut ExtractStats,
+) -> Result<Vec<u64>> {
+    let mut marked = vec![0u64; shapes.virtual_count().div_ceil(64)];
+    let Some(instances) = &mut bins.instances else {
+        return Ok(marked);
+    };
+    for (_, shape) in shapes.owned() {
+        if !matches!(shape.owner, Owner::Run(_)) {
+            continue;
+        }
+        for &layer in layers.iter().filter(|&&l| l != shape.layer) {
+            instances.visit(shapes, layer, shape.rect, &mut stats.work, |id, other| {
+                let (a, b) = (shape.rect, other.rect);
+                if a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy {
+                    let k = id as usize - shapes.virtual_offset();
+                    marked[k / 64] |= 1 << (k % 64);
+                }
+                Ok(true)
+            })?;
+        }
+    }
+    stats.passive_strips = stats
+        .passive_strips
+        .checked_add(
+            marked
+                .iter()
+                .map(|w| w.count_ones() as usize)
+                .sum::<usize>()
+                .saturating_mul(2),
+        )
+        .ok_or_else(|| budget("virtual passive strips"))?;
+    Ok(marked)
+}
+
+fn virtual_strip(id: u32, shape: Shape, vertical: bool) -> Run {
+    let Owner::Passive(owner) = shape.owner else {
+        unreachable!("virtual conductor is passive")
+    };
+    let r = shape.rect;
+    let (lo, hi, minus, plus) = if vertical {
+        (r.ly, r.uy, r.lx, r.ux)
+    } else {
+        (r.lx, r.ux, r.ly, r.uy)
+    };
+    Run {
+        net: match owner {
+            PassiveOwner::Pin { net, .. } => net,
+            PassiveOwner::Ground => u32::MAX,
+        },
+        layer: shape.layer,
+        vertical,
+        cross: minus + (plus - minus) / 2,
+        lo,
+        hi,
+        minus,
+        plus,
+        shape: id,
+        piece: true,
+        passive: Some(owner),
+        node_lo: 0,
+        node_hi: 0,
+    }
 }
 
 /// The plate below (`upper == false`) or above a strip: the nearest other
@@ -1507,8 +1618,9 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             });
         }
     }
+    let mut shapes = Shapes::new(shapes, built.runs.len(), input.instances, limits)?;
     stats.shapes = shapes.len();
-    if shapes.len() > limits.max_shapes {
+    if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
     let routing_layers: Vec<u32> = (0..input.layers.len() as u32)
@@ -1523,9 +1635,10 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     let mut bins = Bins {
         size: bin_size,
         map: HashMap::new(),
+        instances: InstanceGeometry::new(&shapes, bin_size, input.layers.len(), limits)?,
     };
     let mut entries = 0usize;
-    for (i, s) in shapes.iter().enumerate() {
+    for (i, s) in shapes.owned() {
         let (x0, x1) = bins.range(s.rect.lx, s.rect.ux);
         let (y0, y1) = bins.range(s.rect.ly, s.rect.uy);
         let cells = (x1 - x0 + 1)
@@ -1539,10 +1652,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         }
         for bx in x0..=x1 {
             for by in y0..=y1 {
-                bins.map
-                    .entry((s.layer, bx, by))
-                    .or_default()
-                    .push(i as u32);
+                bins.map.entry((s.layer, bx, by)).or_default().push(i);
             }
         }
     }
@@ -1571,14 +1681,16 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         &net_index,
         &mut stats,
     )?;
-    add_passive_strips(input, limits, &mut built, &shapes, &bins, &mut stats)?;
+    let routed_runs = built.runs.len();
+    add_passive_strips(input, limits, &mut built, &shapes, &mut bins, &mut stats)?;
+    let crossed = virtual_crossings(&shapes, &mut bins, &routing_layers, &mut stats)?;
     stats.wire_runs = built.runs.iter().filter(|r| !r.piece).count();
     stats.shapes = shapes.len();
-    if shapes.len() > limits.max_shapes {
+    if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
     let mut coupling = BTreeMap::<((u32, u32), (u32, u32)), f64>::new();
-    let mut stamp = vec![u32::MAX; shapes.len()];
+    let mut seen = std::collections::HashSet::new();
     let mut candidates: Vec<u32> = Vec::new();
     let mut points: Vec<i64> = Vec::new();
     // (calibration metal, cross-axis lo, hi, shape) of other-layer conductors.
@@ -1602,7 +1714,22 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             })
         })
         .collect();
-    for (ri, run) in built.runs.iter().enumerate() {
+    let extra = (0..shapes.virtual_count())
+        .filter(|&i| crossed[i / 64] & (1 << (i % 64)) != 0)
+        .flat_map(|i| {
+            let id = (shapes.virtual_offset() + i) as u32;
+            let shape = shapes.get(id);
+            [
+                virtual_strip(id, shape, false),
+                virtual_strip(id, shape, true),
+            ]
+        });
+    for run in built.runs[..routed_runs]
+        .iter()
+        .cloned()
+        .chain(extra)
+        .chain(built.runs[routed_runs..].iter().cloned())
+    {
         let model = layer_model(input, run.layer)?;
         let ctx_map = contexts[run.layer as usize].as_ref().unwrap();
         let window = model
@@ -1614,50 +1741,51 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         let (edge_minus, edge_plus) = (run.minus, run.plus);
         // Query region: lateral window on the run layer, footprint elsewhere.
         let (c0, c1) = (edge_minus - window_dbu, edge_plus + window_dbu);
-        let (bx, by) = if run.vertical {
-            (bins.range(c0, c1), bins.range(run.lo, run.hi))
+        let query = if run.vertical {
+            Rect {
+                lx: c0,
+                ly: run.lo,
+                ux: c1,
+                uy: run.hi,
+            }
         } else {
-            (bins.range(run.lo, run.hi), bins.range(c0, c1))
+            Rect {
+                lx: run.lo,
+                ly: c0,
+                ux: run.hi,
+                uy: c1,
+            }
         };
         candidates.clear();
+        seen.clear();
         for &layer in &routing_layers {
-            for x in bx.0..=bx.1 {
-                for y in by.0..=by.1 {
-                    let Some(list) = bins.map.get(&(layer, x, y)) else {
-                        continue;
-                    };
-                    stats.work = stats
-                        .work
-                        .checked_add(list.len())
-                        .ok_or_else(|| budget("extraction work"))?;
-                    if stats.work > limits.max_work {
-                        return Err(budget("extraction work"));
-                    }
-                    for &s in list {
-                        if stamp[s as usize] == ri as u32 || s == run.shape {
-                            continue;
-                        }
-                        stamp[s as usize] = ri as u32;
-                        let r = shapes[s as usize].rect;
-                        let (a0, a1, x0, x1) = if run.vertical {
-                            (r.ly, r.uy, r.lx, r.ux)
-                        } else {
-                            (r.lx, r.ux, r.ly, r.uy)
-                        };
-                        if a1 <= run.lo || a0 >= run.hi {
-                            continue;
-                        }
-                        let relevant = if layer == run.layer {
-                            x1 > c0 && x0 < c1
-                        } else {
-                            x1 > edge_minus && x0 < edge_plus
-                        };
-                        if relevant {
-                            candidates.push(s);
-                        }
-                    }
+            bins.visit(layer, query, &shapes, &mut stats, limits, |id, shape| {
+                if id == run.shape || seen.contains(&id) {
+                    return Ok(());
                 }
-            }
+                let r = shape.rect;
+                let (a0, a1, x0, x1) = if run.vertical {
+                    (r.ly, r.uy, r.lx, r.ux)
+                } else {
+                    (r.lx, r.ux, r.ly, r.uy)
+                };
+                if a1 <= run.lo || a0 >= run.hi {
+                    return Ok(());
+                }
+                let relevant = if layer == run.layer {
+                    x1 > c0 && x0 < c1
+                } else {
+                    x1 > edge_minus && x0 < edge_plus
+                };
+                if relevant {
+                    if candidates.len() >= limits.max_candidates {
+                        return Err(budget("extraction candidates per wire run"));
+                    }
+                    seen.insert(id);
+                    candidates.push(id);
+                }
+                Ok(())
+            })?;
         }
         stats.max_run_candidates = stats.max_run_candidates.max(candidates.len());
         if candidates.len() > limits.max_candidates {
@@ -1673,7 +1801,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         points.push(run.lo);
         points.push(run.hi);
         for &s in &candidates {
-            let r = shapes[s as usize].rect;
+            let r = shapes.get(s).rect;
             let (a0, a1) = if run.vertical {
                 (r.ly, r.uy)
             } else {
@@ -1727,7 +1855,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             let (mut covered_plus, mut covered_minus) = (false, false);
             layered.clear();
             for &s in &candidates {
-                let sh = &shapes[s as usize];
+                let sh = &shapes.get(s);
                 let r = sh.rect;
                 let (a0, a1, x0, x1) = if run.vertical {
                     (r.ly, r.uy, r.lx, r.ux)
@@ -1840,8 +1968,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                     continue;
                 }
                 let spacing = side.map(|(g, _)| um(tech, g));
-                let touching_same =
-                    side.is_some_and(|(g, s)| g == 0 && same_metal(&shapes[s as usize]));
+                let touching_same = side.is_some_and(|(g, s)| g == 0 && same_metal(&shapes.get(s)));
                 if touching_same {
                     continue;
                 }
@@ -1921,7 +2048,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                     {
                         let passive: Vec<(u32, i64)> = owners
                             .into_iter()
-                            .filter(|o| matches!(shapes[o.0 as usize].owner, Owner::Passive(_)))
+                            .filter(|o| matches!(shapes.get(o.0).owner, Owner::Passive(_)))
                             .collect();
                         if passive.is_empty() {
                             continue;
@@ -1950,7 +2077,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                     if run_factor < 1.0 {
                         continue;
                     }
-                    let Owner::Run(o) = shapes[s as usize].owner else {
+                    let Owner::Run(o) = shapes.get(s).owner else {
                         continue;
                     };
                     let other = &built.runs[o as usize];
@@ -1987,7 +2114,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             rc.ground[run.node_lo as usize] += ground * (1.0 - w_hi);
             rc.ground[run.node_hi as usize] += ground * w_hi;
             for (s, value, run_factor) in contributions {
-                let sh = shapes[s as usize];
+                let sh = shapes.get(s);
                 let partner = match sh.owner {
                     Owner::Run(o) => {
                         // Every routed-net shape models its own exposed sides,
@@ -2220,6 +2347,7 @@ mod tests {
                 routes: r,
                 terminals: t,
                 passive,
+                instances: None,
                 tech,
             },
             &ExtractLimits::default(),
@@ -2425,6 +2553,7 @@ mod tests {
             ..Default::default()
         };
         let input = ExtractInput {
+            instances: None,
             layers: &l,
             vias: &v,
             routes: &r,
@@ -2688,6 +2817,7 @@ mod tests {
         let v = vias();
         let routed = extract_cpu_ref(
             &ExtractInput {
+                instances: None,
                 layers: &wide_layers,
                 vias: &v,
                 routes: &r2,
@@ -2847,6 +2977,7 @@ mod tests {
         let extract = |r: &Routes| {
             extract_cpu_ref(
                 &ExtractInput {
+                    instances: None,
                     layers: &l,
                     vias: &v,
                     routes: r,
@@ -3329,6 +3460,7 @@ mod tests {
         let (l, v) = (layers(), vias());
         let tk = tech(false);
         let input = ExtractInput {
+            instances: None,
             layers: &l,
             vias: &v,
             routes: &r,
@@ -3367,6 +3499,7 @@ mod tests {
             },
         ];
         let crowded = ExtractInput {
+            instances: None,
             passive: &neighbours,
             ..input
         };
@@ -3422,5 +3555,239 @@ mod tests {
             ..input
         };
         assert!(extract_cpu_ref(&input, &ExtractLimits::default()).is_err());
+    }
+    #[test]
+    fn shared_passive_geometry_matches_explicit_crossings_and_pin_coupling() {
+        use crate::instance_obstacles::{
+            InstanceObstacles, ObstacleInstance, ObstacleTemplate, TemplateObstacle,
+        };
+        let r = routes(
+            [straight(0, 0, 10), straight(1, 1000, 10)].concat(),
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 0,
+                    at: [10000, 0],
+                },
+                Access {
+                    pin: 2,
+                    net: 1,
+                    layer: 0,
+                    at: [0, 1000],
+                },
+                Access {
+                    pin: 3,
+                    net: 1,
+                    layer: 0,
+                    at: [10000, 1000],
+                },
+            ],
+            vec![0, 1],
+        );
+        let t = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 1, true),
+            terminal(3, 1, false),
+        ];
+        // Deliberately list M2 before M1 to exercise original-template order.
+        let shapes = vec![
+            TemplateObstacle {
+                layer: 1,
+                rect: Rect {
+                    lx: 500,
+                    ly: -500,
+                    ux: 900,
+                    uy: 1500,
+                },
+                pin: None,
+            },
+            TemplateObstacle {
+                layer: 0,
+                rect: Rect {
+                    lx: -100,
+                    ly: 900,
+                    ux: 100,
+                    uy: 1100,
+                },
+                pin: Some(0),
+            },
+        ];
+        let source = InstanceObstacles::new(
+            vec![ObstacleTemplate::new(2000, 1, shapes.clone()).unwrap()],
+            vec![ObstacleInstance {
+                template: 0,
+                pin_start: 0,
+                at: [0, 0],
+                orientation: crate::Orientation::N,
+            }],
+            vec![1],
+        )
+        .unwrap()
+        .with_pin_ids(vec![2])
+        .unwrap();
+        let explicit = vec![
+            PassiveShape {
+                layer: shapes[0].layer,
+                rect: shapes[0].rect,
+                owner: PassiveOwner::Ground,
+            },
+            PassiveShape {
+                layer: shapes[1].layer,
+                rect: shapes[1].rect,
+                owner: PassiveOwner::Pin { net: 1, pin: 2 },
+            },
+        ];
+        let (l, v, tech) = (layers(), vias(), tech(true));
+        let a = run(&r, &t, &explicit, &tech).unwrap();
+        let b = extract_cpu_ref(
+            &ExtractInput {
+                layers: &l,
+                vias: &v,
+                routes: &r,
+                terminals: &t,
+                passive: &[],
+                instances: Some(InstancedPassive {
+                    geometry: &source,
+                    signal_nets: &[true, true],
+                }),
+                tech: &tech,
+            },
+            &ExtractLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(a.nets.len(), b.nets.len());
+        for (a, b) in a.nets.iter().zip(&b.nets) {
+            assert_eq!(a.nodes, b.nodes);
+            assert_eq!(a.resistors, b.resistors);
+            for (x, y) in a.ground.iter().zip(&b.ground) {
+                assert!((x - y).abs() < 1e-14, "{x} != {y}");
+            }
+        }
+        assert_eq!(a.stats.passive_strips, b.stats.passive_strips);
+        assert_eq!(a.couplings.len(), b.couplings.len());
+        for (a, b) in a.couplings.iter().zip(&b.couplings) {
+            assert_eq!((a.a, a.b), (b.a, b.b));
+            assert!((a.pf - b.pf).abs() < 1e-14);
+        }
+    }
+    #[test]
+    fn millions_of_virtual_conductors_do_not_consume_retained_shape_budget() {
+        use crate::instance_obstacles::{
+            InstanceObstacles, ObstacleInstance, ObstacleTemplate, TemplateObstacle,
+        };
+        let crossed = TemplateObstacle {
+            layer: 1,
+            rect: Rect {
+                lx: 500,
+                ly: -500,
+                ux: 900,
+                uy: 500,
+            },
+            pin: None,
+        };
+        let far = TemplateObstacle {
+            layer: 0,
+            rect: Rect {
+                lx: 0,
+                ly: 0,
+                ux: 500,
+                uy: 500,
+            },
+            pin: None,
+        };
+        let mut cells = vec![ObstacleInstance {
+            template: 0,
+            pin_start: 0,
+            at: [0, 0],
+            orientation: crate::Orientation::N,
+        }];
+        cells.extend((0..100_000).map(|i| ObstacleInstance {
+            template: 1,
+            pin_start: 0,
+            at: [1_000_000 + (i % 500) * 1000, 1_000_000 + (i / 500) * 1000],
+            orientation: crate::Orientation::N,
+        }));
+        let source = InstanceObstacles::new(
+            vec![
+                ObstacleTemplate::new(1000, 0, vec![crossed.clone()]).unwrap(),
+                ObstacleTemplate::new(1000, 0, vec![far; 102]).unwrap(),
+            ],
+            cells,
+            vec![],
+        )
+        .unwrap()
+        .with_pin_ids(vec![])
+        .unwrap();
+        assert_eq!(source.virtual_shapes(), 10_200_001);
+        let r = routes(
+            straight(0, 0, 10),
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 0,
+                    at: [10000, 0],
+                },
+            ],
+            vec![0],
+        );
+        let t = [terminal(0, 0, true), terminal(1, 0, false)];
+        let (l, v, tech) = (layers(), vias(), tech(true));
+        let expected = run(
+            &r,
+            &t,
+            &[PassiveShape {
+                layer: crossed.layer,
+                rect: crossed.rect,
+                owner: PassiveOwner::Ground,
+            }],
+            &tech,
+        )
+        .unwrap();
+        let limits = ExtractLimits {
+            max_shapes: 32,
+            max_virtual_shapes: 20_000_000,
+            ..Default::default()
+        };
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            terminals: &t,
+            passive: &[],
+            instances: Some(InstancedPassive {
+                geometry: &source,
+                signal_nets: &[true],
+            }),
+            tech: &tech,
+        };
+        let actual = extract_cpu_ref(&input, &limits).unwrap();
+        assert_eq!(actual.nets[0].ground, expected.nets[0].ground);
+        assert_eq!(actual.nets[0].resistors, expected.nets[0].resistors);
+        assert_eq!(actual.stats.passive_strips, expected.stats.passive_strips);
+        let limited = ExtractLimits {
+            max_virtual_shapes: 10,
+            ..limits
+        };
+        assert!(matches!(
+            extract_cpu_ref(&input, &limited),
+            Err(Error::Budget(_))
+        ));
     }
 }

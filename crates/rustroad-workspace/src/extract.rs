@@ -4,7 +4,7 @@
 //! is written atomically next to `--out` (temporary file, fsync, rename) and is
 //! refused inside the workspace directory. Model: docs/extraction.md.
 use crate::pdk::read_input;
-use crate::routing::{ObstacleOwner, build_input_with_owners};
+use crate::routing::{ObstacleOwner, build_compact_input_with_owners};
 use crate::{Error, Result};
 use rustroad_core::connectivity::{Direction, PinOwner};
 use rustroad_core::extract::{
@@ -341,7 +341,7 @@ pub fn extract(
     }
     let placed: Vec<_> = snapshot.records().collect();
     let (input, owners) =
-        build_input_with_owners(design, bundle, &placed, &state.config, state.scope)?;
+        build_compact_input_with_owners(design, bundle, &placed, &state.config, state.scope)?;
     // Bind the profile to the routing layers by name.
     let dbu = f64::from(design.units_per_micron);
     let by_name: HashMap<_, _> = profile
@@ -424,6 +424,7 @@ pub fn extract(
     };
     let model = &bundle.connectivity;
     let supply: Vec<bool> = model.nets.iter().map(|n| n.use_.is_supply()).collect();
+    let signal_nets: Vec<bool> = supply.iter().map(|s| !s).collect();
     // Rail-tie router nets (ids past the connectivity nets) are supply
     // metal: their pins and routed shapes are grounded passive conductors,
     // not extracted nets.
@@ -495,6 +496,13 @@ pub fn extract(
     };
     let network = extract::extract_cpu_ref(
         &extract::ExtractInput {
+            instances: input
+                .instances
+                .as_ref()
+                .map(|geometry| extract::InstancedPassive {
+                    geometry,
+                    signal_nets: &signal_nets,
+                }),
             layers: &input.layers,
             vias: &input.vias,
             routes,
