@@ -418,7 +418,10 @@ fn memory_estimate_limited(
         } else {
             slots.saturating_mul(GRID_BYTES)
         };
-        grid.saturating_add((o + shapes).saturating_mul(SHAPE_BYTES))
+        // Fixed rectangles are shared with RouteInput; only their query marks
+        // are additional. Added geometry retains its full state allowance.
+        grid.saturating_add(o.saturating_mul(16))
+            .saturating_add(shapes.saturating_mul(SHAPE_BYTES))
             .saturating_add(
                 fixed_entries
                     .saturating_add(shapes.saturating_mul(ENTRIES_PER_SHAPE))

@@ -480,6 +480,7 @@ pub(crate) struct Spatial<'a> {
     pub(crate) input: &'a RouteInput,
     limits: &'a RouteLimits,
     bin: i64,
+    /// Added geometry only; immutable fixed shapes remain in `input.obstacles`.
     shapes: Vec<Blockage>,
     bins: BinGrid,
     marks: Vec<u64>,
@@ -502,6 +503,9 @@ pub(crate) enum Soft {
 }
 impl<'a> Spatial<'a> {
     pub(crate) fn new(input: &'a RouteInput, limits: &'a RouteLimits) -> Result<Self> {
+        if input.obstacles.len() > limits.max_obstacles {
+            return Err(budget("routing obstacle count"));
+        }
         // The track router queries far more often with short edges; it
         // uses bins of two access steps (the lattice router keeps eight).
         let bin = bin_side(input)?;
@@ -521,7 +525,7 @@ impl<'a> Spatial<'a> {
                 entries: Vec::new(),
                 overflow: HashMap::with_hasher(BuildFx),
             },
-            marks: Vec::new(),
+            marks: vec![0; input.obstacles.len()],
             generation: 0,
             entries: 0,
             work: 0,
@@ -533,8 +537,8 @@ impl<'a> Spatial<'a> {
                 .map(|t| (t.net, (t.supply, t.zone.clone())))
                 .collect(),
         };
-        for b in &input.obstacles {
-            s.add(b.clone())?;
+        for (id, b) in input.obstacles.iter().enumerate() {
+            s.index(id, b)?;
         }
         Ok(s)
     }
@@ -555,32 +559,52 @@ impl<'a> Spatial<'a> {
     }
     /// Add a rip-up-able routed shape; returns its id.
     pub(crate) fn add_routed(&mut self, b: Blockage) -> Result<usize> {
+        let added = self.shapes.len();
         self.add(b)?;
-        let id = self.shapes.len() - 1;
-        self.routed[id] = true;
+        let id = self.len() - 1;
+        self.routed[added] = true;
         Ok(id)
     }
     /// Add a fixed shape; returns its id.
     pub(crate) fn add_fixed(&mut self, b: Blockage) -> Result<usize> {
         self.add(b)?;
-        Ok(self.shapes.len() - 1)
+        Ok(self.len() - 1)
     }
     pub(crate) fn remove(&mut self, id: usize) {
-        self.alive[id] = false;
+        self.alive[id - self.input.obstacles.len()] = false;
     }
     /// (allocated grid bins, bin entries, shapes, bin side) for telemetry.
     pub(crate) fn footprint(&self) -> (usize, usize, usize, i64) {
-        (
-            self.bins.allocated(),
-            self.entries,
-            self.shapes.len(),
-            self.bin,
-        )
+        (self.bins.allocated(), self.entries, self.len(), self.bin)
     }
     pub(crate) fn add(&mut self, b: Blockage) -> Result<()> {
-        if self.shapes.len() >= self.limits.max_obstacles {
+        if self.len() >= self.limits.max_obstacles {
             return Err(budget("routing obstacle count"));
         }
+        self.index(self.len(), &b)?;
+        self.shapes.push(b);
+        self.marks.push(0);
+        self.alive.push(true);
+        self.routed.push(false);
+        Ok(())
+    }
+    fn len(&self) -> usize {
+        self.input.obstacles.len() + self.shapes.len()
+    }
+    fn shape(&self, id: usize) -> &Blockage {
+        if id < self.input.obstacles.len() {
+            &self.input.obstacles[id]
+        } else {
+            &self.shapes[id - self.input.obstacles.len()]
+        }
+    }
+    fn alive(&self, id: usize) -> bool {
+        id < self.input.obstacles.len() || self.alive[id - self.input.obstacles.len()]
+    }
+    fn routed(&self, id: usize) -> bool {
+        id >= self.input.obstacles.len() && self.routed[id - self.input.obstacles.len()]
+    }
+    fn index(&mut self, id: usize, b: &Blockage) -> Result<()> {
         if b.layer as usize >= self.input.layers.len() || !b.rect.valid() {
             return Err(invalid("routing obstacle"));
         }
@@ -594,17 +618,12 @@ impl<'a> Spatial<'a> {
         if n < 0 || n > self.limits.max_bin_entries.saturating_sub(self.entries) as i128 {
             return Err(budget("routing spatial-bin count"));
         }
-        let id = self.shapes.len();
         for x in x0..=x1 {
             for y in y0..=y1 {
                 self.bins.push(b.layer, x, y, id)?;
                 self.entries += 1;
             }
         }
-        self.shapes.push(b);
-        self.marks.push(0);
-        self.alive.push(true);
-        self.routed.push(false);
         Ok(())
     }
     pub(crate) fn clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
@@ -650,10 +669,10 @@ impl<'a> Spatial<'a> {
                         if self.work > self.limits.max_comparisons {
                             return Err(budget("routing comparison limit"));
                         }
-                        if !self.alive[id] {
+                        if !self.alive(id) {
                             continue;
                         }
-                        let b = &self.shapes[id];
+                        let b = self.shape(id);
                         if !overlap(query, b.rect) {
                             continue;
                         }
@@ -661,7 +680,7 @@ impl<'a> Spatial<'a> {
                             self.same_net(net, layer, rect, b) && (routing || rect == b.rect);
                         if !shared {
                             match b.net {
-                                Some(other) if self.routed[id] && other != net => {
+                                Some(other) if self.routed(id) && other != net => {
                                     victims.push(other)
                                 }
                                 _ => return Ok(Soft::Blocked),
@@ -743,10 +762,10 @@ impl<'a> Spatial<'a> {
                         if self.work > self.limits.max_comparisons {
                             return Err(budget("routing comparison limit"));
                         }
-                        if !self.alive[id] {
+                        if !self.alive(id) {
                             continue;
                         }
-                        let b = &self.shapes[id];
+                        let b = self.shape(id);
                         let routing = self.input.layers[layer as usize].vertical.is_some();
                         if !overlap(query, b.rect) {
                             continue;
@@ -2299,6 +2318,43 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn immutable_obstacles_are_shared_and_survive_route_ripup() {
+        let input = fixture();
+        let limits = RouteLimits::default();
+        let mut spatial = Spatial::new(&input, &limits).unwrap();
+        assert!(spatial.shapes.is_empty());
+        assert!(std::ptr::eq(spatial.shape(0), &input.obstacles[0]));
+        let fixed = Rect {
+            lx: 46,
+            ly: 20,
+            ux: 54,
+            uy: 30,
+        };
+        assert!(!spatial.clear(0, fixed, 8).unwrap());
+        let routed = Rect {
+            lx: 10,
+            ly: 10,
+            ux: 20,
+            uy: 20,
+        };
+        let id = spatial
+            .add_routed(Blockage {
+                layer: 0,
+                rect: routed,
+                net: Some(7),
+            })
+            .unwrap();
+        assert_eq!(id, input.obstacles.len());
+        assert!(!spatial.clear(0, routed, 8).unwrap());
+        assert!(matches!(spatial.probe_soft(0, routed, 8).unwrap(),
+            Soft::Clear { victims, .. } if victims == [7]));
+        spatial.remove(id);
+        assert!(spatial.clear(0, routed, 8).unwrap());
+        assert!(!spatial.clear(0, fixed, 8).unwrap());
+    }
+
     fn fixture() -> RouteInput {
         let layers = vec![
             RouteLayer {
