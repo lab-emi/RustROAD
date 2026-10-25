@@ -11,8 +11,12 @@ import hashlib
 import json
 import math
 import pya
+import sys
+from pathlib import Path
 
-MAX_SHAPES = 20000000
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gds_hierarchy import shape_counts
+
 MAX_TOP_TEXTS = 200000
 MAX_FLAT_TEXTS = 5000000
 
@@ -60,20 +64,11 @@ if info["top_exists"]:
                                                           bbox.right * ly.dbu, bbox.top * ly.dbu]
     info["geometry_outside_boundary"] = None if bbox.empty() or box.empty() else \
         not (bbox.contains(box.p1) and bbox.contains(box.p2))
-    layers = {}
-    total = 0
-    for index in ly.layer_indexes():
-        it = cell.begin_shapes_rec(index)
-        count = 0
-        while not it.at_end():
-            count += 1
-            total += 1
-            if total > MAX_SHAPES:
-                raise RuntimeError("shape probe budget exceeded")
-            it.next()
-        if count:
-            layers[layer_name(index)] = count
-    info["layer_shape_counts"] = layers
+    # Count each referenced cell once; array multiplicities do not allocate or
+    # enumerate the corresponding flattened geometry.
+    info["layer_shape_counts"] = {
+        layer_name(index): count for index, count in shape_counts(ly, cell).items()
+    }
     # Text labels placed directly in the top cell (the block's port labels).
     top_texts, truncated = [], False
     for index in ly.layer_indexes():

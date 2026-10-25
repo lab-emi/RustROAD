@@ -232,8 +232,9 @@ class Session:
                                 env=env, workdir=workdir)
         return verdict.run(receipt)
 
-    def probe(self, which: str = "design") -> dict | None:
-        if which == "design" and self.preflight is not None:
+    def probe(self, which: str = "design", *, include_texts: bool = True) -> dict | None:
+        if which == "design" and self.preflight is not None and \
+                (not include_texts or "flat_texts" in self.preflight):
             return self.preflight
         gds_in, top = ("/in/design.gds", self.top) if which == "design" else ("/in/against.gds", self.against_top)
         result = self.out / f"preflight_{which}.json"
@@ -241,10 +242,12 @@ class Session:
         for stale in (result, texts):
             if stale.exists():
                 stale.unlink()
-        receipt = container.run(["/foss/tools/klayout/klayout", "-b", "-r", "/scripts/kl_probe.py",
+        command = ["/foss/tools/klayout/klayout", "-b", "-r", "/scripts/kl_probe.py",
                                  "-rd", f"gds={gds_in}", "-rd", f"top={top}", "-rd", f"out=/out/{result.name}",
-                                 "-rd", f"texts_out=/out/{texts.name}",
-                                 "-rd", "boundary=%d/%d" % tuple(self.spec["boundary_layer"])],
+                                 "-rd", "boundary=%d/%d" % tuple(self.spec["boundary_layer"])]
+        if include_texts:
+            command.extend(["-rd", f"texts_out=/out/{texts.name}"])
+        receipt = container.run(command,
                                 out_dir=self.out, label=container.next_label(self.out, f"preflight_{which}"),
                                 ro=self.mounts(), memory="2g", cpus=1, threads=1, timeout=300)
         info = json.loads(result.read_text()) if result.is_file() and not run_incomplete(receipt) else None
@@ -839,7 +842,7 @@ def run_checks(args, checks) -> dict:
     started = time.monotonic()
     s.ensure_identity(checks)
     if s.identity["status"] == "verified":
-        s.probe("design")
+        s.probe("design", include_texts="xor" in checks)
     verdicts = {c: RUNNERS[c](s) for c in checks}
     st = {c.replace("-", "_"): v["status"] for c, v in verdicts.items()}
     summary = dict(schema="rustroad.signoff-summary.v1", pdk=s.pdk, top_cell=s.top,
