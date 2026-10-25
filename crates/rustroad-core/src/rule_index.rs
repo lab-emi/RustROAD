@@ -12,7 +12,12 @@ fn charge(work: &mut usize, amount: usize, cap: usize) -> Result<()> {
     Ok(())
 }
 
-fn order(n: usize, net: impl Fn(usize) -> u32, work: &mut usize, cap: usize) -> Result<Vec<u32>> {
+pub(crate) fn order(
+    n: usize,
+    net: impl Fn(usize) -> u32,
+    work: &mut usize,
+    cap: usize,
+) -> Result<Vec<u32>> {
     if n > u32::MAX as usize {
         return Err(budget("same-net source index count"));
     }
@@ -34,7 +39,7 @@ fn order(n: usize, net: impl Fn(usize) -> u32, work: &mut usize, cap: usize) -> 
     Ok(indices)
 }
 
-fn range(indices: &[u32], net: u32, source_net: impl Fn(u32) -> u32) -> &[u32] {
+pub(crate) fn range(indices: &[u32], net: u32, source_net: impl Fn(u32) -> u32) -> &[u32] {
     let lo = indices.partition_point(|&i| source_net(i) < net);
     let end = lo + indices[lo..].partition_point(|&i| source_net(i) == net);
     &indices[lo..end]

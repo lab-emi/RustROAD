@@ -113,6 +113,12 @@ Wire normalization retains line maps and junction sets for one net at a time;
 assembly emits normalized runs directly, without a second full raw-wire copy.
 Completed pin escapes retain exact-length boxed slices for their wires, vias
 and shape handles, rather than the spare capacity of growable vectors.
+Pruning and connectivity validation retain four-byte source indices and one
+net's endpoint graph, instead of maps of every endpoint in the design. Both
+edge and unique-node counts must fit `max_active_nodes`; sort, construction,
+leaf-removal and connectivity work are bounded by `max_comparisons`. An
+oversized net fails before constructing an unbounded graph. Validation also
+uses a compact pin index and an explicitly bounded terminal-presence array.
 The work counter covers all nets and the output cap is checked before appending.
 Same-net rule checks keep compact source indices and collect one net's shapes
 at a time. Each group is bounded by the obstacle cap and sixteen times the

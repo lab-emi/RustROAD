@@ -14,7 +14,7 @@ pub(crate) use crate::route_rules::Violation;
 use crate::{Error, Rect, Result};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -2282,10 +2282,12 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
     Ok(out)
 }
 
+#[cfg(test)]
 type Node = (u32, u32, i64, i64);
 
 /// Remove dead-end wires/vias that lead to no access point (bounded by edges).
-fn prune(input: &RouteInput, out: &mut Routes) {
+#[cfg(test)]
+fn prune_legacy(input: &RouteInput, out: &mut Routes) {
     let anchors: BTreeSet<Node> = out
         .access
         .iter()
@@ -2351,6 +2353,35 @@ fn prune(input: &RouteInput, out: &mut Routes) {
     });
 }
 
+/// Prune one endpoint graph at a time; output order and cyclic metal remain unchanged.
+fn prune(input: &RouteInput, out: &mut Routes, limits: &RouteLimits) -> Result<usize> {
+    let mut work = 0;
+    let index = crate::route_graph::NetIndex::new(out, limits, &mut work)?;
+    let nw = out.wires.len();
+    let mut alive = vec![true; nw + out.vias.len()];
+    for &net in index.nets() {
+        let sources = index.sources(out, net);
+        let graph = crate::route_graph::Graph::new(input, out, sources, limits, &mut work)?;
+        let kept = graph.pruned(&mut work, limits.max_comparisons)?;
+        for (&i, &keep) in sources.wires.iter().zip(&kept) {
+            alive[i as usize] = keep;
+        }
+        for (&i, &keep) in sources.vias.iter().zip(&kept[sources.wires.len()..]) {
+            alive[nw + i as usize] = keep;
+        }
+    }
+    let mut i = 0;
+    out.wires.retain(|_| {
+        i += 1;
+        alive[i - 1]
+    });
+    out.vias.retain(|_| {
+        i += 1;
+        alive[i - 1]
+    });
+    Ok(work)
+}
+
 /// Post-route same-net legalization: prune dead ends, then up to eight rounds
 /// of notch/point-contact patches and minimum-area stubs, each checked against
 /// other nets. Unresolved violations fail explicitly (HEAD stays unchanged).
@@ -2372,7 +2403,7 @@ pub(crate) fn cleanup_report(
     out: &mut Routes,
     limits: &RouteLimits,
 ) -> Result<(usize, Vec<Violation>)> {
-    prune(input, out);
+    let mut work = prune(input, out, limits)?;
     let mut spatial = Spatial::new(input, limits)?;
     for w in &out.wires {
         spatial.add_wire(w)?;
@@ -2380,7 +2411,6 @@ pub(crate) fn cleanup_report(
     for v in &out.vias {
         spatial.add_via(v)?;
     }
-    let mut work = 0usize;
     let mut tried = BTreeSet::new();
     for _ in 0..8 {
         let violations = route_rules::check(input, out, limits, &mut work)?;
@@ -2625,21 +2655,27 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
         return Err(invalid("routing patches require LEF-rule mode"));
     }
     let mut spatial = Spatial::new(input, limits)?;
-    let mut counts = BTreeMap::<u32, usize>::new();
-    for t in &input.terminals {
-        *counts.entry(t.net).or_default() += 1;
+    let mut selected: Vec<u32> = input.terminals.iter().map(|t| t.net).collect();
+    selected.sort_unstable();
+    let (mut read, mut write) = (0, 0);
+    while read < selected.len() {
+        let net = selected[read];
+        let start = read;
+        while read < selected.len() && selected[read] == net {
+            read += 1;
+        }
+        if read - start >= 2 {
+            selected[write] = net;
+            write += 1;
+        }
     }
-    let selected: BTreeSet<_> = counts
-        .into_iter()
-        .filter_map(|(n, c)| (c >= 2).then_some(n))
-        .collect();
-    if selected.iter().copied().collect::<Vec<_>>() != routes.nets {
+    selected.truncate(write);
+    let selected = selected.into_boxed_slice();
+    if selected.as_ref() != routes.nets {
         return Err(invalid("stored routed-net coverage"));
     }
-    type Key = (u32, i64, i64);
-    let mut graph = BTreeMap::<u32, HashMap<Key, Vec<Key>>>::new();
     for w in &routes.wires {
-        if !selected.contains(&w.net)
+        if selected.binary_search(&w.net).is_err()
             || w.layer as usize >= input.layers.len()
             || input.layers[w.layer as usize].vertical.is_none()
         {
@@ -2656,16 +2692,9 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             return Err(invalid("wire collides with blockage/other net"));
         }
         spatial.add_wire(w)?;
-        let (a, b) = (
-            (w.layer, w.start[0], w.start[1]),
-            (w.layer, w.end[0], w.end[1]),
-        );
-        let g = graph.entry(w.net).or_default();
-        g.entry(a).or_default().push(b);
-        g.entry(b).or_default().push(a);
     }
     for v in &routes.vias {
-        if !selected.contains(&v.net)
+        if selected.binary_search(&v.net).is_err()
             || v.kind as usize >= input.vias.len()
             || v.at.iter().any(|x| x % input.grid != 0)
         {
@@ -2675,17 +2704,9 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             return Err(invalid("via collides with blockage/other net"));
         }
         spatial.add_via(v)?;
-        let spec = &input.vias[v.kind as usize];
-        let (a, b) = (
-            (spec.lower, v.at[0], v.at[1]),
-            (spec.upper, v.at[0], v.at[1]),
-        );
-        let g = graph.entry(v.net).or_default();
-        g.entry(a).or_default().push(b);
-        g.entry(b).or_default().push(a);
     }
     for p in &routes.patches {
-        if !selected.contains(&p.net)
+        if selected.binary_search(&p.net).is_err()
             || p.layer as usize >= input.layers.len()
             || input.layers[p.layer as usize].vertical.is_none()
             || !p.rect.valid()
@@ -2704,15 +2725,23 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             net: Some(p.net),
         })?;
     }
-    let terminals: HashMap<_, _> = input.terminals.iter().map(|t| (t.pin, t)).collect();
-    let mut seen = HashSet::new();
+    let mut work = 0;
+    let terminals = crate::rule_index::order(
+        input.terminals.len(),
+        |i| input.terminals[i].pin,
+        &mut work,
+        limits.max_comparisons,
+    )?;
+    let mut seen = vec![false; input.terminals.len()];
     for a in &routes.access {
-        let t = terminals
-            .get(&a.pin)
-            .ok_or_else(|| invalid("routing access pin absent"))?;
-        if !selected.contains(&a.net)
+        let slot = terminals
+            .binary_search_by_key(&a.pin, |&i| input.terminals[i as usize].pin)
+            .map_err(|_| invalid("routing access pin absent"))?;
+        let i = terminals[slot] as usize;
+        let t = &input.terminals[i];
+        if selected.binary_search(&a.net).is_err()
             || t.net != a.net
-            || !seen.insert(a.pin)
+            || seen[i]
             || !t
                 .shapes
                 .iter()
@@ -2720,45 +2749,32 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
         {
             return Err(invalid("routing access does not touch its pin"));
         }
-        graph
-            .entry(a.net)
-            .or_default()
-            .entry((a.layer, a.at[0], a.at[1]))
-            .or_default();
+        seen[i] = true;
     }
     if input
         .terminals
         .iter()
-        .filter(|t| selected.contains(&t.net))
-        .any(|t| !seen.contains(&t.pin))
+        .enumerate()
+        .any(|(i, t)| selected.binary_search(&t.net).is_ok() && !seen[i])
     {
         return Err(invalid("missing routed terminal"));
     }
-    let mut work = 0usize;
-    for g in graph.values() {
-        let Some(&root) = g.keys().next() else {
-            continue;
-        };
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::from([root]);
-        while let Some(node) = queue.pop_front() {
-            if !visited.insert(node) {
-                continue;
-            }
-            for &next in &g[&node] {
-                work += 1;
-                if work > limits.max_comparisons {
-                    return Err(budget("routing connectivity work"));
-                }
-                if !visited.contains(&next) {
-                    queue.push_back(next);
-                }
-            }
-        }
-        if visited.len() != g.len() {
+    drop(terminals);
+    drop(seen);
+    let index = crate::route_graph::NetIndex::new(routes, limits, &mut work)?;
+    for &net in index.nets() {
+        let graph = crate::route_graph::Graph::new(
+            input,
+            routes,
+            index.sources(routes, net),
+            limits,
+            &mut work,
+        )?;
+        if !graph.connected(&mut work, limits.max_comparisons)? {
             return Err(invalid("disconnected routed net"));
         }
     }
+    drop(index);
     if input.rules {
         let mut work = 0usize;
         let violations = route_rules::check(input, routes, limits, &mut work)?;
@@ -2776,6 +2792,182 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn per_net_pruning_matches_whole_graph_with_cycles_branches_and_vias() {
+        let input = fixture();
+        let mut state = 0x5a17u32;
+        for case in 0..100 {
+            let mut next = || {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                state ^ (state >> 16)
+            };
+            let mut original = Routes {
+                wires: Vec::new(),
+                vias: Vec::new(),
+                access: Vec::new(),
+                patches: Vec::new(),
+                nets: (0..8).collect(),
+                stats: RouteStats::default(),
+            };
+            for net in 0..8 {
+                for _ in 0..24 {
+                    let a = i64::from(next() % 8);
+                    let b = i64::from(next() % 8);
+                    original.wires.push(Wire {
+                        net,
+                        layer: next() % 2,
+                        start: [a, 0],
+                        end: [b, 0],
+                    });
+                }
+                for _ in 0..4 {
+                    original.vias.push(Via {
+                        net,
+                        kind: 0,
+                        at: [i64::from(next() % 8), 0],
+                    });
+                }
+                for pin in 0..4 {
+                    original.access.push(Access {
+                        pin: net * 4 + pin,
+                        net,
+                        layer: next() % 2,
+                        at: [i64::from(next() % 8), 0],
+                    });
+                }
+            }
+            original.wires.reverse();
+            original.vias.reverse();
+            let mut expected = original.clone();
+            prune_legacy(&input, &mut expected);
+            prune(&input, &mut original, &RouteLimits::default()).unwrap();
+            assert_eq!(original.wires, expected.wires, "wire pruning case {case}");
+            assert_eq!(original.vias, expected.vias, "via pruning case {case}");
+        }
+    }
+
+    #[test]
+    fn endpoint_graph_rejects_disconnected_access_and_enforces_per_net_budget() {
+        let input = fixture();
+        let mut out = Routes {
+            wires: vec![Wire {
+                net: 0,
+                layer: 0,
+                start: [0, 0],
+                end: [10, 0],
+            }],
+            vias: Vec::new(),
+            access: vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 0,
+                    at: [10, 0],
+                },
+            ],
+            patches: Vec::new(),
+            nets: vec![0],
+            stats: RouteStats::default(),
+        };
+        let limits = RouteLimits::default();
+        for connected in [true, false] {
+            if !connected {
+                out.access[1].at = [20, 0];
+            }
+            let mut work = 0;
+            let index = crate::route_graph::NetIndex::new(&out, &limits, &mut work).unwrap();
+            let graph = crate::route_graph::Graph::new(
+                &input,
+                &out,
+                index.sources(&out, 0),
+                &limits,
+                &mut work,
+            )
+            .unwrap();
+            assert_eq!(
+                graph.connected(&mut work, limits.max_comparisons).unwrap(),
+                connected
+            );
+            let tiny = RouteLimits {
+                max_active_nodes: 1,
+                ..limits.clone()
+            };
+            assert!(matches!(
+                crate::route_graph::Graph::new(
+                    &input,
+                    &out,
+                    index.sources(&out, 0),
+                    &tiny,
+                    &mut work
+                ),
+                Err(Error::Budget(_))
+            ));
+            assert!(graph.connected(&mut 0, 1).is_err());
+        }
+    }
+
+    #[test]
+    #[ignore = "explicit bounded whole-graph versus per-net RSS comparison"]
+    fn endpoint_pruning_memory_fixture() {
+        let input = fixture();
+        let nets = 100_001u32;
+        let mut out = Routes {
+            wires: Vec::new(),
+            vias: Vec::new(),
+            access: Vec::new(),
+            patches: Vec::new(),
+            nets: (0..nets).collect(),
+            stats: RouteStats::default(),
+        };
+        for net in 0..nets {
+            for x in [0, 10, 20] {
+                out.wires.push(Wire {
+                    net,
+                    layer: 0,
+                    start: [x, 0],
+                    end: [x + 10, 0],
+                });
+            }
+            out.access.extend([
+                Access {
+                    pin: net * 2,
+                    net,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: net * 2 + 1,
+                    net,
+                    layer: 0,
+                    at: [20, 0],
+                },
+            ]);
+        }
+        if std::env::var_os("RUSTROAD_LEGACY_PRUNE").is_some() {
+            prune_legacy(&input, &mut out);
+        } else {
+            prune(
+                &input,
+                &mut out,
+                &RouteLimits {
+                    max_segments: 400_004,
+                    max_comparisons: 100_000_000,
+                    ..RouteLimits::ceiling()
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(out.wires.len(), 2 * nets as usize);
+        assert!(out.wires.iter().all(|w| w.end[0] <= 20));
+        std::hint::black_box(out);
+    }
 
     #[test]
     fn instanced_wall_routes_identically_to_explicit_geometry() {

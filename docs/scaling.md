@@ -59,6 +59,10 @@ below describe the earlier small-block release.
 - Optional `port_buffer` roles isolate output aliases and feedthroughs. SPEF
   formatting generates one labeled net at a time; it does not copy the complete
   extracted network into a second string-rich representation.
+- Dead-end pruning and endpoint connectivity use compact source indices for
+  the full design and build only one net's graph at a time. Per-net edge,
+  endpoint and work limits are checked before graph allocation. Cycles and
+  disconnected access points retain their previous validation semantics.
 - Constant fanout repair covers inserted and in-place converted tie sources,
   including top-level output aliases. Mixed signal/constant buses preserve
   their declared bit order. Independent Yosys equivalence and wrong-output
