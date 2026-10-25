@@ -135,6 +135,17 @@ search and access reservation. Every search, queue, repair round and rip-up
 count remains bounded. Reaching a limit returns `BUDGET_EXCEEDED` or `NO_ROUTE`
 and leaves HEAD unchanged.
 
+`batch_terminals` optionally selects groups of 2 through 1,000,000 terminals,
+without splitting a net. There are at most 8,192 groups. Immutable cell and pin
+columns are shared between groups. Each group must pass the existing memory
+estimate using the live process footprint, including accumulated output and
+fixed metal from earlier groups. Output growth is checked before allocation;
+expansion and work counters are cumulative. After group state is released,
+the complete result is checked against all original terminals and obstacles.
+An oversized net, congested group, memory refusal or final check failure leaves
+the workspace revision unchanged. The full-flow harness can exercise this mode
+with `--route-batch-terminals N` on both PDKs.
+
 Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
 remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared
 state into framed, hash-checked `model.rbin` records (16 GiB file bound,

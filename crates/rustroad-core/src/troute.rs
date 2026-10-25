@@ -148,7 +148,7 @@ fn access_cache_limit(plan: &TrackPlan) -> u64 {
 }
 
 /// Upfront whole-route memory estimate (bytes) of the track router.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct MemoryEstimate {
     /// Held by the caller before routing (`RouteInput::held_bytes`).
     pub held: u64,
@@ -644,6 +644,36 @@ pub(crate) fn estimate_for(
     let graph = Graph::new(input, plan, limits)?;
     let cells = Cells::new(input.die, plan.gcell)?;
     memory_estimate_limited(input, graph.len, cells.len(), limits).map(Some)
+}
+
+/// Extra validation storage once completed output records are already resident.
+pub(crate) fn validation_working_bytes(
+    input: &RouteInput,
+    out: &Routes,
+    limits: &RouteLimits,
+) -> Result<u64> {
+    let estimate = estimate_for(input, limits)?.ok_or_else(|| invalid("track plan absent"))?;
+    let assumed_records = (input.terminals.len() as u64)
+        .saturating_mul(RECORDS_PER_TERMINAL)
+        .min(limits.max_segments as u64);
+    let records = out
+        .wires
+        .len()
+        .saturating_add(out.vias.len())
+        .saturating_add(out.patches.len())
+        .saturating_add(out.access.len()) as u64;
+    Ok(estimate
+        .check
+        .saturating_sub(assumed_records.saturating_mul(RECORD_BYTES))
+        // Pin uniqueness, net counts and compact terminal coverage indices.
+        .saturating_add((input.terminals.len() as u64).saturating_mul(32))
+        .saturating_add(records.saturating_mul(24))
+        .saturating_add(
+            (limits.max_active_nodes as u64)
+                .saturating_mul(16)
+                .saturating_mul(std::mem::size_of::<crate::route_rules::Shape>() as u64),
+        )
+        .saturating_add((limits.max_rule_violations as u64).saturating_mul(1024)))
 }
 
 /// GCell grid over the die.
@@ -3011,6 +3041,40 @@ mod tests {
     }
     fn limits() -> RouteLimits {
         RouteLimits::default()
+    }
+
+    #[test]
+    fn bounded_batches_preserve_all_nets_and_validate_the_combined_geometry() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(490, 90, 510, 110)),
+                terminal(2, 1, true, rect(90, 490, 110, 510)),
+                terminal(3, 1, false, rect(490, 490, 510, 510)),
+            ],
+            Vec::new(),
+        );
+        design.tracks.as_mut().unwrap().memory_mib = 256;
+        let (out, report) = crate::route_batches::route(&design, &limits(), 2).unwrap();
+        assert_eq!(report.batches, 2);
+        assert_eq!(out.nets, [0, 1]);
+        assert_eq!(out.access.len(), 4);
+        validate(&design, &out, &limits()).unwrap();
+        let (again, _) = crate::route_batches::route(&design, &limits(), 2).unwrap();
+        assert_eq!(out.wires, again.wires);
+        assert_eq!(out.vias, again.vias);
+        assert_eq!(out.access, again.access);
+        assert!(crate::route_batches::route(&design, &limits(), 1).is_err());
+        let limited = RouteLimits {
+            max_expansions: out.stats.expansions - 1,
+            ..limits()
+        };
+        assert!(crate::route_batches::route(&design, &limited, 2).is_err());
+        let mut disconnected = out.clone();
+        disconnected.access.pop();
+        assert!(validate(&design, &disconnected, &limits()).is_err());
+        design.terminals[2].net = 0;
+        assert!(crate::route_batches::route(&design, &limits(), 2).is_err());
     }
 
     // This fixture intentionally reproduces push-grown spare capacity.

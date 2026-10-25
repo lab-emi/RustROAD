@@ -246,6 +246,40 @@ fn head_dir(ws: &Path) -> PathBuf {
 }
 
 #[test]
+fn batched_routing_persists_complete_coverage_and_failed_batches_keep_head() {
+    let f = Fixture::new();
+    let mut batch = routing(true);
+    batch["batch_terminals"] = serde_json::json!(16);
+    fs::write(f.path("batch.json"), serde_json::to_vec(&batch).unwrap()).unwrap();
+    let first = f.flow("batch-one", "batch.json").unwrap();
+    let second = f.flow("batch-two", "batch.json").unwrap();
+    let snapshot = read(&first, &limits()).unwrap();
+    assert_eq!(snapshot.summary().routed_nets, Some(19));
+    drop(snapshot);
+    assert_eq!(def(&first), def(&second));
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&fs::read(head_dir(&first).join("design.json")).unwrap()).unwrap();
+    assert_eq!(
+        metadata["physical"]["routing"]["config"]["batch_terminals"],
+        16
+    );
+    batch["batch_terminals"] = serde_json::json!(2);
+    fs::write(
+        f.path("batch-small.json"),
+        serde_json::to_vec(&batch).unwrap(),
+    )
+    .unwrap();
+    let error = f.flow("batch-small", "batch-small.json").unwrap_err();
+    assert!(
+        error.to_string().contains("batch terminal limit"),
+        "{error}"
+    );
+    let unchanged = read(&f.path("batch-small-ws"), &limits()).unwrap();
+    assert_eq!(unchanged.summary().routed_nets, None);
+    assert_eq!(unchanged.summary().revision, "rev2");
+}
+
+#[test]
 fn floorplan_place_and_track_route_round_trip_through_schema_6() {
     let f = Fixture::new();
     let report = f.floorplan("a").unwrap();

@@ -12,6 +12,7 @@ pub mod jumper;
 pub mod memory;
 pub mod place;
 pub mod power;
+pub mod route_batches;
 mod route_graph;
 pub(crate) mod route_rules;
 mod route_search;

@@ -3,6 +3,7 @@ use crate::routing::{Blockage, RouteLimits, budget, invalid};
 use crate::{Orientation, Rect, Result, transform_rect};
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
+use std::sync::Arc;
 
 const MAX_INSTANCES: usize = crate::MAX_PHYSICAL_INSTANCES;
 const MAX_PINS: usize = 256_000_000;
@@ -72,11 +73,11 @@ pub struct ObstacleInstance {
 
 #[derive(Clone, Debug)]
 pub struct InstanceObstacles {
-    templates: Vec<ObstacleTemplate>,
-    instances: Vec<ObstacleInstance>,
-    pin_nets: Vec<u32>,
+    templates: Arc<[ObstacleTemplate]>,
+    instances: Arc<[ObstacleInstance]>,
+    pin_nets: Arc<[u32]>,
     /// Optional logical pin identities for extraction. Routing needs only nets.
-    pin_ids: Option<Vec<u32>>,
+    pin_ids: Option<Arc<[u32]>>,
     virtual_shapes: u64,
     layers: BTreeSet<u32>,
 }
@@ -107,9 +108,9 @@ impl InstanceObstacles {
             .flat_map(|t| t.layers.keys().copied())
             .collect();
         Ok(Self {
-            templates,
-            instances,
-            pin_nets,
+            templates: templates.into(),
+            instances: instances.into(),
+            pin_nets: pin_nets.into(),
             pin_ids: None,
             virtual_shapes,
             layers,
@@ -129,7 +130,7 @@ impl InstanceObstacles {
         if pins.len() != self.pin_nets.len() || pins.iter().any(|&p| p as usize >= MAX_PINS) {
             return Err(invalid("instance logical-pin identity column"));
         }
-        self.pin_ids = Some(pins);
+        self.pin_ids = Some(pins.into());
         Ok(self)
     }
     pub fn has_pin_ids(&self) -> bool {
@@ -252,9 +253,9 @@ impl InstanceObstacles {
             .flat_map(|t| t.layers.values())
             .map(|v| v.capacity() * size_of::<(usize, TemplateObstacle)>())
             .sum();
-        (self.instances.capacity() * size_of::<ObstacleInstance>()
-            + self.pin_nets.capacity() * 4
-            + self.pin_ids.as_ref().map_or(0, |v| v.capacity() * 4)
+        (self.instances.len() * size_of::<ObstacleInstance>()
+            + self.pin_nets.len() * 4
+            + self.pin_ids.as_ref().map_or(0, |v| v.len() * 4)
             + shapes
             + self
                 .templates

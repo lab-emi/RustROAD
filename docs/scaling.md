@@ -63,6 +63,12 @@ below describe the earlier small-block release.
   the full design and build only one net's graph at a time. Per-net edge,
   endpoint and work limits are checked before graph allocation. Cycles and
   disconnected access points retain their previous validation semantics.
+- An explicit `batch_terminals` routing profile bounds the active whole-net
+  group. Completed metal becomes fixed geometry for later groups; no net is
+  split or omitted. The combined result passes the full-design validator
+  before publication. Global work/output limits remain cumulative. Congestion
+  that cannot be resolved within a group fails explicitly; earlier groups are
+  not silently discarded. This mode still needs full-core qualification.
 - Constant fanout repair covers inserted and in-place converted tie sources,
   including top-level output aliases. Mixed signal/constant buses preserve
   their declared bit order. Independent Yosys equivalence and wrong-output

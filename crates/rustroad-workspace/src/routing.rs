@@ -116,9 +116,20 @@ pub struct RoutingConfig {
     /// Track router; absent keeps the lattice router (previous behavior).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track_router: Option<TrackRouterConfig>,
+    /// Opt-in whole-net batches; completed metal stays fixed for later batches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_terminals: Option<usize>,
 }
 impl RoutingConfig {
     fn validate(&self) -> Result<()> {
+        if self.batch_terminals.is_some_and(|n| {
+            self.track_router.is_none()
+                || !(2..=rustroad_core::route_batches::MAX_BATCH_TERMINALS).contains(&n)
+        }) {
+            return Err(Error::Invalid(
+                "invalid routing batch terminal limit".into(),
+            ));
+        }
         if let Some(t) = &self.track_router {
             self.limits.validate_track()?;
             if !self.lef_rules
@@ -1276,6 +1287,8 @@ pub struct RouteMemory {
     pub spatial_mib: u64,
     pub routed_mib: u64,
     pub check_mib: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batches: Option<rustroad_core::route_batches::BatchReport>,
 }
 fn mib(bytes: u64) -> u64 {
     bytes.div_ceil(1 << 20)
@@ -1325,24 +1338,51 @@ pub fn route(
     let live_process_bytes = rustroad_core::memory::live_bytes();
     input.held_bytes = routing::loaded_held_estimate(workspace_bytes, &input, live_process_bytes);
     rustroad_core::memory::trace("input");
-    let memory = match (
-        &config.track_router,
-        routing::track_memory_estimate(&input, &config.limits)?,
-    ) {
-        (Some(t), Some(e)) => Some(RouteMemory {
-            estimate_mib: mib(e.total()),
-            memory_mib: t.memory_mib,
+    let mut memory = if config.batch_terminals.is_some() {
+        None
+    } else {
+        match (
+            &config.track_router,
+            routing::track_memory_estimate(&input, &config.limits)?,
+        ) {
+            (Some(t), Some(e)) => Some(RouteMemory {
+                estimate_mib: mib(e.total()),
+                memory_mib: t.memory_mib,
+                workspace_bytes,
+                live_process_bytes,
+                held_mib: mib(e.held),
+                search_mib: mib(e.search),
+                spatial_mib: mib(e.spatial),
+                routed_mib: mib(e.routed),
+                check_mib: mib(e.check),
+                batches: None,
+            }),
+            _ => None,
+        }
+    };
+    let routes = if let Some(batch) = config.batch_terminals {
+        let (routes, report) = rustroad_core::route_batches::route(&input, &config.limits, batch)?;
+        let estimate = report.peak_estimate;
+        memory = Some(RouteMemory {
+            estimate_mib: mib(estimate.total().max(report.final_validation_bytes)),
+            memory_mib: input
+                .tracks
+                .as_ref()
+                .expect("batch track plan checked")
+                .memory_mib,
             workspace_bytes,
             live_process_bytes,
-            held_mib: mib(e.held),
-            search_mib: mib(e.search),
-            spatial_mib: mib(e.spatial),
-            routed_mib: mib(e.routed),
-            check_mib: mib(e.check),
-        }),
-        _ => None,
+            held_mib: mib(estimate.held),
+            search_mib: mib(estimate.search),
+            spatial_mib: mib(estimate.spatial),
+            routed_mib: mib(estimate.routed),
+            check_mib: mib(estimate.check),
+            batches: Some(report),
+        });
+        routes
+    } else {
+        routing::route_cpu_ref(&input, &config.limits)?
     };
-    let routes = routing::route_cpu_ref(&input, &config.limits)?;
     rustroad_core::memory::trace("routed");
     bundle.routing = Some(RoutingState {
         source,

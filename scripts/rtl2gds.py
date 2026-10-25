@@ -156,6 +156,16 @@ class PdkGate:
         self.recipe = ctx.manifest["recipe"]["physical"]
         self.statuses: dict[str, dict] = {}
         self.details: dict = {}
+        batch = getattr(ctx.args, "route_batch_terminals", None)
+        if batch is not None:
+            original = Path(p["routing_config"])
+            routing = json.loads(original.read_text())
+            routing["batch_terminals"] = batch
+            derived = ctx.h.root / f"{tag}_batch_routing.json"
+            derived.write_text(json.dumps(routing, indent=2) + "\n")
+            p["routing_config"] = str(derived)
+            self.details["batch_routing_config"] = dict(path=str(derived), sha256=D.sha256_file(derived),
+                                                        source_sha256=D.sha256_file(original), terminals=batch)
         self.container_peaks: list = []  # peak RSS of every signoff container run (steps)
         want = [(c["name"], c["liberty"], c["rc"]) for c in self.spec["corners"]]
         if want != CORNERS[tag]:
@@ -575,10 +585,13 @@ def main(argv=None) -> int:
     ap.add_argument("--no-controls", action="store_true")
     ap.add_argument("--no-determinism", action="store_true")
     ap.add_argument("--preflight-only", action="store_true")
+    ap.add_argument("--route-batch-terminals", type=int, help="opt-in bounded routing batches of whole nets (2..1000000 terminals)")
     ap.add_argument("--evidence", type=Path, help="also write the compact tracked evidence JSON")
     ap.add_argument("--evidence-from", type=Path, metavar="SUMMARY",
                     help="only rewrite --evidence from an existing summary.json (no run)")
     args = ap.parse_args(argv)
+    if args.route_batch_terminals is not None and not 2 <= args.route_batch_terminals <= 1_000_000:
+        ap.error("--route-batch-terminals must be in 2..1000000")
     if args.evidence_from:
         if args.evidence is None:
             ap.error("--evidence-from needs --evidence")
@@ -602,6 +615,8 @@ def main(argv=None) -> int:
     started = args.started = time.monotonic()
     summary = dict(schema=D.SUMMARY_SCHEMA, status="unverified", exit_code=3, scope=SCOPE, gating=GATING,
                    reported=REPORTED, global_statuses={}, pdks=[])
+    if args.route_batch_terminals is not None:
+        summary["routing_batches"] = dict(max_terminals=args.route_batch_terminals, scope="whole nets; final combined geometry validated")
     h = None
     ctx = None
     try:
