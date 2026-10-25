@@ -569,7 +569,7 @@ pub(crate) fn bin_side(input: &RouteInput) -> Result<i64> {
         .ok_or_else(|| invalid("bin overflow"))
 }
 
-struct InstanceIndex<'a> {
+pub(crate) struct InstanceIndex<'a> {
     source: &'a InstanceObstacles,
     bin: i64,
     bins: BinGrid,
@@ -578,13 +578,11 @@ struct InstanceIndex<'a> {
     entries: usize,
 }
 
-fn instance_extent(input: &RouteInput, source: &InstanceObstacles) -> Result<(i64, Rect, usize)> {
-    let bin = input
-        .step
-        .checked_mul(16)
-        .filter(|&side| side > 0)
-        .ok_or_else(|| invalid("instance bin size"))?;
-    let mut bounds = input.die;
+fn instance_extent(die: Rect, bin: i64, source: &InstanceObstacles) -> Result<(i64, Rect, usize)> {
+    if bin <= 0 {
+        return Err(invalid("instance bin size"));
+    }
+    let mut bounds = die;
     let mut entries = 0usize;
     for i in 0..source.len() {
         if let Some(r) = source.bounds(i)? {
@@ -608,7 +606,14 @@ pub(crate) fn instance_index_bytes(input: &RouteInput, limits: &RouteLimits) -> 
         return Ok(0);
     };
     source.validate(input.layers.len(), limits)?;
-    let (bin, b, entries) = instance_extent(input, source)?;
+    let (bin, b, entries) = instance_extent(
+        input.die,
+        input
+            .step
+            .checked_mul(16)
+            .ok_or_else(|| budget("instance bin size"))?,
+        source,
+    )?;
     if entries > limits.max_bin_entries {
         return Err(budget("instance bin-entry limit"));
     }
@@ -643,12 +648,30 @@ pub(crate) fn instance_index_bytes(input: &RouteInput, limits: &RouteLimits) -> 
 
 impl<'a> InstanceIndex<'a> {
     fn new(
-        input: &'a RouteInput,
+        input: &RouteInput,
         source: &'a InstanceObstacles,
         limits: &RouteLimits,
     ) -> Result<Self> {
-        source.validate(input.layers.len(), limits)?;
-        let (bin, b, entries) = instance_extent(input, source)?;
+        Self::for_geometry(
+            source,
+            input.die,
+            input
+                .step
+                .checked_mul(16)
+                .ok_or_else(|| budget("instance bin size"))?,
+            input.layers.len(),
+            limits,
+        )
+    }
+    pub(crate) fn for_geometry(
+        source: &'a InstanceObstacles,
+        die: Rect,
+        bin: i64,
+        layer_count: usize,
+        limits: &RouteLimits,
+    ) -> Result<Self> {
+        source.validate(layer_count, limits)?;
+        let (bin, b, entries) = instance_extent(die, bin, source)?;
         if entries > limits.max_bin_entries {
             return Err(budget("instance bin-entry limit"));
         }
@@ -708,6 +731,25 @@ impl<'a> InstanceIndex<'a> {
         limits: &RouteLimits,
         mut visitor: impl FnMut(Blockage) -> Result<bool>,
     ) -> Result<bool> {
+        let source = self.source;
+        self.visit_cells(layer, query, work, limits, |i, work| {
+            source.visit(i, layer, |b| {
+                *work = work
+                    .checked_add(1)
+                    .filter(|&n| n <= limits.max_comparisons)
+                    .ok_or_else(|| budget("instance geometry work"))?;
+                visitor(b)
+            })
+        })
+    }
+    pub(crate) fn visit_cells(
+        &mut self,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        limits: &RouteLimits,
+        mut visitor: impl FnMut(usize, &mut usize) -> Result<bool>,
+    ) -> Result<bool> {
         if !self.source.has_layer(layer) {
             return Ok(true);
         }
@@ -743,13 +785,7 @@ impl<'a> InstanceIndex<'a> {
                     if !self.source.bounds(i)?.is_some_and(|b| overlap(query, b)) {
                         continue;
                     }
-                    let clear = self.source.visit(i, layer, |b| {
-                        *work = work
-                            .checked_add(1)
-                            .filter(|&n| n <= limits.max_comparisons)
-                            .ok_or_else(|| budget("instance geometry work"))?;
-                        visitor(b)
-                    })?;
+                    let clear = visitor(i, work)?;
                     if !clear {
                         return Ok(false);
                     }
