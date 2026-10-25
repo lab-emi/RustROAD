@@ -344,6 +344,30 @@ impl DesignDb {
             .collect()
     }
 }
+/// Flat immutable records with the same fresh generational IDs as DesignDb,
+/// without rebuilding its strings and mutable instance payloads.
+pub fn snapshot_records(design: &Design, limits: &Limits) -> Result<Vec<Placed>> {
+    design.validate(limits)?;
+    if design.cells.len() >= u32::MAX as usize {
+        return Err(Error::Budget("snapshot instance identity capacity".into()));
+    }
+    let mut ids: SlotMap<InstId, ()> = SlotMap::with_capacity_and_key(design.cells.len());
+    let mut records = Vec::new();
+    records
+        .try_reserve_exact(design.cells.len())
+        .map_err(|_| Error::Budget("snapshot record allocation".into()))?;
+    for cell in &design.cells {
+        records.push(Placed {
+            id: ids.insert(()).data().as_ffi(),
+            x: 0,
+            y: 0,
+            width: cell.width,
+            height: cell.height,
+        });
+    }
+    Ok(records)
+}
+
 pub struct ComputeView {
     ids: Vec<InstId>,
     widths: Vec<i64>,
@@ -403,6 +427,61 @@ pub fn place_cpu_ref(db: &DesignDb, limits: &Limits) -> Result<Placement> {
                 ));
             }
             x = view.rows[row_index].x_start;
+        }
+    }
+    Ok(Placement { cells, expansions })
+}
+
+/// Fixed-order packing directly from a validated immutable design snapshot.
+pub fn place_design_cpu_ref(design: &Design, limits: &Limits) -> Result<Placement> {
+    pack_records(
+        snapshot_records(design, limits)?,
+        &design.rows,
+        limits,
+        |i| design.cells[i].name.clone(),
+    )
+}
+
+fn pack_records(
+    mut cells: Vec<Placed>,
+    rows: &[Row],
+    limits: &Limits,
+    name: impl Fn(usize) -> String,
+) -> Result<Placement> {
+    if cells.len() > limits.max_cells || rows.len() > limits.max_rows {
+        return Err(Error::Budget(
+            "compute view exceeds configured limit".into(),
+        ));
+    }
+    if rows.is_empty() {
+        return Err(Error::Invalid("placement requires at least one row".into()));
+    }
+    let mut row_index = 0;
+    let mut x = rows[0].x_start;
+    let mut expansions = 0;
+    for (i, cell) in cells.iter_mut().enumerate() {
+        loop {
+            if expansions >= limits.max_expansions {
+                return Err(Error::Budget(
+                    "max_expansions reached during placement".into(),
+                ));
+            }
+            expansions += 1;
+            let row = rows[row_index];
+            if let Some(right) = x
+                .checked_add(cell.width)
+                .filter(|right| *right <= row.x_end)
+            {
+                cell.x = x;
+                cell.y = row.y;
+                x = right;
+                break;
+            }
+            row_index += 1;
+            if row_index == rows.len() {
+                return Err(Error::Capacity(name(i)));
+            }
+            x = rows[row_index].x_start;
         }
     }
     Ok(Placement { cells, expansions })
@@ -538,6 +617,28 @@ pub fn write_def_components(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_records_preserve_arena_identity_and_fixed_placement() {
+        let d = design();
+        let limits = Limits::default();
+        let db = DesignDb::new(&d, &limits).unwrap();
+        assert_eq!(
+            snapshot_records(&d, &limits).unwrap(),
+            db.unplaced_records()
+        );
+        let from_db = place_cpu_ref(&db, &limits).unwrap();
+        let from_snapshot = place_design_cpu_ref(&d, &limits).unwrap();
+        assert_eq!(from_snapshot.cells, from_db.cells);
+        assert_eq!(from_snapshot.expansions, from_db.expansions);
+        let small = Limits {
+            max_cells: 1,
+            ..limits
+        };
+        assert!(snapshot_records(&d, &small).is_err());
+        assert!(place_cpu_ref(&db, &small).is_err());
+    }
+
     fn design() -> Design {
         Design {
             name: "tiny".into(),

@@ -3,7 +3,7 @@
 use crate::pdk::PhysicalBundle;
 use crate::{Error, Result, Stage, Summary};
 use rustroad_core::connectivity::{Direction, PinOwner};
-use rustroad_core::{Cell, DesignDb, Limits, Placed};
+use rustroad_core::{Cell, Limits, Placed};
 use rustroad_formats::verilog;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -589,7 +589,7 @@ pub fn synthesize_with_sdc(
     });
     crate::physical::relink(bundle)?;
     validate_tree(bundle)?;
-    let initial = rustroad_core::place_cpu_ref(&DesignDb::new(&metadata.design, limits)?, limits)?;
+    let initial = rustroad_core::place_design_cpu_ref(&metadata.design, limits)?;
     let (records, extra) =
         crate::physical::prepare(&mut metadata.design, bundle, initial.cells, limits)?;
     metadata.expansions = initial

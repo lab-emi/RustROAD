@@ -10,7 +10,7 @@ use rustroad_core::power::{
     PowerCell, PowerRow, RailConfig, RailLimits, RailPolarity, RailReport, validate_rail_continuity,
 };
 use rustroad_core::supply::{LayerSpec, SupplyGrid, SupplyLimits, ViaSpec, build_supply_grid};
-use rustroad_core::{Cell, Design, DesignDb, Limits, Placed, Rect, def_name};
+use rustroad_core::{Cell, Design, Limits, Placed, Rect, def_name};
 use rustroad_formats::{lef, verilog};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -1212,7 +1212,7 @@ pub(super) fn prepare(
         }
     }
     let original_len = placed.len();
-    let ids = DesignDb::new(design, limits)?.unplaced_records();
+    let ids = rustroad_core::snapshot_records(design, limits)?;
     for (i, p) in placed.iter_mut().enumerate() {
         p.id = ids[i].id;
     }

@@ -6,7 +6,7 @@ use rustroad_core::connectivity::{
     ConnectedDesign, Connection, ConnectivityLimits, Direction, Geometry, Master, MasterPin, Net,
     PinOwner, PinUse, Port,
 };
-use rustroad_core::{Cell, Design, DesignDb, Limits, Rect, Row, Site};
+use rustroad_core::{Cell, Design, Limits, Rect, Row, Site};
 use rustroad_formats::{lef, verilog};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -636,7 +636,7 @@ pub fn import_pdk_bounded(
     };
     crate::physical::distribute_ties(&mut design, &mut physical, limits)?;
     validate_bundle(&physical, &design, connection_limits)?;
-    let records = DesignDb::new(&design, limits)?.unplaced_records();
+    let records = rustroad_core::snapshot_records(&design, limits)?;
     let metadata = Metadata {
         tables: None,
         format_version: if physical

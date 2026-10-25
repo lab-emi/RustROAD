@@ -1,7 +1,7 @@
 //! Locked, immutable disk snapshots. Only HEAD publication changes visible state.
 use fs2::FileExt;
 use memmap2::Mmap;
-use rustroad_core::{Design, DesignDb, Limits, Placed, place_cpu_ref};
+use rustroad_core::{Design, Limits, Placed};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
@@ -335,9 +335,7 @@ pub fn init(path: &Path, base_rev: &str, design: Design, limits: &Limits) -> Res
     design.validate(limits)?;
     // Programmatic callers receive the same metadata byte cap as CLI imports.
     drop(serialize_bounded(&design)?);
-    let db = DesignDb::new(&design, limits)?;
-    let records = db.unplaced_records();
-    drop(db);
+    let records = rustroad_core::snapshot_records(&design, limits)?;
     let metadata = Metadata {
         tables: None,
         format_version: 1,
@@ -432,9 +430,7 @@ pub fn place_with(
     {
         crate::physical::clear_fillers(&mut metadata.design, bundle)?;
     }
-    let db = DesignDb::new(&metadata.design, limits)?;
-    let placement = place_cpu_ref(&db, limits)?;
-    drop(db);
+    let placement = rustroad_core::place_design_cpu_ref(&metadata.design, limits)?;
     let mut records = placement.cells;
     let mut expansions = placement.expansions;
     if let Some(bundle) = &mut metadata.physical
