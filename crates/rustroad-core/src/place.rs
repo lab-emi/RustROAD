@@ -892,9 +892,22 @@ fn detailed(
                 for (relative, items) in occ[first_interval..row_start + x_end].iter().enumerate() {
                     let i = first_interval + relative;
                     let v = &problem.intervals[i];
-                    work.add(items.len() as u64 + 1)?;
-                    let mut left = v.lx;
-                    for k in 0..=items.len() {
+                    // A full-width row is one interval. Restrict its gaps as
+                    // well as its interval to the existing local x window.
+                    let first = items.partition_point(|e| i128::from(e.0) < low_x);
+                    let last = items
+                        .partition_point(|e| i128::from(e.0) <= high_x)
+                        .saturating_add(1)
+                        .min(items.len() + 1);
+                    work.add((last - first) as u64 + 1)?;
+                    let mut left = if first == 0 {
+                        v.lx
+                    } else if items[first - 1].2 == c {
+                        items[first - 1].0
+                    } else {
+                        items[first - 1].0 + items[first - 1].1 + gap
+                    };
+                    for k in first..last {
                         let right = if k < items.len() { items[k].0 } else { v.ux };
                         // Free gap [left, right) (own cell counts as free).
                         let (gl, gr) = (left, right);
@@ -903,7 +916,10 @@ fn detailed(
                             continue;
                         }
                         let room_end = if k < items.len() { gr - gap } else { gr };
-                        if room_end - gl >= w {
+                        if room_end - gl >= w
+                            && i128::from(gl) <= high_x
+                            && i128::from(room_end) >= low_x
+                        {
                             let want = mx - w / 2;
                             let x = gl
                                 + (((want - gl).clamp(0, room_end - w - gl)) / problem.site)
@@ -1140,6 +1156,15 @@ pub fn place(
     config: &PlaceConfig,
     limits: &PlaceLimits,
 ) -> Result<PlaceResult> {
+    let started = std::time::Instant::now();
+    let trace = |phase: &str, iteration: usize, work: u64| {
+        if std::env::var_os("RUSTROAD_PLACE_TRACE").is_some() {
+            eprintln!(
+                "[place] {phase} {iteration}: {:.3}s work {work}",
+                started.elapsed().as_secs_f64()
+            );
+        }
+    };
     validate(problem, config, limits)?;
     let n = problem.widths.len();
     let mut work = Work {
@@ -1181,8 +1206,9 @@ pub fn place(
     }
     let x_lo = region[0] as i64;
     let x_hi = region[2] as i64;
-    for _ in 0..3 {
+    for iteration in 0..3 {
         quadratic(problem, config, &mut pos, None, region, &mut work)?;
+        trace("initial solve", iteration, work.used);
     }
     let mut spread = Spread {
         problem,
@@ -1194,6 +1220,7 @@ pub fn place(
         let mut cells: Vec<usize> = (0..n).collect();
         let nrows = spread.rows.len();
         spread.run(&mut cells, &pos, 0, nrows, x_lo, x_hi, &mut work)?;
+        trace("spread", k, work.used);
         targets.clone_from(&spread.out);
         if k + 1 == config.global_iterations {
             break;
@@ -1207,6 +1234,7 @@ pub fn place(
             region,
             &mut work,
         )?;
+        trace("anchored solve", k, work.used);
     }
     let global: Vec<[i64; 2]> = targets
         .iter()
@@ -1220,6 +1248,7 @@ pub fn place(
         .collect();
     let global_hpwl = hpwl(problem, &global);
     let mut legal = legalize(problem, &targets, &mut work)?;
+    trace("legalized", 0, work.used);
     detailed(
         problem,
         &mut legal,
@@ -1227,6 +1256,7 @@ pub fn place(
         config.max_net_pins,
         &mut work,
     )?;
+    trace("detailed", 0, work.used);
     check_legal(problem, &legal)?;
     Ok(PlaceResult {
         hpwl: hpwl(problem, &legal),
@@ -1448,5 +1478,40 @@ mod tests {
         check_legal(&with_clock, &actual.positions)
             .expect("legal placement with the ignored clock");
         assert!(actual.work < caps.max_work);
+    }
+
+    #[test]
+    fn long_row_gap_search_stays_local_and_keeps_an_optimal_placement() {
+        let n = 5000usize;
+        let problem = PlaceProblem {
+            widths: vec![10; n],
+            row_height: 20,
+            site: 10,
+            gap: 0,
+            nets: (0..n)
+                .map(|i| {
+                    vec![
+                        PinRef::Cell(i as u32),
+                        PinRef::Fixed([i as i64 * 20 + 5, 10]),
+                    ]
+                })
+                .collect(),
+            intervals: vec![Interval {
+                y: 0,
+                lx: 0,
+                ux: n as i64 * 20,
+            }],
+            weights: Vec::new(),
+        };
+        let expected: Vec<[i64; 2]> = (0..n).map(|i| [i as i64 * 20, 0]).collect();
+        let mut positions = expected.clone();
+        let mut work = Work {
+            used: 0,
+            max: 2_000_000,
+        };
+        detailed(&problem, &mut positions, 1, 256, &mut work)
+            .expect("local gaps must stay within the linear-sized work budget");
+        assert_eq!(positions, expected);
+        assert_eq!(hpwl(&problem, &positions), 0);
     }
 }
