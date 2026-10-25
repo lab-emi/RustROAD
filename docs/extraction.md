@@ -66,6 +66,11 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   7.4e9, 20.6 s and 521 MB peak; the track recipe of the gate passes 65,536
   candidates (2.9 MB scratch) and 8 M elements.
 
+SPEF formatting retains the numeric RC network once and generates labeled nets one
+at a time. A compact coupling incidence table preserves record order; the name
+map borrows instance names instead of copying them for every pin. The existing
+byte and graph budgets still apply.
+
 Repeated runs are byte-identical. The SPEF `*DATE` is a fixed string, and the
 JSON report carries provenance.
 

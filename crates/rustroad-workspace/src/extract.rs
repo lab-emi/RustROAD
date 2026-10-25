@@ -173,6 +173,71 @@ fn fail(s: impl Into<String>) -> Error {
     Error::Invalid(s.into())
 }
 
+/// Two incidence ids per coupling, preserving original per-net insertion order.
+/// No second copy of the RC network or per-pin names is retained.
+struct CouplingIndex {
+    rows: Vec<u32>,
+    offsets: Vec<usize>,
+    entries: Vec<u32>,
+}
+impl CouplingIndex {
+    fn new(network: &extract::RcNetwork, nets: usize, limits: &ExtractLimits) -> Result<Self> {
+        if nets > 64_000_000
+            || network.couplings.len() > limits.max_couplings
+            || network.couplings.len() > u32::MAX as usize
+            || network.nets.len() > limits.max_nodes
+            || network.nets.len() >= u32::MAX as usize
+        {
+            return Err(Error::Budget("SPEF coupling index counts".into()));
+        }
+        let mut rows = vec![u32::MAX; nets];
+        let mut offsets = vec![0usize; network.nets.len() + 1];
+        for (row, net) in network.nets.iter().enumerate() {
+            let entry = rows
+                .get_mut(net.net as usize)
+                .ok_or_else(|| fail("SPEF net index"))?;
+            if *entry != u32::MAX {
+                return Err(fail("duplicate SPEF net"));
+            }
+            *entry = row as u32;
+        }
+        let row_of = |net: u32| -> Result<usize> {
+            rows.get(net as usize)
+                .copied()
+                .filter(|&r| r != u32::MAX)
+                .map(|r| r as usize)
+                .ok_or_else(|| fail("SPEF coupling net absent"))
+        };
+        for c in &network.couplings {
+            for net in [c.a.0, c.b.0] {
+                let row = row_of(net)?;
+                offsets[row + 1] = offsets[row + 1]
+                    .checked_add(1)
+                    .ok_or_else(|| fail("SPEF coupling count"))?;
+            }
+        }
+        for i in 1..offsets.len() {
+            offsets[i] = offsets[i]
+                .checked_add(offsets[i - 1])
+                .ok_or_else(|| fail("SPEF coupling prefix"))?;
+        }
+        let mut entries = vec![0; offsets.last().copied().unwrap_or(0)];
+        let mut cursor = offsets[..network.nets.len()].to_vec();
+        for (id, c) in network.couplings.iter().enumerate() {
+            for net in [c.a.0, c.b.0] {
+                let row = row_of(net)?;
+                entries[cursor[row]] = id as u32;
+                cursor[row] += 1;
+            }
+        }
+        Ok(Self {
+            rows,
+            offsets,
+            entries,
+        })
+    }
+}
+
 fn load_profile(path: &Path) -> Result<(RcProfile, ArtifactPin)> {
     let (text, source) = read_input(path, MAX_PROFILE_BYTES, "rc_profile")?;
     let profile: RcProfile = serde_json::from_str(&text)?;
@@ -480,49 +545,20 @@ pub fn extract(
             }
         })
     };
-    let index: HashMap<u32, usize> = network
-        .nets
-        .iter()
-        .enumerate()
-        .map(|(i, n)| (n.net, i))
-        .collect();
-    let mut spef_nets = Vec::with_capacity(network.nets.len());
+    let coupling_index = CouplingIndex::new(&network, model.nets.len(), &request.limits)?;
     let mut ports = BTreeMap::<u32, (String, spef::Direction)>::new();
     for rc in &network.nets {
-        let mut nodes = Vec::with_capacity(rc.nodes.len());
-        let mut connections = Vec::new();
-        for (i, node) in rc.nodes.iter().enumerate() {
-            match *node {
-                RcNode::Pin(pin) => {
-                    let (n, direction, cell) = pin_label(pin)?;
-                    if let spef::Node::Port(name) = &n {
-                        ports.insert(pin, (name.clone(), direction));
-                    }
-                    nodes.push(n);
-                    connections.push(spef::Connection {
-                        node: i as u32,
-                        direction,
-                        cell,
-                    });
-                }
-                RcNode::Internal(k) => nodes.push(spef::Node::Internal(k)),
+        for node in &rc.nodes {
+            if let RcNode::Pin(pin) = *node
+                && matches!(model.pins[pin as usize].owner, PinOwner::Port { .. })
+            {
+                let (spef::Node::Port(name), direction, _) = pin_label(pin)? else {
+                    unreachable!()
+                };
+                ports.insert(pin, (name, direction));
             }
         }
-        spef_nets.push(spef::Net {
-            name: model.nets[rc.net as usize].name.clone(),
-            nodes,
-            connections,
-            ground: rc.ground.clone(),
-            couplings: Vec::new(),
-            resistors: rc.resistors.clone(),
-        });
     }
-    for c in &network.couplings {
-        let (ia, ib) = (index[&c.a.0], index[&c.b.0]);
-        spef_nets[ia].couplings.push((c.a.1, ib, c.b.1, c.pf));
-        spef_nets[ib].couplings.push((c.b.1, ia, c.a.1, c.pf));
-    }
-    let routed: std::collections::BTreeSet<u32> = network.nets.iter().map(|n| n.net).collect();
     // A declared signal net without any connection (no driver, no load: e.g.
     // a dangling wire of the synthesized netlist) has nothing to extract or
     // time; it is listed separately. So is a net with exactly one pin (an
@@ -541,7 +577,7 @@ pub fn extract(
     let mut pinless = Vec::new();
     let mut single = Vec::new();
     for (i, n) in model.nets.iter().enumerate() {
-        if n.use_.is_supply() || routed.contains(&(i as u32)) {
+        if n.use_.is_supply() || coupling_index.rows[i] != u32::MAX {
             continue;
         }
         match pins_per_net[i] {
@@ -575,7 +611,81 @@ pub fn extract(
             cap: request.max_spef_bytes,
             hash: Sha256::new(),
         };
-        spef::write(&header, &ports, &spef_nets, &mut capped).map_err(|e| match e {
+        let names: Vec<&str> = network
+            .nets
+            .iter()
+            .map(|n| model.nets[n.net as usize].name.as_str())
+            .collect();
+        let instances = network.nets.iter().flat_map(|n| &n.nodes).filter_map(|n| {
+            let RcNode::Pin(pin) = *n else { return None };
+            let PinOwner::Instance { instance, .. } = model.pins[pin as usize].owner else {
+                return None;
+            };
+            Some(design.cells[instance as usize].name.as_str())
+        });
+        let label = |pin| pin_label(pin).map_err(|e| spef::SpefError::Invalid(e.to_string()));
+        spef::write_streamed(
+            &header,
+            &ports,
+            &names,
+            instances,
+            |row| {
+                let rc = &network.nets[row];
+                let mut nodes = Vec::with_capacity(rc.nodes.len());
+                let mut connections = Vec::new();
+                for (i, node) in rc.nodes.iter().enumerate() {
+                    match *node {
+                        RcNode::Pin(pin) => {
+                            let (n, direction, cell) = label(pin)?;
+                            nodes.push(n);
+                            connections.push(spef::Connection {
+                                node: i as u32,
+                                direction,
+                                cell,
+                            });
+                        }
+                        RcNode::Internal(k) => nodes.push(spef::Node::Internal(k)),
+                    }
+                }
+                let couplings = coupling_index.entries
+                    [coupling_index.offsets[row]..coupling_index.offsets[row + 1]]
+                    .iter()
+                    .map(|&id| {
+                        let c = network.couplings[id as usize];
+                        let (own, other) = if c.a.0 == rc.net {
+                            (c.a, c.b)
+                        } else {
+                            (c.b, c.a)
+                        };
+                        (
+                            own.1,
+                            coupling_index.rows[other.0 as usize] as usize,
+                            other.1,
+                            c.pf,
+                        )
+                    })
+                    .collect();
+                Ok(spef::Net {
+                    name: names[row].into(),
+                    nodes,
+                    connections,
+                    ground: rc.ground.clone(),
+                    couplings,
+                    resistors: rc.resistors.clone(),
+                })
+            },
+            |row, node| match network
+                .nets
+                .get(row)
+                .and_then(|n| n.nodes.get(node as usize))
+            {
+                Some(RcNode::Pin(pin)) => label(*pin).map(|p| p.0),
+                Some(RcNode::Internal(k)) => Ok(spef::Node::Internal(*k)),
+                None => Err(spef::SpefError::Invalid("coupling node index".into())),
+            },
+            &mut capped,
+        )
+        .map_err(|e| match e {
             spef::SpefError::Io(io) if io.to_string().contains("BUDGET_EXCEEDED") => {
                 Error::Budget("SPEF byte cap".into())
             }
@@ -718,4 +828,46 @@ pub fn extract(
         single_pin_signal_nets: single,
         diagnostics,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn coupling_incidence_preserves_order_and_rejects_absent_nets() {
+        let net = |id| extract::RcNet {
+            net: id,
+            nodes: vec![],
+            ground: vec![],
+            resistors: vec![],
+        };
+        let mut network = extract::RcNetwork {
+            nets: vec![net(8), net(2), net(5)],
+            couplings: vec![
+                extract::RcCoupling {
+                    a: (2, 0),
+                    b: (5, 0),
+                    pf: 1.0,
+                },
+                extract::RcCoupling {
+                    a: (8, 0),
+                    b: (2, 0),
+                    pf: 2.0,
+                },
+                extract::RcCoupling {
+                    a: (5, 0),
+                    b: (8, 0),
+                    pf: 3.0,
+                },
+            ],
+            stats: Default::default(),
+        };
+        let index = CouplingIndex::new(&network, 9, &ExtractLimits::default()).unwrap();
+        assert_eq!(index.offsets, vec![0, 2, 4, 6]);
+        assert_eq!(index.entries, vec![1, 2, 0, 1, 0, 2]);
+        assert_eq!(index.rows[8], 0);
+        assert_eq!(index.rows[0], u32::MAX);
+        network.couplings[0].a.0 = 6;
+        assert!(CouplingIndex::new(&network, 9, &ExtractLimits::default()).is_err());
+    }
 }
