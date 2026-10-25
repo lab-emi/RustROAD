@@ -183,8 +183,11 @@ construction, relocation and traversal. Inserts, construction and distance
 queries charge the shared comparison budget. Traversal uses a fixed stack
 and a node-visit cap. Exceeding the target limit returns a budget diagnostic;
 it never discards segments or silently substitutes the tree's bounding box.
-Only spans that approach the tree's bounding region are proposed. Empty
-history and single-root cases avoid unnecessary per-point lookup work; guide
+Outside the tree's bounds, spans must approach its bounding region. Inside,
+they must approach an actual segment according to the exact target index;
+a zero box distance must not disable every long move. Non-saturated queue
+scores provide the existing target distance without another index query.
+Empty history and single-root cases avoid unnecessary per-point lookup work; guide
 coverage is checked over the complete crossed GCell interval.
 Minimum-area checks accept a component as soon as one of its rectangles is
 large enough; exact union area is retained for every reported area violation.

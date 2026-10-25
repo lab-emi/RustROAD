@@ -2320,7 +2320,7 @@ impl<'a> Router<'a> {
             let mut limited = false;
             let mut projection_attempts = 0;
             let mut search = 0usize;
-            while let Some((_, Reverse(cost), id)) = heap.pop() {
+            while let Some((priority, Reverse(cost), id)) = heap.pop() {
                 if self.search.get(id).is_none_or(|s| s.cost != cost) {
                     continue;
                 }
@@ -2368,6 +2368,23 @@ impl<'a> Router<'a> {
                 let layer = self.graph.layers[l].layer;
                 let p = self.graph.xy(l, t_, s_);
                 let target_distance = target.bounds_distance(p);
+                let interior_distance = if target_distance == 0 {
+                    // During this search the tree is fixed. A non-saturated
+                    // queue score retains exactly g + weight*h, so reuse h.
+                    Some(if priority != u64::MAX {
+                        (priority - cost) / self.plan.heuristic_weight
+                    } else {
+                        target.distance(
+                            l,
+                            p,
+                            &self.target_costs,
+                            &mut self.spatial.work,
+                            self.limits.max_comparisons,
+                        )?
+                    })
+                } else {
+                    None
+                };
                 self.graph.neighbors(id, &mut nbuf);
                 // Dense channels otherwise retry nearly identical long-span
                 // probes at every unit stop. These optional edges are sampled;
@@ -2420,11 +2437,23 @@ impl<'a> Router<'a> {
                 };
                 for &(next, mv) in nbuf.iter() {
                     let (nl, q) = self.graph.point(next);
-                    if matches!(mv, Move::Along)
-                        && id.abs_diff(next) > 1
-                        && target.bounds_distance(q) >= target_distance
-                    {
-                        continue;
+                    let mut next_distance = None;
+                    if matches!(mv, Move::Along) && id.abs_diff(next) > 1 {
+                        if let Some(current) = interior_distance {
+                            let remaining = target.distance(
+                                self.graph.slot[&nl],
+                                q,
+                                &self.target_costs,
+                                &mut self.spatial.work,
+                                self.limits.max_comparisons,
+                            )?;
+                            if remaining >= current {
+                                continue;
+                            }
+                            next_distance = Some(remaining);
+                        } else if target.bounds_distance(q) >= target_distance {
+                            continue;
+                        }
                     }
                     let joins = tree.contains(&next);
                     if self.gmark[self.cells.of(q) as usize] != self.gepoch && !joins {
@@ -2644,18 +2673,18 @@ impl<'a> Router<'a> {
                             kind,
                         },
                     )?;
+                    let remaining = match next_distance {
+                        Some(value) => value,
+                        None => target.distance(
+                            self.graph.slot[&nl],
+                            q,
+                            &self.target_costs,
+                            &mut self.spatial.work,
+                            self.limits.max_comparisons,
+                        )?,
+                    };
                     heap.offer((
-                        nc.saturating_add(
-                            target
-                                .distance(
-                                    self.graph.slot[&nl],
-                                    q,
-                                    &self.target_costs,
-                                    &mut self.spatial.work,
-                                    self.limits.max_comparisons,
-                                )?
-                                .saturating_mul(self.plan.heuristic_weight),
-                        ),
+                        nc.saturating_add(remaining.saturating_mul(self.plan.heuristic_weight)),
                         Reverse(nc),
                         next,
                     ))
@@ -3651,6 +3680,33 @@ mod tests {
                 .sum();
             validate(&design, &out, &limits).unwrap();
         }
+    }
+
+    #[test]
+    fn long_moves_reach_segments_inside_a_branched_tree_bounding_box() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(10, 10, 30, 30)),
+                terminal(1, 0, false, rect(249970, 249970, 249990, 249990)),
+                terminal(2, 0, false, rect(124970, 124970, 124990, 124990)),
+            ],
+            Vec::new(),
+        );
+        design.die = rect(0, 0, 250000, 250000);
+        let plan = design.tracks.as_mut().unwrap();
+        plan.gcell = 100000;
+        plan.capacity_percent = 100;
+        plan.memory_mib = 256;
+        let bounded = RouteLimits {
+            max_axis: 32768,
+            max_grid_nodes: 200_000_000,
+            max_expansions: 200,
+            ..limits()
+        };
+        let result = route_cpu_ref(&design, &bounded).unwrap();
+        validate(&design, &result, &bounded).unwrap();
+        assert_eq!(result.access.len(), 3);
+        assert_eq!(result.nets, [0]);
     }
 
     #[test]
