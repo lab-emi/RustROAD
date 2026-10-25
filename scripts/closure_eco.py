@@ -159,6 +159,81 @@ def parse_netlist(text: str, lef: dict) -> Netlist:
     return n
 
 
+# Physical-only masters that the next placement re-inserts (free space for a
+# seeded cell); taps and endcaps stay (they bound the legalizer's intervals).
+FILLER = re.compile(r"__(fill_|fillcap_|decap_)")
+# Rows searched above and below the wanted position for a free spot.
+FREE_SPOT_ROWS = 6
+
+
+class Occupancy:
+    """Free row space of a placed layout (DEF ROWs minus every component that
+    is not a filler), for seeding a new or moved cell where the legalizer can
+    keep it: a cell seeded into a free span of its interval lands on its
+    seed; one seeded next to a packed driver is pushed to the nearest
+    interval with room (measured on GF180 alu: 87 um). Reservations keep two
+    seeds of one plan apart. Integer DBU."""
+
+    def __init__(self, def_text: str, widths: dict, spacing: int = 0):
+        self.rows = []  # (y, x0, x1, site)
+        for m in re.finditer(r"(?m)^ROW \S+ \S+ (-?\d+) (-?\d+) \S+ DO (\d+) BY 1 STEP (\d+) 0 ;", def_text):
+            x0, y, n, step = int(m[1]), int(m[2]), int(m[3]), int(m[4])
+            self.rows.append((y, x0, x0 + n * step, step))
+        self.rows.sort()
+        self.spacing = spacing
+        self.busy: dict[int, list] = {y: [] for y, *_ in self.rows}
+        self.owner: dict[str, tuple] = {}
+        body = def_text.split("\nCOMPONENTS ", 1)[1].split("\nEND COMPONENTS", 1)[0] if "\nCOMPONENTS " in def_text else ""
+        for m in re.finditer(r"(?m)^- (\S+) (\S+) .*?\+ (?:PLACED|FIXED) \( (-?\d+) (-?\d+) \)", body):
+            if FILLER.search(m[2]) or int(m[4]) not in self.busy:
+                continue
+            span = (int(m[3]), int(m[3]) + widths.get(m[2], 0), key(m[1]))
+            self.busy[int(m[4])].append(span)
+            self.owner[key(m[1])] = (int(m[4]), span)
+
+    def release(self, inst: str):
+        """A cell that moves frees its old span."""
+        if inst in self.owner:
+            y, span = self.owner.pop(inst)
+            self.busy[y].remove(span)
+
+    def spot(self, centre: tuple, width: int, inst: str, budget: list) -> tuple | None:
+        """Lower-left of the free spot nearest `centre` (Manhattan, centre to
+        centre) that fits `width` plus spacing on both sides, within
+        FREE_SPOT_ROWS rows; reserved for `inst`. None: no room nearby."""
+        if not self.rows:
+            return None
+        ys = [r[0] for r in self.rows]
+        k = min(range(len(ys)), key=lambda i: (abs(ys[i] - centre[1]), i))
+        best = None
+        for r in self.rows[max(0, k - FREE_SPOT_ROWS):k + FREE_SPOT_ROWS + 1]:
+            y, x0, x1, site = r
+            spans = sorted(self.busy[y])
+            budget[0] -= len(spans) + 1
+            if budget[0] < 0:
+                raise RuntimeError("closure ECO: free-spot search budget exceeded")
+            edges = [x0] + [e for a, b, _ in spans for e in (a, b)] + [x1]
+            for j in range(0, len(edges), 2):
+                lo, hi = edges[j] + (self.spacing if j else 0), edges[j + 1] - (self.spacing if j + 2 < len(edges) else 0)
+                if hi - lo < width:
+                    continue
+                want = centre[0] - width // 2
+                x = min(max(want, lo), hi - width)
+                x = lo + ((x - lo) // site) * site
+                if x + width > hi:
+                    continue
+                cost = (abs(x + width // 2 - centre[0]) + abs(y - centre[1]), y, x)
+                if best is None or cost < best[0]:
+                    best = (cost, y, x)
+        if best is None:
+            return None
+        _, y, x = best
+        span = (x, x + width, inst)
+        self.busy[y].append(span)
+        self.owner[inst] = (y, span)
+        return (x, y)
+
+
 def def_positions(text: str) -> tuple[dict, dict]:
     """(instance -> lower-left (x, y), port -> pin centre (x, y)) in DBU."""
     comps, pins = {}, {}
@@ -432,9 +507,18 @@ class Planner:
         self.positions: dict[str, tuple] = {}
         self.weights: dict[str, int] = {}
         self.touched: set[str] = set()
+        self.occupancy: Occupancy | None = None
+        self.spot_budget = [MAX_CONSUME_VISITS]
 
     def place_at(self, inst: str, width: int, centre: tuple):
-        self.positions[inst] = (int(centre[0]) - width // 2, int(centre[1]) - self.row_h // 2)
+        """Seed `inst` at the free spot nearest `centre` (the layout's
+        occupancy, when known), else centred on it."""
+        occ = getattr(self, "occupancy", None)
+        at = None
+        if occ is not None:
+            occ.release(inst)
+            at = occ.spot((int(centre[0]), int(centre[1])), width, inst, self.spot_budget)
+        self.positions[inst] = at or (int(centre[0]) - width // 2, int(centre[1]) - self.row_h // 2)
         self.touched.add(inst)
 
     def near_pf(self, cw: float) -> float:
@@ -883,7 +967,7 @@ def design_wire_cap(n: Netlist, pl, prof: Profile, out_load: dict) -> float:
 def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, drv_rows: list, pins: dict,
                    corner: str, max_width: int | None, seq: int, row_h: int, widths: dict,
                    setup_critical: bool, frozen: set | frozenset = frozenset(),
-                   max_added_width: int | None = None, hold_drive: dict | None = None) -> dict:
+                   max_added_width: int | None = None, hold_drive: dict | None = None, spacing: int = 0) -> dict:
     """Plan buffers (and driver resizes) for one layout.
 
     drv_rows: RustSTA drv rows (every corner); pins: corner -> {pin: setup
@@ -960,6 +1044,7 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
     # carry the driver pin and its net's total load).
     out_load = {key(r["pin"]): r["value"] for r in drv_rows if r["kind"] == "max_capacitance" and r["corner"] == corner}
     pl.cw_design = design_wire_cap(n, pl, prof, out_load)
+    pl.occupancy = Occupancy(def_text, widths, spacing)
     skipped, library_limited = {}, {}
     for net in sorted(nets, key=lambda k: (min(nets[k]["kinds"].values(), default=0.0), k)):
         e = nets[net]
@@ -1126,7 +1211,7 @@ def layout_wire_cap(netlist_text: str, lef: dict, def_text: str, profile: dict, 
 
 def plan_hold_isolation(netlist_text: str, lef: dict, def_text: str, profile: dict, points: list, hold_drive: dict,
                         slew_limit: float, seq: int, row_h: int, widths: dict, cw: float, setup_margin: float,
-                        max_width: int | None = None, corners=("ss", "tt")) -> dict:
+                        max_width: int | None = None, corners=("ss", "tt"), spacing: int = 0) -> dict:
     """DRV-aware hold insertion: a buffer behind a hold chain whose sink-side
     delay cell cannot drive the point's load.
 
@@ -1157,6 +1242,8 @@ def plan_hold_isolation(netlist_text: str, lef: dict, def_text: str, profile: di
         return out
     near = cw * NEAR_ROWS * row_h
     target = DRIVER_TARGET * slew_limit
+    occ = Occupancy(def_text, widths, spacing)
+    spot_budget = [MAX_CONSUME_VISITS]
 
     def centre(inst):
         p = comps.get(inst)
@@ -1206,7 +1293,7 @@ def plan_hold_isolation(netlist_text: str, lef: dict, def_text: str, profile: di
                                sinks=[dict(instance=i, pin=p) for i, p in sinks]))
         c = (sum(x[0] for x in pos) // len(pos), sum(x[1] for x in pos) // len(pos))
         for inst, w in [(name, buf.width)] + [(i, widths.get(n.instances[i][0], 0)) for i in insts if i in n.instances]:
-            out["positions"][inst] = (c[0] - w // 2, c[1] - row_h // 2)
+            out["positions"][inst] = occ.spot(c, w, inst, spot_budget) or (c[0] - w // 2, c[1] - row_h // 2)
         out["weights"][net] = DRIVER_NET_WEIGHT
         rec.update(buffer=name, buffer_cell=buf.name, buffer_slew_ns=round(buf.slew_at(load), 4),
                    setup_room_ns=rooms)

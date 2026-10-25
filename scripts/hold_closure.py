@@ -1106,7 +1106,7 @@ class Flow:
         seq = max(CE.next_sequence(text), CE.next_sequence(bounded_text(apply_to, 64 * 1024 ** 2)) if apply_to else 0)
         buf = CE.plan_buffering(text, lef, bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2), prof, drv_rows, pins,
                                 'ss', max_width, seq, floor['site']['height'], widths, setup_failing,
-                                frozen, room, self.hold_drive())
+                                frozen, room, self.hold_drive(), spacing)
         skip = set(buf['resizes']) | set(buf.get('touched') or [])
         n = CE.parse_netlist(text, lef)
         for rec in buf['records']:
@@ -1171,7 +1171,8 @@ class Flow:
                                 'ss', widths, row_h)
         text = bounded_text(out, 64 * 1024 ** 2)
         iso = CE.plan_hold_isolation(text, lef, def_text, prof, plan['points'], self.hold_drive(), min(limits),
-                                     CE.next_sequence(text), row_h, widths, cw, float(self.args.setup_margin), max_width)
+                                     CE.next_sequence(text), row_h, widths, cw, float(self.args.setup_margin), max_width,
+                                     spacing=spacing)
         summary = dict(status='none', records=iso['records'][:64], skipped=dict(sorted(iso['skipped'].items())[:32]),
                        wire_cap_pf_per_dbu=cw)
         if not iso['ops']:

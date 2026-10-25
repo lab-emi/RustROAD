@@ -234,6 +234,20 @@ class CoSizing(unittest.TestCase):
         self.assertEqual(res["positions"], {})
         self.assertIn("setup guard", res["skipped"]["n0"])
 
+    def test_free_spot_avoids_cells_and_takes_filler_space(self):
+        deff = ("ROW r0 core 0 0 N DO 100 BY 1 STEP 100 0 ;\nROW r1 core 0 1000 FS DO 100 BY 1 STEP 100 0 ;\n"
+                "COMPONENTS 3 ;\n- a AND2 + PLACED ( 1000 0 ) N ;\n- f x__fill_8 + PLACED ( 1300 0 ) N ;\n"
+                "- b AND2 + PLACED ( 1600 0 ) N ;\nEND COMPONENTS\n")
+        occ = C.Occupancy(deff, {"AND2": 300, "x__fill_8": 300})
+        budget = [10 ** 6]
+        # The filler's span (1300..1600) is free: a 300 DBU cell fits exactly.
+        self.assertEqual(occ.spot((1450, 500), 300, "n1", budget), (1300, 0))
+        # Now reserved: the next one goes to the nearest other free span.
+        self.assertNotEqual(occ.spot((1450, 500), 300, "n2", budget)[0:2], (1300, 0))
+        # A moved cell frees its own span first.
+        occ.release("a")
+        self.assertEqual(occ.spot((1150, 0), 300, "a", budget), (1000, 0))
+
     def test_hold_chain_gets_an_isolation_buffer(self):
         net = ("module t(input wire a, input wire clk);\n  wire n1;\n  DLY rr_eco_hold_0 (.A(a), .X(rr_eco_hold_0_n));\n"
                "  BUF4 rr_eco_buf_0 (.A(rr_eco_hold_0_n), .X(n1));\n  DFF r0 (.D(n1), .CLK(clk), .Q());\nendmodule\n")
