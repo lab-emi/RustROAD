@@ -523,6 +523,24 @@ pub(crate) fn union_area(rects: &[Rect], work: &mut usize, cap: usize) -> Result
     Ok(area)
 }
 
+fn area_violation(
+    rects: &[Rect],
+    minimum: i128,
+    work: &mut usize,
+    cap: usize,
+) -> Result<Option<i128>> {
+    charge(work, rects.len(), cap)?;
+    if rects.iter().any(|r| {
+        let width = i128::from(r.ux) - i128::from(r.lx);
+        let height = i128::from(r.uy) - i128::from(r.ly);
+        width.checked_mul(height).is_none_or(|area| area >= minimum)
+    }) {
+        return Ok(None);
+    }
+    let area = union_area(rects, work, cap)?;
+    Ok((area < minimum).then_some(area))
+}
+
 /// Merge collinear same-width segments into maximal runs (check view only).
 fn merge_runs(mut horizontal: Vec<Rect>, mut vertical: Vec<Rect>) -> Vec<Rect> {
     let mut out: Vec<Rect> = Vec::with_capacity(horizontal.len() + vertical.len());
@@ -779,8 +797,7 @@ pub(crate) fn check(
                 }
                 if let Some(min) = rule.min_area {
                     let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
-                    let area = union_area(&rects, work, cap)?;
-                    if area < i128::from(min) {
+                    if let Some(area) = area_violation(&rects, i128::from(min), work, cap)? {
                         push_violation(
                             &mut out,
                             &mut diagnostic_shapes,
@@ -805,6 +822,20 @@ mod tests {
     use super::*;
     fn r(lx: i64, ly: i64, ux: i64, uy: i64) -> Rect {
         Rect { lx, ly, ux, uy }
+    }
+    #[test]
+    fn area_certificate_preserves_exact_failure_values_and_bounds_large_passes() {
+        let small = [r(0, 0, 3, 3), r(2, 2, 5, 5)];
+        let exact = union_area(&small, &mut 0, 1000).unwrap();
+        for minimum in [1, 9, 10, exact, exact + 1, 100] {
+            assert_eq!(
+                area_violation(&small, minimum, &mut 0, 1000).unwrap(),
+                (exact < minimum).then_some(exact)
+            );
+        }
+        let large: Vec<_> = (0..5000).map(|i| r(i, i, i + 100, i + 100)).collect();
+        assert_eq!(area_violation(&large, 9999, &mut 0, 5000).unwrap(), None);
+        assert!(area_violation(&large, 9999, &mut 0, 4999).is_err());
     }
     #[test]
     fn relations_cover_overlap_edge_corner_and_euclidean_gaps() {
