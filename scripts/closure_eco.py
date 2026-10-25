@@ -99,6 +99,9 @@ DRIVER_NET_WEIGHT = 8000
 # planning target): accepted when the driver's model transition is at most
 # this fraction of the limit and BEST_EFFORT_GAIN_NS below the observed one.
 BEST_EFFORT = 0.985
+# Output target (fraction of the limit) of a buffer behind a headroom-limited
+# driver (buffer_target).
+HEADROOM_BUFFER_TARGET = 0.7
 BEST_EFFORT_GAIN_NS = 0.02
 # A weak driver's input-slew degradation (observed transition above the
 # Liberty model at the observed load, 0.2 ns input) is subtracted from its
@@ -464,12 +467,14 @@ def fit_buffers(buffers: list, loads: list, target: float, slope: float, per_cap
 
 def buffer_target(target: float, model) -> float:
     """Output transition target of the buffers next to a driver: the planning
-    target, or DRIVER_TARGET x the limit behind a headroom-limited driver
-    (GF180 aoi22 at ss): there the smallest buffer input decides whether the
-    driver meets the limit at all, and buf_1 drives 1.5x the load at 0.8 x
-    the limit that it drives at 0.6 x."""
+    target, or HEADROOM_BUFFER_TARGET x the limit behind a headroom-limited
+    driver (GF180 aoi22 at ss): there the smallest buffer input decides
+    whether the driver meets the limit at all, and buf_1 drives 1.25x the
+    load at 0.7 x the limit that it drives at 0.6 x. (0.8 x was tried: a
+    buf_1 behind an aoi22, whose ~1 ns input edge the 0.2 ns model does not
+    see, then violated on its own output.)"""
     if model is not None and model.headroom:
-        return target * DRIVER_TARGET / TRANSITION_TARGET
+        return target * HEADROOM_BUFFER_TARGET / TRANSITION_TARGET
     return target
 
 
