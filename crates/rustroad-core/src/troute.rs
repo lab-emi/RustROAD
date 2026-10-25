@@ -524,6 +524,9 @@ fn memory_estimate_limited(
         .saturating_mul(SHAPES_PER_TERMINAL)
         .min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
     let index = |shapes: u64| {
+        // Both Spatial implementations enforce this before every insertion.
+        // The checker cannot retain 2*max_segments shapes past this limit.
+        let shapes = shapes.min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
         let entries = fixed_entries.saturating_add(shapes.saturating_mul(ENTRIES_PER_SHAPE));
         let grid = match mode {
             crate::routing::BinMode::Sparse => slots.min(entries).saturating_mul(96),
