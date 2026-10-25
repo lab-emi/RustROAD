@@ -705,12 +705,23 @@ do not change wire/via costs, collision checks, expansion limits or final
 validation. Priority arithmetic saturates at `u64::MAX`. Qualify the chosen
 weight on both PDKs and report measured routed quality along with run time.
 
-Congestion repair orders internal terminal escapes from their coordinate
-median outward and attaches I/O ports last when the net has internal pins.
+Congestion repair starts from an internal driver when present, orders the
+other internal escapes from their coordinate median outward, and attaches
+I/O ports last when the net has internal pins.
 A remote I/O driver therefore need not be the first geometric root
 of the undirected route tree. Logical driver identities are unchanged. The
 ordering reuses each net's terminal slice, takes bounded `O(N log N)` work,
 and is charged to the comparison budget before sorting.
+
+A soft search that reaches its per-search limit releases its partial metal
+and may retry once from an alternate terminal root. Each attempt keeps the
+same limit and both consume the existing aggregate work/expansion budget.
+Exhausting both attempts fails explicitly; no partial result is published.
+
+Detailed search also offers the track stops bracketing the target coordinate
+as checked macro-wire endpoints. They use the same complete-span obstacle,
+guide, history and topology checks as other long moves, then expand to bounded
+unit edges for the stored route. Unit moves remain available for detours.
 
 Via junctions use the area of the actual via pads. A smaller unused variant
 does not force a wire run when an incident pad already meets the layer's

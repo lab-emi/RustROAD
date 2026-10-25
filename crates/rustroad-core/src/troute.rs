@@ -128,12 +128,51 @@ fn repair_terminal_order(
         let p = point(t);
         (
             internal != 0 && t.class.is_none(),
+            internal != 0 && !t.driver,
             p[0].abs_diff(x).saturating_add(p[1].abs_diff(y)),
             !t.driver,
             t.pin,
         )
     });
     Ok(())
+}
+
+fn alternate_repair_root(
+    group: &mut [&Terminal],
+    point: impl Fn(&Terminal) -> [i64; 2],
+    work: &mut usize,
+    cap: usize,
+) -> Result<bool> {
+    *work = work
+        .checked_add(group.len())
+        .filter(|&n| n <= cap)
+        .ok_or_else(|| budget("alternate-root work"))?;
+    let Some(first) = group.first() else {
+        return Ok(false);
+    };
+    let origin = point(first);
+    let best = group
+        .iter()
+        .enumerate()
+        .skip(1)
+        .max_by_key(|(_, t)| {
+            let at = point(t);
+            (
+                t.class.is_some(),
+                t.driver,
+                origin[0]
+                    .abs_diff(at[0])
+                    .saturating_add(origin[1].abs_diff(at[1])),
+                Reverse(t.pin),
+            )
+        })
+        .map(|(i, _)| i);
+    if let Some(i) = best {
+        group.swap(0, i);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 /// Immutable x-interval index for pin-access repair. A query scans only
@@ -409,6 +448,29 @@ impl Graph {
         let t = g.tracks.binary_search(&c).ok()?;
         let s = g.stops.binary_search(&a).ok()?;
         Some(self.node(l, t, s))
+    }
+
+    /// Add the two stops bracketing the root's preferred-axis coordinate.
+    /// These are ordinary macro wires; callers run the same whole-span checks.
+    fn target_neighbors(&self, id: u32, target: [i64; 2], out: &mut Vec<(u32, Move)>) -> usize {
+        let (layer, track, _) = self.locate(id);
+        let g = &self.layers[layer];
+        let at = target[usize::from(g.vertical)];
+        let right = g.stops.partition_point(|&p| p < at);
+        let work = g.stops.len().max(1).ilog2() as usize + 1 + 2 * out.len();
+        for stop in [
+            right.checked_sub(1),
+            (right < g.stops.len()).then_some(right),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let next = self.node(layer, track, stop);
+            if next != id && !out.iter().any(|&(n, _)| n == next) {
+                out.push((next, Move::Along));
+            }
+        }
+        work
     }
     /// Neighbours: (node, move) with move = WIRE (preferred), WRONG or via
     /// pair index. Writes into `out` and returns the count.
@@ -953,6 +1015,7 @@ fn remove_route(
 enum Outcome {
     Routed(NetRoute, Vec<u32>),
     Failed(u32),
+    Limited(u32),
 }
 
 impl<'a> Router<'a> {
@@ -2246,6 +2309,7 @@ impl<'a> Router<'a> {
                 start,
             ))?;
             let mut found = None;
+            let mut limited = false;
             let mut search = 0usize;
             while let Some((_, Reverse(cost), id)) = heap.pop() {
                 if self.search.get(id).is_none_or(|s| s.cost != cost) {
@@ -2274,17 +2338,19 @@ impl<'a> Router<'a> {
                     }
                     break;
                 }
-                if search == self.limits.max_search_expansions
-                    && std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some()
-                {
-                    eprintln!(
-                        "[troute] search cap net {net} pin {} soft {soft} start {:?} root {:?} current {:?} tree_nodes {} cost {cost}",
-                        t.pin,
-                        self.graph.point(start),
-                        (root_layer, root_point),
-                        self.graph.point(id),
-                        tree.len(),
-                    );
+                if search == self.limits.max_search_expansions {
+                    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                        eprintln!(
+                            "[troute] search cap net {net} pin {} soft {soft} start {:?} root {:?} current {:?} tree_nodes {} cost {cost}",
+                            t.pin,
+                            self.graph.point(start),
+                            (root_layer, root_point),
+                            self.graph.point(id),
+                            tree.len(),
+                        );
+                    }
+                    limited = true;
+                    break;
                 }
                 self.tick(&mut search, "detailed", t.pin, net)?;
                 let (l, t_, s_) = self.graph.locate(id);
@@ -2292,6 +2358,13 @@ impl<'a> Router<'a> {
                 let p = self.graph.xy(l, t_, s_);
                 let target_distance = target.bounds_distance(p);
                 self.graph.neighbors(id, &mut nbuf);
+                let work = self.graph.target_neighbors(id, root_point, &mut nbuf);
+                self.spatial.work = self
+                    .spatial
+                    .work
+                    .checked_add(work)
+                    .filter(|&n| n <= self.limits.max_comparisons)
+                    .ok_or_else(|| budget("target projection work"))?;
                 // Minimum area depends on the incoming path, so it cannot be
                 // a general edge restriction in a one-cost-per-node search.
                 // Initial routes use bounded geometric cleanup; a net whose
@@ -2574,7 +2647,11 @@ impl<'a> Router<'a> {
                 for id in out.shapes.drain(..) {
                     self.spatial.remove(id);
                 }
-                return Ok(Outcome::Failed(t.pin));
+                return Ok(if limited {
+                    Outcome::Limited(t.pin)
+                } else {
+                    Outcome::Failed(t.pin)
+                });
             };
             // Trace back, commit shapes so later sinks see this net's metal.
             let mut path = Vec::new();
@@ -3048,7 +3125,26 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 .saturating_mul(2)
                 .saturating_add(rips.get(&net).copied().unwrap_or(0).min(16));
             r.mark_region(g, Some(wide));
-            match r.route_net(net, &groups[&net], &plans, true, tight, &rips, round)? {
+            let mut outcome = r.route_net(net, &groups[&net], &plans, true, tight, &rips, round)?;
+            if matches!(outcome, Outcome::Limited(_))
+                && alternate_repair_root(
+                    groups.get_mut(&net).unwrap(),
+                    |t| r.graph.point(plans[&t.pin].top).1,
+                    &mut r.spatial.work,
+                    limits.max_comparisons,
+                )?
+            {
+                if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                    eprintln!("[troute] bounded alternate-root retry net {net}");
+                }
+                outcome = r.route_net(net, &groups[&net], &plans, true, tight, &rips, round)?;
+            }
+            match outcome {
+                Outcome::Limited(pin) => {
+                    return Err(budget(&format!(
+                        "per-search detailed limit after bounded root retries, pin {pin} net {net}"
+                    )));
+                }
                 Outcome::Failed(pin) => {
                     return Err(no_route(&format!(
                         "pin {pin} net {net}: no path even with rip-up (fixed geometry blocks)"
@@ -3487,6 +3583,34 @@ mod tests {
     }
 
     #[test]
+    fn target_projection_crosses_large_open_tracks_with_bounded_expansions() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(10, 10, 30, 30)),
+                terminal(1, 0, false, rect(999970, 999970, 999990, 999990)),
+            ],
+            Vec::new(),
+        );
+        design.die = rect(0, 0, 1_000_000, 1_000_000);
+        let plan = design.tracks.as_mut().unwrap();
+        plan.gcell = 50_000;
+        plan.memory_mib = 256;
+        let capped = RouteLimits {
+            max_axis: 30_000,
+            max_grid_nodes: 2_000_000_000,
+            max_search_expansions: 100_000,
+            max_heap: 20_000,
+            max_active_nodes: 100_000,
+            max_expansions: 80,
+            ..limits()
+        };
+        let out = route_cpu_ref(&design, &capped).unwrap();
+        validate(&design, &out, &capped).unwrap();
+        assert!(out.stats.expansions <= 80);
+        assert!(out.stats.grid_nodes > 1_000_000_000);
+    }
+
+    #[test]
     fn weighted_search_is_deterministic_checked_and_still_budgeted() {
         let mut obstacles = Vec::new();
         for layer in [0, 1, 2] {
@@ -3578,6 +3702,45 @@ mod tests {
         assert!(
             ordered[1].driver,
             "the physical root does not change the logical driver"
+        );
+    }
+
+    #[test]
+    fn alternate_root_prefers_an_internal_driver_and_honors_work_caps() {
+        let mut sink = terminal(0, 0, false, rect(90, 90, 110, 110));
+        sink.class = Some((0, [0, 0]));
+        let mut driver = terminal(1, 0, true, rect(190, 190, 210, 210));
+        driver.class = Some((0, [0, 0]));
+        let port = terminal(2, 0, false, rect(8990, 8990, 9010, 9010));
+        let mut ordered = [&sink, &driver, &port];
+        let point = |t: &Terminal| [t.shapes[0].rect.lx, t.shapes[0].rect.ly];
+        assert!(alternate_repair_root(&mut ordered, point, &mut 0, 1).is_err());
+        assert_eq!(ordered[0].pin, 0);
+        assert!(alternate_repair_root(&mut ordered, point, &mut 0, 10).unwrap());
+        assert_eq!(ordered[0].pin, 1);
+    }
+
+    #[test]
+    fn soft_search_exhaustion_still_fails_after_bounded_root_retries() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(10, 10, 30, 30)),
+                terminal(1, 0, false, rect(9970, 9970, 9990, 9990)),
+            ],
+            Vec::new(),
+        );
+        design.die = rect(0, 0, 10000, 10000);
+        design.access_layer = 0;
+        design.tracks.as_mut().unwrap().gcell = 1000;
+        design.tracks.as_mut().unwrap().memory_mib = 256;
+        let capped = RouteLimits {
+            max_search_expansions: 1,
+            ..limits()
+        };
+        let error = route_cpu_ref(&design, &capped).unwrap_err();
+        assert!(
+            error.to_string().contains("bounded root retries"),
+            "{error}"
         );
     }
 
