@@ -60,3 +60,10 @@ External tools run one at a time inside the pinned iic-osic-tools image with
 Netgen (257-475 MB). Native exports run on the host under the cgroup cap above.
 Workspaces are copies under `.work/` (never RAM-backed `/tmp`); the read-only
 `.work/rc-timing/ready` run is never mutated.
+
+The independent KLayout streamout counts hierarchy contents with a bounded
+DAG reduction. Each unique cell is visited once; SREF and AREF multiplicities
+are propagated without walking every instantiated leaf shape. It rejects
+cycles, overflowing counts and configured cell, reference, edge, layer, work
+and count-entry limits. A real nested-array fixture matches KLayout's flattened
+shape iterator exactly. This reporting change does not alter written geometry.
