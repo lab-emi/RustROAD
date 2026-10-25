@@ -386,7 +386,10 @@ class PdkGate:
                                                   unrepaired=ar.get("unrepaired")) if ar else None,
                              size_eco={k: se.get(k) for k in ("resized", "candidates", "by_reason", "failing_setup_endpoints",
                                                               "drv_violations", "utilization_after", "buffers",
-                                                              "buffer_nets", "driver_resizes", "library_limited")} if se else None,
+                                                              "buffer_nets", "driver_resizes", "library_limited",
+                                                              "co_sizing")} if se else None,
+                             hold_isolation={k: (rec.get("hold_isolation") or {}).get(k) for k in ("status", "buffers")}
+                             if rec.get("hold_isolation") else None,
                              hold_points=len(he.get("points") or []) or None,
                              hold_infeasible=(he.get("infeasible") or [])[:8] or None,
                              net_weights=bool(rec.get("net_weights")), setup_stagnant=rec.get("setup_stagnant"),

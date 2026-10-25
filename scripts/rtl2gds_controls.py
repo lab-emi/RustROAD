@@ -55,6 +55,8 @@ bound artifact) and runs the oracle that must catch it; the control is
 """
 from __future__ import annotations
 
+from verify_logic import gnu_time_program
+
 import json
 from pathlib import Path
 import re
@@ -498,7 +500,7 @@ def sub_gate(ctx, gate, work: Path, design: Path, *extra: str) -> tuple[int, dic
            "--no-controls", "--no-determinism", *extra]
     work.mkdir(parents=True, exist_ok=True)
     timing = work / "time.txt"
-    p = subprocess.run(["/usr/bin/time", "-v", "-o", str(timing), *cmd], capture_output=True, text=True,
+    p = subprocess.run([gnu_time_program(), "-v", "-o", str(timing), *cmd], capture_output=True, text=True,
                        timeout=600, cwd=work)
     (work / "stdout.txt").write_text(p.stdout)
     (work / "stderr.txt").write_text(p.stderr)

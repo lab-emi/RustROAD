@@ -108,7 +108,7 @@ def worst(statuses) -> str:
 
 
 PRLIMIT = shutil.which("prlimit")
-GNU_TIME = "/usr/bin/time" if Path("/usr/bin/time").is_file() else None
+GNU_TIME = os.environ.get("RUSTEDA_GNU_TIME") or shutil.which("time")
 
 
 class Runner:

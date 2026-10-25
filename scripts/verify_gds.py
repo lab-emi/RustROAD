@@ -29,6 +29,8 @@ Exit codes are never trusted alone: reports are parsed and positive controls
 makes the status `unverified`, never `passed`. Resource contract:
 docs/gds-budget.md. Scope: block level; no pad ring or seal ring.
 """
+from verify_logic import gnu_time_program
+
 import argparse
 import collections
 import hashlib
@@ -151,7 +153,7 @@ class Harness:
         directory.mkdir(parents=True, exist_ok=False)
         time_file = directory / 'time.txt'
         full = ['systemd-run', '--user', '--scope', '-q', '-p', 'MemoryMax=8G', '-p', 'MemorySwapMax=2G',
-                'timeout', f'{timeout}s', '/usr/bin/time', '-v', '-o', str(time_file), *map(str, argv)]
+                'timeout', f'{timeout}s', gnu_time_program(), '-v', '-o', str(time_file), *map(str, argv)]
         started = time.monotonic()
         proc = subprocess.run(full, capture_output=True, timeout=timeout + 60)
         return self._record(name, argv, proc, started, time_file)

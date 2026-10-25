@@ -52,7 +52,7 @@
   },
   "tools": {
     "path": "fixtures/flow/rtl2gds-tools.json",
-    "sha256": "66e7f6915a7b89ad601d63ca63cec08a23e2450d4c60bc1f57b8c20f3f7409e3"
+    "sha256": "5d215475cf074853e934effe6604d028e1d5fc7953e621c8444c031e706a545e"
   },
   "pdks": {
     "sky130": {
@@ -249,7 +249,7 @@
     "setup_margin_ns": 0.0,
     "hold_eco_setup_margin_ns": 0.05,
     "parity_ns": 0.001,
-    "max_hold_iterations": 8,
+    "max_hold_iterations": 10,
     "process_timeout_s": 600,
     "process_memory_mib": 2048,
     "max_wall_s": 3600,

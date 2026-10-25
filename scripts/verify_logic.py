@@ -64,6 +64,14 @@ def executable(value: str | None) -> Path | None:
     return Path(found).resolve() if found else None
 
 
+def gnu_time_program() -> str:
+    """Resolve the measured-run tool explicitly; missing timing is never a zero RSS."""
+    value = os.environ.get("RUSTEDA_GNU_TIME") or shutil.which("time")
+    if not value or not Path(value).is_file() or not os.access(value, os.X_OK):
+        raise RuntimeError("GNU time unavailable; set RUSTEDA_GNU_TIME to a verified executable")
+    return str(Path(value).resolve())
+
+
 def tcl_path(path: Path) -> str:
     # Tcl braced words preserve spaces and do not evaluate substitutions.
     if any(char in str(path) for char in "{}\n\r"):
@@ -95,7 +103,7 @@ class Harness:
             seconds = self.args.timeout_seconds + 2
             resource.setrlimit(resource.RLIMIT_CPU, (seconds, seconds))
 
-        guarded = ["/usr/bin/time", "-v", "-o", str(out / "time.txt"),
+        guarded = [gnu_time_program(), "-v", "-o", str(out / "time.txt"),
                    "timeout", "--signal=TERM", "--kill-after=2s",
                    f"{self.args.timeout_seconds}s", *command]
         started = time.monotonic()
@@ -106,6 +114,7 @@ class Harness:
         match = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", timing)
         receipt = dict(label=label, command=command, guarded_command=guarded,
                        cwd=str(self.root), exit_code=result.returncode,
+                       measurement_tool=dict(path=guarded[0], sha256=sha256(Path(guarded[0]))),
                        elapsed_seconds=time.monotonic() - started,
                        peak_rss_kib=int(match[1]) if match else None,
                        limits=dict(address_space_mib=self.args.memory_mib,
