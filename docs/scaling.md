@@ -713,7 +713,10 @@ and is charged to the comparison budget before sorting.
 
 Via junctions use the area of the actual via pads. A smaller unused variant
 does not force a wire run when an incident pad already meets the layer's
-minimum area. Otherwise the minimum-run requirement remains. The pad table
+minimum area. The conservative minimum-run restriction is used on strict
+reroutes. Initial routes defer this path-dependent restriction to bounded
+geometric repair, which adds area stubs before final validation; unresolved
+violations trigger strict rerouting or an explicit failure. The pad table
 has a one-million-entry cap, is included in memory admission, and is checked
 before search; final geometry validation still checks the complete union.
 

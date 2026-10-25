@@ -2283,10 +2283,11 @@ impl<'a> Router<'a> {
                 let p = self.graph.xy(l, t_, s_);
                 let target_distance = target.bounds_distance(p);
                 self.graph.neighbors(id, &mut nbuf);
-                // A sufficient actual pad certifies AREA even if some other
-                // via variant on this layer is smaller. Otherwise retain the
-                // conservative minimum-wire-run requirement.
-                let no_stack = !self.stack_ok[layer as usize] && {
+                // Minimum area depends on the incoming path, so it cannot be
+                // a general edge restriction in a one-cost-per-node search.
+                // Initial routes use bounded geometric cleanup; a net whose
+                // cleanup fails is retried with conservative strict rules.
+                let no_stack = strict && !self.stack_ok[layer as usize] && {
                     let need = self.min_run[layer as usize];
                     let mut run = 0u64;
                     let mut cur = id;
@@ -2412,7 +2413,8 @@ impl<'a> Router<'a> {
                                 if no_stack && !self.via_pad_ok[layer as usize][kind] {
                                     continue;
                                 }
-                                if joins
+                                if strict
+                                    && joins
                                     && via_nodes.get(&next) == Some(&false)
                                     && !self.via_pad_ok[nl as usize][kind]
                                 {
@@ -3594,9 +3596,10 @@ mod tests {
                 }
             }
         }
+        design.layers[1].min_area = Some(10_000);
         assert!(
             route_cpu_ref(&design, &limits()).is_err(),
-            "undersized isolated pads cannot stack"
+            "an isolated island with no room for its required area must fail"
         );
     }
 
@@ -3642,6 +3645,34 @@ mod tests {
         let again = route_cpu_ref(&design, &limits()).unwrap();
         assert_eq!(out.wires, again.wires);
         assert_eq!(out.vias, again.vias);
+    }
+
+    #[test]
+    fn minimum_area_via_islands_are_repaired_before_returning_a_route() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                Terminal {
+                    pin: 1,
+                    net: 0,
+                    driver: false,
+                    shapes: vec![LayerRect {
+                        layer: 2,
+                        rect: rect(90, 90, 110, 110),
+                    }],
+                    class: None,
+                },
+            ],
+            Vec::new(),
+        );
+        design.access_layer = 0;
+        design.layers[1].min_area = Some(1000);
+        let out = route_cpu_ref(&design, &limits()).unwrap();
+        assert!(out.wires.iter().any(|w| w.layer == 1));
+        validate(&design, &out, &limits()).unwrap();
+        let mut unpatched = out;
+        unpatched.wires.retain(|w| w.layer != 1);
+        assert!(validate(&design, &unpatched, &limits()).is_err());
     }
 
     #[test]
