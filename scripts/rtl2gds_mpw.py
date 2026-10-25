@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from pathlib import Path
 
 import mpw_probe
@@ -60,8 +61,14 @@ def prove_deviations(h, label, tools, pdk, tag, source, corners, top, netlist, l
                 # Revalidate against the GATE'S measurements, not the probe's fresh run.
                 checked = D.validate(proof, binding, originals[(corner, key)], h.root)
                 accepted[key] = dict(checked, proof=proof)
+            record = h.root / f"{label}_mpw{index}_proofs.json"
+            record.write_text(json.dumps({key:accepted[key] for key in candidates}, indent=2,
+                                         allow_nan=False)+"\n")
             note.update(status="evidence_generated", valid=sum(
-                bool(accepted[key]["valid"]) for key in candidates))
+                bool(accepted[key]["valid"]) for key in candidates),
+                proof_record=dict(path=str(record), sha256=sha256_file(record)),
+                rejected_rows=[dict(check=key, reasons=accepted[key]["reasons"])
+                               for key in candidates if not accepted[key]["valid"]])
         except (GateError, KeyError, OSError, ValueError) as error:
             note.update(status="unproven", reason=str(error))
         attempts.append(note)

@@ -51,7 +51,9 @@ DESIGNS = {
     "regfile": dict(top="regfile", rtl=["regfile/regfile.sv"], clock="clk",
                     description="8x8 register file, two read ports, async reset (RustSys fixture)."),
     "mult": dict(top="mult", rtl=["mult/mult.sv"], clock="clk",
-                 description="6x6 signed registered and unsigned combinational multipliers (RustSys fixture)."),
+                 physical_profile={"sky130": "fixtures/designs/mult/sky130-profile.json"},
+                 description="6x6 signed registered and unsigned combinational multipliers (RustSys fixture); "
+                             "SKY130 clock leaves drive at most four sinks to reduce clock loading."),
     "dense": dict(top="lane_smoke", rtl=["dense/dense.sv"], clock="clk", literal=True,
                   description="Dense six-register fixture: literal mapped netlists per PDK (tap-release fixture)."),
     "pipeline_track": dict(top="lane_smoke", rtl_paths=["fixtures/flow/pipeline.v"], clock="clk",
@@ -247,7 +249,7 @@ def rendered_sdc(m: dict, tag: str) -> str:
     tools = json.loads((ROOT / TOOLS).read_text())["tools"]
     paths = {}
     for name in ("yosys", "verilator"):
-        paths[name] = Path(tools[name]["path"])
+        paths[name] = D.resolve(tools[name]["path"])
         if sha256(paths[name]) != tools[name]["sha256"]:
             raise RuntimeError(f"pinned {name} differs from its sha256")
     with tempfile.TemporaryDirectory(dir=ROOT / ".work") as tmp:

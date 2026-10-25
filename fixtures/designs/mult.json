@@ -1,7 +1,7 @@
 {
   "schema": "rustroad.design.v3",
   "name": "mult",
-  "description": "6x6 signed registered and unsigned combinational multipliers (RustSys fixture).",
+  "description": "6x6 signed registered and unsigned combinational multipliers (RustSys fixture); SKY130 clock leaves drive at most four sinks to reduce clock loading.",
   "top": "mult",
   "rtl": [
     {
@@ -62,11 +62,11 @@
       },
       "physical_config": {
         "path": "fixtures/designs/mult/sky130-physical.json",
-        "sha256": "49b55f8dbe0d94d5db059c7e9f836b364fb2e1a4398ccf07b2a4c2c3ddcde7a2"
+        "sha256": "aadb222cb7d72ace57117db72ef29c708b379fa710b5899a4f8b929a12852ad9"
       },
       "physical_profile": {
-        "path": "fixtures/pdk/sky130-scale-physical.json",
-        "sha256": "2ed1ee30217e7e95f09e3181b560a4f488b4744f758595025a4acf35a44d3441"
+        "path": "fixtures/designs/mult/sky130-profile.json",
+        "sha256": "39b7455b866e8b7f5922a1826a8000a70095f3e2b51a065da0ecbe4e8f529ba9"
       },
       "routing_config": {
         "path": "fixtures/pdk/sky130-scale-routing.json",
@@ -123,7 +123,7 @@
         "openrcx_rules_ff": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
         "openrcx_rules_ss": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
         "openrcx_rules_tt": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
-        "physical_config": "49b55f8dbe0d94d5db059c7e9f836b364fb2e1a4398ccf07b2a4c2c3ddcde7a2",
+        "physical_config": "aadb222cb7d72ace57117db72ef29c708b379fa710b5899a4f8b929a12852ad9",
         "rc_profile_ff": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
         "rc_profile_ss": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
         "rc_profile_tt": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
