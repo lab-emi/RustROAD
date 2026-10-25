@@ -609,13 +609,41 @@ struct Router<'a> {
     /// Per input layer: wire run (DBU) between an entering and a leaving via
     /// on a layer that is not `stack_ok` (AREA / width, rounded up).
     min_run: Vec<u64>,
+    access_entries: usize,
 }
 
 /// One routed net: graph edges (a, b, kind) and its spatial shape ids.
 #[derive(Default, Clone)]
 struct NetRoute {
-    edges: BTreeMap<(u32, u32), u32>,
+    edges: Vec<((u32, u32), u32)>,
     shapes: Vec<usize>,
+}
+
+fn retain_route(
+    routes: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    net: u32,
+    route: NetRoute,
+    limit: usize,
+) -> Result<()> {
+    let count = retained_edges.saturating_sub(routes.get(&net).map_or(0, |r| r.edges.len()));
+    let count = count
+        .checked_add(route.edges.len())
+        .filter(|&n| n <= limit)
+        .ok_or_else(|| budget("retained routing-edge limit"))?;
+    routes.insert(net, route);
+    *retained_edges = count;
+    Ok(())
+}
+
+fn remove_route(
+    routes: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    net: u32,
+) -> Option<NetRoute> {
+    let route = routes.remove(&net)?;
+    *retained_edges -= route.edges.len();
+    Some(route)
 }
 
 enum Outcome {
@@ -770,6 +798,11 @@ impl<'a> Router<'a> {
                     &mut work,
                     self.limits,
                 )?;
+                self.access_entries = self
+                    .access_entries
+                    .checked_add(table.len())
+                    .filter(|&n| n <= self.limits.max_segments)
+                    .ok_or_else(|| budget("pin access cache-entry limit"))?;
                 self.spatial.work = self
                     .spatial
                     .work
@@ -1172,6 +1205,7 @@ impl<'a> Router<'a> {
             .collect::<Result<_>>()?;
         let mut queue: VecDeque<usize> = order.into_iter().map(|o| o.2).collect();
         let mut plans: HashMap<u32, Plan> = HashMap::new();
+        let mut plan_records = 0usize;
         let mut owner: BTreeMap<u32, usize> = BTreeMap::new();
         let mut attempts = vec![0usize; terminals.len()];
         let mut rounds = 0usize;
@@ -1182,6 +1216,11 @@ impl<'a> Router<'a> {
             }
             let t = terminals[i];
             if let Some(plan) = self.escape(t, &mut tables)? {
+                plan_records = plan_records
+                    .checked_add(plan.wires.len())
+                    .and_then(|n| n.checked_add(plan.vias.len()))
+                    .filter(|&n| n <= self.limits.max_segments)
+                    .ok_or_else(|| budget("pin access retained-record limit"))?;
                 plans.insert(t.pin, plan);
                 owner.insert(t.pin, i);
                 continue;
@@ -1212,6 +1251,7 @@ impl<'a> Router<'a> {
             let mut back = Vec::new();
             for p in victims {
                 let plan = plans.remove(&p).unwrap();
+                plan_records -= plan.wires.len() + plan.vias.len();
                 for id in plan.shapes {
                     self.spatial.remove(id);
                 }
@@ -1292,8 +1332,9 @@ impl<'a> Router<'a> {
         let mut parent = vec![NONE; n];
         let mut tag = vec![0u32; n];
         let mut epoch = 0u32;
-        let mut routes: BTreeMap<u32, BTreeSet<usize>> = BTreeMap::new();
-        let mut cellsets: BTreeMap<u32, BTreeSet<u32>> = BTreeMap::new();
+        let mut routes: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+        let mut cellsets: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+        let mut retained_edges = 0usize;
         let mut buf = Vec::with_capacity(4);
         let unit = 1000u64;
         let mut order: Vec<(u64, u32)> = nets
@@ -1332,6 +1373,7 @@ impl<'a> Router<'a> {
             let factor = 1 + iteration as u64;
             for net in reroute {
                 if let Some(old) = routes.remove(&net) {
+                    retained_edges -= old.len();
                     for e in old {
                         usage[e] -= 1;
                     }
@@ -1415,6 +1457,11 @@ impl<'a> Router<'a> {
                         let p = parent[cur as usize];
                         edges.insert(self.cells.edge(cur, p));
                         tree.insert(cur);
+                        if edges.len() > self.limits.max_segments
+                            || tree.len() > self.limits.max_segments
+                        {
+                            return Err(budget("global routing net size"));
+                        }
                         cur = p;
                     }
                     tree.insert(cur);
@@ -1422,20 +1469,31 @@ impl<'a> Router<'a> {
                 for &e in &edges {
                     usage[e] += 1;
                 }
-                routes.insert(net, edges);
-                cellsets.insert(net, tree);
+                retained_edges = retained_edges
+                    .checked_add(edges.len())
+                    .filter(|&n| n <= self.limits.max_segments)
+                    .ok_or_else(|| budget("retained global-edge limit"))?;
+                routes.insert(net, edges.into_iter().collect());
+                cellsets.insert(net, tree.into_iter().collect());
             }
         }
         self.expansions = self.expansions.saturating_add(work);
         // Guides: dilated GCell sets.
         let m = self.plan.guide_margin as i64;
         let mut guides = BTreeMap::new();
+        let mut guide_cells = 0usize;
         for (net, set) in cellsets {
             let mut g = BTreeSet::new();
             for c in set {
                 let (x, y) = self.cells.xy(c);
                 for dy in -m..=m {
                     for dx in -m..=m {
+                        self.spatial.work = self
+                            .spatial
+                            .work
+                            .checked_add(1)
+                            .filter(|&n| n <= self.limits.max_comparisons)
+                            .ok_or_else(|| budget("global guide work limit"))?;
                         let (xx, yy) = (x as i64 + dx, y as i64 + dy);
                         if xx >= 0
                             && yy >= 0
@@ -1443,10 +1501,17 @@ impl<'a> Router<'a> {
                             && (yy as usize) < self.cells.ny
                         {
                             g.insert((yy as usize * self.cells.nx + xx as usize) as u32);
+                            if g.len() > self.limits.max_segments {
+                                return Err(budget("global guide size"));
+                            }
                         }
                     }
                 }
             }
+            guide_cells = guide_cells
+                .checked_add(g.len())
+                .filter(|&n| n <= self.limits.max_segments)
+                .ok_or_else(|| budget("retained global-guide limit"))?;
             guides.insert(net, g.into_iter().collect());
         }
         Ok(guides)
@@ -1509,7 +1574,7 @@ impl<'a> Router<'a> {
             type Ends = HashMap<(u32, [i64; 2]), Vec<(bool, i8)>>;
             let mut ends: Ends = HashMap::new();
             let mut vias = Vec::new();
-            for (&(a, b), &kind) in &route.edges {
+            for &((a, b), kind) in &route.edges {
                 let (la, pa) = self.graph.point(a);
                 let (lb, pb) = self.graph.point(b);
                 if la == lb {
@@ -1564,7 +1629,11 @@ impl<'a> Router<'a> {
                                 net: Some(net),
                             })?);
                         }
-                        route.edges.insert(key, k as u32);
+                        let index = route
+                            .edges
+                            .binary_search_by_key(&key, |(edge, _)| *edge)
+                            .map_err(|_| invalid("routed via edge missing"))?;
+                        route.edges[index].1 = k as u32;
                         changed += 1;
                         break;
                     }
@@ -1612,6 +1681,7 @@ impl<'a> Router<'a> {
         round: usize,
     ) -> Result<Outcome> {
         let mut out = NetRoute::default();
+        let mut edges = BTreeMap::new();
         let root = plans[&terminals[0].pin].top;
         let mut tree: HashSet<u32> = HashSet::from([root]);
         // Tree nodes with an incident via: a path may not join them with
@@ -1910,10 +1980,13 @@ impl<'a> Router<'a> {
                 let (la, pa) = self.graph.point(a);
                 let (lb, pb) = self.graph.point(b);
                 let key = (a.min(b), a.max(b));
-                if out.edges.contains_key(&key) {
+                if edges.contains_key(&key) {
                     continue;
                 }
-                out.edges.insert(key, kind);
+                if edges.len() >= self.limits.max_segments {
+                    return Err(budget("detailed routing net size"));
+                }
+                edges.insert(key, kind);
                 tree.insert(a);
                 tree.insert(b);
                 if la == lb {
@@ -1985,6 +2058,7 @@ impl<'a> Router<'a> {
             }
         }
         victims_all.remove(&net);
+        out.edges = edges.into_iter().collect();
         Ok(Outcome::Routed(out, victims_all.into_iter().collect()))
     }
 }
@@ -2083,6 +2157,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         gepoch: 0,
         stack_ok: vec![true; input.layers.len()],
         min_run: vec![0; input.layers.len()],
+        access_entries: 0,
     };
     for (i, l) in input.layers.iter().enumerate() {
         let Some(min) = l.min_area else {
@@ -2144,6 +2219,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
     let mut order: Vec<(usize, u32)> = guides.iter().map(|(n, g)| (g.len(), *n)).collect();
     order.sort_unstable();
     let mut routed: BTreeMap<u32, NetRoute> = BTreeMap::new();
+    let mut retained_edges = 0usize;
     let mut queue: VecDeque<u32> = VecDeque::new();
     let none = BTreeMap::new();
     for &(_, net) in &order {
@@ -2154,7 +2230,13 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
             if let Outcome::Routed(route, _) =
                 r.route_net(net, &groups[&net], &plans, false, false, &none, 0)?
             {
-                routed.insert(net, route);
+                retain_route(
+                    &mut routed,
+                    &mut retained_edges,
+                    net,
+                    route,
+                    limits.max_segments,
+                )?;
                 done = true;
                 break;
             }
@@ -2193,7 +2275,13 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
             if let Outcome::Routed(route, _) =
                 r.route_net(net, &groups[&net], &plans, false, tight, &rips, round)?
             {
-                routed.insert(net, route);
+                retain_route(
+                    &mut routed,
+                    &mut retained_edges,
+                    net,
+                    route,
+                    limits.max_segments,
+                )?;
                 continue;
             }
             let wide = r
@@ -2215,7 +2303,13 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                             victims, r.spatial.work, r.expansions
                         );
                     }
-                    routed.insert(net, route);
+                    retain_route(
+                        &mut routed,
+                        &mut retained_edges,
+                        net,
+                        route,
+                        limits.max_segments,
+                    )?;
                     for v in victims {
                         let c = rips.entry(v).or_insert(0);
                         *c += 1;
@@ -2225,7 +2319,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                                 r.plan.max_ripups_per_net
                             )));
                         }
-                        if let Some(old) = routed.remove(&v) {
+                        if let Some(old) = remove_route(&mut routed, &mut retained_edges, v) {
                             for id in old.shapes {
                                 r.spatial.remove(id);
                             }
@@ -2311,7 +2405,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         // Re-route the offending nets in strict mode (no near misses).
         let bad: BTreeSet<u32> = remaining.iter().map(|v| v.net()).collect();
         for net in bad {
-            if let Some(old) = routed.remove(&net) {
+            if let Some(old) = remove_route(&mut routed, &mut retained_edges, net) {
                 for id in old.shapes {
                     r.spatial.remove(id);
                 }
@@ -2364,6 +2458,18 @@ fn assemble(
     limits: &RouteLimits,
     via_layers: &[(u32, u32)],
 ) -> Result<Routes> {
+    let records = plans.values().try_fold(0usize, |n, p| {
+        n.checked_add(p.wires.len())
+            .and_then(|n| n.checked_add(p.vias.len()))
+            .ok_or_else(|| budget("routing record count overflow"))
+    })?;
+    let records = routed.values().try_fold(records, |n, r| {
+        n.checked_add(r.edges.len())
+            .ok_or_else(|| budget("routing record count overflow"))
+    })?;
+    if records > limits.max_segments {
+        return Err(budget("routing intermediate record limit"));
+    }
     let mut wires: Vec<Wire> = Vec::new();
     let mut vias: Vec<Via> = Vec::new();
     let mut access: Vec<Access> = Vec::new();
@@ -2379,7 +2485,7 @@ fn assemble(
         let route = routed
             .get(&net)
             .ok_or_else(|| no_route(&format!("net {net} left unrouted")))?;
-        for (&(a, b), &kind) in &route.edges {
+        for &((a, b), kind) in &route.edges {
             let (la, pa) = r.graph.point(a);
             let (lb, pb) = r.graph.point(b);
             if la == lb {
@@ -2428,6 +2534,24 @@ fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_edge_limit_is_transactional_and_released_on_ripup() {
+        let mut routes = BTreeMap::new();
+        let mut edges = 0;
+        let one = || NetRoute {
+            edges: vec![((1, 2), WIRE)],
+            shapes: Vec::new(),
+        };
+        retain_route(&mut routes, &mut edges, 1, one(), 1).unwrap();
+        assert!(retain_route(&mut routes, &mut edges, 2, one(), 1).is_err());
+        assert_eq!(edges, 1);
+        assert_eq!(routes.len(), 1);
+        remove_route(&mut routes, &mut edges, 1).unwrap();
+        assert_eq!(edges, 0);
+        retain_route(&mut routes, &mut edges, 2, one(), 1).unwrap();
+        assert_eq!(routes[&2].edges, vec![((1, 2), WIRE)]);
+    }
 
     #[test]
     fn covered_handles_unions_of_pin_rectangles() {
