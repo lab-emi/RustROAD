@@ -18,10 +18,12 @@ bound artifact) and runs the oracle that must catch it; the control is
                     extraction -> RustSTA AND OpenSTA hold below the margin;
                     when the closure loop's DRV buffers still keep hold met
                     without it, every hold cell and ECO buffer is removed
-                    (recorded as `escalated`)
+                    (recorded as `escalated`). If both engines still prove hold
+                    met after removal, this is a non-faulty mutation; retain its
+                    measured result and require planted_hold_uncertainty instead.
   planted_hold_uncertainty
-                    only when no hold cell was inserted (removed_hold_cell is
-                    then not applicable): a copy of the rendered SDC with
+                    when no hold cell was inserted, or removal is proved to
+                    remain hold-clean in both engines: a copy of the SDC with
                     ``set_clock_uncertainty -hold 2.0`` re-times the bound final
                     layout (native SPEF) -> RustSTA AND OpenSTA hold gate fail
   tampered_sdc      the rendered SDC edited -> frozen-input hash check fails
@@ -314,9 +316,14 @@ def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
         sta = flow.sta(0, phys)
         rust = {c: v["worst_hold_ns"] for c, v in sta["corners"].items()}
         corner = min(rust, key=rust.get)
-        ref = T.opensta(hc, f"{gate.tag}_ctl_hold_opensta_{corner}", ctx.tool_paths["opensta"], flow.libs[corner],
-                        Path(phys["paths"]["netlist"]), ctx.top, flow.sdc, Path(phys["spef"][corner]["path"]))
-        return dict(rust=rust, corner=corner, ref_worst=min(ref["hold"].values()), processes=len(hc.receipts),
+        refs = {c:T.opensta(hc, f"{gate.tag}_ctl_hold_opensta_{c}", ctx.tool_paths["opensta"], flow.libs[c],
+                           Path(phys["paths"]["netlist"]), ctx.top, flow.sdc, Path(phys["spef"][c]["path"]))
+                for c in gate.corners}
+        if any(v["unannotated"] or v["partially_unannotated"] for v in refs.values()):
+            raise GateError("hold-removal control has incomplete parasitic annotation")
+        ref_hold = {c:min(v["hold"].values()) for c,v in refs.items()}
+        return dict(rust=rust, corner=corner, ref_worst=min(ref_hold.values()), ref_hold=ref_hold,
+                    processes=len(hc.receipts),
                     peak=max((r["peak_rss_kib"] for r in hc.receipts if r.get("peak_rss_kib")), default=None))
     first = plant("chain", text)
     escalated = None
@@ -335,6 +342,9 @@ def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
     return control("RustSTA and OpenSTA hold gate on a fresh layout", rust[corner] < margin and ref_worst < margin,
                    removed=removed, sink=worst[2], iteration0_hold_ns=worst[0], worst_corner=corner,
                    ruststa_worst_hold_ns=rust, opensta_worst_hold_ns=ref_worst, margin_ns=margin,
+                   opensta_worst_hold_by_corner_ns=first["ref_hold"],
+                   mutation_is_fault=not (all(v >= margin for v in rust.values())
+                                          and all(v >= margin for v in first["ref_hold"].values())),
                    escalated=escalated, processes=first["processes"], peak_rss_kib=first["peak"])
 
 
@@ -663,6 +673,20 @@ def run_all(ctx, gate, b, record) -> dict:
             results[name] = fn(ctx, gate, b, root / name)
         except Exception as error:  # noqa: BLE001 - a control that could not run proves nothing
             results[name] = dict(detected=None, error=repr(error)[:600])
+    removal = results.get("removed_hold_cell", {})
+    if removal.get("detected") is False and removal.get("mutation_is_fault") is False:
+        # A timing oracle must not reject a layout both engines prove meets hold.
+        # Keep the non-fault experiment visible, and require a genuine planted
+        # violation. A failed or incomplete removal experiment never gets this path.
+        results["removed_hold_cell"] = dict(
+            detected="not_applicable", experiment=removal,
+            reason="removal still meets hold in both engines at every corner; "
+                   "a separate planted_hold_uncertainty must be detected")
+        try:
+            results["planted_hold_uncertainty"] = planted_hold_uncertainty(
+                ctx, gate, b, root/"planted_hold_uncertainty")
+        except Exception as error:  # noqa: BLE001
+            results["planted_hold_uncertainty"] = dict(detected=None, error=repr(error)[:600])
     try:
         results["tampered_artifact"] = tampered_artifact(ctx, gate, b, record, root / "tampered_artifact")
     except Exception as error:  # noqa: BLE001

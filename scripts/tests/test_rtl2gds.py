@@ -615,3 +615,35 @@ class CompareRuns(unittest.TestCase):
             self.assertEqual(compare_runs.normalized(j, "routes", "/p/"), compare_runs.normalized(k, "routes", "/q/"))
             k.write_text('{"path": "/q/fixtures/x.json", "n": 2}')
             self.assertNotEqual(compare_runs.normalized(j, "routes", "/p/"), compare_runs.normalized(k, "routes", "/q/"))
+
+
+class HoldMutationControls(unittest.TestCase):
+    def evaluate(self, removal, replacement=True):
+        from types import SimpleNamespace
+        from unittest import mock
+        names = ("drc_spacing", "label_swap", "removed_via", "tampered_sdc", "tampered_spef",
+                 "inverted_output", "missing_tool", "relaxed_manifest", "antenna_planted", "tampered_artifact")
+        patches = {n:mock.Mock(return_value=dict(detected=True)) for n in names}
+        patches.update(hold_cells_inserted=mock.Mock(return_value=True),
+                       removed_hold_cell=mock.Mock(return_value=removal),
+                       planted_hold_uncertainty=mock.Mock(return_value=dict(detected=replacement)))
+        with work_tmp() as tmp, mock.patch.multiple(C, **patches):
+            ctx = SimpleNamespace(h=SimpleNamespace(root=Path(tmp)))
+            return C.run_all(ctx, SimpleNamespace(tag="gf180"), {"final_iteration":1}, {})
+
+    def test_non_faulty_removal_needs_a_detected_replacement(self):
+        old = dict(detected=False, mutation_is_fault=False)
+        good = self.evaluate(old)
+        self.assertEqual(good["status"], "passed")
+        self.assertEqual(good["controls"]["removed_hold_cell"]["detected"], "not_applicable")
+        self.assertIs(good["controls"]["removed_hold_cell"]["experiment"]["detected"], False)
+        self.assertEqual(self.evaluate(old, False)["status"], "failed")
+        self.assertEqual(self.evaluate(old, None)["status"], "unverified")
+
+    def test_real_misses_and_incomplete_removals_cannot_be_excused(self):
+        miss = self.evaluate(dict(detected=False, mutation_is_fault=True))
+        self.assertEqual(miss["status"], "failed")
+        self.assertNotIn("planted_hold_uncertainty", miss["controls"])
+        missing = self.evaluate(dict(detected=None, mutation_is_fault=False))
+        self.assertEqual(missing["status"], "unverified")
+        self.assertNotIn("planted_hold_uncertainty", missing["controls"])

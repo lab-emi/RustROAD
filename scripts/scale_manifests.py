@@ -49,7 +49,9 @@ DESIGNS = {
     "alu": dict(top="alu", rtl=["alu/wt_pkg.sv", "alu/alu.sv"], clock=None,
                 description="8-bit combinational ALU, 8 operations (RustSys fixture); no clock."),
     "regfile": dict(top="regfile", rtl=["regfile/regfile.sv"], clock="clk",
-                    description="8x8 register file, two read ports, async reset (RustSys fixture)."),
+                    physical_profile={"sky130": "fixtures/designs/regfile/sky130-profile.json"},
+                    description="8x8 register file, two read ports, async reset (RustSys fixture); "
+                                "SKY130 clock leaves drive at most four sinks."),
     "mult": dict(top="mult", rtl=["mult/mult.sv"], clock="clk",
                  physical_profile={"sky130": "fixtures/designs/mult/sky130-profile.json"},
                  description="6x6 signed registered and unsigned combinational multipliers (RustSys fixture); "

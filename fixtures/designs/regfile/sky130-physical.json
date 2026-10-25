@@ -67,7 +67,7 @@
     "input_pin": "A",
     "output_pin": "X",
     "sink_pin": "CLK",
-    "max_fanout": 8,
+    "max_fanout": 4,
     "max_buffers": 4096,
     "max_work": 100000
   },
