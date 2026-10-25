@@ -722,19 +722,6 @@ pub(super) fn distribute_ties(
         return Err(Error::Invalid("tie net binding missing".into()));
     }
     drop(by_alias);
-    // Top-level aliases stay on the original source. Their fanout is reserved
-    // before partitioning instance inputs, independent of pin-record order.
-    for pin in &model.pins {
-        if let (Some(net), PinOwner::Port { port, .. }) = (pin.net, pin.owner)
-            && let Some(&group) = net_groups.get(&net)
-            && model.ports[port as usize].direction == Direction::Output
-        {
-            groups[group].used += 1;
-            if groups[group].used > cfg.max_tie_fanout {
-                return Err(Error::Budget("constant top-level alias fanout".into()));
-            }
-        }
-    }
     let mut names: HashSet<String> = bundle
         .netlist
         .instances
@@ -747,22 +734,15 @@ pub(super) fn distribute_ties(
         .collect();
     let mut additions = Vec::new();
     let mut sequence = 0usize;
-    for pin in &model.pins {
-        let (Some(net), PinOwner::Instance { instance, terminal }) = (pin.net, pin.owner) else {
-            continue;
-        };
-        let Some(&group) = net_groups.get(&net) else {
-            continue;
-        };
-        let spec = &model.masters[model.instance_masters[instance as usize] as usize].pins
-            [terminal as usize];
-        if spec.use_.is_supply() || spec.direction != Some(Direction::Input) {
-            continue;
+    let existing_added = report.new_cells;
+    let existing_cells = design.cells.len();
+    let mut advance = |group: &mut Group| -> Result<()> {
+        if group.used < cfg.max_tie_fanout {
+            return Ok(());
         }
-        let group = &mut groups[group];
-        if group.used == cfg.max_tie_fanout {
-            if report.new_cells + additions.len() >= cfg.max_added_cells
-                || design.cells.len() + additions.len() >= limits.max_cells
+        {
+            if existing_added + additions.len() >= cfg.max_added_cells
+                || existing_cells + additions.len() >= limits.max_cells
             {
                 return Err(Error::Budget(
                     "tie fanout distribution added-cell limit".into(),
@@ -810,6 +790,48 @@ pub(super) fn distribute_ties(
             group.active = net;
             group.used = 0;
         }
+        Ok(())
+    };
+    let mut moved_ports = Vec::new();
+    for pin in &model.pins {
+        if let (Some(net), PinOwner::Port { port, bit }) = (pin.net, pin.owner)
+            && let Some(&group) = net_groups.get(&net)
+            && model.ports[port as usize].direction == Direction::Output
+        {
+            let group = &mut groups[group];
+            advance(group)?;
+            if group.active != group.binding.net {
+                let declaration = &bundle.netlist.ports[port as usize];
+                let expr = match declaration.range {
+                    None => verilog::Expr::Ident(declaration.name.clone()),
+                    Some(range) => verilog::Expr::BitSelect {
+                        name: declaration.name.clone(),
+                        index: if range.msb <= range.lsb {
+                            range.msb + i64::from(bit)
+                        } else {
+                            range.msb - i64::from(bit)
+                        },
+                    },
+                };
+                moved_ports.push((expr, group.active.clone()));
+            }
+            group.used += 1;
+        }
+    }
+    for pin in &model.pins {
+        let (Some(net), PinOwner::Instance { instance, terminal }) = (pin.net, pin.owner) else {
+            continue;
+        };
+        let Some(&group) = net_groups.get(&net) else {
+            continue;
+        };
+        let spec = &model.masters[model.instance_masters[instance as usize] as usize].pins
+            [terminal as usize];
+        if spec.use_.is_supply() || spec.direction != Some(Direction::Input) {
+            continue;
+        }
+        let group = &mut groups[group];
+        advance(group)?;
         if group.active != group.binding.net {
             bundle.netlist.instances[instance as usize]
                 .connections
@@ -843,6 +865,13 @@ pub(super) fn distribute_ties(
         }
         report.bindings.push(binding);
     }
+    crate::port_ties::split(
+        &mut bundle.netlist,
+        moved_ports,
+        &mut names,
+        &mut sequence,
+        limits.max_cells.saturating_mul(16).min(256_000_000),
+    )?;
     if added != 0 {
         relink(bundle)?;
     }

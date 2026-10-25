@@ -32,7 +32,7 @@ def main() -> int:
     profiles = json.loads((ROOT / 'fixtures/pdk/local-routing.json').read_text())['pdks']
     rows = []
     for profile in profiles:
-        for variant in ['literal', 'reused']:
+        for variant in ['literal', 'reused', 'ports', 'ports-up']:
             tag = profile['tag']
             folder = out / (tag + '-' + variant)
             folder.mkdir()
@@ -59,10 +59,21 @@ def main() -> int:
                     literal = "1'b1" if rail['supply'] == 'power' else "1'b0"
                     connections.append(f".{rail['pin']}({literal})")
                 driver = f"{low['cell']} original_source ({', '.join(connections)});"
-            source.write_text("module lane_smoke(output [16:0] y);\nwire zero;\n" + driver + '\n' + cells + '\nendmodule\n')
             expected, wrong = folder / 'expected.v', folder / 'wrong.v'
-            expected.write_text("module lane_smoke(output [16:0] y); assign y=17'b0; endmodule\n")
-            wrong.write_text("module lane_smoke(output [16:0] y); assign y=17'b1; endmodule\n")
+            if variant.startswith('ports'):
+                bus = '[0:16]' if variant == 'ports-up' else '[16:0]'
+                fields = ['zero'] * 17
+                fields[5] = 'a'
+                source.write_text(f"module lane_smoke(input a, output {bus} y); wire zero; assign zero=1'b0; assign y={{{','.join(fields)}}}; endmodule\n")
+                fields = ["1'b0"] * 17
+                fields[5] = 'a'
+                expected.write_text(f"module lane_smoke(input a, output {bus} y); assign y={{{','.join(fields)}}}; endmodule\n")
+                fields[0] = "1'b1"
+                wrong.write_text(f"module lane_smoke(input a, output {bus} y); assign y={{{','.join(fields)}}}; endmodule\n")
+            else:
+                source.write_text("module lane_smoke(output [16:0] y);\nwire zero;\n" + driver + '\n' + cells + '\nendmodule\n')
+                expected.write_text("module lane_smoke(output [16:0] y); assign y=17'b0; endmodule\n")
+                wrong.write_text("module lane_smoke(output [16:0] y); assign y=17'b1; endmodule\n")
             workspace = folder / 'workspace'
             run_ok(harness, 'import', [road, '--workspace', workspace, 'import-pdk', '--base-rev', 'rev0',
                                      '--tech-lef', profile['technology_lef']['path'], '--cell-lef', profile['cell_lef']['path'],
@@ -77,13 +88,13 @@ def main() -> int:
             netlist = Path(export['stdout'])
             proof = external_cec(harness, 'constant_cec', yosys, Path(profile['liberty']['path']), expected, netlist)
             control = external_cec(harness, 'wrong_output_control', yosys, Path(profile['liberty']['path']), wrong, netlist, expected=False)
-            rows.append(dict(pdk=tag, variant=variant, status='passed', inserted_sources=count, constant_sources=3, max_fanout=8, proof=proof,
+            rows.append(dict(pdk=tag, variant=variant, status='passed', inserted_sources=count, constant_sources=2 if variant.startswith('ports') else 3, max_fanout=8, proof=proof,
                              negative_control=control, receipts=harness.receipts))
     result = dict(schema='rustroad.tie-fanout-verification.v1', status='passed',
                   rustroad=dict(path=str(road), sha256=sha256(road)),
                   yosys=dict(path=str(yosys), sha256=sha256(yosys)), pdks=rows)
     (out / 'summary.json').write_text(json.dumps(result, indent=2) + '\n')
-    print(json.dumps(dict(status=result['status'], pdks=[r['pdk'] for r in rows], summary=str(out / 'summary.json'))))
+    print(json.dumps(dict(status=result['status'], cases=[r['pdk'] + ':' + r['variant'] for r in rows], summary=str(out / 'summary.json'))))
     return 0
 
 

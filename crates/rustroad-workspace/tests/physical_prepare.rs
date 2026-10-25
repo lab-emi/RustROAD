@@ -816,18 +816,50 @@ fn in_place_constant_sources_are_included_in_fanout_repair() {
 }
 
 #[test]
-fn constant_top_level_alias_fanout_is_rejected_without_false_repair() {
+fn constant_top_level_alias_repair_obeys_its_added_cell_budget() {
     let mut cfg = config();
     cfg.max_tie_fanout = 1;
+    cfg.max_added_cells = 1;
     let f = Fixture::new(
         "module chip(output a,output b); wire k; assign k=1'b1; assign a=k; assign b=k; endmodule",
         &cfg,
     );
     let error = f
         .import()
-        .expect_err("top-level aliases need a separate port-buffer policy");
-    assert!(error.to_string().contains("top-level alias fanout"));
+        .expect_err("port repair must obey its cell budget");
+    assert!(error.to_string().contains("fanout"));
     assert!(!f.workspace.join("HEAD").exists());
+}
+
+#[test]
+fn constant_output_aliases_are_split_without_changing_port_identity() {
+    let mut cfg = config();
+    cfg.max_tie_fanout = 1;
+    let f = Fixture::new(
+        "module chip(output a,output b); wire k; assign k=1'b1; assign a=k; assign b=k; endmodule",
+        &cfg,
+    );
+    f.import().expect("constant port aliases should be split");
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    assert_eq!(bundle.ties.as_ref().unwrap().new_cells, 2);
+    let port_nets: Vec<_> = bundle
+        .connectivity
+        .pins
+        .iter()
+        .filter_map(|p| {
+            if let PinOwner::Port { port, .. } = p.owner
+                && bundle.connectivity.ports[port as usize].direction
+                    == rustroad_core::connectivity::Direction::Output
+            {
+                p.net
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(port_nets.len(), 2);
+    assert_ne!(port_nets[0], port_nets[1]);
 }
 
 #[test]

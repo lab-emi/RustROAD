@@ -17,6 +17,7 @@ pub mod floorplan;
 pub mod gds;
 pub mod pdk;
 pub mod physical;
+mod port_ties;
 pub mod routing;
 mod storage;
 pub mod ties;
