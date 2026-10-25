@@ -716,3 +716,10 @@ does not force a wire run when an incident pad already meets the layer's
 minimum area. Otherwise the minimum-run requirement remains. The pad table
 has a one-million-entry cap, is included in memory admission, and is checked
 before search; final geometry validation still checks the complete union.
+
+Pin access reserves a clear upward via envelope before accepting a landing
+below the access layer. If that exit is blocked, the bounded local search
+continues to another landing. These envelopes protect subsequent access and
+detailed routing, but are excluded from global conductor-capacity estimates
+and from exported geometry. Their shape/index storage is included in memory
+admission and released with the owning escape plan.

@@ -1012,6 +1012,17 @@ impl<'a> Spatial<'a> {
     pub(crate) fn remove(&mut self, id: usize) {
         self.alive[id - self.input.obstacles.len()] = false;
     }
+    pub(crate) fn restore(&mut self, id: usize) -> Result<()> {
+        let offset = id
+            .checked_sub(self.input.obstacles.len())
+            .ok_or_else(|| invalid("cannot restore an input obstacle"))?;
+        let alive = self
+            .alive
+            .get_mut(offset)
+            .ok_or_else(|| invalid("invalid restored obstacle"))?;
+        *alive = true;
+        Ok(())
+    }
     /// (allocated grid bins, bin entries, shapes, bin side) for telemetry.
     pub(crate) fn footprint(&self) -> (usize, usize, usize, i64) {
         (

@@ -571,8 +571,14 @@ fn memory_estimate_limited(
         .obstacles
         .len()
         .saturating_add(input.instances.as_ref().map_or(0, |i| i.len()));
+    let portal_shapes = input
+        .vias
+        .iter()
+        .map(|v| v.shapes.len() as u64)
+        .max()
+        .unwrap_or(0);
     let added = t
-        .saturating_mul(SHAPES_PER_TERMINAL)
+        .saturating_mul(SHAPES_PER_TERMINAL.saturating_add(portal_shapes))
         .min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
     let index = |shapes: u64| {
         // Both Spatial implementations enforce this before every insertion.
@@ -661,6 +667,10 @@ fn memory_estimate_limited(
         spatial: index(added),
         routed: t
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
+            .saturating_add(
+                t.saturating_mul(portal_shapes.saturating_add(1))
+                    .saturating_mul(8),
+            )
             .saturating_add(t.saturating_mul(WINDOW_INDEX_BYTES))
             .saturating_add(records.saturating_mul(96))
             .saturating_add(
@@ -806,6 +816,8 @@ struct Plan {
     top: u32,
     /// The escape reaches `top` through a via (a further via would stack).
     top_via: bool,
+    /// Search-only via envelopes at the end of `shapes`.
+    portal_shapes: u8,
     wires: Box<[Wire]>,
     vias: Box<[Via]>,
     shapes: Box<[usize]>,
@@ -948,6 +960,32 @@ impl<'a> Router<'a> {
                     .any(|s| s.layer == layer)
                 && self.via_pad_ok[layer as usize][v.kind as usize]
         })
+    }
+
+    /// Protect one usable upward via while the rest of the pin escapes are
+    /// reserved. Its envelope is search geometry only, never output metal.
+    fn access_portal(
+        &mut self,
+        slot: usize,
+        at: [i64; 2],
+        net: u32,
+        incoming_ok: bool,
+    ) -> Result<Option<usize>> {
+        let layer = self.graph.layers[slot].layer as usize;
+        for pair in &self.graph.pairs {
+            if pair.lower != slot || self.graph.find(pair.upper, at).is_none() {
+                continue;
+            }
+            for &kind in &pair.kinds {
+                if !incoming_ok && !self.via_pad_ok[layer][kind] {
+                    continue;
+                }
+                if self.spatial.via_clear(kind, at, net)? {
+                    return Ok(Some(kind));
+                }
+            }
+        }
+        Ok(None)
     }
     /// Runtime guard: the process's peak resident set (where the platform
     /// reports it) must stay within `memory_mib`; checked at phase
@@ -1263,8 +1301,20 @@ impl<'a> Router<'a> {
             }
             let (li, at) = local.at(id);
             if slots[li] == goal_slot && self.graph.find(goal_slot, at).is_some() {
-                found = Some(id);
-                break;
+                let needs_portal = !above && self.graph.pairs.iter().any(|p| p.lower == goal_slot);
+                let incoming = visited[&id].2;
+                let enough = incoming == WIRE
+                    || self.via_pad_ok[self.graph.layers[goal_slot].layer as usize]
+                        [incoming as usize];
+                let portal = if needs_portal {
+                    self.access_portal(goal_slot, at, t.net, enough)?
+                } else {
+                    None
+                };
+                if !needs_portal || portal.is_some() {
+                    found = Some((id, portal));
+                    break;
+                }
             }
             self.tick(&mut search, "pin access", t.pin, t.net)?;
             let layer = self.graph.layers[slots[li]].layer;
@@ -1388,7 +1438,7 @@ impl<'a> Router<'a> {
                 heap.push(Reverse((nc.saturating_add(potential.cost(nid)?), nc, nid)));
             }
         }
-        let Some(top) = found else {
+        let Some((top, portal)) = found else {
             return Ok(None);
         };
         let top_via = visited[&top].1 != NONE && visited[&top].2 != WIRE;
@@ -1463,6 +1513,19 @@ impl<'a> Router<'a> {
                 })?);
             }
         }
+        let portal_shapes = if let Some(kind) = portal {
+            let (_, at) = local.at(top);
+            for shape in &input.vias[kind].shapes {
+                shapes.push(self.spatial.add_fixed(Blockage {
+                    layer: shape.layer,
+                    rect: shifted(shape.rect, at)?,
+                    net: Some(t.net),
+                })?);
+            }
+            input.vias[kind].shapes.len() as u8
+        } else {
+            0
+        };
         Ok(Some(Plan {
             access: Access {
                 pin: t.pin,
@@ -1472,6 +1535,7 @@ impl<'a> Router<'a> {
             },
             top: top_node,
             top_via,
+            portal_shapes,
             wires: wires.into_boxed_slice(),
             vias: vias.into_boxed_slice(),
             shapes: shapes.into_boxed_slice(),
@@ -1667,8 +1731,46 @@ impl<'a> Router<'a> {
     }
 
     /// Negotiated-congestion global routing; returns one guide per net.
-    fn global(&mut self, nets: &[(u32, Vec<u32>)]) -> Result<BTreeMap<u32, Vec<u32>>> {
-        let cap = self.capacities()?;
+    fn global(
+        &mut self,
+        nets: &[(u32, Vec<u32>)],
+        plans: &HashMap<u32, Plan>,
+    ) -> Result<BTreeMap<u32, Vec<u32>>> {
+        // Envelopes protect detailed access but are not existing conductor
+        // capacity. In particular they must not seal a terminal's GCell.
+        let count = plans.values().try_fold(0usize, |count, p| {
+            count
+                .checked_add(usize::from(p.portal_shapes))
+                .ok_or_else(|| budget("access portal count"))
+        })?;
+        self.spatial.work = self
+            .spatial
+            .work
+            .checked_add(count.saturating_mul(2))
+            .filter(|&n| n <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("access portal capacity work"))?;
+        for plan in plans.values() {
+            for &id in plan
+                .shapes
+                .iter()
+                .rev()
+                .take(usize::from(plan.portal_shapes))
+            {
+                self.spatial.remove(id);
+            }
+        }
+        let result = self.capacities();
+        for plan in plans.values() {
+            for &id in plan
+                .shapes
+                .iter()
+                .rev()
+                .take(usize::from(plan.portal_shapes))
+            {
+                self.spatial.restore(id)?;
+            }
+        }
+        let cap = result?;
         let n = self.cells.len();
         let mut usage = vec![0u32; cap.len()];
         let mut hist = vec![0u32; cap.len()];
@@ -2824,7 +2926,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
             (*net, cells)
         })
         .collect();
-    let guides = r.global(&nets)?;
+    let guides = r.global(&nets, &plans)?;
     r.guard("global routing")?;
     trace(
         "global",
@@ -3499,6 +3601,50 @@ mod tests {
     }
 
     #[test]
+    fn access_reserves_an_extendable_landing_on_phase_offset_tracks() {
+        let mut blocks = vec![Blockage {
+            layer: 0,
+            rect: rect(340, 0, 660, 1000),
+            net: None,
+        }];
+        for r in [
+            rect(0, 0, 1000, 60),
+            rect(0, 140, 1000, 1000),
+            rect(0, 60, 70, 140),
+            rect(130, 60, 160, 140),
+            rect(300, 60, 700, 140),
+            rect(840, 60, 870, 140),
+            rect(930, 60, 1000, 140),
+        ] {
+            blocks.push(Blockage {
+                layer: 1,
+                rect: r,
+                net: None,
+            });
+        }
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(890, 90, 910, 110)),
+            ],
+            blocks,
+        );
+        design.tracks.as_mut().unwrap().tracks[0] = Some((40, 0));
+        design.vias[1]
+            .shapes
+            .iter_mut()
+            .find(|s| s.layer == 1)
+            .unwrap()
+            .rect = rect(-20, -20, 20, 20);
+        let out = route_cpu_ref(&design, &limits()).unwrap();
+        validate(&design, &out, &limits()).unwrap();
+        assert!(out.wires.iter().any(|w| w.layer == 2));
+        let again = route_cpu_ref(&design, &limits()).unwrap();
+        assert_eq!(out.wires, again.wires);
+        assert_eq!(out.vias, again.vias);
+    }
+
+    #[test]
     fn bounded_batches_preserve_all_nets_and_validate_the_combined_geometry() {
         let mut design = input(
             vec![
@@ -3609,6 +3755,7 @@ mod tests {
                 },
                 top: net,
                 top_via: true,
+                portal_shapes: 0,
                 wires: wires.into_boxed_slice(),
                 vias: vias.into_boxed_slice(),
                 shapes: shapes.into_boxed_slice(),
