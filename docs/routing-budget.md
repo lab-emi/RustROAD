@@ -91,7 +91,7 @@ ceilings, not a promise that all maxima fit in memory at once.
 
 `max_active_nodes` separately bounds the raw edges and nodes of one detailed
 net (default 200,000; hard ceiling 50 million). It is checked before insertion
-and charged at 160 bytes per admitted node/edge, independently of the design's
+and charged at 164 bytes per admitted node/edge, independently of the design's
 output segment budget. A large design can permit many completed routes without
 reserving the entire output budget for one live search tree.
 
@@ -145,6 +145,13 @@ the complete result is checked against all original terminals and obstacles.
 An oversized net, congested group, memory refusal or final check failure leaves
 the workspace revision unchanged. The full-flow harness can exercise this mode
 with `--route-batch-terminals N` on both PDKs.
+
+Same-net pin-metal queries use a bounded index by layer and x interval; exact
+overlap and escape-point exceptions are preserved. Global A* prefers greater
+progress when total estimated costs tie and counts pin-access work against its
+total budget. A hard detailed-search attempt that reaches its per-search cap
+removes its partial metal and proceeds to the existing wider-guide/rip-up
+attempts. Soft-search and aggregate resource limits remain terminal failures.
 
 Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
 remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared

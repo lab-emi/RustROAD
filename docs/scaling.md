@@ -63,6 +63,10 @@ below describe the earlier small-block release.
   the full design and build only one net's graph at a time. Per-net edge,
   endpoint and work limits are checked before graph allocation. Cycles and
   disconnected access points retain their previous validation semantics.
+- Same-net pin-metal queries use a bounded spatial index. Equal-cost global
+  searches prefer progress toward their target. Exhausted hard searches can
+  use the existing bounded wider-guide and rip-up attempts; soft-search and
+  aggregate budgets still fail explicitly.
 - An explicit `batch_terminals` routing profile bounds the active whole-net
   group. Completed metal becomes fixed geometry for later groups; no net is
   split or omitted. The combined result passes the full-design validator

@@ -2076,6 +2076,18 @@ impl<'a> Router<'a> {
                     found = Some(id);
                     break;
                 }
+                // A bounded hard search may defer to the existing wider-guide
+                // and rip-up attempts. Partial metal is removed by the same
+                // failed-attempt cleanup as an exhausted frontier. Soft-search
+                // and aggregate budgets still stop the command explicitly.
+                if !soft && search >= self.limits.max_search_expansions {
+                    trace(
+                        "deferred hard search",
+                        std::time::Instant::now(),
+                        format_args!("net {net} pin {} expansions {search}", t.pin),
+                    );
+                    break;
+                }
                 self.tick(&mut search, "detailed", t.pin, net)?;
                 let (l, t_, s_) = self.graph.locate(id);
                 let layer = self.graph.layers[l].layer;
