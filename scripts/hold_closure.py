@@ -162,14 +162,16 @@ WHATIF_TIMEOUT_S = 600
 # Candidate budgets, as counts so the determinism rebuild evaluates exactly
 # the same candidates (a whatif call that fails or hits WHATIF_TIMEOUT_S is a
 # failed round, recorded): per layout and per closure loop (the gate runs
-# the loop twice per PDK within its 3600 s wall budget). Measured cost per
-# candidate: 0.13 s (counter, 47 logic instances), 1.1 s (regfile, 367),
-# 1.9 s (mult, 417) on this host. Both scale with 200 / logic instances,
-# clamped to 0.5x..4x (counter 512 per layout, mult 64). Raised from 96/320
-# when violating drivers also try one step down (three candidates each):
-# GF180 alu/mult/regfile ran out of candidates with 20-40 violations left.
-WHATIF_LAYOUT_CANDIDATES = 128
-WHATIF_LOOP_CANDIDATES = 640
+# the loop twice per PDK within its 3600 s wall budget). Both scale with 200
+# / instances of the netlist, clamped to 0.5x..4x. Raised from 96/320 when
+# violating drivers also try one step down (three candidates each): GF180
+# alu/mult/regfile ran out of candidates with 20-40 violations left. Raised
+# again from 128/640 (DRV co-sizing, 2026-10-25): with RustSTA 0.4.3 a
+# candidate costs 0.19 s (alu), 0.40 s (regfile), 0.53 s (mult) on this host
+# (was 1.1-1.9 s), and the 640 loop budget (mult 320) was spent by layout 5-6
+# of 8, leaving the last layouts' marginal DRV nets without sizing.
+WHATIF_LAYOUT_CANDIDATES = 192
+WHATIF_LOOP_CANDIDATES = 1536
 WHATIF_HOLD_LOSS_NS = 0.5
 # A resize may not make the worst DRV pin worse by more than this fraction of
 # its limit (severity guard; the count alone accepted alu g121 _2 -> _1 at an
@@ -883,7 +885,8 @@ class Flow:
                 return True
             # Upsizing a near-violating driver (planning margin): kept unless
             # it adds a violation or costs setup below zero.
-            if why in ('drv', 'drv_sink', 'drv_up', 'drv_chain') and m['drv'] <= b['drv'] and setup_ok:
+            # (Upstream growth for a violating driver's sake must improve.)
+            if why in ('drv', 'drv_sink') and m['drv'] <= b['drv'] and setup_ok:
                 return True
             if m['drv'] <= b['drv'] and m['wns'] > b['wns'] + 1e-4:
                 return True
@@ -1617,6 +1620,9 @@ exit
                     best = (record['score'], final)
                 record['drv'] = sta['drv']
                 netlist, stop = self.sized_step(it, netlist, sta, phys, antenna, record)
+                # The full decisions of this step (the gate summary keeps counts).
+                jdump(self.h.root / f'{self.tag}_i{it}_closure_decisions.json',
+                      {k: record.get(k) for k in ('size_eco', 'hold_eco', 'hold_isolation', 'setup_stagnant', 'stopped')})
                 if stop:
                     break
                 # The next layout is an ECO of this one: seeded placement.

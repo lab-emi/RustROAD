@@ -457,6 +457,17 @@ def fit_buffers(buffers: list, loads: list, target: float, slope: float, per_cap
     return out
 
 
+def buffer_target(target: float, model) -> float:
+    """Output transition target of the buffers next to a driver: the planning
+    target, or DRIVER_TARGET x the limit behind a headroom-limited driver
+    (GF180 aoi22 at ss): there the smallest buffer input decides whether the
+    driver meets the limit at all, and buf_1 drives 1.5x the load at 0.8 x
+    the limit that it drives at 0.6 x."""
+    if model is not None and model.headroom:
+        return target * DRIVER_TARGET / TRANSITION_TARGET
+    return target
+
+
 @dataclass
 class DriverModel:
     """What a net's driver can take: its family members (current first,
@@ -539,6 +550,7 @@ class Planner:
         estimated wire. None: no option is feasible."""
         n = len(groups)
         near = self.near_pf(cw)
+        target = buffer_target(target, model)
         far = [l + cw * manhattan(driver_pos, centroid(g)) for g, l in zip(groups, loads)]
         bufs = self.prof.buffers
         ups = list(range(1, len(model.members)))
@@ -673,6 +685,12 @@ class Planner:
             plain = sum(b.cap for b in arr["picks"]) + trunk_est + fixed_pf + kept_pf
             best = max((c for _, c in model.members if c is not None), default=None)
             if best is not None and plain > best:
+                # New trees keep the driver's size unless it is headroom-
+                # limited (only the largest member reaches the limit at all):
+                # resizes are left to the whatif sizing, which verifies them.
+                if not model.headroom:
+                    model = DriverModel(model.members[:1], model.target, model.headroom, model.slope,
+                                        model.degradation)
                 co = self.arrange(groups, loads, driver_pos, trunk_est, fixed_pf + kept_pf, cw, target, model)
                 if co is not None:
                     arr = co
@@ -815,6 +833,7 @@ class Planner:
             return None
         prof = self.prof
         near = self.near_pf(cw)
+        target = buffer_target(target, model)
         fixed_pf = OUTPUT_PORT_LOAD_PF * len(fixed)
         bufs = []
         for it in items:
