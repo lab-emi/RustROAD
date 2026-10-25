@@ -26,6 +26,9 @@ pub struct RouteLimits {
     pub max_segments: usize,
     pub max_expansions: usize,
     pub max_search_expansions: usize,
+    /// Optional earlier handoff from hard search to bounded routing repair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_hard_search_expansions: Option<usize>,
     /// Nodes or raw edges retained for one detailed net, independently of the design output size.
     #[serde(default = "default_active_nodes")]
     pub max_active_nodes: usize,
@@ -60,6 +63,7 @@ impl Default for RouteLimits {
             max_segments: 100_000,
             max_expansions: 2_000_000,
             max_search_expansions: 200_000,
+            max_hard_search_expansions: None,
             max_active_nodes: default_active_nodes(),
             max_rule_violations: default_rule_violations(),
             max_rule_grid_cells: default_rule_grid_cells(),
@@ -81,6 +85,7 @@ impl RouteLimits {
             max_segments: 128_000_000,
             max_expansions: 2_000_000_000,
             max_search_expansions: 50_000_000,
+            max_hard_search_expansions: None,
             max_active_nodes: 50_000_000,
             max_rule_violations: 1_000_000,
             max_rule_grid_cells: 4_000_000,
@@ -96,6 +101,12 @@ impl RouteLimits {
         self.validate_against(&Self::ceiling())
     }
     fn validate_against(&self, hard: &Self) -> Result<()> {
+        if self
+            .max_hard_search_expansions
+            .is_some_and(|n| n == 0 || n > self.max_search_expansions)
+        {
+            return Err(budget("hard search limit exceeds per-search bounds"));
+        }
         for (a, b) in [
             (self.max_axis, hard.max_axis),
             (self.max_grid_nodes, hard.max_grid_nodes),

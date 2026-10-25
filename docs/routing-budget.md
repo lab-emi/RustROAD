@@ -152,6 +152,9 @@ progress when total estimated costs tie and counts pin-access work against its
 total budget. A hard detailed-search attempt that reaches its per-search cap
 removes its partial metal and proceeds to the existing wider-guide/rip-up
 attempts. Soft-search and aggregate resource limits remain terminal failures.
+`max_hard_search_expansions` can hand off earlier; it defaults to the full
+per-search limit and cannot exceed it. Lowering this optional limit does not
+increase soft-search, total-work, frontier or memory allowances.
 
 Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
 remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared

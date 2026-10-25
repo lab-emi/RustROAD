@@ -2080,12 +2080,19 @@ impl<'a> Router<'a> {
                 // and rip-up attempts. Partial metal is removed by the same
                 // failed-attempt cleanup as an exhausted frontier. Soft-search
                 // and aggregate budgets still stop the command explicitly.
-                if !soft && search >= self.limits.max_search_expansions {
-                    trace(
-                        "deferred hard search",
-                        std::time::Instant::now(),
-                        format_args!("net {net} pin {} expansions {search}", t.pin),
-                    );
+                if !soft
+                    && search
+                        >= self
+                            .limits
+                            .max_hard_search_expansions
+                            .unwrap_or(self.limits.max_search_expansions)
+                {
+                    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                        eprintln!(
+                            "[troute] deferred hard search net {net} pin {} expansions {search}",
+                            t.pin
+                        );
+                    }
                     break;
                 }
                 self.tick(&mut search, "detailed", t.pin, net)?;
@@ -3157,6 +3164,14 @@ mod tests {
         assert_eq!(out.wires, again.wires);
         assert_eq!(out.vias, again.vias);
         assert_eq!(out.access, again.access);
+        let repair = RouteLimits {
+            max_hard_search_expansions: Some(1),
+            ..limits()
+        };
+        let (repaired, _) = crate::route_batches::route(&design, &repair, 2).unwrap();
+        validate(&design, &repaired, &repair).unwrap();
+        assert_eq!(repaired.nets, [0, 1]);
+        assert_eq!(repaired.access.len(), 4);
         assert!(crate::route_batches::route(&design, &limits(), 1).is_err());
         let limited = RouteLimits {
             max_expansions: out.stats.expansions - 1,
@@ -3719,6 +3734,11 @@ mod tests {
             route_cpu_ref(&i, &few),
             Err(crate::Error::Budget(_))
         ));
+        let invalid_hard = RouteLimits {
+            max_hard_search_expansions: Some(few.max_search_expansions + 1),
+            ..few.clone()
+        };
+        assert!(invalid_hard.validate_track().is_err());
         // Above the lattice defaults is fine for the track router, above the
         // absolute ceiling is not.
         let raised = RouteLimits {
