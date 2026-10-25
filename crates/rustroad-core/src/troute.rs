@@ -572,6 +572,22 @@ fn memory_estimate_limited(
         .saturating_mul(8)
         .saturating_add(layers.saturating_mul(layers).saturating_mul(2))
         .saturating_add(layers.saturating_mul(32));
+    let shapes_per_record = input
+        .vias
+        .iter()
+        .map(|v| v.shapes.len() as u64)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let rule_shapes = records.saturating_mul(shapes_per_record).saturating_add(
+        input
+            .terminals
+            .iter()
+            .map(|t| t.shapes.len() as u64)
+            .sum::<u64>(),
+    );
+    let rule_grid_cells =
+        (limits.max_rule_grid_cells as u64).min(rule_shapes.saturating_mul(2).saturating_pow(2));
     if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
         eprintln!(
             "[troute] estimate inputs grid_cells {cells} layers {layers} fixed_entries {fixed_entries} obstacles {o} terminals {t} nodes {nodes} gcells {gcells} held {}",
@@ -611,7 +627,8 @@ fn memory_estimate_limited(
                     .saturating_mul(32)
             }),
         check: index(records.saturating_mul(2))
-            .saturating_add(records.saturating_mul(RECORD_BYTES)),
+            .saturating_add(records.saturating_mul(RECORD_BYTES))
+            .saturating_add(rule_grid_cells.saturating_mul(64)),
     })
 }
 
@@ -3473,12 +3490,12 @@ mod tests {
             ..RouteLimits::default()
         };
         assert!(route_cpu_ref(&i, &absurd).is_err());
-        // The runtime guard: an estimate below a 1 MiB cap still stops once
+        // The runtime guard: an estimate below a 2 MiB cap still stops once
         // the process' peak resident set (any test process) is above it.
         if crate::memory::peak_rss_bytes().is_some() {
             let mut small = input(i.terminals.clone(), Vec::new());
-            small.tracks.as_mut().unwrap().memory_mib = 1;
-            assert!(estimate_for(&small, &limits()).unwrap().unwrap().total() < 1 << 20);
+            small.tracks.as_mut().unwrap().memory_mib = 2;
+            assert!(estimate_for(&small, &limits()).unwrap().unwrap().total() < 2 << 20);
             let err = route_cpu_ref(&small, &limits()).unwrap_err();
             assert!(err.to_string().contains("peak resident set"), "{err}");
         }

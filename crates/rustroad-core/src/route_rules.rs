@@ -361,7 +361,12 @@ pub(crate) fn fill_for_robust(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
 
 /// Bounding boxes of holes enclosed by a rectangle union (compressed grid
 /// flood fill from the outside). Work is O(cells) with cells <= (2n)^2.
-pub(crate) fn holes(rects: &[Rect], work: &mut usize, cap: usize) -> Result<Vec<Rect>> {
+pub(crate) fn holes(
+    rects: &[Rect],
+    work: &mut usize,
+    cap: usize,
+    max_cells: usize,
+) -> Result<Vec<Rect>> {
     let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r.lx, r.ux]).collect();
     let mut ys: Vec<i64> = rects.iter().flat_map(|r| [r.ly, r.uy]).collect();
     xs.sort_unstable();
@@ -372,8 +377,12 @@ pub(crate) fn holes(rects: &[Rect], work: &mut usize, cap: usize) -> Result<Vec<
         return Ok(Vec::new());
     }
     let (nx, ny) = (xs.len() - 1, ys.len() - 1);
-    charge(work, nx.saturating_mul(ny), cap)?;
-    let mut covered = vec![false; nx * ny];
+    let cells = nx
+        .checked_mul(ny)
+        .filter(|&n| n <= max_cells)
+        .ok_or_else(|| Error::Budget("same-net compressed hole grid".into()))?;
+    charge(work, cells, cap)?;
+    let mut covered = vec![false; cells];
     for r in rects {
         let (x0, x1) = (
             xs.binary_search(&r.lx).unwrap(),
@@ -391,7 +400,7 @@ pub(crate) fn holes(rects: &[Rect], work: &mut usize, cap: usize) -> Result<Vec<
         }
     }
     // 0 = unvisited free, 1 = outside, 2.. = hole label.
-    let mut label = vec![0u32; nx * ny];
+    let mut label = vec![0u32; cells];
     let mut stack = Vec::new();
     for y in 0..ny {
         for x in 0..nx {
@@ -401,7 +410,6 @@ pub(crate) fn holes(rects: &[Rect], work: &mut usize, cap: usize) -> Result<Vec<
             }
         }
     }
-    let mut out = Vec::new();
     let mut next = 1u32;
     let mut seed = 0usize;
     loop {
@@ -436,7 +444,6 @@ pub(crate) fn holes(rects: &[Rect], work: &mut usize, cap: usize) -> Result<Vec<
         next += 1;
         label[seed] = next;
         stack.push(seed);
-        out.push(next);
     }
     let mut boxes: BTreeMap<u32, Rect> = BTreeMap::new();
     for y in 0..ny {
@@ -461,7 +468,6 @@ pub(crate) fn holes(rects: &[Rect], work: &mut usize, cap: usize) -> Result<Vec<
             }
         }
     }
-    let _ = out;
     Ok(boxes.into_values().collect())
 }
 
@@ -740,7 +746,7 @@ pub(crate) fn check(
                     // MINENCLOSEDAREA is not retained; every same-net hole of
                     // this size can only be filled, never routed through).
                     let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
-                    for h in holes(&rects, work, cap)? {
+                    for h in holes(&rects, work, cap, limits.max_rule_grid_cells)? {
                         let a = i128::from(h.ux - h.lx) * i128::from(h.uy - h.ly);
                         if a < 4 * i128::from(min) {
                             push_violation(
@@ -878,13 +884,28 @@ mod scale_tests {
             r(40, 20, 60, 40),
         ];
         assert_eq!(
-            holes(&ring, &mut w, 10_000).unwrap(),
+            holes(&ring, &mut w, 10_000, 1_000).unwrap(),
             vec![r(20, 20, 40, 40)]
         );
         // A U shape has no hole.
-        assert!(holes(&ring[..3], &mut w, 10_000).unwrap().is_empty());
-        assert!(holes(&ring, &mut 0, 1).is_err());
+        assert!(holes(&ring[..3], &mut w, 10_000, 1_000).unwrap().is_empty());
+        assert!(holes(&ring, &mut 0, 1, 1_000).is_err());
+        assert!(
+            holes(&ring, &mut 0, 10_000, 1)
+                .unwrap_err()
+                .to_string()
+                .contains("compressed hole grid")
+        );
     }
+    #[test]
+    fn large_compressed_grid_is_refused_before_allocating_the_plane() {
+        let rectangles: Vec<_> = (0..5000i64)
+            .map(|i| r(3 * i, 5 * i, 3 * i + 1, 5 * i + 1))
+            .collect();
+        let error = holes(&rectangles, &mut 0, usize::MAX, 1_000_000).unwrap_err();
+        assert!(error.to_string().contains("same-net compressed hole grid"));
+    }
+
     #[test]
     fn robust_corner_bridge_overlaps_both_shapes_by_a_width() {
         // Pin corner (2000, 259260) and via pad corner (2420, 259560).

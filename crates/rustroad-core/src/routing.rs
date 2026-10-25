@@ -32,9 +32,16 @@ pub struct RouteLimits {
     /// Retained same-net violations per check; exceeding the limit is an error.
     #[serde(default = "default_rule_violations")]
     pub max_rule_violations: usize,
+    /// Cells in one coordinate-compressed hole-detection grid.
+    #[serde(default = "default_rule_grid_cells")]
+    pub max_rule_grid_cells: usize,
     pub max_comparisons: usize,
     pub max_heap: usize,
 }
+fn default_rule_grid_cells() -> usize {
+    1_000_000
+}
+
 fn default_rule_violations() -> usize {
     100_000
 }
@@ -55,6 +62,7 @@ impl Default for RouteLimits {
             max_search_expansions: 200_000,
             max_active_nodes: default_active_nodes(),
             max_rule_violations: default_rule_violations(),
+            max_rule_grid_cells: default_rule_grid_cells(),
             max_comparisons: 200_000_000,
             max_heap: 500_000,
         }
@@ -75,6 +83,7 @@ impl RouteLimits {
             max_search_expansions: 50_000_000,
             max_active_nodes: 50_000_000,
             max_rule_violations: 1_000_000,
+            max_rule_grid_cells: 4_000_000,
             max_comparisons: 1usize << 40,
             max_heap: 64_000_000,
         }
@@ -97,6 +106,7 @@ impl RouteLimits {
             (self.max_search_expansions, hard.max_search_expansions),
             (self.max_active_nodes, hard.max_active_nodes),
             (self.max_rule_violations, hard.max_rule_violations),
+            (self.max_rule_grid_cells, hard.max_rule_grid_cells),
             (self.max_comparisons, hard.max_comparisons),
             (self.max_heap, hard.max_heap),
         ] {
