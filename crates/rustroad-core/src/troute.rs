@@ -735,7 +735,9 @@ fn memory_estimate_limited(
         .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES))
         .saturating_add(access_memory)
         .saturating_add(layers.saturating_mul(input.vias.len() as u64 + 32))
-        .saturating_add(crate::routing_target::MEMORY_ALLOWANCE),
+        .saturating_add(crate::routing_target::memory_bytes(
+            limits.max_target_segments,
+        )),
         spatial: index(added),
         routed: t
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
@@ -2221,8 +2223,11 @@ impl<'a> Router<'a> {
         let mut edges = BTreeMap::new();
         let root = plans[&terminals[0].pin].top;
         let (root_layer, root_point) = self.graph.point(root);
-        let mut target =
-            crate::routing_target::TreeDistance::new(self.graph.slot[&root_layer], root_point);
+        let mut target = crate::routing_target::TreeDistance::new(
+            self.graph.slot[&root_layer],
+            root_point,
+            self.limits.max_target_segments,
+        )?;
         let mut tree: HashSet<u32> = HashSet::from([root]);
         // Tree junctions remember whether an actual incident pad meets AREA.
         let mut via_nodes: HashMap<u32, bool> = HashMap::new();
@@ -2343,12 +2348,13 @@ impl<'a> Router<'a> {
                 if search == self.limits.max_search_expansions {
                     if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
                         eprintln!(
-                            "[troute] search cap net {net} pin {} soft {soft} start {:?} root {:?} current {:?} tree_nodes {} cost {cost}",
+                            "[troute] search cap net {net} pin {} soft {soft} start {:?} root {:?} current {:?} tree_nodes {} targets {} cost {cost}",
                             t.pin,
                             self.graph.point(start),
                             (root_layer, root_point),
                             self.graph.point(id),
                             tree.len(),
+                            target.len(),
                         );
                     }
                     limited = true;

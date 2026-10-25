@@ -32,6 +32,9 @@ pub struct RouteLimits {
     /// Nodes or raw edges retained for one detailed net, independently of the design output size.
     #[serde(default = "default_active_nodes")]
     pub max_active_nodes: usize,
+    /// Exact routing-tree segments retained by the bounded distance index.
+    #[serde(default = "default_target_segments")]
+    pub max_target_segments: usize,
     /// Retained same-net violations per check; exceeding the limit is an error.
     #[serde(default = "default_rule_violations")]
     pub max_rule_violations: usize,
@@ -52,6 +55,9 @@ fn default_rule_violations() -> usize {
 fn default_active_nodes() -> usize {
     200_000
 }
+fn default_target_segments() -> usize {
+    8192
+}
 
 impl Default for RouteLimits {
     fn default() -> Self {
@@ -65,6 +71,7 @@ impl Default for RouteLimits {
             max_search_expansions: 200_000,
             max_hard_search_expansions: None,
             max_active_nodes: default_active_nodes(),
+            max_target_segments: default_target_segments(),
             max_rule_violations: default_rule_violations(),
             max_rule_grid_cells: default_rule_grid_cells(),
             max_comparisons: 200_000_000,
@@ -87,6 +94,7 @@ impl RouteLimits {
             max_search_expansions: 50_000_000,
             max_hard_search_expansions: None,
             max_active_nodes: 50_000_000,
+            max_target_segments: 1_000_000,
             max_rule_violations: 1_000_000,
             max_rule_grid_cells: 4_000_000,
             max_comparisons: 1usize << 40,
@@ -116,6 +124,7 @@ impl RouteLimits {
             (self.max_expansions, hard.max_expansions),
             (self.max_search_expansions, hard.max_search_expansions),
             (self.max_active_nodes, hard.max_active_nodes),
+            (self.max_target_segments, hard.max_target_segments),
             (self.max_rule_violations, hard.max_rule_violations),
             (self.max_rule_grid_cells, hard.max_rule_grid_cells),
             (self.max_comparisons, hard.max_comparisons),
