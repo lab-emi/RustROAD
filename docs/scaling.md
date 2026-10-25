@@ -40,7 +40,9 @@ below describe the earlier small-block release.
   qualification of the extractor at full-chip scale.
 - Large routing grids use bounded sparse search state. Spatial bins allocate
   32 by 32 pages on populated large layouts. Fixed rectangles are shared;
-  completed nets retain collinear runs rather than every track edge.
+  completed nets retain collinear runs rather than every track edge. Clock
+  membership uses an indexed bit mask, and supply-net IDs are resolved once
+  for the entire input build.
 - `track_router.max_history_entries` independently bounds congestion history
   (default 4,000,000). Pin-access memoization has a bounded memory cache;
   eviction recomputes the same geometry. Object/work limits, the whole-process

@@ -9,7 +9,7 @@ use rustroad_core::routing::{
 use rustroad_core::{Design, Limits, Placed, Rect};
 use rustroad_formats::lef::LefGeometry;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -409,21 +409,25 @@ pub(crate) fn clock_nets(bundle: &PhysicalBundle) -> Result<BTreeSet<u32>> {
         .as_ref()
         .and_then(|c| c.clock.as_ref())
         .ok_or_else(|| fail("clock config required"))?;
-    let by_name: HashMap<_, _> = bundle
-        .netlist
-        .instances
-        .iter()
-        .enumerate()
-        .map(|(i, x)| (x.name.as_str(), i))
-        .collect();
-    let buffers: BTreeSet<_> = report.buffers.iter().map(|n| by_name[n.as_str()]).collect();
+    let wanted: HashSet<&str> = report.buffers.iter().map(String::as_str).collect();
+    let mut buffers = vec![false; bundle.netlist.instances.len()];
+    let mut found = 0usize;
+    for (i, instance) in bundle.netlist.instances.iter().enumerate() {
+        if wanted.contains(instance.name.as_str()) {
+            buffers[i] = true;
+            found += 1;
+        }
+    }
+    if found != report.buffers.len() {
+        return Err(fail("clock buffer identity missing or repeated"));
+    }
     let model = &bundle.connectivity;
     let mut nets = BTreeSet::new();
     for p in &model.pins {
         let source = match p.owner {
             PinOwner::Port { port, .. } => model.ports[port as usize].name == cfg.port,
             PinOwner::Instance { instance, terminal } => {
-                buffers.contains(&(instance as usize))
+                buffers[instance as usize]
                     && model.masters[model.instance_masters[instance as usize] as usize].pins
                         [terminal as usize]
                         .name
@@ -714,6 +718,7 @@ fn build_input_impl(
     scope: RouteScope,
     compact_instances: bool,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
+    let trace = std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some();
     config.validate()?;
     let state = bundle
         .state
@@ -761,6 +766,9 @@ fn build_input_impl(
     };
     let pin_ids =
         rustroad_core::connectivity::PinIndex::new(model, &crate::pdk::connection_limits(design)?)?;
+    if trace {
+        rustroad_core::memory::trace("route bridge pin lookup");
+    }
     let mut obstacles = Vec::new();
     let mut owners = Vec::new();
     let mut terminals = Vec::new();
@@ -793,6 +801,13 @@ fn build_input_impl(
     let mut ties = Vec::new();
     let mut tie_terminals = Vec::new();
     for (i, p) in placed.iter().enumerate() {
+        if trace && i.is_multiple_of(1_000_000) {
+            eprintln!(
+                "[route] bridge instances {i}/{} terminals {}",
+                placed.len(),
+                terminals.len()
+            );
+        }
         let master = &model.masters[model.instance_masters[i] as usize];
         let orientation = rustroad_core::placed_orientation(design, p)?;
         let pin_start = u32::try_from(instance_pin_nets.len())
@@ -995,18 +1010,22 @@ fn build_input_impl(
             }
         }
     }
-    let supply_net = |p: rustroad_core::power::RailPolarity| -> Result<u32> {
-        let name = if p == rustroad_core::power::RailPolarity::Power {
-            &cfg.power_net
-        } else {
-            &cfg.ground_net
-        };
+    let find_supply = |name: &str| -> Result<u32> {
         model
             .nets
             .iter()
-            .position(|n| n.name == *name)
+            .position(|n| n.name == name)
             .map(|i| i as u32)
             .ok_or_else(|| fail("supply net absent"))
+    };
+    let power_net = find_supply(&cfg.power_net)?;
+    let ground_net = find_supply(&cfg.ground_net)?;
+    let supply_net = |p: rustroad_core::power::RailPolarity| -> Result<u32> {
+        Ok(if p == rustroad_core::power::RailPolarity::Power {
+            power_net
+        } else {
+            ground_net
+        })
     };
     for w in &state.supply.wires {
         if let Some(&l) = indices.get(w.layer.as_str()) {
@@ -1272,7 +1291,7 @@ pub fn route(
     rustroad_core::memory::trace("loaded");
     let placed: Vec<_> = snapshot.records().collect();
     let (_lock, mut metadata) = snapshot.into_metadata();
-    rustroad_core::memory::trace("cloned");
+    rustroad_core::memory::trace("metadata owned");
     let bundle = metadata
         .physical
         .as_mut()
