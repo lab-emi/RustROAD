@@ -24,7 +24,10 @@ the git-tracked file unchanged at HEAD (``manifest_provenance``), and the tool
 pin file must be the one the manifest freezes; otherwise the gate cannot pass.
 
 Statuses are ``passed`` / ``failed`` / ``unverified`` (``missing`` counts as
-unverified) and ``not_applicable``. ``not_applicable`` is accepted for a gating
+unverified), ``not_applicable`` and ``deviation_declared``. The last status is
+accepted only for timing accuracy after the owner-approved MPW proof and
+remains explicit in the aggregate; it does not widen the ordinary tolerance.
+``not_applicable`` is accepted for a gating
 item only where ``NOT_APPLICABLE`` (fixed here, not in the manifest) allows it,
 and the caller must have proved the condition; it is listed separately in the
 summary (``not_applicable_items``), never folded silently into ``passed``. A
@@ -48,7 +51,7 @@ DESIGN_SCHEMA = "rustroad.design.v3"
 RECIPES = ("legacy", "track")
 TOOLS_SCHEMA = "rustroad.rtl2gds-tools.v1"
 SUMMARY_SCHEMA = "rustroad.rtl2gds.v1"
-EXIT = {"passed": 0, "failed": 1, "unverified": 3}
+EXIT = {"passed": 0, "deviation_declared": 0, "failed": 1, "unverified": 3}
 MAX_MANIFEST_BYTES = 1024 * 1024
 
 
@@ -81,7 +84,7 @@ NOT_APPLICABLE = {
 
 
 def item(status: str, reason: str | None = None, **extra) -> dict:
-    if status not in ("passed", "failed", "unverified", "missing", "not_applicable"):
+    if status not in ("passed", "deviation_declared", "failed", "unverified", "missing", "not_applicable"):
         raise ValueError(f"unknown status {status!r}")
     out = dict(status=status)
     if reason:
@@ -91,7 +94,7 @@ def item(status: str, reason: str | None = None, **extra) -> dict:
 
 
 def worst(statuses) -> str:
-    """failed > unverified (incl. missing) > passed; an empty list is unverified.
+    """failed > unverified > deviation_declared > passed; empty is unverified.
 
     ``not_applicable`` parts do not change the verdict of the others; a list
     of only ``not_applicable`` parts is ``not_applicable``."""
@@ -103,8 +106,10 @@ def worst(statuses) -> str:
     applicable = [s for s in statuses if s != "not_applicable"]
     if not applicable:
         return "not_applicable"
-    if any(s != "passed" for s in applicable):
+    if any(s not in ("passed", "deviation_declared") for s in applicable):
         return "unverified"
+    if "deviation_declared" in applicable:
+        return "deviation_declared"
     return "passed"
 
 
@@ -115,7 +120,7 @@ def overall(per_pdk: dict[str, dict[str, dict]], gating: list[str], global_items
     Every required PDK must be present with every gating item; a missing item
     is unverified, never passed.
     """
-    failed, unverified, not_applicable = [], [], []
+    failed, unverified, not_applicable, declared = [], [], [], []
     for tag in required_pdks:
         statuses = per_pdk.get(tag)
         if statuses is None:
@@ -127,6 +132,8 @@ def overall(per_pdk: dict[str, dict[str, dict]], gating: list[str], global_items
                 failed.append(f"{tag}:{key}")
             elif st == "not_applicable" and key in NOT_APPLICABLE:
                 not_applicable.append(f"{tag}:{key}")
+            elif st == "deviation_declared" and key == "timing_accuracy":
+                declared.append(f"{tag}:{key}")
             elif st != "passed":
                 unverified.append(f"{tag}:{key}")
     for key, value in global_items.items():
@@ -135,9 +142,9 @@ def overall(per_pdk: dict[str, dict[str, dict]], gating: list[str], global_items
             failed.append(f"*:{key}")
         elif st != "passed":
             unverified.append(f"*:{key}")
-    status = "failed" if failed else "unverified" if unverified else "passed"
+    status = "failed" if failed else "unverified" if unverified else "deviation_declared" if declared else "passed"
     return dict(status=status, exit_code=EXIT[status], failed_items=failed, unverified_items=unverified,
-                not_applicable_items=not_applicable)
+                not_applicable_items=not_applicable, declared_deviations=declared)
 
 
 # ----------------------------------------------------------------------------- manifest

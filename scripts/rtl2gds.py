@@ -282,6 +282,22 @@ class PdkGate:
                     continue
                 sources[src] = T.evaluate_source(rust, ref, self.corners, ctx.budgets, clocked=ctx.clocked,
                                                  async_pins=async_pins)
+                accuracy = sources[src]["timing_accuracy"]
+                if (accuracy["status"] == "failed" and sources[src]["mpw_min_period"]["status"] == "passed"
+                        and all(x[k]["status"] == "passed" for x in accuracy["corners"].values()
+                                for k in ("endpoints", "drv"))):
+                    from rtl2gds_mpw import prove_deviations
+                    try:
+                        declarations, attempts = prove_deviations(
+                            h, f"{tag}_{src}", ctx.tool_paths,
+                            json.loads(ctx.signoff_manifest.read_text())["pdks"][tag], tag, src, self.corners,
+                            ctx.top, final, flow.libs, flow.sdc, spefs, rust, ref, ctx.budgets["parity_ns"])
+                        sources[src] = T.evaluate_source(rust, ref, self.corners, ctx.budgets,
+                                                         clocked=ctx.clocked, async_pins=async_pins,
+                                                         declarations=declarations)
+                        sources[src]["timing_accuracy"]["deviation_attempts"] = attempts
+                    except GateError as error:
+                        accuracy["deviation_attempts"] = [dict(status="unproven", reason=str(error))]
                 sources[src]["ruststa_metrics"] = rust["gating"]["metrics"]
                 sources[src]["ruststa_scope"] = rust["gating"]["scope"]
             combined = T.combine(sources)
@@ -441,7 +457,7 @@ def accuracy_evidence(pdks: list[dict]) -> list[dict]:
         for src, v in (acc.get("by_spef") or {}).items():
             for corner, x in (v.get("corners") or {}).items():
                 for kind in ("endpoints", "pulse", "drv"):
-                    if x[kind]["status"] != "passed":
+                    if x[kind]["status"] not in ("passed", "deviation_declared"):
                         rows.append(dict(pdk=p["pdk"], spef=src, corner=corner, check=kind,
                                          max_difference_ns=x[kind].get("max_difference_ns"),
                                          tolerance_ns=x["endpoints"]["tolerance_ns"],
@@ -468,7 +484,9 @@ def binding_inputs(ctx: Context, gate: PdkGate, b: dict) -> dict:
     art["design_manifest"] = ctx.args.design
     art["tools_manifest"] = ctx.args.tools
     for script in sorted((ROOT / "scripts").glob("rtl2gds*.py")) + [ROOT / "scripts/hold_closure.py",
-                                                                     ROOT / "scripts/scale_flow.py"]:
+                                                                     ROOT / "scripts/scale_flow.py",
+                                                                     ROOT / "scripts/mpw_probe.py",
+                                                                     ROOT / "scripts/mpw_circuit.py"]:
         art[f"harness.{script.name}"] = script
     return art
 
@@ -679,6 +697,7 @@ def main(argv=None) -> int:
             verdict = dict(verdict, status="unverified", exit_code=3, unverified_items=["*:preflight_only"])
         summary.update(status=verdict["status"], exit_code=verdict["exit_code"], failed_items=verdict["failed_items"],
                        unverified_items=verdict["unverified_items"],
+                       declared_deviations=verdict.get("declared_deviations", []),
                        not_applicable_items=verdict.get("not_applicable_items", []),
                        not_applicable_rules={k: D.NOT_APPLICABLE[k] for k in D.NOT_APPLICABLE})
         summary["timing_accuracy_status"] = D.worst((p["statuses"].get("timing_accuracy") or {}).get("status", "unverified")
@@ -703,6 +722,7 @@ def main(argv=None) -> int:
     print(json.dumps(dict(status=summary["status"], exit_code=summary["exit_code"],
                           failed=summary.get("failed_items"), unverified=summary.get("unverified_items")[:20],
                           not_applicable=summary.get("not_applicable_items"),
+                          declared_deviations=summary.get("declared_deviations", []),
                           timing_accuracy_status=summary.get("timing_accuracy_status"),
                           summary=str(root / "summary.json"))))
     return summary["exit_code"]

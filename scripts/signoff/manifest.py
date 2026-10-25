@@ -77,7 +77,7 @@ PDK_SPEC = {
             "librelane_pdk_config": "libs.tech/librelane/config.tcl",
             "librelane_scl_config": "libs.tech/librelane/sky130_fd_sc_hd/config.tcl",
         },
-        trees={},
+        trees={"ngspice_models": "libs.tech/ngspice"},
     ),
     "gf180": dict(
         library="gf180mcu_fd_sc_mcu7t5v0", variant="gf180mcuD", family="gf180mcu",

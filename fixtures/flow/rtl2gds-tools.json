@@ -50,6 +50,12 @@
       "path": ".work/tools/time",
       "sha256": "3b11dec50514a8473e9f6efa7a34d584d0657538c09988f61b72d38ad4991a10",
       "provenance": "GNU time from the already-pinned signoff image; explicit host measurement path"
+    },
+    "ngspice": {
+      "path": ".work/tools/ngspice",
+      "sha256": "e088057de17fdfe8ea499b11f13a9aaf6f145dc4b1be0f045e583395637f673b",
+      "version": "ngspice-47 (KLU)",
+      "provenance": "Managed ngspice 872486af34517c75e5a413b2ef30c7fea60ea6d7146ba718f1bc6a5db4a5fe71; independent transistor-circuit MPW oracle"
     }
   }
 }

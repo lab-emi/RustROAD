@@ -212,7 +212,8 @@ def parse_opensta(text: str) -> dict:
     return res
 
 
-def opensta(h, label: str, opensta_bin: Path, lib: Path, netlist: Path, top: str, sdc: Path, spef: Path) -> dict:
+def opensta(h, label: str, opensta_bin: Path, lib: Path, netlist: Path, top: str, sdc: Path, spef: Path,
+            driver_arc: tuple[str, str] | None = None) -> dict:
     script = h.root / f"{label}.tcl"
     checks = {"RR_MPW": "-min_pulse_width", "RR_PER": "-min_period", "RR_SLEW": "-max_slew",
               "RR_CAP": "-max_capacitance", "RR_FAN": "-max_fanout"}
@@ -225,7 +226,12 @@ def opensta(h, label: str, opensta_bin: Path, lib: Path, netlist: Path, top: str
             "report_checks -path_delay min -group_path_count 100000 -endpoint_path_count 1 -format end -digits 12"]
     for mark in ("RR_MPW", "RR_PER", "RR_SLEW", "RR_CAP", "RR_FAN"):
         body += [f"puts {mark}", f"report_check_types {checks[mark]} -max_count 100000 -digits 12"]
-    body += ["puts RR_END", "exit", ""]
+    body += ["puts RR_END"]
+    if driver_arc:
+        # Published CLI observation only; the ordinary gate does not request it.
+        body += ["puts RR_DRIVER", "report_dcalc -from " + tcl(Path(driver_arc[0])) +
+                 " -to " + tcl(Path(driver_arc[1])) + " -digits 12"]
+    body += ["exit", ""]
     script.write_text("\n".join(body))
     r = h.run(label, [str(opensta_bin), "-no_init", "-no_splash", "-exit", str(script)])
     if r["exit_code"] != 0:
@@ -262,7 +268,8 @@ def endpoint_parity(rust: dict, ref: dict, tolerance: float) -> dict:
                 worst_rows=sorted(diffs, key=lambda d: -d["difference_ns"])[:6])
 
 
-def pulse_parity(compat: dict, ref: dict, corner: str, tolerance: float) -> dict:
+def pulse_parity(compat: dict, ref: dict, corner: str, tolerance: float,
+                 declarations: dict | None = None) -> dict:
     mine = {}
     for r in compat["reports"]["pulse_width"]["rows"]:
         if r["corner"] != corner:
@@ -285,9 +292,23 @@ def pulse_parity(compat: dict, ref: dict, corner: str, tolerance: float) -> dict
                          difference_ns=max(abs(period[k]["slack"] - ref["period"][k]["slack"]),
                                            abs(period[k]["limit"] - ref["period"][k]["min_period"]))))
     diff = max((r["difference_ns"] for r in rows), default=0.0)
-    return dict(status="passed" if not missing and diff <= tolerance else "failed", mpw_rows=len(mine),
+    declarations = declarations or {}
+    declared, uncovered = [], []
+    for row in rows:
+        if row["difference_ns"] <= tolerance:
+            continue
+        proof = declarations.get(row["check"])
+        if (row["check"].endswith((":high", ":low")) and isinstance(proof, dict)
+                and proof.get("valid") is True):
+            declared.append(dict(check=row["check"], difference_ns=row["difference_ns"], evidence=proof))
+        else:
+            uncovered.append(row["check"])
+    status = "failed" if missing or uncovered else "deviation_declared" if declared else "passed"
+    return dict(status=status, mpw_rows=len(mine),
                 period_rows=len(period), max_difference_ns=diff, missing_or_extra=missing[:20],
-                worst_rows=sorted(rows, key=lambda r: -r["difference_ns"])[:4])
+                worst_rows=sorted(rows, key=lambda r: -r["difference_ns"])[:4],
+                declared_deviations=declared, undeclared_mismatches=uncovered,
+                tolerance_ns=tolerance)
 
 
 def drv_parity(gating: dict, ref: dict, corner: str) -> dict:
@@ -302,7 +323,7 @@ def drv_parity(gating: dict, ref: dict, corner: str) -> dict:
 
 
 def evaluate_source(rust: dict, ref: dict, corners: list[str], budgets: dict, clocked: bool = True,
-                    async_pins: list[str] = ()) -> dict:
+                    async_pins: list[str] = (), declarations: dict | None = None) -> dict:
     """Gating statuses of one SPEF source; `ref` maps corner -> OpenSTA result.
 
     ``clocked`` False (combinational design, virtual I/O clock): the pulse
@@ -417,10 +438,16 @@ def evaluate_source(rust: dict, ref: dict, corners: list[str], budgets: dict, cl
                limits=[x for x in lim if x["kind"] in DRV_KINDS])
     # Accuracy (RustSTA vs OpenSTA).
     acc = {c: dict(endpoints=endpoint_parity(g["endpoints"][c], ref[c], tol),
-                   pulse=pulse_parity(compat, ref[c], c, tol), drv=drv_parity(g, ref[c], c)) for c in corners}
-    failing = [f"{c}:{k}" for c, v in acc.items() for k, x in v.items() if x["status"] != "passed"]
-    accuracy = item("failed" if failing else "passed", None if not failing else f"parity outside {tol * 1e3:g} ps: {failing}",
-                    corners=acc, failing=failing)
+                   pulse=pulse_parity(compat, ref[c], c, tol, (declarations or {}).get(c)),
+                   drv=drv_parity(g, ref[c], c)) for c in corners}
+    failing = [f"{c}:{k}" for c, v in acc.items() for k, x in v.items()
+               if x["status"] != "passed" and not (k == "pulse" and x["status"] == "deviation_declared")]
+    declared = [dict(corner=c, **row) for c, v in acc.items()
+                for row in v["pulse"].get("declared_deviations", [])]
+    status = "failed" if failing else "deviation_declared" if declared else "passed"
+    accuracy = item(status, f"parity outside {tol * 1e3:g} ps: {failing}" if failing else
+                    "owner-approved MPW deviations are listed explicitly" if declared else None,
+                    corners=acc, failing=failing, declared_deviations=declared)
     return dict(timing_setup=setup, timing_hold=hold, mpw_min_period=mpw, drv=drv, timing_accuracy=accuracy,
                 matrix=matrix)
 
@@ -440,7 +467,7 @@ def combine(sources: dict[str, dict]) -> dict:
     for key in ("timing_setup", "timing_hold", "mpw_min_period", "drv", "timing_accuracy"):
         parts = {s: v[key] for s, v in sources.items()}
         st = worst(p["status"] for p in parts.values())
-        if "not_applicable" in [p["status"] for p in parts.values()] and st == "passed":
+        if "not_applicable" in [p["status"] for p in parts.values()] and st in ("passed", "deviation_declared"):
             # One source not applicable, another passed: the sources disagree.
             st = "unverified"
         reasons = [f"{s}: {p['reason']}" for s, p in parts.items() if p.get("reason")]

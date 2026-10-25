@@ -116,11 +116,11 @@
   },
   "signoff_manifest": {
     "path": "fixtures/flow/signoff-pinned.json",
-    "sha256": "9fbc84ff3b90e666a504610834aea9c7462c0daeebdc2b22c39cabaccd13c77a"
+    "sha256": "26fc1a1f230ee3c1b4ea568e549d87c96d84d3087ba47382926bbe097adbaf9b"
   },
   "tools": {
     "path": "fixtures/flow/rtl2gds-tools.json",
-    "sha256": "5d215475cf074853e934effe6604d028e1d5fc7953e621c8444c031e706a545e"
+    "sha256": "716076ef663eab3b38a6c50eb737fe8ecbdac693d4974d2273678add531701f3"
   },
   "pdks": {
     "sky130": {

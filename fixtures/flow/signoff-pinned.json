@@ -431,7 +431,13 @@
           "bytes": 2056
         }
       },
-      "trees": {}
+      "trees": {
+        "ngspice_models": {
+          "path": "libs.tech/ngspice",
+          "sha256": "6867371e10a4a8803d68500c970fcf7cb2269d9652d8a275a93d3848b4e78852",
+          "files": 181
+        }
+      }
     },
     "gf180": {
       "library": "gf180mcu_fd_sc_mcu7t5v0",
