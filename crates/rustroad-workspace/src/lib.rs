@@ -697,12 +697,11 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         {
             let records = snapshot.records().collect::<Vec<_>>();
             crate::physical::validate_state(&snapshot.metadata.design, bundle, &records)?;
-            let expected = crate::physical::table_bytes(bundle.state.as_ref().unwrap())?;
-            let map = map_table(&revision_dir.join("physical.rbin"), expected.len())?
+            let state = bundle.state.as_ref().unwrap();
+            let length = crate::physical::table_len(state)?;
+            let map = map_table(&revision_dir.join("physical.rbin"), length)?
                 .ok_or_else(|| Error::Invalid("empty prepared geometry table".into()))?;
-            if map[..] != expected {
-                return Err(Error::Invalid("prepared geometry table mismatch".into()));
-            }
+            crate::physical::validate_table(state, &map)?;
             snapshot._layout = Some(map);
             crate::routing::validate_state(&snapshot.metadata.design, bundle, &records)?;
             if let Some(routing) = bundle.routing.as_ref().filter(|r| r.table.is_none()) {
@@ -848,10 +847,7 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
             )?;
         }
         if let Some(state) = &physical.state {
-            write_new(
-                &directory.join("physical.rbin"),
-                &crate::physical::table_bytes(state)?,
-            )?;
+            crate::physical::write_table(state, &directory.join("physical.rbin"))?;
         }
     }
     sync_directory(&directory)?;

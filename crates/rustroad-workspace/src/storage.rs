@@ -14,7 +14,8 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 const FILE: &str = "model.rbin";
-const MAGIC: &[u8; 8] = b"RROADB01";
+const MAGIC: &[u8; 8] = b"RROADB02";
+const LEGACY_MAGIC: &[u8; 8] = b"RROADB01";
 const MAX_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 1024 * 1024;
 /// Absolute physical-instance ceiling, including fillers, taps and clock cells.
@@ -133,6 +134,13 @@ struct Held {
     connectivity: Option<ConnectedDesign>,
     fillers: Vec<String>,
     taps: Vec<String>,
+    clock_sinks: Vec<crate::clock::ClockSink>,
+    clock_buffers: Vec<String>,
+    tap_sites: Vec<rustroad_core::tap::TapSite>,
+    row_rails: Vec<rustroad_core::power::RailSpan>,
+    supply_wires: Vec<rustroad_core::supply::SupplyWire>,
+    supply_vias: Vec<rustroad_core::supply::SupplyVia>,
+    io_pins: Vec<rustroad_core::io::IoPin>,
 }
 impl Held {
     fn take(metadata: &mut Metadata) -> Self {
@@ -142,6 +150,13 @@ impl Held {
             connectivity: None,
             fillers: Vec::new(),
             taps: Vec::new(),
+            clock_sinks: Vec::new(),
+            clock_buffers: Vec::new(),
+            tap_sites: Vec::new(),
+            row_rails: Vec::new(),
+            supply_wires: Vec::new(),
+            supply_vias: Vec::new(),
+            io_pins: Vec::new(),
         };
         if let Some(p) = &mut metadata.physical {
             let empty = Netlist {
@@ -163,6 +178,19 @@ impl Held {
             held.connectivity = Some(std::mem::replace(&mut p.connectivity, empty));
             held.fillers = std::mem::take(&mut p.generated_fillers);
             held.taps = std::mem::take(&mut p.generated_taps);
+            if let Some(clock) = &mut p.clock_tree {
+                held.clock_sinks = std::mem::take(&mut clock.sinks);
+                held.clock_buffers = std::mem::take(&mut clock.buffers);
+            }
+            if let Some(state) = &mut p.state {
+                if let Some(tap) = &mut state.tap {
+                    held.tap_sites = std::mem::take(&mut tap.sites);
+                }
+                held.row_rails = std::mem::take(&mut state.rails.row_rails);
+                held.supply_wires = std::mem::take(&mut state.supply.wires);
+                held.supply_vias = std::mem::take(&mut state.supply.vias);
+                held.io_pins = std::mem::take(&mut state.io_pins);
+            }
         }
         held
     }
@@ -173,6 +201,19 @@ impl Held {
             p.connectivity = self.connectivity.expect("physical connectivity retained");
             p.generated_fillers = self.fillers;
             p.generated_taps = self.taps;
+            if let Some(clock) = &mut p.clock_tree {
+                clock.sinks = self.clock_sinks;
+                clock.buffers = self.clock_buffers;
+            }
+            if let Some(state) = &mut p.state {
+                if let Some(tap) = &mut state.tap {
+                    tap.sites = self.tap_sites;
+                }
+                state.rails.row_rails = self.row_rails;
+                state.supply.wires = self.supply_wires;
+                state.supply.vias = self.supply_vias;
+                state.io_pins = self.io_pins;
+            }
         }
     }
 }
@@ -221,6 +262,13 @@ fn spill(metadata: &mut Metadata, directory: &Path) -> Result<Vec<u8>> {
             }
             w.rows(&held.fillers)?;
             w.rows(&held.taps)?;
+            w.rows(&held.clock_sinks)?;
+            w.rows(&held.clock_buffers)?;
+            w.rows(&held.tap_sites)?;
+            w.rows(&held.row_rails)?;
+            w.rows(&held.supply_wires)?;
+            w.rows(&held.supply_vias)?;
+            w.rows(&held.io_pins)?;
         }
         w.output.flush()?;
         w.output.get_ref().sync_all()?;
@@ -270,7 +318,8 @@ pub(crate) fn restore(metadata: &mut Metadata, directory: &Path, limits: &Limits
         bytes: &map,
         offset: 0,
     };
-    if r.raw(8)? != MAGIC {
+    let magic: [u8; 8] = r.raw(8)?.try_into().expect("eight-byte magic");
+    if &magic != MAGIC && &magic != LEGACY_MAGIC {
         return Err(invalid("physical side-table magic"));
     }
     let cells = limits.max_cells;
@@ -339,6 +388,52 @@ pub(crate) fn restore(metadata: &mut Metadata, directory: &Path, limits: &Limits
         }
         p.generated_fillers = r.rows(cells)?;
         p.generated_taps = r.rows(cells)?;
+        if &magic == MAGIC {
+            let clock_sinks = r.rows(cells)?;
+            let clock_buffers = r.rows(cells)?;
+            let tap_sites = r.rows(cells)?;
+            let row_rails = r.rows(limits.max_rows.saturating_mul(2))?;
+            let supply_wires = r.rows(limits.max_rows.saturating_mul(2).saturating_add(2))?;
+            let supply_vias = r.rows(limits.max_rows.saturating_mul(4))?;
+            let io_pins = r.rows(65_536)?;
+            if let Some(clock) = &mut p.clock_tree {
+                if !clock.sinks.is_empty() || !clock.buffers.is_empty() {
+                    return Err(invalid("schema 7 duplicates clock records"));
+                }
+                clock.sinks = clock_sinks;
+                clock.buffers = clock_buffers;
+            } else if !clock_sinks.is_empty() || !clock_buffers.is_empty() {
+                return Err(invalid("clock records without clock report"));
+            }
+            if let Some(state) = &mut p.state {
+                if !state.rails.row_rails.is_empty()
+                    || !state.supply.wires.is_empty()
+                    || !state.supply.vias.is_empty()
+                    || !state.io_pins.is_empty()
+                {
+                    return Err(invalid("schema 7 duplicates prepared geometry records"));
+                }
+                if let Some(tap) = &mut state.tap {
+                    if !tap.sites.is_empty() {
+                        return Err(invalid("schema 7 duplicates tap records"));
+                    }
+                    tap.sites = tap_sites;
+                } else if !tap_sites.is_empty() {
+                    return Err(invalid("tap sites without tap report"));
+                }
+                state.rails.row_rails = row_rails;
+                state.supply.wires = supply_wires;
+                state.supply.vias = supply_vias;
+                state.io_pins = io_pins;
+            } else if !tap_sites.is_empty()
+                || !row_rails.is_empty()
+                || !supply_wires.is_empty()
+                || !supply_vias.is_empty()
+                || !io_pins.is_empty()
+            {
+                return Err(invalid("prepared geometry without state"));
+            }
+        }
     }
     if r.offset != r.bytes.len() {
         return Err(invalid("trailing physical side-table bytes"));
@@ -431,11 +526,25 @@ mod tests {
             "technology": {"dbu_per_micron":1000,"manufacturing_grid":null,"layers":[],"sites":[],"vias":[]},
             "netlist": {"module":"road_demo","ports":[{"name":"a","direction":"input","range":null}],"wires":[{"name":"n","range":null}],"assigns":[],"instances":[{"name":"u","cell":"BUF","connections":[{"pin":"A","signal":{"kind":"ident","value":"a"}}]}]},
             "connectivity": {"layers":["M1"],"masters":[],"instance_masters":[0],"ports":[{"name":"a","direction":"input","bits":["a"],"use_":"signal"}],"nets":[{"name":"a","aliases":["a"],"use_":"signal"}],"pins":[{"owner":{"kind":"instance","instance":0,"terminal":0},"net":0},{"owner":{"kind":"port","port":0,"bit":0},"net":null}]},
-            "sources":[],"diagnostics":[],"generated_fillers":["fill0"],"generated_taps":["tap0"]
+            "sources":[],"diagnostics":[],"generated_fillers":["fill0"],"generated_taps":["tap0"],
+            "clock_tree":{"sinks":[{"instance":"u","pin":"A"}],"buffers":["clock0"],"levels":1,"max_fanout":2,"scope":"storage fixture"},
+            "state":{
+                "io_pins":[{"name":"a","layer":"M1","side":"west","rect":{"lx":0,"ly":0,"ux":10,"uy":10}}],
+                "rails":{"status":"pass","scope":"fixture","rail_layer":"M1","occupied_rows":1,"shared_boundaries_checked":0,"intervals_checked":1,"work_units":1,"row_rails":[{"row":0,"edge":"bottom","polarity":"ground","x_start":0,"x_end":10,"y_min":0,"y_max":10}],"diagnostics":[],"body_bias_status":"unchecked","drc_status":"unchecked","ir_drop_status":"unchecked"},
+                "supply":{"wires":[{"polarity":"power","layer":"M1","width":10,"start":[0,0],"end":[20,0]}],"vias":[{"polarity":"power","name":"V1","at":[0,0]}],"ports":[],"work_units":1,"scope":"fixture","drc_status":"unchecked"},
+                "fillers_added":1,
+                "tap":{"sites":[{"row":0,"x":0,"y":0,"width":10}],"rows_checked":1,"max_clear_gap":10,"requested_max_gap":10,"work_units":1,"contact_status":"unchecked"}
+            }
         })).expect("typed storage fixture"));
         let expected = serde_json::to_value(&metadata).expect("original vectors");
         let json = spill(&mut metadata, &dir).expect("serialize physical vectors");
         let mut decoded: Metadata = serde_json::from_slice(&json).expect("small metadata");
+        let physical = decoded.physical.as_ref().expect("physical metadata");
+        assert!(physical.clock_tree.as_ref().unwrap().sinks.is_empty());
+        let state = physical.state.as_ref().unwrap();
+        assert!(state.tap.as_ref().unwrap().sites.is_empty());
+        assert!(state.io_pins.is_empty());
+        assert!(state.supply.wires.is_empty());
         let logical = restore(&mut decoded, &dir, &Limits::default())
             .expect("restore fixed and variable records");
         decoded.format_version = logical;
@@ -444,6 +553,20 @@ mod tests {
             serde_json::to_value(decoded).expect("decoded vectors"),
             expected
         );
+        std::fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
+    #[test]
+    fn legacy_v1_table_header_is_supported() {
+        let (dir, mut metadata) = fixture();
+        let json = spill(&mut metadata, &dir).expect("write table");
+        let mut decoded: Metadata = serde_json::from_slice(&json).expect("metadata");
+        let mut bytes = std::fs::read(dir.join(FILE)).expect("table");
+        bytes[..8].copy_from_slice(LEGACY_MAGIC);
+        decoded.tables.as_mut().unwrap().sha256 = format!("{:x}", Sha256::digest(&bytes));
+        std::fs::write(dir.join(FILE), bytes).expect("legacy table");
+        restore(&mut decoded, &dir, &Limits::default()).expect("restore legacy table");
+        assert_eq!(decoded.design.cells.len(), metadata.design.cells.len());
         std::fs::remove_dir_all(dir).expect("remove test directory");
     }
     #[test]

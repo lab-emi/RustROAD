@@ -68,7 +68,7 @@ pub enum RailPolarity {
     Power,
     Ground,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RailDiagnostic {
     pub code: String,
@@ -77,7 +77,7 @@ pub struct RailDiagnostic {
     pub x_range: Option<[i64; 2]>,
     pub message: String,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RailSpan {
     pub row: u32,
@@ -89,7 +89,7 @@ pub struct RailSpan {
     pub y_min: i64,
     pub y_max: i64,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RailReport {
     pub status: String,

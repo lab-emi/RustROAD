@@ -15,6 +15,7 @@ use rustroad_formats::{lef, verilog};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::path::Path;
 
 fn default_added() -> usize {
     250_000
@@ -361,7 +362,7 @@ impl PhysicalConfig {
         Ok(())
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PhysicalState {
     pub io_pins: Vec<IoPin>,
@@ -587,11 +588,20 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
         return Err(Error::Invalid("tie report polarity/count mismatch".into()));
     }
     let model = &bundle.connectivity;
+    if report.bindings.is_empty() {
+        return Ok(());
+    }
+    let required: HashSet<&str> = report
+        .bindings
+        .iter()
+        .map(|b| b.instance.as_str())
+        .collect();
     let instances: HashMap<_, _> = bundle
         .netlist
         .instances
         .iter()
         .enumerate()
+        .filter(|(_, c)| required.contains(c.name.as_str()))
         .map(|(i, c)| (c.name.as_str(), i))
         .collect();
     let mut net_sinks = vec![0usize; model.nets.len()];
@@ -612,7 +622,10 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
             }
         }
     }
-    let pin_nets: HashMap<_, _> = model.pins.iter().map(|p| (p.owner, p.net)).collect();
+    let pin_index = rustroad_core::connectivity::PinIndex::new(
+        model,
+        &crate::pdk::connection_limits_for_cells(bundle.netlist.instances.len())?,
+    )?;
     let terminal_names: Vec<HashMap<_, _>> = model
         .masters
         .iter()
@@ -623,12 +636,6 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
                 .map(|(i, p)| (p.name.as_str(), i))
                 .collect()
         })
-        .collect();
-    let alias_nets: HashMap<_, _> = model
-        .nets
-        .iter()
-        .enumerate()
-        .flat_map(|(i, n)| n.aliases.iter().map(move |a| (a.as_str(), i as u32)))
         .collect();
     let mut binding_names = HashSet::new();
     for binding in &report.bindings {
@@ -650,13 +657,12 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
             let terminal = *terminal_names[model.instance_masters[i] as usize]
                 .get(rail_pin)
                 .ok_or_else(|| Error::Invalid("tie rail input absent".into()))?;
-            let net = pin_nets
-                .get(&PinOwner::Instance {
-                    instance: i as u32,
-                    terminal: terminal as u32,
-                })
-                .copied()
-                .flatten()
+            let pin = pin_index.get(PinOwner::Instance {
+                instance: i as u32,
+                terminal: terminal as u32,
+            })?;
+            let net = model.pins[pin as usize]
+                .net
                 .ok_or_else(|| Error::Invalid("tie rail input unconnected".into()))?;
             let want = if power {
                 &cfg.power_net
@@ -670,15 +676,14 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
         let terminal = *terminal_names[model.instance_masters[i] as usize]
             .get(binding.pin.as_str())
             .ok_or_else(|| Error::Invalid("tie output absent".into()))?;
-        let net = pin_nets
-            .get(&PinOwner::Instance {
-                instance: i as u32,
-                terminal: terminal as u32,
-            })
-            .copied()
-            .flatten()
+        let pin = pin_index.get(PinOwner::Instance {
+            instance: i as u32,
+            terminal: terminal as u32,
+        })?;
+        let net = model.pins[pin as usize]
+            .net
             .ok_or_else(|| Error::Invalid("tie output unconnected".into()))?;
-        if alias_nets.get(binding.net.as_str()) != Some(&net)
+        if !model.nets[net as usize].aliases.contains(&binding.net)
             || net_sinks[net as usize] > cfg.max_tie_fanout
         {
             return Err(Error::Budget("tie net identity/fanout limit".into()));
@@ -1490,7 +1495,7 @@ pub(super) fn validate_state(
         .as_ref()
         .ok_or_else(|| Error::Invalid("prepared placement state absent".into()))?;
     let expected = layout(design, bundle, placed)?;
-    if crate::serialize_bounded(state)? != crate::serialize_bounded(&expected)? {
+    if state != &expected {
         return Err(Error::Invalid(
             "prepared layout differs from validated geometry".into(),
         ));
@@ -1908,7 +1913,7 @@ pub(super) fn export_def(
     Ok(())
 }
 
-pub(super) fn table_bytes(state: &PhysicalState) -> Result<Vec<u8>> {
+pub(super) fn table_len(state: &PhysicalState) -> Result<usize> {
     let count = state
         .io_pins
         .len()
@@ -1919,38 +1924,78 @@ pub(super) fn table_bytes(state: &PhysicalState) -> Result<Vec<u8>> {
         .ok_or_else(|| Error::Budget("physical table count overflow".into()))?;
     let bytes = count
         .checked_mul(64)
-        .ok_or_else(|| Error::Budget("physical table size overflow".into()))?;
-    if bytes > crate::MAX_METADATA_BYTES as usize {
-        return Err(Error::Budget("physical table byte cap".into()));
-    }
-    let mut out = Vec::with_capacity(bytes);
-    let mut record = |values: [i64; 8]| {
-        for v in values {
-            out.extend_from_slice(&v.to_le_bytes());
+        .filter(|&n| n <= 2 * 1024 * 1024 * 1024)
+        .ok_or_else(|| Error::Budget("physical table byte cap".into()))?;
+    Ok(bytes)
+}
+
+fn table_records(state: &PhysicalState) -> impl Iterator<Item = [i64; 8]> + '_ {
+    state
+        .io_pins
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            [
+                1, i as i64, p.rect.lx, p.rect.ly, p.rect.ux, p.rect.uy, 0, 0,
+            ]
+        })
+        .chain(state.supply.ports.iter().enumerate().map(|(i, p)| {
+            [
+                2, i as i64, p.rect.lx, p.rect.ly, p.rect.ux, p.rect.uy, 0, 0,
+            ]
+        }))
+        .chain(state.supply.wires.iter().enumerate().map(|(i, w)| {
+            [
+                3, i as i64, w.start[0], w.start[1], w.end[0], w.end[1], w.width, 0,
+            ]
+        }))
+        .chain(
+            state
+                .supply
+                .vias
+                .iter()
+                .enumerate()
+                .map(|(i, v)| [4, i as i64, v.at[0], v.at[1], 0, 0, 0, 0]),
+        )
+        .chain(
+            state
+                .tap
+                .iter()
+                .flat_map(|t| t.sites.iter())
+                .enumerate()
+                .map(|(i, t)| [5, i as i64, t.x, t.y, t.width, t.row as i64, 0, 0]),
+        )
+}
+
+pub(super) fn write_table(state: &PhysicalState, path: &Path) -> Result<()> {
+    table_len(state)?;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    let mut out = std::io::BufWriter::with_capacity(256 * 1024, file);
+    for record in table_records(state) {
+        for value in record {
+            out.write_all(&value.to_le_bytes())?;
         }
-    };
-    for (i, p) in state.io_pins.iter().enumerate() {
-        record([
-            1, i as i64, p.rect.lx, p.rect.ly, p.rect.ux, p.rect.uy, 0, 0,
-        ]);
     }
-    for (i, p) in state.supply.ports.iter().enumerate() {
-        record([
-            2, i as i64, p.rect.lx, p.rect.ly, p.rect.ux, p.rect.uy, 0, 0,
-        ]);
+    out.flush()?;
+    out.get_ref().sync_all()?;
+    Ok(())
+}
+
+pub(super) fn validate_table(state: &PhysicalState, bytes: &[u8]) -> Result<()> {
+    if bytes.len() != table_len(state)? {
+        return Err(Error::Invalid(
+            "prepared geometry table length mismatch".into(),
+        ));
     }
-    for (i, w) in state.supply.wires.iter().enumerate() {
-        record([
-            3, i as i64, w.start[0], w.start[1], w.end[0], w.end[1], w.width, 0,
-        ]);
-    }
-    for (i, v) in state.supply.vias.iter().enumerate() {
-        record([4, i as i64, v.at[0], v.at[1], 0, 0, 0, 0]);
-    }
-    if let Some(tap) = &state.tap {
-        for (i, t) in tap.sites.iter().enumerate() {
-            record([5, i as i64, t.x, t.y, t.width, t.row as i64, 0, 0]);
+    for (record, expected) in bytes.chunks_exact(64).zip(table_records(state)) {
+        for (field, value) in record.chunks_exact(8).zip(expected) {
+            if i64::from_le_bytes(field.try_into().expect("eight-byte field")) != value {
+                return Err(Error::Invalid("prepared geometry table mismatch".into()));
+            }
         }
     }
-    Ok(out)
+    Ok(())
 }
