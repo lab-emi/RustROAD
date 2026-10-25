@@ -92,8 +92,8 @@ fn access_key(class: u32, origin: [i64; 2], points: &[(u32, [i64; 2])]) -> Resul
 }
 
 /// A driver at a remote port need not be the geometric root of an undirected
-/// wire tree. During repair, join the central terminals first and the outliers
-/// last. Reuse the existing group storage and charge all three bounded sorts.
+/// wire tree. During repair, join central internal terminals first and ports
+/// last. Reuse the group storage and charge partitioning plus bounded sorts.
 fn repair_terminal_order(
     group: &mut [&Terminal],
     point: impl Fn(&Terminal) -> [i64; 2],
@@ -112,13 +112,22 @@ fn repair_terminal_order(
         .checked_add(cost)
         .filter(|&n| n <= cap)
         .ok_or_else(|| budget("repair terminal-order work"))?;
-    group.sort_unstable_by_key(|t| (point(t)[0], t.pin));
-    let x = point(group[group.len() / 2])[0];
-    group.sort_unstable_by_key(|t| (point(t)[1], t.pin));
-    let y = point(group[group.len() / 2])[1];
+    let mut internal = 0;
+    for i in 0..group.len() {
+        if group[i].class.is_some() {
+            group.swap(i, internal);
+            internal += 1;
+        }
+    }
+    let central = if internal == 0 { group.len() } else { internal };
+    group[..central].sort_unstable_by_key(|t| (point(t)[0], t.pin));
+    let x = point(group[central / 2])[0];
+    group[..central].sort_unstable_by_key(|t| (point(t)[1], t.pin));
+    let y = point(group[central / 2])[1];
     group.sort_unstable_by_key(|t| {
         let p = point(t);
         (
+            internal != 0 && t.class.is_none(),
             p[0].abs_diff(x).saturating_add(p[1].abs_diff(y)),
             !t.driver,
             t.pin,
@@ -3549,6 +3558,26 @@ mod tests {
         assert_eq!(
             ordered.iter().map(|t| t.pin).collect::<Vec<_>>(),
             permuted.iter().map(|t| t.pin).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn two_terminal_repair_grows_from_the_internal_cell_toward_the_port() {
+        let port = terminal(0, 0, true, rect(8990, 8990, 9010, 9010));
+        let mut cell = terminal(1, 0, false, rect(90, 90, 110, 110));
+        cell.class = Some((0, [0, 0]));
+        let mut ordered = [&port, &cell];
+        repair_terminal_order(
+            &mut ordered,
+            |t| if t.pin == 0 { [9000, 9000] } else { [100, 100] },
+            &mut 0,
+            100,
+        )
+        .unwrap();
+        assert_eq!([ordered[0].pin, ordered[1].pin], [1, 0]);
+        assert!(
+            ordered[1].driver,
+            "the physical root does not change the logical driver"
         );
     }
 
