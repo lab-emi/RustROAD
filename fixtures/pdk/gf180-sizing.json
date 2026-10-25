@@ -1,0 +1,7873 @@
+{
+ "schema": "rustroad.sizing-profile.v1",
+ "pdk": "gf180",
+ "library": "gf180mcu_fd_sc_mcu7t5v0",
+ "generator": "scripts/build_sizing_profile.py",
+ "sources": [
+  {
+   "role": "liberty_tt",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+   "sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+   "bytes": 20107439
+  },
+  {
+   "role": "cell_lef",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lef/gf180mcu_fd_sc_mcu7t5v0.lef",
+   "sha256": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+   "bytes": 671072
+  },
+  {
+   "role": "cell_policy",
+   "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/final2/fixtures/flow/cell-policy.json",
+   "sha256": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37",
+   "bytes": 13337
+  },
+  {
+   "role": "liberty_ss",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib",
+   "sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+   "bytes": 19934792
+  },
+  {
+   "role": "liberty_ff",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ff_n40C_3v60.lib",
+   "sha256": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+   "bytes": 20275104
+  }
+ ],
+ "dbu_per_um": 2000,
+ "rule": "same pins, directions, output functions and sequential description; policy synth_dont_use and pnr_exclude removed; ordered by output max_capacitance",
+ "drive_model": {
+  "input_slew_ns": 0.2,
+  "loads_pf": [
+   0.005,
+   0.05
+  ],
+  "corners": [
+   "tt",
+   "ss",
+   "ff"
+  ],
+  "rule": "per corner Liberty: input pin capacitance; worst (max rise/fall, max over combinational and edge arcs of the one output pin) delay and output transition at input_slew_ns and each of loads_pf, bilinear inside the table; linear in load between the points is the planner's estimate"
+ },
+ "families": [
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__addf",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "CI": "input",
+    "CO": "output",
+    "S": "output"
+   },
+   "functions": {
+    "CO": "((A&B)|(A&CI)|(B&CI))",
+    "S": "(A^B^CI)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__addf_1",
+     "width_dbu": 36960,
+     "area_um2": 72.4416,
+     "max_capacitance_pf": 0.3582,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A": 0.01156,
+        "B": 0.01124,
+        "CI": 0.009417
+       }
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A": 0.01167,
+        "B": 0.0114,
+        "CI": 0.009763
+       }
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A": 0.01182,
+        "B": 0.01142,
+        "CI": 0.009254
+       }
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__addf_2",
+     "width_dbu": 40320,
+     "area_um2": 79.0272,
+     "max_capacitance_pf": 0.7051,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A": 0.01168,
+        "B": 0.01146,
+        "CI": 0.009442
+       }
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A": 0.01176,
+        "B": 0.0115,
+        "CI": 0.00977
+       }
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A": 0.01195,
+        "B": 0.01172,
+        "CI": 0.009287
+       }
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__addf_4",
+     "width_dbu": 49280,
+     "area_um2": 96.5888,
+     "max_capacitance_pf": 1.43,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A": 0.01172,
+        "B": 0.01142,
+        "CI": 0.009256
+       }
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A": 0.01181,
+        "B": 0.0115,
+        "CI": 0.009571
+       }
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A": 0.01198,
+        "B": 0.01168,
+        "CI": 0.009133
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__addh",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A": "input",
+    "B": "input",
+    "CO": "output",
+    "S": "output"
+   },
+   "functions": {
+    "CO": "(A&B)",
+    "S": "(A^B)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__addh_1",
+     "width_dbu": 20160,
+     "area_um2": 39.5136,
+     "max_capacitance_pf": 0.3598,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A": 0.006344,
+        "B": 0.005309
+       }
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A": 0.006461,
+        "B": 0.005332
+       }
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A": 0.006349,
+        "B": 0.005337
+       }
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__addh_2",
+     "width_dbu": 24640,
+     "area_um2": 48.2944,
+     "max_capacitance_pf": 0.718,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A": 0.008909,
+        "B": 0.007629
+       }
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A": 0.009119,
+        "B": 0.007798
+       }
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A": 0.008886,
+        "B": 0.007613
+       }
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__addh_4",
+     "width_dbu": 44800,
+     "area_um2": 87.808,
+     "max_capacitance_pf": 1.162,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A": 0.01637,
+        "B": 0.01436
+       }
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A": 0.01673,
+        "B": 0.01468
+       }
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A": 0.01631,
+        "B": 0.01433
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__and2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "(A1&A2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__and2_1",
+     "width_dbu": 8960,
+     "area_um2": 17.5616,
+     "max_capacitance_pf": 0.3579,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.002759,
+        "A2": 0.002753
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.406641,
+        1.027435
+       ],
+       "slew_ns": [
+        0.226821,
+        1.270627
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.002747,
+        "A2": 0.002736
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.792323,
+        1.947607
+       ],
+       "slew_ns": [
+        0.438753,
+        2.35032
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.002802,
+        "A2": 0.002808
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.259027,
+        0.627599
+       ],
+       "slew_ns": [
+        0.133762,
+        0.774243
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__and2_2",
+     "width_dbu": 10080,
+     "area_um2": 19.7568,
+     "max_capacitance_pf": 0.7179,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.0044,
+        "A2": 0.004437
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.363486,
+        0.648264
+       ],
+       "slew_ns": [
+        0.142874,
+        0.654893
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004453,
+        "A2": 0.004504
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.65032,
+        1.221781
+       ],
+       "slew_ns": [
+        0.274648,
+        1.213618
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004416,
+        "A2": 0.004453
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.238344,
+        0.399495
+       ],
+       "slew_ns": [
+        0.084636,
+        0.398506
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__and2_4",
+     "width_dbu": 19040,
+     "area_um2": 37.3184,
+     "max_capacitance_pf": 1.434,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.008745,
+        "A2": 0.009062
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.324494,
+        0.474732
+       ],
+       "slew_ns": [
+        0.113742,
+        0.365891
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.008872,
+        "A2": 0.009218
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.573303,
+        0.897721
+       ],
+       "slew_ns": [
+        0.221021,
+        0.683974
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.008777,
+        "A2": 0.00906
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.215351,
+        0.294082
+       ],
+       "slew_ns": [
+        0.067882,
+        0.221877
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__and3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "(A1&A2&A3)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__and3_1",
+     "width_dbu": 11200,
+     "area_um2": 21.952,
+     "max_capacitance_pf": 0.358,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.002784,
+        "A2": 0.002715,
+        "A3": 0.002744
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.563438,
+        1.209469
+       ],
+       "slew_ns": [
+        0.259349,
+        1.279117
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.002779,
+        "A2": 0.002715,
+        "A3": 0.00276
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.144475,
+        2.364705
+       ],
+       "slew_ns": [
+        0.512974,
+        2.375638
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.002817,
+        "A2": 0.00275,
+        "A3": 0.002789
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.321303,
+        0.711427
+       ],
+       "slew_ns": [
+        0.151013,
+        0.777312
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__and3_2",
+     "width_dbu": 12320,
+     "area_um2": 24.1472,
+     "max_capacitance_pf": 0.7175,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004303,
+        "A2": 0.004119,
+        "A3": 0.004086
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.446554,
+        0.785846
+       ],
+       "slew_ns": [
+        0.167386,
+        0.673585
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004357,
+        "A2": 0.004145,
+        "A3": 0.004113
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.880175,
+        1.525543
+       ],
+       "slew_ns": [
+        0.32852,
+        1.256494
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004314,
+        "A2": 0.004156,
+        "A3": 0.004116
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.279498,
+        0.465197
+       ],
+       "slew_ns": [
+        0.098787,
+        0.4084
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__and3_4",
+     "width_dbu": 22400,
+     "area_um2": 43.904,
+     "max_capacitance_pf": 1.44,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.009005,
+        "A2": 0.009435,
+        "A3": 0.01016
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.424226,
+        0.61269
+       ],
+       "slew_ns": [
+        0.137101,
+        0.394235
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.009137,
+        "A2": 0.00965,
+        "A3": 0.01046
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.837789,
+        1.202757
+       ],
+       "slew_ns": [
+        0.268683,
+        0.744685
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.009036,
+        "A2": 0.009396,
+        "A3": 0.01005
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.249633,
+        0.360732
+       ],
+       "slew_ns": [
+        0.081494,
+        0.23684
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__and4",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "A4": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "(A1&A2&A3&A4)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__and4_1",
+     "width_dbu": 12320,
+     "area_um2": 24.1472,
+     "max_capacitance_pf": 0.3591,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.002928,
+        "A2": 0.003002,
+        "A3": 0.002928,
+        "A4": 0.002815
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.711025,
+        1.379771
+       ],
+       "slew_ns": [
+        0.287823,
+        1.298366
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.002927,
+        "A2": 0.003019,
+        "A3": 0.002936,
+        "A4": 0.002819
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.47095,
+        2.749699
+       ],
+       "slew_ns": [
+        0.574362,
+        2.427042
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.002962,
+        "A2": 0.003023,
+        "A3": 0.002951,
+        "A4": 0.002859
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.397951,
+        0.798816
+       ],
+       "slew_ns": [
+        0.167003,
+        0.78665
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__and4_2",
+     "width_dbu": 14560,
+     "area_um2": 28.5376,
+     "max_capacitance_pf": 0.7198,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004099,
+        "A2": 0.004046,
+        "A3": 0.00403,
+        "A4": 0.00397
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.569386,
+        0.928296
+       ],
+       "slew_ns": [
+        0.190625,
+        0.699518
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004136,
+        "A2": 0.004079,
+        "A3": 0.004076,
+        "A4": 0.004
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.137334,
+        1.830144
+       ],
+       "slew_ns": [
+        0.373752,
+        1.314428
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004129,
+        "A2": 0.004075,
+        "A3": 0.004047,
+        "A4": 0.003994
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.331523,
+        0.54177
+       ],
+       "slew_ns": [
+        0.113627,
+        0.422177
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__and4_4",
+     "width_dbu": 26880,
+     "area_um2": 52.6848,
+     "max_capacitance_pf": 1.439,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.008551,
+        "A2": 0.008735,
+        "A3": 0.009113,
+        "A4": 0.009942
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.602664,
+        0.817302
+       ],
+       "slew_ns": [
+        0.171924,
+        0.44197
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.008712,
+        "A2": 0.008936,
+        "A3": 0.009346,
+        "A4": 0.01035
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.227326,
+        1.651546
+       ],
+       "slew_ns": [
+        0.336355,
+        0.849343
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.008551,
+        "A2": 0.008682,
+        "A3": 0.00904,
+        "A4": 0.00975
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.342851,
+        0.467926
+       ],
+       "slew_ns": [
+        0.103007,
+        0.261817
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__aoi21",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "(((!A1)&(!B))|((!A2)&(!B)))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__aoi21_1",
+     "width_dbu": 8960,
+     "area_um2": 17.5616,
+     "max_capacitance_pf": 0.1815,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004753,
+        "A2": 0.004645,
+        "B": 0.003919
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.421678,
+        1.580044
+       ],
+       "slew_ns": [
+        0.499626,
+        2.524828
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004828,
+        "A2": 0.004707,
+        "B": 0.00394
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.806282,
+        3.064416
+       ],
+       "slew_ns": [
+        0.972368,
+        4.893258
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004765,
+        "A2": 0.004665,
+        "B": 0.003974
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.251027,
+        0.91612
+       ],
+       "slew_ns": [
+        0.291113,
+        1.455478
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__aoi21_2",
+     "width_dbu": 14560,
+     "area_um2": 28.5376,
+     "max_capacitance_pf": 0.3628,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.009094,
+        "A2": 0.009524,
+        "B": 0.007744
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.352001,
+        0.934544
+       ],
+       "slew_ns": [
+        0.38657,
+        1.399863
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.009238,
+        "A2": 0.00976,
+        "B": 0.007809
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.672241,
+        1.808655
+       ],
+       "slew_ns": [
+        0.754183,
+        2.720572
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.009139,
+        "A2": 0.009525,
+        "B": 0.007819
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.211089,
+        0.545762
+       ],
+       "slew_ns": [
+        0.226935,
+        0.807276
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__aoi21_4",
+     "width_dbu": 26880,
+     "area_um2": 52.6848,
+     "max_capacitance_pf": 0.7155,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.01896,
+        "A2": 0.01929,
+        "B": 0.01488
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.323085,
+        0.620213
+       ],
+       "slew_ns": [
+        0.338751,
+        0.852655
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.01934,
+        "A2": 0.01973,
+        "B": 0.01494
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.616232,
+        1.195713
+       ],
+       "slew_ns": [
+        0.662087,
+        1.660621
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.01897,
+        "A2": 0.01924,
+        "B": 0.01503
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.193882,
+        0.364455
+       ],
+       "slew_ns": [
+        0.200105,
+        0.491572
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__aoi22",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B1": "input",
+    "B2": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "(((!A1)&(!B1))|((!A1)&(!B2))|((!A2)&(!B1))|((!A2)&(!B2)))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__aoi22_1",
+     "width_dbu": 10080,
+     "area_um2": 19.7568,
+     "max_capacitance_pf": 0.2411,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004838,
+        "A2": 0.004757,
+        "B1": 0.004611,
+        "B2": 0.004473
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.504807,
+        1.662987
+       ],
+       "slew_ns": [
+        0.582297,
+        2.611585
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.00494,
+        "A2": 0.004842,
+        "B1": 0.004678,
+        "B2": 0.00452
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.974388,
+        3.234451
+       ],
+       "slew_ns": [
+        1.12266,
+        5.053464
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004816,
+        "A2": 0.004762,
+        "B1": 0.004618,
+        "B2": 0.004493
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.298517,
+        0.964316
+       ],
+       "slew_ns": [
+        0.34123,
+        1.508946
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__aoi22_2",
+     "width_dbu": 17920,
+     "area_um2": 35.1232,
+     "max_capacitance_pf": 0.4804,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.009257,
+        "A2": 0.009695,
+        "B1": 0.008815,
+        "B2": 0.009034
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.437144,
+        1.019147
+       ],
+       "slew_ns": [
+        0.475871,
+        1.493188
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.00942,
+        "A2": 0.009906,
+        "B1": 0.008926,
+        "B2": 0.009144
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.843803,
+        1.979663
+       ],
+       "slew_ns": [
+        0.919102,
+        2.890974
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.009274,
+        "A2": 0.009652,
+        "B1": 0.00885,
+        "B2": 0.009067
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.259264,
+        0.593713
+       ],
+       "slew_ns": [
+        0.280181,
+        0.864227
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__aoi22_4",
+     "width_dbu": 35840,
+     "area_um2": 70.2464,
+     "max_capacitance_pf": 0.863,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.01759,
+        "A2": 0.0183,
+        "B1": 0.01753,
+        "B2": 0.01794
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.443345,
+        0.769487
+       ],
+       "slew_ns": [
+        0.468986,
+        1.038165
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.01779,
+        "A2": 0.01863,
+        "B1": 0.01784,
+        "B2": 0.01828
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.863147,
+        1.501934
+       ],
+       "slew_ns": [
+        0.910272,
+        2.017182
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.01775,
+        "A2": 0.01835,
+        "B1": 0.01752,
+        "B2": 0.01788
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.261224,
+        0.447863
+       ],
+       "slew_ns": [
+        0.27513,
+        0.59975
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__buf",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "I": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "I"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__buf_1",
+     "width_dbu": 6720,
+     "area_um2": 13.1712,
+     "max_capacitance_pf": 0.3597,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.002834
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.373506,
+        0.91795
+       ],
+       "slew_ns": [
+        0.204185,
+        1.264913
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.002832
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.678128,
+        1.683701
+       ],
+       "slew_ns": [
+        0.387573,
+        2.339057
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.002877
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.241474,
+        0.569929
+       ],
+       "slew_ns": [
+        0.122369,
+        0.770767
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__buf_2",
+     "width_dbu": 8960,
+     "area_um2": 17.5616,
+     "max_capacitance_pf": 0.7212,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.004859
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.301014,
+        0.556859
+       ],
+       "slew_ns": [
+        0.124634,
+        0.648139
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.004949
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.526282,
+        1.004605
+       ],
+       "slew_ns": [
+        0.233689,
+        1.201525
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.004863
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.202047,
+        0.35149
+       ],
+       "slew_ns": [
+        0.075872,
+        0.395399
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__buf_3",
+     "width_dbu": 11200,
+     "area_um2": 21.952,
+     "max_capacitance_pf": 1.082,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.004869
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.348508,
+        0.504275
+       ],
+       "slew_ns": [
+        0.121301,
+        0.46233
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.004951
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.618885,
+        0.903339
+       ],
+       "slew_ns": [
+        0.230944,
+        0.859438
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.004859
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.230661,
+        0.326534
+       ],
+       "slew_ns": [
+        0.072793,
+        0.280907
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__buf_4",
+     "width_dbu": 15680,
+     "area_um2": 30.7328,
+     "max_capacitance_pf": 1.442,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.009096
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.266836,
+        0.381205
+       ],
+       "slew_ns": [
+        0.093658,
+        0.35027
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.009175
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.459413,
+        0.667048
+       ],
+       "slew_ns": [
+        0.175757,
+        0.650522
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.009149
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.181795,
+        0.252681
+       ],
+       "slew_ns": [
+        0.057271,
+        0.213623
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__buf_8",
+     "width_dbu": 29120,
+     "area_um2": 57.0752,
+     "max_capacitance_pf": 2.878,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.01792
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.261676,
+        0.324768
+       ],
+       "slew_ns": [
+        0.083159,
+        0.209462
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.01812
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.451487,
+        0.566861
+       ],
+       "slew_ns": [
+        0.157292,
+        0.391019
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.01808
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.178359,
+        0.217191
+       ],
+       "slew_ns": [
+        0.050541,
+        0.127434
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__buf_12",
+     "width_dbu": 42560,
+     "area_um2": 83.4176,
+     "max_capacitance_pf": 4.311,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.02687
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.261658,
+        0.306825
+       ],
+       "slew_ns": [
+        0.080666,
+        0.164024
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.02719
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.452466,
+        0.535235
+       ],
+       "slew_ns": [
+        0.153985,
+        0.308057
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.02708
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.178004,
+        0.205776
+       ],
+       "slew_ns": [
+        0.048967,
+        0.099691
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__buf_16",
+     "width_dbu": 56000,
+     "area_um2": 109.76,
+     "max_capacitance_pf": 5.739,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.03591
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.261576,
+        0.297842
+       ],
+       "slew_ns": [
+        0.07955,
+        0.141265
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.03632
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.453798,
+        0.520285
+       ],
+       "slew_ns": [
+        0.152483,
+        0.267109
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.03618
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.177794,
+        0.199903
+       ],
+       "slew_ns": [
+        0.048003,
+        0.085825
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__buf_20",
+     "width_dbu": 69440,
+     "area_um2": 136.1024,
+     "max_capacitance_pf": 7.161,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.04492
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.262598,
+        0.293398
+       ],
+       "slew_ns": [
+        0.079564,
+        0.128521
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.04547
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.455593,
+        0.512135
+       ],
+       "slew_ns": [
+        0.152032,
+        0.243307
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.04521
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.178089,
+        0.196852
+       ],
+       "slew_ns": [
+        0.047889,
+        0.077897
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__dffnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLKN": "input",
+    "D": "input",
+    "Q": "output"
+   },
+   "functions": {
+    "Q": "IQ1"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ1",
+      "IQN1"
+     ],
+     [
+      "clocked_on",
+      "(!CLKN)"
+     ],
+     [
+      "next_state",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnq_1",
+     "width_dbu": 33600,
+     "area_um2": 65.856,
+     "max_capacitance_pf": 0.3316,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003401,
+        "D": 0.002363
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.12743,
+        1.787376
+       ],
+       "slew_ns": [
+        0.223971,
+        1.357491
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003408,
+        "D": 0.002318
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.220386,
+        3.446725
+       ],
+       "slew_ns": [
+        0.427549,
+        2.514522
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003433,
+        "D": 0.002447
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.663456,
+        1.067406
+       ],
+       "slew_ns": [
+        0.132546,
+        0.825725
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnq_2",
+     "width_dbu": 36960,
+     "area_um2": 72.4416,
+     "max_capacitance_pf": 0.6438,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003401,
+        "D": 0.002369
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.084219,
+        1.429698
+       ],
+       "slew_ns": [
+        0.154104,
+        0.724597
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003408,
+        "D": 0.002317
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.135419,
+        2.783031
+       ],
+       "slew_ns": [
+        0.296716,
+        1.347365
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003433,
+        "D": 0.002447
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.639741,
+        0.849414
+       ],
+       "slew_ns": [
+        0.090527,
+        0.438966
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnq_4",
+     "width_dbu": 42560,
+     "area_um2": 83.4176,
+     "max_capacitance_pf": 1.289,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003401,
+        "D": 0.002369
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.169142,
+        1.354527
+       ],
+       "slew_ns": [
+        0.158827,
+        0.418679
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003409,
+        "D": 0.00232
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.299533,
+        2.652164
+       ],
+       "slew_ns": [
+        0.294504,
+        0.788345
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003433,
+        "D": 0.002446
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.691579,
+        0.80142
+       ],
+       "slew_ns": [
+        0.098049,
+        0.252142
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__dffnrnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLKN": "input",
+    "D": "input",
+    "Q": "output",
+    "RN": "input"
+   },
+   "functions": {
+    "Q": "IQ1"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ1",
+      "IQN1"
+     ],
+     [
+      "clocked_on",
+      "(!CLKN)"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "clear",
+      "(!RN)"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnrnq_1",
+     "width_dbu": 38080,
+     "area_um2": 74.6368,
+     "max_capacitance_pf": 0.3458,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003279,
+        "D": 0.002979,
+        "RN": 0.007089
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.353926,
+        2.007791
+       ],
+       "slew_ns": [
+        0.261289,
+        1.31884
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003277,
+        "D": 0.002969,
+        "RN": 0.007254
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.708473,
+        3.935131
+       ],
+       "slew_ns": [
+        0.511197,
+        2.447736
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003322,
+        "D": 0.003027,
+        "RN": 0.007208
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.789236,
+        1.186405
+       ],
+       "slew_ns": [
+        0.152145,
+        0.801931
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnrnq_2",
+     "width_dbu": 40320,
+     "area_um2": 79.0272,
+     "max_capacitance_pf": 0.6979,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.00317,
+        "D": 0.00298,
+        "RN": 0.006987
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.330171,
+        1.685032
+       ],
+       "slew_ns": [
+        0.185401,
+        0.701692
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003159,
+        "D": 0.002966,
+        "RN": 0.007124
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.675107,
+        3.357024
+       ],
+       "slew_ns": [
+        0.365972,
+        1.315804
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003223,
+        "D": 0.003032,
+        "RN": 0.007152
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.77326,
+        0.984024
+       ],
+       "slew_ns": [
+        0.108915,
+        0.42335
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnrnq_4",
+     "width_dbu": 44800,
+     "area_um2": 87.808,
+     "max_capacitance_pf": 1.419,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003171,
+        "D": 0.002977,
+        "RN": 0.006997
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.489861,
+        1.701879
+       ],
+       "slew_ns": [
+        0.190394,
+        0.460043
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003159,
+        "D": 0.002966,
+        "RN": 0.007117
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.995565,
+        3.41688
+       ],
+       "slew_ns": [
+        0.368572,
+        0.885351
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003221,
+        "D": 0.00303,
+        "RN": 0.007162
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.864637,
+        0.987644
+       ],
+       "slew_ns": [
+        0.113279,
+        0.270448
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__dffnrsnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLKN": "input",
+    "D": "input",
+    "Q": "output",
+    "RN": "input",
+    "SETN": "input"
+   },
+   "functions": {
+    "Q": "IQ1"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ1",
+      "IQN1"
+     ],
+     [
+      "clocked_on",
+      "(!CLKN)"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "clear",
+      "(!RN)"
+     ],
+     [
+      "preset",
+      "(!SETN)"
+     ],
+     [
+      "clear_preset_var1",
+      "L"
+     ],
+     [
+      "clear_preset_var2",
+      "H"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnrsnq_1",
+     "width_dbu": 48160,
+     "area_um2": 94.3936,
+     "max_capacitance_pf": 0.36,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003355,
+        "D": 0.002409,
+        "RN": 0.007529,
+        "SETN": 0.006379
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.347861,
+        1.985325
+       ],
+       "slew_ns": [
+        0.25565,
+        1.270941
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003366,
+        "D": 0.002377,
+        "RN": 0.007678,
+        "SETN": 0.006363
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.690941,
+        3.88858
+       ],
+       "slew_ns": [
+        0.500124,
+        2.360631
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003384,
+        "D": 0.002463,
+        "RN": 0.007594,
+        "SETN": 0.006526
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.78351,
+        1.169904
+       ],
+       "slew_ns": [
+        0.148609,
+        0.772719
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnrsnq_2",
+     "width_dbu": 50400,
+     "area_um2": 98.784,
+     "max_capacitance_pf": 0.7192,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003355,
+        "D": 0.002409,
+        "RN": 0.007531,
+        "SETN": 0.00637
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.416647,
+        1.776676
+       ],
+       "slew_ns": [
+        0.202059,
+        0.707124
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003366,
+        "D": 0.002375,
+        "RN": 0.007681,
+        "SETN": 0.006354
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.825064,
+        3.52367
+       ],
+       "slew_ns": [
+        0.398084,
+        1.336152
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003384,
+        "D": 0.002464,
+        "RN": 0.007589,
+        "SETN": 0.00652
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.823398,
+        1.034829
+       ],
+       "slew_ns": [
+        0.119426,
+        0.42499
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnrsnq_4",
+     "width_dbu": 54880,
+     "area_um2": 107.5648,
+     "max_capacitance_pf": 1.43,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003356,
+        "D": 0.002409,
+        "RN": 0.007529,
+        "SETN": 0.006366
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.63031,
+        1.854297
+       ],
+       "slew_ns": [
+        0.223499,
+        0.497589
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003366,
+        "D": 0.002375,
+        "RN": 0.007679,
+        "SETN": 0.006355
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        3.24946,
+        3.697289
+       ],
+       "slew_ns": [
+        0.431108,
+        0.96895
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003384,
+        "D": 0.002469,
+        "RN": 0.007588,
+        "SETN": 0.006525
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.94717,
+        1.076397
+       ],
+       "slew_ns": [
+        0.132961,
+        0.290973
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__dffnsnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLKN": "input",
+    "D": "input",
+    "Q": "output",
+    "SETN": "input"
+   },
+   "functions": {
+    "Q": "IQ1"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ1",
+      "IQN1"
+     ],
+     [
+      "clocked_on",
+      "(!CLKN)"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "preset",
+      "(!SETN)"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnsnq_1",
+     "width_dbu": 40320,
+     "area_um2": 79.0272,
+     "max_capacitance_pf": 0.3576,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003724,
+        "D": 0.002568,
+        "SETN": 0.006243
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.07208,
+        1.686218
+       ],
+       "slew_ns": [
+        0.218607,
+        1.264783
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003752,
+        "D": 0.002526,
+        "SETN": 0.006221
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.102039,
+        3.241986
+       ],
+       "slew_ns": [
+        0.419048,
+        2.341257
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003749,
+        "D": 0.002653,
+        "SETN": 0.006366
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.634955,
+        1.011573
+       ],
+       "slew_ns": [
+        0.129161,
+        0.771556
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnsnq_2",
+     "width_dbu": 42560,
+     "area_um2": 83.4176,
+     "max_capacitance_pf": 0.7173,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003723,
+        "D": 0.002568,
+        "SETN": 0.006241
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.117372,
+        1.44001
+       ],
+       "slew_ns": [
+        0.164183,
+        0.662861
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003753,
+        "D": 0.002526,
+        "SETN": 0.006221
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.189641,
+        2.800345
+       ],
+       "slew_ns": [
+        0.315523,
+        1.232943
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003746,
+        "D": 0.002656,
+        "SETN": 0.006362
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.662348,
+        0.855793
+       ],
+       "slew_ns": [
+        0.100041,
+        0.402122
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffnsnq_4",
+     "width_dbu": 47040,
+     "area_um2": 92.1984,
+     "max_capacitance_pf": 1.433,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLKN": 0.003724,
+        "D": 0.002569,
+        "SETN": 0.006238
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.268804,
+        1.458865
+       ],
+       "slew_ns": [
+        0.201393,
+        0.414562
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLKN": 0.003752,
+        "D": 0.002526,
+        "SETN": 0.006219
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.479162,
+        2.851244
+       ],
+       "slew_ns": [
+        0.373436,
+        0.788511
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLKN": 0.003748,
+        "D": 0.002654,
+        "SETN": 0.006361
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.752053,
+        0.862393
+       ],
+       "slew_ns": [
+        0.1223,
+        0.246232
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__dffq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output"
+   },
+   "functions": {
+    "Q": "IQ1"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ1",
+      "IQN1"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
+     "width_dbu": 32480,
+     "area_um2": 63.6608,
+     "max_capacitance_pf": 0.3602,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003183,
+        "D": 0.002361
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.081377,
+        1.6899
+       ],
+       "slew_ns": [
+        0.218645,
+        1.259664
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003181,
+        "D": 0.002342
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.165757,
+        3.295959
+       ],
+       "slew_ns": [
+        0.421549,
+        2.328906
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003222,
+        "D": 0.002426
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.62204,
+        0.995513
+       ],
+       "slew_ns": [
+        0.128636,
+        0.767842
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffq_2",
+     "width_dbu": 34720,
+     "area_um2": 68.0512,
+     "max_capacitance_pf": 0.72,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003182,
+        "D": 0.002363
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.122938,
+        1.442331
+       ],
+       "slew_ns": [
+        0.162276,
+        0.657072
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003181,
+        "D": 0.002342
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.249075,
+        2.854101
+       ],
+       "slew_ns": [
+        0.318808,
+        1.224021
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003222,
+        "D": 0.00243
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.646867,
+        0.838264
+       ],
+       "slew_ns": [
+        0.093883,
+        0.398482
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffq_4",
+     "width_dbu": 40320,
+     "area_um2": 79.0272,
+     "max_capacitance_pf": 1.442,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003349,
+        "D": 0.002363
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.120141,
+        1.285904
+       ],
+       "slew_ns": [
+        0.125623,
+        0.364279
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003365,
+        "D": 0.002342
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.28016,
+        2.597376
+       ],
+       "slew_ns": [
+        0.248382,
+        0.682861
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003375,
+        "D": 0.002427
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.635915,
+        0.734365
+       ],
+       "slew_ns": [
+        0.072377,
+        0.220043
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__dffrnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output",
+    "RN": "input"
+   },
+   "functions": {
+    "Q": "IQ1"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ1",
+      "IQN1"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "clear",
+      "(!RN)"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffrnq_1",
+     "width_dbu": 38080,
+     "area_um2": 74.6368,
+     "max_capacitance_pf": 0.3584,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003346,
+        "D": 0.002956,
+        "RN": 0.007113
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.286648,
+        1.922574
+       ],
+       "slew_ns": [
+        0.254625,
+        1.274109
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003363,
+        "D": 0.002938,
+        "RN": 0.007233
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.608088,
+        3.802638
+       ],
+       "slew_ns": [
+        0.49835,
+        2.362696
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003378,
+        "D": 0.00302,
+        "RN": 0.007237
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.73738,
+        1.123672
+       ],
+       "slew_ns": [
+        0.148007,
+        0.774638
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffrnq_2",
+     "width_dbu": 40320,
+     "area_um2": 79.0272,
+     "max_capacitance_pf": 0.7164,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003346,
+        "D": 0.002955,
+        "RN": 0.007439
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.293512,
+        1.643586
+       ],
+       "slew_ns": [
+        0.188087,
+        0.691847
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003362,
+        "D": 0.002938,
+        "RN": 0.007578
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.640483,
+        3.314936
+       ],
+       "slew_ns": [
+        0.370818,
+        1.299421
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003377,
+        "D": 0.003019,
+        "RN": 0.00757
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.738277,
+        0.945802
+       ],
+       "slew_ns": [
+        0.110661,
+        0.417044
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffrnq_4",
+     "width_dbu": 44800,
+     "area_um2": 87.808,
+     "max_capacitance_pf": 1.433,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003347,
+        "D": 0.002957,
+        "RN": 0.007435
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.465342,
+        1.677899
+       ],
+       "slew_ns": [
+        0.198562,
+        0.466848
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003361,
+        "D": 0.002936,
+        "RN": 0.007564
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.986453,
+        3.409568
+       ],
+       "slew_ns": [
+        0.384222,
+        0.901181
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003378,
+        "D": 0.003015,
+        "RN": 0.007568
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.835916,
+        0.959119
+       ],
+       "slew_ns": [
+        0.118095,
+        0.274222
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__dffrsnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output",
+    "RN": "input",
+    "SETN": "input"
+   },
+   "functions": {
+    "Q": "IQ1"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ1",
+      "IQN1"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "clear",
+      "(!RN)"
+     ],
+     [
+      "preset",
+      "(!SETN)"
+     ],
+     [
+      "clear_preset_var1",
+      "L"
+     ],
+     [
+      "clear_preset_var2",
+      "H"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffrsnq_1",
+     "width_dbu": 43680,
+     "area_um2": 85.6128,
+     "max_capacitance_pf": 0.3585,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003369,
+        "D": 0.002318,
+        "RN": 0.00727,
+        "SETN": 0.00626
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.284458,
+        1.92092
+       ],
+       "slew_ns": [
+        0.251467,
+        1.273173
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003386,
+        "D": 0.002283,
+        "RN": 0.007426,
+        "SETN": 0.006275
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.61078,
+        3.806776
+       ],
+       "slew_ns": [
+        0.492304,
+        2.359709
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003395,
+        "D": 0.002386,
+        "RN": 0.00735,
+        "SETN": 0.006348
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.733739,
+        1.120016
+       ],
+       "slew_ns": [
+        0.146956,
+        0.774793
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffrsnq_2",
+     "width_dbu": 45920,
+     "area_um2": 90.0032,
+     "max_capacitance_pf": 0.716,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003359,
+        "D": 0.002318,
+        "RN": 0.00727,
+        "SETN": 0.006256
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.35263,
+        1.709589
+       ],
+       "slew_ns": [
+        0.198447,
+        0.704097
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003375,
+        "D": 0.002283,
+        "RN": 0.007423,
+        "SETN": 0.006276
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.746179,
+        3.439735
+       ],
+       "slew_ns": [
+        0.392063,
+        1.327648
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003386,
+        "D": 0.002385,
+        "RN": 0.00735,
+        "SETN": 0.006344
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.772639,
+        0.983192
+       ],
+       "slew_ns": [
+        0.11699,
+        0.422875
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffrsnq_4",
+     "width_dbu": 50400,
+     "area_um2": 98.784,
+     "max_capacitance_pf": 1.43,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003307,
+        "D": 0.002517,
+        "RN": 0.007169,
+        "SETN": 0.006343
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.580608,
+        1.801788
+       ],
+       "slew_ns": [
+        0.220126,
+        0.491546
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003306,
+        "D": 0.002485,
+        "RN": 0.007318,
+        "SETN": 0.006387
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        3.2094,
+        3.652272
+       ],
+       "slew_ns": [
+        0.425808,
+        0.956998
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.00335,
+        "D": 0.002595,
+        "RN": 0.00725,
+        "SETN": 0.00642
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.902171,
+        1.029977
+       ],
+       "slew_ns": [
+        0.130634,
+        0.287576
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__dffsnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "CLK": "input",
+    "D": "input",
+    "Q": "output",
+    "SETN": "input"
+   },
+   "functions": {
+    "Q": "IQ1"
+   },
+   "sequential": [
+    [
+     "ff",
+     [
+      "IQ1",
+      "IQN1"
+     ],
+     [
+      "clocked_on",
+      "CLK"
+     ],
+     [
+      "next_state",
+      "D"
+     ],
+     [
+      "preset",
+      "(!SETN)"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffsnq_1",
+     "width_dbu": 40320,
+     "area_um2": 79.0272,
+     "max_capacitance_pf": 0.3584,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003361,
+        "D": 0.002597,
+        "SETN": 0.006415
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.109163,
+        1.715339
+       ],
+       "slew_ns": [
+        0.225316,
+        1.270812
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003375,
+        "D": 0.002585,
+        "SETN": 0.006394
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.204772,
+        3.343478
+       ],
+       "slew_ns": [
+        0.434262,
+        2.350572
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003386,
+        "D": 0.00264,
+        "SETN": 0.006556
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.649885,
+        1.013363
+       ],
+       "slew_ns": [
+        0.132366,
+        0.773237
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffsnq_2",
+     "width_dbu": 42560,
+     "area_um2": 83.4176,
+     "max_capacitance_pf": 0.7176,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003248,
+        "D": 0.002596,
+        "SETN": 0.006415
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.13787,
+        1.366286
+       ],
+       "slew_ns": [
+        0.148732,
+        0.657727
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003251,
+        "D": 0.002584,
+        "SETN": 0.006392
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.264948,
+        2.701491
+       ],
+       "slew_ns": [
+        0.288151,
+        1.21948
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003278,
+        "D": 0.002641,
+        "SETN": 0.006556
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.667142,
+        0.806947
+       ],
+       "slew_ns": [
+        0.086962,
+        0.3997
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__dffsnq_4",
+     "width_dbu": 48160,
+     "area_um2": 94.3936,
+     "max_capacitance_pf": 1.44,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "CLK": 0.003361,
+        "D": 0.002596,
+        "SETN": 0.006403
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.215913,
+        1.348159
+       ],
+       "slew_ns": [
+        0.125496,
+        0.367662
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "CLK": 0.003376,
+        "D": 0.002587,
+        "SETN": 0.006376
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.426167,
+        2.672144
+       ],
+       "slew_ns": [
+        0.247467,
+        0.688132
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "CLK": 0.003386,
+        "D": 0.002641,
+        "SETN": 0.00655
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.711761,
+        0.791534
+       ],
+       "slew_ns": [
+        0.072651,
+        0.221723
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__inv",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "I": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "(!I)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__inv_1",
+     "width_dbu": 4480,
+     "area_um2": 8.7808,
+     "max_capacitance_pf": 0.3503,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.004623
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.182096,
+        0.790186
+       ],
+       "slew_ns": [
+        0.204235,
+        1.257705
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.004683
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.293323,
+        1.413951
+       ],
+       "slew_ns": [
+        0.364068,
+        2.323798
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.004639
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.130211,
+        0.505121
+       ],
+       "slew_ns": [
+        0.133188,
+        0.767595
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__inv_2",
+     "width_dbu": 6720,
+     "area_um2": 13.1712,
+     "max_capacitance_pf": 0.703,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.009068
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.136292,
+        0.445351
+       ],
+       "slew_ns": [
+        0.136572,
+        0.650179
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.009183
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.210389,
+        0.776467
+       ],
+       "slew_ns": [
+        0.229313,
+        1.197767
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.009108
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.101491,
+        0.29373
+       ],
+       "slew_ns": [
+        0.094797,
+        0.396945
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__inv_3",
+     "width_dbu": 8960,
+     "area_um2": 17.5616,
+     "max_capacitance_pf": 1.053,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.01361
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.125539,
+        0.335486
+       ],
+       "slew_ns": [
+        0.121617,
+        0.456339
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.01381
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.193142,
+        0.574584
+       ],
+       "slew_ns": [
+        0.202116,
+        0.845056
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.0137
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.094122,
+        0.226084
+       ],
+       "slew_ns": [
+        0.085366,
+        0.282085
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__inv_4",
+     "width_dbu": 11200,
+     "area_um2": 21.952,
+     "max_capacitance_pf": 1.408,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.01798
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.112669,
+        0.274479
+       ],
+       "slew_ns": [
+        0.104344,
+        0.350211
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.01823
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.170616,
+        0.461267
+       ],
+       "slew_ns": [
+        0.168252,
+        0.64617
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.01813
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.085567,
+        0.188825
+       ],
+       "slew_ns": [
+        0.074974,
+        0.218557
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__inv_8",
+     "width_dbu": 20160,
+     "area_um2": 39.5136,
+     "max_capacitance_pf": 2.804,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.03638
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.103911,
+        0.188836
+       ],
+       "slew_ns": [
+        0.092607,
+        0.215561
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.03687
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.15723,
+        0.306072
+       ],
+       "slew_ns": [
+        0.147207,
+        0.385898
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.03655
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.07937,
+        0.13479
+       ],
+       "slew_ns": [
+        0.06743,
+        0.139856
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__inv_12",
+     "width_dbu": 29120,
+     "area_um2": 57.0752,
+     "max_capacitance_pf": 4.203,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.05414
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.100239,
+        0.159325
+       ],
+       "slew_ns": [
+        0.087093,
+        0.170483
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.05474
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.150769,
+        0.252306
+       ],
+       "slew_ns": [
+        0.136599,
+        0.296519
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.05434
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.076625,
+        0.115984
+       ],
+       "slew_ns": [
+        0.064107,
+        0.113762
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__inv_16",
+     "width_dbu": 38080,
+     "area_um2": 74.6368,
+     "max_capacitance_pf": 5.593,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.07291
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.100405,
+        0.146368
+       ],
+       "slew_ns": [
+        0.087019,
+        0.150581
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.07396
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.151582,
+        0.229142
+       ],
+       "slew_ns": [
+        0.137104,
+        0.257348
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.07308
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.076494,
+        0.107523
+       ],
+       "slew_ns": [
+        0.064028,
+        0.10208
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__inv_20",
+     "width_dbu": 47040,
+     "area_um2": 92.1984,
+     "max_capacitance_pf": 6.994,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I": 0.09057
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.101206,
+        0.139324
+       ],
+       "slew_ns": [
+        0.086177,
+        0.137534
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I": 0.09189
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.154037,
+        0.217302
+       ],
+       "slew_ns": [
+        0.135947,
+        0.232336
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I": 0.09059
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.076116,
+        0.102174
+       ],
+       "slew_ns": [
+        0.063274,
+        0.094536
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__latq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "E": "input",
+    "Q": "output"
+   },
+   "functions": {
+    "Q": "IQN1"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ1",
+      "IQN1"
+     ],
+     [
+      "enable",
+      "E"
+     ],
+     [
+      "data_in",
+      "(!D)"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latq_1",
+     "width_dbu": 22400,
+     "area_um2": 43.904,
+     "max_capacitance_pf": 0.3598,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.002994,
+        "E": 0.00365
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.885275,
+        1.52235
+       ],
+       "slew_ns": [
+        0.283253,
+        1.271923
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.002993,
+        "E": 0.003669
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.72455,
+        2.920173
+       ],
+       "slew_ns": [
+        0.542065,
+        2.356673
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003016,
+        "E": 0.00368
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.526371,
+        0.913374
+       ],
+       "slew_ns": [
+        0.16681,
+        0.7745
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latq_2",
+     "width_dbu": 24640,
+     "area_um2": 48.2944,
+     "max_capacitance_pf": 0.7212,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.002993,
+        "E": 0.003609
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.966042,
+        1.31489
+       ],
+       "slew_ns": [
+        0.275731,
+        0.701159
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.002993,
+        "E": 0.003624
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.936336,
+        2.60768
+       ],
+       "slew_ns": [
+        0.525179,
+        1.319186
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003013,
+        "E": 0.003646
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.553182,
+        0.764854
+       ],
+       "slew_ns": [
+        0.161793,
+        0.422131
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latq_4",
+     "width_dbu": 31360,
+     "area_um2": 61.4656,
+     "max_capacitance_pf": 1.438,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.002991,
+        "E": 0.003606
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.394969,
+        1.663942
+       ],
+       "slew_ns": [
+        0.377637,
+        0.64133
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.002991,
+        "E": 0.003625
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.81786,
+        3.344668
+       ],
+       "slew_ns": [
+        0.715178,
+        1.219706
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003009,
+        "E": 0.003642
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.78953,
+        0.945468
+       ],
+       "slew_ns": [
+        0.220275,
+        0.378879
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__latrnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "E": "input",
+    "Q": "output",
+    "RN": "input"
+   },
+   "functions": {
+    "Q": "IQ2"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ2",
+      "IQN2"
+     ],
+     [
+      "clear",
+      "(!RN)"
+     ],
+     [
+      "enable",
+      "E"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latrnq_1",
+     "width_dbu": 24640,
+     "area_um2": 48.2944,
+     "max_capacitance_pf": 0.3601,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.003026,
+        "E": 0.007231,
+        "RN": 0.00514
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.155806,
+        1.587671
+       ],
+       "slew_ns": [
+        0.202758,
+        1.261127
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.003061,
+        "E": 0.007335,
+        "RN": 0.005294
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.326369,
+        3.100239
+       ],
+       "slew_ns": [
+        0.384707,
+        2.332059
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003046,
+        "E": 0.007236,
+        "RN": 0.005097
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.658935,
+        0.939303
+       ],
+       "slew_ns": [
+        0.121155,
+        0.768749
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latrnq_2",
+     "width_dbu": 26880,
+     "area_um2": 52.6848,
+     "max_capacitance_pf": 0.7201,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.003027,
+        "E": 0.007229,
+        "RN": 0.00514
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.191642,
+        1.403996
+       ],
+       "slew_ns": [
+        0.140056,
+        0.65118
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.00306,
+        "E": 0.007335,
+        "RN": 0.005294
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.399204,
+        2.786639
+       ],
+       "slew_ns": [
+        0.269585,
+        1.209048
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003047,
+        "E": 0.007234,
+        "RN": 0.005097
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.679898,
+        0.811314
+       ],
+       "slew_ns": [
+        0.082431,
+        0.396187
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latrnq_4",
+     "width_dbu": 34720,
+     "area_um2": 68.0512,
+     "max_capacitance_pf": 1.444,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.003027,
+        "E": 0.007226,
+        "RN": 0.005137
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.238513,
+        1.360814
+       ],
+       "slew_ns": [
+        0.108065,
+        0.357351
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.00306,
+        "E": 0.007336,
+        "RN": 0.005293
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.494016,
+        2.718495
+       ],
+       "slew_ns": [
+        0.209623,
+        0.668393
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003046,
+        "E": 0.007234,
+        "RN": 0.005093
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.706462,
+        0.781525
+       ],
+       "slew_ns": [
+        0.06362,
+        0.216527
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__latrsnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "E": "input",
+    "Q": "output",
+    "RN": "input",
+    "SETN": "input"
+   },
+   "functions": {
+    "Q": "IQ2"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ2",
+      "IQN2"
+     ],
+     [
+      "clear",
+      "(!RN)"
+     ],
+     [
+      "preset",
+      "(!SETN)"
+     ],
+     [
+      "clear_preset_var1",
+      "H"
+     ],
+     [
+      "clear_preset_var2",
+      "L"
+     ],
+     [
+      "enable",
+      "E"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latrsnq_1",
+     "width_dbu": 26880,
+     "area_um2": 52.6848,
+     "max_capacitance_pf": 0.3602,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.003028,
+        "E": 0.007233,
+        "RN": 0.005141,
+        "SETN": 0.003586
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.218082,
+        1.743636
+       ],
+       "slew_ns": [
+        0.205531,
+        1.261349
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.003061,
+        "E": 0.007335,
+        "RN": 0.005295,
+        "SETN": 0.003597
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.470108,
+        3.425047
+       ],
+       "slew_ns": [
+        0.391242,
+        2.332833
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003047,
+        "E": 0.007233,
+        "RN": 0.005097,
+        "SETN": 0.003643
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.690368,
+        1.026632
+       ],
+       "slew_ns": [
+        0.122647,
+        0.768533
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latrsnq_2",
+     "width_dbu": 28000,
+     "area_um2": 54.88,
+     "max_capacitance_pf": 0.7214,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.003026,
+        "E": 0.007228,
+        "RN": 0.005096,
+        "SETN": 0.003625
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.251446,
+        1.457238
+       ],
+       "slew_ns": [
+        0.131278,
+        0.647387
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.003061,
+        "E": 0.007334,
+        "RN": 0.005245,
+        "SETN": 0.003645
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.537763,
+        2.911934
+       ],
+       "slew_ns": [
+        0.250019,
+        1.198083
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003047,
+        "E": 0.007231,
+        "RN": 0.005057,
+        "SETN": 0.003667
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.70994,
+        0.837517
+       ],
+       "slew_ns": [
+        0.078258,
+        0.394503
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latrsnq_4",
+     "width_dbu": 34720,
+     "area_um2": 68.0512,
+     "max_capacitance_pf": 1.444,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.003027,
+        "E": 0.007227,
+        "RN": 0.005095,
+        "SETN": 0.003627
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.323627,
+        1.442676
+       ],
+       "slew_ns": [
+        0.10903,
+        0.35666
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.00306,
+        "E": 0.007333,
+        "RN": 0.005244,
+        "SETN": 0.003648
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.685557,
+        2.904317
+       ],
+       "slew_ns": [
+        0.21,
+        0.66358
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003047,
+        "E": 0.00723,
+        "RN": 0.005059,
+        "SETN": 0.003668
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.751724,
+        0.824725
+       ],
+       "slew_ns": [
+        0.064588,
+        0.216082
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__latsnq",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "D": "input",
+    "E": "input",
+    "Q": "output",
+    "SETN": "input"
+   },
+   "functions": {
+    "Q": "IQ2"
+   },
+   "sequential": [
+    [
+     "latch",
+     [
+      "IQ2",
+      "IQN2"
+     ],
+     [
+      "preset",
+      "(!SETN)"
+     ],
+     [
+      "enable",
+      "E"
+     ],
+     [
+      "data_in",
+      "D"
+     ]
+    ]
+   ],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latsnq_1",
+     "width_dbu": 23520,
+     "area_um2": 46.0992,
+     "max_capacitance_pf": 0.3594,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.00327,
+        "E": 0.006975,
+        "SETN": 0.003939
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.126133,
+        1.48087
+       ],
+       "slew_ns": [
+        0.202983,
+        1.261476
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.003369,
+        "E": 0.007057,
+        "SETN": 0.004008
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.250773,
+        2.881312
+       ],
+       "slew_ns": [
+        0.385114,
+        2.335434
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003251,
+        "E": 0.007003,
+        "SETN": 0.003946
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.644849,
+        0.869768
+       ],
+       "slew_ns": [
+        0.121393,
+        0.768971
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latsnq_2",
+     "width_dbu": 24640,
+     "area_um2": 48.2944,
+     "max_capacitance_pf": 0.7201,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.003272,
+        "E": 0.006937,
+        "SETN": 0.003937
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.159625,
+        1.365054
+       ],
+       "slew_ns": [
+        0.12686,
+        0.646498
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.003364,
+        "E": 0.007019,
+        "SETN": 0.004007
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.320929,
+        2.693985
+       ],
+       "slew_ns": [
+        0.24024,
+        1.195544
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.003251,
+        "E": 0.006963,
+        "SETN": 0.003941
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.665467,
+        0.792975
+       ],
+       "slew_ns": [
+        0.076053,
+        0.394186
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__latsnq_4",
+     "width_dbu": 31360,
+     "area_um2": 61.4656,
+     "max_capacitance_pf": 1.444,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "D": 0.002881,
+        "E": 0.006933,
+        "SETN": 0.005155
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        1.131733,
+        1.248282
+       ],
+       "slew_ns": [
+        0.101788,
+        0.354456
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "D": 0.00289,
+        "E": 0.007013,
+        "SETN": 0.005289
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        2.257423,
+        2.470706
+       ],
+       "slew_ns": [
+        0.194731,
+        0.660039
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "D": 0.002922,
+        "E": 0.006957,
+        "SETN": 0.005128
+       },
+       "output_pin": "Q",
+       "delay_ns": [
+        0.651894,
+        0.723864
+       ],
+       "slew_ns": [
+        0.060424,
+        0.215253
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__mux2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "I0": "input",
+    "I1": "input",
+    "S": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "((I0&(!S))|(I1&S))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__mux2_2",
+     "width_dbu": 16800,
+     "area_um2": 32.928,
+     "max_capacitance_pf": 0.7209,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I0": 0.004608,
+        "I1": 0.004617,
+        "S": 0.009907
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.575409,
+        0.85173
+       ],
+       "slew_ns": [
+        0.172983,
+        0.656972
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I0": 0.004681,
+        "I1": 0.004689,
+        "S": 0.01011
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.123752,
+        1.610307
+       ],
+       "slew_ns": [
+        0.325153,
+        1.217191
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I0": 0.004614,
+        "I1": 0.004623,
+        "S": 0.009858
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.335554,
+        0.529574
+       ],
+       "slew_ns": [
+        0.103626,
+        0.399502
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__mux2_4",
+     "width_dbu": 21280,
+     "area_um2": 41.7088,
+     "max_capacitance_pf": 1.44,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I0": 0.004613,
+        "I1": 0.004583,
+        "S": 0.009826
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.724337,
+        0.910236
+       ],
+       "slew_ns": [
+        0.206826,
+        0.399402
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I0": 0.004688,
+        "I1": 0.004659,
+        "S": 0.01001
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.422759,
+        1.774504
+       ],
+       "slew_ns": [
+        0.388424,
+        0.752925
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I0": 0.004614,
+        "I1": 0.004585,
+        "S": 0.009782
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.420601,
+        0.53095
+       ],
+       "slew_ns": [
+        0.122888,
+        0.239988
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__mux4",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "I0": "input",
+    "I1": "input",
+    "I2": "input",
+    "I3": "input",
+    "S0": "input",
+    "S1": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "((I0&(!S0)&(!S1))|(I1&S0&(!S1))|(I2&(!S0)&S1)|(I3&S0&S1))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__mux4_1",
+     "width_dbu": 35840,
+     "area_um2": 70.2464,
+     "max_capacitance_pf": 0.2264,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I0": 0.002787,
+        "I1": 0.00285,
+        "I2": 0.00275,
+        "I3": 0.002749,
+        "S0": 0.009917,
+        "S1": 0.005428
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.999567,
+        1.994325
+       ],
+       "slew_ns": [
+        0.439507,
+        1.980936
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I0": 0.002783,
+        "I1": 0.002855,
+        "I2": 0.00274,
+        "I3": 0.002744,
+        "S0": 0.01006,
+        "S1": 0.005371
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        2.064887,
+        3.897057
+       ],
+       "slew_ns": [
+        0.895168,
+        3.725493
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I0": 0.002821,
+        "I1": 0.002882,
+        "I2": 0.002795,
+        "I3": 0.002793,
+        "S0": 0.01014,
+        "S1": 0.005554
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.58928,
+        1.18503
+       ],
+       "slew_ns": [
+        0.245793,
+        1.183779
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__mux4_2",
+     "width_dbu": 38080,
+     "area_um2": 74.6368,
+     "max_capacitance_pf": 0.454,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I0": 0.002852,
+        "I1": 0.002894,
+        "I2": 0.003102,
+        "I3": 0.00336,
+        "S0": 0.01052,
+        "S1": 0.005658
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.985953,
+        1.533598
+       ],
+       "slew_ns": [
+        0.349426,
+        1.053121
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I0": 0.002844,
+        "I1": 0.002895,
+        "I2": 0.003096,
+        "I3": 0.003409,
+        "S0": 0.01068,
+        "S1": 0.005625
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.967545,
+        3.075885
+       ],
+       "slew_ns": [
+        0.712305,
+        2.002242
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I0": 0.002886,
+        "I1": 0.002919,
+        "I2": 0.003139,
+        "I3": 0.003365,
+        "S0": 0.01072,
+        "S1": 0.005779
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.582156,
+        0.903108
+       ],
+       "slew_ns": [
+        0.195241,
+        0.626833
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__mux4_4",
+     "width_dbu": 42560,
+     "area_um2": 83.4176,
+     "max_capacitance_pf": 0.9054,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "I0": 0.002808,
+        "I1": 0.002897,
+        "I2": 0.003052,
+        "I3": 0.003341,
+        "S0": 0.01087,
+        "S1": 0.005723
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.134581,
+        1.482127
+       ],
+       "slew_ns": [
+        0.367329,
+        0.762041
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "I0": 0.002804,
+        "I1": 0.002893,
+        "I2": 0.003042,
+        "I3": 0.003387,
+        "S0": 0.01106,
+        "S1": 0.005703
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        2.272549,
+        3.044476
+       ],
+       "slew_ns": [
+        0.750208,
+        1.508789
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "I0": 0.002845,
+        "I1": 0.002923,
+        "I2": 0.003099,
+        "I3": 0.003352,
+        "S0": 0.01107,
+        "S1": 0.005839
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.665044,
+        0.853965
+       ],
+       "slew_ns": [
+        0.203054,
+        0.432486
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__nand2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "((!A1)|(!A2))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nand2_1",
+     "width_dbu": 5600,
+     "area_um2": 10.976,
+     "max_capacitance_pf": 0.3223,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.0047,
+        "A2": 0.00441
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.231427,
+        0.887502
+       ],
+       "slew_ns": [
+        0.267714,
+        1.417892
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004782,
+        "A2": 0.004454
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.386449,
+        1.599717
+       ],
+       "slew_ns": [
+        0.489949,
+        2.621317
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004694,
+        "A2": 0.004434
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.16069,
+        0.563294
+       ],
+       "slew_ns": [
+        0.170927,
+        0.865089
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nand2_2",
+     "width_dbu": 10080,
+     "area_um2": 19.7568,
+     "max_capacitance_pf": 0.6451,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.008947,
+        "A2": 0.009336
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.190537,
+        0.519909
+       ],
+       "slew_ns": [
+        0.201221,
+        0.770115
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.009092,
+        "A2": 0.009536
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.310274,
+        0.920829
+       ],
+       "slew_ns": [
+        0.360963,
+        1.425016
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.008964,
+        "A2": 0.009305
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.135357,
+        0.337363
+       ],
+       "slew_ns": [
+        0.132702,
+        0.470285
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+     "width_dbu": 17920,
+     "area_um2": 35.1232,
+     "max_capacitance_pf": 1.291,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.01866,
+        "A2": 0.01891
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.172618,
+        0.339416
+       ],
+       "slew_ns": [
+        0.175424,
+        0.452185
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.01907,
+        "A2": 0.01935
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.279238,
+        0.587714
+       ],
+       "slew_ns": [
+        0.310871,
+        0.839612
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.01859,
+        "A2": 0.01881
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.123642,
+        0.226661
+       ],
+       "slew_ns": [
+        0.117821,
+        0.278613
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__nand3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "((!A1)|(!A2)|(!A3))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nand3_1",
+     "width_dbu": 7840,
+     "area_um2": 15.3664,
+     "max_capacitance_pf": 0.2781,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004311,
+        "A2": 0.004088,
+        "A3": 0.00419
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.303856,
+        1.064287
+       ],
+       "slew_ns": [
+        0.377852,
+        1.713375
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004368,
+        "A2": 0.004104,
+        "A3": 0.00422
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.529039,
+        1.942675
+       ],
+       "slew_ns": [
+        0.706619,
+        3.182528
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004325,
+        "A2": 0.00414,
+        "A3": 0.004224
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.203217,
+        0.667612
+       ],
+       "slew_ns": [
+        0.233612,
+        1.040651
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nand3_2",
+     "width_dbu": 14560,
+     "area_um2": 28.5376,
+     "max_capacitance_pf": 0.5561,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.008478,
+        "A2": 0.009067,
+        "A3": 0.009473
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.25067,
+        0.634616
+       ],
+       "slew_ns": [
+        0.286516,
+        0.95669
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.008603,
+        "A2": 0.009268,
+        "A3": 0.00976
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.427277,
+        1.143118
+       ],
+       "slew_ns": [
+        0.533268,
+        1.775247
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.008515,
+        "A2": 0.009032,
+        "A3": 0.009371
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.171394,
+        0.404662
+       ],
+       "slew_ns": [
+        0.180205,
+        0.581971
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nand3_4",
+     "width_dbu": 29120,
+     "area_um2": 57.0752,
+     "max_capacitance_pf": 1.114,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.01668,
+        "A2": 0.0178,
+        "A3": 0.01712
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.252736,
+        0.449577
+       ],
+       "slew_ns": [
+        0.286444,
+        0.626119
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.01688,
+        "A2": 0.0182,
+        "A3": 0.01744
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.435542,
+        0.803606
+       ],
+       "slew_ns": [
+        0.538682,
+        1.167584
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.01692,
+        "A2": 0.01772,
+        "A3": 0.0171
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.172052,
+        0.291295
+       ],
+       "slew_ns": [
+        0.179788,
+        0.38211
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__nand4",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "A4": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "((!A1)|(!A2)|(!A3)|(!A4))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nand4_1",
+     "width_dbu": 10080,
+     "area_um2": 19.7568,
+     "max_capacitance_pf": 0.2229,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004003,
+        "A2": 0.003918,
+        "A3": 0.003876,
+        "A4": 0.003864
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.384429,
+        1.28309
+       ],
+       "slew_ns": [
+        0.504671,
+        2.075535
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004043,
+        "A2": 0.003939,
+        "A3": 0.003879,
+        "A4": 0.003885
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.686632,
+        2.444627
+       ],
+       "slew_ns": [
+        0.94568,
+        3.879456
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.00402,
+        "A2": 0.003956,
+        "A3": 0.003925,
+        "A4": 0.003895
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.250213,
+        0.79536
+       ],
+       "slew_ns": [
+        0.307959,
+        1.254618
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nand4_2",
+     "width_dbu": 17920,
+     "area_um2": 35.1232,
+     "max_capacitance_pf": 0.4442,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.008596,
+        "A2": 0.008342,
+        "A3": 0.009091,
+        "A4": 0.00961
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.34435,
+        0.799872
+       ],
+       "slew_ns": [
+        0.436979,
+        1.227906
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.008796,
+        "A2": 0.008496,
+        "A3": 0.009356,
+        "A4": 0.00998
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.615765,
+        1.47047
+       ],
+       "slew_ns": [
+        0.828297,
+        2.299385
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.008547,
+        "A2": 0.008317,
+        "A3": 0.008988,
+        "A4": 0.009413
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.224693,
+        0.500248
+       ],
+       "slew_ns": [
+        0.265343,
+        0.740938
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nand4_4",
+     "width_dbu": 35840,
+     "area_um2": 70.2464,
+     "max_capacitance_pf": 0.889,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.01721,
+        "A2": 0.01726,
+        "A3": 0.0165,
+        "A4": 0.01605
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.323909,
+        0.560258
+       ],
+       "slew_ns": [
+        0.401732,
+        0.805321
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.01761,
+        "A2": 0.01771,
+        "A3": 0.01676,
+        "A4": 0.01633
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.577175,
+        1.022276
+       ],
+       "slew_ns": [
+        0.762485,
+        1.511109
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.01718,
+        "A2": 0.01711,
+        "A3": 0.0165,
+        "A4": 0.01605
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.212557,
+        0.354788
+       ],
+       "slew_ns": [
+        0.244283,
+        0.487555
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__nor2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "((!A1)&(!A2))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nor2_1",
+     "width_dbu": 6720,
+     "area_um2": 13.1712,
+     "max_capacitance_pf": 0.1829,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004394,
+        "A2": 0.004154
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.316972,
+        1.468808
+       ],
+       "slew_ns": [
+        0.39469,
+        2.40654
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004447,
+        "A2": 0.004195
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.599493,
+        2.845174
+       ],
+       "slew_ns": [
+        0.775226,
+        4.672743
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004395,
+        "A2": 0.004168
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.191421,
+        0.852606
+       ],
+       "slew_ns": [
+        0.229668,
+        1.383191
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nor2_2",
+     "width_dbu": 11200,
+     "area_um2": 21.952,
+     "max_capacitance_pf": 0.3657,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.008108,
+        "A2": 0.008417
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.239176,
+        0.818547
+       ],
+       "slew_ns": [
+        0.26661,
+        1.266135
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.008161,
+        "A2": 0.008534
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.445977,
+        1.575572
+       ],
+       "slew_ns": [
+        0.515088,
+        2.463096
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.008198,
+        "A2": 0.008419
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.146677,
+        0.47874
+       ],
+       "slew_ns": [
+        0.159835,
+        0.72697
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nor2_4",
+     "width_dbu": 20160,
+     "area_um2": 39.5136,
+     "max_capacitance_pf": 0.7314,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.01736,
+        "A2": 0.01725
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.210178,
+        0.502419
+       ],
+       "slew_ns": [
+        0.224188,
+        0.717674
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.0176,
+        "A2": 0.01764
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.392168,
+        0.960871
+       ],
+       "slew_ns": [
+        0.43228,
+        1.404788
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.0173,
+        "A2": 0.01718
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.129939,
+        0.297815
+       ],
+       "slew_ns": [
+        0.137126,
+        0.411897
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__nor3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "((!A1)&(!A2)&(!A3))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nor3_1",
+     "width_dbu": 8960,
+     "area_um2": 17.5616,
+     "max_capacitance_pf": 0.1222,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004129,
+        "A2": 0.003865,
+        "A3": 0.004009
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.50691,
+        2.208194
+       ],
+       "slew_ns": [
+        0.640786,
+        3.608715
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004178,
+        "A2": 0.003897,
+        "A3": 0.004062
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        1.004582,
+        4.397552
+       ],
+       "slew_ns": [
+        1.284632,
+        7.141946
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.00415,
+        "A2": 0.003914,
+        "A3": 0.004017
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.287409,
+        1.23759
+       ],
+       "slew_ns": [
+        0.359704,
+        2.028704
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nor3_2",
+     "width_dbu": 15680,
+     "area_um2": 30.7328,
+     "max_capacitance_pf": 0.2439,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.007745,
+        "A2": 0.008163,
+        "A3": 0.008616
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.416362,
+        1.270865
+       ],
+       "slew_ns": [
+        0.483666,
+        1.967702
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.007788,
+        "A2": 0.008311,
+        "A3": 0.008808
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.829199,
+        2.531199
+       ],
+       "slew_ns": [
+        0.980945,
+        3.911823
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.007817,
+        "A2": 0.008166,
+        "A3": 0.008568
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.235853,
+        0.713254
+       ],
+       "slew_ns": [
+        0.273244,
+        1.102234
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__nor3_4",
+     "width_dbu": 29120,
+     "area_um2": 57.0752,
+     "max_capacitance_pf": 0.4907,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.01559,
+        "A2": 0.01598,
+        "A3": 0.0157
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.364663,
+        0.797355
+       ],
+       "slew_ns": [
+        0.369839,
+        1.110376
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.0157,
+        "A2": 0.01626,
+        "A3": 0.01599
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.728145,
+        1.587344
+       ],
+       "slew_ns": [
+        0.741452,
+        2.210006
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.01574,
+        "A2": 0.01609,
+        "A3": 0.01572
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.206959,
+        0.449152
+       ],
+       "slew_ns": [
+        0.214,
+        0.622442
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__oai21",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "(((!A1)&(!A2))|(!B))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__oai21_1",
+     "width_dbu": 8960,
+     "area_um2": 17.5616,
+     "max_capacitance_pf": 0.1819,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004855,
+        "A2": 0.004723,
+        "B": 0.004661
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.346751,
+        1.503954
+       ],
+       "slew_ns": [
+        0.433435,
+        2.447757
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004938,
+        "A2": 0.004835,
+        "B": 0.004742
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.665244,
+        2.918872
+       ],
+       "slew_ns": [
+        0.859244,
+        4.758443
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004865,
+        "A2": 0.0047,
+        "B": 0.004677
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.207413,
+        0.871185
+       ],
+       "slew_ns": [
+        0.249498,
+        1.406245
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__oai21_2",
+     "width_dbu": 16800,
+     "area_um2": 32.928,
+     "max_capacitance_pf": 0.3238,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.008871,
+        "A2": 0.009286,
+        "B": 0.008271
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.317527,
+        0.969864
+       ],
+       "slew_ns": [
+        0.372176,
+        1.496794
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.009024,
+        "A2": 0.009534,
+        "B": 0.008384
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.616214,
+        1.890364
+       ],
+       "slew_ns": [
+        0.745234,
+        2.935699
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.008901,
+        "A2": 0.009245,
+        "B": 0.008319
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.196593,
+        0.561775
+       ],
+       "slew_ns": [
+        0.234833,
+        0.852337
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__oai21_4",
+     "width_dbu": 30240,
+     "area_um2": 59.2704,
+     "max_capacitance_pf": 0.6494,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.01818,
+        "A2": 0.01807,
+        "B": 0.01603
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.269543,
+        0.599356
+       ],
+       "slew_ns": [
+        0.318957,
+        0.855252
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.01853,
+        "A2": 0.01849,
+        "B": 0.01624
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.521289,
+        1.165819
+       ],
+       "slew_ns": [
+        0.592342,
+        1.688867
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.01814,
+        "A2": 0.01803,
+        "B": 0.01615
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.178889,
+        0.349953
+       ],
+       "slew_ns": [
+        0.204476,
+        0.484952
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__oai211",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "B": "input",
+    "C": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "(((!A1)&(!A2))|(!B)|(!C))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__oai211_1",
+     "width_dbu": 11200,
+     "area_um2": 21.952,
+     "max_capacitance_pf": 0.1803,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004804,
+        "A2": 0.004719,
+        "B": 0.004429,
+        "C": 0.004583
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.412742,
+        1.54361
+       ],
+       "slew_ns": [
+        0.571399,
+        2.51571
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004881,
+        "A2": 0.004827,
+        "B": 0.004511,
+        "C": 0.004692
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.74795,
+        2.998692
+       ],
+       "slew_ns": [
+        1.064962,
+        4.898024
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004799,
+        "A2": 0.004705,
+        "B": 0.004432,
+        "C": 0.00455
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.266036,
+        0.893754
+       ],
+       "slew_ns": [
+        0.35111,
+        1.442543
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__oai211_2",
+     "width_dbu": 20160,
+     "area_um2": 39.5136,
+     "max_capacitance_pf": 0.3225,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.008865,
+        "A2": 0.009317,
+        "B": 0.008897,
+        "C": 0.008407
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.340918,
+        0.993496
+       ],
+       "slew_ns": [
+        0.434418,
+        1.532503
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.009034,
+        "A2": 0.009616,
+        "B": 0.009093,
+        "C": 0.008549
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.663441,
+        1.935331
+       ],
+       "slew_ns": [
+        0.822556,
+        3.010514
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.008889,
+        "A2": 0.009298,
+        "B": 0.008883,
+        "C": 0.008419
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.219021,
+        0.575092
+       ],
+       "slew_ns": [
+        0.271468,
+        0.871701
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__oai211_4",
+     "width_dbu": 36960,
+     "area_um2": 72.4416,
+     "max_capacitance_pf": 0.6451,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.01815,
+        "A2": 0.01817,
+        "B": 0.01767,
+        "C": 0.01686
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.306875,
+        0.629014
+       ],
+       "slew_ns": [
+        0.388275,
+        0.901018
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.01855,
+        "A2": 0.01857,
+        "B": 0.01804,
+        "C": 0.01711
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.579134,
+        1.222522
+       ],
+       "slew_ns": [
+        0.71748,
+        1.781166
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.01819,
+        "A2": 0.01819,
+        "B": 0.01763,
+        "C": 0.01688
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.203679,
+        0.366701
+       ],
+       "slew_ns": [
+        0.244909,
+        0.510129
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__or2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "(A1|A2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__or2_1",
+     "width_dbu": 8960,
+     "area_um2": 17.5616,
+     "max_capacitance_pf": 0.3599,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.002891,
+        "A2": 0.002731
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.61343,
+        1.056321
+       ],
+       "slew_ns": [
+        0.229909,
+        1.26317
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.002908,
+        "A2": 0.002698
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.236404,
+        2.062932
+       ],
+       "slew_ns": [
+        0.446894,
+        2.339171
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.002908,
+        "A2": 0.002771
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.351507,
+        0.618888
+       ],
+       "slew_ns": [
+        0.133341,
+        0.769669
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__or2_2",
+     "width_dbu": 11200,
+     "area_um2": 21.952,
+     "max_capacitance_pf": 0.7218,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004658,
+        "A2": 0.004658
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.477355,
+        0.726774
+       ],
+       "slew_ns": [
+        0.15418,
+        0.646504
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.00472,
+        "A2": 0.004718
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.931366,
+        1.396399
+       ],
+       "slew_ns": [
+        0.292582,
+        1.195999
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004671,
+        "A2": 0.004663
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.283787,
+        0.434589
+       ],
+       "slew_ns": [
+        0.092235,
+        0.393953
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__or2_4",
+     "width_dbu": 20160,
+     "area_um2": 39.5136,
+     "max_capacitance_pf": 1.441,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.009213,
+        "A2": 0.00947
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.450654,
+        0.598885
+       ],
+       "slew_ns": [
+        0.1333,
+        0.355668
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.009367,
+        "A2": 0.009668
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.881252,
+        1.160601
+       ],
+       "slew_ns": [
+        0.254891,
+        0.66184
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.009237,
+        "A2": 0.009404
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.267756,
+        0.356286
+       ],
+       "slew_ns": [
+        0.079071,
+        0.216026
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__or3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "(A1|A2|A3)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__or3_1",
+     "width_dbu": 11200,
+     "area_um2": 21.952,
+     "max_capacitance_pf": 0.3599,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.002831,
+        "A2": 0.002774,
+        "A3": 0.002723
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.980883,
+        1.515056
+       ],
+       "slew_ns": [
+        0.314443,
+        1.263282
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.002822,
+        "A2": 0.002775,
+        "A3": 0.002672
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        2.062961,
+        3.088684
+       ],
+       "slew_ns": [
+        0.61841,
+        2.339065
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.002871,
+        "A2": 0.002828,
+        "A3": 0.002788
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.531068,
+        0.84557
+       ],
+       "slew_ns": [
+        0.179733,
+        0.769718
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__or3_2",
+     "width_dbu": 13440,
+     "area_um2": 26.3424,
+     "max_capacitance_pf": 0.7209,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004596,
+        "A2": 0.004255,
+        "A3": 0.004192
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.719801,
+        1.01404
+       ],
+       "slew_ns": [
+        0.20987,
+        0.656007
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004672,
+        "A2": 0.004292,
+        "A3": 0.004237
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.461412,
+        2.022062
+       ],
+       "slew_ns": [
+        0.403567,
+        1.217231
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004592,
+        "A2": 0.004297,
+        "A3": 0.00423
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.405309,
+        0.580399
+       ],
+       "slew_ns": [
+        0.123813,
+        0.398916
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__or3_4",
+     "width_dbu": 24640,
+     "area_um2": 48.2944,
+     "max_capacitance_pf": 1.441,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.008964,
+        "A2": 0.008821,
+        "A3": 0.009221
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.67515,
+        0.852638
+       ],
+       "slew_ns": [
+        0.179154,
+        0.362828
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.009133,
+        "A2": 0.00897,
+        "A3": 0.009468
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.372955,
+        1.712847
+       ],
+       "slew_ns": [
+        0.345757,
+        0.67862
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.008973,
+        "A2": 0.008839,
+        "A3": 0.009163
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.379442,
+        0.483907
+       ],
+       "slew_ns": [
+        0.104787,
+        0.219849
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__or4",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "A4": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "(A1|A2|A3|A4)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__or4_1",
+     "width_dbu": 13440,
+     "area_um2": 26.3424,
+     "max_capacitance_pf": 0.3598,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.002755,
+        "A2": 0.002784,
+        "A3": 0.002744,
+        "A4": 0.002682
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.312504,
+        1.912542
+       ],
+       "slew_ns": [
+        0.380917,
+        1.269117
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.002753,
+        "A2": 0.002788,
+        "A3": 0.002728,
+        "A4": 0.002674
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        2.799748,
+        3.965727
+       ],
+       "slew_ns": [
+        0.752139,
+        2.351066
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.002804,
+        "A2": 0.002824,
+        "A3": 0.002797,
+        "A4": 0.002747
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.696258,
+        1.046013
+       ],
+       "slew_ns": [
+        0.216904,
+        0.772174
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__or4_2",
+     "width_dbu": 15680,
+     "area_um2": 30.7328,
+     "max_capacitance_pf": 0.7208,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.003998,
+        "A2": 0.003895,
+        "A3": 0.003805,
+        "A4": 0.003877
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.966942,
+        1.298075
+       ],
+       "slew_ns": [
+        0.256156,
+        0.670076
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004022,
+        "A2": 0.003895,
+        "A3": 0.003791,
+        "A4": 0.003884
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.986621,
+        2.622497
+       ],
+       "slew_ns": [
+        0.492319,
+        1.246609
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004028,
+        "A2": 0.003947,
+        "A3": 0.003867,
+        "A4": 0.003925
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.532974,
+        0.728164
+       ],
+       "slew_ns": [
+        0.149887,
+        0.406428
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__or4_4",
+     "width_dbu": 29120,
+     "area_um2": 57.0752,
+     "max_capacitance_pf": 1.44,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.00784,
+        "A2": 0.008109,
+        "A3": 0.008867,
+        "A4": 0.009559
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.936418,
+        1.138351
+       ],
+       "slew_ns": [
+        0.226405,
+        0.42551
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.007847,
+        "A2": 0.008236,
+        "A3": 0.009122,
+        "A4": 0.009937
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.937552,
+        2.328286
+       ],
+       "slew_ns": [
+        0.437939,
+        0.816979
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.00792,
+        "A2": 0.008139,
+        "A3": 0.008787,
+        "A4": 0.009391
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.513553,
+        0.631892
+       ],
+       "slew_ns": [
+        0.131077,
+        0.251266
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "1"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+     "width_dbu": 4480,
+     "area_um2": 8.7808,
+     "max_capacitance_pf": 0.4066,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {}
+      },
+      "ss": {
+       "input_cap_pf": {}
+      },
+      "ff": {
+       "input_cap_pf": {}
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "0"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+     "width_dbu": 4480,
+     "area_um2": 8.7808,
+     "max_capacitance_pf": 0.7661,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {}
+      },
+      "ss": {
+       "input_cap_pf": {}
+      },
+      "ff": {
+       "input_cap_pf": {}
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__xnor2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "(!(A1^A2))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xnor2_1",
+     "width_dbu": 14560,
+     "area_um2": 28.5376,
+     "max_capacitance_pf": 0.1619,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.006939,
+        "A2": 0.007344
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.536185,
+        1.69855
+       ],
+       "slew_ns": [
+        0.511793,
+        2.765141
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.007038,
+        "A2": 0.007578
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        1.058429,
+        3.314992
+       ],
+       "slew_ns": [
+        1.023532,
+        5.398638
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.006996,
+        "A2": 0.007247
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.329792,
+        0.978103
+       ],
+       "slew_ns": [
+        0.288248,
+        1.579338
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xnor2_2",
+     "width_dbu": 19040,
+     "area_um2": 37.3184,
+     "max_capacitance_pf": 0.7203,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.007372,
+        "A2": 0.007322
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.848869,
+        1.157209
+       ],
+       "slew_ns": [
+        0.173503,
+        0.655807
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.007469,
+        "A2": 0.00753
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        1.690347,
+        2.265732
+       ],
+       "slew_ns": [
+        0.32647,
+        1.218369
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.007383,
+        "A2": 0.007229
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.492747,
+        0.680438
+       ],
+       "slew_ns": [
+        0.10396,
+        0.399361
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xnor2_4",
+     "width_dbu": 23520,
+     "area_um2": 46.0992,
+     "max_capacitance_pf": 1.441,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.006894,
+        "A2": 0.007043
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        1.143194,
+        1.312927
+       ],
+       "slew_ns": [
+        0.210222,
+        0.39928
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.006993,
+        "A2": 0.007224
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        2.316805,
+        2.643793
+       ],
+       "slew_ns": [
+        0.3972,
+        0.753329
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.006918,
+        "A2": 0.006967
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.648885,
+        0.749577
+       ],
+       "slew_ns": [
+        0.12499,
+        0.240257
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__xnor3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "ZN": "output"
+   },
+   "functions": {
+    "ZN": "(!(A1^A2^A3))"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xnor3_1",
+     "width_dbu": 26880,
+     "area_um2": 52.6848,
+     "max_capacitance_pf": 0.1668,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.005106,
+        "A2": 0.005145,
+        "A3": 0.006807
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        1.493,
+        2.544258
+       ],
+       "slew_ns": [
+        0.535111,
+        2.76967
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.005143,
+        "A2": 0.005248,
+        "A3": 0.006884
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        3.042545,
+        5.085111
+       ],
+       "slew_ns": [
+        1.077154,
+        5.414316
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.005146,
+        "A2": 0.005101,
+        "A3": 0.00686
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.838076,
+        1.441187
+       ],
+       "slew_ns": [
+        0.300951,
+        1.583185
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xnor3_2",
+     "width_dbu": 31360,
+     "area_um2": 61.4656,
+     "max_capacitance_pf": 0.7182,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004961,
+        "A2": 0.005062,
+        "A3": 0.007209
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        1.722785,
+        2.029744
+       ],
+       "slew_ns": [
+        0.195493,
+        0.687036
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004949,
+        "A2": 0.005156,
+        "A3": 0.007297
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        3.509047,
+        4.08108
+       ],
+       "slew_ns": [
+        0.371696,
+        1.2831
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.005021,
+        "A2": 0.005034,
+        "A3": 0.007228
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        0.972646,
+        1.159631
+       ],
+       "slew_ns": [
+        0.116593,
+        0.416992
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xnor3_4",
+     "width_dbu": 35840,
+     "area_um2": 70.2464,
+     "max_capacitance_pf": 1.438,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004578,
+        "A2": 0.004841,
+        "A3": 0.007019
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        1.956239,
+        2.123823
+       ],
+       "slew_ns": [
+        0.22531,
+        0.430815
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004541,
+        "A2": 0.004949,
+        "A3": 0.007118
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        4.057285,
+        4.39224
+       ],
+       "slew_ns": [
+        0.428446,
+        0.822847
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.00465,
+        "A2": 0.004801,
+        "A3": 0.007032
+       },
+       "output_pin": "ZN",
+       "delay_ns": [
+        1.09209,
+        1.191423
+       ],
+       "slew_ns": [
+        0.133474,
+        0.255667
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__xor2",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "(A1^A2)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xor2_1",
+     "width_dbu": 13440,
+     "area_um2": 26.3424,
+     "max_capacitance_pf": 0.1819,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.007356,
+        "A2": 0.007336
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.693864,
+        1.704719
+       ],
+       "slew_ns": [
+        0.513647,
+        2.528785
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.007462,
+        "A2": 0.007541
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.390724,
+        3.312539
+       ],
+       "slew_ns": [
+        1.003332,
+        4.907077
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.007376,
+        "A2": 0.007203
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.398933,
+        0.989111
+       ],
+       "slew_ns": [
+        0.295665,
+        1.457708
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xor2_2",
+     "width_dbu": 20160,
+     "area_um2": 39.5136,
+     "max_capacitance_pf": 0.7186,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.007041,
+        "A2": 0.007237
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.718706,
+        1.0436
+       ],
+       "slew_ns": [
+        0.177058,
+        0.662107
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.007158,
+        "A2": 0.007468
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.371197,
+        1.982169
+       ],
+       "slew_ns": [
+        0.337138,
+        1.230732
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.007079,
+        "A2": 0.007143
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.440345,
+        0.636607
+       ],
+       "slew_ns": [
+        0.104724,
+        0.402475
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xor2_4",
+     "width_dbu": 24640,
+     "area_um2": 48.2944,
+     "max_capacitance_pf": 1.438,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.006742,
+        "A2": 0.007075
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.915684,
+        1.104601
+       ],
+       "slew_ns": [
+        0.219616,
+        0.409996
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.006828,
+        "A2": 0.007291
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.767708,
+        2.134415
+       ],
+       "slew_ns": [
+        0.417033,
+        0.778062
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.00677,
+        "A2": 0.006931
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.554318,
+        0.665173
+       ],
+       "slew_ns": [
+        0.129311,
+        0.245221
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gf180mcu_fd_sc_mcu7t5v0__xor3",
+   "order": "max_capacitance_pf",
+   "pins": {
+    "A1": "input",
+    "A2": "input",
+    "A3": "input",
+    "Z": "output"
+   },
+   "functions": {
+    "Z": "(A1^A2^A3)"
+   },
+   "sequential": [],
+   "cells": [
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xor3_1",
+     "width_dbu": 25760,
+     "area_um2": 50.4896,
+     "max_capacitance_pf": 0.1873,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004882,
+        "A2": 0.00523,
+        "A3": 0.007321
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.56774,
+        2.547225
+       ],
+       "slew_ns": [
+        0.537738,
+        2.538787
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004874,
+        "A2": 0.005353,
+        "A3": 0.007429
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        3.216312,
+        5.111986
+       ],
+       "slew_ns": [
+        1.060003,
+        4.928098
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004948,
+        "A2": 0.005174,
+        "A3": 0.007357
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.876525,
+        1.434973
+       ],
+       "slew_ns": [
+        0.308485,
+        1.462873
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xor3_2",
+     "width_dbu": 32480,
+     "area_um2": 63.6608,
+     "max_capacitance_pf": 0.7173,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004739,
+        "A2": 0.005181,
+        "A3": 0.006801
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.646014,
+        1.878466
+       ],
+       "slew_ns": [
+        0.192645,
+        0.688749
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004736,
+        "A2": 0.005317,
+        "A3": 0.006866
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        3.350717,
+        3.780566
+       ],
+       "slew_ns": [
+        0.370483,
+        1.284772
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004819,
+        "A2": 0.005117,
+        "A3": 0.006853
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        0.926095,
+        1.073265
+       ],
+       "slew_ns": [
+        0.114425,
+        0.417194
+       ]
+      }
+     }
+    },
+    {
+     "name": "gf180mcu_fd_sc_mcu7t5v0__xor3_4",
+     "width_dbu": 36960,
+     "area_um2": 72.4416,
+     "max_capacitance_pf": 1.436,
+     "drive": {
+      "tt": {
+       "input_cap_pf": {
+        "A1": 0.004523,
+        "A2": 0.004919,
+        "A3": 0.006647
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.961267,
+        2.113373
+       ],
+       "slew_ns": [
+        0.23224,
+        0.435467
+       ]
+      },
+      "ss": {
+       "input_cap_pf": {
+        "A1": 0.004488,
+        "A2": 0.005081,
+        "A3": 0.006737
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        4.06607,
+        4.346343
+       ],
+       "slew_ns": [
+        0.4434,
+        0.831948
+       ]
+      },
+      "ff": {
+       "input_cap_pf": {
+        "A1": 0.004594,
+        "A2": 0.004876,
+        "A3": 0.006681
+       },
+       "output_pin": "Z",
+       "delay_ns": [
+        1.084596,
+        1.177422
+       ],
+       "slew_ns": [
+        0.136892,
+        0.258777
+       ]
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "excluded": [
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__antenna",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__aoi211_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__aoi211_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__aoi211_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__aoi221_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__aoi221_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__aoi221_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__aoi222_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__aoi222_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__aoi222_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__bufz_1",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__bufz_12",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__bufz_16",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__bufz_2",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__bufz_3",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__bufz_4",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__bufz_8",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_12",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_16",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_20",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_3",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_12",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_16",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_20",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_3",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_8",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlya_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlya_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlya_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyb_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyb_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyb_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyc_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyc_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyc_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyd_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyd_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyd_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__endcap",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fill_32",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fill_64",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fillcap_16",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fillcap_32",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fillcap_4",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fillcap_64",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__fillcap_8",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+   "reason": "no output with a function"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__hold",
+   "reason": "pin Z direction inout"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__icgtn_1",
+   "reason": "state table or clock-gating cell"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__icgtn_2",
+   "reason": "state table or clock-gating cell"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__icgtn_4",
+   "reason": "state table or clock-gating cell"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__icgtp_1",
+   "reason": "state table or clock-gating cell"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__icgtp_2",
+   "reason": "state table or clock-gating cell"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__icgtp_4",
+   "reason": "state table or clock-gating cell"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__invz_1",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__invz_12",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__invz_16",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__invz_2",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__invz_3",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__invz_4",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__invz_8",
+   "reason": "three-state output"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__nor4_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__nor4_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__nor4_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai221_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai221_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai221_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai222_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai222_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai222_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai22_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai22_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai22_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai31_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai31_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai31_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai32_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai32_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai32_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai33_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai33_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__oai33_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffq_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffq_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffq_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_1",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_2",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_4",
+   "reason": "cell policy synth_dont_use / pnr_exclude"
+  }
+ ]
+}

@@ -1,0 +1,4 @@
+# Raw REA terminal captures preserve original CRLF and trailing whitespace.
+# These bytes are evidence, not source formatting to normalize.
+evidence/rea/*.stdout.txt -text -whitespace
+evidence/rea/placement-oracle/*.stdout.txt -text -whitespace

@@ -1,0 +1,235 @@
+{
+  "schema": "rustroad.tap-source-pins.v1",
+  "files": {
+    "scripts/verify_taps.py": "392e27e8294b8e98924f339e600116fd59eeb3211c0c23e9aa18b34f0864f772",
+    "scripts/check_tap_gds.py": "a9e61018b9763d6c10c656ae6da1ae251de03874baf58354bf5c8ebbaf718aaf",
+    "scripts/verify_power_io.py": "259e5312cdc03e5ebec3047be7e813449a34917e6bc8dfd168cf78891231fbb8",
+    "scripts/verify_physical.py": "68050cf5fe29a73742bd9219ca79d91dce1bff8c0d1441dd04ccea3104579790",
+    "scripts/verify_logic.py": "f43959f4930b716ef53e0340dcbb72f27c4aa2338839a87387aa04106bf1a12f",
+    "scripts/build_tap_report.py": "88ba6150ec35e9357d6877d76389221b1592a00968cbf0ca383af1aac806a0ae",
+    "fixtures/pdk/local-taps.json": "457df2bfafb6d99aeea7f8c9ad873276ea17d8c2059304bc1571e7d53596b1f2",
+    "fixtures/pdk/sky130-tap.json": "46234fa1178c2a6944a7706a49f46774623c17dbcbda4c0c8774540123ae7a42",
+    "fixtures/pdk/gf180-tap.json": "0305711ebddd2ceb31113fe7ba2c1a536ffa45992ca596ce691ea39a1b5d18c7",
+    "docs/tap-budget.md": "d4681e8241a8337b61c462d92f7ace9296581771337bd362d8bbe012608bcccb",
+    "docs/tap-integration.md": "36794f68760b2f09b24651d5f3d2db68d8184910681d96151100661db080d46b"
+  },
+  "pdks": [
+    {
+      "tag": "sky130",
+      "name": "sky130_fd_sc_hd",
+      "corner": "tt_025C_1v80",
+      "source": {
+        "distribution": "Ciel/open_pdks",
+        "version": "f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7",
+        "process_variant": "sky130A"
+      },
+      "technology_lef": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef",
+        "sha256": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "bytes": 18167
+      },
+      "cell_lef": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lef/sky130_fd_sc_hd.lef",
+        "sha256": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "bytes": 1415362
+      },
+      "liberty": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+        "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "bytes": 12841637
+      },
+      "config": "fixtures/pdk/sky130-tap.json",
+      "pin_roles": {
+        "VPWR": "VDD",
+        "VGND": "VSS",
+        "VPB": "VDD",
+        "VNB": "VSS"
+      },
+      "primary_pins": [
+        "VPWR",
+        "VGND"
+      ],
+      "rail_layer": "met1",
+      "conductor_layers": [
+        "met1",
+        "met2"
+      ],
+      "tie_high": {
+        "master": "sky130_fd_sc_hd__conb_1",
+        "pin": "HI"
+      },
+      "tie_low": {
+        "master": "sky130_fd_sc_hd__conb_1",
+        "pin": "LO"
+      },
+      "via": "M1M2_PR",
+      "power_net": "VDD",
+      "ground_net": "VSS",
+      "tap_reference": {
+        "master": "sky130_fd_sc_hd__tapvpwrvgnd_1",
+        "max_distance_dbu": 15000,
+        "gds": {
+          "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/gds/sky130_fd_sc_hd.gds",
+          "sha256": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+          "bytes": 4194544
+        },
+        "layer_properties": {
+          "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/klayout/tech/sky130A.lyp",
+          "sha256": "dd71d4d404bef41c040f02511023fb1f6891000fb87decc635ddc285b25bf041",
+          "bytes": 246962
+        },
+        "layers": {
+          "well": "nwell.drawing",
+          "pwell": null,
+          "active": "diff.drawing",
+          "tap": "tap.drawing",
+          "nimplant": "nsdm.drawing",
+          "pimplant": "psdm.drawing",
+          "contact": "licon1.drawing",
+          "local": "li1.drawing",
+          "mcon": "mcon.drawing",
+          "metal": "met1.drawing",
+          "deepwell": "dnwell.drawing"
+        },
+        "rule_url": "https://skywater-pdk.readthedocs.io/en/main/rules/periphery.html#nwell",
+        "policy": "15um Manhattan coverage is an explicit conservative test policy; not full foundry latch-up signoff"
+      }
+    },
+    {
+      "tag": "gf180",
+      "name": "gf180mcu_fd_sc_mcu7t5v0",
+      "corner": "tt_025C_3v30",
+      "source": {
+        "distribution": "Ciel/open_pdks",
+        "version": "f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7",
+        "process_variant": "gf180mcuD"
+      },
+      "technology_lef": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/techlef/gf180mcu_fd_sc_mcu7t5v0__nom.tlef",
+        "sha256": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "bytes": 33047
+      },
+      "cell_lef": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lef/gf180mcu_fd_sc_mcu7t5v0.lef",
+        "sha256": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "bytes": 671072
+      },
+      "liberty": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+        "sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "bytes": 20107439
+      },
+      "config": "fixtures/pdk/gf180-tap.json",
+      "pin_roles": {
+        "VDD": "VDD",
+        "VSS": "VSS",
+        "VNW": "VDD",
+        "VPW": "VSS"
+      },
+      "primary_pins": [
+        "VDD",
+        "VSS"
+      ],
+      "rail_layer": "Metal1",
+      "conductor_layers": [
+        "Metal1",
+        "Metal2"
+      ],
+      "tie_high": {
+        "master": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+        "pin": "Z"
+      },
+      "tie_low": {
+        "master": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+        "pin": "ZN"
+      },
+      "via": "Via1_HV",
+      "power_net": "VDD",
+      "ground_net": "VSS",
+      "tap_reference": {
+        "master": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+        "max_distance_dbu": 30000,
+        "gds": {
+          "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/gds/gf180mcu_fd_sc_mcu7t5v0.gds",
+          "sha256": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+          "bytes": 1450948
+        },
+        "layer_properties": {
+          "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/klayout/tech/gf180mcu.lyp",
+          "sha256": "df2554c382713e671425ac9c6250c512e86e33bc469d70eee1c128878aaeb927",
+          "bytes": 55130
+        },
+        "layers": {
+          "well": "Nwell",
+          "pwell": "LVPWELL",
+          "active": "COMP",
+          "tap": "COMP",
+          "nimplant": "Nplus",
+          "pimplant": "Pplus",
+          "contact": "Contact",
+          "local": null,
+          "mcon": null,
+          "metal": "Metal1",
+          "deepwell": "DNWELL"
+        },
+        "rule_url": "https://gf180mcu-pdk.readthedocs.io/en/latest/physical_verification/design_manual/drm_14_3_1.html",
+        "policy": "15um Manhattan coverage is an explicit conservative test policy; not full foundry latch-up signoff"
+      }
+    }
+  ],
+  "tools": {
+    "rustsys": {
+      "path": "/mnt/data2/cgao/git/RustSys/target/release/rustsys",
+      "sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
+      "bytes": 65663096,
+      "version": "rustsys 0.1.0 (runtimes: cpu, cuda)"
+    },
+    "yosys": {
+      "path": "/mnt/data2/cgao/git/RustSys/.work/lec-verification/tools/yosys",
+      "sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+      "bytes": 74,
+      "version": "Yosys 0.67 (git sha1 2d1509d1b, Release, GNU /usr/bin/c++ 13.3.0)"
+    },
+    "verilator": {
+      "path": "/usr/bin/verilator",
+      "sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+      "bytes": 26226,
+      "version": "Verilator 5.032 2025-01-01 rev (Debian 5.032-1)"
+    },
+    "rusteda": {
+      "path": "/mnt/data2/cgao/git/RustSTA/target/release/rusteda",
+      "sha256": "8fcf8e0eefa05e14c3b3d6ac367839f5ff95059f6d416e2e8fab0262667b2429",
+      "bytes": 27956416,
+      "version": "rusteda 0.1.0"
+    },
+    "ruststa": {
+      "path": "/mnt/data2/cgao/git/RustSTA/target/release/ruststa",
+      "sha256": "b1a8389c7684aaf8a8e05f89635fac5ed2ee15aa380c8f8d8c40b1780f08668d",
+      "bytes": 57681688,
+      "version": "ruststa 0.1.0 (backends: cpu)"
+    },
+    "opensta": {
+      "path": "/home/cgao/.local/share/containers/storage/overlay/c2cc5a7e2baaa2c6bdac6951f759273edbb27a34c710ea4593e43ef22d00e4b8/diff/foss/tools/openroad/bin/sta",
+      "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+      "bytes": 9077264,
+      "version": "3.1.0"
+    },
+    "rustroad": {
+      "path": "/mnt/data2/cgao/git/RustROAD/target/release/rustroad",
+      "sha256": "95f75e6816bc27ea1e92503bac648072d1e58fc4595c9682eddccc89a4a216a5",
+      "bytes": 18113272,
+      "version": "rustroad-cli 0.4.0"
+    },
+    "klayout": {
+      "path": "/usr/bin/klayout",
+      "sha256": "32441e21747f7718500e6c36c028229f6f1ce2ffcfe5b11acf03305047639ee3",
+      "bytes": 78,
+      "version": "KLayout 0.30.0"
+    }
+  },
+  "openroad_reference": {
+    "image_id": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+    "executable": "/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad",
+    "sha256": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2"
+  }
+}

@@ -1,0 +1,5494 @@
+{
+ "density_status": {
+  "gf180": "failed",
+  "sky130": "unverified"
+ },
+ "design": {
+  "clock": {
+   "name": "core",
+   "port": "clk"
+  },
+  "manifest": "pipeline.json",
+  "manifest_sha256": "d87d3e57b1b4dbe1c522847a54ec27122fdfde2cc3061daf7201a07de1f476ec",
+  "name": "pipeline",
+  "pdks_unavailable": {},
+  "recipe": {
+   "floorplan": null,
+   "physical": "legacy"
+  },
+  "stretch": false,
+  "top": "lane_smoke"
+ },
+ "exit_code": 0,
+ "failed_items": [],
+ "gating": [
+  "inputs_frozen",
+  "implementation",
+  "cell_policy",
+  "cec_prelayout",
+  "hold_closure",
+  "antenna_native",
+  "extraction",
+  "timing_setup",
+  "timing_hold",
+  "mpw_min_period",
+  "drv",
+  "timing_accuracy",
+  "gds_xor",
+  "drc_magic",
+  "drc_klayout",
+  "antenna_deck",
+  "lvs_netgen",
+  "lvs_klayout",
+  "cec_final",
+  "cec_powered",
+  "simulation",
+  "cell_proofs",
+  "artifact_binding",
+  "determinism",
+  "controls"
+ ],
+ "global_statuses": {
+  "budget_floors": {
+   "floors": {
+    "budgets.hold_eco_target_margin_ns": {
+     "required": ">= budgets.hold_margin_ns (0.05)",
+     "rule": "the ECO hold target is the gate margin plus a guard band",
+     "status": "passed",
+     "value": 0.05
+    },
+    "budgets.hold_margin_ns": {
+     "required": ">= 0.05",
+     "rule": "hold >= +0.05 ns at tt/ss/ff (owner decision)",
+     "status": "passed",
+     "value": 0.05
+    },
+    "budgets.parity_ns": {
+     "required": "<= 0.001",
+     "rule": "RustSTA-vs-OpenSTA endpoint parity <= 1 ps (owner decision)",
+     "status": "passed",
+     "value": 0.001
+    },
+    "budgets.setup_margin_ns": {
+     "required": ">= 0.0",
+     "rule": "setup >= 0 at ss+max and tt (owner decision)",
+     "status": "passed",
+     "value": 0.0
+    },
+    "verification.cosim_vectors": {
+     "required": ">= 1024",
+     "rule": "random co-simulation of at least 1024 cycles (gate policy)",
+     "status": "passed",
+     "value": 4096
+    }
+   },
+   "status": "passed"
+  },
+  "design_manifest": {
+   "changed": [],
+   "files": {
+    "cell_policy": {
+     "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+     "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+     "status": "passed"
+    },
+    "pdk_profiles": {
+     "actual": "057a44b6061fada1dfb0222cee426e2498e890ce235794df2e68a1481c23dbfd",
+     "expected": "057a44b6061fada1dfb0222cee426e2498e890ce235794df2e68a1481c23dbfd",
+     "status": "passed"
+    },
+    "pdks.gf180.delay_cells": {
+     "actual": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+     "expected": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+     "status": "passed"
+    },
+    "pdks.gf180.floorplan": {
+     "actual": "272ce90fd7f536149830d4ebcdc397bf53ff0a93d890ba1c50a27f9c1b374ebf",
+     "expected": "272ce90fd7f536149830d4ebcdc397bf53ff0a93d890ba1c50a27f9c1b374ebf",
+     "status": "passed"
+    },
+    "pdks.gf180.gds_layer_map": {
+     "actual": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+     "expected": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+     "status": "passed"
+    },
+    "pdks.gf180.physical_config": {
+     "actual": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+     "expected": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+     "status": "passed"
+    },
+    "pdks.gf180.rc_profiles.max": {
+     "actual": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+     "expected": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+     "status": "passed"
+    },
+    "pdks.gf180.rc_profiles.min": {
+     "actual": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+     "expected": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+     "status": "passed"
+    },
+    "pdks.gf180.rc_profiles.nom": {
+     "actual": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+     "expected": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+     "status": "passed"
+    },
+    "pdks.gf180.routing_config": {
+     "actual": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+     "expected": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+     "status": "passed"
+    },
+    "pdks.sky130.delay_cells": {
+     "actual": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+     "expected": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+     "status": "passed"
+    },
+    "pdks.sky130.floorplan": {
+     "actual": "0e6db14b53fc631975645e6c6833792740e7ac16194e946c0a835cb098c91529",
+     "expected": "0e6db14b53fc631975645e6c6833792740e7ac16194e946c0a835cb098c91529",
+     "status": "passed"
+    },
+    "pdks.sky130.gds_layer_map": {
+     "actual": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+     "expected": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+     "status": "passed"
+    },
+    "pdks.sky130.physical_config": {
+     "actual": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+     "expected": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+     "status": "passed"
+    },
+    "pdks.sky130.rc_profiles.max": {
+     "actual": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+     "expected": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+     "status": "passed"
+    },
+    "pdks.sky130.rc_profiles.min": {
+     "actual": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+     "expected": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+     "status": "passed"
+    },
+    "pdks.sky130.rc_profiles.nom": {
+     "actual": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+     "expected": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+     "status": "passed"
+    },
+    "pdks.sky130.routing_config": {
+     "actual": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+     "expected": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+     "status": "passed"
+    },
+    "rtl.0": {
+     "actual": "1239bbd086f74052a8f27bdd70db0cdf0e9caf2f7454c72f4b794ab409e3f6f5",
+     "expected": "1239bbd086f74052a8f27bdd70db0cdf0e9caf2f7454c72f4b794ab409e3f6f5",
+     "status": "passed"
+    },
+    "sdc.clock": {
+     "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+     "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+     "status": "passed"
+    },
+    "sdc.io_template": {
+     "actual": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07",
+     "expected": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07",
+     "status": "passed"
+    },
+    "signoff_manifest": {
+     "actual": "446347653af195e1337997f57309fa4d8efec1c31be55b9b3a41067ea8775c24",
+     "expected": "446347653af195e1337997f57309fa4d8efec1c31be55b9b3a41067ea8775c24",
+     "status": "passed"
+    },
+    "tools": {
+     "actual": "f1b01f01eb282866515cca7b7a18917461088dfa5fb3f6f3405da05c7d1fb117",
+     "expected": "f1b01f01eb282866515cca7b7a18917461088dfa5fb3f6f3405da05c7d1fb117",
+     "status": "passed"
+    }
+   },
+   "status": "passed"
+  },
+  "manifest_provenance": {
+   "head": "0acb28a11a8319941564b82c0b12f91b07e64a21",
+   "head_blob": "577e8b618b08d233640b40e22d07e5281e5db91f",
+   "status": "passed",
+   "worktree_blob": "577e8b618b08d233640b40e22d07e5281e5db91f"
+  },
+  "openroad_image": {
+   "image": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+   "status": "passed"
+  },
+  "sdc_rendering": {
+   "sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+   "status": "passed"
+  },
+  "tools_identity": {
+   "status": "passed",
+   "tools": {
+    "openroad": "passed",
+    "opensta": "passed",
+    "rusteda": "passed",
+    "rustroad": "passed",
+    "ruststa": "passed",
+    "rustsys": "passed",
+    "verilator": "passed",
+    "yosys": "passed"
+   }
+  }
+ },
+ "not_applicable_items": [],
+ "not_applicable_rules": {
+  "mpw_min_period": "combinational design (no clock port, virtual I/O clock only): no sequential or clocked cell, RustSTA pulse_width_status unconstrained with zero pulse-width and period rows, OpenSTA zero min-pulse-width and period rows at every corner"
+ },
+ "pdks": [
+  {
+   "binding": {
+    "artifacts": 55,
+    "digest": "8d5795183fb85b4f276d5996b01dcc6f6b4465553f019eaefca35b63356c68b0",
+    "revision": {
+     "branch": "feat/rtl2gds-final",
+     "dirty": false,
+     "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+     "dirty_paths": 0,
+     "head": "0acb28a11a8319941564b82c0b12f91b07e64a21",
+     "rustroad_sha256": "2911f28b20a26e273a426e45917cddad3ff3e1e8d2a1475f9a9ca212de70b3af"
+    }
+   },
+   "details": {
+    "reference_streamout": {
+     "output": {
+      "bytes": 74354,
+      "sha256": "db746e82500712fefb6c5cb0e13c9a524ff5b03d9c9dd85da913e32414e94803"
+     },
+     "problems": [],
+     "status": "passed"
+    },
+    "signoff_summary": "signoff.json",
+    "timing_matrix": {
+     "native": {
+      "ff": {
+       "opensta": {
+        "worst_hold_ns": 0.114521495998,
+        "worst_setup_ns": 9.327614784241
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.1145345107710859,
+        "worst_setup_ns": 9.327687344763392
+       }
+      },
+      "ss": {
+       "opensta": {
+        "worst_hold_ns": 0.064465686679,
+        "worst_setup_ns": 8.490673065186
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.06458005468294642,
+        "worst_setup_ns": 8.49097311883781
+       }
+      },
+      "tt": {
+       "opensta": {
+        "worst_hold_ns": 0.080875143409,
+        "worst_setup_ns": 9.087491035461
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.08091612984406826,
+        "worst_setup_ns": 9.08763419145182
+       }
+      }
+     },
+     "openrcx": {
+      "ff": {
+       "opensta": {
+        "worst_hold_ns": 0.111468963325,
+        "worst_setup_ns": 9.33039855957
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.1115143354068277,
+        "worst_setup_ns": 9.33054703505653
+       }
+      },
+      "ss": {
+       "opensta": {
+        "worst_hold_ns": 0.055679488927,
+        "worst_setup_ns": 8.495097160339
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.05572219757125679,
+        "worst_setup_ns": 8.494776616860188
+       }
+      },
+      "tt": {
+       "opensta": {
+        "worst_hold_ns": 0.075775668025,
+        "worst_setup_ns": 9.091998100281
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.07583042777715937,
+        "worst_setup_ns": 9.092171164487516
+       }
+      }
+     }
+    },
+    "timing_sources": {
+     "native": {
+      "metrics": {
+       "drv_status": "met",
+       "hold_violating_endpoints": 0,
+       "max_capacitance_status": "met",
+       "max_capacitance_violating": 0,
+       "max_fanout_status": "met",
+       "max_fanout_violating": 0,
+       "max_transition_status": "met",
+       "max_transition_violating": 0,
+       "min_period_violating": null,
+       "min_pulse_width_violating": 0,
+       "pulse_width_status": "met",
+       "ths_ns": 0.0,
+       "tns_ns": 0.0,
+       "violating_endpoints": 0,
+       "whs_ns": 0.0,
+       "wns_ns": 0.0,
+       "worst_hold_slack_ns": 0.06458005468294642,
+       "worst_max_capacitance_slack_pf": 0.05259049386304,
+       "worst_max_fanout_slack": 0.0,
+       "worst_max_transition_slack_ns": 0.7412617775028834,
+       "worst_min_period_slack_ns": null,
+       "worst_min_pulse_width_slack_ns": 4.253079364361682,
+       "worst_setup_slack_ns": 8.49097311883781
+      },
+      "scope": {
+       "backend": "cpu",
+       "clock_model": "propagated",
+       "corner": "tt",
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "coupling": "grounded_factor_1",
+       "cppr": "off",
+       "delay_calculator": "nldm_ceff_ramp",
+       "drc_status": "unchecked",
+       "drv_rules": {
+        "clock_limits": "paths"
+       },
+       "parasitics": "spef",
+       "physical_clock_domains": 1,
+       "precision": "f64",
+       "pulse_rules": {
+        "groups": "worst",
+        "pins": "all"
+       },
+       "wire_load": null,
+       "wire_model": "spef_rc"
+      }
+     },
+     "openrcx": {
+      "metrics": {
+       "drv_status": "met",
+       "hold_violating_endpoints": 0,
+       "max_capacitance_status": "met",
+       "max_capacitance_violating": 0,
+       "max_fanout_status": "met",
+       "max_fanout_violating": 0,
+       "max_transition_status": "met",
+       "max_transition_violating": 0,
+       "min_period_violating": null,
+       "min_pulse_width_violating": 0,
+       "pulse_width_status": "met",
+       "ths_ns": 0.0,
+       "tns_ns": 0.0,
+       "violating_endpoints": 0,
+       "whs_ns": 0.0,
+       "wns_ns": 0.0,
+       "worst_hold_slack_ns": 0.05572219757125679,
+       "worst_max_capacitance_slack_pf": 0.0528722931,
+       "worst_max_fanout_slack": 0.0,
+       "worst_max_transition_slack_ns": 0.7444503596363543,
+       "worst_min_period_slack_ns": null,
+       "worst_min_pulse_width_slack_ns": 4.247663739182237,
+       "worst_setup_slack_ns": 8.494776616860188
+      },
+      "scope": {
+       "backend": "cpu",
+       "clock_model": "propagated",
+       "corner": "tt",
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "coupling": "grounded_factor_1",
+       "cppr": "off",
+       "delay_calculator": "nldm_ceff_ramp",
+       "drc_status": "unchecked",
+       "drv_rules": {
+        "clock_limits": "paths"
+       },
+       "parasitics": "spef",
+       "physical_clock_domains": 1,
+       "precision": "f64",
+       "pulse_rules": {
+        "groups": "worst",
+        "pins": "all"
+       },
+       "wire_load": null,
+       "wire_model": "spef_rc"
+      }
+     }
+    }
+   },
+   "pdk": "sky130",
+   "rerun_receipts": 79,
+   "status": "passed",
+   "statuses": {
+    "antenna_deck": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed",
+     "tools": {
+      "primary": {
+       "by_plane": {},
+       "tool": "magic antennacheck",
+       "violations": 0
+      },
+      "secondary": {
+       "reason": "the sky130 KLayout DRC decks contain no antenna rules",
+       "status": "not_available",
+       "tool": "klayout"
+      }
+     }
+    },
+    "antenna_native": {
+     "margin": {
+      "derivation": "native partial-net ratios read low against the foundry deck: sky130 clk/met3 445.6 native vs 470.866 Magic (-5.4 %); planted met3 sweep: native 379.5 already fails Magic, native 366.6 passes (-5.1 % .. -8.4 %). Margin 0.10 exceeds the measured bound; the foundry deck remains the signoff gate.",
+      "fraction": 0.1,
+      "rule": "violated when ratio > (1 - fraction) x LEF limit; exceeds_lef_limit is the raw comparison"
+     },
+     "status": "passed",
+     "violations": 0,
+     "worst": [
+      {
+       "layer": "met3",
+       "limit": 400.0,
+       "net": "en",
+       "ratio": 161.079
+      },
+      {
+       "layer": "met3",
+       "limit": 400.0,
+       "net": "clk",
+       "ratio": 149.7
+      },
+      {
+       "layer": "met3",
+       "limit": 2736.24,
+       "net": "rr_eco_hold_1_n",
+       "ratio": 524.19
+      }
+     ]
+    },
+    "artifact_binding": {
+     "artifacts": 55,
+     "changed": [],
+     "digest": "8d5795183fb85b4f276d5996b01dcc6f6b4465553f019eaefca35b63356c68b0",
+     "status": "passed"
+    },
+    "cec_final": {
+     "exhaustive": null,
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": []
+     },
+     "second_oracle": "Yosys equiv_simple",
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cec_powered": {
+     "exhaustive": null,
+     "filtering": {
+      "physical_only": {
+       "by_master": {
+        "sky130_fd_sc_hd__fill_1": 3,
+        "sky130_fd_sc_hd__fill_2": 11,
+        "sky130_fd_sc_hd__fill_4": 2,
+        "sky130_fd_sc_hd__fill_8": 75,
+        "sky130_fd_sc_hd__tapvpwrvgnd_1": 32
+       },
+       "removed_instances": 123,
+       "rule": "cell-policy physical_only masters without any LEF OUTPUT pin"
+      },
+      "rail_constants": {
+       "rail_tied_signal_pins": [],
+       "rule": "signal pin on a supply rail -> that rail's constant"
+      },
+      "supply_ports": [
+       "VDD",
+       "VSS"
+      ],
+      "unpowered_view": {
+       "supply_connections_removed": 68,
+       "supply_ports_removed": [
+        "VDD",
+        "VSS"
+       ]
+      }
+     },
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": [
+       "VDD",
+       "VSS"
+      ]
+     },
+     "second_oracle": "Yosys equiv_simple",
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cec_prelayout": {
+     "exhaustive": null,
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": []
+     },
+     "second_oracle": "Yosys equiv_simple",
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cell_policy": {
+     "checks": {
+      "physical": {
+       "status": "passed",
+       "violations": []
+      },
+      "synth": {
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    },
+    "cell_proofs": {
+     "cells": [
+      "sky130_fd_sc_hd__buf_1"
+     ],
+     "clock_cells": [
+      "sky130_fd_sc_hd__clkbuf_1"
+     ],
+     "native_wrong_polarity": {
+      "cell": "sky130_fd_sc_hd__clkinv_1",
+      "code": "ECO_NOT_BUFFER",
+      "liberty_function": "(!A)",
+      "status": "rejected"
+     },
+     "proofs": {
+      "sky130_fd_sc_hd__buf_1@ff": "proved",
+      "sky130_fd_sc_hd__buf_1@ss": "proved",
+      "sky130_fd_sc_hd__buf_1@tt": "proved",
+      "sky130_fd_sc_hd__clkbuf_1@ff": "proved",
+      "sky130_fd_sc_hd__clkbuf_1@ss": "proved",
+      "sky130_fd_sc_hd__clkbuf_1@tt": "proved"
+     },
+     "status": "passed"
+    },
+    "controls": {
+     "controls": {
+      "antenna_planted": {
+       "candidates": [
+        "en",
+        "a[0]",
+        "a[1]",
+        "b[0]"
+       ],
+       "deck": {
+        "by_rule": {
+         "metal3": 1
+        },
+        "count": 1,
+        "status": "failed"
+       },
+       "detected": true,
+       "expected": "failed",
+       "layer": "met3",
+       "length_um": 600,
+       "margin_check": {
+        "conservative": true,
+        "magic_max_ratio": 4194.11,
+        "native_ratio": 3970.6031746031745,
+        "native_ratio_over_keep": 4411.781305114639
+       },
+       "native": {
+        "status": "violated",
+        "violated": [
+         {
+          "kind": "side_area",
+          "layer": "met3",
+          "limit": 400.0,
+          "net": "en",
+          "ratio": 3970.6031746031745,
+          "rule": "ANTENNADIFFSIDEAREARATIO"
+         }
+        ]
+       },
+       "oracle": "native check-antenna and the foundry antenna deck",
+       "peak_rss_kib": 72628,
+       "port": "en"
+      },
+      "drc_spacing": {
+       "by_rule": {
+        "drc-klayout": {
+         "m1.2": 1
+        },
+        "drc-magic": {
+         "met1.2": 2
+        }
+       },
+       "counts": {
+        "drc-klayout": 1,
+        "drc-magic": 2
+       },
+       "detected": true,
+       "expected": "failed",
+       "gap_um": 0.1,
+       "oracle": "Magic DRC and KLayout DRC",
+       "peak_rss_kib": 415172,
+       "planted": [
+        "(20000,2000;20600,3000)",
+        "(20700,2000;21300,3000)"
+       ],
+       "statuses": {
+        "drc_klayout": "failed",
+        "drc_magic": "failed"
+       }
+      },
+      "inverted_output": {
+       "cosim": {
+        "mismatches": [
+         "RR_COSIM_MISMATCH cycle=0 phase=0 port=y gold=00 gate=01",
+         "RR_COSIM_MISMATCH cycle=0 phase=1 port=y gold=00 gate=01",
+         "RR_COSIM_MISMATCH cycle=1 phase=0 port=y gold=00 gate=01"
+        ],
+        "status": "failed"
+       },
+       "detected": true,
+       "exhaustive": null,
+       "expected": "failed",
+       "mutation": "output bit y[0] driven through sky130_fd_sc_hd__inv_1 rr_mut",
+       "oracle": "RustSys check synth, Yosys equiv_simple and the random co-simulation",
+       "rustsys": {
+        "exit_code": 3,
+        "reason": "RustSys check synth verdict 'not-equivalent' (exit 3)",
+        "status": "failed",
+        "supply_ports": []
+       },
+       "yosys": {
+        "reason": "Yosys equiv: 1 unproven $equiv cells",
+        "status": "failed"
+       }
+      },
+      "label_swap": {
+       "detected": true,
+       "expected": "failed",
+       "labels_swapped": {
+        "a[0]": 1,
+        "en": 1
+       },
+       "oracle": "Netgen LVS, KLayout LVS (own results) and the XOR label comparison",
+       "own_problems": {
+        "klayout": [
+         "top pin names swapped/mismatched (layout<->schematic) a[0]<->EN, en<->A[0]",
+         "labelled top-level nets paired with a different or non-matching schematic net: [['a[0]', 'EN', 'Match'], ['en', 'A[0]', 'Match']]"
+        ],
+        "netgen": [
+         "lane_smoke: pin lists differ",
+         "final result 'Top level cell failed pin matching.'"
+        ]
+       },
+       "peak_rss_kib": 408756,
+       "statuses": {
+        "lvs_klayout": "failed",
+        "lvs_netgen": "failed",
+        "xor": "failed"
+       },
+       "swapped": "en,a[0]"
+      },
+      "missing_tool": {
+       "detected": true,
+       "exit_code": 3,
+       "expected": "failed",
+       "oracle": "tool identity preflight (missing -> unverified, exit 3)",
+       "pdk_items_run": 0,
+       "peak_rss_kib": 41628,
+       "status": "unverified",
+       "tools_identity": {
+        "reason": "tool identity: {'yosys': 'missing'}",
+        "status": "unverified",
+        "tools": {
+         "openroad": "passed",
+         "opensta": "passed",
+         "rusteda": "passed",
+         "rustroad": "passed",
+         "ruststa": "passed",
+         "rustsys": "passed",
+         "verilator": "passed",
+         "yosys": "missing"
+        }
+       }
+      },
+      "relaxed_manifest": {
+       "budget_floors": {
+        "reason": "manifest loosens fixed thresholds: ['budgets.parity_ns=0.003 (required <= 0.001)']",
+        "status": "failed"
+       },
+       "detected": true,
+       "exit_code": 1,
+       "expected": "failed",
+       "failed_items": [
+        "*:budget_floors"
+       ],
+       "manifest_provenance": {
+        "reason": ".work/runs/E3-pipeline/sky130_controls/relaxed_manifest/relaxed-design.json is not tracked at HEAD",
+        "status": "unverified"
+       },
+       "oracle": "budget floors (owner thresholds) and manifest provenance (git-tracked at HEAD)",
+       "pdk_items_run": 0,
+       "peak_rss_kib": 42696,
+       "status": "failed"
+      },
+      "removed_hold_cell": {
+       "detected": true,
+       "expected": "failed",
+       "iteration0_hold_ns": -0.10804453866321856,
+       "margin_ns": 0.05,
+       "opensta_worst_hold_ns": -0.091031432152,
+       "oracle": "RustSTA and OpenSTA hold gate on a fresh layout",
+       "peak_rss_kib": 120580,
+       "processes": 24,
+       "removed": [
+        "rr_eco_hold_0"
+       ],
+       "ruststa_worst_hold_ns": {
+        "ff": 0.06127292928544059,
+        "ss": -0.09091585358784299,
+        "tt": 0.0030100465421948885
+       },
+       "sink": "r0/D",
+       "worst_corner": "ss"
+      },
+      "removed_via": {
+       "at_gds": [
+        47070,
+        16830
+       ],
+       "detected": true,
+       "expected": "failed",
+       "net": "y[1]",
+       "oracle": "Netgen LVS and KLayout LVS (own results)",
+       "own_problems": {
+        "klayout": [
+         "top pin count layout 11 != schematic 12",
+         "unnamed top pin pairs [[None, 'Y[1]']]",
+         "labelled top-level layout nets not in the schematic (extra pins/labels): ['y[1]']",
+         "reference ports not paired with a layout pin: ['y[1]']"
+        ],
+        "netgen": [
+         "lane_smoke: pin lists differ",
+         "final result 'Top level cell failed pin matching.'",
+         "comp.out reports port errors ('Netlists match uniquely with port errors.')",
+         "1 pins without a matching pin: ['layout-only y[1]']"
+        ]
+       },
+       "peak_rss_kib": 407616,
+       "removed": "VIA_L1M1_PR",
+       "statuses": {
+        "lvs_klayout": "failed",
+        "lvs_netgen": "failed"
+       },
+       "via": "L1M1_PR"
+      },
+      "tampered_artifact": {
+       "detected": true,
+       "edited_hash": {
+        "reason": "binding record digest does not match its contents (recorded hash tampered); 1 artifact(s) differ from their bound sha256: ['def']",
+        "status": "failed"
+       },
+       "expected": "failed",
+       "flipped_byte": {
+        "reason": "1 artifact(s) differ from their bound sha256: ['gds']",
+        "status": "failed"
+       },
+       "oracle": "artifact binding re-verification",
+       "untouched_record": "passed"
+      },
+      "tampered_sdc": {
+       "changed": [
+        "sdc_postroute"
+       ],
+       "detected": true,
+       "expected": "failed",
+       "expected_sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+       "oracle": "frozen-input SHA-256 check",
+       "tampered_sha256": "bae115c87105d4cd7f9c983e667c7e33270d1b6d25ac0e2c65361e3f2e1d1313"
+      },
+      "tampered_spef": {
+       "binding": {
+        "ss": {
+         "actual": "9d24e7f91165352d80f922b1fb425022c7fe9773c45b79e8f6595fa764c8b489",
+         "expected": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3"
+        }
+       },
+       "detected": true,
+       "expected": "failed",
+       "factor": 1000.0,
+       "oracle": "SPEF identity against the extraction receipt",
+       "peak_rss_kib": 120852,
+       "resistors_scaled": 229,
+       "timing_effect": {
+        "bound_worst_hold_ns": 0.06458005468294642,
+        "bound_worst_setup_ns": 8.49097311883781,
+        "worst_hold_ns": 0.20322865868629547,
+        "worst_setup_ns": 6.979253578662555
+       }
+      }
+     },
+     "status": "passed"
+    },
+    "density": {
+     "by_rule": null,
+     "count": null,
+     "reason": "see density.json",
+     "status": "unverified"
+    },
+    "determinism": {
+     "artifacts": {
+      "def": {
+       "normalization": [],
+       "other_sha256": "d4116afea4124a53c999309f95e41233b69a17f45bb4186c6cdc000ac77b7b69",
+       "sha256": "d4116afea4124a53c999309f95e41233b69a17f45bb4186c6cdc000ac77b7b69",
+       "status": "passed"
+      },
+      "gds": {
+       "normalization": [],
+       "other_sha256": "08ad175aa97093a6d8c769336184ed31085f2746c3561df9fc59d7340e4768df",
+       "sha256": "08ad175aa97093a6d8c769336184ed31085f2746c3561df9fc59d7340e4768df",
+       "status": "passed"
+      },
+      "netlist.final": {
+       "normalization": [],
+       "other_sha256": "c8bf19f2008eb78ab7719ba83857c422e7b0ff57adcbad0ff1412a57f152d4e5",
+       "sha256": "c8bf19f2008eb78ab7719ba83857c422e7b0ff57adcbad0ff1412a57f152d4e5",
+       "status": "passed"
+      },
+      "netlist.final_mapped": {
+       "normalization": [],
+       "other_sha256": "8d386d5fd8ab115edb6319541ded889b5d54b457767c7e76cee5c71f96633fb6",
+       "sha256": "8d386d5fd8ab115edb6319541ded889b5d54b457767c7e76cee5c71f96633fb6",
+       "status": "passed"
+      },
+      "netlist.i0": {
+       "normalization": [],
+       "other_sha256": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+       "sha256": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+       "status": "passed"
+      },
+      "netlist.i1": {
+       "normalization": [],
+       "other_sha256": "045f7efa7ad1ae5199ee45f607a34064c1ebbc913522e87a6e5d48eacbd241cb",
+       "sha256": "045f7efa7ad1ae5199ee45f607a34064c1ebbc913522e87a6e5d48eacbd241cb",
+       "status": "passed"
+      },
+      "netlist.i2": {
+       "normalization": [],
+       "other_sha256": "8d386d5fd8ab115edb6319541ded889b5d54b457767c7e76cee5c71f96633fb6",
+       "sha256": "8d386d5fd8ab115edb6319541ded889b5d54b457767c7e76cee5c71f96633fb6",
+       "status": "passed"
+      },
+      "netlist.mapped": {
+       "normalization": [],
+       "other_sha256": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+       "sha256": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+       "status": "passed"
+      },
+      "netlist.powered": {
+       "normalization": [],
+       "other_sha256": "f46eb77a6f695f7366ae0ebdb271eb3cd19a66b22c0dc61c8de7f2434d48a698",
+       "sha256": "f46eb77a6f695f7366ae0ebdb271eb3cd19a66b22c0dc61c8de7f2434d48a698",
+       "status": "passed"
+      },
+      "routes": {
+       "normalization": [],
+       "other_sha256": "0d81c9be796cb29a4137ee5e95f94af403fa8eccb70045f762f9aae65b1fb589",
+       "sha256": "0d81c9be796cb29a4137ee5e95f94af403fa8eccb70045f762f9aae65b1fb589",
+       "status": "passed"
+      },
+      "spef.native.ff": {
+       "normalization": [],
+       "other_sha256": "32f038661aa5d239f5b2c9cd2a9c85685012f1147990601054e12fd5eafb44b1",
+       "sha256": "32f038661aa5d239f5b2c9cd2a9c85685012f1147990601054e12fd5eafb44b1",
+       "status": "passed"
+      },
+      "spef.native.ss": {
+       "normalization": [],
+       "other_sha256": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3",
+       "sha256": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3",
+       "status": "passed"
+      },
+      "spef.native.tt": {
+       "normalization": [],
+       "other_sha256": "2f82fbb657d709ebc0ee354e218347cf516b434718aeb95a4cd9fcd1764de234",
+       "sha256": "2f82fbb657d709ebc0ee354e218347cf516b434718aeb95a4cd9fcd1764de234",
+       "status": "passed"
+      },
+      "spef.openrcx.ff": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "3ad5d65d64009be85ba274c127333a2982a75538eceaa189024e1cad7cb6f623",
+       "sha256": "3ad5d65d64009be85ba274c127333a2982a75538eceaa189024e1cad7cb6f623",
+       "status": "passed"
+      },
+      "spef.openrcx.ss": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "d62f9bb8028d923a015620474146e46713ac828bc4d7e41bbb1c1c3fd1f9ab25",
+       "sha256": "d62f9bb8028d923a015620474146e46713ac828bc4d7e41bbb1c1c3fd1f9ab25",
+       "status": "passed"
+      },
+      "spef.openrcx.tt": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "d7c612a298a928e8e20e582d6122eee87213806cc2584aae7d6cac313d874ca5",
+       "sha256": "d7c612a298a928e8e20e582d6122eee87213806cc2584aae7d6cac313d874ca5",
+       "status": "passed"
+      }
+     },
+     "compared": 16,
+     "status": "passed"
+    },
+    "drc_klayout": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed"
+    },
+    "drc_magic": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed"
+    },
+    "drv": {
+     "by_spef": {
+      "native": {
+       "limits": [
+        {
+         "checked": 54,
+         "corner": "tt",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.8402418862930086
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.101335251498235
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ss",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.7412617775028834
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.05259049386304
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ff",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.8839913501528069
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.14397497871383402
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        }
+       ],
+       "status": "passed"
+      },
+      "openrcx": {
+       "limits": [
+        {
+         "checked": 54,
+         "corner": "tt",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.8421751150831369
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.101595088
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ss",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.7444503596363543
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0528722931
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ff",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.8853228873974579
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.1442606203
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        }
+       ],
+       "status": "passed"
+      }
+     },
+     "status": "passed"
+    },
+    "extraction": {
+     "native": {
+      "binding": {
+       "files": {
+        "ff": {
+         "actual": "32f038661aa5d239f5b2c9cd2a9c85685012f1147990601054e12fd5eafb44b1",
+         "expected": "32f038661aa5d239f5b2c9cd2a9c85685012f1147990601054e12fd5eafb44b1"
+        },
+        "ss": {
+         "actual": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3",
+         "expected": "17d68e61397b0dc27c8e29455488813d7e290724abdda65c86196de4e61349d3"
+        },
+        "tt": {
+         "actual": "2f82fbb657d709ebc0ee354e218347cf516b434718aeb95a4cd9fcd1764de234",
+         "expected": "2f82fbb657d709ebc0ee354e218347cf516b434718aeb95a4cd9fcd1764de234"
+        }
+       },
+       "status": "passed"
+      },
+      "diagnostics": {
+       "ff": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled"
+       ],
+       "ss": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled"
+       ],
+       "tt": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled"
+       ]
+      },
+      "rc_profiles": {
+       "ff": "min",
+       "ss": "max",
+       "tt": "nom"
+      }
+     },
+     "openrcx": {
+      "binding": {
+       "files": {
+        "ff": {
+         "actual": "68b9564a1bb843349f68de775d6f8b450119c126fbb302e762cd98b3f9a19861",
+         "expected": "68b9564a1bb843349f68de775d6f8b450119c126fbb302e762cd98b3f9a19861"
+        },
+        "ss": {
+         "actual": "cd43d7d75c74929e483a4d85dc516fe82c820c7d8d4b35a52d268596e69bb226",
+         "expected": "cd43d7d75c74929e483a4d85dc516fe82c820c7d8d4b35a52d268596e69bb226"
+        },
+        "tt": {
+         "actual": "cdf1ce5ebd27c03ee6866c6b53778c94528c1c340c3117b0d8424bf4fe6fdfd4",
+         "expected": "cdf1ce5ebd27c03ee6866c6b53778c94528c1c340c3117b0d8424bf4fe6fdfd4"
+        }
+       },
+       "status": "passed"
+      },
+      "rules": {
+       "ff": {
+        "bytes": 45435,
+        "sha256": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63"
+       },
+       "ss": {
+        "bytes": 45404,
+        "sha256": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220"
+       },
+       "tt": {
+        "bytes": 45409,
+        "sha256": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757"
+       }
+      }
+     },
+     "status": "passed"
+    },
+    "gds_xor": {
+     "by_rule": {},
+     "count": 0,
+     "native_gds": {
+      "export": {
+       "bytes": 70362,
+       "sha256": "08ad175aa97093a6d8c769336184ed31085f2746c3561df9fc59d7340e4768df"
+      }
+     },
+     "status": "passed"
+    },
+    "hold_closure": {
+     "decision_spef": "native rustroad extract",
+     "gate_hold_margin_ns": 0.05,
+     "iterations": [
+      {
+       "antenna": "violated",
+       "antenna_eco": null,
+       "closed": false,
+       "drv": null,
+       "hold_eco": {
+        "area_um2": 11.2608,
+        "cells": 3,
+        "planned_sinks": 3,
+        "violating_sinks": 3
+       },
+       "iteration": 0,
+       "size_eco": null,
+       "stopped": null,
+       "worst": {
+        "ff": {
+         "hold_ns": 0.054580616285746286,
+         "setup_ns": 9.334751870799183
+        },
+        "ss": {
+         "hold_ns": -0.10804453866321856,
+         "setup_ns": 8.516792008718205
+        },
+        "tt": {
+         "hold_ns": -0.009019205285610843,
+         "setup_ns": 9.100921822132163
+        }
+       }
+      },
+      {
+       "antenna": "passed",
+       "antenna_eco": null,
+       "closed": false,
+       "drv": null,
+       "hold_eco": {
+        "area_um2": 3.7536,
+        "cells": 1,
+        "planned_sinks": 1,
+        "violating_sinks": 1
+       },
+       "iteration": 1,
+       "size_eco": null,
+       "stopped": null,
+       "worst": {
+        "ff": {
+         "hold_ns": 0.09425765746188436,
+         "setup_ns": 9.325215783582586
+        },
+        "ss": {
+         "hold_ns": 0.03553523034149397,
+         "setup_ns": 8.481044765544477
+        },
+        "tt": {
+         "hold_ns": 0.06688773549470428,
+         "setup_ns": 9.084571978987004
+        }
+       }
+      },
+      {
+       "antenna": "passed",
+       "antenna_eco": null,
+       "closed": true,
+       "drv": null,
+       "hold_eco": null,
+       "iteration": 2,
+       "size_eco": null,
+       "stopped": null,
+       "worst": {
+        "ff": {
+         "hold_ns": 0.1145345107710859,
+         "setup_ns": 9.327687344763392
+        },
+        "ss": {
+         "hold_ns": 0.06458005468294642,
+         "setup_ns": 8.49097311883781
+        },
+        "tt": {
+         "hold_ns": 0.08091612984406826,
+         "setup_ns": 9.08763419145182
+        }
+       }
+      }
+     ],
+     "max_iterations": 4,
+     "sizing": false,
+     "status": "passed",
+     "target_margin_ns": 0.05
+    },
+    "implementation": {
+     "clock_tree": {
+      "body_bias_status": "tap_inserted_contact_unverified",
+      "cells": 140,
+      "clock_buffers": 3,
+      "clock_constraint_status": "explicit_sdc",
+      "clock_topology_status": "unrouted_topology_checked",
+      "connectivity_status": "linked_unverified",
+      "corner": "not_applicable",
+      "design": "lane_smoke",
+      "diagnostics": [
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units TIME (first line 23): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units CAPACITANCE (first line 24): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units RESISTANCE (first line 25): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library USEMINSPACING (first line 30): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "property_definitions LAYER (first line 33): Property schema is not interpreted; property uses produce separate diagnostics",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer PROPERTY (first line 52): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 2,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer SPACINGTABLE (first line 73): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer THICKNESS (first line 77): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer EDGECAPACITANCE (first line 78): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer CAPACITANCE (first line 79): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer RESISTANCE (first line 80): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 11,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNAMODEL (first line 82): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNADIFFSIDEAREARATIO (first line 83): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNADIFFAREARATIO (first line 95): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DCCURRENTDENSITY (first line 96): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 10,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer MINENCLOSEDAREA (first line 116): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 2,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ACCURRENTDENSITY (first line 124): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer MAXIMUMDENSITY (first line 125): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DENSITYCHECKWINDOW (first line 126): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DENSITYCHECKSTEP (first line 127): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "via_rule VIARULE (first line 310): Via generation rule is not modeled; routing/via DRC remain unchecked",
+        "occurrences": 25,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library NOWIREEXTENSIONATPIN (first line 2): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "macro FOREIGN (first line 7): FOREIGN is retained for GDS cell binding (checked by export-gds); import uses LEF geometry only",
+        "occurrences": 437,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "pin ANTENNAGATEAREA (first line 15): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 1314,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "pin ANTENNADIFFAREA (first line 88): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 450,
+        "source": "cell_lef"
+       },
+       {
+        "code": "PHYSICAL_SIGNOFF_UNCHECKED",
+        "message": "Primary metal rails/spines/vias and I/O geometry are generated and locally checked; well/tap continuity, DRC, IR/EM and extracted timing are not verified by this pass",
+        "occurrences": 1,
+        "source": "physical_preparation"
+       }
+      ],
+      "drc_status": "unchecked",
+      "expansions": 180,
+      "filler_cells": 91,
+      "inserted_tie_cells": 0,
+      "io_placement_status": "placed_geometry_checked",
+      "lvs_status": "unchecked",
+      "masters": 12,
+      "nets": 25,
+      "pins": 552,
+      "placement_status": "placed_unverified",
+      "power_grid_status": "primary_grid_generated",
+      "rail_continuity_status": "geometry_checked",
+      "revision": "rev3",
+      "routed_nets": null,
+      "routing_expansions": null,
+      "routing_segments": null,
+      "routing_status": "not_run",
+      "rows": 8,
+      "stage": "placed",
+      "tap_cells": 32,
+      "tap_placement_status": "geometry_checked",
+      "unconstrained_endpoints": null,
+      "wire_model": "none"
+     },
+     "final_iteration": 2,
+     "floorplan_reproduced": null,
+     "iterations": 3,
+     "patches": 5,
+     "placement": null,
+     "recipe": "legacy",
+     "renamed_escaped_wires": 0,
+     "route": {
+      "cells": 140,
+      "filler_cells": 91,
+      "routed_nets": 23,
+      "routing_expansions": 803753,
+      "routing_segments": 6266,
+      "tap_cells": 32
+     },
+     "routed_nets": 23,
+     "status": "passed",
+     "vias": 109,
+     "wires": 6157
+    },
+    "inputs_frozen": {
+     "after": {
+      "changed": [],
+      "files": {
+       "cell_gds": {
+        "actual": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "expected": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "status": "passed"
+       },
+       "cell_lef": {
+        "actual": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "expected": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "status": "passed"
+       },
+       "cell_policy": {
+        "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "status": "passed"
+       },
+       "delay_cells": {
+        "actual": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "expected": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "status": "passed"
+       },
+       "gds_layer_map": {
+        "actual": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "expected": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "status": "passed"
+       },
+       "liberty_ff": {
+        "actual": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "expected": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "status": "passed"
+       },
+       "liberty_ss": {
+        "actual": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "expected": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "status": "passed"
+       },
+       "liberty_tt": {
+        "actual": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "expected": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "status": "passed"
+       },
+       "openrcx_rules_ff": {
+        "actual": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "expected": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "status": "passed"
+       },
+       "openrcx_rules_ss": {
+        "actual": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "expected": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "status": "passed"
+       },
+       "openrcx_rules_tt": {
+        "actual": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "expected": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "status": "passed"
+       },
+       "physical_config": {
+        "actual": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+        "expected": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+        "status": "passed"
+       },
+       "rc_profile_ff": {
+        "actual": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+        "expected": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+        "status": "passed"
+       },
+       "rc_profile_ss": {
+        "actual": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+        "expected": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+        "status": "passed"
+       },
+       "rc_profile_tt": {
+        "actual": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+        "expected": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+        "status": "passed"
+       },
+       "routing_profile": {
+        "actual": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+        "expected": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+        "status": "passed"
+       },
+       "sdc_cts": {
+        "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "status": "passed"
+       },
+       "sdc_postroute": {
+        "actual": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "expected": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "status": "passed"
+       },
+       "technology_lef": {
+        "actual": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "expected": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "status": "passed"
+       }
+      },
+      "status": "passed"
+     },
+     "before": {
+      "changed": [],
+      "files": {
+       "cell_gds": {
+        "actual": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "expected": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "status": "passed"
+       },
+       "cell_lef": {
+        "actual": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "expected": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "status": "passed"
+       },
+       "cell_policy": {
+        "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "status": "passed"
+       },
+       "delay_cells": {
+        "actual": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "expected": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "status": "passed"
+       },
+       "gds_layer_map": {
+        "actual": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "expected": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "status": "passed"
+       },
+       "liberty_ff": {
+        "actual": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "expected": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "status": "passed"
+       },
+       "liberty_ss": {
+        "actual": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "expected": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "status": "passed"
+       },
+       "liberty_tt": {
+        "actual": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "expected": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "status": "passed"
+       },
+       "openrcx_rules_ff": {
+        "actual": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "expected": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "status": "passed"
+       },
+       "openrcx_rules_ss": {
+        "actual": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "expected": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "status": "passed"
+       },
+       "openrcx_rules_tt": {
+        "actual": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "expected": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "status": "passed"
+       },
+       "physical_config": {
+        "actual": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+        "expected": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+        "status": "passed"
+       },
+       "rc_profile_ff": {
+        "actual": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+        "expected": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+        "status": "passed"
+       },
+       "rc_profile_ss": {
+        "actual": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+        "expected": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+        "status": "passed"
+       },
+       "rc_profile_tt": {
+        "actual": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+        "expected": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+        "status": "passed"
+       },
+       "routing_profile": {
+        "actual": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+        "expected": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+        "status": "passed"
+       },
+       "sdc_cts": {
+        "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "status": "passed"
+       },
+       "sdc_postroute": {
+        "actual": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "expected": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "status": "passed"
+       },
+       "technology_lef": {
+        "actual": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "expected": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+        "status": "passed"
+       }
+      },
+      "status": "passed"
+     },
+     "status": "passed"
+    },
+    "lvs_klayout": {
+     "by_rule": {
+      "mismatch": 0
+     },
+     "count": 0,
+     "status": "passed"
+    },
+    "lvs_netgen": {
+     "by_rule": {
+      "mismatch": 0
+     },
+     "count": 0,
+     "status": "passed"
+    },
+    "mpw_min_period": {
+     "by_spef": {
+      "native": {
+       "async_set_clear_pins_unchecked": null,
+       "min_period_note": "no Liberty minimum_period constraint on the clocked cells (both engines report none)",
+       "min_period_rows": {
+        "opensta": 0,
+        "ruststa": 0
+       },
+       "pulse_width_rows": 24,
+       "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
+       "status": "passed",
+       "worst_min_period_slack_ns": null,
+       "worst_min_pulse_width_slack_ns": 4.253079364361682
+      },
+      "openrcx": {
+       "async_set_clear_pins_unchecked": null,
+       "min_period_note": "no Liberty minimum_period constraint on the clocked cells (both engines report none)",
+       "min_period_rows": {
+        "opensta": 0,
+        "ruststa": 0
+       },
+       "pulse_width_rows": 24,
+       "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
+       "status": "passed",
+       "worst_min_period_slack_ns": null,
+       "worst_min_pulse_width_slack_ns": 4.247663739182237
+      }
+     },
+     "status": "passed"
+    },
+    "simulation": {
+     "compared_outputs": [
+      "y",
+      "z"
+     ],
+     "expected": {
+      "checks": 16384,
+      "cycles": 4096,
+      "time": 12288
+     },
+     "initial_state": "Verilator zero-initialised state in both models",
+     "observed": {
+      "checks": 16384,
+      "cycles": 4096,
+      "time": 12288
+     },
+     "seed": "0x5eed2026c0ffee01",
+     "status": "passed",
+     "stimulus": "xorshift64 random",
+     "vectors": 4096
+    },
+    "timing_accuracy": {
+     "by_spef": {
+      "native": {
+       "corners": {
+        "ff": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 8.141825458296559e-05,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 8.141825458296559e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 0.544350147247,
+            "ruststa_ns": 0.5442687289924171
+           },
+           {
+            "difference_ns": 7.256052239235089e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 9.327614784241,
+            "ruststa_ns": 9.327687344763392
+           },
+           {
+            "difference_ns": 6.533856215007461e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.404953956604,
+            "ruststa_ns": 9.40501929516615
+           },
+           {
+            "difference_ns": 5.808675177809697e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.466627985239,
+            "ruststa_ns": 0.4665698984872219
+           },
+           {
+            "difference_ns": 4.5712558653765445e-05,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 0.461339473724,
+            "ruststa_ns": 0.46129376116534626
+           },
+           {
+            "difference_ns": 4.175460873323544e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 0.536838233471,
+            "ruststa_ns": 0.5367964788622668
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 2.6280162777059246e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 2.6280162777059246e-05,
+            "opensta_required_ns": 0.206430241466,
+            "opensta_slack_ns": 4.786327362061,
+            "ruststa_required_ns": 0.20640396130322294,
+            "ruststa_slack_ns": 4.786353215152354
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 2.6280162777059246e-05,
+            "opensta_required_ns": 0.206430241466,
+            "opensta_slack_ns": 4.786327838898,
+            "ruststa_required_ns": 0.20640396130322294,
+            "ruststa_slack_ns": 4.7863537245680545
+           },
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.7127738819372462e-05,
+            "opensta_required_ns": 0.181284323335,
+            "opensta_slack_ns": 4.816902160645,
+            "ruststa_required_ns": 0.18126719559618062,
+            "ruststa_slack_ns": 4.816917343482599
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.7127738819372462e-05,
+            "opensta_required_ns": 0.181284323335,
+            "opensta_slack_ns": 4.816901683807,
+            "ruststa_required_ns": 0.18126719559618062,
+            "ruststa_slack_ns": 4.8169170396802
+           }
+          ]
+         }
+        },
+        "ss": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00030567799489866765,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00030567799489866765,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.308854818344,
+            "ruststa_ns": 1.3085491403491014
+           },
+           {
+            "difference_ns": 0.0003000536518094066,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 8.490673065186,
+            "ruststa_ns": 8.49097311883781
+           },
+           {
+            "difference_ns": 0.0002355068664730009,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.286001682281,
+            "ruststa_ns": 1.285766175414527
+           },
+           {
+            "difference_ns": 0.0002251699935182927,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 8.527575492859,
+            "ruststa_ns": 8.527800662852519
+           },
+           {
+            "difference_ns": 0.00021639323582400838,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.649799346924,
+            "ruststa_ns": 0.649582953688176
+           },
+           {
+            "difference_ns": 0.00019823090443082947,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.197924613953,
+            "ruststa_ns": 9.198122844857432
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 0.00012543642828255486,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 0.00012543642828255486,
+            "opensta_required_ns": 0.640194237232,
+            "opensta_slack_ns": 4.407521724701,
+            "ruststa_required_ns": 0.6400728007772648,
+            "ruststa_slack_ns": 4.407647161129282
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 0.00012533372432610435,
+            "opensta_required_ns": 0.640193998814,
+            "opensta_slack_ns": 4.407521247864,
+            "ruststa_required_ns": 0.6400728007772648,
+            "ruststa_slack_ns": 4.407646581588326
+           },
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 9.925779422925718e-05,
+            "opensta_required_ns": 0.699299931526,
+            "opensta_slack_ns": 4.252984523773,
+            "ruststa_required_ns": 0.6992006737317707,
+            "ruststa_slack_ns": 4.253079364361682
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 9.925779422925718e-05,
+            "opensta_required_ns": 0.699299931526,
+            "opensta_slack_ns": 4.25298500061,
+            "ruststa_required_ns": 0.6992006737317707,
+            "ruststa_slack_ns": 4.253079943902637
+           }
+          ]
+         }
+        },
+        "tt": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00016157803877869803,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00016157803877869803,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 0.766741156578,
+            "ruststa_ns": 0.7665795785392213
+           },
+           {
+            "difference_ns": 0.000143155990819821,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 9.087491035461,
+            "ruststa_ns": 9.08763419145182
+           },
+           {
+            "difference_ns": 9.844598929464876e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 0.754774570465,
+            "ruststa_ns": 0.7546761244757053
+           },
+           {
+            "difference_ns": 9.379419180532977e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 9.109537124634,
+            "ruststa_ns": 9.109630918825806
+           },
+           {
+            "difference_ns": 8.09103801611144e-05,
+            "endpoint": "z[1]",
+            "kind": "setup",
+            "opensta_ns": 9.352344512939,
+            "ruststa_ns": 9.352425423319161
+           },
+           {
+            "difference_ns": 7.63855941917635e-05,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 0.523429989815,
+            "ruststa_ns": 0.5233536042208082
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 4.628142224089027e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 4.628142224089027e-05,
+            "opensta_required_ns": 0.34134376049,
+            "opensta_slack_ns": 4.632150173187,
+            "ruststa_required_ns": 0.3412974790677591,
+            "ruststa_slack_ns": 4.6321936875194885
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 4.6132411240962234e-05,
+            "opensta_required_ns": 0.341343611479,
+            "opensta_slack_ns": 4.632151126862,
+            "ruststa_required_ns": 0.34129747906775904,
+            "ruststa_slack_ns": 4.632194345414567
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 4.110540907920068e-05,
+            "opensta_required_ns": 0.283121645451,
+            "opensta_slack_ns": 4.74338388443,
+            "ruststa_required_ns": 0.2830838435736735,
+            "ruststa_slack_ns": 4.743424989839079
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 4.044751400122948e-05,
+            "opensta_required_ns": 0.283121466637,
+            "opensta_slack_ns": 4.74338388443,
+            "ruststa_required_ns": 0.2830838435736735,
+            "ruststa_slack_ns": 4.743424331944001
+           }
+          ]
+         }
+        }
+       },
+       "failing": [],
+       "status": "passed"
+      },
+      "openrcx": {
+       "corners": {
+        "ff": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00016281434474552103,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00016281434474552103,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 0.542036116123,
+            "ruststa_ns": 0.5418733017782544
+           },
+           {
+            "difference_ns": 0.00014847548652952014,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 9.33039855957,
+            "ruststa_ns": 9.33054703505653
+           },
+           {
+            "difference_ns": 0.0001397936750766604,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.404908180237,
+            "ruststa_ns": 9.405047973912076
+           },
+           {
+            "difference_ns": 0.00011441195015310379,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.466782748699,
+            "ruststa_ns": 0.4666683367488469
+           },
+           {
+            "difference_ns": 0.00010373903619853575,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 0.534783244133,
+            "ruststa_ns": 0.5346795050968015
+           },
+           {
+            "difference_ns": 0.00010078538399227455,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 9.344770431519,
+            "ruststa_ns": 9.344871216902993
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 8.319068165871246e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 8.319068165871246e-05,
+            "opensta_required_ns": 0.209535181522,
+            "opensta_slack_ns": 4.782690525055,
+            "ruststa_required_ns": 0.2094519908403413,
+            "ruststa_slack_ns": 4.782771068685732
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 8.292246065869091e-05,
+            "opensta_required_ns": 0.209534913301,
+            "opensta_slack_ns": 4.782691001892,
+            "ruststa_required_ns": 0.2094519908403413,
+            "ruststa_slack_ns": 4.782771538390344
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 5.543308668620739e-05,
+            "opensta_required_ns": 0.149990260601,
+            "opensta_slack_ns": 4.85778427124,
+            "ruststa_required_ns": 0.1499372361472409,
+            "ruststa_slack_ns": 4.857839704326686
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 5.4486545074894366e-05,
+            "opensta_required_ns": 0.149989888072,
+            "opensta_slack_ns": 4.857784748077,
+            "ruststa_required_ns": 0.1499372361472409,
+            "ruststa_slack_ns": 4.857839234622075
+           }
+          ]
+         }
+        },
+        "ss": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.0003205434788124961,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.0003205434788124961,
+            "endpoint": "r2/D",
+            "kind": "setup",
+            "opensta_ns": 8.495097160339,
+            "ruststa_ns": 8.494776616860188
+           },
+           {
+            "difference_ns": 0.00020169044234719102,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.301212668419,
+            "ruststa_ns": 1.3010109779766528
+           },
+           {
+            "difference_ns": 0.00019701463305032973,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 8.499221801758,
+            "ruststa_ns": 8.499418816391051
+           },
+           {
+            "difference_ns": 0.00019550886935293388,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.649560987949,
+            "ruststa_ns": 0.649365479079647
+           },
+           {
+            "difference_ns": 0.00017875222521190892,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.198483467102,
+            "ruststa_ns": 9.198662219327211
+           },
+           {
+            "difference_ns": 0.00012867242871528184,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 0.640161633492,
+            "ruststa_ns": 0.6400329610632847
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 4.159711814910594e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 4.159711814910594e-05,
+            "opensta_required_ns": 0.64264190197,
+            "opensta_slack_ns": 4.405473232269,
+            "ruststa_required_ns": 0.6426046724863963,
+            "ruststa_slack_ns": 4.405514829387149
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 4.0932258408510336e-05,
+            "opensta_required_ns": 0.64264190197,
+            "opensta_slack_ns": 4.405473232269,
+            "ruststa_required_ns": 0.6426046724863963,
+            "ruststa_slack_ns": 4.405514164527409
+           },
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.9559983516437285e-05,
+            "opensta_required_ns": 0.628558218479,
+            "opensta_slack_ns": 4.336282730103,
+            "ruststa_required_ns": 0.628575213262583,
+            "ruststa_slack_ns": 4.336263170119484
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.9521748937378902e-05,
+            "opensta_required_ns": 0.628558218479,
+            "opensta_slack_ns": 4.336282253265,
+            "ruststa_required_ns": 0.628575213262583,
+            "ruststa_slack_ns": 4.3362627315160625
+           }
+          ]
+         }
+        },
+        "tt": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00019581569285664902,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00019581569285664902,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 0.762865006924,
+            "ruststa_ns": 0.7626691912311434
+           },
+           {
+            "difference_ns": 0.00017306420651586052,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 9.091998100281,
+            "ruststa_ns": 9.092171164487516
+           },
+           {
+            "difference_ns": 0.00011424492059575186,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 0.751348674297,
+            "ruststa_ns": 0.7512344293764043
+           },
+           {
+            "difference_ns": 0.00010974396816720855,
+            "endpoint": "z[1]",
+            "kind": "setup",
+            "opensta_ns": 9.352476119995,
+            "ruststa_ns": 9.352585863963167
+           },
+           {
+            "difference_ns": 0.00010852958227403064,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 9.113196372986,
+            "ruststa_ns": 9.113304902568274
+           },
+           {
+            "difference_ns": 0.0001005753102932827,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 0.523210167885,
+            "ruststa_ns": 0.5231095925747067
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 8.314818848986771e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 0,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r0/CLK:high",
+            "difference_ns": 8.314818848986771e-05,
+            "opensta_required_ns": 0.345206081867,
+            "opensta_slack_ns": 4.627610206604,
+            "ruststa_required_ns": 0.34512293367851016,
+            "ruststa_slack_ns": 4.62768776713199
+           },
+           {
+            "check": "r1/CLK:high",
+            "difference_ns": 8.285016548986723e-05,
+            "opensta_required_ns": 0.345205783844,
+            "opensta_slack_ns": 4.627611160278,
+            "ruststa_required_ns": 0.34512293367851016,
+            "ruststa_slack_ns": 4.627688428307944
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 5.2827585867554205e-05,
+            "opensta_required_ns": 0.284873425961,
+            "opensta_slack_ns": 4.742310523987,
+            "ruststa_required_ns": 0.2848259476166332,
+            "ruststa_slack_ns": 4.742363351572868
+           },
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 5.2166409911791334e-05,
+            "opensta_required_ns": 0.28487315774,
+            "opensta_slack_ns": 4.742310523987,
+            "ruststa_required_ns": 0.2848259476166332,
+            "ruststa_slack_ns": 4.742362690396912
+           }
+          ]
+         }
+        }
+       },
+       "failing": [],
+       "status": "passed"
+      }
+     },
+     "status": "passed"
+    },
+    "timing_hold": {
+     "by_spef": {
+      "native": {
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "status": "passed",
+       "violations": []
+      },
+      "openrcx": {
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    },
+    "timing_setup": {
+     "by_spef": {
+      "native": {
+       "corners": [
+        "tt",
+        "ss"
+       ],
+       "status": "passed",
+       "violations": []
+      },
+      "openrcx": {
+       "corners": [
+        "tt",
+        "ss"
+       ],
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    }
+   },
+   "wall_seconds": 50.804
+  },
+  {
+   "binding": {
+    "artifacts": 54,
+    "digest": "327c7394985d8eeeaa94ea92c6e38391641106bd881b4fedec85f671d10d744f",
+    "revision": {
+     "branch": "feat/rtl2gds-final",
+     "dirty": false,
+     "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+     "dirty_paths": 0,
+     "head": "0acb28a11a8319941564b82c0b12f91b07e64a21",
+     "rustroad_sha256": "2911f28b20a26e273a426e45917cddad3ff3e1e8d2a1475f9a9ca212de70b3af"
+    }
+   },
+   "details": {
+    "reference_streamout": {
+     "output": {
+      "bytes": 56278,
+      "sha256": "c1b2eddc2659f4d14bd773f16ea4102e3169bcc7b92c2dba395455133039bc15"
+     },
+     "problems": [],
+     "status": "passed"
+    },
+    "signoff_summary": "signoff.json",
+    "timing_matrix": {
+     "native": {
+      "ff": {
+       "opensta": {
+        "worst_hold_ns": 0.194193333387,
+        "worst_setup_ns": 8.547598838806
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.1942148250466148,
+        "worst_setup_ns": 8.547623497569393
+       }
+      },
+      "ss": {
+       "opensta": {
+        "worst_hold_ns": 0.36208859086,
+        "worst_setup_ns": 4.84410572052
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.362088586010864,
+        "worst_setup_ns": 4.844104505829436
+       }
+      },
+      "tt": {
+       "opensta": {
+        "worst_hold_ns": 0.241543784738,
+        "worst_setup_ns": 7.461035728455
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.24156418899847754,
+        "worst_setup_ns": 7.46105543263267
+       }
+      }
+     },
+     "openrcx": {
+      "ff": {
+       "opensta": {
+        "worst_hold_ns": 0.193814083934,
+        "worst_setup_ns": 8.549252510071
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.1938359303315127,
+        "worst_setup_ns": 8.549281472909945
+       }
+      },
+      "ss": {
+       "opensta": {
+        "worst_hold_ns": 0.361523151398,
+        "worst_setup_ns": 4.85221862793
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.36154441960255834,
+        "worst_setup_ns": 4.852230418776879
+       }
+      },
+      "tt": {
+       "opensta": {
+        "worst_hold_ns": 0.24055197835,
+        "worst_setup_ns": 7.463933467865
+       },
+       "ruststa": {
+        "worst_hold_ns": 0.2405742794680804,
+        "worst_setup_ns": 7.463964172867033
+       }
+      }
+     }
+    },
+    "timing_sources": {
+     "native": {
+      "metrics": {
+       "drv_status": "met",
+       "hold_violating_endpoints": 0,
+       "max_capacitance_status": "met",
+       "max_capacitance_violating": 0,
+       "max_fanout_status": "met",
+       "max_fanout_violating": 0,
+       "max_transition_status": "met",
+       "max_transition_violating": 0,
+       "min_period_violating": 0,
+       "min_pulse_width_violating": 0,
+       "pulse_width_status": "met",
+       "ths_ns": 0.0,
+       "tns_ns": 0.0,
+       "violating_endpoints": 0,
+       "whs_ns": 0.0,
+       "wns_ns": 0.0,
+       "worst_hold_slack_ns": 0.1942148250466148,
+       "worst_max_capacitance_slack_pf": 0.275947609629573,
+       "worst_max_fanout_slack": 0.0,
+       "worst_max_transition_slack_ns": 0.04928745506994425,
+       "worst_min_period_slack_ns": 6.438000000000001,
+       "worst_min_pulse_width_slack_ns": 3.2465038399357136,
+       "worst_setup_slack_ns": 4.844104505829436
+      },
+      "scope": {
+       "backend": "cpu",
+       "clock_model": "propagated",
+       "corner": "tt",
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "coupling": "grounded_factor_1",
+       "cppr": "off",
+       "delay_calculator": "nldm_ceff_ramp",
+       "drc_status": "unchecked",
+       "drv_rules": {
+        "clock_limits": "paths"
+       },
+       "parasitics": "spef",
+       "physical_clock_domains": 1,
+       "precision": "f64",
+       "pulse_rules": {
+        "groups": "worst",
+        "pins": "all"
+       },
+       "wire_load": null,
+       "wire_model": "spef_rc"
+      }
+     },
+     "openrcx": {
+      "metrics": {
+       "drv_status": "met",
+       "hold_violating_endpoints": 0,
+       "max_capacitance_status": "met",
+       "max_capacitance_violating": 0,
+       "max_fanout_status": "met",
+       "max_fanout_violating": 0,
+       "max_transition_status": "met",
+       "max_transition_violating": 0,
+       "min_period_violating": 0,
+       "min_pulse_width_violating": 0,
+       "pulse_width_status": "met",
+       "ths_ns": 0.0,
+       "tns_ns": 0.0,
+       "violating_endpoints": 0,
+       "whs_ns": 0.0,
+       "wns_ns": 0.0,
+       "worst_hold_slack_ns": 0.1938359303315127,
+       "worst_max_capacitance_slack_pf": 0.2758997427,
+       "worst_max_fanout_slack": 0.0,
+       "worst_max_transition_slack_ns": 0.04997946398232278,
+       "worst_min_period_slack_ns": 6.438000000000001,
+       "worst_min_pulse_width_slack_ns": 3.2509824924595616,
+       "worst_setup_slack_ns": 4.852230418776879
+      },
+      "scope": {
+       "backend": "cpu",
+       "clock_model": "propagated",
+       "corner": "tt",
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "coupling": "grounded_factor_1",
+       "cppr": "off",
+       "delay_calculator": "nldm_ceff_ramp",
+       "drc_status": "unchecked",
+       "drv_rules": {
+        "clock_limits": "paths"
+       },
+       "parasitics": "spef",
+       "physical_clock_domains": 1,
+       "precision": "f64",
+       "pulse_rules": {
+        "groups": "worst",
+        "pins": "all"
+       },
+       "wire_load": null,
+       "wire_model": "spef_rc"
+      }
+     }
+    }
+   },
+   "pdk": "gf180",
+   "rerun_receipts": 54,
+   "status": "passed",
+   "statuses": {
+    "antenna_deck": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed",
+     "tools": {
+      "primary": {
+       "by_rule": {},
+       "tool": "klayout gf180mcu.drc decks=antenna",
+       "total": 0
+      },
+      "secondary": {
+       "by_plane": {},
+       "note": "gf180mcuD.tech antenna section is marked incomplete; a clean result is not evidence",
+       "status": "secondary_incomplete_rules",
+       "tool": "magic antennacheck",
+       "violations": 0
+      }
+     }
+    },
+    "antenna_native": {
+     "margin": {
+      "derivation": "native partial-net ratios read low against the foundry deck: sky130 clk/met3 445.6 native vs 470.866 Magic (-5.4 %); planted met3 sweep: native 379.5 already fails Magic, native 366.6 passes (-5.1 % .. -8.4 %). Margin 0.10 exceeds the measured bound; the foundry deck remains the signoff gate.",
+      "fraction": 0.1,
+      "rule": "violated when ratio > (1 - fraction) x LEF limit; exceeds_lef_limit is the raw comparison"
+     },
+     "status": "passed",
+     "violations": 0,
+     "worst": [
+      {
+       "layer": "Metal3",
+       "limit": 400.0,
+       "net": "clk",
+       "ratio": 60.289
+      },
+      {
+       "layer": "Metal2",
+       "limit": 400.0,
+       "net": "a[0]",
+       "ratio": 53.789
+      },
+      {
+       "layer": "Metal2",
+       "limit": 400.0,
+       "net": "clk",
+       "ratio": 47.726
+      }
+     ]
+    },
+    "artifact_binding": {
+     "artifacts": 54,
+     "changed": [],
+     "digest": "327c7394985d8eeeaa94ea92c6e38391641106bd881b4fedec85f671d10d744f",
+     "status": "passed"
+    },
+    "cec_final": {
+     "exhaustive": null,
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": []
+     },
+     "second_oracle": "Yosys equiv_simple",
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cec_powered": {
+     "exhaustive": null,
+     "filtering": {
+      "physical_only": {
+       "by_master": {
+        "gf180mcu_fd_sc_mcu7t5v0__fill_1": 14,
+        "gf180mcu_fd_sc_mcu7t5v0__fill_16": 14,
+        "gf180mcu_fd_sc_mcu7t5v0__fill_2": 26,
+        "gf180mcu_fd_sc_mcu7t5v0__fill_4": 17,
+        "gf180mcu_fd_sc_mcu7t5v0__fill_8": 16,
+        "gf180mcu_fd_sc_mcu7t5v0__filltie": 32
+       },
+       "removed_instances": 119,
+       "rule": "cell-policy physical_only masters without any LEF OUTPUT pin"
+      },
+      "rail_constants": {
+       "rail_tied_signal_pins": [],
+       "rule": "signal pin on a supply rail -> that rail's constant"
+      },
+      "supply_ports": [
+       "VDD",
+       "VSS"
+      ],
+      "unpowered_view": {
+       "supply_connections_removed": 68,
+       "supply_ports_removed": [
+        "VDD",
+        "VSS"
+       ]
+      }
+     },
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": [
+       "VDD",
+       "VSS"
+      ]
+     },
+     "second_oracle": "Yosys equiv_simple",
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cec_prelayout": {
+     "exhaustive": null,
+     "rustsys": {
+      "exit_code": 0,
+      "status": "passed",
+      "supply_ports": []
+     },
+     "second_oracle": "Yosys equiv_simple",
+     "status": "passed",
+     "yosys": {
+      "status": "passed"
+     }
+    },
+    "cell_policy": {
+     "checks": {
+      "physical": {
+       "status": "passed",
+       "violations": []
+      },
+      "synth": {
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    },
+    "cell_proofs": {
+     "cells": [
+      "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+     ],
+     "clock_cells": [
+      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1"
+     ],
+     "native_wrong_polarity": {
+      "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_1",
+      "code": "ECO_NOT_BUFFER",
+      "liberty_function": "(!I)",
+      "status": "rejected"
+     },
+     "proofs": {
+      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1@ff": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1@ss": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1@tt": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__dlya_1@ff": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__dlya_1@ss": "proved",
+      "gf180mcu_fd_sc_mcu7t5v0__dlya_1@tt": "proved"
+     },
+     "status": "passed"
+    },
+    "controls": {
+     "controls": {
+      "antenna_planted": {
+       "candidates": [
+        "en",
+        "a[0]",
+        "a[1]",
+        "b[0]"
+       ],
+       "deck": {
+        "by_rule": {
+         "ANT.16_ii_ANT.4": 5
+        },
+        "count": 5,
+        "status": "failed"
+       },
+       "detected": true,
+       "expected": "failed",
+       "layer": "Metal3",
+       "length_um": 2000,
+       "margin_check": {
+        "conservative": true,
+        "magic_max_ratio": 1104.8,
+        "native_ratio": 1084.8357421874998,
+        "native_ratio_over_keep": 1205.3730468749998
+       },
+       "native": {
+        "status": "violated",
+        "violated": [
+         {
+          "kind": "side_area",
+          "layer": "Metal3",
+          "limit": 400.0,
+          "net": "en",
+          "ratio": 1084.8357421874998,
+          "rule": "ANTENNADIFFSIDEAREARATIO"
+         }
+        ]
+       },
+       "oracle": "native check-antenna and the foundry antenna deck",
+       "peak_rss_kib": 425904,
+       "port": "en"
+      },
+      "drc_spacing": {
+       "by_rule": {
+        "drc-klayout": {
+         "M1.2a": 1
+        },
+        "drc-magic": {
+         "M1.2a": 1
+        }
+       },
+       "counts": {
+        "drc-klayout": 1,
+        "drc-magic": 1
+       },
+       "detected": true,
+       "expected": "failed",
+       "gap_um": 0.12,
+       "oracle": "Magic DRC and KLayout DRC",
+       "peak_rss_kib": 412956,
+       "planted": [
+        "(43000,3000;43600,4000)",
+        "(43720,3000;44320,4000)"
+       ],
+       "statuses": {
+        "drc_klayout": "failed",
+        "drc_magic": "failed"
+       }
+      },
+      "inverted_output": {
+       "cosim": {
+        "mismatches": [
+         "RR_COSIM_MISMATCH cycle=0 phase=0 port=y gold=00 gate=01",
+         "RR_COSIM_MISMATCH cycle=0 phase=1 port=y gold=00 gate=01",
+         "RR_COSIM_MISMATCH cycle=1 phase=0 port=y gold=00 gate=01"
+        ],
+        "status": "failed"
+       },
+       "detected": true,
+       "exhaustive": null,
+       "expected": "failed",
+       "mutation": "output bit y[0] driven through gf180mcu_fd_sc_mcu7t5v0__inv_1 rr_mut",
+       "oracle": "RustSys check synth, Yosys equiv_simple and the random co-simulation",
+       "rustsys": {
+        "exit_code": 3,
+        "reason": "RustSys check synth verdict 'not-equivalent' (exit 3)",
+        "status": "failed",
+        "supply_ports": []
+       },
+       "yosys": {
+        "reason": "Yosys equiv: 1 unproven $equiv cells",
+        "status": "failed"
+       }
+      },
+      "label_swap": {
+       "detected": true,
+       "expected": "failed",
+       "labels_swapped": {
+        "a[0]": 1,
+        "en": 1
+       },
+       "oracle": "Netgen LVS, KLayout LVS (own results) and the XOR label comparison",
+       "own_problems": {
+        "klayout": [
+         "top pin names swapped/mismatched (layout<->schematic) a[0]<->EN, en<->A[0]",
+         "labelled top-level nets paired with a different or non-matching schematic net: [['a[0]', 'EN', 'Match'], ['en', 'A[0]', 'Match']]"
+        ],
+        "netgen": [
+         "lane_smoke: pin lists differ",
+         "final result 'Top level cell failed pin matching.'"
+        ]
+       },
+       "peak_rss_kib": 408580,
+       "statuses": {
+        "lvs_klayout": "failed",
+        "lvs_netgen": "failed",
+        "xor": "failed"
+       },
+       "swapped": "en,a[0]"
+      },
+      "missing_tool": {
+       "detected": true,
+       "exit_code": 3,
+       "expected": "failed",
+       "oracle": "tool identity preflight (missing -> unverified, exit 3)",
+       "pdk_items_run": 0,
+       "peak_rss_kib": 42456,
+       "status": "unverified",
+       "tools_identity": {
+        "reason": "tool identity: {'yosys': 'missing'}",
+        "status": "unverified",
+        "tools": {
+         "openroad": "passed",
+         "opensta": "passed",
+         "rusteda": "passed",
+         "rustroad": "passed",
+         "ruststa": "passed",
+         "rustsys": "passed",
+         "verilator": "passed",
+         "yosys": "missing"
+        }
+       }
+      },
+      "relaxed_manifest": {
+       "budget_floors": {
+        "reason": "manifest loosens fixed thresholds: ['budgets.parity_ns=0.003 (required <= 0.001)']",
+        "status": "failed"
+       },
+       "detected": true,
+       "exit_code": 1,
+       "expected": "failed",
+       "failed_items": [
+        "*:budget_floors"
+       ],
+       "manifest_provenance": {
+        "reason": ".work/runs/E3-pipeline/gf180_controls/relaxed_manifest/relaxed-design.json is not tracked at HEAD",
+        "status": "unverified"
+       },
+       "oracle": "budget floors (owner thresholds) and manifest provenance (git-tracked at HEAD)",
+       "pdk_items_run": 0,
+       "peak_rss_kib": 42052,
+       "status": "failed"
+      },
+      "removed_hold_cell": {
+       "detected": true,
+       "expected": "failed",
+       "iteration0_hold_ns": -0.9115811915834465,
+       "margin_ns": 0.05,
+       "opensta_worst_hold_ns": -0.820352494717,
+       "oracle": "RustSTA and OpenSTA hold gate on a fresh layout",
+       "peak_rss_kib": 231200,
+       "processes": 24,
+       "removed": [
+        "rr_eco_hold_3"
+       ],
+       "ruststa_worst_hold_ns": {
+        "ff": -0.15848480494636086,
+        "ss": -0.8203533626682248,
+        "tt": -0.3536653930190452
+       },
+       "sink": "r3/D",
+       "worst_corner": "ss"
+      },
+      "removed_via": {
+       "at_gds": [
+        46460,
+        28435
+       ],
+       "detected": true,
+       "expected": "failed",
+       "net": "y[1]",
+       "oracle": "Netgen LVS and KLayout LVS (own results)",
+       "own_problems": {
+        "klayout": [
+         "top pin count layout 11 != schematic 12",
+         "unnamed top pin pairs [[None, 'Y[1]']]",
+         "labelled top-level layout nets not in the schematic (extra pins/labels): ['y[1]']",
+         "reference ports not paired with a layout pin: ['y[1]']"
+        ],
+        "netgen": [
+         "lane_smoke: pin lists differ",
+         "final result 'Top level cell failed pin matching.'",
+         "comp.out reports port errors ('Netlists match uniquely with port errors.')",
+         "1 pins without a matching pin: ['layout-only y[1]']"
+        ]
+       },
+       "peak_rss_kib": 408800,
+       "removed": "VIA_Via1_HV",
+       "statuses": {
+        "lvs_klayout": "failed",
+        "lvs_netgen": "failed"
+       },
+       "via": "Via1_HV"
+      },
+      "tampered_artifact": {
+       "detected": true,
+       "edited_hash": {
+        "reason": "binding record digest does not match its contents (recorded hash tampered); 1 artifact(s) differ from their bound sha256: ['def']",
+        "status": "failed"
+       },
+       "expected": "failed",
+       "flipped_byte": {
+        "reason": "1 artifact(s) differ from their bound sha256: ['gds']",
+        "status": "failed"
+       },
+       "oracle": "artifact binding re-verification",
+       "untouched_record": "passed"
+      },
+      "tampered_sdc": {
+       "changed": [
+        "sdc_postroute"
+       ],
+       "detected": true,
+       "expected": "failed",
+       "expected_sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+       "oracle": "frozen-input SHA-256 check",
+       "tampered_sha256": "bae115c87105d4cd7f9c983e667c7e33270d1b6d25ac0e2c65361e3f2e1d1313"
+      },
+      "tampered_spef": {
+       "binding": {
+        "ss": {
+         "actual": "6d6958c1a95b1704cf323459c1e9db20c81fc397e999e167f7aebfc7ea532cd0",
+         "expected": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935"
+        }
+       },
+       "detected": true,
+       "expected": "failed",
+       "factor": 1000.0,
+       "oracle": "SPEF identity against the extraction receipt",
+       "peak_rss_kib": 231644,
+       "resistors_scaled": 209,
+       "timing_effect": {
+        "bound_worst_hold_ns": 0.362088586010864,
+        "bound_worst_setup_ns": 4.844104505829436,
+        "worst_hold_ns": 0.5665188438660829,
+        "worst_setup_ns": 4.559875899702819
+       }
+      }
+     },
+     "status": "passed"
+    },
+    "density": {
+     "by_rule": {
+      "DCF.1b": 1,
+      "M1.4": 1,
+      "M2.4": 1,
+      "M3.4": 1,
+      "M4.4": 1,
+      "M5.4": 1,
+      "MT.3": 1,
+      "PL.8": 1
+     },
+     "count": 8,
+     "reason": "see density.json",
+     "status": "failed"
+    },
+    "determinism": {
+     "artifacts": {
+      "def": {
+       "normalization": [],
+       "other_sha256": "310cd74d1dee55117fd38f1e1a3fbdce8da67ddaf29207dc16392ede8523d1d5",
+       "sha256": "310cd74d1dee55117fd38f1e1a3fbdce8da67ddaf29207dc16392ede8523d1d5",
+       "status": "passed"
+      },
+      "gds": {
+       "normalization": [],
+       "other_sha256": "b5c59883ef5d94b0b0aea8ae22f4b1ee694d6be2452817d44ea2e7968aad8b68",
+       "sha256": "b5c59883ef5d94b0b0aea8ae22f4b1ee694d6be2452817d44ea2e7968aad8b68",
+       "status": "passed"
+      },
+      "netlist.final": {
+       "normalization": [],
+       "other_sha256": "c865b9dbdf8f0a507ef70ea5a8792b1ae8990ce2ee8e75a6abe72ec604db3a28",
+       "sha256": "c865b9dbdf8f0a507ef70ea5a8792b1ae8990ce2ee8e75a6abe72ec604db3a28",
+       "status": "passed"
+      },
+      "netlist.final_mapped": {
+       "normalization": [],
+       "other_sha256": "6b114fa4f7d136a5610ae42b1a529cd5dd133f49302aa3d49560ed0d75a85c30",
+       "sha256": "6b114fa4f7d136a5610ae42b1a529cd5dd133f49302aa3d49560ed0d75a85c30",
+       "status": "passed"
+      },
+      "netlist.i0": {
+       "normalization": [],
+       "other_sha256": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+       "sha256": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+       "status": "passed"
+      },
+      "netlist.i1": {
+       "normalization": [],
+       "other_sha256": "6b114fa4f7d136a5610ae42b1a529cd5dd133f49302aa3d49560ed0d75a85c30",
+       "sha256": "6b114fa4f7d136a5610ae42b1a529cd5dd133f49302aa3d49560ed0d75a85c30",
+       "status": "passed"
+      },
+      "netlist.mapped": {
+       "normalization": [],
+       "other_sha256": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+       "sha256": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+       "status": "passed"
+      },
+      "netlist.powered": {
+       "normalization": [],
+       "other_sha256": "6eafab55ab219db66d18c6b182e33f649ca42ec0afdab85381073773c8ec0773",
+       "sha256": "6eafab55ab219db66d18c6b182e33f649ca42ec0afdab85381073773c8ec0773",
+       "status": "passed"
+      },
+      "routes": {
+       "normalization": [],
+       "other_sha256": "7b0fca253b5642aa8484123e2137748749669490ce7bf910aba68403c5141ccf",
+       "sha256": "7b0fca253b5642aa8484123e2137748749669490ce7bf910aba68403c5141ccf",
+       "status": "passed"
+      },
+      "spef.native.ff": {
+       "normalization": [],
+       "other_sha256": "392adedea2367d5baaf4d7877117620d43dcb228e3b7bf4684f0217b0d85bfd6",
+       "sha256": "392adedea2367d5baaf4d7877117620d43dcb228e3b7bf4684f0217b0d85bfd6",
+       "status": "passed"
+      },
+      "spef.native.ss": {
+       "normalization": [],
+       "other_sha256": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935",
+       "sha256": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935",
+       "status": "passed"
+      },
+      "spef.native.tt": {
+       "normalization": [],
+       "other_sha256": "2322a76b222df035307309426de6f89da6f702cc292c6b5d3fe0f92fae6c8fe8",
+       "sha256": "2322a76b222df035307309426de6f89da6f702cc292c6b5d3fe0f92fae6c8fe8",
+       "status": "passed"
+      },
+      "spef.openrcx.ff": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "55d9dabb247017c9139c39104be05d1fa98e49809dda9fc1efc34044ecd9e8c6",
+       "sha256": "55d9dabb247017c9139c39104be05d1fa98e49809dda9fc1efc34044ecd9e8c6",
+       "status": "passed"
+      },
+      "spef.openrcx.ss": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "03bb47d6f49406290294e8d99040cdef53f6c68f22a62514723fd158afbca589",
+       "sha256": "03bb47d6f49406290294e8d99040cdef53f6c68f22a62514723fd158afbca589",
+       "status": "passed"
+      },
+      "spef.openrcx.tt": {
+       "normalization": [
+        "*DATE header line removed (OpenRCX wall clock)"
+       ],
+       "other_sha256": "892095427292ac44fb4d66fcb418b970eb59a8b700e7c5671e03d2333d598322",
+       "sha256": "892095427292ac44fb4d66fcb418b970eb59a8b700e7c5671e03d2333d598322",
+       "status": "passed"
+      }
+     },
+     "compared": 15,
+     "status": "passed"
+    },
+    "drc_klayout": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed"
+    },
+    "drc_magic": {
+     "by_rule": {},
+     "count": 0,
+     "status": "passed"
+    },
+    "drv": {
+     "by_spef": {
+      "native": {
+       "limits": [
+        {
+         "checked": 54,
+         "corner": "tt",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.5046184060467371
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.277306111556227
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ss",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.04928745506994425
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.275947609629573
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ff",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.7076959475998593
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.27827840539606397
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        }
+       ],
+       "status": "passed"
+      },
+      "openrcx": {
+       "limits": [
+        {
+         "checked": 54,
+         "corner": "tt",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.5053137762482646
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.2772984659
+        },
+        {
+         "checked": 23,
+         "corner": "tt",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ss",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.04997946398232278
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.2758997427
+        },
+        {
+         "checked": 23,
+         "corner": "ss",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        },
+        {
+         "checked": 54,
+         "corner": "ff",
+         "kind": "max_transition",
+         "stored": 54,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "ns",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.7082407576873602
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_capacitance",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "pF",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.27829181154
+        },
+        {
+         "checked": 23,
+         "corner": "ff",
+         "kind": "max_fanout",
+         "stored": 23,
+         "truncated": 0,
+         "unevaluated": 0,
+         "unit": "fanout_load",
+         "unlimited": 0,
+         "violating": 0,
+         "worst_slack": 0.0
+        }
+       ],
+       "status": "passed"
+      }
+     },
+     "status": "passed"
+    },
+    "extraction": {
+     "native": {
+      "binding": {
+       "files": {
+        "ff": {
+         "actual": "392adedea2367d5baaf4d7877117620d43dcb228e3b7bf4684f0217b0d85bfd6",
+         "expected": "392adedea2367d5baaf4d7877117620d43dcb228e3b7bf4684f0217b0d85bfd6"
+        },
+        "ss": {
+         "actual": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935",
+         "expected": "54449eec836d79439faa3edb5b3052f057f0272519a7d1cef4164225d5041935"
+        },
+        "tt": {
+         "actual": "2322a76b222df035307309426de6f89da6f702cc292c6b5d3fe0f92fae6c8fe8",
+         "expected": "2322a76b222df035307309426de6f89da6f702cc292c6b5d3fe0f92fae6c8fe8"
+        }
+       },
+       "status": "passed"
+      },
+      "diagnostics": {
+       "ff": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled",
+        "VIA_R_CORNER_UNAVAILABLE: magic (lrlc) lists m2c contact resistance 0 mOhm (all contacts are 0 in that block, i.e. no corner data); using nominal 4500 mOhm",
+        "VIA_R_CORNER_UNAVAILABLE: magic (lrlc) lists m3c contact resistance 0 mOhm (all contacts are 0 in that block, i.e. no corner data); using nominal 4500 mOhm",
+        "VIA_R_CORNER_UNAVAILABLE: magic (lrlc) lists via3 contact resistance 0 mOhm (all contacts are 0 in that block, i.e. no corner data); using nominal 4500 mOhm",
+        "VIA_R_CORNER_UNAVAILABLE: magic (lrlc) lists via4 contact resistance 0 mOhm (all contacts are 0 in that block, i.e. no corner data); using nominal 4500 mOhm"
+       ],
+       "ss": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled",
+        "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for m2c",
+        "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for m3c",
+        "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for via3",
+        "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 10 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 4500 mOhm for via4"
+       ],
+       "tt": [
+        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+        "via cut and via landing-pad self capacitance are not modeled"
+       ]
+      },
+      "rc_profiles": {
+       "ff": "min",
+       "ss": "max",
+       "tt": "nom"
+      }
+     },
+     "openrcx": {
+      "binding": {
+       "files": {
+        "ff": {
+         "actual": "548a2d1bd77cabba841b427bf034e652b73e429398a1f668430f660d3ac709a8",
+         "expected": "548a2d1bd77cabba841b427bf034e652b73e429398a1f668430f660d3ac709a8"
+        },
+        "ss": {
+         "actual": "546836477acbe5f4721d5674424a5b4105315173f6aa0010b8c5d73e6f271eae",
+         "expected": "546836477acbe5f4721d5674424a5b4105315173f6aa0010b8c5d73e6f271eae"
+        },
+        "tt": {
+         "actual": "ff9902c0078192d8b26b0e6159a01bcf24cd2ce82c6ba164dd601956c29d178b",
+         "expected": "ff9902c0078192d8b26b0e6159a01bcf24cd2ce82c6ba164dd601956c29d178b"
+        }
+       },
+       "status": "passed"
+      },
+      "rules": {
+       "ff": {
+        "bytes": 31290,
+        "sha256": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00"
+       },
+       "ss": {
+        "bytes": 31286,
+        "sha256": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f"
+       },
+       "tt": {
+        "bytes": 31291,
+        "sha256": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf"
+       }
+      }
+     },
+     "status": "passed"
+    },
+    "gds_xor": {
+     "by_rule": {},
+     "count": 0,
+     "native_gds": {
+      "export": {
+       "bytes": 52578,
+       "sha256": "b5c59883ef5d94b0b0aea8ae22f4b1ee694d6be2452817d44ea2e7968aad8b68"
+      }
+     },
+     "status": "passed"
+    },
+    "hold_closure": {
+     "decision_spef": "native rustroad extract",
+     "gate_hold_margin_ns": 0.05,
+     "iterations": [
+      {
+       "antenna": "passed",
+       "antenna_eco": null,
+       "closed": false,
+       "drv": null,
+       "hold_eco": {
+        "area_um2": 96.5888,
+        "cells": 4,
+        "planned_sinks": 4,
+        "violating_sinks": 4
+       },
+       "iteration": 0,
+       "size_eco": null,
+       "stopped": null,
+       "worst": {
+        "ff": {
+         "hold_ns": -0.18286362498551328,
+         "setup_ns": 8.564741023880629
+        },
+        "ss": {
+         "hold_ns": -0.9115811915834465,
+         "setup_ns": 5.63001195859839
+        },
+        "tt": {
+         "hold_ns": -0.39899191425467007,
+         "setup_ns": 7.688717165593755
+        }
+       }
+      },
+      {
+       "antenna": "passed",
+       "antenna_eco": null,
+       "closed": true,
+       "drv": null,
+       "hold_eco": null,
+       "iteration": 1,
+       "size_eco": null,
+       "stopped": null,
+       "worst": {
+        "ff": {
+         "hold_ns": 0.1942148250466148,
+         "setup_ns": 8.547623497569393
+        },
+        "ss": {
+         "hold_ns": 0.362088586010864,
+         "setup_ns": 4.844104505829436
+        },
+        "tt": {
+         "hold_ns": 0.24156418899847754,
+         "setup_ns": 7.46105543263267
+        }
+       }
+      }
+     ],
+     "max_iterations": 4,
+     "sizing": false,
+     "status": "passed",
+     "target_margin_ns": 0.05
+    },
+    "implementation": {
+     "clock_tree": {
+      "body_bias_status": "tap_inserted_contact_unverified",
+      "cells": 136,
+      "clock_buffers": 3,
+      "clock_constraint_status": "explicit_sdc",
+      "clock_topology_status": "unrouted_topology_checked",
+      "connectivity_status": "linked_unverified",
+      "corner": "not_applicable",
+      "design": "lane_smoke",
+      "diagnostics": [
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units CAPACITANCE (first line 41): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units CURRENT (first line 42): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "units RESISTANCE (first line 43): Non-geometric unit system is not modeled",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "property_definitions LAYER (first line 53): Property schema is not interpreted; property uses produce separate diagnostics",
+        "occurrences": 2,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library CLEARANCEMEASURE (first line 58): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library USEMINSPACING (first line 59): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer PROPERTY (first line 63): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer MINWIDTH (first line 88): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer SPACING (first line 91): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer THICKNESS (first line 94): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNAMODEL (first line 95): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 9,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNASIDEAREARATIO (first line 96): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 1,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DCCURRENTDENSITY (first line 98): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 9,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ACCURRENTDENSITY (first line 99): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 9,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer CAPACITANCE (first line 101): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer RESISTANCE (first line 102): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 9,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer MINIMUMDENSITY (first line 104): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DENSITYCHECKWINDOW (first line 105): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer DENSITYCHECKSTEP (first line 106): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ARRAYSPACING (first line 121): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNAAREARATIO (first line 127): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNADIFFSIDEAREARATIO (first line 146): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "layer ANTENNAGATEPLUSDIFF (first line 147): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 4,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "via RESISTANCE (first line 341): Via resistance is not modeled; extraction remains unchecked",
+        "occurrences": 16,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "via_rule VIARULE (first line 442): Via generation rule is not modeled; routing/via DRC remain unchecked",
+        "occurrences": 16,
+        "source": "technology_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "library NOWIREEXTENSIONATPIN (first line 2): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "macro FOREIGN (first line 7): FOREIGN is retained for GDS cell binding (checked by export-gds); import uses LEF geometry only",
+        "occurrences": 229,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "pin ANTENNAGATEAREA (first line 14): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 616,
+        "source": "cell_lef"
+       },
+       {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "message": "pin ANTENNADIFFAREA (first line 40): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 221,
+        "source": "cell_lef"
+       },
+       {
+        "code": "PHYSICAL_SIGNOFF_UNCHECKED",
+        "message": "Primary metal rails/spines/vias and I/O geometry are generated and locally checked; well/tap continuity, DRC, IR/EM and extracted timing are not verified by this pass",
+        "occurrences": 1,
+        "source": "physical_preparation"
+       }
+      ],
+      "drc_status": "unchecked",
+      "expansions": 181,
+      "filler_cells": 87,
+      "inserted_tie_cells": 0,
+      "io_placement_status": "placed_geometry_checked",
+      "lvs_status": "unchecked",
+      "masters": 15,
+      "nets": 25,
+      "pins": 536,
+      "placement_status": "placed_unverified",
+      "power_grid_status": "primary_grid_generated",
+      "rail_continuity_status": "geometry_checked",
+      "revision": "rev3",
+      "routed_nets": null,
+      "routing_expansions": null,
+      "routing_segments": null,
+      "routing_status": "not_run",
+      "rows": 8,
+      "stage": "placed",
+      "tap_cells": 32,
+      "tap_placement_status": "geometry_checked",
+      "unconstrained_endpoints": null,
+      "wire_model": "none"
+     },
+     "final_iteration": 1,
+     "floorplan_reproduced": null,
+     "iterations": 2,
+     "patches": 1,
+     "placement": null,
+     "recipe": "legacy",
+     "renamed_escaped_wires": 0,
+     "route": {
+      "cells": 136,
+      "filler_cells": 87,
+      "routed_nets": 23,
+      "routing_expansions": 616950,
+      "routing_segments": 5705,
+      "tap_cells": 32
+     },
+     "routed_nets": 23,
+     "status": "passed",
+     "vias": 83,
+     "wires": 5622
+    },
+    "inputs_frozen": {
+     "after": {
+      "changed": [],
+      "files": {
+       "cell_gds": {
+        "actual": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "expected": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "status": "passed"
+       },
+       "cell_lef": {
+        "actual": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "expected": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "status": "passed"
+       },
+       "cell_policy": {
+        "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "status": "passed"
+       },
+       "delay_cells": {
+        "actual": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "expected": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "status": "passed"
+       },
+       "gds_layer_map": {
+        "actual": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "expected": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "status": "passed"
+       },
+       "liberty_ff": {
+        "actual": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "expected": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "status": "passed"
+       },
+       "liberty_ss": {
+        "actual": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "expected": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "status": "passed"
+       },
+       "liberty_tt": {
+        "actual": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "expected": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "status": "passed"
+       },
+       "openrcx_rules_ff": {
+        "actual": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "expected": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "status": "passed"
+       },
+       "openrcx_rules_ss": {
+        "actual": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "expected": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "status": "passed"
+       },
+       "openrcx_rules_tt": {
+        "actual": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "expected": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "status": "passed"
+       },
+       "physical_config": {
+        "actual": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+        "expected": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+        "status": "passed"
+       },
+       "rc_profile_ff": {
+        "actual": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+        "expected": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+        "status": "passed"
+       },
+       "rc_profile_ss": {
+        "actual": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+        "expected": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+        "status": "passed"
+       },
+       "rc_profile_tt": {
+        "actual": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+        "expected": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+        "status": "passed"
+       },
+       "routing_profile": {
+        "actual": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+        "expected": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+        "status": "passed"
+       },
+       "sdc_cts": {
+        "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "status": "passed"
+       },
+       "sdc_postroute": {
+        "actual": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "expected": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "status": "passed"
+       },
+       "technology_lef": {
+        "actual": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "expected": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "status": "passed"
+       }
+      },
+      "status": "passed"
+     },
+     "before": {
+      "changed": [],
+      "files": {
+       "cell_gds": {
+        "actual": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "expected": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "status": "passed"
+       },
+       "cell_lef": {
+        "actual": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "expected": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "status": "passed"
+       },
+       "cell_policy": {
+        "actual": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "expected": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+        "status": "passed"
+       },
+       "delay_cells": {
+        "actual": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "expected": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "status": "passed"
+       },
+       "gds_layer_map": {
+        "actual": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "expected": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "status": "passed"
+       },
+       "liberty_ff": {
+        "actual": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "expected": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "status": "passed"
+       },
+       "liberty_ss": {
+        "actual": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "expected": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "status": "passed"
+       },
+       "liberty_tt": {
+        "actual": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "expected": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "status": "passed"
+       },
+       "openrcx_rules_ff": {
+        "actual": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "expected": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "status": "passed"
+       },
+       "openrcx_rules_ss": {
+        "actual": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "expected": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "status": "passed"
+       },
+       "openrcx_rules_tt": {
+        "actual": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "expected": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "status": "passed"
+       },
+       "physical_config": {
+        "actual": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+        "expected": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+        "status": "passed"
+       },
+       "rc_profile_ff": {
+        "actual": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+        "expected": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+        "status": "passed"
+       },
+       "rc_profile_ss": {
+        "actual": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+        "expected": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+        "status": "passed"
+       },
+       "rc_profile_tt": {
+        "actual": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+        "expected": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+        "status": "passed"
+       },
+       "routing_profile": {
+        "actual": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+        "expected": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+        "status": "passed"
+       },
+       "sdc_cts": {
+        "actual": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "expected": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "status": "passed"
+       },
+       "sdc_postroute": {
+        "actual": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "expected": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "status": "passed"
+       },
+       "technology_lef": {
+        "actual": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "expected": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+        "status": "passed"
+       }
+      },
+      "status": "passed"
+     },
+     "status": "passed"
+    },
+    "lvs_klayout": {
+     "by_rule": {
+      "mismatch": 0
+     },
+     "count": 0,
+     "status": "passed"
+    },
+    "lvs_netgen": {
+     "by_rule": {
+      "mismatch": 0
+     },
+     "count": 0,
+     "status": "passed"
+    },
+    "mpw_min_period": {
+     "by_spef": {
+      "native": {
+       "async_set_clear_pins_unchecked": null,
+       "min_period_note": null,
+       "min_period_rows": {
+        "opensta": 12,
+        "ruststa": 12
+       },
+       "pulse_width_rows": 24,
+       "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
+       "status": "passed",
+       "worst_min_period_slack_ns": 6.438000000000001,
+       "worst_min_pulse_width_slack_ns": 3.2465038399357136
+      },
+      "openrcx": {
+       "async_set_clear_pins_unchecked": null,
+       "min_period_note": null,
+       "min_period_rows": {
+        "opensta": 12,
+        "ruststa": 12
+       },
+       "pulse_width_rows": 24,
+       "rule": "RustSTA default pulse rules (groups=worst, pins=all) gate; OpenSTA must agree",
+       "status": "passed",
+       "worst_min_period_slack_ns": 6.438000000000001,
+       "worst_min_pulse_width_slack_ns": 3.2509824924595616
+      }
+     },
+     "status": "passed"
+    },
+    "simulation": {
+     "compared_outputs": [
+      "y",
+      "z"
+     ],
+     "expected": {
+      "checks": 16384,
+      "cycles": 4096,
+      "time": 12288
+     },
+     "initial_state": "Verilator zero-initialised state in both models",
+     "observed": {
+      "checks": 16384,
+      "cycles": 4096,
+      "time": 12288
+     },
+     "seed": "0x5eed2026c0ffee01",
+     "status": "passed",
+     "stimulus": "xorshift64 random",
+     "vectors": 4096
+    },
+    "timing_accuracy": {
+     "by_spef": {
+      "native": {
+       "corners": {
+        "ff": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 7.457452617831706e-05,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 7.457452617831706e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.223753094673,
+            "ruststa_ns": 1.2236785201468217
+           },
+           {
+            "difference_ns": 7.133137650860988e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 8.583008766174,
+            "ruststa_ns": 8.583080097550509
+           },
+           {
+            "difference_ns": 7.073077033048492e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.591328680515,
+            "ruststa_ns": 0.5912579497446695
+           },
+           {
+            "difference_ns": 6.963223298761534e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.288932800293,
+            "ruststa_ns": 9.289002432525988
+           },
+           {
+            "difference_ns": 5.328898628320644e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 8.608744621277,
+            "ruststa_ns": 8.608797910263283
+           },
+           {
+            "difference_ns": 5.293414994267387e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.207623243332,
+            "ruststa_ns": 1.2075703091820573
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 1.5135788876463607e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r3/CLK:low",
+            "difference_ns": 1.5135788876463607e-05,
+            "opensta_required_ns": 0.324000000954,
+            "opensta_slack_ns": 4.678160667419,
+            "ruststa_required_ns": 0.324,
+            "ruststa_slack_ns": 4.678175803207877
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.4838241876979907e-05,
+            "opensta_required_ns": 0.388999998569,
+            "opensta_slack_ns": 4.608839035034,
+            "ruststa_required_ns": 0.389,
+            "ruststa_slack_ns": 4.608824196792123
+           },
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.4838241876091729e-05,
+            "opensta_required_ns": 0.388999998569,
+            "opensta_slack_ns": 4.608839035034,
+            "ruststa_required_ns": 0.389,
+            "ruststa_slack_ns": 4.608824196792124
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.4658950874490984e-05,
+            "opensta_required_ns": 0.324000000954,
+            "opensta_slack_ns": 4.678161144257,
+            "ruststa_required_ns": 0.324,
+            "ruststa_slack_ns": 4.678175803207875
+           }
+          ]
+         }
+        },
+        "ss": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00010113933646471729,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00010113933646471729,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 1.07991039753,
+            "ruststa_ns": 1.0798092581935352
+           },
+           {
+            "difference_ns": 7.744078482474492e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 8.704963684082,
+            "ruststa_ns": 8.705041124866824
+           },
+           {
+            "difference_ns": 5.708795896897101e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 3.769137620926,
+            "ruststa_ns": 3.769080532967031
+           },
+           {
+            "difference_ns": 5.4419180305353976e-05,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 1.045632839203,
+            "ruststa_ns": 1.0455784200226947
+           },
+           {
+            "difference_ns": 5.355579631061147e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 5.698850631714,
+            "ruststa_ns": 5.698904187510311
+           },
+           {
+            "difference_ns": 4.377797799293148e-05,
+            "endpoint": "z[1]",
+            "kind": "setup",
+            "opensta_ns": 8.753409385681,
+            "ruststa_ns": 8.753453163658993
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 5.504429889668927e-07,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r1/CLK:low",
+            "difference_ns": 5.504429889668927e-07,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.778118848801,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.7781193992439888
+           },
+           {
+            "check": "r3/CLK:low",
+            "difference_ns": 2.770087133008303e-07,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.776503562927,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.7765038399357134
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.9982828503017913e-07,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.776504039764,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.776503839935715
+           },
+           {
+            "check": "r0/CLK:min_period",
+            "difference_ns": 1.6784700029859323e-07,
+            "opensta_required_ns": 3.101000070572,
+            "opensta_slack_ns": 6.899000167847,
+            "ruststa_required_ns": 3.101,
+            "ruststa_slack_ns": 6.899
+           }
+          ]
+         }
+        },
+        "tt": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 8.522307028158149e-05,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 8.522307028158149e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.739439189434,
+            "ruststa_ns": 0.7393539663637184
+           },
+           {
+            "difference_ns": 7.788094835903259e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.985738277435,
+            "ruststa_ns": 1.985660396486641
+           },
+           {
+            "difference_ns": 7.488614188044806e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 7.722896099091,
+            "ruststa_ns": 7.72297098523288
+           },
+           {
+            "difference_ns": 6.491613262404883e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.114609718323,
+            "ruststa_ns": 9.114674634455625
+           },
+           {
+            "difference_ns": 5.448186067535943e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 7.767554759979,
+            "ruststa_ns": 7.767609241839676
+           },
+           {
+            "difference_ns": 5.2763073602690724e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.958452343941,
+            "ruststa_ns": 1.9583995808673973
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 1.797971989958569e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.797971989958569e-05,
+            "opensta_required_ns": 0.597000002861,
+            "opensta_slack_ns": 4.413273334503,
+            "ruststa_required_ns": 0.597,
+            "ruststa_slack_ns": 4.413291314222899
+           },
+           {
+            "check": "r3/CLK:low",
+            "difference_ns": 1.797971989958569e-05,
+            "opensta_required_ns": 0.597000002861,
+            "opensta_slack_ns": 4.413273334503,
+            "ruststa_required_ns": 0.597,
+            "ruststa_slack_ns": 4.413291314222899
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.7602064900756886e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.282726287842,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.2827086857770995
+           },
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.7602064899868708e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.282726287842,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.2827086857771
+           }
+          ]
+         }
+        }
+       },
+       "failing": [],
+       "status": "passed"
+      },
+      "openrcx": {
+       "corners": {
+        "ff": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 7.150774432118645e-05,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 7.150774432118645e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.22286772728,
+            "ruststa_ns": 1.2227962195356787
+           },
+           {
+            "difference_ns": 6.893765916515804e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 8.584024429321,
+            "ruststa_ns": 8.584093366980165
+           },
+           {
+            "difference_ns": 6.6318268168164e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.590572535992,
+            "ruststa_ns": 0.5905062177238318
+           },
+           {
+            "difference_ns": 6.528953564455264e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.289699554443,
+            "ruststa_ns": 9.289764843978645
+           },
+           {
+            "difference_ns": 5.204818389792365e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 8.609883308411,
+            "ruststa_ns": 8.609935356594898
+           },
+           {
+            "difference_ns": 5.035181328527649e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.206664085388,
+            "ruststa_ns": 1.2066137335747147
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 1.563570105123091e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r3/CLK:low",
+            "difference_ns": 1.563570105123091e-05,
+            "opensta_required_ns": 0.324000000954,
+            "opensta_slack_ns": 4.678115844727,
+            "ruststa_required_ns": 0.324,
+            "ruststa_slack_ns": 4.678131480428052
+           },
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.533815505272429e-05,
+            "opensta_required_ns": 0.388999998569,
+            "opensta_slack_ns": 4.608883857727,
+            "ruststa_required_ns": 0.389,
+            "ruststa_slack_ns": 4.608868519571947
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.533815505183611e-05,
+            "opensta_required_ns": 0.388999998569,
+            "opensta_slack_ns": 4.608883857727,
+            "ruststa_required_ns": 0.389,
+            "ruststa_slack_ns": 4.608868519571948
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.4682027052792535e-05,
+            "opensta_required_ns": 0.324000000954,
+            "opensta_slack_ns": 4.678116798401,
+            "ruststa_required_ns": 0.324,
+            "ruststa_slack_ns": 4.6781314804280525
+           }
+          ]
+         }
+        },
+        "ss": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 0.00014220860603919583,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 0.00014220860603919583,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 1.077664971352,
+            "ruststa_ns": 1.0775227627459607
+           },
+           {
+            "difference_ns": 0.00011037561099414006,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 8.708365440369,
+            "ruststa_ns": 8.708475815979995
+           },
+           {
+            "difference_ns": 0.0001048897322322162,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 3.767025947571,
+            "ruststa_ns": 3.766921057838768
+           },
+           {
+            "difference_ns": 9.991922356089589e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 5.701058864594,
+            "ruststa_ns": 5.701158783817561
+           },
+           {
+            "difference_ns": 7.453945893076686e-05,
+            "endpoint": "z[1]",
+            "kind": "hold",
+            "opensta_ns": 1.044184923172,
+            "ruststa_ns": 1.0441103837130692
+           },
+           {
+            "difference_ns": 6.408297869331392e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 5.790239810944,
+            "ruststa_ns": 5.790303893922693
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 2.6536954562672577e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 2.6536954562672577e-05,
+            "opensta_required_ns": 1.473999977112,
+            "opensta_slack_ns": 3.491044044495,
+            "ruststa_required_ns": 1.474,
+            "ruststa_slack_ns": 3.4910175075404375
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 2.6536954562672577e-05,
+            "opensta_required_ns": 1.473999977112,
+            "opensta_slack_ns": 3.491044044495,
+            "ruststa_required_ns": 1.474,
+            "ruststa_slack_ns": 3.4910175075404375
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 2.6462567561225114e-05,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.780956029892,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.7809824924595614
+           },
+           {
+            "check": "r3/CLK:low",
+            "difference_ns": 2.6462567561225114e-05,
+            "opensta_required_ns": 1.253999948502,
+            "opensta_slack_ns": 3.780956029892,
+            "ruststa_required_ns": 1.254,
+            "ruststa_slack_ns": 3.7809824924595614
+           }
+          ]
+         }
+        },
+        "tt": {
+         "drv": {
+          "max_capacitance": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_fanout": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "max_transition": {
+           "equal": true,
+           "opensta_violators": [],
+           "ruststa_violators": []
+          },
+          "status": "passed"
+         },
+         "endpoints": {
+          "comparisons": 16,
+          "endpoints": 8,
+          "max_difference_ns": 9.224494819226603e-05,
+          "missing": [],
+          "status": "passed",
+          "tolerance_ns": 0.001,
+          "worst_rows": [
+           {
+            "difference_ns": 9.224494819226603e-05,
+            "endpoint": "z[0]",
+            "kind": "hold",
+            "opensta_ns": 0.738226830959,
+            "ruststa_ns": 0.7381345860108077
+           },
+           {
+            "difference_ns": 8.270996635117989e-05,
+            "endpoint": "y[0]",
+            "kind": "hold",
+            "opensta_ns": 1.985266923904,
+            "ruststa_ns": 1.9851842139376488
+           },
+           {
+            "difference_ns": 7.968113710354885e-05,
+            "endpoint": "y[0]",
+            "kind": "setup",
+            "opensta_ns": 7.723526954651,
+            "ruststa_ns": 7.723606635788103
+           },
+           {
+            "difference_ns": 7.036088191547663e-05,
+            "endpoint": "z[0]",
+            "kind": "setup",
+            "opensta_ns": 9.116306304932,
+            "ruststa_ns": 9.116376665813915
+           },
+           {
+            "difference_ns": 5.5346150256596616e-05,
+            "endpoint": "y[1]",
+            "kind": "setup",
+            "opensta_ns": 7.768431663513,
+            "ruststa_ns": 7.768487009663256
+           },
+           {
+            "difference_ns": 5.456024146366367e-05,
+            "endpoint": "y[1]",
+            "kind": "hold",
+            "opensta_ns": 1.957830667496,
+            "ruststa_ns": 1.9577761072545363
+           }
+          ]
+         },
+         "pulse": {
+          "max_difference_ns": 1.8797185616037382e-05,
+          "missing_or_extra": [],
+          "mpw_rows": 8,
+          "period_rows": 4,
+          "status": "passed",
+          "worst_rows": [
+           {
+            "check": "r2/CLK:high",
+            "difference_ns": 1.8797185616037382e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.28277349472,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.282754697534384
+           },
+           {
+            "check": "r3/CLK:high",
+            "difference_ns": 1.8797185616037382e-05,
+            "opensta_required_ns": 0.707000017166,
+            "opensta_slack_ns": 4.28277349472,
+            "ruststa_required_ns": 0.707,
+            "ruststa_slack_ns": 4.282754697534384
+           },
+           {
+            "check": "r0/CLK:low",
+            "difference_ns": 1.848045781294161e-05,
+            "opensta_required_ns": 0.597000002861,
+            "opensta_slack_ns": 4.413713932037,
+            "ruststa_required_ns": 0.597,
+            "ruststa_slack_ns": 4.413732412494813
+           },
+           {
+            "check": "r2/CLK:low",
+            "difference_ns": 1.8221166614651452e-05,
+            "opensta_required_ns": 0.597000002861,
+            "opensta_slack_ns": 4.413227081299,
+            "ruststa_required_ns": 0.597,
+            "ruststa_slack_ns": 4.413245302465615
+           }
+          ]
+         }
+        }
+       },
+       "failing": [],
+       "status": "passed"
+      }
+     },
+     "status": "passed"
+    },
+    "timing_hold": {
+     "by_spef": {
+      "native": {
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "status": "passed",
+       "violations": []
+      },
+      "openrcx": {
+       "corners": [
+        "tt",
+        "ss",
+        "ff"
+       ],
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    },
+    "timing_setup": {
+     "by_spef": {
+      "native": {
+       "corners": [
+        "tt",
+        "ss"
+       ],
+       "status": "passed",
+       "violations": []
+      },
+      "openrcx": {
+       "corners": [
+        "tt",
+        "ss"
+       ],
+       "status": "passed",
+       "violations": []
+      }
+     },
+     "status": "passed"
+    }
+   },
+   "wall_seconds": 60.566
+  }
+ ],
+ "port_source": {
+  "tool": "yosys"
+ },
+ "ports": [
+  {
+   "bits": [
+    "clk"
+   ],
+   "direction": "input",
+   "lsb": 0,
+   "msb": 0,
+   "name": "clk",
+   "vector": false,
+   "width": 1
+  },
+  {
+   "bits": [
+    "en"
+   ],
+   "direction": "input",
+   "lsb": 0,
+   "msb": 0,
+   "name": "en",
+   "vector": false,
+   "width": 1
+  },
+  {
+   "bits": [
+    "a[0]",
+    "a[1]"
+   ],
+   "direction": "input",
+   "lsb": 0,
+   "msb": 1,
+   "name": "a",
+   "vector": true,
+   "width": 2
+  },
+  {
+   "bits": [
+    "b[0]",
+    "b[1]"
+   ],
+   "direction": "input",
+   "lsb": 0,
+   "msb": 1,
+   "name": "b",
+   "vector": true,
+   "width": 2
+  },
+  {
+   "bits": [
+    "y[0]",
+    "y[1]"
+   ],
+   "direction": "output",
+   "lsb": 0,
+   "msb": 1,
+   "name": "y",
+   "vector": true,
+   "width": 2
+  },
+  {
+   "bits": [
+    "z[0]",
+    "z[1]"
+   ],
+   "direction": "output",
+   "lsb": 0,
+   "msb": 1,
+   "name": "z",
+   "vector": true,
+   "width": 2
+  }
+ ],
+ "reported": [
+  "density"
+ ],
+ "requested_pdks": [
+  "sky130",
+  "gf180"
+ ],
+ "resources": {
+  "guards": {
+   "gate_process_address_space_mib": 8192,
+   "single_tool_process_rss_limit_kib": 2097152,
+   "tool_process_address_space_mib": 2048,
+   "tool_timeout_s": 120
+  },
+  "peak_rss_kib": 475596,
+  "processes": 290,
+  "steps": [
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 61912,
+    "processes": 1,
+    "step": "synthesis",
+    "wall_seconds": 0.14
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 120648,
+    "processes": 74,
+    "step": "place_cts_route_closure",
+    "wall_seconds": 2.994
+   },
+   {
+    "nested_peaks": 3,
+    "pdk": "sky130",
+    "peak_rss_kib": 108620,
+    "processes": 3,
+    "step": "openrcx",
+    "wall_seconds": 1.237
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 18708,
+    "processes": 1,
+    "step": "gds_export",
+    "wall_seconds": 0.03
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": null,
+    "processes": 0,
+    "step": "cell_policy",
+    "wall_seconds": 0.028
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 63440,
+    "processes": 2,
+    "step": "cec_prelayout",
+    "wall_seconds": 0.157
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 121160,
+    "processes": 42,
+    "step": "timing",
+    "wall_seconds": 1.9
+   },
+   {
+    "nested_peaks": 2,
+    "pdk": "sky130",
+    "peak_rss_kib": 475596,
+    "processes": 0,
+    "step": "signoff",
+    "wall_seconds": 11.621
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 62928,
+    "processes": 2,
+    "step": "cec_final",
+    "wall_seconds": 0.156
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 62940,
+    "processes": 2,
+    "step": "cec_powered",
+    "wall_seconds": 0.166
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 288848,
+    "processes": 3,
+    "step": "simulation",
+    "wall_seconds": 1.697
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 61928,
+    "processes": 20,
+    "step": "cell_proofs",
+    "wall_seconds": 0.706
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 61664,
+    "processes": 1,
+    "step": "rerun_synthesis",
+    "wall_seconds": 0.133
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 121268,
+    "processes": 74,
+    "step": "rerun_place_cts_route_closure",
+    "wall_seconds": 2.905
+   },
+   {
+    "nested_peaks": 3,
+    "pdk": "sky130",
+    "peak_rss_kib": 108268,
+    "processes": 3,
+    "step": "rerun_openrcx",
+    "wall_seconds": 1.004
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "sky130",
+    "peak_rss_kib": 18232,
+    "processes": 1,
+    "step": "rerun_gds_export",
+    "wall_seconds": 0.03
+   },
+   {
+    "nested_peaks": 79,
+    "pdk": "sky130",
+    "peak_rss_kib": 121268,
+    "processes": 0,
+    "step": "determinism_rerun",
+    "wall_seconds": 4.094
+   },
+   {
+    "nested_peaks": 11,
+    "pdk": "sky130",
+    "peak_rss_kib": 475172,
+    "processes": 6,
+    "step": "controls",
+    "wall_seconds": 25.568
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 104544,
+    "processes": 1,
+    "step": "synthesis",
+    "wall_seconds": 0.227
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 231536,
+    "processes": 49,
+    "step": "place_cts_route_closure",
+    "wall_seconds": 2.144
+   },
+   {
+    "nested_peaks": 3,
+    "pdk": "gf180",
+    "peak_rss_kib": 123240,
+    "processes": 3,
+    "step": "openrcx",
+    "wall_seconds": 1.371
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 12688,
+    "processes": 1,
+    "step": "gds_export",
+    "wall_seconds": 0.018
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": null,
+    "processes": 0,
+    "step": "cell_policy",
+    "wall_seconds": 0.013
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 106960,
+    "processes": 2,
+    "step": "cec_prelayout",
+    "wall_seconds": 0.249
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 231496,
+    "processes": 42,
+    "step": "timing",
+    "wall_seconds": 3.063
+   },
+   {
+    "nested_peaks": 2,
+    "pdk": "gf180",
+    "peak_rss_kib": 447560,
+    "processes": 0,
+    "step": "signoff",
+    "wall_seconds": 15.278
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 106980,
+    "processes": 2,
+    "step": "cec_final",
+    "wall_seconds": 0.252
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 106400,
+    "processes": 2,
+    "step": "cec_powered",
+    "wall_seconds": 0.253
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 287144,
+    "processes": 3,
+    "step": "simulation",
+    "wall_seconds": 1.717
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 79376,
+    "processes": 20,
+    "step": "cell_proofs",
+    "wall_seconds": 0.946
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 104384,
+    "processes": 1,
+    "step": "rerun_synthesis",
+    "wall_seconds": 0.229
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 231368,
+    "processes": 49,
+    "step": "rerun_place_cts_route_closure",
+    "wall_seconds": 2.151
+   },
+   {
+    "nested_peaks": 3,
+    "pdk": "gf180",
+    "peak_rss_kib": 123164,
+    "processes": 3,
+    "step": "rerun_openrcx",
+    "wall_seconds": 1.402
+   },
+   {
+    "nested_peaks": 0,
+    "pdk": "gf180",
+    "peak_rss_kib": 12428,
+    "processes": 1,
+    "step": "rerun_gds_export",
+    "wall_seconds": 0.018
+   },
+   {
+    "nested_peaks": 54,
+    "pdk": "gf180",
+    "peak_rss_kib": 231368,
+    "processes": 0,
+    "step": "determinism_rerun",
+    "wall_seconds": 3.83
+   },
+   {
+    "nested_peaks": 11,
+    "pdk": "gf180",
+    "peak_rss_kib": 447992,
+    "processes": 6,
+    "step": "controls",
+    "wall_seconds": 30.873
+   }
+  ],
+  "wall_seconds": 111.856
+ },
+ "revision": {
+  "branch": "feat/rtl2gds-final",
+  "dirty": false,
+  "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+  "dirty_paths": 0,
+  "head": "0acb28a11a8319941564b82c0b12f91b07e64a21",
+  "rustroad_sha256": "2911f28b20a26e273a426e45917cddad3ff3e1e8d2a1475f9a9ca212de70b3af"
+ },
+ "schema": "rustroad.rtl2gds.v1",
+ "scope": {
+  "antenna": "native check-antenna with a 0.10 safety margin + foundry deck (deck is the signoff gate)",
+  "async_reset_pulse_width": "unchecked: minimum pulse width of asynchronous set/clear inputs is a requirement on the reset source outside the block (pins listed per PDK in mpw_min_period); their recovery/removal checks are timed",
+  "clocks": "propagated, RustROAD CTS",
+  "cppr": "unchecked",
+  "density": "reported separately (density_status); not part of the gate (owner decision)",
+  "electromigration": "unchecked",
+  "ir_drop": "unchecked",
+  "level": "block/macro",
+  "ocv": "unchecked",
+  "pad_ring": "not_applicable (block level, no pad ring)",
+  "seal_ring": "not_applicable (block level, no seal ring)",
+  "signal_integrity": "unchecked (coupling grounded)"
+ },
+ "status": "passed",
+ "timing_accuracy_failures": [],
+ "timing_accuracy_status": "passed",
+ "tools": {
+  "openroad": {
+   "executable": "openroad",
+   "image": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+   "note": "image identity verified by its own harness",
+   "provenance": "OpenROAD/OpenRCX image f152917ebc45 (black box)",
+   "sha256": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+   "status": "passed"
+  },
+  "opensta": {
+   "actual_sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+   "expected_sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+   "overridden": false,
+   "provenance": "OpenSTA 3.1.0 (fixtures/flow/local-pinned.json)",
+   "reason": null,
+   "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+   "status": "passed"
+  },
+  "rusteda": {
+   "actual_sha256": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+   "expected_sha256": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+   "overridden": false,
+   "provenance": "RustSTA feat/signoff-checks 06b1c9f (merge of the shared-crate convergence 0.4.1, 6af9936, into stream sta3 ebc7037: lumped nearly resistance-free pi loads, driver resistance at 1 fF), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS",
+   "reason": null,
+   "sha256": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+   "status": "passed"
+  },
+  "rustroad": {
+   "actual_sha256": "2911f28b20a26e273a426e45917cddad3ff3e1e8d2a1475f9a9ca212de70b3af",
+   "note": "the binary under test: bound by sha256 with the git revision, not pinned",
+   "status": "passed"
+  },
+  "ruststa": {
+   "actual_sha256": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+   "expected_sha256": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+   "overridden": false,
+   "provenance": "RustSTA feat/signoff-checks 06b1c9f (merge of the shared-crate convergence 0.4.1, 6af9936, into stream sta3 ebc7037: lumped nearly resistance-free pi loads, driver resistance at 1 fF), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS",
+   "reason": null,
+   "sha256": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+   "status": "passed"
+  },
+  "rustsys": {
+   "actual_sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "expected_sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "overridden": false,
+   "provenance": "policy producer RustSys c5ec23c (fixtures/flow/cell-policy.json)",
+   "reason": null,
+   "sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "status": "passed"
+  },
+  "verilator": {
+   "actual_sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+   "expected_sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+   "overridden": false,
+   "provenance": "Verilator 5.032 (fixtures/flow/local-pinned.json)",
+   "reason": null,
+   "sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+   "status": "passed"
+  },
+  "yosys": {
+   "actual_sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "expected_sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "overridden": false,
+   "provenance": "Yosys 0.67 (fixtures/flow/local-pinned.json)",
+   "reason": null,
+   "sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "status": "passed"
+  }
+ },
+ "unverified_items": []
+}

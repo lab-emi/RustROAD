@@ -1,0 +1,3332 @@
+{
+  "schema": "rustroad.power-io-verification.v1",
+  "status": "passed",
+  "source": {
+    "path": "/mnt/data2/cgao/git/RustROAD/scripts/verify_power_io.py",
+    "sha256": "040e372cff01b863c1d5718a26cd4b8579eca6ec9b2d164eb05744bffc9294c8",
+    "bytes": 36015
+  },
+  "profiles": {
+    "path": "/mnt/data2/cgao/git/RustROAD/fixtures/pdk/local-power-io.json",
+    "sha256": "e48f3916cc3796c60c585b16588701d9095a62d7c96c34dd98404cc31605c258",
+    "bytes": 4383
+  },
+  "tools": {
+    "rustroad": {
+      "path": "/mnt/data2/cgao/git/RustROAD/target/release/rustroad",
+      "sha256": "fd5f827406a2e90bb6822dfe0c7f2ebdf2d335f4c490fcfe6ad08ed8d53f5654",
+      "bytes": 17170344,
+      "version": "rustroad-cli 0.3.0"
+    },
+    "rustsys": {
+      "path": "/mnt/data2/cgao/git/RustSys/target/release/rustsys",
+      "sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
+      "bytes": 65663096,
+      "version": "rustsys 0.1.0 (runtimes: cpu, cuda)"
+    },
+    "yosys": {
+      "path": "/mnt/data2/cgao/git/RustSys/.work/lec-verification/tools/yosys",
+      "sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+      "bytes": 74,
+      "version": "Yosys 0.67 (git sha1 2d1509d1b, Release, GNU /usr/bin/c++ 13.3.0)"
+    },
+    "verilator": {
+      "path": "/usr/bin/verilator",
+      "sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+      "bytes": 26226,
+      "version": "Verilator 5.032 2025-01-01 rev (Debian 5.032-1)"
+    },
+    "rusteda": {
+      "path": "/mnt/data2/cgao/git/RustSTA/target/release/rusteda",
+      "sha256": "8fcf8e0eefa05e14c3b3d6ac367839f5ff95059f6d416e2e8fab0262667b2429",
+      "bytes": 27956416,
+      "version": "rusteda 0.1.0"
+    },
+    "ruststa": {
+      "path": "/mnt/data2/cgao/git/RustSTA/target/release/ruststa",
+      "sha256": "b1a8389c7684aaf8a8e05f89635fac5ed2ee15aa380c8f8d8c40b1780f08668d",
+      "bytes": 57681688,
+      "version": "ruststa 0.1.0 (backends: cpu)"
+    },
+    "opensta": {
+      "path": "/home/cgao/.local/share/containers/storage/overlay/c2cc5a7e2baaa2c6bdac6951f759273edbb27a34c710ea4593e43ef22d00e4b8/diff/foss/tools/openroad/bin/sta",
+      "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+      "bytes": 9077264,
+      "version": "3.1.0"
+    }
+  },
+  "pdks": [
+    {
+      "pdk": "sky130",
+      "status": "passed",
+      "synthesis": {
+        "format": "rustsys-synth-report",
+        "format_version": 1,
+        "top": "lane_smoke",
+        "cells": {
+          "sky130_fd_sc_hd__and2_2": 4,
+          "sky130_fd_sc_hd__conb_1": 2,
+          "sky130_fd_sc_hd__dfxtp_1": 6,
+          "sky130_fd_sc_hd__nand2_4": 4,
+          "sky130_fd_sc_hd__o211a_4": 4
+        },
+        "area": 272.7616000000001,
+        "sequential_cells": 6,
+        "combinational_cells": 12,
+        "inverters": 0,
+        "logic_depth": 2,
+        "estimated_delay": 0.4544,
+        "aig_nodes_before": 20,
+        "aig_nodes_after": 16,
+        "map_requested_cuts": 40,
+        "map_effective_cuts": 40,
+        "map_cut_memory_budget_bytes": 4294967296,
+        "state_bits_rtl": 6,
+        "state_bits_retained": 6,
+        "after_reset": [],
+        "uninitialized_dont_care": false,
+        "assume_full_case": false,
+        "assume_parallel_case": false,
+        "constant_states": [],
+        "merged_states": [],
+        "latches": 0,
+        "warnings": 0,
+        "unused_cells": {
+          "sky130_fd_sc_hd__decap_12": "output without function",
+          "sky130_fd_sc_hd__decap_3": "output without function",
+          "sky130_fd_sc_hd__decap_4": "output without function",
+          "sky130_fd_sc_hd__decap_6": "output without function",
+          "sky130_fd_sc_hd__decap_8": "output without function",
+          "sky130_fd_sc_hd__diode_2": "output without function",
+          "sky130_fd_sc_hd__dlclkp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__dlclkp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__dlclkp_4": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__ebufn_1": "three-state output",
+          "sky130_fd_sc_hd__ebufn_2": "three-state output",
+          "sky130_fd_sc_hd__ebufn_4": "three-state output",
+          "sky130_fd_sc_hd__ebufn_8": "three-state output",
+          "sky130_fd_sc_hd__edfxbp_1": "next_state/data_in depends on more than one pin (SYNTH-REQ-0523)",
+          "sky130_fd_sc_hd__edfxtp_1": "next_state/data_in depends on more than one pin (SYNTH-REQ-0523)",
+          "sky130_fd_sc_hd__einvn_0": "three-state output",
+          "sky130_fd_sc_hd__einvn_1": "three-state output",
+          "sky130_fd_sc_hd__einvn_2": "three-state output",
+          "sky130_fd_sc_hd__einvn_4": "three-state output",
+          "sky130_fd_sc_hd__einvn_8": "three-state output",
+          "sky130_fd_sc_hd__einvp_1": "three-state output",
+          "sky130_fd_sc_hd__einvp_2": "three-state output",
+          "sky130_fd_sc_hd__einvp_4": "three-state output",
+          "sky130_fd_sc_hd__einvp_8": "three-state output",
+          "sky130_fd_sc_hd__fa_1": "more than one output",
+          "sky130_fd_sc_hd__fa_2": "more than one output",
+          "sky130_fd_sc_hd__fa_4": "more than one output",
+          "sky130_fd_sc_hd__fah_1": "more than one output",
+          "sky130_fd_sc_hd__fahcin_1": "more than one output",
+          "sky130_fd_sc_hd__fahcon_1": "more than one output",
+          "sky130_fd_sc_hd__ha_1": "more than one output",
+          "sky130_fd_sc_hd__ha_2": "more than one output",
+          "sky130_fd_sc_hd__ha_4": "more than one output",
+          "sky130_fd_sc_hd__lpflow_bleeder_1": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkbufkapwr_1": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkbufkapwr_16": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkbufkapwr_2": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkbufkapwr_4": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkbufkapwr_8": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkinvkapwr_1": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkinvkapwr_16": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkinvkapwr_2": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkinvkapwr_4": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_clkinvkapwr_8": "always-on cell",
+          "sky130_fd_sc_hd__lpflow_decapkapwr_12": "output without function",
+          "sky130_fd_sc_hd__lpflow_decapkapwr_3": "output without function",
+          "sky130_fd_sc_hd__lpflow_decapkapwr_4": "output without function",
+          "sky130_fd_sc_hd__lpflow_decapkapwr_6": "output without function",
+          "sky130_fd_sc_hd__lpflow_decapkapwr_8": "output without function",
+          "sky130_fd_sc_hd__lpflow_inputiso0n_1": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_inputiso0p_1": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_inputiso1n_1": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_inputiso1p_1": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_inputisolatch_1": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_isobufsrc_1": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_isobufsrc_16": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_isobufsrc_2": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_isobufsrc_4": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_isobufsrc_8": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_isobufsrckapwr_16": "isolation cell",
+          "sky130_fd_sc_hd__lpflow_lsbuf_lh_hl_isowell_tap_1": "level-shifter cell",
+          "sky130_fd_sc_hd__lpflow_lsbuf_lh_hl_isowell_tap_2": "level-shifter cell",
+          "sky130_fd_sc_hd__lpflow_lsbuf_lh_hl_isowell_tap_4": "level-shifter cell",
+          "sky130_fd_sc_hd__lpflow_lsbuf_lh_isowell_4": "level-shifter cell",
+          "sky130_fd_sc_hd__lpflow_lsbuf_lh_isowell_tap_1": "level-shifter cell",
+          "sky130_fd_sc_hd__lpflow_lsbuf_lh_isowell_tap_2": "level-shifter cell",
+          "sky130_fd_sc_hd__lpflow_lsbuf_lh_isowell_tap_4": "level-shifter cell",
+          "sky130_fd_sc_hd__sdfbbn_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfbbn_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfbbp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfrbp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfrbp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfrtn_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfrtp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfrtp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfrtp_4": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfsbp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfsbp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfstp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfstp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfstp_4": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfxbp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfxbp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfxtp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfxtp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdfxtp_4": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdlclkp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdlclkp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sdlclkp_4": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sedfxbp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sedfxbp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sedfxtp_1": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sedfxtp_2": "bus, state table, test cell or clock gating cell",
+          "sky130_fd_sc_hd__sedfxtp_4": "bus, state table, test cell or clock gating cell"
+        },
+        "runtime_s": 0.062621875,
+        "phase_s": [
+          [
+            "read",
+            9.3121e-05
+          ],
+          [
+            "elaborate",
+            9.2581e-05
+          ],
+          [
+            "optimize",
+            0.000163652
+          ],
+          [
+            "map",
+            0.06221672
+          ],
+          [
+            "emit",
+            4.666e-05
+          ]
+        ],
+        "map_backend": "cpu",
+        "map_phase_s": [
+          [
+            "setup",
+            4.85e-06
+          ],
+          [
+            "cut_passes",
+            0.000241532
+          ],
+          [
+            "exact_passes",
+            3.8541e-05
+          ]
+        ],
+        "opt_phase_s": [
+          [
+            "sweep",
+            1.271e-05
+          ],
+          [
+            "mux_decode",
+            5.99e-06
+          ],
+          [
+            "balance",
+            1.195e-05
+          ],
+          [
+            "rewrite",
+            5.4451e-05
+          ],
+          [
+            "refactor",
+            1.698e-05
+          ],
+          [
+            "resub",
+            1.243e-05
+          ],
+          [
+            "rewrite",
+            2.7291e-05
+          ],
+          [
+            "balance",
+            7.62e-06
+          ],
+          [
+            "mux_merge",
+            7.25e-06
+          ],
+          [
+            "sweep",
+            2.64e-06
+          ]
+        ],
+        "cell_area": {
+          "sky130_fd_sc_hd__and2_2": 7.5072,
+          "sky130_fd_sc_hd__conb_1": 3.7536,
+          "sky130_fd_sc_hd__dfxtp_1": 20.0192,
+          "sky130_fd_sc_hd__nand2_4": 11.2608,
+          "sky130_fd_sc_hd__o211a_4": 17.5168
+        },
+        "time_unit_ns": 1.0
+      },
+      "tie_function_proofs": [
+        {
+          "master": "sky130_fd_sc_hd__conb_1",
+          "pins": [
+            [
+              "HI",
+              1
+            ],
+            [
+              "LO",
+              0
+            ]
+          ],
+          "status": "proved",
+          "receipt": "sky130_tie_function_0",
+          "wrong_polarity": "rejected"
+        }
+      ],
+      "literal_projection": [
+        {
+          "master": "sky130_fd_sc_hd__conb_1",
+          "pin": "HI",
+          "net": "n12",
+          "value": 1
+        },
+        {
+          "master": "sky130_fd_sc_hd__conb_1",
+          "pin": "LO",
+          "net": "n13",
+          "value": 0
+        }
+      ],
+      "imported": {
+        "revision": "rev1",
+        "stage": "imported",
+        "design": "lane_smoke",
+        "cells": 20,
+        "rows": 8,
+        "expansions": 0,
+        "placement_status": "not_run",
+        "drc_status": "unchecked",
+        "lvs_status": "unchecked",
+        "routing_status": "not_run",
+        "corner": "not_applicable",
+        "wire_model": "none",
+        "unconstrained_endpoints": null,
+        "nets": 32,
+        "pins": 168,
+        "masters": 9,
+        "connectivity_status": "linked_unverified",
+        "power_grid_status": "unchecked",
+        "io_placement_status": "not_placed",
+        "diagnostics": [
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units TIME (first line 23): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units CAPACITANCE (first line 24): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units RESISTANCE (first line 25): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "library USEMINSPACING (first line 30): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "property_definitions LAYER (first line 33): Property schema is not interpreted; property uses produce separate diagnostics",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer PROPERTY (first line 52): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 2
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer SPACINGTABLE (first line 73): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer AREA (first line 76): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer THICKNESS (first line 77): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer EDGECAPACITANCE (first line 78): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer CAPACITANCE (first line 79): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer RESISTANCE (first line 80): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 11
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNAMODEL (first line 82): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNADIFFSIDEAREARATIO (first line 83): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ENCLOSURE (first line 91): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 10
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNADIFFAREARATIO (first line 95): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DCCURRENTDENSITY (first line 96): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 10
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer MINENCLOSEDAREA (first line 116): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 2
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ACCURRENTDENSITY (first line 124): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer MAXIMUMDENSITY (first line 125): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DENSITYCHECKWINDOW (first line 126): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DENSITYCHECKSTEP (first line 127): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "via_rule VIARULE (first line 310): Via generation rule is not modeled; routing/via DRC remain unchecked",
+            "occurrences": 25
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "library NOWIREEXTENSIONATPIN (first line 2): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "macro FOREIGN (first line 7): Macro annotation/foreign mapping is not modeled; use only retained local geometry",
+            "occurrences": 437
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "pin ANTENNAGATEAREA (first line 15): Antenna value is not modeled; antenna status remains unchecked",
+            "occurrences": 1314
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "pin ANTENNADIFFAREA (first line 88): Antenna value is not modeled; antenna status remains unchecked",
+            "occurrences": 450
+          },
+          {
+            "code": "POWER_GRID_PENDING",
+            "source": "physical_import",
+            "message": "Supply pins are logically connected; primary metal network construction and rail verification occur during placement",
+            "occurrences": 80
+          },
+          {
+            "code": "IO_PLACEMENT_PENDING",
+            "source": "physical_import",
+            "message": "Top-level terminals are preserved; boundary I/O placement occurs during placement",
+            "occurrences": 22
+          }
+        ],
+        "inserted_tie_cells": 2,
+        "filler_cells": null,
+        "rail_continuity_status": "unchecked",
+        "body_bias_status": "logically_connected"
+      },
+      "placed": {
+        "revision": "rev2",
+        "stage": "placed",
+        "design": "lane_smoke",
+        "cells": 97,
+        "rows": 8,
+        "expansions": 107,
+        "placement_status": "placed_unverified",
+        "drc_status": "unchecked",
+        "lvs_status": "unchecked",
+        "routing_status": "not_run",
+        "corner": "not_applicable",
+        "wire_model": "none",
+        "unconstrained_endpoints": null,
+        "nets": 32,
+        "pins": 476,
+        "masters": 9,
+        "connectivity_status": "linked_unverified",
+        "power_grid_status": "primary_grid_generated",
+        "io_placement_status": "placed_geometry_checked",
+        "diagnostics": [
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units TIME (first line 23): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units CAPACITANCE (first line 24): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units RESISTANCE (first line 25): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "library USEMINSPACING (first line 30): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "property_definitions LAYER (first line 33): Property schema is not interpreted; property uses produce separate diagnostics",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer PROPERTY (first line 52): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 2
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer SPACINGTABLE (first line 73): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer AREA (first line 76): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer THICKNESS (first line 77): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer EDGECAPACITANCE (first line 78): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer CAPACITANCE (first line 79): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer RESISTANCE (first line 80): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 11
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNAMODEL (first line 82): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNADIFFSIDEAREARATIO (first line 83): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ENCLOSURE (first line 91): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 10
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNADIFFAREARATIO (first line 95): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DCCURRENTDENSITY (first line 96): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 10
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer MINENCLOSEDAREA (first line 116): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 2
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ACCURRENTDENSITY (first line 124): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer MAXIMUMDENSITY (first line 125): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DENSITYCHECKWINDOW (first line 126): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DENSITYCHECKSTEP (first line 127): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "via_rule VIARULE (first line 310): Via generation rule is not modeled; routing/via DRC remain unchecked",
+            "occurrences": 25
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "library NOWIREEXTENSIONATPIN (first line 2): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "macro FOREIGN (first line 7): Macro annotation/foreign mapping is not modeled; use only retained local geometry",
+            "occurrences": 437
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "pin ANTENNAGATEAREA (first line 15): Antenna value is not modeled; antenna status remains unchecked",
+            "occurrences": 1314
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "pin ANTENNADIFFAREA (first line 88): Antenna value is not modeled; antenna status remains unchecked",
+            "occurrences": 450
+          },
+          {
+            "code": "PHYSICAL_SIGNOFF_UNCHECKED",
+            "source": "physical_preparation",
+            "message": "Primary metal rails/spines/vias and I/O geometry are generated and locally checked; well/tap continuity, DRC, IR/EM and extracted timing are not verified by this pass",
+            "occurrences": 1
+          }
+        ],
+        "inserted_tie_cells": 2,
+        "filler_cells": 77,
+        "rail_continuity_status": "geometry_checked",
+        "body_bias_status": "logically_connected"
+      },
+      "native_cec": "equivalent",
+      "external_cec": {
+        "status": "passed",
+        "expected_equivalent": true,
+        "receipt": "sky130_post_cec"
+      },
+      "simulation": {
+        "status": "passed",
+        "cases": 512,
+        "initial_state": "sampled after first edge",
+        "constant_outputs": {
+          "high_bit": 1,
+          "low_bit": 0
+        }
+      },
+      "tie_counts": {
+        "tie_high": 1,
+        "tie_low": 1
+      },
+      "powered_topology": {
+        "status": "passed",
+        "cells": 97,
+        "connections": 452,
+        "ports": 22,
+        "method": "independent bare-Yosys parsing versus public OpenDB endpoint partitions"
+      },
+      "power_geometry": {
+        "status": "passed",
+        "pg_pins": 388,
+        "flipped_instances": 46,
+        "signal_io": 20,
+        "conductor_rectangles": 223,
+        "intersection_comparisons": 5505,
+        "rows_with_intrinsic_rail_continuity": 8,
+        "components": {
+          "VSS": 1,
+          "VDD": 1
+        },
+        "body_bias_continuity": "unchecked",
+        "drc_status": "unchecked",
+        "ir_drop_status": "unchecked",
+        "electromigration_status": "unchecked"
+      },
+      "geometry_controls": {
+        "status": "passed",
+        "scope": "mutated copies of actual OpenDB records; physical workspace unchanged",
+        "cases": [
+          {
+            "control": "polarity",
+            "status": "rejected",
+            "diagnostic": "wrong supply polarity g0/VPWR"
+          },
+          {
+            "control": "row_gap",
+            "status": "rejected",
+            "diagnostic": "intrinsic cell-rail interval gap"
+          },
+          {
+            "control": "strap_gap",
+            "status": "rejected",
+            "diagnostic": "disconnected rail/spine/pin component"
+          },
+          {
+            "control": "short",
+            "status": "rejected",
+            "diagnostic": "power/ground conductor short"
+          },
+          {
+            "control": "io_interior",
+            "status": "rejected",
+            "diagnostic": "I/O shape does not touch die boundary"
+          }
+        ]
+      },
+      "reference_measurement": {
+        "peak_rss_kib": 88640,
+        "time": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130_power_probe.time",
+          "sha256": "2a61ffc9964d9f2080bc5e31270356ac2d0ce808cf705ff88d83a29c7efd7208",
+          "bytes": 845
+        }
+      },
+      "timing": {
+        "status": "passed",
+        "native": {
+          "status": "passed",
+          "workspace": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130_timing_workspace",
+          "scope": {
+            "corner": "tt",
+            "wire_model": "ideal",
+            "parasitics": "none",
+            "drc_status": "unchecked",
+            "wire_load": null,
+            "delay_calculator": "nldm_lumped",
+            "clock_model": "ideal",
+            "cppr": "off",
+            "backend": "cpu",
+            "precision": "f64"
+          },
+          "completeness": {
+            "constrained_endpoints": 14,
+            "unconstrained_endpoints": 2,
+            "clock_domains": [
+              "core"
+            ],
+            "unconstrained_by_reason": {
+              "no_data_arrival": 2
+            },
+            "unconstrained_inputs": 0,
+            "disabled_arcs": 0,
+            "unanalyzed_arcs": {
+              "min_pulse_width": 6
+            }
+          },
+          "metrics": {
+            "wns_ns": 0.0,
+            "tns_ns": 0.0,
+            "violating_endpoints": 0,
+            "whs_ns": 0.0,
+            "ths_ns": 0.0,
+            "hold_violating_endpoints": 0,
+            "worst_setup_slack_ns": 9.367814612482068,
+            "worst_hold_slack_ns": 0.36544981705413804
+          },
+          "diagnostics": [
+            {
+              "severity": "warning",
+              "code": "T0015",
+              "location": null,
+              "message": "corner 'tt': 6 unanalyzed 'min_pulse_width' arc(s) across 6 instance(s)",
+              "help": null
+            }
+          ],
+          "endpoints": [
+            {
+              "endpoint": "z[3]",
+              "handle": "port15",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.367814612482068,
+              "hold_slack_ns": 0.5735620075392918,
+              "worst_setup_handle": "path1",
+              "worst_hold_handle": "path25"
+            },
+            {
+              "endpoint": "z[2]",
+              "handle": "port16",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.367814612482068,
+              "hold_slack_ns": 0.5735620075392918,
+              "worst_setup_handle": "path2",
+              "worst_hold_handle": "path26"
+            },
+            {
+              "endpoint": "z[1]",
+              "handle": "port17",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.367814612482068,
+              "hold_slack_ns": 0.5735620075392918,
+              "worst_setup_handle": "path3",
+              "worst_hold_handle": "path27"
+            },
+            {
+              "endpoint": "z[0]",
+              "handle": "port18",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.367814612482068,
+              "hold_slack_ns": 0.5735620075392918,
+              "worst_setup_handle": "path4",
+              "worst_hold_handle": "path28"
+            },
+            {
+              "endpoint": "y[3]",
+              "handle": "port11",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.432276327887784,
+              "hold_slack_ns": 0.5406693679540548,
+              "worst_setup_handle": "path5",
+              "worst_hold_handle": "path19"
+            },
+            {
+              "endpoint": "y[2]",
+              "handle": "port12",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.432276327887784,
+              "hold_slack_ns": 0.5406693679540548,
+              "worst_setup_handle": "path6",
+              "worst_hold_handle": "path20"
+            },
+            {
+              "endpoint": "y[1]",
+              "handle": "port13",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.432276327887784,
+              "hold_slack_ns": 0.5406693679540548,
+              "worst_setup_handle": "path7",
+              "worst_hold_handle": "path21"
+            },
+            {
+              "endpoint": "y[0]",
+              "handle": "port14",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.432276327887784,
+              "hold_slack_ns": 0.5406693679540548,
+              "worst_setup_handle": "path8",
+              "worst_hold_handle": "path22"
+            },
+            {
+              "endpoint": "high_bit",
+              "handle": "port19",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.432276327887784,
+              "hold_slack_ns": 0.5406693679540548,
+              "worst_setup_handle": "path9",
+              "worst_hold_handle": "path23"
+            },
+            {
+              "endpoint": "low_bit",
+              "handle": "port20",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.432276327887784,
+              "hold_slack_ns": 0.5406693679540548,
+              "worst_setup_handle": "path10",
+              "worst_hold_handle": "path24"
+            },
+            {
+              "endpoint": "r2/D",
+              "handle": "pin51",
+              "kind": "flip_flop",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.453827507237417,
+              "hold_slack_ns": 0.36544981705413804,
+              "worst_setup_handle": "path11",
+              "worst_hold_handle": "path15"
+            },
+            {
+              "endpoint": "r3/D",
+              "handle": "pin54",
+              "kind": "flip_flop",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.453827507237417,
+              "hold_slack_ns": 0.36544981705413804,
+              "worst_setup_handle": "path12",
+              "worst_hold_handle": "path16"
+            },
+            {
+              "endpoint": "r4/D",
+              "handle": "pin57",
+              "kind": "flip_flop",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.453827507237417,
+              "hold_slack_ns": 0.36544981705413804,
+              "worst_setup_handle": "path13",
+              "worst_hold_handle": "path17"
+            },
+            {
+              "endpoint": "r5/D",
+              "handle": "pin60",
+              "kind": "flip_flop",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.453827507237417,
+              "hold_slack_ns": 0.36544981705413804,
+              "worst_setup_handle": "path14",
+              "worst_hold_handle": "path18"
+            }
+          ],
+          "full_check": {
+            "verdict": "agree",
+            "max_abs_difference_ns": 0.0
+          },
+          "both_check": {
+            "verdict": "agree",
+            "max_abs_difference_ns": 0.0
+          },
+          "incremental_noop": {
+            "scope": "no netlist or constraint edits",
+            "verdict": "agree",
+            "max_abs_difference_ns": 0.0,
+            "diagnostics": [
+              {
+                "severity": "warning",
+                "code": "T0015",
+                "location": null,
+                "message": "corner 'tt': 6 unanalyzed 'min_pulse_width' arc(s) across 6 instance(s)",
+                "help": null
+              }
+            ]
+          }
+        },
+        "opensta": {
+          "status": "passed",
+          "wire_model": "ideal",
+          "corner": "tt",
+          "parasitics": "none",
+          "unconstrained_endpoints": 2,
+          "tolerance_ns": 0.001,
+          "max_difference_ns": 6.02940417593345e-07,
+          "comparisons": [
+            {
+              "endpoint": "z[3]",
+              "kind": "setup",
+              "ruststa_ns": 9.367814612482068,
+              "opensta_ns": 9.3678150177,
+              "difference_ns": 4.052179320979121e-07
+            },
+            {
+              "endpoint": "z[3]",
+              "kind": "hold",
+              "ruststa_ns": 0.5735620075392918,
+              "opensta_ns": 0.573561966419,
+              "difference_ns": 4.112029172720355e-08
+            },
+            {
+              "endpoint": "z[2]",
+              "kind": "setup",
+              "ruststa_ns": 9.367814612482068,
+              "opensta_ns": 9.3678150177,
+              "difference_ns": 4.052179320979121e-07
+            },
+            {
+              "endpoint": "z[2]",
+              "kind": "hold",
+              "ruststa_ns": 0.5735620075392918,
+              "opensta_ns": 0.573561966419,
+              "difference_ns": 4.112029172720355e-08
+            },
+            {
+              "endpoint": "z[1]",
+              "kind": "setup",
+              "ruststa_ns": 9.367814612482068,
+              "opensta_ns": 9.3678150177,
+              "difference_ns": 4.052179320979121e-07
+            },
+            {
+              "endpoint": "z[1]",
+              "kind": "hold",
+              "ruststa_ns": 0.5735620075392918,
+              "opensta_ns": 0.573561966419,
+              "difference_ns": 4.112029172720355e-08
+            },
+            {
+              "endpoint": "z[0]",
+              "kind": "setup",
+              "ruststa_ns": 9.367814612482068,
+              "opensta_ns": 9.3678150177,
+              "difference_ns": 4.052179320979121e-07
+            },
+            {
+              "endpoint": "z[0]",
+              "kind": "hold",
+              "ruststa_ns": 0.5735620075392918,
+              "opensta_ns": 0.573561966419,
+              "difference_ns": 4.112029172720355e-08
+            },
+            {
+              "endpoint": "y[3]",
+              "kind": "setup",
+              "ruststa_ns": 9.432276327887784,
+              "opensta_ns": 9.432276725769,
+              "difference_ns": 3.9788121597439385e-07
+            },
+            {
+              "endpoint": "y[3]",
+              "kind": "hold",
+              "ruststa_ns": 0.5406693679540548,
+              "opensta_ns": 0.540669381618,
+              "difference_ns": 1.3663945197528449e-08
+            },
+            {
+              "endpoint": "y[2]",
+              "kind": "setup",
+              "ruststa_ns": 9.432276327887784,
+              "opensta_ns": 9.432276725769,
+              "difference_ns": 3.9788121597439385e-07
+            },
+            {
+              "endpoint": "y[2]",
+              "kind": "hold",
+              "ruststa_ns": 0.5406693679540548,
+              "opensta_ns": 0.540669381618,
+              "difference_ns": 1.3663945197528449e-08
+            },
+            {
+              "endpoint": "y[1]",
+              "kind": "setup",
+              "ruststa_ns": 9.432276327887784,
+              "opensta_ns": 9.432276725769,
+              "difference_ns": 3.9788121597439385e-07
+            },
+            {
+              "endpoint": "y[1]",
+              "kind": "hold",
+              "ruststa_ns": 0.5406693679540548,
+              "opensta_ns": 0.540669381618,
+              "difference_ns": 1.3663945197528449e-08
+            },
+            {
+              "endpoint": "y[0]",
+              "kind": "setup",
+              "ruststa_ns": 9.432276327887784,
+              "opensta_ns": 9.432276725769,
+              "difference_ns": 3.9788121597439385e-07
+            },
+            {
+              "endpoint": "y[0]",
+              "kind": "hold",
+              "ruststa_ns": 0.5406693679540548,
+              "opensta_ns": 0.540669381618,
+              "difference_ns": 1.3663945197528449e-08
+            },
+            {
+              "endpoint": "high_bit",
+              "kind": "setup",
+              "ruststa_ns": 9.432276327887784,
+              "opensta_ns": 9.432276725769,
+              "difference_ns": 3.9788121597439385e-07
+            },
+            {
+              "endpoint": "high_bit",
+              "kind": "hold",
+              "ruststa_ns": 0.5406693679540548,
+              "opensta_ns": 0.540669381618,
+              "difference_ns": 1.3663945197528449e-08
+            },
+            {
+              "endpoint": "low_bit",
+              "kind": "setup",
+              "ruststa_ns": 9.432276327887784,
+              "opensta_ns": 9.432276725769,
+              "difference_ns": 3.9788121597439385e-07
+            },
+            {
+              "endpoint": "low_bit",
+              "kind": "hold",
+              "ruststa_ns": 0.5406693679540548,
+              "opensta_ns": 0.540669381618,
+              "difference_ns": 1.3663945197528449e-08
+            },
+            {
+              "endpoint": "r2/D",
+              "kind": "setup",
+              "ruststa_ns": 9.453827507237417,
+              "opensta_ns": 9.453826904297,
+              "difference_ns": 6.02940417593345e-07
+            },
+            {
+              "endpoint": "r2/D",
+              "kind": "hold",
+              "ruststa_ns": 0.36544981705413804,
+              "opensta_ns": 0.365449786186,
+              "difference_ns": 3.08681380456477e-08
+            },
+            {
+              "endpoint": "r3/D",
+              "kind": "setup",
+              "ruststa_ns": 9.453827507237417,
+              "opensta_ns": 9.453826904297,
+              "difference_ns": 6.02940417593345e-07
+            },
+            {
+              "endpoint": "r3/D",
+              "kind": "hold",
+              "ruststa_ns": 0.36544981705413804,
+              "opensta_ns": 0.365449786186,
+              "difference_ns": 3.08681380456477e-08
+            },
+            {
+              "endpoint": "r4/D",
+              "kind": "setup",
+              "ruststa_ns": 9.453827507237417,
+              "opensta_ns": 9.453826904297,
+              "difference_ns": 6.02940417593345e-07
+            },
+            {
+              "endpoint": "r4/D",
+              "kind": "hold",
+              "ruststa_ns": 0.36544981705413804,
+              "opensta_ns": 0.365449786186,
+              "difference_ns": 3.08681380456477e-08
+            },
+            {
+              "endpoint": "r5/D",
+              "kind": "setup",
+              "ruststa_ns": 9.453827507237417,
+              "opensta_ns": 9.453826904297,
+              "difference_ns": 6.02940417593345e-07
+            },
+            {
+              "endpoint": "r5/D",
+              "kind": "hold",
+              "ruststa_ns": 0.36544981705413804,
+              "opensta_ns": 0.365449786186,
+              "difference_ns": 3.08681380456477e-08
+            }
+          ],
+          "receipt": "sky130_opensta"
+        },
+        "projection": {
+          "purpose": "verification_only_ideal_wires",
+          "original": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+          "original_sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+          "projected": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130_timing_ideal.lib",
+          "projected_sha256": "1c6372ecc8fe4ae03326de976c5c14cc2d68e44426526561d8b3c1cb77b434b1",
+          "removed_spans": [
+            {
+              "start_byte": 1468,
+              "end_byte": 1781,
+              "sha256": "ccbc5aed5b2240d5672349c33471ee5edde11be79c3681fb9bf0e02c63dcb227"
+            },
+            {
+              "start_byte": 1783,
+              "end_byte": 2097,
+              "sha256": "632610e2804d51508877597f407555128b493aaca4246c8ff5a24455e953a5c3"
+            },
+            {
+              "start_byte": 2099,
+              "end_byte": 2412,
+              "sha256": "925ae3844b1029238fbd9ff9756e223526b62d163396095e0378b82a76ecf323"
+            },
+            {
+              "start_byte": 2414,
+              "end_byte": 2726,
+              "sha256": "cfb6b04ee205102d3c79a9dda19344c5b0662ef5e0a4dda874abdce7bde5fb48"
+            },
+            {
+              "start_byte": 2728,
+              "end_byte": 2761,
+              "sha256": "e193524f965ddf26a4d6931c8ab0fc46814274a7d9013e11abdacc57105a7575"
+            },
+            {
+              "start_byte": 2762,
+              "end_byte": 2795,
+              "sha256": "0e9bdb4878310c34cf477c87cb478004a1267643aaf86cd621b44db1ffbc28cd"
+            }
+          ],
+          "cell_functions_and_nldm": "unchanged",
+          "production_library": "unmodified"
+        },
+        "unconstrained": [
+          {
+            "pin": "r0/D",
+            "handle": "pin45",
+            "reason": "no_arrival"
+          },
+          {
+            "pin": "r1/D",
+            "handle": "pin48",
+            "reason": "no_arrival"
+          }
+        ],
+        "scope_note": "constant-driven data pins have no data arrival; all other tested endpoints are constrained"
+      },
+      "artifacts": {
+        "source": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130.sv",
+          "sha256": "45305fd9e0798501d5de456062e87439be872abb35c386d2f79bf69b21e46675",
+          "bytes": 309
+        },
+        "native_mapped": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130_mapped.v",
+          "sha256": "a2f48292aad9c3dfffbd5717b94064c2a4cb2c5ad71562434288e89ea4042eba",
+          "bytes": 1864
+        },
+        "literal_mapped": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130_literal.v",
+          "sha256": "a18178b25bfa9ee2ddf90bf4e41b965926b38393d58b47b4bbc3899cd8e9c287",
+          "bytes": 1826
+        },
+        "exported": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130_exported.v",
+          "sha256": "a955c3e8481d92846dfd6649afdf681abe6ea937ebbf01b5e154fbb8e039d8a0",
+          "bytes": 2019
+        },
+        "powered": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130_powered.v",
+          "sha256": "b858c3aad992ad09b4d0b9a1b33930e28d769c59332cd805a5ac1407b8db44c3",
+          "bytes": 9510
+        },
+        "def": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130.def",
+          "sha256": "d718e51ed82e598636f035363c01e053651ffd47a8823c5d580294c28e2e3e9a",
+          "bytes": 19121
+        },
+        "config": {
+          "path": "/mnt/data2/cgao/git/RustROAD/fixtures/pdk/sky130-power-io.json",
+          "sha256": "174e9ad3cc99588c2bdf42ebe8fcb0d6cbb05bdc8c37fa6204c8596dc9f460f2",
+          "bytes": 704
+        },
+        "floorplan": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130_floor.json",
+          "sha256": "0e6db14b53fc631975645e6c6833792740e7ac16194e946c0a835cb098c91529",
+          "bytes": 915
+        },
+        "geometry": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/sky130_power_geometry.json",
+          "sha256": "2ca5d7c3be13507581bef3af941615e6f4171c0ca3f99a47edea07d4e4f4f11c",
+          "bytes": 270661
+        }
+      },
+      "layout_evidence": {
+        "path": "docs/evidence/power-io-layout-sky130.json",
+        "sha256": "60fe0cbcb0885fa58f772aff2a1e11b349f66966eed720922cc760ad2a21a88c"
+      }
+    },
+    {
+      "pdk": "gf180",
+      "status": "passed",
+      "synthesis": {
+        "format": "rustsys-synth-report",
+        "format_version": 1,
+        "top": "lane_smoke",
+        "cells": {
+          "gf180mcu_fd_sc_mcu7t5v0__and2_1": 4,
+          "gf180mcu_fd_sc_mcu7t5v0__and3_4": 4,
+          "gf180mcu_fd_sc_mcu7t5v0__dffq_1": 6,
+          "gf180mcu_fd_sc_mcu7t5v0__nand2_4": 4,
+          "gf180mcu_fd_sc_mcu7t5v0__or2_4": 4,
+          "gf180mcu_fd_sc_mcu7t5v0__tieh": 1,
+          "gf180mcu_fd_sc_mcu7t5v0__tiel": 1
+        },
+        "area": 943.9359999999999,
+        "sequential_cells": 6,
+        "combinational_cells": 16,
+        "inverters": 0,
+        "logic_depth": 2,
+        "estimated_delay": 2.51191,
+        "aig_nodes_before": 20,
+        "aig_nodes_after": 16,
+        "map_requested_cuts": 40,
+        "map_effective_cuts": 40,
+        "map_cut_memory_budget_bytes": 4294967296,
+        "state_bits_rtl": 6,
+        "state_bits_retained": 6,
+        "after_reset": [],
+        "uninitialized_dont_care": false,
+        "assume_full_case": false,
+        "assume_parallel_case": false,
+        "constant_states": [],
+        "merged_states": [],
+        "latches": 0,
+        "warnings": 0,
+        "unused_cells": {
+          "gf180mcu_fd_sc_mcu7t5v0__addf_1": "more than one output",
+          "gf180mcu_fd_sc_mcu7t5v0__addf_2": "more than one output",
+          "gf180mcu_fd_sc_mcu7t5v0__addf_4": "more than one output",
+          "gf180mcu_fd_sc_mcu7t5v0__addh_1": "more than one output",
+          "gf180mcu_fd_sc_mcu7t5v0__addh_2": "more than one output",
+          "gf180mcu_fd_sc_mcu7t5v0__addh_4": "more than one output",
+          "gf180mcu_fd_sc_mcu7t5v0__antenna": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__bufz_1": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__bufz_12": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__bufz_16": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__bufz_2": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__bufz_3": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__bufz_4": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__bufz_8": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__endcap": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fill_1": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fill_16": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fill_2": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fill_32": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fill_4": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fill_64": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fill_8": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fillcap_16": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fillcap_32": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fillcap_4": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fillcap_64": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__fillcap_8": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__filltie": "output without function",
+          "gf180mcu_fd_sc_mcu7t5v0__hold": "inout pin",
+          "gf180mcu_fd_sc_mcu7t5v0__icgtn_1": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__icgtn_2": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__icgtn_4": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__icgtp_1": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__icgtp_2": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__icgtp_4": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__invz_1": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__invz_12": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__invz_16": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__invz_2": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__invz_3": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__invz_4": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__invz_8": "three-state output",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffq_1": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffq_2": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffq_4": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_1": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_2": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_4": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_1": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_2": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_4": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_1": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_2": "bus, state table, test cell or clock gating cell",
+          "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_4": "bus, state table, test cell or clock gating cell"
+        },
+        "runtime_s": 0.116715461,
+        "phase_s": [
+          [
+            "read",
+            0.000105521
+          ],
+          [
+            "elaborate",
+            9.0901e-05
+          ],
+          [
+            "optimize",
+            0.000150132
+          ],
+          [
+            "map",
+            0.116304026
+          ],
+          [
+            "emit",
+            5.187e-05
+          ]
+        ],
+        "map_backend": "cpu",
+        "map_phase_s": [
+          [
+            "setup",
+            5.42e-06
+          ],
+          [
+            "cut_passes",
+            0.000153691
+          ],
+          [
+            "exact_passes",
+            2.6801e-05
+          ]
+        ],
+        "opt_phase_s": [
+          [
+            "sweep",
+            1.114e-05
+          ],
+          [
+            "mux_decode",
+            6.141e-06
+          ],
+          [
+            "balance",
+            9.49e-06
+          ],
+          [
+            "rewrite",
+            5.2e-05
+          ],
+          [
+            "refactor",
+            1.227e-05
+          ],
+          [
+            "resub",
+            1.1631e-05
+          ],
+          [
+            "rewrite",
+            2.702e-05
+          ],
+          [
+            "balance",
+            7.56e-06
+          ],
+          [
+            "mux_merge",
+            7.31e-06
+          ],
+          [
+            "sweep",
+            2.98e-06
+          ]
+        ],
+        "cell_area": {
+          "gf180mcu_fd_sc_mcu7t5v0__and2_1": 17.5616,
+          "gf180mcu_fd_sc_mcu7t5v0__and3_4": 43.904,
+          "gf180mcu_fd_sc_mcu7t5v0__dffq_1": 63.6608,
+          "gf180mcu_fd_sc_mcu7t5v0__nand2_4": 35.1232,
+          "gf180mcu_fd_sc_mcu7t5v0__or2_4": 39.5136,
+          "gf180mcu_fd_sc_mcu7t5v0__tieh": 8.7808,
+          "gf180mcu_fd_sc_mcu7t5v0__tiel": 8.7808
+        },
+        "time_unit_ns": 1.0
+      },
+      "tie_function_proofs": [
+        {
+          "master": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+          "pins": [
+            [
+              "Z",
+              1
+            ]
+          ],
+          "status": "proved",
+          "receipt": "gf180_tie_function_0",
+          "wrong_polarity": "rejected"
+        },
+        {
+          "master": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+          "pins": [
+            [
+              "ZN",
+              0
+            ]
+          ],
+          "status": "proved",
+          "receipt": "gf180_tie_function_1",
+          "wrong_polarity": "rejected"
+        }
+      ],
+      "literal_projection": [
+        {
+          "master": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+          "pin": "Z",
+          "net": "n16",
+          "value": 1
+        },
+        {
+          "master": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+          "pin": "ZN",
+          "net": "n17",
+          "value": 0
+        }
+      ],
+      "imported": {
+        "revision": "rev1",
+        "stage": "imported",
+        "design": "lane_smoke",
+        "cells": 24,
+        "rows": 8,
+        "expansions": 0,
+        "placement_status": "not_run",
+        "drc_status": "unchecked",
+        "lvs_status": "unchecked",
+        "routing_status": "not_run",
+        "corner": "not_applicable",
+        "wire_model": "none",
+        "unconstrained_endpoints": null,
+        "nets": 36,
+        "pins": 190,
+        "masters": 14,
+        "connectivity_status": "linked_unverified",
+        "power_grid_status": "unchecked",
+        "io_placement_status": "not_placed",
+        "diagnostics": [
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units CAPACITANCE (first line 41): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units CURRENT (first line 42): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units RESISTANCE (first line 43): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "property_definitions LAYER (first line 53): Property schema is not interpreted; property uses produce separate diagnostics",
+            "occurrences": 2
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "library CLEARANCEMEASURE (first line 58): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "library USEMINSPACING (first line 59): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer PROPERTY (first line 63): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer MINWIDTH (first line 88): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer SPACING (first line 91): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer AREA (first line 92): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer THICKNESS (first line 94): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNAMODEL (first line 95): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 9
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNASIDEAREARATIO (first line 96): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DCCURRENTDENSITY (first line 98): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 9
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ACCURRENTDENSITY (first line 99): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 9
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer CAPACITANCE (first line 101): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer RESISTANCE (first line 102): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 9
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer MINIMUMDENSITY (first line 104): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DENSITYCHECKWINDOW (first line 105): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DENSITYCHECKSTEP (first line 106): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ENCLOSURE (first line 116): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 8
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ARRAYSPACING (first line 121): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNAAREARATIO (first line 127): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNADIFFSIDEAREARATIO (first line 146): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNAGATEPLUSDIFF (first line 147): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "via RESISTANCE (first line 341): Via resistance is not modeled; extraction remains unchecked",
+            "occurrences": 16
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "via_rule VIARULE (first line 442): Via generation rule is not modeled; routing/via DRC remain unchecked",
+            "occurrences": 16
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "library NOWIREEXTENSIONATPIN (first line 2): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "macro FOREIGN (first line 7): Macro annotation/foreign mapping is not modeled; use only retained local geometry",
+            "occurrences": 229
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "pin ANTENNAGATEAREA (first line 14): Antenna value is not modeled; antenna status remains unchecked",
+            "occurrences": 616
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "pin ANTENNADIFFAREA (first line 40): Antenna value is not modeled; antenna status remains unchecked",
+            "occurrences": 221
+          },
+          {
+            "code": "POWER_GRID_PENDING",
+            "source": "physical_import",
+            "message": "Supply pins are logically connected; primary metal network construction and rail verification occur during placement",
+            "occurrences": 96
+          },
+          {
+            "code": "IO_PLACEMENT_PENDING",
+            "source": "physical_import",
+            "message": "Top-level terminals are preserved; boundary I/O placement occurs during placement",
+            "occurrences": 22
+          }
+        ],
+        "inserted_tie_cells": 2,
+        "filler_cells": null,
+        "rail_continuity_status": "unchecked",
+        "body_bias_status": "logically_connected"
+      },
+      "placed": {
+        "revision": "rev2",
+        "stage": "placed",
+        "design": "lane_smoke",
+        "cells": 44,
+        "rows": 8,
+        "expansions": 56,
+        "placement_status": "placed_unverified",
+        "drc_status": "unchecked",
+        "lvs_status": "unchecked",
+        "routing_status": "not_run",
+        "corner": "not_applicable",
+        "wire_model": "none",
+        "unconstrained_endpoints": null,
+        "nets": 36,
+        "pins": 270,
+        "masters": 14,
+        "connectivity_status": "linked_unverified",
+        "power_grid_status": "primary_grid_generated",
+        "io_placement_status": "placed_geometry_checked",
+        "diagnostics": [
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units CAPACITANCE (first line 41): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units CURRENT (first line 42): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "units RESISTANCE (first line 43): Non-geometric unit system is not modeled",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "property_definitions LAYER (first line 53): Property schema is not interpreted; property uses produce separate diagnostics",
+            "occurrences": 2
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "library CLEARANCEMEASURE (first line 58): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "library USEMINSPACING (first line 59): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer PROPERTY (first line 63): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 6
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer MINWIDTH (first line 88): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer SPACING (first line 91): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer AREA (first line 92): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer THICKNESS (first line 94): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNAMODEL (first line 95): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 9
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNASIDEAREARATIO (first line 96): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DCCURRENTDENSITY (first line 98): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 9
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ACCURRENTDENSITY (first line 99): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 9
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer CAPACITANCE (first line 101): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer RESISTANCE (first line 102): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 9
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer MINIMUMDENSITY (first line 104): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DENSITYCHECKWINDOW (first line 105): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer DENSITYCHECKSTEP (first line 106): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 5
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ENCLOSURE (first line 116): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 8
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ARRAYSPACING (first line 121): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNAAREARATIO (first line 127): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNADIFFSIDEAREARATIO (first line 146): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "layer ANTENNAGATEPLUSDIFF (first line 147): Antenna rule is not modeled; antenna status remains unchecked",
+            "occurrences": 4
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "via RESISTANCE (first line 341): Via resistance is not modeled; extraction remains unchecked",
+            "occurrences": 16
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "technology_lef",
+            "message": "via_rule VIARULE (first line 442): Via generation rule is not modeled; routing/via DRC remain unchecked",
+            "occurrences": 16
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "library NOWIREEXTENSIONATPIN (first line 2): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+            "occurrences": 1
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "macro FOREIGN (first line 7): Macro annotation/foreign mapping is not modeled; use only retained local geometry",
+            "occurrences": 229
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "pin ANTENNAGATEAREA (first line 14): Antenna value is not modeled; antenna status remains unchecked",
+            "occurrences": 616
+          },
+          {
+            "code": "LEF_SEMANTICS_UNMODELED",
+            "source": "cell_lef",
+            "message": "pin ANTENNADIFFAREA (first line 40): Antenna value is not modeled; antenna status remains unchecked",
+            "occurrences": 221
+          },
+          {
+            "code": "PHYSICAL_SIGNOFF_UNCHECKED",
+            "source": "physical_preparation",
+            "message": "Primary metal rails/spines/vias and I/O geometry are generated and locally checked; well/tap continuity, DRC, IR/EM and extracted timing are not verified by this pass",
+            "occurrences": 1
+          }
+        ],
+        "inserted_tie_cells": 2,
+        "filler_cells": 20,
+        "rail_continuity_status": "geometry_checked",
+        "body_bias_status": "logically_connected"
+      },
+      "native_cec": "equivalent",
+      "external_cec": {
+        "status": "passed",
+        "expected_equivalent": true,
+        "receipt": "gf180_post_cec"
+      },
+      "simulation": {
+        "status": "passed",
+        "cases": 512,
+        "initial_state": "sampled after first edge",
+        "constant_outputs": {
+          "high_bit": 1,
+          "low_bit": 0
+        }
+      },
+      "tie_counts": {
+        "tie_high": 1,
+        "tie_low": 1
+      },
+      "powered_topology": {
+        "status": "passed",
+        "cells": 44,
+        "connections": 248,
+        "ports": 22,
+        "method": "independent bare-Yosys parsing versus public OpenDB endpoint partitions"
+      },
+      "power_geometry": {
+        "status": "passed",
+        "pg_pins": 176,
+        "flipped_instances": 19,
+        "signal_io": 20,
+        "conductor_rectangles": 301,
+        "intersection_comparisons": 7236,
+        "rows_with_intrinsic_rail_continuity": 8,
+        "components": {
+          "VDD": 1,
+          "VSS": 1
+        },
+        "body_bias_continuity": "unchecked",
+        "drc_status": "unchecked",
+        "ir_drop_status": "unchecked",
+        "electromigration_status": "unchecked"
+      },
+      "geometry_controls": {
+        "status": "passed",
+        "scope": "mutated copies of actual OpenDB records; physical workspace unchanged",
+        "cases": [
+          {
+            "control": "polarity",
+            "status": "rejected",
+            "diagnostic": "wrong supply polarity g0/VDD"
+          },
+          {
+            "control": "row_gap",
+            "status": "rejected",
+            "diagnostic": "intrinsic cell-rail does not cover row"
+          },
+          {
+            "control": "strap_gap",
+            "status": "rejected",
+            "diagnostic": "disconnected rail/spine/pin component"
+          },
+          {
+            "control": "short",
+            "status": "rejected",
+            "diagnostic": "power/ground conductor short"
+          },
+          {
+            "control": "io_interior",
+            "status": "rejected",
+            "diagnostic": "I/O shape does not touch die boundary"
+          }
+        ]
+      },
+      "reference_measurement": {
+        "peak_rss_kib": 85588,
+        "time": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180_power_probe.time",
+          "sha256": "34d46d7dbc53051b0ec4573d84841a0ccf60cc8cee6a497acb04b0a2e7b612c7",
+          "bytes": 840
+        }
+      },
+      "timing": {
+        "status": "passed",
+        "native": {
+          "status": "passed",
+          "workspace": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180_timing_workspace",
+          "scope": {
+            "corner": "tt",
+            "wire_model": "ideal",
+            "parasitics": "none",
+            "drc_status": "unchecked",
+            "wire_load": null,
+            "delay_calculator": "nldm_lumped",
+            "clock_model": "ideal",
+            "cppr": "off",
+            "backend": "cpu",
+            "precision": "f64"
+          },
+          "completeness": {
+            "constrained_endpoints": 14,
+            "unconstrained_endpoints": 2,
+            "clock_domains": [
+              "core"
+            ],
+            "unconstrained_by_reason": {
+              "no_data_arrival": 2
+            },
+            "unconstrained_inputs": 0,
+            "disabled_arcs": 0,
+            "unanalyzed_arcs": {
+              "min_pulse_width": 12,
+              "minimum_period": 12
+            }
+          },
+          "metrics": {
+            "wns_ns": 0.0,
+            "tns_ns": 0.0,
+            "violating_endpoints": 0,
+            "whs_ns": 0.0,
+            "ths_ns": 0.0,
+            "hold_violating_endpoints": 0,
+            "worst_setup_slack_ns": 8.63602152990383,
+            "worst_hold_slack_ns": 0.38552818295696845
+          },
+          "diagnostics": [
+            {
+              "severity": "warning",
+              "code": "T0015",
+              "location": null,
+              "message": "corner 'tt': 12 unanalyzed 'min_pulse_width' arc(s) across 6 instance(s)",
+              "help": null
+            },
+            {
+              "severity": "warning",
+              "code": "T0015",
+              "location": null,
+              "message": "corner 'tt': 12 unanalyzed 'minimum_period' arc(s) across 6 instance(s)",
+              "help": null
+            }
+          ],
+          "endpoints": [
+            {
+              "endpoint": "r2/D",
+              "handle": "pin59",
+              "kind": "flip_flop",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.63602152990383,
+              "hold_slack_ns": 0.38552818295696845,
+              "worst_setup_handle": "path1",
+              "worst_hold_handle": "path15"
+            },
+            {
+              "endpoint": "r3/D",
+              "handle": "pin62",
+              "kind": "flip_flop",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.63602152990383,
+              "hold_slack_ns": 0.38552818295696845,
+              "worst_setup_handle": "path2",
+              "worst_hold_handle": "path16"
+            },
+            {
+              "endpoint": "r4/D",
+              "handle": "pin65",
+              "kind": "flip_flop",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.63602152990383,
+              "hold_slack_ns": 0.38552818295696845,
+              "worst_setup_handle": "path3",
+              "worst_hold_handle": "path17"
+            },
+            {
+              "endpoint": "r5/D",
+              "handle": "pin68",
+              "kind": "flip_flop",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.63602152990383,
+              "hold_slack_ns": 0.38552818295696845,
+              "worst_setup_handle": "path4",
+              "worst_hold_handle": "path18"
+            },
+            {
+              "endpoint": "y[3]",
+              "handle": "port11",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.672568525727085,
+              "hold_slack_ns": 1.1753221294810465,
+              "worst_setup_handle": "path5",
+              "worst_hold_handle": "path23"
+            },
+            {
+              "endpoint": "y[2]",
+              "handle": "port12",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.672568525727085,
+              "hold_slack_ns": 1.1753221294810465,
+              "worst_setup_handle": "path6",
+              "worst_hold_handle": "path24"
+            },
+            {
+              "endpoint": "y[1]",
+              "handle": "port13",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.672568525727085,
+              "hold_slack_ns": 1.1753221294810465,
+              "worst_setup_handle": "path7",
+              "worst_hold_handle": "path25"
+            },
+            {
+              "endpoint": "y[0]",
+              "handle": "port14",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.672568525727085,
+              "hold_slack_ns": 1.1753221294810465,
+              "worst_setup_handle": "path8",
+              "worst_hold_handle": "path26"
+            },
+            {
+              "endpoint": "high_bit",
+              "handle": "port19",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.672568525727085,
+              "hold_slack_ns": 1.1753221294810465,
+              "worst_setup_handle": "path9",
+              "worst_hold_handle": "path27"
+            },
+            {
+              "endpoint": "low_bit",
+              "handle": "port20",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 8.672568525727085,
+              "hold_slack_ns": 1.1753221294810465,
+              "worst_setup_handle": "path10",
+              "worst_hold_handle": "path28"
+            },
+            {
+              "endpoint": "z[3]",
+              "handle": "port15",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.130367096139159,
+              "hold_slack_ns": 0.7967399876109595,
+              "worst_setup_handle": "path11",
+              "worst_hold_handle": "path19"
+            },
+            {
+              "endpoint": "z[2]",
+              "handle": "port16",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.130367096139159,
+              "hold_slack_ns": 0.7967399876109595,
+              "worst_setup_handle": "path12",
+              "worst_hold_handle": "path20"
+            },
+            {
+              "endpoint": "z[1]",
+              "handle": "port17",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.130367096139159,
+              "hold_slack_ns": 0.7967399876109595,
+              "worst_setup_handle": "path13",
+              "worst_hold_handle": "path21"
+            },
+            {
+              "endpoint": "z[0]",
+              "handle": "port18",
+              "kind": "output_port",
+              "path_group": "core",
+              "capture_clock": "core",
+              "setup_slack_ns": 9.130367096139159,
+              "hold_slack_ns": 0.7967399876109595,
+              "worst_setup_handle": "path14",
+              "worst_hold_handle": "path22"
+            }
+          ],
+          "full_check": {
+            "verdict": "agree",
+            "max_abs_difference_ns": 0.0
+          },
+          "both_check": {
+            "verdict": "agree",
+            "max_abs_difference_ns": 0.0
+          },
+          "incremental_noop": {
+            "scope": "no netlist or constraint edits",
+            "verdict": "agree",
+            "max_abs_difference_ns": 0.0,
+            "diagnostics": [
+              {
+                "severity": "warning",
+                "code": "T0015",
+                "location": null,
+                "message": "corner 'tt': 12 unanalyzed 'min_pulse_width' arc(s) across 6 instance(s)",
+                "help": null
+              },
+              {
+                "severity": "warning",
+                "code": "T0015",
+                "location": null,
+                "message": "corner 'tt': 12 unanalyzed 'minimum_period' arc(s) across 6 instance(s)",
+                "help": null
+              }
+            ]
+          }
+        },
+        "opensta": {
+          "status": "passed",
+          "wire_model": "ideal",
+          "corner": "tt",
+          "parasitics": "none",
+          "unconstrained_endpoints": 2,
+          "tolerance_ns": 0.001,
+          "max_difference_ns": 8.695038307138248e-07,
+          "comparisons": [
+            {
+              "endpoint": "r2/D",
+              "kind": "setup",
+              "ruststa_ns": 8.63602152990383,
+              "opensta_ns": 8.6360206604,
+              "difference_ns": 8.695038307138248e-07
+            },
+            {
+              "endpoint": "r2/D",
+              "kind": "hold",
+              "ruststa_ns": 0.38552818295696845,
+              "opensta_ns": 0.385528177023,
+              "difference_ns": 5.93396842774041e-09
+            },
+            {
+              "endpoint": "r3/D",
+              "kind": "setup",
+              "ruststa_ns": 8.63602152990383,
+              "opensta_ns": 8.6360206604,
+              "difference_ns": 8.695038307138248e-07
+            },
+            {
+              "endpoint": "r3/D",
+              "kind": "hold",
+              "ruststa_ns": 0.38552818295696845,
+              "opensta_ns": 0.385528177023,
+              "difference_ns": 5.93396842774041e-09
+            },
+            {
+              "endpoint": "r4/D",
+              "kind": "setup",
+              "ruststa_ns": 8.63602152990383,
+              "opensta_ns": 8.6360206604,
+              "difference_ns": 8.695038307138248e-07
+            },
+            {
+              "endpoint": "r4/D",
+              "kind": "hold",
+              "ruststa_ns": 0.38552818295696845,
+              "opensta_ns": 0.385528177023,
+              "difference_ns": 5.93396842774041e-09
+            },
+            {
+              "endpoint": "r5/D",
+              "kind": "setup",
+              "ruststa_ns": 8.63602152990383,
+              "opensta_ns": 8.6360206604,
+              "difference_ns": 8.695038307138248e-07
+            },
+            {
+              "endpoint": "r5/D",
+              "kind": "hold",
+              "ruststa_ns": 0.38552818295696845,
+              "opensta_ns": 0.385528177023,
+              "difference_ns": 5.93396842774041e-09
+            },
+            {
+              "endpoint": "y[3]",
+              "kind": "setup",
+              "ruststa_ns": 8.672568525727085,
+              "opensta_ns": 8.672568321228,
+              "difference_ns": 2.0449908433306518e-07
+            },
+            {
+              "endpoint": "y[3]",
+              "kind": "hold",
+              "ruststa_ns": 1.1753221294810465,
+              "opensta_ns": 1.175322175026,
+              "difference_ns": 4.554495336428488e-08
+            },
+            {
+              "endpoint": "y[2]",
+              "kind": "setup",
+              "ruststa_ns": 8.672568525727085,
+              "opensta_ns": 8.672568321228,
+              "difference_ns": 2.0449908433306518e-07
+            },
+            {
+              "endpoint": "y[2]",
+              "kind": "hold",
+              "ruststa_ns": 1.1753221294810465,
+              "opensta_ns": 1.175322175026,
+              "difference_ns": 4.554495336428488e-08
+            },
+            {
+              "endpoint": "y[1]",
+              "kind": "setup",
+              "ruststa_ns": 8.672568525727085,
+              "opensta_ns": 8.672568321228,
+              "difference_ns": 2.0449908433306518e-07
+            },
+            {
+              "endpoint": "y[1]",
+              "kind": "hold",
+              "ruststa_ns": 1.1753221294810465,
+              "opensta_ns": 1.175322175026,
+              "difference_ns": 4.554495336428488e-08
+            },
+            {
+              "endpoint": "y[0]",
+              "kind": "setup",
+              "ruststa_ns": 8.672568525727085,
+              "opensta_ns": 8.672568321228,
+              "difference_ns": 2.0449908433306518e-07
+            },
+            {
+              "endpoint": "y[0]",
+              "kind": "hold",
+              "ruststa_ns": 1.1753221294810465,
+              "opensta_ns": 1.175322175026,
+              "difference_ns": 4.554495336428488e-08
+            },
+            {
+              "endpoint": "high_bit",
+              "kind": "setup",
+              "ruststa_ns": 8.672568525727085,
+              "opensta_ns": 8.672568321228,
+              "difference_ns": 2.0449908433306518e-07
+            },
+            {
+              "endpoint": "high_bit",
+              "kind": "hold",
+              "ruststa_ns": 1.1753221294810465,
+              "opensta_ns": 1.175322175026,
+              "difference_ns": 4.554495336428488e-08
+            },
+            {
+              "endpoint": "low_bit",
+              "kind": "setup",
+              "ruststa_ns": 8.672568525727085,
+              "opensta_ns": 8.672568321228,
+              "difference_ns": 2.0449908433306518e-07
+            },
+            {
+              "endpoint": "low_bit",
+              "kind": "hold",
+              "ruststa_ns": 1.1753221294810465,
+              "opensta_ns": 1.175322175026,
+              "difference_ns": 4.554495336428488e-08
+            },
+            {
+              "endpoint": "z[3]",
+              "kind": "setup",
+              "ruststa_ns": 9.130367096139159,
+              "opensta_ns": 9.130367279053,
+              "difference_ns": 1.8291384229485175e-07
+            },
+            {
+              "endpoint": "z[3]",
+              "kind": "hold",
+              "ruststa_ns": 0.7967399876109595,
+              "opensta_ns": 0.796740055084,
+              "difference_ns": 6.747304048815295e-08
+            },
+            {
+              "endpoint": "z[2]",
+              "kind": "setup",
+              "ruststa_ns": 9.130367096139159,
+              "opensta_ns": 9.130367279053,
+              "difference_ns": 1.8291384229485175e-07
+            },
+            {
+              "endpoint": "z[2]",
+              "kind": "hold",
+              "ruststa_ns": 0.7967399876109595,
+              "opensta_ns": 0.796740055084,
+              "difference_ns": 6.747304048815295e-08
+            },
+            {
+              "endpoint": "z[1]",
+              "kind": "setup",
+              "ruststa_ns": 9.130367096139159,
+              "opensta_ns": 9.130367279053,
+              "difference_ns": 1.8291384229485175e-07
+            },
+            {
+              "endpoint": "z[1]",
+              "kind": "hold",
+              "ruststa_ns": 0.7967399876109595,
+              "opensta_ns": 0.796740055084,
+              "difference_ns": 6.747304048815295e-08
+            },
+            {
+              "endpoint": "z[0]",
+              "kind": "setup",
+              "ruststa_ns": 9.130367096139159,
+              "opensta_ns": 9.130367279053,
+              "difference_ns": 1.8291384229485175e-07
+            },
+            {
+              "endpoint": "z[0]",
+              "kind": "hold",
+              "ruststa_ns": 0.7967399876109595,
+              "opensta_ns": 0.796740055084,
+              "difference_ns": 6.747304048815295e-08
+            }
+          ],
+          "receipt": "gf180_opensta"
+        },
+        "projection": {
+          "purpose": "verification_only_ideal_wires",
+          "original": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+          "original_sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+          "projected": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180_timing_ideal.lib",
+          "projected_sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+          "removed_spans": [],
+          "cell_functions_and_nldm": "unchanged",
+          "production_library": "unmodified"
+        },
+        "unconstrained": [
+          {
+            "pin": "r0/D",
+            "handle": "pin53",
+            "reason": "no_arrival"
+          },
+          {
+            "pin": "r1/D",
+            "handle": "pin56",
+            "reason": "no_arrival"
+          }
+        ],
+        "scope_note": "constant-driven data pins have no data arrival; all other tested endpoints are constrained"
+      },
+      "artifacts": {
+        "source": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180.sv",
+          "sha256": "45305fd9e0798501d5de456062e87439be872abb35c386d2f79bf69b21e46675",
+          "bytes": 309
+        },
+        "native_mapped": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180_mapped.v",
+          "sha256": "8c1b957bc89db1fc3dff48fd38c2e0e86b4e37d4b2d8ec9a494c0afaccdfd996",
+          "bytes": 2309
+        },
+        "literal_mapped": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180_literal.v",
+          "sha256": "d4463d0cd418a149f2f7151d09939ce1f5a172b8de85e50713b3d8b3bfa7753e",
+          "bytes": 2260
+        },
+        "exported": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180_exported.v",
+          "sha256": "a8a323510027f38fdf33eca775c207fb6548093530743a69d697d504f2f986be",
+          "bytes": 2450
+        },
+        "powered": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180_powered.v",
+          "sha256": "14278e3775979887eabda1cc524850ba26effd0e36d1662fc234adab0fc89429",
+          "bytes": 5359
+        },
+        "def": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180.def",
+          "sha256": "1b9421c3fb2930e0b5a14eb841ae11f36996e00e54d766f3357e1a1eb36c4e7b",
+          "bytes": 12021
+        },
+        "config": {
+          "path": "/mnt/data2/cgao/git/RustROAD/fixtures/pdk/gf180-power-io.json",
+          "sha256": "187afb5e03679178b0f5f8b6cb3b0d7d0570bbde7b9c7fdb0c281496d7ec2522",
+          "bytes": 872
+        },
+        "floorplan": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180_floor.json",
+          "sha256": "272ce90fd7f536149830d4ebcdc397bf53ff0a93d890ba1c50a27f9c1b374ebf",
+          "bytes": 948
+        },
+        "geometry": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/power-io-verified/gf180_power_geometry.json",
+          "sha256": "36cf3d5942966c43d168f639c2e24d249301a3eeadd9259f9dce0243d880624b",
+          "bytes": 203284
+        }
+      },
+      "layout_evidence": {
+        "path": "docs/evidence/power-io-layout-gf180.json",
+        "sha256": "9175c581d47a626f85b8cc90d8fecb36d6fc6dc2ad3b98ba70fd255e2220a4bd"
+      }
+    }
+  ],
+  "analysis_scope": {
+    "corner": null,
+    "wire_model": null,
+    "unconstrained_endpoints": null
+  },
+  "scope": {
+    "cts": "not_run",
+    "routing": "not_run",
+    "extracted_sta": "not_run",
+    "drc": "unchecked",
+    "lvs": "unchecked",
+    "ir_drop": "unchecked",
+    "electromigration": "unchecked"
+  },
+  "memory_preflight": "               total        used        free      shared  buff/cache   available\nMem:            59Gi        12Gi       4.7Gi       281Mi        42Gi        46Gi\nSwap:          127Gi        11Gi       116Gi\n",
+  "openroad_reference": {
+    "image_id": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+    "executable": "/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad",
+    "sha256": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2"
+  },
+  "identity_stable": true,
+  "peak_host_process_rss_kib": 290696,
+  "measurement": {
+    "wall_clock": "0:06.90",
+    "peak_host_process_rss_kib": 290696,
+    "scope": "Full serial dual-PDK preparation, semantic and geometry verification. Peak is maximum single-process RSS, not aggregate concurrent-family RSS."
+  },
+  "raw_evidence": {
+    "summary": ".work/power-io-verified/summary.json",
+    "summary_sha256": "5614deae0ce5b582df62811c3b1bc602d07fa291550543b532f74aeaf1b46420",
+    "receipts": ".work/power-io-verified/receipts",
+    "outer_time": ".work/power-io-verified.time",
+    "outer_time_sha256": "cb858f4e7f46f2eda1af891cb405c804f892dbe84178f3409da8f33edbc23c69"
+  },
+  "receipt_index": [
+    {
+      "label": "memory_preflight",
+      "exit_code": 0,
+      "elapsed_seconds": 0.003054204978980124,
+      "peak_rss_kib": 8040,
+      "path": ".work/power-io-verified/receipts/memory_preflight/receipt.json",
+      "sha256": "4d334a0406416127845752583d194b1376b243f7b722312977fc017ccd7d5e10",
+      "stdout_sha256": "baa07a6c4646e821c08d6ca66b259a7c8f7060fc40fb5e11e1f1092071ff9408",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "c01e8327d6cbccaacc03f4b1c0ba65f7f8991d5e2a4b492b10a233e9cd8739f6"
+    },
+    {
+      "label": "rustroad_version",
+      "exit_code": 0,
+      "elapsed_seconds": 0.002430687949527055,
+      "peak_rss_kib": 8200,
+      "path": ".work/power-io-verified/receipts/rustroad_version/receipt.json",
+      "sha256": "f2a3df91768a0e61488509743ee3fd19ba288f0d6342baa9365f640d95361095",
+      "stdout_sha256": "1ae39e7a7a5ea33532135dfdddd7f25c39fa22437fa25fdc291240953b451d57",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "0172a8543b990f7b5b6b1bcd615525d3e5fad1d3ded4aa25cdfaac1b84b1b084"
+    },
+    {
+      "label": "rustsys_version",
+      "exit_code": 0,
+      "elapsed_seconds": 0.002704432001337409,
+      "peak_rss_kib": 7920,
+      "path": ".work/power-io-verified/receipts/rustsys_version/receipt.json",
+      "sha256": "34a11fe282f38051bebee1f6f4b5c7e1b993a7876df4b14a424bffa31be1536b",
+      "stdout_sha256": "4d4e04ebe6d547726f6848e13d8d6eb9ce40b999ed1bb69a1b92a1cd124ecad8",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "1ab10d98a6b7bb58222bc3726602c79a3a1115ffa35ae57d80ad507fb6dd2e5c"
+    },
+    {
+      "label": "yosys_version",
+      "exit_code": 0,
+      "elapsed_seconds": 0.006511544983368367,
+      "peak_rss_kib": 26280,
+      "path": ".work/power-io-verified/receipts/yosys_version/receipt.json",
+      "sha256": "739bac0859cb9dbb48eea9f6298ff6f363d4ab3daf5c40d2c4819a996ad0bc93",
+      "stdout_sha256": "ead28b091a783cc6d2f16fa919fdcc7e4859a897d8d9031d20f9fb4473324f19",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "be87b5722b23f1e059e50344c6cbc8d35ab272b7eb3644679bdad57b7343da8b"
+    },
+    {
+      "label": "verilator_version",
+      "exit_code": 0,
+      "elapsed_seconds": 0.024167448980733752,
+      "peak_rss_kib": 11980,
+      "path": ".work/power-io-verified/receipts/verilator_version/receipt.json",
+      "sha256": "3535cec9f865001559d96fb083f8fc516ed76155df916b35f5c94846547712b3",
+      "stdout_sha256": "31ee8ba532711b2dcaef0bb2e203e20284e39ea422325f094074f3c2a9da7996",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "4ff28d142a9dd6db5856d944cdda2e44749f839ee1822f344abab0fca237bf3f"
+    },
+    {
+      "label": "rusteda_version",
+      "exit_code": 0,
+      "elapsed_seconds": 0.002559569024015218,
+      "peak_rss_kib": 8100,
+      "path": ".work/power-io-verified/receipts/rusteda_version/receipt.json",
+      "sha256": "01ca93e76eec9b1a2ca7f7979389c945a4d30f1d1a7739084f4c70671f0b81fd",
+      "stdout_sha256": "b08fd002f360effd767447943a6f2f03b3f3ffaefaf99266d297ec17f829c898",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "f12c6b7e5cec6009c426fa8a1e427778aa9f5d3ff52336325e7d742bf96c9cf4"
+    },
+    {
+      "label": "ruststa_version",
+      "exit_code": 0,
+      "elapsed_seconds": 0.0027754330076277256,
+      "peak_rss_kib": 8076,
+      "path": ".work/power-io-verified/receipts/ruststa_version/receipt.json",
+      "sha256": "648a9ff09e44a0ddef302803e27d0047e7df68b9fee8eaabca6987173516e493",
+      "stdout_sha256": "a3108d2b964c57904710ade03ec75ba9e13132252892fd467f33630711af1277",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "24cb13d38bdba8e09001181be39807730312824a72d4af8304ae256bf1879d14"
+    },
+    {
+      "label": "opensta_version",
+      "exit_code": 0,
+      "elapsed_seconds": 0.0032691179658286273,
+      "peak_rss_kib": 8160,
+      "path": ".work/power-io-verified/receipts/opensta_version/receipt.json",
+      "sha256": "ead6a85f3eacd6963af6b4fd2955a7d5a484713b2a7a4a0cfde5474931a512b8",
+      "stdout_sha256": "b2f44d3b6e29f8b1b73ea4735f006affc4d198e1fd9c7d50e736159b1ef636c6",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "e3e44f2f215c508bbb7e62cda610c149f2b0601930ec1322ddff9a07bc8dc5c0"
+    },
+    {
+      "label": "openroad_image",
+      "exit_code": 0,
+      "elapsed_seconds": 0.01546745904488489,
+      "peak_rss_kib": 40724,
+      "path": ".work/power-io-verified/receipts/openroad_image/receipt.json",
+      "sha256": "44a4c11feecc86a596232c4d9bc3c10c366a8a0fa6cf8e32c4acbacfce749b92",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "5ff4e9c93a3685c2e58d81dd2cf22ef7bd845a1a19042f26585bd425be5699dd"
+    },
+    {
+      "label": "openroad_binary",
+      "exit_code": 0,
+      "elapsed_seconds": 0.34909023897489533,
+      "peak_rss_kib": 46020,
+      "path": ".work/power-io-verified/receipts/openroad_binary/receipt.json",
+      "sha256": "1af4142ab7ac1f32371f9cd8e09fe741b7fc12ba91a49c01218c4e588ef3a4c7",
+      "stdout_sha256": "1bb4508e6543aa366a2c8870d7da961b1615688c1b037c1923d187de514d9e92",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "6f182246f08e3398810f7c32e13293dcb118a21716fd31025144ac9f27ba5412"
+    },
+    {
+      "label": "sky130_synth",
+      "exit_code": 0,
+      "elapsed_seconds": 0.14581169694429263,
+      "peak_rss_kib": 61776,
+      "path": ".work/power-io-verified/receipts/sky130_synth/receipt.json",
+      "sha256": "687ae17d1c4db57422e2a5c4c2536bc44567062c3e190dd97cf3b30331e7c3a0",
+      "stdout_sha256": "51070847b1f6cdad3924ff6f78abe1b82f39a54b2b4349dc875c18af4e87d695",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "e7c1141c002e41404e994117c19083434137f3671ddab978665a7a3707b74289"
+    },
+    {
+      "label": "sky130_tie_function_0",
+      "exit_code": 0,
+      "elapsed_seconds": 0.04322374000912532,
+      "peak_rss_kib": 64788,
+      "path": ".work/power-io-verified/receipts/sky130_tie_function_0/receipt.json",
+      "sha256": "3938d312eee1276cda1535524869dd6bf823790c2db086d472801c978968e374",
+      "stdout_sha256": "5f461dc3354c9a85e2b559a7455c970f80e61d0a33e308f11eeb3158a228cb9e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "2bfaf1838ce57afd19721770c82687437a849523647f92ac271f25478d504ba0"
+    },
+    {
+      "label": "sky130_tie_function_0_negative",
+      "exit_code": 1,
+      "elapsed_seconds": 0.03484064299846068,
+      "peak_rss_kib": 61936,
+      "path": ".work/power-io-verified/receipts/sky130_tie_function_0_negative/receipt.json",
+      "sha256": "1b6cf6e8186cdf374c9b77c711a655df2714922fd12002e84e1c7baba8cca607",
+      "stdout_sha256": "60794e109bf7ebab7d98b3b62c35f0a9a3fd2fbd5ce37af0dec3a998d41b06c5",
+      "stderr_sha256": "8e79acc8c131396f3cefc96bc86fb08950866c074005a08541791b51b723301f",
+      "time_sha256": "f0d387dc258726fb311077e56e34c5afc3eb7e959dc04ae099f3412905641ed9"
+    },
+    {
+      "label": "sky130_literal_cec",
+      "exit_code": 0,
+      "elapsed_seconds": 0.044587465992663056,
+      "peak_rss_kib": 65488,
+      "path": ".work/power-io-verified/receipts/sky130_literal_cec/receipt.json",
+      "sha256": "d66cd92f37b5191c000cb5658b151734541844ab90a385fbda5ac1b6db1e9b1a",
+      "stdout_sha256": "9ccc55e2032fbb04004f0afaf7027aac0fcc7c311d1888f2ce959a92a3c4b51a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "524213f07689ab355319e9f7c32b6605da71c6777f5e23d4ca251194e13398bd"
+    },
+    {
+      "label": "sky130_import",
+      "exit_code": 0,
+      "elapsed_seconds": 0.01931711402721703,
+      "peak_rss_kib": 9948,
+      "path": ".work/power-io-verified/receipts/sky130_import/receipt.json",
+      "sha256": "7a3b0831776a3ced16083e634223e7151f508fb2daf6b54b9872edb0882ab6fe",
+      "stdout_sha256": "e89872db5564941eeffd8fbd2f51dfdf0cf2ceacadde49bfe3bd1ef82978c558",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "31d8f57ace84cdff34b40495aeda9b2525800bad06cba13a5f5fc0b5eb4698a8"
+    },
+    {
+      "label": "sky130_place",
+      "exit_code": 0,
+      "elapsed_seconds": 0.006576456013135612,
+      "peak_rss_kib": 8004,
+      "path": ".work/power-io-verified/receipts/sky130_place/receipt.json",
+      "sha256": "2fd5ac73e230017d0b8bcfc8ae7201ee5b01587e617543cbb03e90eceafcb8c0",
+      "stdout_sha256": "25a201f978a37024516895aa5b5535ebf6f14d1923d55ad75e9beddc892dbc88",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "3b3404f574db109bf8734892ed4a432f3c8c20f1607b85c7612b16500865fd16"
+    },
+    {
+      "label": "sky130_export_logical",
+      "exit_code": 0,
+      "elapsed_seconds": 0.003688982978928834,
+      "peak_rss_kib": 7724,
+      "path": ".work/power-io-verified/receipts/sky130_export_logical/receipt.json",
+      "sha256": "f8951dbebcf06b8e8fb261ad47505f732ffd8ca69e71ffab0ecc2d43db9ec762",
+      "stdout_sha256": "a955c3e8481d92846dfd6649afdf681abe6ea937ebbf01b5e154fbb8e039d8a0",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "c69cefaf96ce5b8b362ca496f9368b049e0ebd8d07bb2216e337f59e225a5fef"
+    },
+    {
+      "label": "sky130_export_def",
+      "exit_code": 0,
+      "elapsed_seconds": 0.003396929008886218,
+      "peak_rss_kib": 7996,
+      "path": ".work/power-io-verified/receipts/sky130_export_def/receipt.json",
+      "sha256": "aaf547afa741df53fecb0310d2150ff8a0ee3bbf3c6802371fb2b5a77da31383",
+      "stdout_sha256": "d718e51ed82e598636f035363c01e053651ffd47a8823c5d580294c28e2e3e9a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "b56d6317e18039c25df73c3a9a0a5d0e3cc022b61f40e77c9e8d44a8ae712111"
+    },
+    {
+      "label": "sky130_export_powered",
+      "exit_code": 0,
+      "elapsed_seconds": 0.0035632619983516634,
+      "peak_rss_kib": 8080,
+      "path": ".work/power-io-verified/receipts/sky130_export_powered/receipt.json",
+      "sha256": "b2438498bcbf389d6a24488a2e1c8e5139f6e1fed1e4557da414a1d811966301",
+      "stdout_sha256": "b858c3aad992ad09b4d0b9a1b33930e28d769c59332cd805a5ac1407b8db44c3",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "df38485dd724e6a5c1feb9f092ea2589dcaff745bd30523438ea212133cc09cd"
+    },
+    {
+      "label": "sky130_post_cec",
+      "exit_code": 0,
+      "elapsed_seconds": 0.04383228701772168,
+      "peak_rss_kib": 66000,
+      "path": ".work/power-io-verified/receipts/sky130_post_cec/receipt.json",
+      "sha256": "7c2ff28c18679840016e4ffae60ea316e52a2339744efc9857de47819a801166",
+      "stdout_sha256": "301003d23c0c2401dbd4b438f33dc9ccef732dc074341cbe32ec3f98b4944633",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "f85c4228a560b9db2a55827de10791fbe2b5480fca44997f08234023bb3f0ffb"
+    },
+    {
+      "label": "sky130_native_cec",
+      "exit_code": 0,
+      "elapsed_seconds": 0.10261883802013472,
+      "peak_rss_kib": 62408,
+      "path": ".work/power-io-verified/receipts/sky130_native_cec/receipt.json",
+      "sha256": "16e5e284e7700247818c629577d8541a24f0b2ce1e520288f3de7f0221238e09",
+      "stdout_sha256": "7144dde990cd4f701f9689203df2f359ebef89b99ba8bca076f97b2297a91f93",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "a6beb73f5978c0931a4cc4d206defea743c439837a55588a07b81ba6e23ede81"
+    },
+    {
+      "label": "sky130_sim_model",
+      "exit_code": 0,
+      "elapsed_seconds": 0.040113124006893486,
+      "peak_rss_kib": 65968,
+      "path": ".work/power-io-verified/receipts/sky130_sim_model/receipt.json",
+      "sha256": "ce3231ff76e759b4d08a7fd1ce715e49e8b1864f14db5874c599537e64dfe273",
+      "stdout_sha256": "d32bb63f65a47932d8bd92689a4ab7052cf130de82adafb819c106c66da5550f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "389884f9d860544b7e38a9d54800fcb0a61cfb343713f94379e3aad21a80aa83"
+    },
+    {
+      "label": "sky130_sim_build",
+      "exit_code": 0,
+      "elapsed_seconds": 1.5296601190348156,
+      "peak_rss_kib": 289844,
+      "path": ".work/power-io-verified/receipts/sky130_sim_build/receipt.json",
+      "sha256": "168ea4debb379dbbd49a0525bd7d79dbfd6b0f064830f6671bebb5523b696729",
+      "stdout_sha256": "54a01a3d5cbecd0f3c0896736aa2f48722e548236e1f7f8c810a58fe4b36ba81",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "36fbc5ccf9c8c8aa387a2ca4cf96ff0d96c51ec7c545318c4eae839f5d240eb1"
+    },
+    {
+      "label": "sky130_sim_run",
+      "exit_code": 0,
+      "elapsed_seconds": 0.004037036036606878,
+      "peak_rss_kib": 8272,
+      "path": ".work/power-io-verified/receipts/sky130_sim_run/receipt.json",
+      "sha256": "31fb79b5a3e277a91225e539dae4329fa9bc24c90a1d574b8e16f69d2fb450b0",
+      "stdout_sha256": "840b96a4fbbf7c69c1084486666afcecf923bf44dc5118e48b089009e27d7010",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "8cace7700c52be5ac10d171987d6d589ad89aa4e4cca546401b9955b70ac05ee"
+    },
+    {
+      "label": "sky130_power_probe",
+      "exit_code": 0,
+      "elapsed_seconds": 0.20808504795422778,
+      "peak_rss_kib": 44428,
+      "path": ".work/power-io-verified/receipts/sky130_power_probe/receipt.json",
+      "sha256": "b8f79ed494afe02aab09e4030eeb8d71bc684cf50eb12e9bf58a8304a568d722",
+      "stdout_sha256": "5586d20eaf73251cd77d64483e52937090302bacc6d43d1d21c6f110e3e1799c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "abefe616b2205359746d5227f373a43b72b3cf5ee0ae35bd826b94d51ff11ac9"
+    },
+    {
+      "label": "sky130_powered_json",
+      "exit_code": 0,
+      "elapsed_seconds": 0.014123292989097536,
+      "peak_rss_kib": 35328,
+      "path": ".work/power-io-verified/receipts/sky130_powered_json/receipt.json",
+      "sha256": "59a6f9bee7fb8e971cfbc59e72d31fe8da7824250f7dbc28b324c422c9115cff",
+      "stdout_sha256": "599880e898a2158b930bdaa0d231c9319a0baba33b440ace3a1caabb617599f6",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "e032bc282d28a9fc9aaeb3d61ef0a9f2c8215e785d92436417264c38e931eca9"
+    },
+    {
+      "label": "sky130_timing_init",
+      "exit_code": 0,
+      "elapsed_seconds": 0.007155712984967977,
+      "peak_rss_kib": 7756,
+      "path": ".work/power-io-verified/receipts/sky130_timing_init/receipt.json",
+      "sha256": "463da341da2fffeba44ceb9b8203a014ce6a57a74459363569cdc59fb8911cd0",
+      "stdout_sha256": "f08bf8150ab24d06c97c18da937036481f0e41273eb1cb61e636b9ff5979bad5",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "bdf1f9f7b1bb89b378c5cf03970d4037cfd74f82d4063c085ffefe23379deb29"
+    },
+    {
+      "label": "sky130_timing_import",
+      "exit_code": 0,
+      "elapsed_seconds": 0.08464075002120808,
+      "peak_rss_kib": 67044,
+      "path": ".work/power-io-verified/receipts/sky130_timing_import/receipt.json",
+      "sha256": "aa9cf12d4fa5e23745d281badfbbfd7141c64572c8c14b5b7422e2a1822738a3",
+      "stdout_sha256": "a74f844e30f2afa73c07199a4b11f886869bf80131f88f50ce623fd6e4d5a8b5",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "43e0a82e57cfa0ec683a087d0aa5bc47026ec7022be503cb5cc041f89b199967"
+    },
+    {
+      "label": "sky130_timing_run",
+      "exit_code": 0,
+      "elapsed_seconds": 0.017586063011549413,
+      "peak_rss_kib": 26092,
+      "path": ".work/power-io-verified/receipts/sky130_timing_run/receipt.json",
+      "sha256": "1621f9c37d4ad8d9f294eda0e23b067baf8ce9a469bee1ac4dbe335fe5fb7723",
+      "stdout_sha256": "24e4100d2e1a5ba49930b724167332936a4b2e7494ed43bd65e6793a0b209ab5",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "f2d402360b43cf7f80822191ba12bbb58eb7587aacd96301270462cd504f3a7f"
+    },
+    {
+      "label": "sky130_timing_report",
+      "exit_code": 0,
+      "elapsed_seconds": 0.004051816998980939,
+      "peak_rss_kib": 8324,
+      "path": ".work/power-io-verified/receipts/sky130_timing_report/receipt.json",
+      "sha256": "50f8a4d70859f074201e30bf2af5e4a6c568a716d6e6341cd2f3b838b34caaa5",
+      "stdout_sha256": "06933b96077eb6f3638d38cb29928031a87e58d89a5c1ad2aee0c67cb6e84f11",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "afb1e7211f8d04d7a56c8bde802a4bedb3fa2b390df6ff9e6f8a5e0fddbba4aa"
+    },
+    {
+      "label": "sky130_timing_check_full",
+      "exit_code": 0,
+      "elapsed_seconds": 0.016070606012362987,
+      "peak_rss_kib": 25436,
+      "path": ".work/power-io-verified/receipts/sky130_timing_check_full/receipt.json",
+      "sha256": "5d60d3dc24d35315f078b9135bc594ece9cf19202376151318e5fedcc6b9db6b",
+      "stdout_sha256": "83be36f9212410e4fdcc31f5ce638e210225a8f5694cf18b8adc87e7366c2f64",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "f23d46eaab2c00198b60e10396b7fd87aa126d72d7be92288568037eed4c62ee"
+    },
+    {
+      "label": "sky130_timing_check_both",
+      "exit_code": 0,
+      "elapsed_seconds": 0.02727921598125249,
+      "peak_rss_kib": 40384,
+      "path": ".work/power-io-verified/receipts/sky130_timing_check_both/receipt.json",
+      "sha256": "f09b98a31b5fbb7cdd84cc606571657a125f19c2fecf594df6a5e14d5182d099",
+      "stdout_sha256": "5a0052d0e7ab5f9224b330dfdde847c30073eef75ef296525d1f66737ec16303",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "b435ab25394a7db71638b8af4a53b22319b6a97ab6a9dcab12bfe0a78615141a"
+    },
+    {
+      "label": "sky130_timing_update",
+      "exit_code": 0,
+      "elapsed_seconds": 0.017667443957179785,
+      "peak_rss_kib": 26852,
+      "path": ".work/power-io-verified/receipts/sky130_timing_update/receipt.json",
+      "sha256": "3698fd416862df3ce06f9cfdbce8319ef14c614f5d1e870898406fa29ee5cb03",
+      "stdout_sha256": "833d391d9ef2e12e10d29ad700adc98aa0eb93f35ddaea4da0797a379d0f461e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "00b0d8289a19287944e725585394693ca43f90c88cba6d4404dd4949ce01e7a8"
+    },
+    {
+      "label": "sky130_timing_updated_check_full",
+      "exit_code": 0,
+      "elapsed_seconds": 0.016405559959821403,
+      "peak_rss_kib": 26052,
+      "path": ".work/power-io-verified/receipts/sky130_timing_updated_check_full/receipt.json",
+      "sha256": "65d95e03c2ee4902870b94748235b8185e4f7fc9100579e8493d90406ee15c7b",
+      "stdout_sha256": "ca00afc84ae9a494bc49ad7995c10662c5eb36fcc79a13427479f45a9a0f1e6a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "6611617336e60f2b7077efe8ee4d6e46dfeddd00cb7497dcc7e719039e244b43"
+    },
+    {
+      "label": "sky130_opensta",
+      "exit_code": 0,
+      "elapsed_seconds": 0.14383887400617823,
+      "peak_rss_kib": 51064,
+      "path": ".work/power-io-verified/receipts/sky130_opensta/receipt.json",
+      "sha256": "d8d775ee26fe61cd818c2f5bb1ddde0dd15d7417b17b922218a2716a61fd73a1",
+      "stdout_sha256": "4410367907b80a7b9746678e09a219ca1ce9ef74ca687291f85a5168132187ce",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "04cb9e46a8c4289c07790f67f703a3e83a600ad167640dde7b9116ce1ecdcdd3"
+    },
+    {
+      "label": "gf180_synth",
+      "exit_code": 0,
+      "elapsed_seconds": 0.24277396901743487,
+      "peak_rss_kib": 103884,
+      "path": ".work/power-io-verified/receipts/gf180_synth/receipt.json",
+      "sha256": "e697935da42f136d5ab9867a57d0e4553efd9027b3c5fb5fe96ca0ff81b5f264",
+      "stdout_sha256": "e5586a6e3d9f3ea6dc6bcf6a9f7b677df3e85391fd07ebb754fb638276d9c1df",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "891b41463cf7d390003cc5f9548c68414fb6048c3874875b45fb9668f9151207"
+    },
+    {
+      "label": "gf180_tie_function_0",
+      "exit_code": 0,
+      "elapsed_seconds": 0.04911591799464077,
+      "peak_rss_kib": 80652,
+      "path": ".work/power-io-verified/receipts/gf180_tie_function_0/receipt.json",
+      "sha256": "375462058a7dfbf9fafbf3a7b52a9c3d94cfaf1e82465384104e33c9581dcb71",
+      "stdout_sha256": "6b9d4ef76c72edafbf18c16bb8b96f1f2b1d50636aef7cf99837977c58a40015",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "37a4923043f37c38811aa19115c291a79add91ef9aed9e72ec5246bb86be47df"
+    },
+    {
+      "label": "gf180_tie_function_0_negative",
+      "exit_code": 1,
+      "elapsed_seconds": 0.04821413697209209,
+      "peak_rss_kib": 78288,
+      "path": ".work/power-io-verified/receipts/gf180_tie_function_0_negative/receipt.json",
+      "sha256": "df502d0ba75ede4d806ec4c61fa58d859811d84886b1670467beb5873500aa16",
+      "stdout_sha256": "8a8dab1558aac8b115fdfd667b713029edf1377cd5414101ba431be4472e5d0a",
+      "stderr_sha256": "8e79acc8c131396f3cefc96bc86fb08950866c074005a08541791b51b723301f",
+      "time_sha256": "4917f9fa5daf857211efdd1781ee7560e3ac5ac35f1bb78586c9494c21c5c0a1"
+    },
+    {
+      "label": "gf180_tie_function_1",
+      "exit_code": 0,
+      "elapsed_seconds": 0.04983963700942695,
+      "peak_rss_kib": 82076,
+      "path": ".work/power-io-verified/receipts/gf180_tie_function_1/receipt.json",
+      "sha256": "cd3e9d40191df4a4546528e27b98a6e1c304e62814127789b2668baa80d3a65f",
+      "stdout_sha256": "106ae5ce0f1763b0989fd351d4a57b2b9e37ac934cdcb007ff6457cc624c8c3f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "5e613089bd7e9dd65fd935ed86bd475c7055bc88b681c4530ee5c32f026e2e3c"
+    },
+    {
+      "label": "gf180_tie_function_1_negative",
+      "exit_code": 1,
+      "elapsed_seconds": 0.04773231199942529,
+      "peak_rss_kib": 78436,
+      "path": ".work/power-io-verified/receipts/gf180_tie_function_1_negative/receipt.json",
+      "sha256": "f2573ffc8f4b8fc8959007a07d08bbb6fe51e7ad452b4d2f52d0f977445521ad",
+      "stdout_sha256": "7f800fa6eef6341a1797c6da2ad538619a1fe910b8cbdad3cb8c099baa378849",
+      "stderr_sha256": "8e79acc8c131396f3cefc96bc86fb08950866c074005a08541791b51b723301f",
+      "time_sha256": "39a1752b6557928d7733ff66008f6906bff2f922136b2f8cdb7502e77dd339c3"
+    },
+    {
+      "label": "gf180_literal_cec",
+      "exit_code": 0,
+      "elapsed_seconds": 0.05402056500315666,
+      "peak_rss_kib": 83092,
+      "path": ".work/power-io-verified/receipts/gf180_literal_cec/receipt.json",
+      "sha256": "7d857a2752584d59830b4ba587eb988bd496e540807341844873d522ab9d3913",
+      "stdout_sha256": "0bc41615476af2700cd39bd3bb827f23ab27086d9e9b0af81aaec817472e775a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "da7371536b9db5c233c02c01a94f05bf3e84638e9306dbf9a89babd32ac2440b"
+    },
+    {
+      "label": "gf180_import",
+      "exit_code": 0,
+      "elapsed_seconds": 0.01157907402375713,
+      "peak_rss_kib": 7996,
+      "path": ".work/power-io-verified/receipts/gf180_import/receipt.json",
+      "sha256": "1e23de28385525b56ba85e50c81e28db4f53d638f0ee8094dd9e3d3bd59ace51",
+      "stdout_sha256": "377f168b111d23285608978377c7a144542633c65a58661d8c00ca401d886751",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "dba3f9102e83233c933b03bb6ce7decd80e768b617ee4546c6ce8ed567805cb7"
+    },
+    {
+      "label": "gf180_place",
+      "exit_code": 0,
+      "elapsed_seconds": 0.0075249369838275015,
+      "peak_rss_kib": 7964,
+      "path": ".work/power-io-verified/receipts/gf180_place/receipt.json",
+      "sha256": "0f21f2c354be6e6869ea2e692dd75084f1f9abe1f29a784b71b9a6c9ab7fd1b6",
+      "stdout_sha256": "6325b0279699fb788487766c21917f43391f6bdea437281b18c42f5d2cf3a1f2",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "4c0154a0c23513d8add47db79f14da8ba55594db70fd265a10f28d7b1e2974db"
+    },
+    {
+      "label": "gf180_export_logical",
+      "exit_code": 0,
+      "elapsed_seconds": 0.0032696480047889054,
+      "peak_rss_kib": 8144,
+      "path": ".work/power-io-verified/receipts/gf180_export_logical/receipt.json",
+      "sha256": "3639c678bd0259ed2e41c4d038dc22982d74e4cdfbb819764a9e76b53cd9e585",
+      "stdout_sha256": "a8a323510027f38fdf33eca775c207fb6548093530743a69d697d504f2f986be",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "ceabc4600b2f81074dbfe2f68034a60d9b6b52690e9f7c1b14a10923e4be56cf"
+    },
+    {
+      "label": "gf180_export_def",
+      "exit_code": 0,
+      "elapsed_seconds": 0.0035852320143021643,
+      "peak_rss_kib": 8232,
+      "path": ".work/power-io-verified/receipts/gf180_export_def/receipt.json",
+      "sha256": "fdfbdc8f7b161043c428431f3f33a03a55ae232f7bc3ed9a4a83963be0bc8877",
+      "stdout_sha256": "1b9421c3fb2930e0b5a14eb841ae11f36996e00e54d766f3357e1a1eb36c4e7b",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "03ce12319e65fbdefb94ebe8ba41f6aba95060303bce8414f00e1a68f9fb18f9"
+    },
+    {
+      "label": "gf180_export_powered",
+      "exit_code": 0,
+      "elapsed_seconds": 0.0030686649843119085,
+      "peak_rss_kib": 8196,
+      "path": ".work/power-io-verified/receipts/gf180_export_powered/receipt.json",
+      "sha256": "d51c3462bdc6e109263cb2515a03cf10b6919f46999419e993b9bf5c40f20e24",
+      "stdout_sha256": "14278e3775979887eabda1cc524850ba26effd0e36d1662fc234adab0fc89429",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "f89169a300ace127b853745d878a7adbfca45ede33cfb21d44e8dc677e24cab0"
+    },
+    {
+      "label": "gf180_post_cec",
+      "exit_code": 0,
+      "elapsed_seconds": 0.05389621399808675,
+      "peak_rss_kib": 82712,
+      "path": ".work/power-io-verified/receipts/gf180_post_cec/receipt.json",
+      "sha256": "9026397eca5b74517904c0d916fc6e735fc8da7f6e9dc9d855ca2a981b20af8f",
+      "stdout_sha256": "e7e50750ea55fd2e4269674cdb8fcf5c66b1741cae2ded4a463427e680509caf",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "e53160f9f834c5c8fee97785082eec407ec628fae7c6dd9fa33b3e764b3f6877"
+    },
+    {
+      "label": "gf180_native_cec",
+      "exit_code": 0,
+      "elapsed_seconds": 0.18876693403581157,
+      "peak_rss_kib": 106528,
+      "path": ".work/power-io-verified/receipts/gf180_native_cec/receipt.json",
+      "sha256": "1059aa298bfa52c79d69e75bed069125750293d432aedff680ce862a9c9e0e3e",
+      "stdout_sha256": "d7774b98c0b54cdb286c60b750f4fa8de0113724b0c4c15d66c43305eb367161",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "d07cd6ca72bdc508da7f552b2b67666eb26cae35273dc64462b192d629941d34"
+    },
+    {
+      "label": "gf180_sim_model",
+      "exit_code": 0,
+      "elapsed_seconds": 0.053120864962693304,
+      "peak_rss_kib": 81844,
+      "path": ".work/power-io-verified/receipts/gf180_sim_model/receipt.json",
+      "sha256": "0982f826c9b8379a97bdeae5fcc4a5e2099f3d93c690c26970a58c41bcdc880b",
+      "stdout_sha256": "76696cd5171057678b9a5d390acac6cd925af325e77c8f3e5147777bc5ff896a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "4a1c1c8b5df8ec74b60b327196b3898bd6ab6e855aa94bb030eccb6f23722515"
+    },
+    {
+      "label": "gf180_sim_build",
+      "exit_code": 0,
+      "elapsed_seconds": 1.5649034970556386,
+      "peak_rss_kib": 290696,
+      "path": ".work/power-io-verified/receipts/gf180_sim_build/receipt.json",
+      "sha256": "a2ee28c8a8ff45751b38ece24880f2a7a2c968d1939087c5d43f55025d11b2d1",
+      "stdout_sha256": "57e70f54b028090403a5ca791afb20807db0823362aa4a5d0eeb9c39ac22e249",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "93e872b5ecbac6192690cc5dca5c728385c6507e659c4de7ff4ac29a36614008"
+    },
+    {
+      "label": "gf180_sim_run",
+      "exit_code": 0,
+      "elapsed_seconds": 0.004200887982733548,
+      "peak_rss_kib": 8044,
+      "path": ".work/power-io-verified/receipts/gf180_sim_run/receipt.json",
+      "sha256": "8530c9a0b377181edbe77b81a625018a9e6f812322ebd022e80055d9ace4393b",
+      "stdout_sha256": "e46dfa4391b397e45f857165f46ae46d9817b4019aba595da56a3c2f93f03d4f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "66488f48abbcb371e438933f2696e03c369ae202fac76a4cb27c814e3a149bc7"
+    },
+    {
+      "label": "gf180_power_probe",
+      "exit_code": 0,
+      "elapsed_seconds": 0.17712731898063794,
+      "peak_rss_kib": 44580,
+      "path": ".work/power-io-verified/receipts/gf180_power_probe/receipt.json",
+      "sha256": "e929f21ec6fea7b7aeb8031d2ab7a3dc9396d1608a7b3474af63cc3e5214d8d5",
+      "stdout_sha256": "baf8f92a2a772d4f385bd31134052bd004c7d3a1deaa1afcceb894f2d7fd7000",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "f7c927ac76295b84f3f45c0e572e8311da82077af109b971cf2bcae3f6088931"
+    },
+    {
+      "label": "gf180_powered_json",
+      "exit_code": 0,
+      "elapsed_seconds": 0.012976769998203963,
+      "peak_rss_kib": 34564,
+      "path": ".work/power-io-verified/receipts/gf180_powered_json/receipt.json",
+      "sha256": "45cea7f36d037a6b7380c85817db302404372e6590cda75161c9029783ff9cc7",
+      "stdout_sha256": "43db15e8c46b887f396d2b2d8c7e175fd4697d87171eb62287568fcb1b4c79c9",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "df82450ff8cb0b654fee4b085627cc93c3de44696f8505b224168748249ce6f8"
+    },
+    {
+      "label": "gf180_timing_init",
+      "exit_code": 0,
+      "elapsed_seconds": 0.008041922992561013,
+      "peak_rss_kib": 8044,
+      "path": ".work/power-io-verified/receipts/gf180_timing_init/receipt.json",
+      "sha256": "ab168bc2b68663e991f16f3b48b19372e43d9566d1e493dfc1f241be3c4e56e4",
+      "stdout_sha256": "bf58245032322e06a0c1750dbfa0dd6955f1d780c5df31443272d2e6286486d4",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "c73f875d2318b2bab4b20de3cc4f9f175974f71afdeeceafb95f7243a7f42726"
+    },
+    {
+      "label": "gf180_timing_import",
+      "exit_code": 0,
+      "elapsed_seconds": 0.1552117060055025,
+      "peak_rss_kib": 119492,
+      "path": ".work/power-io-verified/receipts/gf180_timing_import/receipt.json",
+      "sha256": "7a455dfb3bd906e1dbf2919990721b6bbaa714d3a503bebfda83f691abd06eba",
+      "stdout_sha256": "7ca32c1dd20429da3178a4cff8df82af8dcae317a4bb08f1141d5f17b367a759",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "d9b6cd482937f8c02c25e2a2aa38bbe2fc49487f8ac8b5e62039a5898b893e6b"
+    },
+    {
+      "label": "gf180_timing_run",
+      "exit_code": 0,
+      "elapsed_seconds": 0.02618488296866417,
+      "peak_rss_kib": 52444,
+      "path": ".work/power-io-verified/receipts/gf180_timing_run/receipt.json",
+      "sha256": "51d35ce231100e18414012e8f1c85170dea11f904ba37a0143cef2e52fd42ed8",
+      "stdout_sha256": "a3c43ce21fb4826c70cd7a747e864280e7f15be7f01053958b6e5641fba6b2e2",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "279cae4cecb00dfec5d48167ce9cfcaae4cbe40a00da66e04d2754f89e656d8d"
+    },
+    {
+      "label": "gf180_timing_report",
+      "exit_code": 0,
+      "elapsed_seconds": 0.003854655020404607,
+      "peak_rss_kib": 8080,
+      "path": ".work/power-io-verified/receipts/gf180_timing_report/receipt.json",
+      "sha256": "57ccf3b82034aee7c7027495b76a55d1154cccd54ca9f4080cc6095ba0a8616d",
+      "stdout_sha256": "4c90e2778bb20d41bec25bf30f9f841feaaff6e57a93c7209d454020467bdd14",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "0d7c3d0a4e9ffd9bf651bbe99dfffe1e6542d40ba754f7299f3771afb32761af"
+    },
+    {
+      "label": "gf180_timing_check_full",
+      "exit_code": 0,
+      "elapsed_seconds": 0.02264338097302243,
+      "peak_rss_kib": 52268,
+      "path": ".work/power-io-verified/receipts/gf180_timing_check_full/receipt.json",
+      "sha256": "c79313f2991da12333c2d96db7195dfe9f3d97f4f5b3edb9c645ae14e71d4cc9",
+      "stdout_sha256": "784b8da10faf066c144ca96cd9bd3a4aad3318d83ad3ba66c701b0d69ebde589",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "4ca9b83c6c91fedc1c5eaa6650d0972484325daa3fb63531689aba8a9c4eed79"
+    },
+    {
+      "label": "gf180_timing_check_both",
+      "exit_code": 0,
+      "elapsed_seconds": 0.049055596988182515,
+      "peak_rss_kib": 85804,
+      "path": ".work/power-io-verified/receipts/gf180_timing_check_both/receipt.json",
+      "sha256": "65016e16a57d1e70783b03b867951ff7e7e09e7c020bcbb91127b23b015d2f68",
+      "stdout_sha256": "ef4ee92e12c49e86114874d8cc4fcf7e0a5619167ee7dd03b2e632e2cf97704f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "82851ee76225ff17050dfccccb7361bef994342b1a650d219ebb79f4e521af71"
+    },
+    {
+      "label": "gf180_timing_update",
+      "exit_code": 0,
+      "elapsed_seconds": 0.030261240026447922,
+      "peak_rss_kib": 53004,
+      "path": ".work/power-io-verified/receipts/gf180_timing_update/receipt.json",
+      "sha256": "981e28d65b6fa0df0cc94ccd40653fe52e2d96e20d338ea9eb0f143fb4fb1154",
+      "stdout_sha256": "39ec49b9ca4e1787f21900fda6ab0179a5f44117bbc21aa327578f8e25e43878",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "699b919e7bd3e076044f60a0628bea1430ef605f86c64f87837b020c79e6190b"
+    },
+    {
+      "label": "gf180_timing_updated_check_full",
+      "exit_code": 0,
+      "elapsed_seconds": 0.025576536019798368,
+      "peak_rss_kib": 52672,
+      "path": ".work/power-io-verified/receipts/gf180_timing_updated_check_full/receipt.json",
+      "sha256": "96b39a8a4bb0fbbdfa62f53ecba9b2552d11578f9561655079d423fb65984c15",
+      "stdout_sha256": "df43193c3ee6bdd5fe728fe362dea7db0ed91486a4fbaa05e6b07b638f2d77fe",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "9aecd2c27fcd7879063f608335648dacd98d1dcdde5e6df3c9c9eb8b7e37c752"
+    },
+    {
+      "label": "gf180_opensta",
+      "exit_code": 0,
+      "elapsed_seconds": 0.24800406000576913,
+      "peak_rss_kib": 63628,
+      "path": ".work/power-io-verified/receipts/gf180_opensta/receipt.json",
+      "sha256": "2b9bf6a33609e90059a994d25a96f5158139fa1ad805afb641a101c08547d4cc",
+      "stdout_sha256": "44ae42893104da10c4143e5b5c7acf7ba454c5f0155cc5f8ce017b1ce7fc74a0",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "time_sha256": "e4edc73665422559e85105015d1df503925c1f20988494642d1e9bb5963e1b2f"
+    }
+  ]
+}

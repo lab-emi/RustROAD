@@ -1,0 +1,336 @@
+{
+  "schema": "rustroad.cell-policy.v1",
+  "rules": {
+    "synthesis": "mapped netlists contain no cell matching synth_dont_use",
+    "physical": "no netlist contains a pnr_exclude cell; synth_dont_use cells may appear only on instances added after synthesis and only if post_synthesis_insertable",
+    "glob": "'*' and '?' as in RustSys --dont-use, matched against the full cell name"
+  },
+  "manifest": "fixtures/flow/signoff-pinned.json",
+  "pdks": {
+    "sky130": {
+      "library": "sky130_fd_sc_hd",
+      "pdk_version": "f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7",
+      "sources": [
+        {
+          "role": "synth_exclude",
+          "path": "libs.tech/librelane/sky130_fd_sc_hd/synth_excluded.cells",
+          "sha256": "873fb0ef2daea4b386cf3f337b38f674cd7265ffa860bc5cc9482d01f1cf9a5e",
+          "entries": [
+            "sky130_fd_sc_hd__clkbuf*",
+            "sky130_fd_sc_hd__clkinv*",
+            "sky130_fd_sc_hd__clkinvlp*",
+            "sky130_fd_sc_hd__clkdlybuf*",
+            "sky130_fd_sc_hd__dlygate*",
+            "sky130_fd_sc_hd__dlymetal*",
+            "sky130_fd_sc_hd__tap*",
+            "sky130_fd_sc_hd__decap*",
+            "sky130_fd_sc_hd__fill*",
+            "sky130_fd_sc_hd__diode*",
+            "sky130_fd_sc_hd__lpflow_*",
+            "sky130_fd_sc_hd__macro_sparecell",
+            "sky130_fd_sc_hd__probe*",
+            "sky130_fd_sc_hd__s*"
+          ]
+        },
+        {
+          "role": "pnr_exclude",
+          "path": "libs.tech/librelane/sky130_fd_sc_hd/pnr_excluded.cells",
+          "sha256": "2b047a124fcee8a933b112df88acbfad4d0db40aa7b19dcc145b9ae4eb57d3f7",
+          "entries": [
+            "sky130_fd_sc_hd__lpflow_*",
+            "sky130_fd_sc_hd__probe*"
+          ]
+        }
+      ],
+      "reserved_for_cts_hold": [],
+      "synth_dont_use": [
+        "sky130_fd_sc_hd__clkbuf*",
+        "sky130_fd_sc_hd__clkinv*",
+        "sky130_fd_sc_hd__clkinvlp*",
+        "sky130_fd_sc_hd__clkdlybuf*",
+        "sky130_fd_sc_hd__dlygate*",
+        "sky130_fd_sc_hd__dlymetal*",
+        "sky130_fd_sc_hd__tap*",
+        "sky130_fd_sc_hd__decap*",
+        "sky130_fd_sc_hd__fill*",
+        "sky130_fd_sc_hd__diode*",
+        "sky130_fd_sc_hd__lpflow_*",
+        "sky130_fd_sc_hd__macro_sparecell",
+        "sky130_fd_sc_hd__probe*",
+        "sky130_fd_sc_hd__s*"
+      ],
+      "pnr_exclude": [
+        "sky130_fd_sc_hd__lpflow_*",
+        "sky130_fd_sc_hd__probe*"
+      ],
+      "post_synthesis_insertable": {
+        "physical_only": [
+          "sky130_fd_sc_hd__tap*",
+          "sky130_fd_sc_hd__decap*",
+          "sky130_fd_sc_hd__fill*",
+          "sky130_fd_sc_hd__diode*"
+        ],
+        "cts_hold": [
+          "sky130_fd_sc_hd__clkbuf*",
+          "sky130_fd_sc_hd__clkinv*",
+          "sky130_fd_sc_hd__clkinvlp*",
+          "sky130_fd_sc_hd__clkdlybuf*",
+          "sky130_fd_sc_hd__dlygate*",
+          "sky130_fd_sc_hd__dlymetal*"
+        ]
+      },
+      "rustsys_args": [
+        "--dont-use",
+        "sky130_fd_sc_hd__clkbuf*",
+        "--dont-use",
+        "sky130_fd_sc_hd__clkinv*",
+        "--dont-use",
+        "sky130_fd_sc_hd__clkinvlp*",
+        "--dont-use",
+        "sky130_fd_sc_hd__clkdlybuf*",
+        "--dont-use",
+        "sky130_fd_sc_hd__dlygate*",
+        "--dont-use",
+        "sky130_fd_sc_hd__dlymetal*",
+        "--dont-use",
+        "sky130_fd_sc_hd__tap*",
+        "--dont-use",
+        "sky130_fd_sc_hd__decap*",
+        "--dont-use",
+        "sky130_fd_sc_hd__fill*",
+        "--dont-use",
+        "sky130_fd_sc_hd__diode*",
+        "--dont-use",
+        "sky130_fd_sc_hd__lpflow_*",
+        "--dont-use",
+        "sky130_fd_sc_hd__macro_sparecell",
+        "--dont-use",
+        "sky130_fd_sc_hd__probe*",
+        "--dont-use",
+        "sky130_fd_sc_hd__s*"
+      ]
+    },
+    "gf180": {
+      "library": "gf180mcu_fd_sc_mcu7t5v0",
+      "pdk_version": "f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7",
+      "sources": [
+        {
+          "role": "synth_exclude",
+          "path": "libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/synth_exclude.cells",
+          "sha256": "65958d46c78006e215e53c77227773ca9d69e3767d9944772a29260ea3ffd06e",
+          "entries": [
+            "gf180mcu_fd_sc_mcu7t5v0__sdffq_1",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffq_2",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffq_4",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_1",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_2",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_4",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_1",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_2",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_4",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_1",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_2",
+            "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_4"
+          ]
+        },
+        {
+          "role": "pnr_exclude",
+          "path": "libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/pnr_exclude.cells",
+          "sha256": "a46ab41fe9f38cd763051045c11a9bf345e0e26ea7029ae47e510dd7fb1206e3",
+          "entries": [
+            "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
+            "gf180mcu_fd_sc_mcu7t5v0__oai33_2"
+          ]
+        },
+        {
+          "role": "owner_drv_limit",
+          "path": "fixtures/flow/gf180-drv-dont-use.json",
+          "sha256": "04b26ee38ec196b627641b909fc111061b7def1c6237b0df2dcdc96962faecd4",
+          "entries": [
+            "gf180mcu_fd_sc_mcu7t5v0__aoi211_*",
+            "gf180mcu_fd_sc_mcu7t5v0__aoi221_*",
+            "gf180mcu_fd_sc_mcu7t5v0__aoi222_*",
+            "gf180mcu_fd_sc_mcu7t5v0__nor4_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai22_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai221_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai222_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai31_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai32_*",
+            "gf180mcu_fd_sc_mcu7t5v0__oai33_*"
+          ],
+          "liberty_sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+          "rule": {
+            "max_transition_ns": 1.0,
+            "input_transition_ns": 0.2,
+            "load": "smallest input-pin capacitance of a cell synthesis may instantiate (one sink, no wire); PDK-excluded, owner-reserved and output-less cells are not sinks; raised to a table's smallest load index where that is larger",
+            "member": "worst over every output pin, timing arc and rise/fall transition table (three_state_disable skipped), bilinear, no extrapolation",
+            "family": "DRV-limited when even its best member exceeds max_transition_ns",
+            "source": "owner decision 2026-10-24 (GF180 DRV / cell policy); SDC set_max_transition 1.0 unchanged"
+          }
+        }
+      ],
+      "reserved_for_cts_hold": [
+        "gf180mcu_fd_sc_mcu7t5v0__dly*",
+        "gf180mcu_fd_sc_mcu7t5v0__clkbuf*",
+        "gf180mcu_fd_sc_mcu7t5v0__clkinv*"
+      ],
+      "synth_dont_use": [
+        "gf180mcu_fd_sc_mcu7t5v0__sdffq_1",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffq_2",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffq_4",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_1",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_2",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_4",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_1",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_2",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_4",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_1",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_2",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_4",
+        "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
+        "gf180mcu_fd_sc_mcu7t5v0__oai33_2",
+        "gf180mcu_fd_sc_mcu7t5v0__dly*",
+        "gf180mcu_fd_sc_mcu7t5v0__clkbuf*",
+        "gf180mcu_fd_sc_mcu7t5v0__clkinv*",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi211_*",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi221_*",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi222_*",
+        "gf180mcu_fd_sc_mcu7t5v0__nor4_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai22_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai221_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai222_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai31_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai32_*",
+        "gf180mcu_fd_sc_mcu7t5v0__oai33_*"
+      ],
+      "pnr_exclude": [
+        "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
+        "gf180mcu_fd_sc_mcu7t5v0__oai33_2"
+      ],
+      "post_synthesis_insertable": {
+        "physical_only": [
+          "gf180mcu_fd_sc_mcu7t5v0__filltie",
+          "gf180mcu_fd_sc_mcu7t5v0__fill_*",
+          "gf180mcu_fd_sc_mcu7t5v0__fillcap_*",
+          "gf180mcu_fd_sc_mcu7t5v0__endcap",
+          "gf180mcu_fd_sc_mcu7t5v0__antenna"
+        ],
+        "cts_hold": [
+          "gf180mcu_fd_sc_mcu7t5v0__dly*",
+          "gf180mcu_fd_sc_mcu7t5v0__clkbuf*",
+          "gf180mcu_fd_sc_mcu7t5v0__clkinv*"
+        ]
+      },
+      "rustsys_args": [
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffq_1",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffq_2",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffq_4",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_1",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_2",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_4",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_1",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_2",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_4",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_1",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_2",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_4",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai33_2",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__dly*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__clkbuf*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__clkinv*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi211_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi221_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__aoi222_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__nor4_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai22_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai221_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai222_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai31_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai32_*",
+        "--dont-use",
+        "gf180mcu_fd_sc_mcu7t5v0__oai33_*"
+      ]
+    }
+  },
+  "producer": {
+    "id": "rustsys",
+    "repository": "/mnt/data2/cgao/git/RustSys",
+    "commit": "c5ec23cdc7591df99acb76cc7debc09bf1ddeff7",
+    "tree": "a25b2efb3f980d4115fa482b84d3c8da63188a1e",
+    "source": {
+      "method": "git archive --format=tar c5ec23c | tar -x (RustSys working tree and target/ untouched)",
+      "path": "/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-src-c5ec23c",
+      "archive_sha256": "29c83bbcfb5bd31adaf8a55c4880e4d6923a9523ebc04b02389447d12c5ffff6"
+    },
+    "build": {
+      "command": "CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target /home/cgao/.cargo/bin/cargo build --locked --offline --release -p rustsys-cli (systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G, timeout 1800s)",
+      "toolchain": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "wall": "0:53.06",
+      "peak_rss_kib": 719028,
+      "log": "/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-build.log"
+    },
+    "binary": {
+      "path": "/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target/release/rustsys",
+      "sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+      "bytes": 70962888
+    },
+    "version": "rustsys 0.1.0 (runtimes: cpu, cuda)",
+    "comparison": {
+      "reference": "/mnt/data2/cgao/git/RustSys/.work/gf180-audit-20261023/binaries-repair/rustsys",
+      "reference_sha256": "cded9f8ba395a29f0b2c5bb599f45dbf4bcd5a9d6a8cd02f0d35ffe9ab1288ae",
+      "binary_sha256_equal": false,
+      "binary_sha256_note": "differs because the build path and embedded line tables differ (git-archive tree vs in-tree build)",
+      "help_identical": {
+        "top": true,
+        "synth": true,
+        "check": true,
+        "check synth": true,
+        "show": true,
+        "report": true,
+        "opt-timing": true,
+        "resize": true
+      },
+      "pipeline_v_netlist_sha256": {
+        "new_sky": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+        "new_gf": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+        "repair_sky": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+        "repair_gf": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+        "frozen_sky": "cc52904484cc48003cb34d4dc4cbb81347db3bf12a046058598b41f94b4c133b",
+        "frozen_gf": "1e06b782693ee505d5e00dc306de1332171845a4b2a79025a17069fc872fc0ba"
+      },
+      "pipeline_v_netlists_identical_to_reference": true
+    }
+  },
+  "frozen_producer": {
+    "path": "/mnt/data2/cgao/git/RustSys/target/release/rustsys",
+    "sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
+    "note": "historical frozen producer without --dont-use; reproduce with verify_routing.py --producer frozen"
+  }
+}

@@ -1,0 +1,2114 @@
+{
+  "schema": "rustroad.power-io-layout.v1",
+  "pdk": "sky130",
+  "design": "lane_smoke",
+  "units_per_micron": 1000,
+  "die": [
+    0,
+    0,
+    57500,
+    48960
+  ],
+  "core": {
+    "lx": 9200,
+    "ly": 13600,
+    "ux": 55200,
+    "uy": 35360
+  },
+  "rows": [
+    {
+      "name": "row0",
+      "site": "unithd",
+      "x": 9200,
+      "y": 13600,
+      "orientation": "N",
+      "width": 46000,
+      "height": 2720
+    },
+    {
+      "name": "row1",
+      "site": "unithd",
+      "x": 9200,
+      "y": 16320,
+      "orientation": "FS",
+      "width": 46000,
+      "height": 2720
+    },
+    {
+      "name": "row2",
+      "site": "unithd",
+      "x": 9200,
+      "y": 19040,
+      "orientation": "N",
+      "width": 46000,
+      "height": 2720
+    },
+    {
+      "name": "row3",
+      "site": "unithd",
+      "x": 9200,
+      "y": 21760,
+      "orientation": "FS",
+      "width": 46000,
+      "height": 2720
+    },
+    {
+      "name": "row4",
+      "site": "unithd",
+      "x": 9200,
+      "y": 24480,
+      "orientation": "N",
+      "width": 46000,
+      "height": 2720
+    },
+    {
+      "name": "row5",
+      "site": "unithd",
+      "x": 9200,
+      "y": 27200,
+      "orientation": "FS",
+      "width": 46000,
+      "height": 2720
+    },
+    {
+      "name": "row6",
+      "site": "unithd",
+      "x": 9200,
+      "y": 29920,
+      "orientation": "N",
+      "width": 46000,
+      "height": 2720
+    },
+    {
+      "name": "row7",
+      "site": "unithd",
+      "x": 9200,
+      "y": 32640,
+      "orientation": "FS",
+      "width": 46000,
+      "height": 2720
+    }
+  ],
+  "cells": [
+    {
+      "name": "g0",
+      "master": "sky130_fd_sc_hd__and2_2",
+      "x": 9200,
+      "y": 13600,
+      "width": 2760,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g1",
+      "master": "sky130_fd_sc_hd__nand2_4",
+      "x": 11960,
+      "y": 13600,
+      "width": 4140,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g2",
+      "master": "sky130_fd_sc_hd__and2_2",
+      "x": 16100,
+      "y": 13600,
+      "width": 2760,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g3",
+      "master": "sky130_fd_sc_hd__nand2_4",
+      "x": 18860,
+      "y": 13600,
+      "width": 4140,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g4",
+      "master": "sky130_fd_sc_hd__and2_2",
+      "x": 23000,
+      "y": 13600,
+      "width": 2760,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g5",
+      "master": "sky130_fd_sc_hd__nand2_4",
+      "x": 25760,
+      "y": 13600,
+      "width": 4140,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g6",
+      "master": "sky130_fd_sc_hd__and2_2",
+      "x": 29900,
+      "y": 13600,
+      "width": 2760,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g7",
+      "master": "sky130_fd_sc_hd__nand2_4",
+      "x": 32660,
+      "y": 13600,
+      "width": 4140,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g8",
+      "master": "sky130_fd_sc_hd__o211a_4",
+      "x": 36800,
+      "y": 13600,
+      "width": 6440,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g9",
+      "master": "sky130_fd_sc_hd__o211a_4",
+      "x": 43240,
+      "y": 13600,
+      "width": 6440,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "g10",
+      "master": "sky130_fd_sc_hd__o211a_4",
+      "x": 9200,
+      "y": 16320,
+      "width": 6440,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "g11",
+      "master": "sky130_fd_sc_hd__o211a_4",
+      "x": 15640,
+      "y": 16320,
+      "width": 6440,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "r0",
+      "master": "sky130_fd_sc_hd__dfxtp_1",
+      "x": 22080,
+      "y": 16320,
+      "width": 7360,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "r1",
+      "master": "sky130_fd_sc_hd__dfxtp_1",
+      "x": 29440,
+      "y": 16320,
+      "width": 7360,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "r2",
+      "master": "sky130_fd_sc_hd__dfxtp_1",
+      "x": 36800,
+      "y": 16320,
+      "width": 7360,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "r3",
+      "master": "sky130_fd_sc_hd__dfxtp_1",
+      "x": 44160,
+      "y": 16320,
+      "width": 7360,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "logic"
+    },
+    {
+      "name": "r4",
+      "master": "sky130_fd_sc_hd__dfxtp_1",
+      "x": 9200,
+      "y": 19040,
+      "width": 7360,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "r5",
+      "master": "sky130_fd_sc_hd__dfxtp_1",
+      "x": 16560,
+      "y": 19040,
+      "width": 7360,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "logic"
+    },
+    {
+      "name": "rr_tie_cell_0",
+      "master": "sky130_fd_sc_hd__conb_1",
+      "x": 23920,
+      "y": 19040,
+      "width": 1380,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "tie"
+    },
+    {
+      "name": "rr_tie_cell_1",
+      "master": "sky130_fd_sc_hd__conb_1",
+      "x": 25300,
+      "y": 19040,
+      "width": 1380,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "tie"
+    },
+    {
+      "name": "rr_fill_0",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 49680,
+      "y": 13600,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_1",
+      "master": "sky130_fd_sc_hd__fill_4",
+      "x": 53360,
+      "y": 13600,
+      "width": 1840,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_2",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 51520,
+      "y": 16320,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_3",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 26680,
+      "y": 19040,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_4",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 30360,
+      "y": 19040,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_5",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 34040,
+      "y": 19040,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_6",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 37720,
+      "y": 19040,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_7",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 41400,
+      "y": 19040,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_8",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 45080,
+      "y": 19040,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_9",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 48760,
+      "y": 19040,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_10",
+      "master": "sky130_fd_sc_hd__fill_4",
+      "x": 52440,
+      "y": 19040,
+      "width": 1840,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_11",
+      "master": "sky130_fd_sc_hd__fill_2",
+      "x": 54280,
+      "y": 19040,
+      "width": 920,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_12",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 9200,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_13",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 12880,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_14",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 16560,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_15",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 20240,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_16",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 23920,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_17",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 27600,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_18",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 31280,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_19",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 34960,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_20",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 38640,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_21",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 42320,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_22",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 46000,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_23",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 49680,
+      "y": 21760,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_24",
+      "master": "sky130_fd_sc_hd__fill_4",
+      "x": 53360,
+      "y": 21760,
+      "width": 1840,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_25",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 9200,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_26",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 12880,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_27",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 16560,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_28",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 20240,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_29",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 23920,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_30",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 27600,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_31",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 31280,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_32",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 34960,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_33",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 38640,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_34",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 42320,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_35",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 46000,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_36",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 49680,
+      "y": 24480,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_37",
+      "master": "sky130_fd_sc_hd__fill_4",
+      "x": 53360,
+      "y": 24480,
+      "width": 1840,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_38",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 9200,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_39",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 12880,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_40",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 16560,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_41",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 20240,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_42",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 23920,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_43",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 27600,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_44",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 31280,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_45",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 34960,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_46",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 38640,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_47",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 42320,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_48",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 46000,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_49",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 49680,
+      "y": 27200,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_50",
+      "master": "sky130_fd_sc_hd__fill_4",
+      "x": 53360,
+      "y": 27200,
+      "width": 1840,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_51",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 9200,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_52",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 12880,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_53",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 16560,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_54",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 20240,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_55",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 23920,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_56",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 27600,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_57",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 31280,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_58",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 34960,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_59",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 38640,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_60",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 42320,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_61",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 46000,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_62",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 49680,
+      "y": 29920,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_63",
+      "master": "sky130_fd_sc_hd__fill_4",
+      "x": 53360,
+      "y": 29920,
+      "width": 1840,
+      "height": 2720,
+      "orientation": "R0",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_64",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 9200,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_65",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 12880,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_66",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 16560,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_67",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 20240,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_68",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 23920,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_69",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 27600,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_70",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 31280,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_71",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 34960,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_72",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 38640,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_73",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 42320,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_74",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 46000,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_75",
+      "master": "sky130_fd_sc_hd__fill_8",
+      "x": 49680,
+      "y": 32640,
+      "width": 3680,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    },
+    {
+      "name": "rr_fill_76",
+      "master": "sky130_fd_sc_hd__fill_4",
+      "x": 53360,
+      "y": 32640,
+      "width": 1840,
+      "height": 2720,
+      "orientation": "MX",
+      "role": "filler"
+    }
+  ],
+  "io": [
+    {
+      "name": "clk",
+      "net": "clk",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            0,
+            1200,
+            400,
+            1600
+          ]
+        }
+      ]
+    },
+    {
+      "name": "en",
+      "net": "en",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            57100,
+            1200,
+            57500,
+            1600
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a[3]",
+      "net": "a[3]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            1200,
+            0,
+            1600,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a[2]",
+      "net": "a[2]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            1200,
+            48560,
+            1600,
+            48960
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a[1]",
+      "net": "a[1]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            0,
+            12740,
+            400,
+            13140
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a[0]",
+      "net": "a[0]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            57100,
+            12740,
+            57500,
+            13140
+          ]
+        }
+      ]
+    },
+    {
+      "name": "b[3]",
+      "net": "b[3]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            14875,
+            0,
+            15275,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "name": "b[2]",
+      "net": "b[2]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            14875,
+            48560,
+            15275,
+            48960
+          ]
+        }
+      ]
+    },
+    {
+      "name": "b[1]",
+      "net": "b[1]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            0,
+            24280,
+            400,
+            24680
+          ]
+        }
+      ]
+    },
+    {
+      "name": "b[0]",
+      "net": "b[0]",
+      "status": "FIRM",
+      "direction": "input",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            57100,
+            24280,
+            57500,
+            24680
+          ]
+        }
+      ]
+    },
+    {
+      "name": "y[3]",
+      "net": "y[3]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            28550,
+            0,
+            28950,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "name": "y[2]",
+      "net": "y[2]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            28550,
+            48560,
+            28950,
+            48960
+          ]
+        }
+      ]
+    },
+    {
+      "name": "y[1]",
+      "net": "y[1]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            0,
+            35820,
+            400,
+            36220
+          ]
+        }
+      ]
+    },
+    {
+      "name": "y[0]",
+      "net": "y[0]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            57100,
+            35820,
+            57500,
+            36220
+          ]
+        }
+      ]
+    },
+    {
+      "name": "z[3]",
+      "net": "z[3]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            42225,
+            0,
+            42625,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "name": "z[2]",
+      "net": "z[2]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            42225,
+            48560,
+            42625,
+            48960
+          ]
+        }
+      ]
+    },
+    {
+      "name": "z[1]",
+      "net": "z[1]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            0,
+            47360,
+            400,
+            47760
+          ]
+        }
+      ]
+    },
+    {
+      "name": "z[0]",
+      "net": "z[0]",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            57100,
+            47360,
+            57500,
+            47760
+          ]
+        }
+      ]
+    },
+    {
+      "name": "high_bit",
+      "net": "high_bit",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            55900,
+            0,
+            56300,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "name": "low_bit",
+      "net": "low_bit",
+      "status": "FIRM",
+      "direction": "output",
+      "use": "signal",
+      "shapes": [
+        {
+          "layer": "met3",
+          "rect": [
+            55900,
+            48560,
+            56300,
+            48960
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VDD",
+      "net": "VDD",
+      "status": "FIRM",
+      "direction": "inout",
+      "use": "power",
+      "shapes": [
+        {
+          "layer": "met2",
+          "rect": [
+            40,
+            0,
+            440,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VSS",
+      "net": "VSS",
+      "status": "FIRM",
+      "direction": "inout",
+      "use": "ground",
+      "shapes": [
+        {
+          "layer": "met2",
+          "rect": [
+            1440,
+            0,
+            1840,
+            400
+          ]
+        }
+      ]
+    }
+  ],
+  "wires": [
+    {
+      "net": "VDD",
+      "layer": "met2",
+      "rect": [
+        40,
+        0,
+        440,
+        35720
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VDD",
+      "layer": "met1",
+      "rect": [
+        0,
+        16080,
+        55440,
+        16560
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VDD",
+      "layer": "met1",
+      "rect": [
+        0,
+        21520,
+        55440,
+        22000
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VDD",
+      "layer": "met1",
+      "rect": [
+        0,
+        26960,
+        55440,
+        27440
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VDD",
+      "layer": "met1",
+      "rect": [
+        0,
+        32400,
+        55440,
+        32880
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "met2",
+      "rect": [
+        1440,
+        0,
+        1840,
+        35720
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "met1",
+      "rect": [
+        1400,
+        13360,
+        55440,
+        13840
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "met1",
+      "rect": [
+        1400,
+        18800,
+        55440,
+        19280
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "met1",
+      "rect": [
+        1400,
+        24240,
+        55440,
+        24720
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "met1",
+      "rect": [
+        1400,
+        29680,
+        55440,
+        30160
+      ],
+      "kind": "wire"
+    },
+    {
+      "net": "VSS",
+      "layer": "met1",
+      "rect": [
+        1400,
+        35120,
+        55440,
+        35600
+      ],
+      "kind": "wire"
+    }
+  ],
+  "vias": [
+    {
+      "net": "VDD",
+      "id": 0,
+      "name": "M1M2_PR",
+      "shapes": [
+        {
+          "layer": "via",
+          "rect": [
+            165,
+            16245,
+            315,
+            16395
+          ]
+        },
+        {
+          "layer": "met1",
+          "rect": [
+            80,
+            16190,
+            400,
+            16450
+          ]
+        },
+        {
+          "layer": "met2",
+          "rect": [
+            110,
+            16160,
+            370,
+            16480
+          ]
+        }
+      ]
+    },
+    {
+      "net": "VDD",
+      "id": 1,
+      "name": "M1M2_PR",
+      "shapes": [
+        {
+          "layer": "via",
+          "rect": [
+            165,
+            21685,
+            315,
+            21835
+          ]
+        },
+        {
+          "layer": "met1",
+          "rect": [
+            80,
+            21630,
+            400,
+            21890
+          ]
+        },
+        {
+          "layer": "met2",
+          "rect": [
+            110,
+            21600,
+            370,
+            21920
+          ]
+        }
+      ]
+    },
+    {
+      "net": "VDD",
+      "id": 2,
+      "name": "M1M2_PR",
+      "shapes": [
+        {
+          "layer": "via",
+          "rect": [
+            165,
+            27125,
+            315,
+            27275
+          ]
+        },
+        {
+          "layer": "met1",
+          "rect": [
+            80,
+            27070,
+            400,
+            27330
+          ]
+        },
+        {
+          "layer": "met2",
+          "rect": [
+            110,
+            27040,
+            370,
+            27360
+          ]
+        }
+      ]
+    },
+    {
+      "net": "VDD",
+      "id": 3,
+      "name": "M1M2_PR",
+      "shapes": [
+        {
+          "layer": "via",
+          "rect": [
+            165,
+            32565,
+            315,
+            32715
+          ]
+        },
+        {
+          "layer": "met1",
+          "rect": [
+            80,
+            32510,
+            400,
+            32770
+          ]
+        },
+        {
+          "layer": "met2",
+          "rect": [
+            110,
+            32480,
+            370,
+            32800
+          ]
+        }
+      ]
+    },
+    {
+      "net": "VSS",
+      "id": 4,
+      "name": "M1M2_PR",
+      "shapes": [
+        {
+          "layer": "via",
+          "rect": [
+            1565,
+            13525,
+            1715,
+            13675
+          ]
+        },
+        {
+          "layer": "met1",
+          "rect": [
+            1480,
+            13470,
+            1800,
+            13730
+          ]
+        },
+        {
+          "layer": "met2",
+          "rect": [
+            1510,
+            13440,
+            1770,
+            13760
+          ]
+        }
+      ]
+    },
+    {
+      "net": "VSS",
+      "id": 5,
+      "name": "M1M2_PR",
+      "shapes": [
+        {
+          "layer": "via",
+          "rect": [
+            1565,
+            18965,
+            1715,
+            19115
+          ]
+        },
+        {
+          "layer": "met1",
+          "rect": [
+            1480,
+            18910,
+            1800,
+            19170
+          ]
+        },
+        {
+          "layer": "met2",
+          "rect": [
+            1510,
+            18880,
+            1770,
+            19200
+          ]
+        }
+      ]
+    },
+    {
+      "net": "VSS",
+      "id": 6,
+      "name": "M1M2_PR",
+      "shapes": [
+        {
+          "layer": "via",
+          "rect": [
+            1565,
+            24405,
+            1715,
+            24555
+          ]
+        },
+        {
+          "layer": "met1",
+          "rect": [
+            1480,
+            24350,
+            1800,
+            24610
+          ]
+        },
+        {
+          "layer": "met2",
+          "rect": [
+            1510,
+            24320,
+            1770,
+            24640
+          ]
+        }
+      ]
+    },
+    {
+      "net": "VSS",
+      "id": 7,
+      "name": "M1M2_PR",
+      "shapes": [
+        {
+          "layer": "via",
+          "rect": [
+            1565,
+            29845,
+            1715,
+            29995
+          ]
+        },
+        {
+          "layer": "met1",
+          "rect": [
+            1480,
+            29790,
+            1800,
+            30050
+          ]
+        },
+        {
+          "layer": "met2",
+          "rect": [
+            1510,
+            29760,
+            1770,
+            30080
+          ]
+        }
+      ]
+    },
+    {
+      "net": "VSS",
+      "id": 8,
+      "name": "M1M2_PR",
+      "shapes": [
+        {
+          "layer": "via",
+          "rect": [
+            1565,
+            35285,
+            1715,
+            35435
+          ]
+        },
+        {
+          "layer": "met1",
+          "rect": [
+            1480,
+            35230,
+            1800,
+            35490
+          ]
+        },
+        {
+          "layer": "met2",
+          "rect": [
+            1510,
+            35200,
+            1770,
+            35520
+          ]
+        }
+      ]
+    }
+  ],
+  "state": {
+    "revision": "rev2",
+    "stage": "placed",
+    "design": "lane_smoke",
+    "cells": 97,
+    "rows": 8,
+    "expansions": 107,
+    "placement_status": "placed_unverified",
+    "drc_status": "unchecked",
+    "lvs_status": "unchecked",
+    "routing_status": "not_run",
+    "corner": "not_applicable",
+    "wire_model": "none",
+    "unconstrained_endpoints": null,
+    "nets": 32,
+    "pins": 476,
+    "masters": 9,
+    "connectivity_status": "linked_unverified",
+    "power_grid_status": "primary_grid_generated",
+    "io_placement_status": "placed_geometry_checked",
+    "diagnostics": [
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "units TIME (first line 23): Non-geometric unit system is not modeled",
+        "occurrences": 1
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "units CAPACITANCE (first line 24): Non-geometric unit system is not modeled",
+        "occurrences": 1
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "units RESISTANCE (first line 25): Non-geometric unit system is not modeled",
+        "occurrences": 1
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "library USEMINSPACING (first line 30): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "property_definitions LAYER (first line 33): Property schema is not interpreted; property uses produce separate diagnostics",
+        "occurrences": 1
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer PROPERTY (first line 52): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 2
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer SPACINGTABLE (first line 73): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer AREA (first line 76): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer THICKNESS (first line 77): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer EDGECAPACITANCE (first line 78): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer CAPACITANCE (first line 79): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 6
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer RESISTANCE (first line 80): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 11
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer ANTENNAMODEL (first line 82): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 6
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer ANTENNADIFFSIDEAREARATIO (first line 83): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 6
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer ENCLOSURE (first line 91): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 10
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer ANTENNADIFFAREARATIO (first line 95): Antenna rule is not modeled; antenna status remains unchecked",
+        "occurrences": 5
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer DCCURRENTDENSITY (first line 96): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 10
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer MINENCLOSEDAREA (first line 116): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 2
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer ACCURRENTDENSITY (first line 124): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 5
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer MAXIMUMDENSITY (first line 125): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer DENSITYCHECKWINDOW (first line 126): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "layer DENSITYCHECKSTEP (first line 127): Technology rule/electrical value is not modeled; DRC/RC/antenna remain unchecked",
+        "occurrences": 4
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "technology_lef",
+        "message": "via_rule VIARULE (first line 310): Via generation rule is not modeled; routing/via DRC remain unchecked",
+        "occurrences": 25
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "cell_lef",
+        "message": "library NOWIREEXTENSIONATPIN (first line 2): Library rule is not modeled; downstream DRC/routing semantics remain unchecked",
+        "occurrences": 1
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "cell_lef",
+        "message": "macro FOREIGN (first line 7): Macro annotation/foreign mapping is not modeled; use only retained local geometry",
+        "occurrences": 437
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "cell_lef",
+        "message": "pin ANTENNAGATEAREA (first line 15): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 1314
+      },
+      {
+        "code": "LEF_SEMANTICS_UNMODELED",
+        "source": "cell_lef",
+        "message": "pin ANTENNADIFFAREA (first line 88): Antenna value is not modeled; antenna status remains unchecked",
+        "occurrences": 450
+      },
+      {
+        "code": "PHYSICAL_SIGNOFF_UNCHECKED",
+        "source": "physical_preparation",
+        "message": "Primary metal rails/spines/vias and I/O geometry are generated and locally checked; well/tap continuity, DRC, IR/EM and extracted timing are not verified by this pass",
+        "occurrences": 1
+      }
+    ],
+    "inserted_tie_cells": 2,
+    "filler_cells": 77,
+    "rail_continuity_status": "geometry_checked",
+    "body_bias_status": "logically_connected"
+  },
+  "verification": {
+    "status": "passed",
+    "pg_pins": 388,
+    "flipped_instances": 46,
+    "signal_io": 20,
+    "conductor_rectangles": 223,
+    "intersection_comparisons": 5505,
+    "rows_with_intrinsic_rail_continuity": 8,
+    "components": {
+      "VSS": 1,
+      "VDD": 1
+    },
+    "body_bias_continuity": "unchecked",
+    "drc_status": "unchecked",
+    "ir_drop_status": "unchecked",
+    "electromigration_status": "unchecked"
+  },
+  "scope": {
+    "cts": "not_run",
+    "routing": "not_run",
+    "extracted_sta": "not_run",
+    "drc": "unchecked",
+    "lvs": "unchecked",
+    "ir_drop": "unchecked",
+    "electromigration": "unchecked"
+  }
+}

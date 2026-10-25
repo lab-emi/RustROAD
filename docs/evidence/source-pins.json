@@ -1,0 +1,13 @@
+{
+  "schema": "rustroad.evidence-sources.v1",
+  "files": {
+    "scripts/verify_logic.py": "f43959f4930b716ef53e0340dcbb72f27c4aa2338839a87387aa04106bf1a12f",
+    "scripts/verify_def.py": "b90a5e91d75941b03b5e65d3ed16bb2ed9e93b8e27b027cbba19902c860a2021",
+    "scripts/check_def.py": "6e22b1d2402bd85154dfd4ff0c4484c7ffdeb9b764eaba79602e95ebac044002",
+    "scripts/flow_probe.py": "e73c41e7008d30f3a8e1984a87c637a7f2d7c1dd4395d0462a731a5f4d451bb1",
+    "fixtures/flow/lane_smoke.sv": "e5682e772e6a95dcb9f21419d4ae213e090ac6ae8a9e75e1d9eace721cc3685c",
+    "fixtures/flow/lane_smoke.sdc": "523d51ee3aa5886e572afd7d13026a3d496be7124a5065f5033fada0dbc28b2a",
+    "fixtures/flow/local-pinned.json": "64e1694556cbed9d4223ed857ffcb82547c23a2a090982e7cda50940ad96146e",
+    "fixtures/physical-small.json": "340de95389c2bc32a581d5179fd18213def02d856641fbcfdf7254757cdf5f38"
+  }
+}

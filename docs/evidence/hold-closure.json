@@ -1,0 +1,1648 @@
+{
+ "schema": "rustroad.hold-closure-evidence.v1",
+ "status": "passed",
+ "run": ".work/evidence/final",
+ "parameters": {
+  "target_margin_ns": 0.05,
+  "setup_margin_ns": 0.05,
+  "max_iterations": 4,
+  "decision_spef": "native rustroad extract",
+  "corners": {
+   "sky130": [
+    {
+     "corner": "tt",
+     "liberty": "tt_025C_1v80",
+     "rc": "nom"
+    },
+    {
+     "corner": "ss",
+     "liberty": "ss_100C_1v60",
+     "rc": "max"
+    },
+    {
+     "corner": "ff",
+     "liberty": "ff_n40C_1v95",
+     "rc": "min"
+    }
+   ],
+   "gf180": [
+    {
+     "corner": "tt",
+     "liberty": "tt_025C_3v30",
+     "rc": "nom"
+    },
+    {
+     "corner": "ss",
+     "liberty": "ss_125C_3v00",
+     "rc": "max"
+    },
+    {
+     "corner": "ff",
+     "liberty": "ff_n40C_3v60",
+     "rc": "min"
+    }
+   ]
+  },
+  "parity_ns": 0.001
+ },
+ "scope": {
+  "level": "block/macro (no pad ring, no seal ring)",
+  "ir_drop": "unchecked",
+  "electromigration": "unchecked",
+  "signal_integrity": "unchecked",
+  "ocv": "unchecked",
+  "cppr": "unchecked"
+ },
+ "identity_stable": true,
+ "tools": {
+  "yosys": {
+   "sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "path": "/mnt/data2/cgao/git/RustSys/.work/lec-verification/tools/yosys"
+  },
+  "verilator": {
+   "sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+   "path": "/usr/bin/verilator"
+  },
+  "opensta": {
+   "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/c2cc5a7e2baaa2c6bdac6951f759273edbb27a34c710ea4593e43ef22d00e4b8/diff/foss/tools/openroad/bin/sta"
+  },
+  "rustsys": {
+   "sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "path": "/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target/release/rustsys"
+  },
+  "rustroad": {
+   "sha256": "a8e57fc64fa4c2925e13f839f12edd85899ab768bb2b92a39ab3df2ec655ba98",
+   "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/hold/target/release/rustroad"
+  },
+  "rusteda": {
+   "sha256": "c8f71b63124577174f8458870d4ec006ab14b35f3b249e6e9d52a1734e759baf",
+   "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/hold/.work/tools/sta/rusteda"
+  },
+  "ruststa": {
+   "sha256": "ac76f0f3765ce3c6d44f85257f7d836120a7e0bf6a7283a75357f37fd79aa838",
+   "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/hold/.work/tools/sta/ruststa"
+  }
+ },
+ "receipts": 282,
+ "wall_seconds": 145.507,
+ "peak_child_rss_kib": 290084,
+ "pdks": [
+  {
+   "pdk": "sky130",
+   "status": "passed",
+   "gates": {
+    "ruststa_closed": true,
+    "opensta_closed": true,
+    "parity": true,
+    "rustsys_cec": true,
+    "yosys_cec": true,
+    "simulation": true,
+    "cell_proofs": true,
+    "native_antenna": true,
+    "frozen_inputs": true,
+    "drc_not_worse": true,
+    "deck_antenna": true,
+    "antenna_controls": true
+   },
+   "closed": true,
+   "iterations": [
+    {
+     "iteration": 0,
+     "netlist_sha256": "a3e5c9cff4bcc5bc2ca35b75e1c9d55bc209230fc962f08a4fc82f3c91fd0dfc",
+     "def_sha256": "e7dba8e6d75516cadef2e2f8ae90244f055835a86c194002b9391520eefe303d",
+     "routing": {
+      "wires": 4898,
+      "vias": 88,
+      "patches": 8,
+      "routed_nets": 19
+     },
+     "timing": {
+      "tt": {
+       "clock_latency_max_ns": 0.256256,
+       "clock_slew_max_ns": 0.123872,
+       "worst_setup_ns": 9.108091,
+       "worst_hold_ns": -0.0045,
+       "hold_below_margin": 2,
+       "setup_violations": 0
+      },
+      "ss": {
+       "clock_latency_max_ns": 0.447624,
+       "clock_slew_max_ns": 0.198719,
+       "worst_setup_ns": 8.531038,
+       "worst_hold_ns": -0.09981,
+       "hold_below_margin": 3,
+       "setup_violations": 0
+      },
+      "ff": {
+       "clock_latency_max_ns": 0.166949,
+       "clock_slew_max_ns": 0.087974,
+       "worst_setup_ns": 9.339369,
+       "worst_hold_ns": 0.057352,
+       "hold_below_margin": 0,
+       "setup_violations": 0
+      }
+     },
+     "drv_status": "met",
+     "antenna": {
+      "status": "violated",
+      "violations": 1,
+      "violated": [
+       {
+        "net": "clk",
+        "layer": "met3",
+        "kind": "side_area",
+        "ratio": 445.5979643765903,
+        "limit": 400.0,
+        "rule": "ANTENNADIFFSIDEAREARATIO"
+       }
+      ],
+      "worst": [
+       {
+        "net": "clk",
+        "layer": "met3",
+        "ratio": 445.598,
+        "limit": 400.0
+       }
+      ]
+     },
+     "hold_eco": {
+      "totals": {
+       "violating_sinks": 3,
+       "planned_sinks": 3,
+       "cells": 3,
+       "area_um2": 11.2608
+      },
+      "sinks": [
+       {
+        "endpoint": "r0/D",
+        "cells": [
+         "sky130_fd_sc_hd__buf_1"
+        ],
+        "existing_chain": [],
+        "need_ns": {
+         "ff": 0.0,
+         "ss": 0.14981,
+         "tt": 0.0545
+        },
+        "estimated_hold_slack_ns": {
+         "ff": null,
+         "ss": 0.070871,
+         "tt": 0.095479
+        },
+        "estimated_setup_slack_ns": 9.465536
+       },
+       {
+        "endpoint": "r1/D",
+        "cells": [
+         "sky130_fd_sc_hd__buf_1"
+        ],
+        "existing_chain": [],
+        "need_ns": {
+         "ff": 0.0,
+         "ss": 0.141645,
+         "tt": 0.049854
+        },
+        "estimated_hold_slack_ns": {
+         "ff": null,
+         "ss": 0.079036,
+         "tt": 0.100124
+        },
+        "estimated_setup_slack_ns": 9.457285
+       },
+       {
+        "endpoint": "r3/D",
+        "cells": [
+         "sky130_fd_sc_hd__buf_1"
+        ],
+        "existing_chain": [],
+        "need_ns": {
+         "ff": 0.0,
+         "ss": 0.003424,
+         "tt": 0.0
+        },
+        "estimated_hold_slack_ns": {
+         "ff": null,
+         "ss": 0.217257,
+         "tt": null
+        },
+        "estimated_setup_slack_ns": 8.587779
+       }
+      ]
+     }
+    },
+    {
+     "iteration": 1,
+     "netlist_sha256": "045f7efa7ad1ae5199ee45f607a34064c1ebbc913522e87a6e5d48eacbd241cb",
+     "def_sha256": "1c5dec8541dba54943408dee9cfba2f41e6ad804396822f47129c3394df2dc73",
+     "routing": {
+      "wires": 5729,
+      "vias": 104,
+      "patches": 5,
+      "routed_nets": 22
+     },
+     "timing": {
+      "tt": {
+       "clock_latency_max_ns": 0.252968,
+       "clock_slew_max_ns": 0.108614,
+       "worst_setup_ns": 9.087608,
+       "worst_hold_ns": 0.064101,
+       "hold_below_margin": 0,
+       "setup_violations": 0
+      },
+      "ss": {
+       "clock_latency_max_ns": 0.446625,
+       "clock_slew_max_ns": 0.17779,
+       "worst_setup_ns": 8.487164,
+       "worst_hold_ns": 0.029942,
+       "hold_below_margin": 1,
+       "setup_violations": 0
+      },
+      "ff": {
+       "clock_latency_max_ns": 0.164453,
+       "clock_slew_max_ns": 0.078614,
+       "worst_setup_ns": 9.327346,
+       "worst_hold_ns": 0.092991,
+       "hold_below_margin": 0,
+       "setup_violations": 0
+      }
+     },
+     "drv_status": "met",
+     "antenna": {
+      "status": "passed",
+      "violations": 0,
+      "violated": [],
+      "worst": [
+       {
+        "net": "en",
+        "layer": "met3",
+        "ratio": 161.079,
+        "limit": 400.0
+       }
+      ]
+     },
+     "hold_eco": {
+      "totals": {
+       "violating_sinks": 1,
+       "planned_sinks": 1,
+       "cells": 1,
+       "area_um2": 3.7536
+      },
+      "sinks": [
+       {
+        "endpoint": "r2/D",
+        "cells": [
+         "sky130_fd_sc_hd__buf_1"
+        ],
+        "existing_chain": [],
+        "need_ns": {
+         "ff": 0.0,
+         "ss": 0.020058,
+         "tt": 0.0
+        },
+        "estimated_hold_slack_ns": {
+         "ff": null,
+         "ss": 0.200623,
+         "tt": null
+        },
+        "estimated_setup_slack_ns": 8.626906
+       }
+      ]
+     }
+    },
+    {
+     "iteration": 2,
+     "netlist_sha256": "8d386d5fd8ab115edb6319541ded889b5d54b457767c7e76cee5c71f96633fb6",
+     "def_sha256": "4aa8719f6a6da5eac27b18724a3cd3b9ffc41c0312e97145da433a227ca03433",
+     "routing": {
+      "wires": 6157,
+      "vias": 109,
+      "patches": 5,
+      "routed_nets": 23
+     },
+     "timing": {
+      "tt": {
+       "clock_latency_max_ns": 0.26354,
+       "clock_slew_max_ns": 0.134486,
+       "worst_setup_ns": 9.092872,
+       "worst_hold_ns": 0.081692,
+       "hold_below_margin": 0,
+       "setup_violations": 0
+      },
+      "ss": {
+       "clock_latency_max_ns": 0.460459,
+       "clock_slew_max_ns": 0.216701,
+       "worst_setup_ns": 8.502195,
+       "worst_hold_ns": 0.0667,
+       "hold_below_margin": 0,
+       "setup_violations": 0
+      },
+      "ff": {
+       "clock_latency_max_ns": 0.170892,
+       "clock_slew_max_ns": 0.093828,
+       "worst_setup_ns": 9.331024,
+       "worst_hold_ns": 0.114823,
+       "hold_below_margin": 0,
+       "setup_violations": 0
+      }
+     },
+     "drv_status": "met",
+     "antenna": {
+      "status": "passed",
+      "violations": 0,
+      "violated": [],
+      "worst": [
+       {
+        "net": "en",
+        "layer": "met3",
+        "ratio": 161.079,
+        "limit": 400.0
+       }
+      ]
+     }
+    }
+   ],
+   "opensta_native": {
+    "status": "passed",
+    "max_difference_ps": 0.3049,
+    "comparisons": 48,
+    "opensta_closed": true,
+    "opensta_worst": {
+     "tt": {
+      "setup": 9.092731,
+      "hold": 0.08165
+     },
+     "ss": {
+      "setup": 8.5019,
+      "hold": 0.066515
+     },
+     "ff": {
+      "setup": 9.330952,
+      "hold": 0.114747
+     }
+    },
+    "clock_latency_ns": {
+     "tt": [
+      0.246960237622,
+      0.263582289219,
+      0.229534178972,
+      0.238426625729
+     ],
+     "ss": [
+      0.432022929192,
+      0.46056458354,
+      0.39720004797,
+      0.415369093418
+     ],
+     "ff": [
+      0.160283118486,
+      0.170903578401,
+      0.159142032266,
+      0.164692267776
+     ]
+    }
+   },
+   "equivalence": {
+    "rustsys_check_synth": "equivalent",
+    "yosys_cec": "passed",
+    "yosys_cec_negative": "rejected",
+    "simulation": {
+     "status": "passed",
+     "vectors": 512,
+     "checked_pipeline_cycles": 511,
+     "initial_state": "unconstrained; y sampled after two edges"
+    }
+   },
+   "frozen_inputs": {
+    "status": "unchanged",
+    "changed": [],
+    "files": {
+     "cell_gds": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+     "cell_lef": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+     "cell_policy": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+     "delay_cells": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+     "gds_layer_map": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+     "liberty_ff": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+     "liberty_ss": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+     "liberty_tt": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+     "openrcx_rules_ff": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+     "openrcx_rules_ss": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+     "openrcx_rules_tt": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+     "physical_config": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+     "rc_profile_ff": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+     "rc_profile_ss": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+     "rc_profile_tt": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+     "routing_profile": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+     "sdc_cts": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+     "sdc_postroute": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+     "technology_lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519"
+    }
+   },
+   "drc_not_worse": {
+    "status": "passed",
+    "worse_or_unverified": [],
+    "before": {
+     "drc-magic": 15,
+     "drc-klayout": 11,
+     "antenna": 1,
+     "lvs-netgen": 0,
+     "lvs-klayout": 0
+    },
+    "after": {
+     "drc-magic": 7,
+     "drc-klayout": 7,
+     "antenna": 0,
+     "lvs-netgen": 0,
+     "lvs-klayout": 0
+    }
+   },
+   "cell_proofs": {
+    "status": "proved",
+    "cells": [
+     "sky130_fd_sc_hd__buf_1"
+    ],
+    "clock_cells": [
+     "sky130_fd_sc_hd__clkbuf_1"
+    ],
+    "proofs": {
+     "sky130_fd_sc_hd__buf_1@tt": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "sky130_fd_sc_hd__buf_1@ss": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "sky130_fd_sc_hd__buf_1@ff": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "sky130_fd_sc_hd__clkbuf_1@tt": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "sky130_fd_sc_hd__clkbuf_1@ss": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "sky130_fd_sc_hd__clkbuf_1@ff": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     }
+    },
+    "native_wrong_polarity": {
+     "status": "rejected",
+     "cell": "sky130_fd_sc_hd__clkinv_1",
+     "liberty_function": "(!A)",
+     "code": "ECO_NOT_BUFFER"
+    },
+    "native_positive_control": "accepted"
+   },
+   "drc_before": {
+    "statuses": {
+     "drc_magic": "failed",
+     "drc_klayout": "failed",
+     "antenna": "failed",
+     "lvs_netgen": "passed",
+     "lvs_klayout": "passed"
+    },
+    "counts": {
+     "drc-magic": 15,
+     "drc-klayout": 11,
+     "antenna": 1,
+     "lvs-netgen": 0,
+     "lvs-klayout": 0
+    },
+    "by_rule": {
+     "drc-magic": {
+      "met2.2": 25,
+      "met1.2": 19,
+      "met3.2": 6
+     },
+     "drc-klayout": {
+      "m1.2": 5,
+      "m2.2": 5,
+      "m3.2": 1
+     },
+     "antenna": {
+      "metal3": 1
+     },
+     "lvs-netgen": {
+      "mismatch": 0
+     },
+     "lvs-klayout": {
+      "mismatch": 0
+     }
+    },
+    "gds_sha256": "61d13e4bb82ac100b3202fb3e7825bf65b42e634a215bef26934e83048fa73f5"
+   },
+   "drc_after": {
+    "statuses": {
+     "drc_magic": "failed",
+     "drc_klayout": "failed",
+     "antenna": "passed",
+     "lvs_netgen": "passed",
+     "lvs_klayout": "passed"
+    },
+    "counts": {
+     "drc-magic": 7,
+     "drc-klayout": 7,
+     "antenna": 0,
+     "lvs-netgen": 0,
+     "lvs-klayout": 0
+    },
+    "by_rule": {
+     "drc-magic": {
+      "met2.2": 8,
+      "met1.2": 19
+     },
+     "drc-klayout": {
+      "m1.2": 5,
+      "m2.2": 2
+     },
+     "antenna": {},
+     "lvs-netgen": {
+      "mismatch": 0
+     },
+     "lvs-klayout": {
+      "mismatch": 0
+     }
+    },
+    "gds_sha256": "520b2a711b9282ffa31ddc6543cb93bd8e0529eb71a5a71315df2c0134438053"
+   },
+   "antenna_controls": {
+    "status": "passed",
+    "reason": null,
+    "planted": {
+     "net": "a[1]",
+     "layer": "met3",
+     "rect_dbu": [
+      1290,
+      -600000,
+      1590,
+      490
+     ],
+     "length_um": 600
+    },
+    "native_planted": {
+     "status": "violated",
+     "violated": [
+      {
+       "net": "a[1]",
+       "layer": "met3",
+       "kind": "side_area",
+       "ratio": 793.2185858585858,
+       "limit": 400.0,
+       "rule": "ANTENNADIFFSIDEAREARATIO"
+      }
+     ]
+    },
+    "deck_planted": {
+     "status": "failed",
+     "count": 1,
+     "by_rule": {
+      "metal3": 1
+     },
+     "summary": "/mnt/data2/cgao/git/RustROAD/.work/wt/hold/.work/evidence/final/sky130_antctl_planted_signoff/signoff.json"
+    },
+    "antenna_eco": {
+     "status": "planned",
+     "nets": [
+      {
+       "net": "a[1]",
+       "violations": 1,
+       "worst_ratio_over_limit": 1.9830464646464645,
+       "diodes": 1,
+       "estimated_worst_ratio_over_limit": 0.21162267552602682,
+       "instances": [
+        "rr_eco_ant_0"
+       ]
+      }
+     ],
+     "cell": "sky130_fd_sc_hd__diode_2"
+    },
+    "native_repaired": {
+     "status": "passed",
+     "worst": [
+      {
+       "net": "clk",
+       "layer": "met3",
+       "ratio": 164.682,
+       "limit": 400.0
+      },
+      {
+       "net": "en",
+       "layer": "met3",
+       "ratio": 161.079,
+       "limit": 400.0
+      },
+      {
+       "net": "a[1]",
+       "layer": "met3",
+       "ratio": 587.016,
+       "limit": 2773.88
+      }
+     ]
+    },
+    "native_repaired_unplanted": {
+     "status": "passed"
+    },
+    "deck_repaired": {
+     "status": "passed",
+     "count": 0,
+     "by_rule": {},
+     "summary": "/mnt/data2/cgao/git/RustROAD/.work/wt/hold/.work/evidence/final/sky130_antctl_repaired_signoff/signoff.json"
+    },
+    "repaired_timing": {
+     "closed": true,
+     "corners": {
+      "tt": {
+       "worst_setup_ns": 9.100468132299516,
+       "worst_hold_ns": 0.07618469239473763
+      },
+      "ss": {
+       "worst_setup_ns": 8.510912451508192,
+       "worst_hold_ns": 0.05605873301586617
+      },
+      "ff": {
+       "worst_setup_ns": 9.334972314565997,
+       "worst_hold_ns": 0.11171520372891786
+      }
+     }
+    }
+   },
+   "openrcx_merged_reported": {
+    "status": "reported",
+    "reason": null,
+    "ruststa_closed": true,
+    "opensta_closed": true,
+    "opensta_worst": {
+     "tt": {
+      "setup": 9.091998,
+      "hold": 0.075776
+     },
+     "ss": {
+      "setup": 8.495097,
+      "hold": 0.055679
+     },
+     "ff": {
+      "setup": 9.330399,
+      "hold": 0.111469
+     }
+    },
+    "parity_ps": 0.4413,
+    "dropped_patch_lines": 5,
+    "note": "OpenRCX ignores DEF RECT patches (router stream); the b0 stream owns DEF merging"
+   },
+   "wall_seconds": 56.719,
+   "reason": null
+  },
+  {
+   "pdk": "gf180",
+   "status": "passed",
+   "gates": {
+    "ruststa_closed": true,
+    "opensta_closed": true,
+    "parity": true,
+    "rustsys_cec": true,
+    "yosys_cec": true,
+    "simulation": true,
+    "cell_proofs": true,
+    "native_antenna": true,
+    "frozen_inputs": true,
+    "drc_not_worse": true,
+    "deck_antenna": true,
+    "antenna_controls": true
+   },
+   "closed": true,
+   "iterations": [
+    {
+     "iteration": 0,
+     "netlist_sha256": "a29ada8813572aff519782ecfe19e318cb60bb6c8c95c302a8d6e2fe76f400a5",
+     "def_sha256": "7d2c89c94e40dff1591e4b7d66f432070caf86afb34e4ff2197bfe2412092a43",
+     "routing": {
+      "wires": 5014,
+      "vias": 76,
+      "patches": 1,
+      "routed_nets": 19
+     },
+     "timing": {
+      "tt": {
+       "clock_latency_max_ns": 0.756592,
+       "clock_slew_max_ns": 0.359707,
+       "worst_setup_ns": 7.702046,
+       "worst_hold_ns": -0.394451,
+       "hold_below_margin": 4,
+       "setup_violations": 0
+      },
+      "ss": {
+       "clock_latency_max_ns": 1.458135,
+       "clock_slew_max_ns": 0.69894,
+       "worst_setup_ns": 5.660602,
+       "worst_hold_ns": -0.898712,
+       "hold_below_margin": 4,
+       "setup_violations": 0
+      },
+      "ff": {
+       "clock_latency_max_ns": 0.452019,
+       "clock_slew_max_ns": 0.209984,
+       "worst_setup_ns": 8.571856,
+       "worst_hold_ns": -0.180479,
+       "hold_below_margin": 4,
+       "setup_violations": 0
+      }
+     },
+     "drv_status": "met",
+     "antenna": {
+      "status": "passed",
+      "violations": 0,
+      "violated": [],
+      "worst": [
+       {
+        "net": "clk",
+        "layer": "Metal3",
+        "ratio": 87.18,
+        "limit": 400.0
+       }
+      ]
+     },
+     "hold_eco": {
+      "totals": {
+       "violating_sinks": 4,
+       "planned_sinks": 4,
+       "cells": 4,
+       "area_um2": 96.5888
+      },
+      "sinks": [
+       {
+        "endpoint": "r0/D",
+        "cells": [
+         "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+        ],
+        "existing_chain": [],
+        "need_ns": {
+         "ff": 0.18942,
+         "ss": 0.834082,
+         "tt": 0.388401
+        },
+        "estimated_hold_slack_ns": {
+         "ff": 0.264456,
+         "ss": 0.525968,
+         "tt": 0.342003
+        },
+        "estimated_setup_slack_ns": 7.494883
+       },
+       {
+        "endpoint": "r1/D",
+        "cells": [
+         "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+        ],
+        "existing_chain": [],
+        "need_ns": {
+         "ff": 0.189671,
+         "ss": 0.835423,
+         "tt": 0.388948
+        },
+        "estimated_hold_slack_ns": {
+         "ff": 0.264205,
+         "ss": 0.524628,
+         "tt": 0.341456
+        },
+        "estimated_setup_slack_ns": 7.496105
+       },
+       {
+        "endpoint": "r2/D",
+        "cells": [
+         "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+        ],
+        "existing_chain": [],
+        "need_ns": {
+         "ff": 0.205896,
+         "ss": 0.856712,
+         "tt": 0.400872
+        },
+        "estimated_hold_slack_ns": {
+         "ff": 0.247979,
+         "ss": 0.503339,
+         "tt": 0.329532
+        },
+        "estimated_setup_slack_ns": 4.580349
+       },
+       {
+        "endpoint": "r3/D",
+        "cells": [
+         "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+        ],
+        "existing_chain": [],
+        "need_ns": {
+         "ff": 0.230479,
+         "ss": 0.948712,
+         "tt": 0.444451
+        },
+        "estimated_hold_slack_ns": {
+         "ff": 0.223396,
+         "ss": 0.411338,
+         "tt": 0.285953
+        },
+        "estimated_setup_slack_ns": 4.477897
+       }
+      ]
+     }
+    },
+    {
+     "iteration": 1,
+     "netlist_sha256": "6b114fa4f7d136a5610ae42b1a529cd5dd133f49302aa3d49560ed0d75a85c30",
+     "def_sha256": "2577c50319d4808f6e19f449b44eab5cf0a09323b3b1c914981d69fd3122593f",
+     "routing": {
+      "wires": 5622,
+      "vias": 83,
+      "patches": 1,
+      "routed_nets": 23
+     },
+     "timing": {
+      "tt": {
+       "clock_latency_max_ns": 0.736239,
+       "clock_slew_max_ns": 0.325557,
+       "worst_setup_ns": 7.463827,
+       "worst_hold_ns": 0.244523,
+       "hold_below_margin": 0,
+       "setup_violations": 0
+      },
+      "ss": {
+       "clock_latency_max_ns": 1.419215,
+       "clock_slew_max_ns": 0.631848,
+       "worst_setup_ns": 4.852929,
+       "worst_hold_ns": 0.370677,
+       "hold_below_margin": 0,
+       "setup_violations": 0
+      },
+      "ff": {
+       "clock_latency_max_ns": 0.440119,
+       "clock_slew_max_ns": 0.190568,
+       "worst_setup_ns": 8.549193,
+       "worst_hold_ns": 0.196192,
+       "hold_below_margin": 0,
+       "setup_violations": 0
+      }
+     },
+     "drv_status": "met",
+     "antenna": {
+      "status": "passed",
+      "violations": 0,
+      "violated": [],
+      "worst": [
+       {
+        "net": "clk",
+        "layer": "Metal3",
+        "ratio": 60.289,
+        "limit": 400.0
+       }
+      ]
+     }
+    }
+   ],
+   "opensta_native": {
+    "status": "passed",
+    "max_difference_ps": 0.4547,
+    "comparisons": 48,
+    "opensta_closed": true,
+    "opensta_worst": {
+     "tt": {
+      "setup": 7.463592,
+      "hold": 0.244503
+     },
+     "ss": {
+      "setup": 4.852761,
+      "hold": 0.370533
+     },
+     "ff": {
+      "setup": 8.549169,
+      "hold": 0.196171
+     }
+    },
+    "clock_latency_ns": {
+     "tt": [
+      0.726225972176,
+      0.736257433891,
+      0.716625869274,
+      0.725838065147
+     ],
+     "ss": [
+      1.395798563957,
+      1.419279456139,
+      1.363948583603,
+      1.385094285011
+     ],
+     "ff": [
+      0.435291677713,
+      0.440138697624,
+      0.433443516493,
+      0.437949687243
+     ]
+    }
+   },
+   "equivalence": {
+    "rustsys_check_synth": "equivalent",
+    "yosys_cec": "passed",
+    "yosys_cec_negative": "rejected",
+    "simulation": {
+     "status": "passed",
+     "vectors": 512,
+     "checked_pipeline_cycles": 511,
+     "initial_state": "unconstrained; y sampled after two edges"
+    }
+   },
+   "frozen_inputs": {
+    "status": "unchanged",
+    "changed": [],
+    "files": {
+     "cell_gds": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+     "cell_lef": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+     "cell_policy": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61",
+     "delay_cells": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+     "gds_layer_map": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+     "liberty_ff": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+     "liberty_ss": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+     "liberty_tt": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+     "openrcx_rules_ff": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+     "openrcx_rules_ss": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+     "openrcx_rules_tt": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+     "physical_config": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+     "rc_profile_ff": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+     "rc_profile_ss": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+     "rc_profile_tt": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+     "routing_profile": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+     "sdc_cts": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+     "sdc_postroute": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+     "technology_lef": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd"
+    }
+   },
+   "drc_not_worse": {
+    "status": "passed",
+    "worse_or_unverified": [],
+    "before": {
+     "drc-magic": 2,
+     "drc-klayout": 2,
+     "antenna": 0,
+     "lvs-netgen": 0,
+     "lvs-klayout": 0
+    },
+    "after": {
+     "drc-magic": 2,
+     "drc-klayout": 2,
+     "antenna": 0,
+     "lvs-netgen": 0,
+     "lvs-klayout": 0
+    }
+   },
+   "cell_proofs": {
+    "status": "proved",
+    "cells": [
+     "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+    ],
+    "clock_cells": [
+     "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1"
+    ],
+    "proofs": {
+     "gf180mcu_fd_sc_mcu7t5v0__dlya_1@tt": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "gf180mcu_fd_sc_mcu7t5v0__dlya_1@ss": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "gf180mcu_fd_sc_mcu7t5v0__dlya_1@ff": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1@tt": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1@ss": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     },
+     "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1@ff": {
+      "truth_table": [
+       0,
+       1
+      ],
+      "wrong_polarity": "rejected"
+     }
+    },
+    "native_wrong_polarity": {
+     "status": "rejected",
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_1",
+     "liberty_function": "(!I)",
+     "code": "ECO_NOT_BUFFER"
+    },
+    "native_positive_control": "accepted"
+   },
+   "drc_before": {
+    "statuses": {
+     "drc_magic": "failed",
+     "drc_klayout": "failed",
+     "antenna": "passed",
+     "lvs_netgen": "passed",
+     "lvs_klayout": "passed"
+    },
+    "counts": {
+     "drc-magic": 2,
+     "drc-klayout": 2,
+     "antenna": 0,
+     "lvs-netgen": 0,
+     "lvs-klayout": 0
+    },
+    "by_rule": {
+     "drc-magic": {
+      "M2.2a": 2
+     },
+     "drc-klayout": {
+      "M2.2a": 2
+     },
+     "antenna": {},
+     "lvs-netgen": {
+      "mismatch": 0
+     },
+     "lvs-klayout": {
+      "mismatch": 0
+     }
+    },
+    "gds_sha256": "85ec426270ff9e645cf5994654ce3db58d45523ad84214bf4d9a6a0baee0225f"
+   },
+   "drc_after": {
+    "statuses": {
+     "drc_magic": "failed",
+     "drc_klayout": "failed",
+     "antenna": "passed",
+     "lvs_netgen": "passed",
+     "lvs_klayout": "passed"
+    },
+    "counts": {
+     "drc-magic": 2,
+     "drc-klayout": 2,
+     "antenna": 0,
+     "lvs-netgen": 0,
+     "lvs-klayout": 0
+    },
+    "by_rule": {
+     "drc-magic": {
+      "M2.2a": 2
+     },
+     "drc-klayout": {
+      "M2.2a": 2
+     },
+     "antenna": {},
+     "lvs-netgen": {
+      "mismatch": 0
+     },
+     "lvs-klayout": {
+      "mismatch": 0
+     }
+    },
+    "gds_sha256": "b3308c5b01edab688efe6e5bb1cf060910c7d524751df30d9c11caad7d3ba687"
+   },
+   "antenna_controls": {
+    "status": "passed",
+    "reason": null,
+    "planted": {
+     "net": "a[1]",
+     "layer": "Metal3",
+     "rect_dbu": [
+      2400,
+      -4000000,
+      2960,
+      800
+     ],
+     "length_um": 2000
+    },
+    "native_planted": {
+     "status": "violated",
+     "violated": [
+      {
+       "net": "a[1]",
+       "layer": "Metal3",
+       "kind": "side_area",
+       "ratio": 866.6752100019536,
+       "limit": 400.0,
+       "rule": "ANTENNADIFFSIDEAREARATIO"
+      }
+     ]
+    },
+    "deck_planted": {
+     "status": "failed",
+     "count": 8,
+     "by_rule": {
+      "ANT.16_ii_ANT.4": 8
+     },
+     "summary": "/mnt/data2/cgao/git/RustROAD/.work/wt/hold/.work/evidence/final/gf180_antctl_planted_signoff/signoff.json"
+    },
+    "antenna_eco": {
+     "status": "planned",
+     "nets": [
+      {
+       "net": "a[1]",
+       "violations": 1,
+       "worst_ratio_over_limit": 2.166688025004884,
+       "diodes": 1,
+       "estimated_worst_ratio_over_limit": 0.6362960243244795,
+       "instances": [
+        "rr_eco_ant_0"
+       ]
+      }
+     ],
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__antenna"
+    },
+    "native_repaired": {
+     "status": "passed",
+     "worst": [
+      {
+       "net": "a[1]",
+       "layer": "Metal3",
+       "ratio": 254.531,
+       "limit": 400.0
+      },
+      {
+       "net": "clk",
+       "layer": "Metal3",
+       "ratio": 60.289,
+       "limit": 400.0
+      },
+      {
+       "net": "a[0]",
+       "layer": "Metal2",
+       "ratio": 53.789,
+       "limit": 400.0
+      }
+     ]
+    },
+    "native_repaired_unplanted": {
+     "status": "passed"
+    },
+    "deck_repaired": {
+     "status": "passed",
+     "count": 0,
+     "by_rule": {},
+     "summary": "/mnt/data2/cgao/git/RustROAD/.work/wt/hold/.work/evidence/final/gf180_antctl_repaired_signoff/signoff.json"
+    },
+    "repaired_timing": {
+     "closed": true,
+     "corners": {
+      "tt": {
+       "worst_setup_ns": 7.463601855443688,
+       "worst_hold_ns": 0.2445892628211953
+      },
+      "ss": {
+       "worst_setup_ns": 4.85211179485249,
+       "worst_hold_ns": 0.37083213577619056
+      },
+      "ff": {
+       "worst_setup_ns": 8.549074060656416,
+       "worst_hold_ns": 0.19624371141335406
+      }
+     }
+    }
+   },
+   "openrcx_merged_reported": {
+    "status": "reported",
+    "reason": null,
+    "ruststa_closed": true,
+    "opensta_closed": true,
+    "opensta_worst": {
+     "tt": {
+      "setup": 7.463933,
+      "hold": 0.240552
+     },
+     "ss": {
+      "setup": 4.852219,
+      "hold": 0.361523
+     },
+     "ff": {
+      "setup": 8.549253,
+      "hold": 0.193814
+     }
+    },
+    "parity_ps": 2.7226,
+    "dropped_patch_lines": 1,
+    "note": "OpenRCX ignores DEF RECT patches (router stream); the b0 stream owns DEF merging"
+   },
+   "wall_seconds": 88.435,
+   "reason": null
+  }
+ ],
+ "driver": {
+  "wall": "2:25.62",
+  "peak_rss_kib": 290084
+ },
+ "cts_drive_evaluation": [
+  {
+   "pdk": "sky130",
+   "variant": "base",
+   "level_cells": [
+    "clkbuf_1"
+   ],
+   "status": "passed",
+   "iteration0": {
+    "tt": {
+     "latency_max_ns": 0.256256,
+     "slew_max_ns": 0.123872,
+     "worst_hold_ns": -0.0045
+    },
+    "ss": {
+     "latency_max_ns": 0.447624,
+     "slew_max_ns": 0.198719,
+     "worst_hold_ns": -0.09981
+    },
+    "ff": {
+     "latency_max_ns": 0.166949,
+     "slew_max_ns": 0.087974,
+     "worst_hold_ns": 0.057352
+    }
+   },
+   "iterations": 3,
+   "hold_cells": 4,
+   "hold_area_um2": 15.014,
+   "cell_types": [
+    "sky130_fd_sc_hd__buf_1"
+   ],
+   "first_plan": null,
+   "reason": null,
+   "failure": null
+  },
+  {
+   "pdk": "sky130",
+   "variant": "L24",
+   "level_cells": [
+    "clkbuf_2",
+    "clkbuf_4"
+   ],
+   "status": "passed",
+   "iteration0": {
+    "tt": {
+     "latency_max_ns": 0.287262,
+     "slew_max_ns": 0.066586,
+     "worst_hold_ns": -0.013108
+    },
+    "ss": {
+     "latency_max_ns": 0.487538,
+     "slew_max_ns": 0.105532,
+     "worst_hold_ns": -0.111964
+    },
+    "ff": {
+     "latency_max_ns": 0.202016,
+     "slew_max_ns": 0.047776,
+     "worst_hold_ns": 0.039916
+    }
+   },
+   "iterations": 2,
+   "hold_cells": 4,
+   "hold_area_um2": 15.014,
+   "cell_types": [
+    "sky130_fd_sc_hd__buf_1"
+   ],
+   "first_plan": null,
+   "reason": null,
+   "failure": null
+  },
+  {
+   "pdk": "sky130",
+   "variant": "L48",
+   "level_cells": [
+    "clkbuf_4",
+    "clkbuf_8"
+   ],
+   "status": "passed",
+   "iteration0": {
+    "tt": {
+     "latency_max_ns": 0.293255,
+     "slew_max_ns": 0.04575,
+     "worst_hold_ns": 0.003244
+    },
+    "ss": {
+     "latency_max_ns": 0.498025,
+     "slew_max_ns": 0.076998,
+     "worst_hold_ns": -0.088248
+    },
+    "ff": {
+     "latency_max_ns": 0.207171,
+     "slew_max_ns": 0.032298,
+     "worst_hold_ns": 0.048885
+    }
+   },
+   "iterations": 2,
+   "hold_cells": 4,
+   "hold_area_um2": 15.014,
+   "cell_types": [
+    "sky130_fd_sc_hd__buf_1"
+   ],
+   "first_plan": null,
+   "reason": null,
+   "failure": null
+  },
+  {
+   "pdk": "sky130",
+   "variant": "L4",
+   "level_cells": [
+    "clkbuf_4"
+   ],
+   "status": "failed",
+   "iteration0": {
+    "tt": {
+     "latency_max_ns": 0.307855,
+     "slew_max_ns": 0.048347,
+     "worst_hold_ns": -0.021312
+    },
+    "ss": {
+     "latency_max_ns": 0.525034,
+     "slew_max_ns": 0.08105,
+     "worst_hold_ns": -0.133842
+    },
+    "ff": {
+     "latency_max_ns": 0.2157,
+     "slew_max_ns": 0.033858,
+     "worst_hold_ns": 0.034003
+    }
+   },
+   "iterations": null,
+   "hold_cells": null,
+   "hold_area_um2": null,
+   "cell_types": null,
+   "first_plan": {
+    "cells": 5,
+    "area_um2": 20.019,
+    "cell_types": [
+     "sky130_fd_sc_hd__buf_1",
+     "sky130_fd_sc_hd__buf_2"
+    ]
+   },
+   "reason": "sky130_i1_all_route: process exited 2; see receipt",
+   "failure": {
+    "step": "sky130_i1_all_route",
+    "code": "BUDGET_EXCEEDED",
+    "message": "BUDGET_EXCEEDED: routing comparison limit"
+   }
+  },
+  {
+   "pdk": "sky130",
+   "variant": "L816",
+   "level_cells": [
+    "clkbuf_8",
+    "clkbuf_16"
+   ],
+   "status": "failed",
+   "iteration0": {},
+   "iterations": null,
+   "hold_cells": null,
+   "hold_area_um2": null,
+   "cell_types": null,
+   "first_plan": null,
+   "reason": "sky130_i0_clock_route: process exited 2; see receipt",
+   "failure": {
+    "step": "sky130_i0_clock_route",
+    "code": "BUDGET_EXCEEDED",
+    "message": "BUDGET_EXCEEDED: pin access candidates"
+   }
+  },
+  {
+   "pdk": "gf180",
+   "variant": "base",
+   "level_cells": [
+    "clkbuf_1"
+   ],
+   "status": "passed",
+   "iteration0": {
+    "tt": {
+     "latency_max_ns": 0.756592,
+     "slew_max_ns": 0.359707,
+     "worst_hold_ns": -0.394451
+    },
+    "ss": {
+     "latency_max_ns": 1.458135,
+     "slew_max_ns": 0.69894,
+     "worst_hold_ns": -0.898712
+    },
+    "ff": {
+     "latency_max_ns": 0.452019,
+     "slew_max_ns": 0.209984,
+     "worst_hold_ns": -0.180479
+    }
+   },
+   "iterations": 2,
+   "hold_cells": 4,
+   "hold_area_um2": 96.589,
+   "cell_types": [
+    "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+   ],
+   "first_plan": null,
+   "reason": null,
+   "failure": null
+  },
+  {
+   "pdk": "gf180",
+   "variant": "L24",
+   "level_cells": [
+    "clkbuf_2",
+    "clkbuf_4"
+   ],
+   "status": "failed",
+   "iteration0": {
+    "tt": {
+     "latency_max_ns": 0.699897,
+     "slew_max_ns": 0.212512,
+     "worst_hold_ns": -0.292418
+    },
+    "ss": {
+     "latency_max_ns": 1.338584,
+     "slew_max_ns": 0.413286,
+     "worst_hold_ns": -0.675167
+    },
+    "ff": {
+     "latency_max_ns": 0.422885,
+     "slew_max_ns": 0.124823,
+     "worst_hold_ns": -0.12837
+    }
+   },
+   "iterations": null,
+   "hold_cells": null,
+   "hold_area_um2": null,
+   "cell_types": null,
+   "first_plan": {
+    "cells": 4,
+    "area_um2": 74.637,
+    "cell_types": [
+     "gf180mcu_fd_sc_mcu7t5v0__buf_1",
+     "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+    ]
+   },
+   "reason": "gf180_i1_all_route: process exited 2; see receipt",
+   "failure": {
+    "step": "gf180_i1_all_route",
+    "code": "BUDGET_EXCEEDED",
+    "message": "BUDGET_EXCEEDED: routing expansion limit: per-sink search, pin 9 net 9, 9 nets done"
+   }
+  },
+  {
+   "pdk": "gf180",
+   "variant": "L48",
+   "level_cells": [
+    "clkbuf_4",
+    "clkbuf_8"
+   ],
+   "status": "failed",
+   "iteration0": {
+    "tt": {
+     "latency_max_ns": 0.666663,
+     "slew_max_ns": 0.16113,
+     "worst_hold_ns": -0.230913
+    },
+    "ss": {
+     "latency_max_ns": 1.279117,
+     "slew_max_ns": 0.311371,
+     "worst_hold_ns": -0.553607
+    },
+    "ff": {
+     "latency_max_ns": 0.402823,
+     "slew_max_ns": 0.094848,
+     "worst_hold_ns": -0.092684
+    }
+   },
+   "iterations": null,
+   "hold_cells": null,
+   "hold_area_um2": null,
+   "cell_types": null,
+   "first_plan": {
+    "cells": 4,
+    "area_um2": 52.685,
+    "cell_types": [
+     "gf180mcu_fd_sc_mcu7t5v0__buf_1"
+    ]
+   },
+   "reason": "gf180_i1_all_route: process exited 2; see receipt",
+   "failure": {
+    "step": "gf180_i1_all_route",
+    "code": "BUDGET_EXCEEDED",
+    "message": "BUDGET_EXCEEDED: routing expansion limit: per-sink search, pin 9 net 9, 9 nets done"
+   }
+  },
+  {
+   "pdk": "gf180",
+   "variant": "L4",
+   "level_cells": [
+    "clkbuf_4"
+   ],
+   "status": "failed",
+   "iteration0": {
+    "tt": {
+     "latency_max_ns": 0.70492,
+     "slew_max_ns": 0.161008,
+     "worst_hold_ns": -0.287264
+    },
+    "ss": {
+     "latency_max_ns": 1.35181,
+     "slew_max_ns": 0.311124,
+     "worst_hold_ns": -0.652641
+    },
+    "ff": {
+     "latency_max_ns": 0.425569,
+     "slew_max_ns": 0.094801,
+     "worst_hold_ns": -0.128817
+    }
+   },
+   "iterations": null,
+   "hold_cells": null,
+   "hold_area_um2": null,
+   "cell_types": null,
+   "first_plan": {
+    "cells": 4,
+    "area_um2": 63.661,
+    "cell_types": [
+     "gf180mcu_fd_sc_mcu7t5v0__buf_1",
+     "gf180mcu_fd_sc_mcu7t5v0__dlya_1"
+    ]
+   },
+   "reason": "gf180_i1_all_route: process exited 2; see receipt",
+   "failure": {
+    "step": "gf180_i1_all_route",
+    "code": "BUDGET_EXCEEDED",
+    "message": "BUDGET_EXCEEDED: routing expansion limit: per-sink search, pin 9 net 9, 9 nets done"
+   }
+  },
+  {
+   "pdk": "gf180",
+   "variant": "L816",
+   "level_cells": [
+    "clkbuf_8",
+    "clkbuf_16"
+   ],
+   "status": "failed",
+   "iteration0": {},
+   "iterations": null,
+   "hold_cells": null,
+   "hold_area_um2": null,
+   "cell_types": null,
+   "first_plan": null,
+   "reason": "gf180_i0_cts: process exited 2; see receipt",
+   "failure": {
+    "step": "gf180_i0_cts",
+    "code": "PLACEMENT_CAPACITY",
+    "message": "PLACEMENT_CAPACITY: no legal row remains for instance rr_clkbuf_2: insufficient free row intervals between taps"
+   }
+  },
+  {
+   "pdk": "gf180",
+   "variant": "L1220",
+   "level_cells": [
+    "clkbuf_12",
+    "clkbuf_20"
+   ],
+   "status": "failed",
+   "iteration0": {},
+   "iterations": null,
+   "hold_cells": null,
+   "hold_area_um2": null,
+   "cell_types": null,
+   "first_plan": null,
+   "reason": "gf180_i0_cts: process exited 2; see receipt",
+   "failure": {
+    "step": "gf180_i0_cts",
+    "code": "PLACEMENT_CAPACITY",
+    "message": "PLACEMENT_CAPACITY: no legal row remains for instance rr_clkbuf_0: insufficient free row intervals between taps"
+   }
+  }
+ ]
+}

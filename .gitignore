@@ -1,0 +1,10 @@
+/target/
+/.work/
+__pycache__/
+*.pyc
+
+AGENTS.md
+
+agents.md
+
+HANDOFF.md

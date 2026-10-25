@@ -1,0 +1,125 @@
+{
+ "schema": "rustroad.clock-period.v1",
+ "design": "alu",
+ "rule": "period = max(10 ns, round_up(1.25 x pre-layout ss+max critical-path delay, 1 ns))",
+ "owner_decision": "2026-10-24 clock period rule",
+ "method": {
+  "netlist": "gate mapped netlist (RustSys + cell policy, deconflict, port-alias buffers)",
+  "constraints": "rendered signoff SDC on the reference clock SDC, set_propagated_clock removed (ideal clock)",
+  "engine": "RustSTA, ss Liberty only, no SPEF, --require-wire-model per PDK",
+  "wire_model": {
+   "gf180": "ideal",
+   "sky130": "wireload_lumped"
+  },
+  "critical_path_delay": "reference period - worst ss setup slack",
+  "rounding": "ceil to 1 ns, floor 10 ns"
+ },
+ "inputs": {
+  "rtl": [
+   {
+    "path": "fixtures/designs/rtl/alu/wt_pkg.sv",
+    "sha256": "0f1e288fda63aed831b106a0f47755240808bcae2b2e826354375c3e12088879"
+   },
+   {
+    "path": "fixtures/designs/rtl/alu/alu.sv",
+    "sha256": "3067a49ef31f74b51927689cc165bc45d4995dc8fa7bef2ba836cfda1ba5ff64"
+   }
+  ],
+  "reference_clock_sdc": {
+   "path": "fixtures/designs/alu/cts.sdc",
+   "sha256": "a5ee8a7d8db310a6245c2f386abe42a8af17d5001ad0db7da1bb744209dc0c3d",
+   "period_ns": 10.0
+  },
+  "io_template": {
+   "path": "fixtures/designs/postroute-io-virtual.sdc.tmpl",
+   "sha256": "fadb23b324f7bfc8f9ac02f3303e175f1e600c0bbf145daab3e406149d020596"
+  },
+  "cell_policy": {
+   "path": "fixtures/flow/cell-policy.json",
+   "sha256": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37"
+  },
+  "tools": {
+   "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "rusteda": "c39dbde459db506ab3731be75900eae93bcb71691d8e4945e05c2013f4cdd11a",
+   "ruststa": "472de8e8980100310005a817709a68cdda7b376d1fbd51f8ae3ad684aad08fea",
+   "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252"
+  }
+ },
+ "pdks": {
+  "sky130": {
+   "liberty_ss": {
+    "name": "sky130_fd_sc_hd__ss_100C_1v60.lib",
+    "sha256": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361"
+   },
+   "netlist": {
+    "kind": "rustsys",
+    "cells": 253,
+    "area": 2287.1936000000023,
+    "sha256": "fe4dae3830eb9294bc0ae5ebe9266588e129dc7fd5416cabb1ed19f41f5c69cf",
+    "instances": 253
+   },
+   "prelayout": {
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "unconstrained_endpoints": null,
+    "startpoint": "a_i[3]",
+    "endpoint": "zero_o",
+    "arrival_ns": 3.6249917886244702,
+    "required_ns": 9.75,
+    "slack_ns": 6.12500821137553
+   },
+   "critical_path_delay_ns": 3.874992,
+   "scaled_ns": 4.84374,
+   "period_ns": 10,
+   "binding": "floor 10 ns",
+   "clock_sdc": {
+    "path": "fixtures/designs/alu/sky130-cts.sdc",
+    "sha256": "a5ee8a7d8db310a6245c2f386abe42a8af17d5001ad0db7da1bb744209dc0c3d"
+   },
+   "self_check": {
+    "status": "passed",
+    "worst_slack_at_period_ns": 6.12500821137553,
+    "expected_ns": 6.125008,
+    "endpoint": "zero_o"
+   }
+  },
+  "gf180": {
+   "liberty_ss": {
+    "name": "gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib",
+    "sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6"
+   },
+   "netlist": {
+    "kind": "rustsys",
+    "cells": 244,
+    "area": 5848.012800000009,
+    "sha256": "9545afa01efaf685cb9d72d9d22f4ea2952b6df51c0095a3058bfbf23af99769",
+    "instances": 244
+   },
+   "prelayout": {
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "unconstrained_endpoints": null,
+    "startpoint": "b_i[1]",
+    "endpoint": "zero_o",
+    "arrival_ns": 13.708419451868728,
+    "required_ns": 9.75,
+    "slack_ns": -3.9584194518687283
+   },
+   "critical_path_delay_ns": 13.958419,
+   "scaled_ns": 17.448024,
+   "period_ns": 18,
+   "binding": "1.25 x critical path",
+   "clock_sdc": {
+    "path": "fixtures/designs/alu/gf180-cts.sdc",
+    "sha256": "e9b9238651b019b2464c735b0e51e0b966a3dd004ddb9a470f4a43ef777b787e"
+   },
+   "self_check": {
+    "status": "passed",
+    "worst_slack_at_period_ns": 4.041580548131272,
+    "expected_ns": 4.041581,
+    "endpoint": "zero_o"
+   }
+  }
+ }
+}

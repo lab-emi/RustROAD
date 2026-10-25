@@ -1,0 +1,3648 @@
+{
+ "schema": "rustroad.drv-dont-use.v1",
+ "pdk": "gf180",
+ "corner": "ss_125C_3v00",
+ "liberty": {
+  "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib",
+  "sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+  "bytes": 19934792,
+  "manifest_key": "liberty_ss",
+  "time_unit_ns": 1.0,
+  "capacitive_load_unit_pf": 1.0
+ },
+ "rule": {
+  "max_transition_ns": 1.0,
+  "input_transition_ns": 0.2,
+  "load": "smallest input-pin capacitance of a cell synthesis may instantiate (one sink, no wire); PDK-excluded, owner-reserved and output-less cells are not sinks; raised to a table's smallest load index where that is larger",
+  "member": "worst over every output pin, timing arc and rise/fall transition table (three_state_disable skipped), bilinear, no extrapolation",
+  "family": "DRV-limited when even its best member exceeds max_transition_ns",
+  "source": "owner decision 2026-10-24 (GF180 DRV / cell policy); SDC set_max_transition 1.0 unchanged"
+ },
+ "minimum_load": {
+  "load_pf": 0.002283,
+  "cell": "gf180mcu_fd_sc_mcu7t5v0__dffrsnq_1",
+  "pin": "D"
+ },
+ "producer": "scripts/derive_drv_dont_use.py",
+ "drv_limited_families": [
+  "aoi211",
+  "aoi221",
+  "aoi222",
+  "nor4",
+  "oai22",
+  "oai221",
+  "oai222",
+  "oai31",
+  "oai32",
+  "oai33"
+ ],
+ "dont_use": [
+  "gf180mcu_fd_sc_mcu7t5v0__aoi211_*",
+  "gf180mcu_fd_sc_mcu7t5v0__aoi221_*",
+  "gf180mcu_fd_sc_mcu7t5v0__aoi222_*",
+  "gf180mcu_fd_sc_mcu7t5v0__nor4_*",
+  "gf180mcu_fd_sc_mcu7t5v0__oai22_*",
+  "gf180mcu_fd_sc_mcu7t5v0__oai221_*",
+  "gf180mcu_fd_sc_mcu7t5v0__oai222_*",
+  "gf180mcu_fd_sc_mcu7t5v0__oai31_*",
+  "gf180mcu_fd_sc_mcu7t5v0__oai32_*",
+  "gf180mcu_fd_sc_mcu7t5v0__oai33_*"
+ ],
+ "drv_limited_at_table_min_load": [
+  "aoi211",
+  "aoi221",
+  "aoi222",
+  "nor4",
+  "oai22",
+  "oai221",
+  "oai222",
+  "oai32",
+  "oai33"
+ ],
+ "no_transition_table": [
+  "gf180mcu_fd_sc_mcu7t5v0__antenna",
+  "gf180mcu_fd_sc_mcu7t5v0__endcap",
+  "gf180mcu_fd_sc_mcu7t5v0__fill_1",
+  "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+  "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+  "gf180mcu_fd_sc_mcu7t5v0__fill_32",
+  "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+  "gf180mcu_fd_sc_mcu7t5v0__fill_64",
+  "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+  "gf180mcu_fd_sc_mcu7t5v0__fillcap_16",
+  "gf180mcu_fd_sc_mcu7t5v0__fillcap_32",
+  "gf180mcu_fd_sc_mcu7t5v0__fillcap_4",
+  "gf180mcu_fd_sc_mcu7t5v0__fillcap_64",
+  "gf180mcu_fd_sc_mcu7t5v0__fillcap_8",
+  "gf180mcu_fd_sc_mcu7t5v0__filltie",
+  "gf180mcu_fd_sc_mcu7t5v0__hold",
+  "gf180mcu_fd_sc_mcu7t5v0__tieh",
+  "gf180mcu_fd_sc_mcu7t5v0__tiel"
+ ],
+ "families": [
+  {
+   "family": "addf",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__addf_1",
+   "best_ns": 0.532857,
+   "best_ns_at_table_min_load": 0.478,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__addf_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.532857,
+     "pin": "S",
+     "related_pin": "B",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.478,
+      "related_pin": "B"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__addf_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.547954,
+     "pin": "S",
+     "related_pin": "B",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.513362,
+      "related_pin": "B"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__addf_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.791169,
+     "pin": "S",
+     "related_pin": "B",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.770277,
+      "related_pin": "B"
+     }
+    }
+   ]
+  },
+  {
+   "family": "addh",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__addh_4",
+   "best_ns": 0.283418,
+   "best_ns_at_table_min_load": 0.2708,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__addh_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.367276,
+     "pin": "S",
+     "related_pin": "A",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.326438,
+      "related_pin": "B"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__addh_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.294664,
+     "pin": "S",
+     "related_pin": "A",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.271123,
+      "related_pin": "A"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__addh_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.283418,
+     "pin": "S",
+     "related_pin": "B",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.2708,
+      "related_pin": "B"
+     }
+    }
+   ]
+  },
+  {
+   "family": "and2",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__and2_4",
+   "best_ns": 0.191376,
+   "best_ns_at_table_min_load": 0.177377,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and2_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.326831,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.2724,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and2_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.215805,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.188019,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and2_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.191376,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.177377,
+      "related_pin": "A1"
+     }
+    }
+   ]
+  },
+  {
+   "family": "and3",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__and3_4",
+   "best_ns": 0.235207,
+   "best_ns_at_table_min_load": 0.219404,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and3_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.392559,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.331238,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and3_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.262881,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.231962,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and3_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.235207,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.219404,
+      "related_pin": "A2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "and4",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__and4_4",
+   "best_ns": 0.299711,
+   "best_ns_at_table_min_load": 0.269646,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and4_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.446574,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.381216,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and4_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.303038,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.269646,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__and4_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.299711,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.282408,
+      "related_pin": "A2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "aoi21",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__aoi21_4",
+   "best_ns": 0.601585,
+   "best_ns_at_table_min_load": 0.573015,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi21_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.734372,
+     "pin": "ZN",
+     "related_pin": "B",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.622484,
+      "related_pin": "B"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi21_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.635253,
+     "pin": "ZN",
+     "related_pin": "B",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.579261,
+      "related_pin": "B"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi21_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.601585,
+     "pin": "ZN",
+     "related_pin": "B",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.573015,
+      "related_pin": "B"
+     }
+    }
+   ]
+  },
+  {
+   "family": "aoi211",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__aoi211_4",
+   "best_ns": 1.056059,
+   "best_ns_at_table_min_load": 1.013384,
+   "drv_limited": true,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi211_1",
+     "excluded_already": false,
+     "worst_transition_ns": 1.276992,
+     "pin": "ZN",
+     "related_pin": "C",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.107808,
+      "related_pin": "C"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi211_2",
+     "excluded_already": false,
+     "worst_transition_ns": 1.153165,
+     "pin": "ZN",
+     "related_pin": "C",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.062192,
+      "related_pin": "B"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi211_4",
+     "excluded_already": false,
+     "worst_transition_ns": 1.056059,
+     "pin": "ZN",
+     "related_pin": "C",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.013384,
+      "related_pin": "C"
+     }
+    }
+   ]
+  },
+  {
+   "family": "aoi22",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__aoi22_2",
+   "best_ns": 0.798408,
+   "best_ns_at_table_min_load": 0.741269,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi22_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.882992,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.769326,
+      "related_pin": "B2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi22_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.798408,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.741269,
+      "related_pin": "B2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi22_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.842554,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.810577,
+      "related_pin": "B2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "aoi221",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__aoi221_4",
+   "best_ns": 1.473888,
+   "best_ns_at_table_min_load": 1.304192,
+   "drv_limited": true,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi221_1",
+     "excluded_already": false,
+     "worst_transition_ns": 1.475792,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.304192,
+      "related_pin": "B2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi221_2",
+     "excluded_already": false,
+     "worst_transition_ns": 1.552665,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.46,
+      "related_pin": "B2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi221_4",
+     "excluded_already": false,
+     "worst_transition_ns": 1.473888,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.428808,
+      "related_pin": "B2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "aoi222",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__aoi222_4",
+   "best_ns": 1.665493,
+   "best_ns_at_table_min_load": 1.622,
+   "drv_limited": true,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi222_1",
+     "excluded_already": false,
+     "worst_transition_ns": 2.005033,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.824192,
+      "related_pin": "C2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi222_2",
+     "excluded_already": false,
+     "worst_transition_ns": 1.719265,
+     "pin": "ZN",
+     "related_pin": "C2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.633,
+      "related_pin": "C2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__aoi222_4",
+     "excluded_already": false,
+     "worst_transition_ns": 1.665493,
+     "pin": "ZN",
+     "related_pin": "C2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.622,
+      "related_pin": "B2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "buf",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__buf_8",
+   "best_ns": 0.143701,
+   "best_ns_at_table_min_load": 0.135579,
+   "drv_limited": false,
+   "usable_members": 8,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__buf_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.275982,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.224746,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__buf_12",
+     "excluded_already": false,
+     "worst_transition_ns": 0.144911,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.140626,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__buf_16",
+     "excluded_already": false,
+     "worst_transition_ns": 0.145649,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.142422,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__buf_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.179554,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.153991,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__buf_20",
+     "excluded_already": false,
+     "worst_transition_ns": 0.146523,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.143922,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__buf_3",
+     "excluded_already": false,
+     "worst_transition_ns": 0.194488,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.182381,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__buf_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.148466,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.135579,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__buf_8",
+     "excluded_already": false,
+     "worst_transition_ns": 0.143701,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.137283,
+      "related_pin": "I"
+     }
+    }
+   ]
+  },
+  {
+   "family": "bufz",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__bufz_4",
+   "best_ns": 0.245273,
+   "best_ns_at_table_min_load": 0.245273,
+   "drv_limited": false,
+   "usable_members": 7,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__bufz_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.3638,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.004209,
+      "worst_transition_ns": 0.3638,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__bufz_12",
+     "excluded_already": false,
+     "worst_transition_ns": 0.311842,
+     "pin": "Z",
+     "related_pin": "EN",
+     "timing_type": "three_state_enable",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.02583,
+      "worst_transition_ns": 0.311842,
+      "related_pin": "EN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__bufz_16",
+     "excluded_already": false,
+     "worst_transition_ns": 0.359366,
+     "pin": "Z",
+     "related_pin": "EN",
+     "timing_type": "three_state_enable",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.0348,
+      "worst_transition_ns": 0.359366,
+      "related_pin": "EN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__bufz_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.2578,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.004786,
+      "worst_transition_ns": 0.2578,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__bufz_3",
+     "excluded_already": false,
+     "worst_transition_ns": 0.257754,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.007968,
+      "worst_transition_ns": 0.257754,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__bufz_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.245273,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.008858,
+      "worst_transition_ns": 0.245273,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__bufz_8",
+     "excluded_already": false,
+     "worst_transition_ns": 0.26455,
+     "pin": "Z",
+     "related_pin": "EN",
+     "timing_type": "three_state_enable",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.01699,
+      "worst_transition_ns": 0.26455,
+      "related_pin": "EN"
+     }
+    }
+   ]
+  },
+  {
+   "family": "clkbuf",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_12",
+   "best_ns": 0.179197,
+   "best_ns_at_table_min_load": 0.17463,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.25866,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.207799,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_12",
+     "excluded_already": true,
+     "worst_transition_ns": 0.179197,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.17463,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_16",
+     "excluded_already": true,
+     "worst_transition_ns": 0.182867,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.179442,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.208471,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.181711,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_20",
+     "excluded_already": true,
+     "worst_transition_ns": 0.182973,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.180238,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_3",
+     "excluded_already": true,
+     "worst_transition_ns": 0.196022,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.182404,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.191702,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.178289,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_8",
+     "excluded_already": true,
+     "worst_transition_ns": 0.184645,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.177634,
+      "related_pin": "I"
+     }
+    }
+   ]
+  },
+  {
+   "family": "clkinv",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__clkinv_12",
+   "best_ns": 0.122444,
+   "best_ns_at_table_min_load": 0.117066,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.237937,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.184169,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_12",
+     "excluded_already": true,
+     "worst_transition_ns": 0.122444,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.117962,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_16",
+     "excluded_already": true,
+     "worst_transition_ns": 0.122962,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.119596,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.159476,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.132519,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_20",
+     "excluded_already": true,
+     "worst_transition_ns": 0.125659,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.122954,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_3",
+     "excluded_already": true,
+     "worst_transition_ns": 0.152154,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.134095,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.132743,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.119338,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__clkinv_8",
+     "excluded_already": true,
+     "worst_transition_ns": 0.123794,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.117066,
+      "related_pin": "I"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dffnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dffnq_2",
+   "best_ns": 0.235453,
+   "best_ns_at_table_min_load": 0.206523,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.309944,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.25583,
+      "related_pin": "CLKN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.235453,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.206523,
+      "related_pin": "CLKN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.271966,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.261323,
+      "related_pin": "CLKN"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dffnrnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dffnrnq_2",
+   "best_ns": 0.296248,
+   "best_ns_at_table_min_load": 0.263323,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnrnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.391527,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.331477,
+      "related_pin": "CLKN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnrnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.296248,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.263323,
+      "related_pin": "CLKN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnrnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.332345,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.315238,
+      "related_pin": "CLKN"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dffnrsnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dffnrsnq_2",
+   "best_ns": 0.328445,
+   "best_ns_at_table_min_load": 0.295562,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnrsnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.383171,
+     "pin": "Q",
+     "related_pin": "SETN",
+     "timing_type": "preset",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.325115,
+      "related_pin": "SETN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnrsnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.328445,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.295562,
+      "related_pin": "CLKN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnrsnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.394063,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.37657,
+      "related_pin": "CLKN"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dffnsnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dffnsnq_2",
+   "best_ns": 0.264631,
+   "best_ns_at_table_min_load": 0.244638,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnsnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.311345,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.260592,
+      "related_pin": "CLKN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnsnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.264631,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.244638,
+      "related_pin": "CLKN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffnsnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.347192,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "falling_edge",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.3348,
+      "related_pin": "CLKN"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dffq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dffq_4",
+   "best_ns": 0.221005,
+   "best_ns_at_table_min_load": 0.208077,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.316272,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.2668,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.259598,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.231638,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.221005,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.208077,
+      "related_pin": "CLK"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dffrnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dffrnq_2",
+   "best_ns": 0.302635,
+   "best_ns_at_table_min_load": 0.270438,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffrnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.381593,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.323285,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffrnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.302635,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.270438,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffrnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.348233,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.331238,
+      "related_pin": "CLK"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dffrsnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dffrsnq_2",
+   "best_ns": 0.32746,
+   "best_ns_at_table_min_load": 0.295038,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffrsnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.382335,
+     "pin": "Q",
+     "related_pin": "SETN",
+     "timing_type": "preset",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.324392,
+      "related_pin": "SETN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffrsnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.32746,
+     "pin": "Q",
+     "related_pin": "SETN",
+     "timing_type": "preset",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.295038,
+      "related_pin": "SETN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffrsnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.389155,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.371846,
+      "related_pin": "CLK"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dffsnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dffsnq_4",
+   "best_ns": 0.220278,
+   "best_ns_at_table_min_load": 0.207438,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffsnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.326169,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.2754,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffsnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.233787,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.209877,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dffsnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.220278,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.207438,
+      "related_pin": "CLK"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dlya",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dlya_1",
+   "best_ns": 0.293361,
+   "best_ns_at_table_min_load": 0.258277,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlya_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.293361,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.258277,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlya_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.329057,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.306038,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlya_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.489609,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.475,
+      "related_pin": "I"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dlyb",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dlyb_1",
+   "best_ns": 0.477585,
+   "best_ns_at_table_min_load": 0.430915,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlyb_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.477585,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.430915,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlyb_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.563139,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.531038,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlyb_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.871079,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.851562,
+      "related_pin": "I"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dlyc",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dlyc_1",
+   "best_ns": 0.490513,
+   "best_ns_at_table_min_load": 0.443723,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlyc_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.490513,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.443723,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlyc_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.564413,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.532038,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlyc_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.86354,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.843954,
+      "related_pin": "I"
+     }
+    }
+   ]
+  },
+  {
+   "family": "dlyd",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__dlyd_1",
+   "best_ns": 0.473589,
+   "best_ns_at_table_min_load": 0.426438,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlyd_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.473589,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.426438,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlyd_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.556309,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.523784,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__dlyd_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.860693,
+     "pin": "Z",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.841038,
+      "related_pin": "I"
+     }
+    }
+   ]
+  },
+  {
+   "family": "icgtn",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__icgtn_2",
+   "best_ns": 0.261413,
+   "best_ns_at_table_min_load": 0.236681,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__icgtn_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.302669,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.259277,
+      "related_pin": "CLKN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__icgtn_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.261413,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.236681,
+      "related_pin": "CLKN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__icgtn_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.346828,
+     "pin": "Q",
+     "related_pin": "CLKN",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.332438,
+      "related_pin": "CLKN"
+     }
+    }
+   ]
+  },
+  {
+   "family": "icgtp",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__icgtp_2",
+   "best_ns": 0.234907,
+   "best_ns_at_table_min_load": 0.206434,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__icgtp_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.329302,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.276181,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__icgtp_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.234907,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.206434,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__icgtp_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.27157,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.255788,
+      "related_pin": "CLK"
+     }
+    }
+   ]
+  },
+  {
+   "family": "inv",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__inv_12",
+   "best_ns": 0.126911,
+   "best_ns_at_table_min_load": 0.122336,
+   "drv_limited": false,
+   "usable_members": 8,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__inv_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.249027,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.195528,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__inv_12",
+     "excluded_already": false,
+     "worst_transition_ns": 0.126911,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.122336,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__inv_16",
+     "excluded_already": false,
+     "worst_transition_ns": 0.129829,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.126393,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__inv_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.171351,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.143981,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__inv_20",
+     "excluded_already": false,
+     "worst_transition_ns": 0.130127,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.127378,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__inv_3",
+     "excluded_already": false,
+     "worst_transition_ns": 0.163679,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.145528,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__inv_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.13907,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.125289,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__inv_8",
+     "excluded_already": false,
+     "worst_transition_ns": 0.132688,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.125832,
+      "related_pin": "I"
+     }
+    }
+   ]
+  },
+  {
+   "family": "invz",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__invz_4",
+   "best_ns": 0.237719,
+   "best_ns_at_table_min_load": 0.237719,
+   "drv_limited": false,
+   "usable_members": 7,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__invz_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.358438,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.004075,
+      "worst_transition_ns": 0.358438,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__invz_12",
+     "excluded_already": false,
+     "worst_transition_ns": 0.302204,
+     "pin": "ZN",
+     "related_pin": "EN",
+     "timing_type": "three_state_enable",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.02611,
+      "worst_transition_ns": 0.302204,
+      "related_pin": "EN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__invz_16",
+     "excluded_already": false,
+     "worst_transition_ns": 0.35,
+     "pin": "ZN",
+     "related_pin": "EN",
+     "timing_type": "three_state_enable",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.03589,
+      "worst_transition_ns": 0.35,
+      "related_pin": "EN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__invz_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.251158,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.004711,
+      "worst_transition_ns": 0.251158,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__invz_3",
+     "excluded_already": false,
+     "worst_transition_ns": 0.257881,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.008116,
+      "worst_transition_ns": 0.257881,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__invz_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.237719,
+     "pin": "ZN",
+     "related_pin": "I",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.008645,
+      "worst_transition_ns": 0.237719,
+      "related_pin": "I"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__invz_8",
+     "excluded_already": false,
+     "worst_transition_ns": 0.260131,
+     "pin": "ZN",
+     "related_pin": "EN",
+     "timing_type": "three_state_enable",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.01713,
+      "worst_transition_ns": 0.260131,
+      "related_pin": "EN"
+     }
+    }
+   ]
+  },
+  {
+   "family": "latq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__latq_1",
+   "best_ns": 0.454357,
+   "best_ns_at_table_min_load": 0.406954,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.454357,
+     "pin": "Q",
+     "related_pin": "D",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.406954,
+      "related_pin": "D"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.459363,
+     "pin": "Q",
+     "related_pin": "D",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.428285,
+      "related_pin": "D"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.670012,
+     "pin": "Q",
+     "related_pin": "D",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.648685,
+      "related_pin": "D"
+     }
+    }
+   ]
+  },
+  {
+   "family": "latrnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__latrnq_4",
+   "best_ns": 0.181921,
+   "best_ns_at_table_min_load": 0.168877,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latrnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.274301,
+     "pin": "Q",
+     "related_pin": "E",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.224246,
+      "related_pin": "E"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latrnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.213781,
+     "pin": "Q",
+     "related_pin": "E",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.187438,
+      "related_pin": "RN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latrnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.181921,
+     "pin": "Q",
+     "related_pin": "E",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.168877,
+      "related_pin": "E"
+     }
+    }
+   ]
+  },
+  {
+   "family": "latrsnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__latrsnq_4",
+   "best_ns": 0.183891,
+   "best_ns_at_table_min_load": 0.171562,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latrsnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.282153,
+     "pin": "Q",
+     "related_pin": "D",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.2326,
+      "related_pin": "D"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latrsnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.19749,
+     "pin": "Q",
+     "related_pin": "E",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.172685,
+      "related_pin": "E"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latrsnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.183891,
+     "pin": "Q",
+     "related_pin": "D",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.171562,
+      "related_pin": "D"
+     }
+    }
+   ]
+  },
+  {
+   "family": "latsnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__latsnq_4",
+   "best_ns": 0.168016,
+   "best_ns_at_table_min_load": 0.1554,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latsnq_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.274358,
+     "pin": "Q",
+     "related_pin": "E",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.223923,
+      "related_pin": "E"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latsnq_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.186798,
+     "pin": "Q",
+     "related_pin": "D",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.1616,
+      "related_pin": "E"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__latsnq_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.168016,
+     "pin": "Q",
+     "related_pin": "E",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.1554,
+      "related_pin": "D"
+     }
+    }
+   ]
+  },
+  {
+   "family": "mux2",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__mux2_2",
+   "best_ns": 0.279268,
+   "best_ns_at_table_min_load": 0.2576,
+   "drv_limited": false,
+   "usable_members": 2,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.376922,
+     "pin": "Z",
+     "related_pin": "I1",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.335562,
+      "related_pin": "I1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__mux2_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.279268,
+     "pin": "Z",
+     "related_pin": "I0",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.2576,
+      "related_pin": "I0"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__mux2_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.360558,
+     "pin": "Z",
+     "related_pin": "I0",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.347446,
+      "related_pin": "S"
+     }
+    }
+   ]
+  },
+  {
+   "family": "mux4",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__mux4_2",
+   "best_ns": 0.592031,
+   "best_ns_at_table_min_load": 0.528038,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__mux4_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.730041,
+     "pin": "Z",
+     "related_pin": "S0",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.629262,
+      "related_pin": "S0"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__mux4_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.592031,
+     "pin": "Z",
+     "related_pin": "I0",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.528038,
+      "related_pin": "I0"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__mux4_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.671763,
+     "pin": "Z",
+     "related_pin": "S0",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.6348,
+      "related_pin": "S0"
+     }
+    }
+   ]
+  },
+  {
+   "family": "nand2",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+   "best_ns": 0.27967,
+   "best_ns_at_table_min_load": 0.264936,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nand2_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.362751,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.30345,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nand2_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.298443,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.268921,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nand2_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.27967,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.264936,
+      "related_pin": "A2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "nand3",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__nand3_2",
+   "best_ns": 0.45719,
+   "best_ns_at_table_min_load": 0.421238,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nand3_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.555649,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.483815,
+      "related_pin": "A3"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nand3_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.45719,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.421238,
+      "related_pin": "A3"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nand3_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.499758,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.481377,
+      "related_pin": "A3"
+     }
+    }
+   ]
+  },
+  {
+   "family": "nand4",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__nand4_4",
+   "best_ns": 0.715834,
+   "best_ns_at_table_min_load": 0.678862,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nand4_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.765897,
+     "pin": "ZN",
+     "related_pin": "A4",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.678862,
+      "related_pin": "A4"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nand4_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.73755,
+     "pin": "ZN",
+     "related_pin": "A4",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.694401,
+      "related_pin": "A4"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nand4_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.715834,
+     "pin": "ZN",
+     "related_pin": "A4",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.693805,
+      "related_pin": "A4"
+     }
+    }
+   ]
+  },
+  {
+   "family": "nor2",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__nor2_4",
+   "best_ns": 0.375135,
+   "best_ns_at_table_min_load": 0.34542,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nor2_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.540244,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.430946,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nor2_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.399314,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.34542,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nor2_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.375135,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.34815,
+      "related_pin": "A2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "nor3",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__nor3_4",
+   "best_ns": 0.654389,
+   "best_ns_at_table_min_load": 0.613722,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nor3_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.929472,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.762948,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nor3_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.803746,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.719468,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nor3_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.654389,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.613722,
+      "related_pin": "A3"
+     }
+    }
+   ]
+  },
+  {
+   "family": "nor4",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__nor4_2",
+   "best_ns": 1.180215,
+   "best_ns_at_table_min_load": 1.06896,
+   "drv_limited": true,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nor4_1",
+     "excluded_already": false,
+     "worst_transition_ns": 1.33655,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.112576,
+      "related_pin": "A4"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nor4_2",
+     "excluded_already": false,
+     "worst_transition_ns": 1.180215,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.06896,
+      "related_pin": "A3"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__nor4_4",
+     "excluded_already": false,
+     "worst_transition_ns": 1.189144,
+     "pin": "ZN",
+     "related_pin": "A4",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.134192,
+      "related_pin": "A4"
+     }
+    }
+   ]
+  },
+  {
+   "family": "oai21",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__oai21_4",
+   "best_ns": 0.545778,
+   "best_ns_at_table_min_load": 0.52073,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai21_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.623346,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.52073,
+      "related_pin": "B"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai21_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.612888,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.566296,
+      "related_pin": "B"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai21_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.545778,
+     "pin": "ZN",
+     "related_pin": "B",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.526203,
+      "related_pin": "B"
+     }
+    }
+   ]
+  },
+  {
+   "family": "oai211",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__oai211_4",
+   "best_ns": 0.677392,
+   "best_ns_at_table_min_load": 0.658462,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai211_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.90877,
+     "pin": "ZN",
+     "related_pin": "C",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.834197,
+      "related_pin": "C"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai211_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.725841,
+     "pin": "ZN",
+     "related_pin": "C",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.687916,
+      "related_pin": "C"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai211_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.677392,
+     "pin": "ZN",
+     "related_pin": "C",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.658462,
+      "related_pin": "C"
+     }
+    }
+   ]
+  },
+  {
+   "family": "oai22",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__oai22_4",
+   "best_ns": 1.141897,
+   "best_ns_at_table_min_load": 1.108,
+   "drv_limited": true,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai22_1",
+     "excluded_already": false,
+     "worst_transition_ns": 1.223732,
+     "pin": "ZN",
+     "related_pin": "B1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.108,
+      "related_pin": "B1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai22_2",
+     "excluded_already": false,
+     "worst_transition_ns": 1.193389,
+     "pin": "ZN",
+     "related_pin": "B1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.127192,
+      "related_pin": "B1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai22_4",
+     "excluded_already": false,
+     "worst_transition_ns": 1.141897,
+     "pin": "ZN",
+     "related_pin": "B1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.109,
+      "related_pin": "B1"
+     }
+    }
+   ]
+  },
+  {
+   "family": "oai221",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__oai221_4",
+   "best_ns": 1.486601,
+   "best_ns_at_table_min_load": 1.454,
+   "drv_limited": true,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai221_1",
+     "excluded_already": false,
+     "worst_transition_ns": 1.602736,
+     "pin": "ZN",
+     "related_pin": "B1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.487,
+      "related_pin": "B1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai221_2",
+     "excluded_already": false,
+     "worst_transition_ns": 1.551727,
+     "pin": "ZN",
+     "related_pin": "B1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.487,
+      "related_pin": "B1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai221_4",
+     "excluded_already": false,
+     "worst_transition_ns": 1.486601,
+     "pin": "ZN",
+     "related_pin": "B1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.454,
+      "related_pin": "B1"
+     }
+    }
+   ]
+  },
+  {
+   "family": "oai222",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__oai222_4",
+   "best_ns": 1.912281,
+   "best_ns_at_table_min_load": 1.880808,
+   "drv_limited": true,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai222_1",
+     "excluded_already": false,
+     "worst_transition_ns": 2.107395,
+     "pin": "ZN",
+     "related_pin": "C1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.981,
+      "related_pin": "C1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai222_2",
+     "excluded_already": false,
+     "worst_transition_ns": 2.009667,
+     "pin": "ZN",
+     "related_pin": "C1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.946,
+      "related_pin": "C1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai222_4",
+     "excluded_already": false,
+     "worst_transition_ns": 1.912281,
+     "pin": "ZN",
+     "related_pin": "C1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.880808,
+      "related_pin": "C1"
+     }
+    }
+   ]
+  },
+  {
+   "family": "oai31",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__oai31_4",
+   "best_ns": 1.011656,
+   "best_ns_at_table_min_load": 0.964296,
+   "drv_limited": true,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai31_1",
+     "excluded_already": false,
+     "worst_transition_ns": 1.347529,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.159808,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai31_2",
+     "excluded_already": false,
+     "worst_transition_ns": 1.115695,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.020576,
+      "related_pin": "A3"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai31_4",
+     "excluded_already": false,
+     "worst_transition_ns": 1.011656,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.964296,
+      "related_pin": "A2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "oai32",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__oai32_4",
+   "best_ns": 1.860273,
+   "best_ns_at_table_min_load": 1.767,
+   "drv_limited": true,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai32_1",
+     "excluded_already": false,
+     "worst_transition_ns": 1.938027,
+     "pin": "ZN",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.767,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai32_2",
+     "excluded_already": false,
+     "worst_transition_ns": 1.989873,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.893,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai32_4",
+     "excluded_already": false,
+     "worst_transition_ns": 1.860273,
+     "pin": "ZN",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 1.812,
+      "related_pin": "A2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "oai33",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__oai33_4",
+   "best_ns": 2.315658,
+   "best_ns_at_table_min_load": 2.266,
+   "drv_limited": true,
+   "usable_members": 2,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai33_1",
+     "excluded_already": false,
+     "worst_transition_ns": 2.607099,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 2.402,
+      "related_pin": "B1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai33_2",
+     "excluded_already": true,
+     "worst_transition_ns": 2.430152,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 2.327192,
+      "related_pin": "B2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__oai33_4",
+     "excluded_already": false,
+     "worst_transition_ns": 2.315658,
+     "pin": "ZN",
+     "related_pin": "B2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 2.266,
+      "related_pin": "B2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "or2",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__or2_4",
+   "best_ns": 0.232879,
+   "best_ns_at_table_min_load": 0.222485,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__or2_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.370897,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.3308,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__or2_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.24838,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.227642,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__or2_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.232879,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.222485,
+      "related_pin": "A2"
+     }
+    }
+   ]
+  },
+  {
+   "family": "or3",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__or3_4",
+   "best_ns": 0.319113,
+   "best_ns_at_table_min_load": 0.306531,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__or3_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.525226,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.475046,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__or3_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.350467,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.325438,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__or3_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.319113,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.306531,
+      "related_pin": "A1"
+     }
+    }
+   ]
+  },
+  {
+   "family": "or4",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__or4_4",
+   "best_ns": 0.40685,
+   "best_ns_at_table_min_load": 0.39217,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__or4_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.644477,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.584838,
+      "related_pin": "A4"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__or4_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.431322,
+     "pin": "Z",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.402661,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__or4_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.40685,
+     "pin": "Z",
+     "related_pin": "A3",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.39217,
+      "related_pin": "A3"
+     }
+    }
+   ]
+  },
+  {
+   "family": "sdffq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__sdffq_2",
+   "best_ns": 0.220454,
+   "best_ns_at_table_min_load": 0.1946,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffq_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.295776,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.246085,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffq_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.220454,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.1946,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffq_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.236905,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.226762,
+      "related_pin": "CLK"
+     }
+    }
+   ]
+  },
+  {
+   "family": "sdffrnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_2",
+   "best_ns": 0.284732,
+   "best_ns_at_table_min_load": 0.2532,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.377654,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.3188,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.284732,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.2532,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffrnq_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.321057,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.304477,
+      "related_pin": "CLK"
+     }
+    }
+   ]
+  },
+  {
+   "family": "sdffrsnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_2",
+   "best_ns": 0.310505,
+   "best_ns_at_table_min_load": 0.27817,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.376423,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.319123,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.310505,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.27817,
+      "related_pin": "CLK"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffrsnq_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.353951,
+     "pin": "Q",
+     "related_pin": "CLK",
+     "timing_type": "rising_edge",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.336877,
+      "related_pin": "CLK"
+     }
+    }
+   ]
+  },
+  {
+   "family": "sdffsnq",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_4",
+   "best_ns": 0.222179,
+   "best_ns_at_table_min_load": 0.202438,
+   "drv_limited": false,
+   "usable_members": 0,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_1",
+     "excluded_already": true,
+     "worst_transition_ns": 0.307178,
+     "pin": "Q",
+     "related_pin": "SETN",
+     "timing_type": "preset",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.258362,
+      "related_pin": "SETN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_2",
+     "excluded_already": true,
+     "worst_transition_ns": 0.227801,
+     "pin": "Q",
+     "related_pin": "SETN",
+     "timing_type": "preset",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.202438,
+      "related_pin": "SETN"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__sdffsnq_4",
+     "excluded_already": true,
+     "worst_transition_ns": 0.222179,
+     "pin": "Q",
+     "related_pin": "SETN",
+     "timing_type": "preset",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.209446,
+      "related_pin": "SETN"
+     }
+    }
+   ]
+  },
+  {
+   "family": "xnor2",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__xnor2_2",
+   "best_ns": 0.281425,
+   "best_ns_at_table_min_load": 0.260154,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xnor2_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.757939,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.633053,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xnor2_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.281425,
+     "pin": "ZN",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.260154,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xnor2_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.369596,
+     "pin": "ZN",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.356562,
+      "related_pin": "A1"
+     }
+    }
+   ]
+  },
+  {
+   "family": "xnor3",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__xnor3_2",
+   "best_ns": 0.330662,
+   "best_ns_at_table_min_load": 0.311285,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xnor3_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.825024,
+     "pin": "ZN",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.707754,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xnor3_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.330662,
+     "pin": "ZN",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.311285,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xnor3_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.402196,
+     "pin": "ZN",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.3898,
+      "related_pin": "A1"
+     }
+    }
+   ]
+  },
+  {
+   "family": "xor2",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__xor2_2",
+   "best_ns": 0.290243,
+   "best_ns_at_table_min_load": 0.268115,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xor2_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.767589,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.656396,
+      "related_pin": "A1"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xor2_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.290243,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.268115,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xor2_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.388676,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.375285,
+      "related_pin": "A1"
+     }
+    }
+   ]
+  },
+  {
+   "family": "xor3",
+   "best_member": "gf180mcu_fd_sc_mcu7t5v0__xor3_2",
+   "best_ns": 0.327744,
+   "best_ns_at_table_min_load": 0.307562,
+   "drv_limited": false,
+   "usable_members": 3,
+   "members": [
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xor3_1",
+     "excluded_already": false,
+     "worst_transition_ns": 0.831638,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "rise_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.723493,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xor3_2",
+     "excluded_already": false,
+     "worst_transition_ns": 0.327744,
+     "pin": "Z",
+     "related_pin": "A2",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.307562,
+      "related_pin": "A2"
+     }
+    },
+    {
+     "cell": "gf180mcu_fd_sc_mcu7t5v0__xor3_4",
+     "excluded_already": false,
+     "worst_transition_ns": 0.416768,
+     "pin": "Z",
+     "related_pin": "A1",
+     "timing_type": "combinational",
+     "table": "fall_transition",
+     "at_table_min_load": {
+      "load_pf": 0.001,
+      "worst_transition_ns": 0.404192,
+      "related_pin": "A1"
+     }
+    }
+   ]
+  }
+ ]
+}

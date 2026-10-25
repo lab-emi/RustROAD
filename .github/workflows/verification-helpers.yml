@@ -1,0 +1,41 @@
+name: Verification harness unit tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verification-helpers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-helpers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Prepare pinned numerical verification dependencies
+        run: |
+          python3 -m venv .work/ci-venv
+          .work/ci-venv/bin/python -m pip install --requirement scripts/requirements-verification.txt
+      - name: Test parsers, bounds, negative controls and declaration policy
+        shell: bash
+        run: |
+          free -h
+          ulimit -v 2097152
+          /usr/bin/time -v timeout --signal=TERM --kill-after=5s 180s \
+            .work/ci-venv/bin/python -m unittest discover -s scripts/tests -v
+
+# Full RTL-to-GDS qualification additionally needs the pinned private/local
+# binaries, PDKs and OCI images. This workflow does not claim that signoff scope.

@@ -1,0 +1,21 @@
+{
+  "input_def_sha256": "e220b05a87e77a375215ea35dcb0d85e30b4dc16fb627769df896a8a0e59dc20",
+  "overlap_def_sha256": "0f111a88310afe58de3bb84c0434ad866d8515b85d7c6fab95a8bd45f67173a5",
+  "lef_sha256": "59d95801ade32f14b09724ce548234a427d1507a407b4ba2527e67b556a10695",
+  "instances": 24,
+  "negative_mutation": "second instance moved to first instance x/y",
+  "image_id": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+  "image_digests": [
+    "docker.io/openroad/orfs@sha256:0a78705613f3135a842983d3fa02564ddd2c50cabdb7c41ae22693196848fe3d",
+    "docker.io/openroad/orfs@sha256:2894c8431c5b0c778ba39a25dbbf1621ad52546098c43eb211a7f1deb039af66"
+  ],
+  "analysis_scope": {
+    "corner": null,
+    "wire_model": "none",
+    "unconstrained_endpoints": null,
+    "placement_only": true,
+    "drc_status": "unchecked",
+    "lvs_status": "unchecked",
+    "timing_status": "unchecked"
+  }
+}

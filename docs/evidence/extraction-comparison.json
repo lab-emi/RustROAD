@@ -1,0 +1,5175 @@
+{
+  "schema": "rustroad.extraction-evidence.v1",
+  "status": "partial",
+  "targets": {
+    "total_c_rel": 0.1,
+    "net_c_rel": 0.2,
+    "net_c_min_pf": 0.005,
+    "net_r_rel": 0.2,
+    "net_r_min_ohm": 20.0,
+    "slack_delta_ns": 0.01
+  },
+  "sta_corners": {
+    "tt": {
+      "liberty": "tt",
+      "rc": "nom"
+    },
+    "ss": {
+      "liberty": "ss",
+      "rc": "max"
+    },
+    "ff": {
+      "liberty": "ff",
+      "rc": "min"
+    }
+  },
+  "scope": {
+    "block_level": true,
+    "coupling": "native: cross-net SPEF caps; timing grounds at factor 1",
+    "si": "unchecked",
+    "ir_em": "unchecked",
+    "ocv": "unchecked",
+    "cppr": "off",
+    "drc": "unchecked",
+    "lvs": "unchecked"
+  },
+  "tools": {
+    "rustroad": {
+      "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/target/release/rustroad",
+      "sha256": "90a0c4f91ebc4e69b075cfe263cd8dbe8be8ca8146cb38eede7576f3971770ec",
+      "bytes": 22023592,
+      "version": "rustroad-cli 0.5.0"
+    },
+    "rusteda": {
+      "path": "/mnt/data2/cgao/git/RustSTA/.work/rc-wave/target/release/rusteda",
+      "sha256": "5f19144410590f1e922e74ea99691ec6c18369e4bb97205658ad33cb12591fdb",
+      "bytes": 29105896,
+      "version": "rusteda 0.3.0"
+    },
+    "ruststa": {
+      "path": "/mnt/data2/cgao/git/RustSTA/.work/rc-wave/target/release/ruststa",
+      "sha256": "e9fd98be5db1c52e101a1e2ac8f5f8762bd333ba0a02cd765d3fc1ced276abc3",
+      "bytes": 59179088,
+      "version": "ruststa 0.3.0 (backends: cpu)"
+    },
+    "openroad": {
+      "image": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+      "binary": "/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad",
+      "sha256": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2"
+    }
+  },
+  "verdicts": [
+    {
+      "pdk": "sky130",
+      "corner": "min",
+      "reference": "vs_harness_def",
+      "target": "total_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "min",
+      "reference": "vs_harness_def",
+      "target": "net_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "min",
+      "reference": "vs_harness_def",
+      "target": "net_r",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "min",
+      "reference": "vs_harness_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "min",
+      "reference": "vs_merged_def",
+      "target": "total_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "min",
+      "reference": "vs_merged_def",
+      "target": "net_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "min",
+      "reference": "vs_merged_def",
+      "target": "net_r",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "min",
+      "reference": "vs_merged_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "nom",
+      "reference": "vs_harness_def",
+      "target": "total_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "nom",
+      "reference": "vs_harness_def",
+      "target": "net_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "nom",
+      "reference": "vs_harness_def",
+      "target": "net_r",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "nom",
+      "reference": "vs_harness_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "nom",
+      "reference": "vs_merged_def",
+      "target": "total_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "nom",
+      "reference": "vs_merged_def",
+      "target": "net_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "nom",
+      "reference": "vs_merged_def",
+      "target": "net_r",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "nom",
+      "reference": "vs_merged_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "max",
+      "reference": "vs_harness_def",
+      "target": "total_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "max",
+      "reference": "vs_harness_def",
+      "target": "net_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "max",
+      "reference": "vs_harness_def",
+      "target": "net_r",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "max",
+      "reference": "vs_harness_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "max",
+      "reference": "vs_merged_def",
+      "target": "total_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "max",
+      "reference": "vs_merged_def",
+      "target": "net_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "max",
+      "reference": "vs_merged_def",
+      "target": "net_r",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "max",
+      "reference": "vs_merged_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "tt",
+      "reference": "vs_harness_def",
+      "target": "sta_slack",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "tt",
+      "reference": "vs_merged_def",
+      "target": "sta_slack",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "ss",
+      "reference": "vs_harness_def",
+      "target": "sta_slack",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "ss",
+      "reference": "vs_merged_def",
+      "target": "sta_slack",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "ff",
+      "reference": "vs_harness_def",
+      "target": "sta_slack",
+      "status": "failed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "ff",
+      "reference": "vs_merged_def",
+      "target": "sta_slack",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "min",
+      "reference": "independent",
+      "target": "resistance_accounting",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "nom",
+      "reference": "independent",
+      "target": "resistance_accounting",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "max",
+      "reference": "independent",
+      "target": "resistance_accounting",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "all",
+      "reference": "self",
+      "target": "read_only",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "control",
+      "reference": "scaled_r_x3",
+      "target": "detected",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "control",
+      "reference": "dropped_net",
+      "target": "detected",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "control",
+      "reference": "missing_net",
+      "target": "detected",
+      "status": "passed"
+    },
+    {
+      "pdk": "sky130",
+      "corner": "control",
+      "reference": "dropped_connection",
+      "target": "detected",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "min",
+      "reference": "vs_harness_def",
+      "target": "total_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "min",
+      "reference": "vs_harness_def",
+      "target": "net_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "min",
+      "reference": "vs_harness_def",
+      "target": "net_r",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "min",
+      "reference": "vs_harness_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "min",
+      "reference": "vs_merged_def",
+      "target": "total_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "min",
+      "reference": "vs_merged_def",
+      "target": "net_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "min",
+      "reference": "vs_merged_def",
+      "target": "net_r",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "min",
+      "reference": "vs_merged_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "nom",
+      "reference": "vs_harness_def",
+      "target": "total_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "nom",
+      "reference": "vs_harness_def",
+      "target": "net_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "nom",
+      "reference": "vs_harness_def",
+      "target": "net_r",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "nom",
+      "reference": "vs_harness_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "nom",
+      "reference": "vs_merged_def",
+      "target": "total_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "nom",
+      "reference": "vs_merged_def",
+      "target": "net_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "nom",
+      "reference": "vs_merged_def",
+      "target": "net_r",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "nom",
+      "reference": "vs_merged_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "max",
+      "reference": "vs_harness_def",
+      "target": "total_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "max",
+      "reference": "vs_harness_def",
+      "target": "net_c",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "max",
+      "reference": "vs_harness_def",
+      "target": "net_r",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "max",
+      "reference": "vs_harness_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "max",
+      "reference": "vs_merged_def",
+      "target": "total_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "max",
+      "reference": "vs_merged_def",
+      "target": "net_c",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "max",
+      "reference": "vs_merged_def",
+      "target": "net_r",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "max",
+      "reference": "vs_merged_def",
+      "target": "coverage",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "tt",
+      "reference": "vs_harness_def",
+      "target": "sta_slack",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "tt",
+      "reference": "vs_merged_def",
+      "target": "sta_slack",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "ss",
+      "reference": "vs_harness_def",
+      "target": "sta_slack",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "ss",
+      "reference": "vs_merged_def",
+      "target": "sta_slack",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "ff",
+      "reference": "vs_harness_def",
+      "target": "sta_slack",
+      "status": "failed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "ff",
+      "reference": "vs_merged_def",
+      "target": "sta_slack",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "min",
+      "reference": "independent",
+      "target": "resistance_accounting",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "nom",
+      "reference": "independent",
+      "target": "resistance_accounting",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "max",
+      "reference": "independent",
+      "target": "resistance_accounting",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "all",
+      "reference": "self",
+      "target": "read_only",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "control",
+      "reference": "scaled_r_x3",
+      "target": "detected",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "control",
+      "reference": "dropped_net",
+      "target": "detected",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "control",
+      "reference": "missing_net",
+      "target": "detected",
+      "status": "passed"
+    },
+    {
+      "pdk": "gf180",
+      "corner": "control",
+      "reference": "dropped_connection",
+      "target": "detected",
+      "status": "passed"
+    }
+  ],
+  "wall_seconds": 28.29956603201572,
+  "peak_child_rss_kib": 136396,
+  "receipts": 169,
+  "pdks": [
+    {
+      "pdk": "sky130",
+      "inputs": {
+        "sky130.def": {
+          "source": "/mnt/data2/cgao/git/RustROAD/.work/rc-timing/ready/sky130.def",
+          "sha256": "23b4c5cf2692cc420fea5d35c499e22f37ee233a3ca44f385e19ae01bf21cbbb"
+        },
+        "sky130_exported.v": {
+          "source": "/mnt/data2/cgao/git/RustROAD/.work/rc-timing/ready/sky130_exported.v",
+          "sha256": "1ad8fa185c81674e73aced9f851af3a9c45bc15e18d9830e60e9ca5727041be9"
+        },
+        "sky130_postroute.sdc": {
+          "source": "/mnt/data2/cgao/git/RustROAD/.work/rc-timing/ready/sky130_postroute.sdc",
+          "sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6"
+        },
+        "sky130.spef": {
+          "source": "/mnt/data2/cgao/git/RustROAD/.work/rc-timing/ready/sky130.spef",
+          "sha256": "437bf747363652c1a55a980ac8ab8d3ab5823679ecb1d09dad86c3d77e9afd1a"
+        }
+      },
+      "read_only": {
+        "status": "passed",
+        "workspace_tree_sha256": "a539e96a8f5e4cfc4634f7064457aa5923d79babdff4794d6247ebc11cda0442",
+        "output_inside_workspace": "refused",
+        "corner_mismatch": "refused"
+      },
+      "reference_identity": {
+        "nominal_harness_equals_ready_run_spef": true
+      },
+      "merged_def": {
+        "source": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130.def",
+          "sha256": "23b4c5cf2692cc420fea5d35c499e22f37ee233a3ca44f385e19ae01bf21cbbb",
+          "bytes": 236395
+        },
+        "merged": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged.def",
+          "sha256": "e8342c673e2d9435bb14ddbba3616013efdff8880aa70567214dc3a20af8a60a",
+          "bytes": 28917
+        },
+        "nets": 19,
+        "original_wire_paths": 4964,
+        "merged_wire_paths": 92,
+        "metal_union": "identical per net, layer and track line",
+        "vias": "identical"
+      },
+      "native": {
+        "min": {
+          "output": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_min.spef",
+            "sha256": "7fe9bbbcbe480436286415f4a8ad96cfbab4e17267dcc0e288ff4b9a689d6406",
+            "bytes": 40902
+          },
+          "rc_profile": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/fixtures/pdk/sky130-rc-min.json",
+            "sha256": "baf9394c475045da459a02d994af0c9add4d4b52a01dac0e12c2178db0e3476a",
+            "bytes": 57218
+          },
+          "stats": {
+            "nets": 19,
+            "lattice_wires": 4964,
+            "wire_runs": 103,
+            "vias": 101,
+            "nodes": 223,
+            "resistors": 204,
+            "opened_loop_resistors": 0,
+            "coincident_pin_links": 0,
+            "couplings": 579,
+            "shapes": 1517,
+            "intervals": 2619,
+            "work": 160513,
+            "context_fallback_intervals": 0,
+            "foreign_overlaps": 0,
+            "unrouted_pin_partners": 0,
+            "wire_length_dbu": 738010,
+            "ground_pf": 0.054096497852334516,
+            "coupling_pf": 0.015338044984746438,
+            "resistance_ohm": 493.8036333333334
+          },
+          "scope": {
+            "corner": "min",
+            "pdk": "sky130",
+            "wire_model": "rc_tree_per_net",
+            "coupling": "cross_net_spef",
+            "coupling_reason": "listed in both nets so totals and SPEF consumers see the same capacitance; the timing engine grounds coupling at factor 1",
+            "supply_nets": "excluded",
+            "pin_capacitance": "excluded (Liberty pin capacitance)",
+            "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
+            "diagonal_coupling": "unmodeled",
+            "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "max_segment_length_dbu": 25000,
+            "drc_status": "unchecked",
+            "lvs_status": "unchecked"
+          },
+          "byte_identical_rerun": true,
+          "elapsed_seconds": 0.045475449005607516,
+          "peak_rss_kib": 8092
+        },
+        "nom": {
+          "output": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_nom.spef",
+            "sha256": "59cd50e6226a4a15531aaadf58a278f2c6e7f538a19ef848a64be6cfa359107b",
+            "bytes": 40877
+          },
+          "rc_profile": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/fixtures/pdk/sky130-rc-nom.json",
+            "sha256": "7c2393847a4373ce6c33df8a3044725dee31ccfbe13c5efe26059713c3e6ce27",
+            "bytes": 57146
+          },
+          "stats": {
+            "nets": 19,
+            "lattice_wires": 4964,
+            "wire_runs": 103,
+            "vias": 101,
+            "nodes": 223,
+            "resistors": 204,
+            "opened_loop_resistors": 0,
+            "coincident_pin_links": 0,
+            "couplings": 579,
+            "shapes": 1517,
+            "intervals": 2619,
+            "work": 160513,
+            "context_fallback_intervals": 0,
+            "foreign_overlaps": 0,
+            "unrouted_pin_partners": 0,
+            "wire_length_dbu": 738010,
+            "ground_pf": 0.05830035844539393,
+            "coupling_pf": 0.01725735618557404,
+            "resistance_ohm": 999.2897476190476
+          },
+          "scope": {
+            "corner": "nom",
+            "pdk": "sky130",
+            "wire_model": "rc_tree_per_net",
+            "coupling": "cross_net_spef",
+            "coupling_reason": "listed in both nets so totals and SPEF consumers see the same capacitance; the timing engine grounds coupling at factor 1",
+            "supply_nets": "excluded",
+            "pin_capacitance": "excluded (Liberty pin capacitance)",
+            "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
+            "diagonal_coupling": "unmodeled",
+            "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "max_segment_length_dbu": 25000,
+            "drc_status": "unchecked",
+            "lvs_status": "unchecked"
+          },
+          "byte_identical_rerun": true,
+          "elapsed_seconds": 0.028519164014142007,
+          "peak_rss_kib": 8220
+        },
+        "max": {
+          "output": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_max.spef",
+            "sha256": "76ee3c3f1f3d1c28ac5fe933933fd77549e9376c9c06575918a818d30c5219d2",
+            "bytes": 40875
+          },
+          "rc_profile": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/fixtures/pdk/sky130-rc-max.json",
+            "sha256": "7f68d961c8f0cc223fda5b754c08eb72cd675bc7014d93f6ae9f7427b47e4e20",
+            "bytes": 57144
+          },
+          "stats": {
+            "nets": 19,
+            "lattice_wires": 4964,
+            "wire_runs": 103,
+            "vias": 101,
+            "nodes": 223,
+            "resistors": 204,
+            "opened_loop_resistors": 0,
+            "coincident_pin_links": 0,
+            "couplings": 579,
+            "shapes": 1517,
+            "intervals": 2619,
+            "work": 160513,
+            "context_fallback_intervals": 0,
+            "foreign_overlaps": 0,
+            "unrouted_pin_partners": 0,
+            "wire_length_dbu": 738010,
+            "ground_pf": 0.06231839350077323,
+            "coupling_pf": 0.017717982985714004,
+            "resistance_ohm": 2099.415861904762
+          },
+          "scope": {
+            "corner": "max",
+            "pdk": "sky130",
+            "wire_model": "rc_tree_per_net",
+            "coupling": "cross_net_spef",
+            "coupling_reason": "listed in both nets so totals and SPEF consumers see the same capacitance; the timing engine grounds coupling at factor 1",
+            "supply_nets": "excluded",
+            "pin_capacitance": "excluded (Liberty pin capacitance)",
+            "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
+            "diagonal_coupling": "unmodeled",
+            "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "max_segment_length_dbu": 25000,
+            "drc_status": "unchecked",
+            "lvs_status": "unchecked"
+          },
+          "byte_identical_rerun": true,
+          "elapsed_seconds": 0.02433582703815773,
+          "peak_rss_kib": 8100
+        }
+      },
+      "reference_runs": {
+        "harness": {
+          "min": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/librelane/rules.openrcx.sky130A.min.calibre",
+              "sha256": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+              "bytes": 45435
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_min.spef",
+              "sha256": "698f486a7bcc21b4d03bc870f4c368966ee57bb0c54b7c9c4b343fb9867dc9a3",
+              "bytes": 551845
+            },
+            "container_peak_rss_kib": 110696,
+            "elapsed_seconds": 0.567092822981067,
+            "receipt": "sky130_harness_min"
+          },
+          "nom": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/librelane/rules.openrcx.sky130A.nom.calibre",
+              "sha256": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+              "bytes": 45409
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_nom.spef",
+              "sha256": "777b24bdff0bf5bbce5c585a628117510fad4208a4a0a3d660993a788df79961",
+              "bytes": 551074
+            },
+            "container_peak_rss_kib": 110276,
+            "elapsed_seconds": 0.5965452900272794,
+            "receipt": "sky130_harness_nom"
+          },
+          "max": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/librelane/rules.openrcx.sky130A.max.calibre",
+              "sha256": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+              "bytes": 45404
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_max.spef",
+              "sha256": "180881be82e4c711b0c42d83f655d43d9cfd205f4f3c377f28082080cfb74061",
+              "bytes": 550370
+            },
+            "container_peak_rss_kib": 110784,
+            "elapsed_seconds": 0.6289468679460697,
+            "receipt": "sky130_harness_max"
+          }
+        },
+        "merged": {
+          "min": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/librelane/rules.openrcx.sky130A.min.calibre",
+              "sha256": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+              "bytes": 45435
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_min.spef",
+              "sha256": "403f7c302c59f36c34bb3123be0bda3db204c180196855cf6afc0725e01ba8a6",
+              "bytes": 17079
+            },
+            "container_peak_rss_kib": 109296,
+            "elapsed_seconds": 0.5193346730084158,
+            "receipt": "sky130_merged_min"
+          },
+          "nom": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/librelane/rules.openrcx.sky130A.nom.calibre",
+              "sha256": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+              "bytes": 45409
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_nom.spef",
+              "sha256": "a0f458a050f4f5057a25b379d062106ff0e27cd53f4ed0d1d1cdf2f25a0a9587",
+              "bytes": 17061
+            },
+            "container_peak_rss_kib": 109328,
+            "elapsed_seconds": 0.5540048319962807,
+            "receipt": "sky130_merged_nom"
+          },
+          "max": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.tech/librelane/rules.openrcx.sky130A.max.calibre",
+              "sha256": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+              "bytes": 45404
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_max.spef",
+              "sha256": "ddab4ac670e085a775cbde1776df20ecd0aa9f57eae0b971630e1cf295279f5d",
+              "bytes": 17048
+            },
+            "container_peak_rss_kib": 109232,
+            "elapsed_seconds": 0.5998714159941301,
+            "receipt": "sky130_merged_max"
+          }
+        }
+      },
+      "spef": {
+        "min": {
+          "vs_harness_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_min.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_min.spef",
+            "native_sha256": "7fe9bbbcbe480436286415f4a8ad96cfbab4e17267dcc0e288ff4b9a689d6406",
+            "reference_sha256": "698f486a7bcc21b4d03bc870f4c368966ee57bb0c54b7c9c4b343fb9867dc9a3",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.054096495679,
+              "coupling_pf": 0.015338045125769001,
+              "total_pf": 0.069434540804769,
+              "resistance_ohm": 493.803429
+            },
+            "design_reference": {
+              "ground_pf": 0.13468225843,
+              "coupling_pf": 0.0347800477232,
+              "total_pf": 0.16946230615320002,
+              "resistance_ohm": 1459.1995566
+            },
+            "total_c_rel": -0.5902655736196716,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.5902655736196716,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 16,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.7282714161297561,
+                  "median": -0.6004912918784376,
+                  "max": -0.4045504540362834,
+                  "mean": -0.5772353811698474,
+                  "count": 16
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.755510528861665,
+                  "median": -0.6632011706264714,
+                  "max": -0.5640369463072812,
+                  "mean": -0.6711441600324638,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "vs_merged_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_min.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_min.spef",
+            "native_sha256": "7fe9bbbcbe480436286415f4a8ad96cfbab4e17267dcc0e288ff4b9a689d6406",
+            "reference_sha256": "403f7c302c59f36c34bb3123be0bda3db204c180196855cf6afc0725e01ba8a6",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.054096495679,
+              "coupling_pf": 0.015338045125769001,
+              "total_pf": 0.069434540804769,
+              "resistance_ohm": 493.803429
+            },
+            "design_reference": {
+              "ground_pf": 0.0595790853,
+              "coupling_pf": 0.014199854781999999,
+              "total_pf": 0.073778940082,
+              "resistance_ohm": 1016.790882
+            },
+            "total_c_rel": -0.05888400229662438,
+            "targets": {
+              "total_c": {
+                "status": "passed",
+                "rel": -0.05888400229662438,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "passed",
+                "eligible": 8,
+                "failing": [],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.1847685549306088,
+                  "median": -0.024922372125254527,
+                  "max": 0.03670852060647947,
+                  "mean": -0.044970283057486286,
+                  "count": 8
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.6965395831673459,
+                  "median": -0.5274973640249062,
+                  "max": -0.36384152746188686,
+                  "mean": -0.5288429100757928,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "reference_segmentation": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_min.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_min.spef",
+            "native_sha256": "403f7c302c59f36c34bb3123be0bda3db204c180196855cf6afc0725e01ba8a6",
+            "reference_sha256": "698f486a7bcc21b4d03bc870f4c368966ee57bb0c54b7c9c4b343fb9867dc9a3",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.0595790853,
+              "coupling_pf": 0.014199854781999999,
+              "total_pf": 0.073778940082,
+              "resistance_ohm": 1016.790882
+            },
+            "design_reference": {
+              "ground_pf": 0.13468225843,
+              "coupling_pf": 0.0347800477232,
+              "total_pf": 0.16946230615320002,
+              "resistance_ohm": 1459.1995566
+            },
+            "total_c_rel": -0.5646291983345182,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.5646291983345182,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 16,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.6930837135980569,
+                  "median": -0.5683139744689948,
+                  "max": -0.4261070364567626,
+                  "mean": -0.5635536599337184,
+                  "count": 16
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.402887348828016,
+                  "median": -0.29795837342614817,
+                  "max": -0.11370375653981789,
+                  "mean": -0.28626752766251146,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          }
+        },
+        "nom": {
+          "vs_harness_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_nom.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_nom.spef",
+            "native_sha256": "59cd50e6226a4a15531aaadf58a278f2c6e7f538a19ef848a64be6cfa359107b",
+            "reference_sha256": "777b24bdff0bf5bbce5c585a628117510fad4208a4a0a3d660993a788df79961",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.05830036561,
+              "coupling_pf": 0.017257359564158,
+              "total_pf": 0.075557725174158,
+              "resistance_ohm": 999.2896661
+            },
+            "design_reference": {
+              "ground_pf": 0.14680073405,
+              "coupling_pf": 0.0387591847462,
+              "total_pf": 0.18555991879619999,
+              "resistance_ohm": 1740.6550497
+            },
+            "total_c_rel": -0.5928122535064112,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.5928122535064112,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 17,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.7299434713791809,
+                  "median": -0.6013650796674356,
+                  "max": -0.400957362735558,
+                  "mean": -0.5788735010381443,
+                  "count": 17
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.5159937829256448,
+                  "median": -0.43167857881302746,
+                  "max": -0.18073496682210005,
+                  "mean": -0.39775097237823887,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "vs_merged_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_nom.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_nom.spef",
+            "native_sha256": "59cd50e6226a4a15531aaadf58a278f2c6e7f538a19ef848a64be6cfa359107b",
+            "reference_sha256": "a0f458a050f4f5057a25b379d062106ff0e27cd53f4ed0d1d1cdf2f25a0a9587",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.05830036561,
+              "coupling_pf": 0.017257359564158,
+              "total_pf": 0.075557725174158,
+              "resistance_ohm": 999.2896661
+            },
+            "design_reference": {
+              "ground_pf": 0.06462787142,
+              "coupling_pf": 0.015901989522,
+              "total_pf": 0.080529860942,
+              "resistance_ohm": 1154.143415
+            },
+            "total_c_rel": -0.06174275864480979,
+            "targets": {
+              "total_c": {
+                "status": "passed",
+                "rel": -0.06174275864480979,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "passed",
+                "eligible": 9,
+                "failing": [],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.18492455013803122,
+                  "median": -0.026717018454434024,
+                  "max": 0.03932453701428401,
+                  "mean": -0.04261903305667867,
+                  "count": 9
+                }
+              },
+              "net_r": {
+                "status": "passed",
+                "eligible": 19,
+                "failing": [],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.19409541627443455,
+                  "median": -0.12074286064235276,
+                  "max": -0.026428852640762394,
+                  "mean": -0.12115444374175113,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "reference_segmentation": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_nom.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_nom.spef",
+            "native_sha256": "a0f458a050f4f5057a25b379d062106ff0e27cd53f4ed0d1d1cdf2f25a0a9587",
+            "reference_sha256": "777b24bdff0bf5bbce5c585a628117510fad4208a4a0a3d660993a788df79961",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.06462787142,
+              "coupling_pf": 0.015901989522,
+              "total_pf": 0.080529860942,
+              "resistance_ohm": 1154.143415
+            },
+            "design_reference": {
+              "ground_pf": 0.14680073405,
+              "coupling_pf": 0.0387591847462,
+              "total_pf": 0.18555991879619999,
+              "resistance_ohm": 1740.6550497
+            },
+            "total_c_rel": -0.5660169423201475,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.5660169423201475,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 17,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.6946536817316619,
+                  "median": -0.5836672430378848,
+                  "max": -0.4251774697809973,
+                  "mean": -0.565540129692592,
+                  "count": 17
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.44193512561537857,
+                  "median": -0.3295485131171968,
+                  "max": -0.14106269290996637,
+                  "mean": -0.3185319663303536,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          }
+        },
+        "max": {
+          "vs_harness_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_max.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_max.spef",
+            "native_sha256": "76ee3c3f1f3d1c28ac5fe933933fd77549e9376c9c06575918a818d30c5219d2",
+            "reference_sha256": "180881be82e4c711b0c42d83f655d43d9cfd205f4f3c377f28082080cfb74061",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.062318387168,
+              "coupling_pf": 0.017717984292331,
+              "total_pf": 0.08003637146033099,
+              "resistance_ohm": 2099.4156008
+            },
+            "design_reference": {
+              "ground_pf": 0.16075053947,
+              "coupling_pf": 0.0391718052501,
+              "total_pf": 0.1999223447201,
+              "resistance_ohm": 2139.1015598
+            },
+            "total_c_rel": -0.5996627011733711,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.5996627011733711,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 17,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.7353770216165434,
+                  "median": -0.6061144302741405,
+                  "max": -0.4162666612808308,
+                  "mean": -0.585183822991691,
+                  "count": 17
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.3624581532327294,
+                  "median": -0.11395371561836616,
+                  "max": 0.9730811151563085,
+                  "mean": 0.10783372750427618,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "vs_merged_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_native_max.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_max.spef",
+            "native_sha256": "76ee3c3f1f3d1c28ac5fe933933fd77549e9376c9c06575918a818d30c5219d2",
+            "reference_sha256": "ddab4ac670e085a775cbde1776df20ecd0aa9f57eae0b971630e1cf295279f5d",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.062318387168,
+              "coupling_pf": 0.017717984292331,
+              "total_pf": 0.08003637146033099,
+              "resistance_ohm": 2099.4156008
+            },
+            "design_reference": {
+              "ground_pf": 0.07027992117,
+              "coupling_pf": 0.015884371168,
+              "total_pf": 0.08616429233799999,
+              "resistance_ohm": 1348.719311
+            },
+            "total_c_rel": -0.07111902983698595,
+            "targets": {
+              "total_c": {
+                "status": "passed",
+                "rel": -0.07111902983698595,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "passed",
+                "eligible": 11,
+                "failing": [],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.16658219641655558,
+                  "median": -0.041463341969416014,
+                  "max": 0.05761961312741854,
+                  "mean": -0.04856345682122684,
+                  "count": 11
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": 0.06962297455167918,
+                  "median": 0.5643289966942738,
+                  "max": 1.3904945527934989,
+                  "mean": 0.6738976949160065,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "reference_segmentation": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_merged_rcx/sky130_merged_max.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/sky130_harness_rcx/sky130_harness_max.spef",
+            "native_sha256": "ddab4ac670e085a775cbde1776df20ecd0aa9f57eae0b971630e1cf295279f5d",
+            "reference_sha256": "180881be82e4c711b0c42d83f655d43d9cfd205f4f3c377f28082080cfb74061",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.07027992117,
+              "coupling_pf": 0.015884371168,
+              "total_pf": 0.08616429233799999,
+              "resistance_ohm": 1348.719311
+            },
+            "design_reference": {
+              "ground_pf": 0.16075053947,
+              "coupling_pf": 0.0391718052501,
+              "total_pf": 0.1999223447201,
+              "resistance_ohm": 2139.1015598
+            },
+            "total_c_rel": -0.5690111955287752,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.5690111955287752,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 17,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.6994138320776848,
+                  "median": -0.5846958275140234,
+                  "max": -0.44376235509204953,
+                  "mean": -0.569225896454886,
+                  "count": 17
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.4784490545973888,
+                  "median": -0.36718893255413754,
+                  "max": -0.17461384178826383,
+                  "mean": -0.3513318167363303,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          }
+        }
+      },
+      "spef_nets_nominal_vs_merged": [
+        {
+          "net": "a[0]",
+          "native_c_pf": 0.0073816356335200005,
+          "reference_c_pf": 0.007584264570000001,
+          "c_rel": -0.026717018454434024,
+          "native_ground_pf": 0.004042731205,
+          "reference_ground_pf": 0.00449549767,
+          "native_coupling_pf": 0.00333890442852,
+          "reference_coupling_pf": 0.0030887669,
+          "native_r_ohm": 82.3289444,
+          "reference_r_ohm": 101.430822,
+          "r_rel": -0.18832419202912512,
+          "worst_sink_path_r_rel": -0.2073342795096304,
+          "native_nodes": 17,
+          "reference_nodes": 16,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "a[1]",
+          "native_c_pf": 0.00657873694156,
+          "reference_c_pf": 0.008071322652000001,
+          "c_rel": -0.18492455013803122,
+          "native_ground_pf": 0.0037421193560000002,
+          "reference_ground_pf": 0.0049386738000000005,
+          "native_coupling_pf": 0.00283661758556,
+          "reference_coupling_pf": 0.003132648852,
+          "native_r_ohm": 57.0916544,
+          "reference_r_ohm": 63.140379,
+          "r_rel": -0.09579804074346782,
+          "worst_sink_path_r_rel": -0.14840626981864208,
+          "native_nodes": 13,
+          "reference_nodes": 12,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "b[0]",
+          "native_c_pf": 0.006799961273220001,
+          "reference_c_pf": 0.00718286636,
+          "c_rel": -0.05330811790016363,
+          "native_ground_pf": 0.0053441032,
+          "reference_ground_pf": 0.006100082,
+          "native_coupling_pf": 0.00145585807322,
+          "reference_coupling_pf": 0.0010827843600000001,
+          "native_r_ohm": 57.343007,
+          "reference_r_ohm": 65.217562,
+          "r_rel": -0.12074286064235276,
+          "worst_sink_path_r_rel": -0.12869747528984898,
+          "native_nodes": 17,
+          "reference_nodes": 16,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "b[1]",
+          "native_c_pf": 0.0080605976194,
+          "reference_c_pf": 0.00792112129,
+          "c_rel": 0.01760815474143558,
+          "native_ground_pf": 0.004318948615,
+          "reference_ground_pf": 0.00429228431,
+          "native_coupling_pf": 0.0037416490044,
+          "reference_coupling_pf": 0.00362883698,
+          "native_r_ohm": 73.77876140000001,
+          "reference_r_ohm": 90.028662,
+          "r_rel": -0.1804969688431001,
+          "worst_sink_path_r_rel": -0.20129034964062675,
+          "native_nodes": 20,
+          "reference_nodes": 20,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "clk",
+          "native_c_pf": 0.004810250865000001,
+          "reference_c_pf": 0.0049625958000000005,
+          "c_rel": -0.030698638603611383,
+          "native_ground_pf": 0.003180205,
+          "reference_ground_pf": 0.003534728,
+          "native_coupling_pf": 0.0016300458650000001,
+          "reference_coupling_pf": 0.0014278678,
+          "native_r_ohm": 37.66962,
+          "reference_r_ohm": 44.71386,
+          "r_rel": -0.15754041364355473,
+          "worst_sink_path_r_rel": -0.15754041364355487,
+          "native_nodes": 6,
+          "reference_nodes": 6,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "en",
+          "native_c_pf": 0.0092605270263,
+          "reference_c_pf": 0.0089101399,
+          "c_rel": 0.03932453701428401,
+          "native_ground_pf": 0.0068796394,
+          "reference_ground_pf": 0.006329078,
+          "native_coupling_pf": 0.0023808876263,
+          "reference_coupling_pf": 0.0025810619000000003,
+          "native_r_ohm": 87.771323,
+          "reference_r_ohm": 108.42388,
+          "r_rel": -0.19047978176025432,
+          "worst_sink_path_r_rel": -0.2083509745583002,
+          "native_nodes": 13,
+          "reference_nodes": 12,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "n2",
+          "native_c_pf": 0.0043296259185,
+          "reference_c_pf": 0.004154573265,
+          "c_rel": 0.04213492995170467,
+          "native_ground_pf": 0.00211527075,
+          "reference_ground_pf": 0.00223356265,
+          "native_coupling_pf": 0.0022143551685,
+          "reference_coupling_pf": 0.001921010615,
+          "native_r_ohm": 40.2062703,
+          "reference_r_ohm": 47.793944,
+          "r_rel": -0.15875805729696638,
+          "worst_sink_path_r_rel": -0.17525947047004997,
+          "native_nodes": 10,
+          "reference_nodes": 10,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "n3",
+          "native_c_pf": 0.00379393383374,
+          "reference_c_pf": 0.0037744327999999997,
+          "c_rel": 0.005166613044481881,
+          "native_ground_pf": 0.0009514649,
+          "reference_ground_pf": 0.0012435422,
+          "native_coupling_pf": 0.00284246893374,
+          "reference_coupling_pf": 0.0025308906,
+          "native_r_ohm": 31.41794,
+          "reference_r_ohm": 33.37416,
+          "r_rel": -0.05861480858244827,
+          "worst_sink_path_r_rel": -0.05861480858244827,
+          "native_nodes": 9,
+          "reference_nodes": 9,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "n4",
+          "native_c_pf": 0.0022955891595,
+          "reference_c_pf": 0.0023257989,
+          "c_rel": -0.012988973595266592,
+          "native_ground_pf": 0.0010013385,
+          "reference_ground_pf": 0.0010718029999999999,
+          "native_coupling_pf": 0.0012942506595,
+          "reference_coupling_pf": 0.0012539959,
+          "native_r_ohm": 39.454751,
+          "reference_r_ohm": 41.259249000000004,
+          "r_rel": -0.0437355997439508,
+          "worst_sink_path_r_rel": -0.04373559974395063,
+          "native_nodes": 10,
+          "reference_nodes": 10,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "n5",
+          "native_c_pf": 0.0007220400727000001,
+          "reference_c_pf": 0.00071972164,
+          "c_rel": 0.003221290803483456,
+          "native_ground_pf": 0.00030814617,
+          "reference_ground_pf": 0.00044584687999999997,
+          "native_coupling_pf": 0.0004138939027,
+          "reference_coupling_pf": 0.00027387476,
+          "native_r_ohm": 35.988385,
+          "reference_r_ohm": 38.356226,
+          "r_rel": -0.06173289833050829,
+          "worst_sink_path_r_rel": -0.06993812600376689,
+          "native_nodes": 11,
+          "reference_nodes": 11,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "q[0]",
+          "native_c_pf": 0.005233694386140001,
+          "reference_c_pf": 0.00583539041,
+          "c_rel": -0.10311152837844136,
+          "native_ground_pf": 0.0015843707000000001,
+          "reference_ground_pf": 0.001841278,
+          "native_coupling_pf": 0.00364932368614,
+          "reference_coupling_pf": 0.00399411241,
+          "native_r_ohm": 41.20745,
+          "reference_r_ohm": 42.58415,
+          "r_rel": -0.03232892989527793,
+          "worst_sink_path_r_rel": -0.03232892989527777,
+          "native_nodes": 10,
+          "reference_nodes": 9,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "q[1]",
+          "native_c_pf": 0.0029602213416,
+          "reference_c_pf": 0.00334704994,
+          "c_rel": -0.11557299871061984,
+          "native_ground_pf": 0.001276368674,
+          "reference_ground_pf": 0.00189265364,
+          "native_coupling_pf": 0.0016838526676,
+          "reference_coupling_pf": 0.0014543963,
+          "native_r_ohm": 38.63897,
+          "reference_r_ohm": 39.687875,
+          "r_rel": -0.026428852640762394,
+          "worst_sink_path_r_rel": -0.026428852640762567,
+          "native_nodes": 10,
+          "reference_nodes": 10,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "rr_clock_0",
+          "native_c_pf": 0.002212631845938,
+          "reference_c_pf": 0.0022249315,
+          "c_rel": -0.005528104600973203,
+          "native_ground_pf": 0.001461225,
+          "reference_ground_pf": 0.0017474807,
+          "native_coupling_pf": 0.000751406845938,
+          "reference_coupling_pf": 0.0004774508,
+          "native_r_ohm": 66.109827,
+          "reference_r_ohm": 73.215714,
+          "r_rel": -0.09705412420071474,
+          "worst_sink_path_r_rel": -0.10501163451457393,
+          "native_nodes": 15,
+          "reference_nodes": 15,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "rr_clock_1",
+          "native_c_pf": 0.004435237595899999,
+          "reference_c_pf": 0.00475647157,
+          "c_rel": -0.0675361913495051,
+          "native_ground_pf": 0.00318554551,
+          "reference_ground_pf": 0.00387807937,
+          "native_coupling_pf": 0.0012496920859,
+          "reference_coupling_pf": 0.0008783922,
+          "native_r_ohm": 75.0476936,
+          "reference_r_ohm": 84.618677,
+          "r_rel": -0.113107220998031,
+          "worst_sink_path_r_rel": -0.1587249131393024,
+          "native_nodes": 19,
+          "reference_nodes": 19,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "rr_clock_2",
+          "native_c_pf": 0.00058701619343,
+          "reference_c_pf": 0.0006568362,
+          "c_rel": -0.10629744001624762,
+          "native_ground_pf": 0.00034346473,
+          "reference_ground_pf": 0.0006568362,
+          "native_coupling_pf": 0.00024355146343,
+          "reference_coupling_pf": 0,
+          "native_r_ohm": 45.283926,
+          "reference_r_ohm": 47.476765,
+          "r_rel": -0.046187624620169454,
+          "worst_sink_path_r_rel": -0.0587773202540621,
+          "native_nodes": 11,
+          "reference_nodes": 11,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "y[0]",
+          "native_c_pf": 0.0041010412922,
+          "reference_c_pf": 0.004257252,
+          "c_rel": -0.036692849706806266,
+          "native_ground_pf": 0.003447609,
+          "reference_ground_pf": 0.00365078,
+          "native_coupling_pf": 0.0006534322922,
+          "reference_coupling_pf": 0.000606472,
+          "native_r_ohm": 47.02864,
+          "reference_r_ohm": 58.35449,
+          "r_rel": -0.1940870359761519,
+          "worst_sink_path_r_rel": -0.1940870359761519,
+          "native_nodes": 7,
+          "reference_nodes": 6,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "y[1]",
+          "native_c_pf": 0.006030089760008,
+          "reference_c_pf": 0.006151103999999999,
+          "c_rel": -0.019673580546191286,
+          "native_ground_pf": 0.004906367,
+          "reference_ground_pf": 0.00518718,
+          "native_coupling_pf": 0.001123722760008,
+          "reference_coupling_pf": 0.000963924,
+          "native_r_ohm": 40.64957,
+          "reference_r_ohm": 48.108380000000004,
+          "r_rel": -0.15504180352778468,
+          "worst_sink_path_r_rel": -0.15504180352778468,
+          "native_nodes": 7,
+          "reference_nodes": 6,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "z[0]",
+          "native_c_pf": 0.00793405042846,
+          "reference_c_pf": 0.008194265667,
+          "c_rel": -0.03175577277021176,
+          "native_ground_pf": 0.0065607519,
+          "reference_ground_pf": 0.007021727,
+          "native_coupling_pf": 0.00137329852846,
+          "reference_coupling_pf": 0.001172538667,
+          "native_r_ohm": 53.234993,
+          "reference_r_ohm": 65.5103,
+          "r_rel": -0.18737980134421606,
+          "worst_sink_path_r_rel": -0.18737980134421625,
+          "native_nodes": 11,
+          "reference_nodes": 9,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "z[1]",
+          "native_c_pf": 0.005288203551200001,
+          "reference_c_pf": 0.005401712,
+          "c_rel": -0.021013421078354376,
+          "native_ground_pf": 0.003650696,
+          "reference_ground_pf": 0.004066758,
+          "native_coupling_pf": 0.0016375075512,
+          "reference_coupling_pf": 0.001334954,
+          "native_r_ohm": 49.03794,
+          "reference_r_ohm": 60.84832,
+          "r_rel": -0.19409541627443455,
+          "worst_sink_path_r_rel": -0.19409541627443447,
+          "native_nodes": 7,
+          "reference_nodes": 6,
+          "native_mesh": false,
+          "reference_mesh": false
+        }
+      ],
+      "sta": {
+        "tt": {
+          "liberty": {
+            "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+            "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+            "bytes": 12841637
+          },
+          "rc_corner": "nom",
+          "runs": {
+            "native": {
+              "scope": {
+                "corner": "tt",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": 0.0,
+                "ths_ns": 0.0,
+                "hold_violating_endpoints": 0,
+                "worst_setup_slack_ns": 9.098064645338159,
+                "worst_hold_slack_ns": 0.036892661104912294
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 4
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 67468
+            },
+            "harness": {
+              "scope": {
+                "corner": "tt",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": 0.0,
+                "ths_ns": 0.0,
+                "hold_violating_endpoints": 0,
+                "worst_setup_slack_ns": 8.945669658248658,
+                "worst_hold_slack_ns": 0.0002468887865704761
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 4
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 67472
+            },
+            "merged": {
+              "scope": {
+                "corner": "tt",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": 0.0,
+                "ths_ns": 0.0,
+                "hold_violating_endpoints": 0,
+                "worst_setup_slack_ns": 9.092573226071277,
+                "worst_hold_slack_ns": 0.036218684126978984
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 4
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 67428
+            }
+          },
+          "vs_merged_def": {
+            "status": "passed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.005763194800646687,
+            "max_abs_hold_delta_ns": 0.005282905191043685,
+            "max_abs_setup_arrival_delta_ns": 0.005763194800646243,
+            "max_abs_hold_arrival_delta_ns": 0.005282905191043685,
+            "native_worst": {
+              "setup": 9.098064645338159,
+              "hold": 0.036892661104912294
+            },
+            "reference_worst": {
+              "setup": 9.092573226071277,
+              "hold": 0.036218684126978984
+            }
+          },
+          "vs_harness_def": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.15239498708950094,
+            "max_abs_hold_delta_ns": 0.12161536668229267,
+            "max_abs_setup_arrival_delta_ns": 0.15239498708950117,
+            "max_abs_hold_arrival_delta_ns": 0.12161536668229267,
+            "native_worst": {
+              "setup": 9.098064645338159,
+              "hold": 0.036892661104912294
+            },
+            "reference_worst": {
+              "setup": 8.945669658248658,
+              "hold": 0.0002468887865704761
+            }
+          },
+          "reference_segmentation": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.14690356782261915,
+            "max_abs_hold_delta_ns": 0.1165017598625584,
+            "max_abs_setup_arrival_delta_ns": 0.14690356782261982,
+            "max_abs_hold_arrival_delta_ns": 0.1165017598625584,
+            "native_worst": {
+              "setup": 9.092573226071277,
+              "hold": 0.036218684126978984
+            },
+            "reference_worst": {
+              "setup": 8.945669658248658,
+              "hold": 0.0002468887865704761
+            }
+          }
+        },
+        "ss": {
+          "liberty": {
+            "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_100C_1v60.lib",
+            "sha256": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+            "bytes": 12845260
+          },
+          "rc_corner": "max",
+          "runs": {
+            "native": {
+              "scope": {
+                "corner": "ss",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.03707923511167238,
+                "ths_ns": -0.07322855633438635,
+                "hold_violating_endpoints": 2,
+                "worst_setup_slack_ns": 8.507957923306176,
+                "worst_hold_slack_ns": -0.03707923511167238
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 4
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 67352
+            },
+            "harness": {
+              "scope": {
+                "corner": "ss",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.11158977795565067,
+                "ths_ns": -0.3477437999611975,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 8.219331590798076,
+                "worst_hold_slack_ns": -0.11158977795565067
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 4
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 67488
+            },
+            "merged": {
+              "scope": {
+                "corner": "ss",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.04096226595505004,
+                "ths_ns": -0.08178370992265843,
+                "hold_violating_endpoints": 2,
+                "worst_setup_slack_ns": 8.495072675241788,
+                "worst_hold_slack_ns": -0.04096226595505004
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 4
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 67428
+            }
+          },
+          "vs_merged_def": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.01327248577507234,
+            "max_abs_hold_delta_ns": 0.012355743287504772,
+            "max_abs_setup_arrival_delta_ns": 0.013272485775072562,
+            "max_abs_hold_arrival_delta_ns": 0.01235574328750455,
+            "native_worst": {
+              "setup": 8.507957923306176,
+              "hold": -0.03707923511167238
+            },
+            "reference_worst": {
+              "setup": 8.495072675241788,
+              "hold": -0.04096226595505004
+            }
+          },
+          "vs_harness_def": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.2886263325081,
+            "max_abs_hold_delta_ns": 0.24453770809930697,
+            "max_abs_setup_arrival_delta_ns": 0.2886263325081,
+            "max_abs_hold_arrival_delta_ns": 0.24453770809930697,
+            "native_worst": {
+              "setup": 8.507957923306176,
+              "hold": -0.03707923511167238
+            },
+            "reference_worst": {
+              "setup": 8.219331590798076,
+              "hold": -0.11158977795565067
+            }
+          },
+          "reference_segmentation": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.2757410844437125,
+            "max_abs_hold_delta_ns": 0.23246197269167812,
+            "max_abs_setup_arrival_delta_ns": 0.2757410844437129,
+            "max_abs_hold_arrival_delta_ns": 0.23246197269167812,
+            "native_worst": {
+              "setup": 8.495072675241788,
+              "hold": -0.04096226595505004
+            },
+            "reference_worst": {
+              "setup": 8.219331590798076,
+              "hold": -0.11158977795565067
+            }
+          }
+        },
+        "ff": {
+          "liberty": {
+            "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v95.lib",
+            "sha256": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+            "bytes": 12918504
+          },
+          "rc_corner": "min",
+          "runs": {
+            "native": {
+              "scope": {
+                "corner": "ff",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": 0.0,
+                "ths_ns": 0.0,
+                "hold_violating_endpoints": 0,
+                "worst_setup_slack_ns": 9.33256021498886,
+                "worst_hold_slack_ns": 0.08187894740464666
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 4
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 62844
+            },
+            "harness": {
+              "scope": {
+                "corner": "ff",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": 0.0,
+                "ths_ns": 0.0,
+                "hold_violating_endpoints": 0,
+                "worst_setup_slack_ns": 9.23370342295445,
+                "worst_hold_slack_ns": 0.0605805142831532
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 4
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 63068
+            },
+            "merged": {
+              "scope": {
+                "corner": "ff",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": 0.0,
+                "ths_ns": 0.0,
+                "hold_violating_endpoints": 0,
+                "worst_setup_slack_ns": 9.329338773407798,
+                "worst_hold_slack_ns": 0.08180646265848376
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 4
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 62748
+            }
+          },
+          "vs_merged_def": {
+            "status": "passed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.0033887738875986173,
+            "max_abs_hold_delta_ns": 0.003062780911962326,
+            "max_abs_setup_arrival_delta_ns": 0.0033887738875998386,
+            "max_abs_hold_arrival_delta_ns": 0.0030627809119623817,
+            "native_worst": {
+              "setup": 9.33256021498886,
+              "hold": 0.08187894740464666
+            },
+            "reference_worst": {
+              "setup": 9.329338773407798,
+              "hold": 0.08180646265848376
+            }
+          },
+          "vs_harness_def": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.09885679203440922,
+            "max_abs_hold_delta_ns": 0.07594560573888931,
+            "max_abs_setup_arrival_delta_ns": 0.09885679203440956,
+            "max_abs_hold_arrival_delta_ns": 0.07594560573888931,
+            "native_worst": {
+              "setup": 9.33256021498886,
+              "hold": 0.08187894740464666
+            },
+            "reference_worst": {
+              "setup": 9.23370342295445,
+              "hold": 0.0605805142831532
+            }
+          },
+          "reference_segmentation": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.09563535045334781,
+            "max_abs_hold_delta_ns": 0.0729770183204741,
+            "max_abs_setup_arrival_delta_ns": 0.09563535045334726,
+            "max_abs_hold_arrival_delta_ns": 0.0729770183204741,
+            "native_worst": {
+              "setup": 9.329338773407798,
+              "hold": 0.08180646265848376
+            },
+            "reference_worst": {
+              "setup": 9.23370342295445,
+              "hold": 0.0605805142831532
+            }
+          }
+        }
+      },
+      "resistance_accounting": {
+        "min": {
+          "status": "passed",
+          "nets": 19,
+          "max_rel_error": 2.5191911209161334e-06,
+          "method": "per net: sum of stored lattice wires Rs*L/W plus vias, against the SPEF resistors"
+        },
+        "nom": {
+          "status": "passed",
+          "nets": 19,
+          "max_rel_error": 1.1749877739083888e-06,
+          "method": "per net: sum of stored lattice wires Rs*L/W plus vias, against the SPEF resistors"
+        },
+        "max": {
+          "status": "passed",
+          "nets": 19,
+          "max_rel_error": 6.253916404012083e-07,
+          "method": "per net: sum of stored lattice wires Rs*L/W plus vias, against the SPEF resistors"
+        }
+      },
+      "unmodeled_metal": {
+        "min": {
+          "via_pad_area_um2": 15.459500000000007,
+          "via_pad_area_outside_wires_um2": 10.70165000000001,
+          "wire_end_cap_area_um2": 2.1455999999999995,
+          "estimated_capacitance_pf": 0.007087433656357131,
+          "method": "excess area / default width * isolated two-sided ground per um (substrate context)"
+        },
+        "nom": {
+          "via_pad_area_um2": 15.459500000000007,
+          "via_pad_area_outside_wires_um2": 10.70165000000001,
+          "wire_end_cap_area_um2": 2.1455999999999995,
+          "estimated_capacitance_pf": 0.007567675752585714,
+          "method": "excess area / default width * isolated two-sided ground per um (substrate context)"
+        },
+        "max": {
+          "via_pad_area_um2": 15.459500000000007,
+          "via_pad_area_outside_wires_um2": 10.70165000000001,
+          "wire_end_cap_area_um2": 2.1455999999999995,
+          "estimated_capacitance_pf": 0.007918637357214289,
+          "method": "excess area / default width * isolated two-sided ground per um (substrate context)"
+        }
+      },
+      "sensitivity": {
+        "ss_max_nominal_resistance": {
+          "sta_vs_merged": {
+            "status": "failed",
+            "max_abs_setup_delta_ns": 0.013575365914539006,
+            "max_abs_hold_delta_ns": 0.012658557818961746
+          },
+          "net_r": {
+            "status": "failed",
+            "eligible": 19,
+            "failing": [
+              "a[0]",
+              "a[1]",
+              "b[0]",
+              "b[1]",
+              "clk",
+              "en",
+              "n2",
+              "rr_clock_1",
+              "y[0]",
+              "y[1]",
+              "z[0]",
+              "z[1]"
+            ],
+            "bound": 0.2,
+            "min_reference_ohm": 20.0,
+            "distribution": {
+              "min": -0.354276426070104,
+              "median": -0.24506245523306344,
+              "max": -0.07019938714784464,
+              "mean": -0.23201923016145004,
+              "count": 19
+            }
+          },
+          "total_c_rel": -0.07111902983698595
+        },
+        "ss_max_nominal_via_resistance": {
+          "sta_vs_merged": {
+            "status": "failed",
+            "max_abs_setup_delta_ns": 0.01353706306007929,
+            "max_abs_hold_delta_ns": 0.012620257849885075
+          },
+          "net_r": {
+            "status": "failed",
+            "eligible": 19,
+            "failing": [
+              "a[0]",
+              "b[1]",
+              "clk",
+              "en",
+              "n2",
+              "y[0]",
+              "y[1]",
+              "z[0]",
+              "z[1]"
+            ],
+            "bound": 0.2,
+            "min_reference_ohm": 20.0,
+            "distribution": {
+              "min": -0.28623005105696914,
+              "median": -0.19372863058851258,
+              "max": -0.05144526125819675,
+              "mean": -0.1869531303481394,
+              "count": 19
+            }
+          },
+          "total_c_rel": -0.07111902983698595
+        },
+        "ff_min_nominal_resistance": {
+          "sta_vs_merged": {
+            "status": "passed",
+            "max_abs_setup_delta_ns": 0.0032475656493478056,
+            "max_abs_hold_delta_ns": 0.002929237018280628
+          },
+          "net_r": {
+            "status": "passed",
+            "eligible": 19,
+            "failing": [],
+            "bound": 0.2,
+            "min_reference_ohm": 20.0,
+            "distribution": {
+              "min": -0.03856867238230538,
+              "median": -0.015550625474423544,
+              "max": 0.01688388347827892,
+              "mean": -0.01402136207997921,
+              "count": 19
+            }
+          },
+          "total_c_rel": -0.05888400229662438
+        },
+        "ff_min_nominal_via_resistance": {
+          "sta_vs_merged": {
+            "status": "passed",
+            "max_abs_setup_delta_ns": 0.0032795574402655348,
+            "max_abs_hold_delta_ns": 0.0029593850285131174
+          },
+          "net_r": {
+            "status": "passed",
+            "eligible": 19,
+            "failing": [],
+            "bound": 0.2,
+            "min_reference_ohm": 20.0,
+            "distribution": {
+              "min": -0.12653081916128503,
+              "median": -0.07241741696136077,
+              "max": -0.01294921429343145,
+              "mean": -0.07597236625167597,
+              "count": 19
+            }
+          },
+          "total_c_rel": -0.05888400229662438
+        }
+      },
+      "controls": {
+        "scaled_r_x3": {
+          "status": "detected",
+          "capacitance_unchanged": true
+        },
+        "dropped_net": {
+          "mutation": "*10",
+          "comparison_coverage": {
+            "status": "failed",
+            "only_native": [],
+            "only_reference": [
+              "z[0]"
+            ],
+            "connection_mismatch": [],
+            "nets": 18
+          },
+          "ruststa": {
+            "status": "rejected",
+            "stage": "run",
+            "missing_annotation": true
+          },
+          "status": "detected"
+        },
+        "missing_net": {
+          "mutation": "q[0]",
+          "comparison_coverage": {
+            "status": "failed",
+            "only_native": [
+              "rr_missing_net_q_0"
+            ],
+            "only_reference": [
+              "q[0]"
+            ],
+            "connection_mismatch": [],
+            "nets": 18
+          },
+          "ruststa": {
+            "status": "rejected",
+            "stage": "run",
+            "missing_annotation": false
+          },
+          "status": "detected"
+        },
+        "dropped_connection": {
+          "mutation": "*I *20:A I *D sky130_fd_sc_hd__clkbuf_1",
+          "comparison_coverage": {
+            "status": "failed",
+            "only_native": [],
+            "only_reference": [],
+            "connection_mismatch": [
+              "clk"
+            ],
+            "nets": 19
+          },
+          "ruststa": {
+            "status": "rejected",
+            "stage": "run",
+            "missing_annotation": false
+          },
+          "status": "detected"
+        }
+      }
+    },
+    {
+      "pdk": "gf180",
+      "inputs": {
+        "gf180.def": {
+          "source": "/mnt/data2/cgao/git/RustROAD/.work/rc-timing/ready/gf180.def",
+          "sha256": "f5fd22114abf4e22ba7ea61f88251c7eddaa626fe110af4ff227215dbb5a3084"
+        },
+        "gf180_exported.v": {
+          "source": "/mnt/data2/cgao/git/RustROAD/.work/rc-timing/ready/gf180_exported.v",
+          "sha256": "ed1022d774cfe365fb879344f013363e12ca122936003131a52c5f6e68d1d5a4"
+        },
+        "gf180_postroute.sdc": {
+          "source": "/mnt/data2/cgao/git/RustROAD/.work/rc-timing/ready/gf180_postroute.sdc",
+          "sha256": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6"
+        },
+        "gf180.spef": {
+          "source": "/mnt/data2/cgao/git/RustROAD/.work/rc-timing/ready/gf180.spef",
+          "sha256": "adeff266886e97029fa49df1ab5cc8576ebe65c3127508a4c37ca087f7f28e40"
+        }
+      },
+      "read_only": {
+        "status": "passed",
+        "workspace_tree_sha256": "04cb922437017f20c3e103e02401988e45e2e9e6ebd10a6e63ffb50a70a45a27",
+        "output_inside_workspace": "refused",
+        "corner_mismatch": "refused"
+      },
+      "reference_identity": {
+        "nominal_harness_equals_ready_run_spef": true
+      },
+      "merged_def": {
+        "source": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180.def",
+          "sha256": "f5fd22114abf4e22ba7ea61f88251c7eddaa626fe110af4ff227215dbb5a3084",
+          "bytes": 253394
+        },
+        "merged": {
+          "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged.def",
+          "sha256": "e8cd173eaa685274b845c731a27d272df4e5cd573cf229406809edf85cd8c5c6",
+          "bytes": 29086
+        },
+        "nets": 19,
+        "original_wire_paths": 4982,
+        "merged_wire_paths": 74,
+        "metal_union": "identical per net, layer and track line",
+        "vias": "identical"
+      },
+      "native": {
+        "min": {
+          "output": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_min.spef",
+            "sha256": "7d5ab3a7058cbf69780f71099d727695ad5857fe213430e00635907374199996",
+            "bytes": 36838
+          },
+          "rc_profile": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/fixtures/pdk/gf180-rc-min.json",
+            "sha256": "813da14591cda984bf6df2c8f19a5adef38c0f93796f89e7a01e3454cd868b3c",
+            "bytes": 37674
+          },
+          "stats": {
+            "nets": 19,
+            "lattice_wires": 4982,
+            "wire_runs": 95,
+            "vias": 77,
+            "nodes": 191,
+            "resistors": 172,
+            "opened_loop_resistors": 0,
+            "coincident_pin_links": 0,
+            "couplings": 518,
+            "shapes": 984,
+            "intervals": 1637,
+            "work": 63664,
+            "context_fallback_intervals": 0,
+            "foreign_overlaps": 0,
+            "unrouted_pin_partners": 0,
+            "wire_length_dbu": 2057510,
+            "ground_pf": 0.05143816713933407,
+            "coupling_pf": 0.03041181936728536,
+            "resistance_ohm": 625.8500372670807
+          },
+          "scope": {
+            "corner": "min",
+            "pdk": "gf180",
+            "wire_model": "rc_tree_per_net",
+            "coupling": "cross_net_spef",
+            "coupling_reason": "listed in both nets so totals and SPEF consumers see the same capacitance; the timing engine grounds coupling at factor 1",
+            "supply_nets": "excluded",
+            "pin_capacitance": "excluded (Liberty pin capacitance)",
+            "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
+            "diagonal_coupling": "unmodeled",
+            "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "max_segment_length_dbu": 50000,
+            "drc_status": "unchecked",
+            "lvs_status": "unchecked"
+          },
+          "byte_identical_rerun": true,
+          "elapsed_seconds": 0.02363303699530661,
+          "peak_rss_kib": 8060
+        },
+        "nom": {
+          "output": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_nom.spef",
+            "sha256": "d5ac6380f00e28f6e32dc23a8e8c3989bf3d8793d8ed1b9f7656c6abd3660a14",
+            "bytes": 36834
+          },
+          "rc_profile": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/fixtures/pdk/gf180-rc-nom.json",
+            "sha256": "10a666859b695a6db7f2d5c74b3230456c0b91aed2ff03e8ef89d6984833903a",
+            "bytes": 36961
+          },
+          "stats": {
+            "nets": 19,
+            "lattice_wires": 4982,
+            "wire_runs": 95,
+            "vias": 77,
+            "nodes": 191,
+            "resistors": 172,
+            "opened_loop_resistors": 0,
+            "coincident_pin_links": 0,
+            "couplings": 518,
+            "shapes": 984,
+            "intervals": 1637,
+            "work": 63664,
+            "context_fallback_intervals": 0,
+            "foreign_overlaps": 0,
+            "unrouted_pin_partners": 0,
+            "wire_length_dbu": 2057510,
+            "ground_pf": 0.05490160724301441,
+            "coupling_pf": 0.033635436756147476,
+            "resistance_ohm": 677.3092546583849
+          },
+          "scope": {
+            "corner": "nom",
+            "pdk": "gf180",
+            "wire_model": "rc_tree_per_net",
+            "coupling": "cross_net_spef",
+            "coupling_reason": "listed in both nets so totals and SPEF consumers see the same capacitance; the timing engine grounds coupling at factor 1",
+            "supply_nets": "excluded",
+            "pin_capacitance": "excluded (Liberty pin capacitance)",
+            "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
+            "diagonal_coupling": "unmodeled",
+            "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "max_segment_length_dbu": 50000,
+            "drc_status": "unchecked",
+            "lvs_status": "unchecked"
+          },
+          "byte_identical_rerun": true,
+          "elapsed_seconds": 0.022476661019027233,
+          "peak_rss_kib": 8036
+        },
+        "max": {
+          "output": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_max.spef",
+            "sha256": "028b4c1408a7f1e65ec7811d54de037809abc8a1eb92149fa79d54398f96a936",
+            "bytes": 36780
+          },
+          "rc_profile": {
+            "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/fixtures/pdk/gf180-rc-max.json",
+            "sha256": "5592202a65acfaf4cdd2e936a39219c1bd7591b8226aac28f8f451db42b04635",
+            "bytes": 36982
+          },
+          "stats": {
+            "nets": 19,
+            "lattice_wires": 4982,
+            "wire_runs": 95,
+            "vias": 77,
+            "nodes": 191,
+            "resistors": 172,
+            "opened_loop_resistors": 0,
+            "coincident_pin_links": 0,
+            "couplings": 517,
+            "shapes": 984,
+            "intervals": 1637,
+            "work": 63664,
+            "context_fallback_intervals": 0,
+            "foreign_overlaps": 0,
+            "unrouted_pin_partners": 0,
+            "wire_length_dbu": 2057510,
+            "ground_pf": 0.05907885496172514,
+            "coupling_pf": 0.03720095318924261,
+            "resistance_ohm": 1537.2684720496895
+          },
+          "scope": {
+            "corner": "max",
+            "pdk": "gf180",
+            "wire_model": "rc_tree_per_net",
+            "coupling": "cross_net_spef",
+            "coupling_reason": "listed in both nets so totals and SPEF consumers see the same capacitance; the timing engine grounds coupling at factor 1",
+            "supply_nets": "excluded",
+            "pin_capacitance": "excluded (Liberty pin capacitance)",
+            "via_capacitance": "unmodeled (cut and landing-pad self capacitance)",
+            "diagonal_coupling": "unmodeled",
+            "cell_internal_metal": "pins and obstructions are neighbours and planes, not extracted",
+            "max_segment_length_dbu": 50000,
+            "drc_status": "unchecked",
+            "lvs_status": "unchecked"
+          },
+          "byte_identical_rerun": true,
+          "elapsed_seconds": 0.022676284017506987,
+          "peak_rss_kib": 8100
+        }
+      },
+      "reference_runs": {
+        "harness": {
+          "min": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/librelane/rules.openrcx.gf180mcuD.min",
+              "sha256": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+              "bytes": 31290
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_min.spef",
+              "sha256": "b87316047e995d295e4fbf9cfb2f2e2f6ada56709bb74988ad028645ed42f432",
+              "bytes": 639758
+            },
+            "container_peak_rss_kib": 125148,
+            "elapsed_seconds": 0.7986933849751949,
+            "receipt": "gf180_harness_min"
+          },
+          "nom": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/librelane/rules.openrcx.gf180mcuD.nom",
+              "sha256": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+              "bytes": 31291
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_nom.spef",
+              "sha256": "9b83d144fbfbc40fa3bfcbfc4fb173eac8d1236d048659e77618bb47848d95b5",
+              "bytes": 635802
+            },
+            "container_peak_rss_kib": 124832,
+            "elapsed_seconds": 0.8286251090466976,
+            "receipt": "gf180_harness_nom"
+          },
+          "max": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/librelane/rules.openrcx.gf180mcuD.max",
+              "sha256": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+              "bytes": 31286
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_max.spef",
+              "sha256": "346e4403b8d4a23f2ff8289559c24630b34592e477d189904684137fdf273f47",
+              "bytes": 635551
+            },
+            "container_peak_rss_kib": 125124,
+            "elapsed_seconds": 0.8293760900269262,
+            "receipt": "gf180_harness_max"
+          }
+        },
+        "merged": {
+          "min": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/librelane/rules.openrcx.gf180mcuD.min",
+              "sha256": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+              "bytes": 31290
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_min.spef",
+              "sha256": "9dfd47ea1e860607ce17701a1600e1f4d7415dbb17e1735f4d71bd1f18c40a9a",
+              "bytes": 15833
+            },
+            "container_peak_rss_kib": 123472,
+            "elapsed_seconds": 0.7963205729611218,
+            "receipt": "gf180_merged_min"
+          },
+          "nom": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/librelane/rules.openrcx.gf180mcuD.nom",
+              "sha256": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+              "bytes": 31291
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_nom.spef",
+              "sha256": "6d29541ea94b58cb0c3513d23f12c864128d241653336ddc3cd78cd0ec385046",
+              "bytes": 15808
+            },
+            "container_peak_rss_kib": 123616,
+            "elapsed_seconds": 0.7960101980133913,
+            "receipt": "gf180_merged_nom"
+          },
+          "max": {
+            "rules": {
+              "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.tech/librelane/rules.openrcx.gf180mcuD.max",
+              "sha256": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+              "bytes": 31286
+            },
+            "spef": {
+              "path": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_max.spef",
+              "sha256": "1381dc64ff5277c2b3539cf0456eb12879c5c637fddfc0a4ca18ed917b960b5b",
+              "bytes": 15795
+            },
+            "container_peak_rss_kib": 123572,
+            "elapsed_seconds": 0.8547364210244268,
+            "receipt": "gf180_merged_max"
+          }
+        }
+      },
+      "spef": {
+        "min": {
+          "vs_harness_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_min.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_min.spef",
+            "native_sha256": "7d5ab3a7058cbf69780f71099d727695ad5857fe213430e00635907374199996",
+            "reference_sha256": "b87316047e995d295e4fbf9cfb2f2e2f6ada56709bb74988ad028645ed42f432",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.05143816747,
+              "coupling_pf": 0.03041182467064,
+              "total_pf": 0.08184999214064,
+              "resistance_ohm": 625.8500296999999
+            },
+            "design_reference": {
+              "ground_pf": 0.1365465498214,
+              "coupling_pf": 0.0695323278394,
+              "total_pf": 0.2060788776608,
+              "resistance_ohm": 893.3882798
+            },
+            "total_c_rel": -0.6028220210158425,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.6028220210158425,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 17,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.7425230208401387,
+                  "median": -0.5905157198847772,
+                  "max": -0.5243546935464255,
+                  "mean": -0.5977693783392994,
+                  "count": 17
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n3",
+                  "n4",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.3941789695670541,
+                  "median": -0.2876904857749349,
+                  "max": -0.18506610120619185,
+                  "mean": -0.28899806000470774,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "vs_merged_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_min.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_min.spef",
+            "native_sha256": "7d5ab3a7058cbf69780f71099d727695ad5857fe213430e00635907374199996",
+            "reference_sha256": "9dfd47ea1e860607ce17701a1600e1f4d7415dbb17e1735f4d71bd1f18c40a9a",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.05143816747,
+              "coupling_pf": 0.03041182467064,
+              "total_pf": 0.08184999214064,
+              "resistance_ohm": 625.8500296999999
+            },
+            "design_reference": {
+              "ground_pf": 0.05955743604,
+              "coupling_pf": 0.028519967405,
+              "total_pf": 0.08807740344500001,
+              "resistance_ohm": 583.5856176
+            },
+            "total_c_rel": -0.07070384753393329,
+            "targets": {
+              "total_c": {
+                "status": "passed",
+                "rel": -0.07070384753393329,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "passed",
+                "eligible": 12,
+                "failing": [],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.07240748706971645,
+                  "median": -0.03404420405689202,
+                  "max": 0.013303869818801106,
+                  "mean": -0.03409090563467101,
+                  "count": 12
+                }
+              },
+              "net_r": {
+                "status": "passed",
+                "eligible": 19,
+                "failing": [],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": 0.009381294652224703,
+                  "median": 0.07638557484208497,
+                  "max": 0.13385734849283795,
+                  "mean": 0.07010901323281356,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "reference_segmentation": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_min.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_min.spef",
+            "native_sha256": "9dfd47ea1e860607ce17701a1600e1f4d7415dbb17e1735f4d71bd1f18c40a9a",
+            "reference_sha256": "b87316047e995d295e4fbf9cfb2f2e2f6ada56709bb74988ad028645ed42f432",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.05955743604,
+              "coupling_pf": 0.028519967405,
+              "total_pf": 0.08807740344500001,
+              "resistance_ohm": 583.5856176
+            },
+            "design_reference": {
+              "ground_pf": 0.1365465498214,
+              "coupling_pf": 0.0695323278394,
+              "total_pf": 0.2060788776608,
+              "resistance_ohm": 893.3882798
+            },
+            "total_c_rel": -0.57260343978594,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.57260343978594,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 17,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.7220057010195156,
+                  "median": -0.5773288756724306,
+                  "max": -0.5005355672955728,
+                  "mean": -0.5816778861687657,
+                  "count": 17
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.46249230967838795,
+                  "median": -0.33475319824101646,
+                  "max": -0.201141225058928,
+                  "mean": -0.3325781127399363,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          }
+        },
+        "nom": {
+          "vs_harness_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_nom.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_nom.spef",
+            "native_sha256": "d5ac6380f00e28f6e32dc23a8e8c3989bf3d8793d8ed1b9f7656c6abd3660a14",
+            "reference_sha256": "9b83d144fbfbc40fa3bfcbfc4fb173eac8d1236d048659e77618bb47848d95b5",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.05490161378,
+              "coupling_pf": 0.03363544042204,
+              "total_pf": 0.08853705420204,
+              "resistance_ohm": 677.3092417
+            },
+            "design_reference": {
+              "ground_pf": 0.1491035848393,
+              "coupling_pf": 0.0765125292161,
+              "total_pf": 0.2256161140554,
+              "resistance_ohm": 1134.3104543
+            },
+            "total_c_rel": -0.607576548453894,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.607576548453894,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 18,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.755634777587502,
+                  "median": -0.5931618641225964,
+                  "max": -0.5285023339425328,
+                  "mean": -0.6091428661615345,
+                  "count": 18
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.4956358107092865,
+                  "median": -0.39109918651373254,
+                  "max": -0.26798368692652164,
+                  "mean": -0.3863512151030744,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "vs_merged_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_nom.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_nom.spef",
+            "native_sha256": "d5ac6380f00e28f6e32dc23a8e8c3989bf3d8793d8ed1b9f7656c6abd3660a14",
+            "reference_sha256": "6d29541ea94b58cb0c3513d23f12c864128d241653336ddc3cd78cd0ec385046",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.05490161378,
+              "coupling_pf": 0.03363544042204,
+              "total_pf": 0.08853705420204,
+              "resistance_ohm": 677.3092417
+            },
+            "design_reference": {
+              "ground_pf": 0.06469419594,
+              "coupling_pf": 0.031396025309,
+              "total_pf": 0.096090221249,
+              "resistance_ohm": 688.029664
+            },
+            "total_c_rel": -0.07860495010608179,
+            "targets": {
+              "total_c": {
+                "status": "passed",
+                "rel": -0.07860495010608179,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "passed",
+                "eligible": 13,
+                "failing": [],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.08080538285087253,
+                  "median": -0.038743585208197616,
+                  "max": 0.010544899504646507,
+                  "mean": -0.03882794483929372,
+                  "count": 13
+                }
+              },
+              "net_r": {
+                "status": "passed",
+                "eligible": 19,
+                "failing": [],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.024508292761369514,
+                  "median": -0.014445356645442385,
+                  "max": -0.013036592857698965,
+                  "mean": -0.01535044686928487,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "reference_segmentation": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_nom.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_nom.spef",
+            "native_sha256": "6d29541ea94b58cb0c3513d23f12c864128d241653336ddc3cd78cd0ec385046",
+            "reference_sha256": "9b83d144fbfbc40fa3bfcbfc4fb173eac8d1236d048659e77618bb47848d95b5",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.06469419594,
+              "coupling_pf": 0.031396025309,
+              "total_pf": 0.096090221249,
+              "resistance_ohm": 688.029664
+            },
+            "design_reference": {
+              "ground_pf": 0.1491035848393,
+              "coupling_pf": 0.0765125292161,
+              "total_pf": 0.2256161140554,
+              "resistance_ohm": 1134.3104543
+            },
+            "total_c_rel": -0.5740985893170508,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.5740985893170508,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 18,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.7285871144237016,
+                  "median": -0.5779832875240966,
+                  "max": -0.5027776026904137,
+                  "mean": -0.5906800306609081,
+                  "count": 18
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.48768668999983555,
+                  "median": -0.38141706061502956,
+                  "max": -0.2566162470066379,
+                  "mean": -0.37683703150786174,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          }
+        },
+        "max": {
+          "vs_harness_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_max.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_max.spef",
+            "native_sha256": "028b4c1408a7f1e65ec7811d54de037809abc8a1eb92149fa79d54398f96a936",
+            "reference_sha256": "346e4403b8d4a23f2ff8289559c24630b34592e477d189904684137fdf273f47",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.0590788566,
+              "coupling_pf": 0.03720095766452,
+              "total_pf": 0.09627981426452001,
+              "resistance_ohm": 1537.2684527
+            },
+            "design_reference": {
+              "ground_pf": 0.1653818249239,
+              "coupling_pf": 0.0839887475677,
+              "total_pf": 0.2493705724916,
+              "resistance_ohm": 1597.594587
+            },
+            "total_c_rel": -0.6139086769439759,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.6139086769439759,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.7584162997851724,
+                  "median": -0.608873099996622,
+                  "max": -0.533791144603162,
+                  "mean": -0.618250294253907,
+                  "count": 19
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "b[0]",
+                  "clk",
+                  "n2",
+                  "n3",
+                  "n5",
+                  "q[0]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.43678295156442287,
+                  "median": -0.04493628996630195,
+                  "max": 0.8393660212872515,
+                  "mean": 0.0850453703175629,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "vs_merged_def": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_native_max.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_max.spef",
+            "native_sha256": "028b4c1408a7f1e65ec7811d54de037809abc8a1eb92149fa79d54398f96a936",
+            "reference_sha256": "1381dc64ff5277c2b3539cf0456eb12879c5c637fddfc0a4ca18ed917b960b5b",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.0590788566,
+              "coupling_pf": 0.03720095766452,
+              "total_pf": 0.09627981426452001,
+              "resistance_ohm": 1537.2684527
+            },
+            "design_reference": {
+              "ground_pf": 0.0712743543,
+              "coupling_pf": 0.034482318571,
+              "total_pf": 0.10575667287099999,
+              "resistance_ohm": 888.871205
+            },
+            "total_c_rel": -0.08961002979017386,
+            "targets": {
+              "total_c": {
+                "status": "passed",
+                "rel": -0.08961002979017386,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "passed",
+                "eligible": 13,
+                "failing": [],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.09213199695081685,
+                  "median": -0.045165802417457684,
+                  "max": 0.006085769027101997,
+                  "mean": -0.04543142777056374,
+                  "count": 13
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": 0.15198646523393733,
+                  "median": 0.7145185161215605,
+                  "max": 1.7744609818907853,
+                  "mean": 0.8483518754009208,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          },
+          "reference_segmentation": {
+            "native": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_merged_rcx/gf180_merged_max.spef",
+            "reference": "/mnt/data2/cgao/git/RustROAD/.work/wt/extract/.work/extract-final/gf180_harness_rcx/gf180_harness_max.spef",
+            "native_sha256": "1381dc64ff5277c2b3539cf0456eb12879c5c637fddfc0a4ca18ed917b960b5b",
+            "reference_sha256": "346e4403b8d4a23f2ff8289559c24630b34592e477d189904684137fdf273f47",
+            "coverage": {
+              "status": "passed",
+              "only_native": [],
+              "only_reference": [],
+              "connection_mismatch": [],
+              "nets": 19
+            },
+            "design_native": {
+              "ground_pf": 0.0712743543,
+              "coupling_pf": 0.034482318571,
+              "total_pf": 0.10575667287099999,
+              "resistance_ohm": 888.871205
+            },
+            "design_reference": {
+              "ground_pf": 0.1653818249239,
+              "coupling_pf": 0.0839887475677,
+              "total_pf": 0.2493705724916,
+              "resistance_ohm": 1597.594587
+            },
+            "total_c_rel": -0.5759055616934817,
+            "targets": {
+              "total_c": {
+                "status": "failed",
+                "rel": -0.5759055616934817,
+                "bound": 0.1
+              },
+              "net_c": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_pf": 0.005,
+                "distribution": {
+                  "min": -0.7275597520651674,
+                  "median": -0.5915776316319726,
+                  "max": -0.505672270515773,
+                  "mean": -0.5968611124308013,
+                  "count": 19
+                }
+              },
+              "net_r": {
+                "status": "failed",
+                "eligible": 19,
+                "failing": [
+                  "a[0]",
+                  "a[1]",
+                  "b[0]",
+                  "b[1]",
+                  "clk",
+                  "en",
+                  "n2",
+                  "n3",
+                  "n4",
+                  "n5",
+                  "q[0]",
+                  "q[1]",
+                  "rr_clock_0",
+                  "rr_clock_1",
+                  "rr_clock_2",
+                  "y[0]",
+                  "y[1]",
+                  "z[0]",
+                  "z[1]"
+                ],
+                "bound": 0.2,
+                "min_reference_ohm": 20.0,
+                "distribution": {
+                  "min": -0.5213180085605579,
+                  "median": -0.43204220897780693,
+                  "max": -0.3237200148657747,
+                  "mean": -0.4280385316142709,
+                  "count": 19
+                }
+              },
+              "coverage": {
+                "status": "passed"
+              }
+            }
+          }
+        }
+      },
+      "spef_nets_nominal_vs_merged": [
+        {
+          "net": "a[0]",
+          "native_c_pf": 0.0085998221406,
+          "reference_c_pf": 0.009355823,
+          "c_rel": -0.08080538285087253,
+          "native_ground_pf": 0.0055613019,
+          "reference_ground_pf": 0.0065800075,
+          "native_coupling_pf": 0.0030385202406,
+          "reference_coupling_pf": 0.0027758155,
+          "native_r_ohm": 49.752321099999996,
+          "reference_r_ohm": 50.604257,
+          "r_rel": -0.016835261507742342,
+          "worst_sink_path_r_rel": -0.018478465014629793,
+          "native_nodes": 14,
+          "reference_nodes": 12,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "a[1]",
+          "native_c_pf": 0.01003322748883,
+          "reference_c_pf": 0.010288476040000001,
+          "c_rel": -0.02480917000512367,
+          "native_ground_pf": 0.00319723844,
+          "reference_ground_pf": 0.0037430106,
+          "native_coupling_pf": 0.00683598904883,
+          "reference_coupling_pf": 0.00654546544,
+          "native_r_ohm": 46.0044671,
+          "reference_r_ohm": 46.632282000000004,
+          "r_rel": -0.013463096230203878,
+          "worst_sink_path_r_rel": -0.014901041913656543,
+          "native_nodes": 11,
+          "reference_nodes": 10,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "b[0]",
+          "native_c_pf": 0.007848192566939999,
+          "reference_c_pf": 0.00831777112,
+          "c_rel": -0.05645485386474551,
+          "native_ground_pf": 0.006153128999999999,
+          "reference_ground_pf": 0.0069313811,
+          "native_coupling_pf": 0.00169506356694,
+          "reference_coupling_pf": 0.00138639002,
+          "native_r_ohm": 44.392502,
+          "reference_r_ohm": 45.507821,
+          "r_rel": -0.024508292761369514,
+          "worst_sink_path_r_rel": -0.024860022340396457,
+          "native_nodes": 15,
+          "reference_nodes": 14,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "b[1]",
+          "native_c_pf": 0.00929511884143,
+          "reference_c_pf": 0.009813593299,
+          "c_rel": -0.05283227476146101,
+          "native_ground_pf": 0.0026700408700000003,
+          "reference_ground_pf": 0.0035414789,
+          "native_coupling_pf": 0.00662507797143,
+          "reference_coupling_pf": 0.006272114399,
+          "native_r_ohm": 43.296423000000004,
+          "reference_r_ohm": 43.984879,
+          "r_rel": -0.015652106261335744,
+          "worst_sink_path_r_rel": -0.019491492351594728,
+          "native_nodes": 12,
+          "reference_nodes": 11,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "clk",
+          "native_c_pf": 0.0080601214386,
+          "reference_c_pf": 0.0083272424,
+          "c_rel": -0.032077961535021536,
+          "native_ground_pf": 0.0053068348,
+          "reference_ground_pf": 0.00574324,
+          "native_coupling_pf": 0.0027532866386,
+          "reference_coupling_pf": 0.0025840024,
+          "native_r_ohm": 36.792321,
+          "reference_r_ohm": 37.286249999999995,
+          "r_rel": -0.013246947601327415,
+          "worst_sink_path_r_rel": -0.013246947601327415,
+          "native_nodes": 8,
+          "reference_nodes": 5,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "en",
+          "native_c_pf": 0.01294618550534,
+          "reference_c_pf": 0.01325393351,
+          "c_rel": -0.023219371398521517,
+          "native_ground_pf": 0.0023034435,
+          "reference_ground_pf": 0.00292488,
+          "native_coupling_pf": 0.01064274200534,
+          "reference_coupling_pf": 0.01032905351,
+          "native_r_ohm": 48.479471,
+          "reference_r_ohm": 49.226042,
+          "r_rel": -0.015166179722513603,
+          "worst_sink_path_r_rel": -0.016692087352598806,
+          "native_nodes": 12,
+          "reference_nodes": 11,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "n2",
+          "native_c_pf": 0.0014278081599000002,
+          "reference_c_pf": 0.0015323075199999998,
+          "c_rel": -0.06819738122801852,
+          "native_ground_pf": 0.00043784924,
+          "reference_ground_pf": 0.0006766917999999999,
+          "native_coupling_pf": 0.0009899589199000001,
+          "reference_coupling_pf": 0.0008556157199999999,
+          "native_r_ohm": 20.683925,
+          "reference_r_ohm": 20.987086,
+          "r_rel": -0.014445121156886806,
+          "worst_sink_path_r_rel": -0.014445121156886636,
+          "native_nodes": 8,
+          "reference_nodes": 8,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "n3",
+          "native_c_pf": 0.00124657719913,
+          "reference_c_pf": 0.001384555099,
+          "c_rel": -0.09965504440354524,
+          "native_ground_pf": 0.0004425599,
+          "reference_ground_pf": 0.000682425,
+          "native_coupling_pf": 0.00080401729913,
+          "reference_coupling_pf": 0.000702130099,
+          "native_r_ohm": 20.683924,
+          "reference_r_ohm": 20.98709,
+          "r_rel": -0.014445356645442385,
+          "worst_sink_path_r_rel": -0.014445356645442385,
+          "native_nodes": 8,
+          "reference_nodes": 8,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "n4",
+          "native_c_pf": 0.0069543847453,
+          "reference_c_pf": 0.00688181668,
+          "c_rel": 0.010544899504646507,
+          "native_ground_pf": 0.0021292024,
+          "reference_ground_pf": 0.002369796,
+          "native_coupling_pf": 0.0048251823453,
+          "reference_coupling_pf": 0.00451202068,
+          "native_r_ohm": 35.771784000000004,
+          "reference_r_ohm": 36.244286,
+          "r_rel": -0.013036592857698965,
+          "worst_sink_path_r_rel": -0.013036592857699161,
+          "native_nodes": 9,
+          "reference_nodes": 8,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "n5",
+          "native_c_pf": 0.0038233805829999998,
+          "reference_c_pf": 0.0040330532,
+          "c_rel": -0.051988557205245964,
+          "native_ground_pf": 0.00064860102,
+          "reference_ground_pf": 0.0010783676,
+          "native_coupling_pf": 0.003174779563,
+          "reference_coupling_pf": 0.0029546856,
+          "native_r_ohm": 25.670897,
+          "reference_r_ohm": 26.030009,
+          "r_rel": -0.013796076674426032,
+          "worst_sink_path_r_rel": -0.01379607667442576,
+          "native_nodes": 8,
+          "reference_nodes": 8,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "q[0]",
+          "native_c_pf": 0.0032065946947,
+          "reference_c_pf": 0.00335693646,
+          "c_rel": -0.04478540690043327,
+          "native_ground_pf": 0.0003272819,
+          "reference_ground_pf": 0.000735098,
+          "native_coupling_pf": 0.0028793127947,
+          "reference_coupling_pf": 0.00262183846,
+          "native_r_ohm": 24.635897,
+          "reference_r_ohm": 24.983389,
+          "r_rel": -0.013908921643897032,
+          "worst_sink_path_r_rel": -0.013908921643897032,
+          "native_nodes": 8,
+          "reference_nodes": 8,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "q[1]",
+          "native_c_pf": 0.0072878410254,
+          "reference_c_pf": 0.00757153189,
+          "c_rel": -0.037468093474542656,
+          "native_ground_pf": 0.00167252072,
+          "reference_ground_pf": 0.00230631264,
+          "native_coupling_pf": 0.0056153203054,
+          "reference_coupling_pf": 0.00526521925,
+          "native_r_ohm": 34.6210686,
+          "reference_r_ohm": 35.080628,
+          "r_rel": -0.013100090454480927,
+          "worst_sink_path_r_rel": -0.013100090454481126,
+          "native_nodes": 10,
+          "reference_nodes": 8,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "rr_clock_0",
+          "native_c_pf": 0.0041202894222,
+          "reference_c_pf": 0.0043375081999999995,
+          "c_rel": -0.05007916245553143,
+          "native_ground_pf": 0.0008615368,
+          "reference_ground_pf": 0.0012064833999999999,
+          "native_coupling_pf": 0.0032587526222,
+          "reference_coupling_pf": 0.0031310248,
+          "native_r_ohm": 35.3073216,
+          "reference_r_ohm": 35.855607,
+          "r_rel": -0.01529148286347509,
+          "worst_sink_path_r_rel": -0.014657750867589553,
+          "native_nodes": 12,
+          "reference_nodes": 12,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "rr_clock_1",
+          "native_c_pf": 0.0062839384767,
+          "reference_c_pf": 0.00638782291,
+          "c_rel": -0.01626288561277606,
+          "native_ground_pf": 0.00236737907,
+          "reference_ground_pf": 0.0027147784,
+          "native_coupling_pf": 0.0039165594067,
+          "reference_coupling_pf": 0.00367304451,
+          "native_r_ohm": 41.3678546,
+          "reference_r_ohm": 42.075175,
+          "r_rel": -0.01681087244438081,
+          "worst_sink_path_r_rel": -0.017095723074935235,
+          "native_nodes": 13,
+          "reference_nodes": 13,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "rr_clock_2",
+          "native_c_pf": 0.001648843655,
+          "reference_c_pf": 0.00179233139,
+          "c_rel": -0.08005647605156319,
+          "native_ground_pf": 0.0007801553,
+          "reference_ground_pf": 0.0010053528,
+          "native_coupling_pf": 0.000868688355,
+          "reference_coupling_pf": 0.0007869785899999999,
+          "native_r_ohm": 31.210716,
+          "reference_r_ohm": 31.713017,
+          "r_rel": -0.015838953449304406,
+          "worst_sink_path_r_rel": -0.018248814469701717,
+          "native_nodes": 12,
+          "reference_nodes": 12,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "y[0]",
+          "native_c_pf": 0.0076874529075,
+          "reference_c_pf": 0.008056084,
+          "c_rel": -0.045758099406609985,
+          "native_ground_pf": 0.005287183,
+          "reference_ground_pf": 0.005733663999999999,
+          "native_coupling_pf": 0.0024002699075,
+          "reference_coupling_pf": 0.00232242,
+          "native_r_ohm": 35.49857,
+          "reference_r_ohm": 35.9779,
+          "r_rel": -0.01332290100311573,
+          "worst_sink_path_r_rel": -0.01332290100311573,
+          "native_nodes": 7,
+          "reference_nodes": 5,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "y[1]",
+          "native_c_pf": 0.00492975815524,
+          "reference_c_pf": 0.0051372612,
+          "c_rel": -0.04039176453788254,
+          "native_ground_pf": 0.0033477938199999997,
+          "reference_ground_pf": 0.0038752512,
+          "native_coupling_pf": 0.00158196433524,
+          "reference_coupling_pf": 0.00126201,
+          "native_r_ohm": 25.1903557,
+          "reference_r_ohm": 25.645089,
+          "r_rel": -0.017731788725708745,
+          "worst_sink_path_r_rel": -0.017731788725708884,
+          "native_nodes": 7,
+          "reference_nodes": 6,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "z[0]",
+          "native_c_pf": 0.01000578877004,
+          "reference_c_pf": 0.0104090736,
+          "c_rel": -0.038743585208197616,
+          "native_ground_pf": 0.0063209291,
+          "reference_ground_pf": 0.007019963000000001,
+          "native_coupling_pf": 0.00368485967004,
+          "reference_coupling_pf": 0.0033891106,
+          "native_r_ohm": 46.412463,
+          "reference_r_ohm": 47.236937,
+          "r_rel": -0.017454010618850987,
+          "worst_sink_path_r_rel": -0.01929183647391471,
+          "native_nodes": 11,
+          "reference_nodes": 9,
+          "native_mesh": false,
+          "reference_mesh": false
+        },
+        {
+          "net": "z[1]",
+          "native_c_pf": 0.006767168848230001,
+          "reference_c_pf": 0.00724912504,
+          "c_rel": -0.06648473975971031,
+          "native_ground_pf": 0.005086633,
+          "reference_ground_pf": 0.005826014,
+          "native_coupling_pf": 0.00168053584823,
+          "reference_coupling_pf": 0.00142311104,
+          "native_r_ohm": 31.53696,
+          "reference_r_ohm": 31.971919999999997,
+          "r_rel": -0.013604437894252103,
+          "worst_sink_path_r_rel": -0.013604437894252103,
+          "native_nodes": 6,
+          "reference_nodes": 5,
+          "native_mesh": false,
+          "reference_mesh": false
+        }
+      ],
+      "sta": {
+        "tt": {
+          "liberty": {
+            "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+            "sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+            "bytes": 20107439
+          },
+          "rc_corner": "nom",
+          "runs": {
+            "native": {
+              "scope": {
+                "corner": "tt",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.4182247696064677,
+                "ths_ns": -1.4901518408203778,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 7.702525137858197,
+                "worst_hold_slack_ns": -0.4182247696064677
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 8,
+                  "minimum_period": 8
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 120420
+            },
+            "harness": {
+              "scope": {
+                "corner": "tt",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.6355345830601125,
+                "ths_ns": -2.1930445465871835,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 7.315693878229817,
+                "worst_hold_slack_ns": -0.6355345830601125
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 8,
+                  "minimum_period": 8
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 120656
+            },
+            "merged": {
+              "scope": {
+                "corner": "tt",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.42128241920275067,
+                "ths_ns": -1.5080605094570132,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 7.692997672755416,
+                "worst_hold_slack_ns": -0.42128241920275067
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 8,
+                  "minimum_period": 8
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 120352
+            }
+          },
+          "vs_merged_def": {
+            "status": "passed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.009527465102781463,
+            "max_abs_hold_delta_ns": 0.007595188361646077,
+            "max_abs_setup_arrival_delta_ns": 0.012731987614909013,
+            "max_abs_hold_arrival_delta_ns": 0.007595188361646299,
+            "native_worst": {
+              "setup": 7.702525137858197,
+              "hold": -0.4182247696064677
+            },
+            "reference_worst": {
+              "setup": 7.692997672755416,
+              "hold": -0.42128241920275067
+            }
+          },
+          "vs_harness_def": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.38683125962838005,
+            "max_abs_hold_delta_ns": 0.33755408567960554,
+            "max_abs_setup_arrival_delta_ns": 0.41725139840748016,
+            "max_abs_hold_arrival_delta_ns": 0.33755408567960576,
+            "native_worst": {
+              "setup": 7.702525137858197,
+              "hold": -0.4182247696064677
+            },
+            "reference_worst": {
+              "setup": 7.315693878229817,
+              "hold": -0.6355345830601125
+            }
+          },
+          "reference_segmentation": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.3773037945255986,
+            "max_abs_hold_delta_ns": 0.32995889731795947,
+            "max_abs_setup_arrival_delta_ns": 0.40451941079257114,
+            "max_abs_hold_arrival_delta_ns": 0.32995889731795947,
+            "native_worst": {
+              "setup": 7.692997672755416,
+              "hold": -0.42128241920275067
+            },
+            "reference_worst": {
+              "setup": 7.315693878229817,
+              "hold": -0.6355345830601125
+            }
+          }
+        },
+        "ss": {
+          "liberty": {
+            "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib",
+            "sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+            "bytes": 19934792
+          },
+          "rc_corner": "max",
+          "runs": {
+            "native": {
+              "scope": {
+                "corner": "ss",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.9434975356744203,
+                "ths_ns": -3.4080648423249276,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 5.661445362955016,
+                "worst_hold_slack_ns": -0.9434975356744203
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 8,
+                  "minimum_period": 8
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 120188
+            },
+            "harness": {
+              "scope": {
+                "corner": "ss",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -1.4080005102409086,
+                "ths_ns": -4.914037708029937,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 4.851477670202791,
+                "worst_hold_slack_ns": -1.4080005102409086
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 8,
+                  "minimum_period": 8
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 119968
+            },
+            "merged": {
+              "scope": {
+                "corner": "ss",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.9512653276671069,
+                "ths_ns": -3.4498219418665075,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 5.638908950982042,
+                "worst_hold_slack_ns": -0.9512653276671069
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 8,
+                  "minimum_period": 8
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 120396
+            }
+          },
+          "vs_merged_def": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.022536411972973625,
+            "max_abs_hold_delta_ns": 0.017820106570796135,
+            "max_abs_setup_arrival_delta_ns": 0.029144287544637493,
+            "max_abs_hold_arrival_delta_ns": 0.017820106570796135,
+            "native_worst": {
+              "setup": 5.661445362955016,
+              "hold": -0.9434975356744203
+            },
+            "reference_worst": {
+              "setup": 5.638908950982042,
+              "hold": -0.9512653276671069
+            }
+          },
+          "vs_harness_def": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.8099676927522248,
+            "max_abs_hold_delta_ns": 0.7079231443322254,
+            "max_abs_setup_arrival_delta_ns": 0.8915805670266916,
+            "max_abs_hold_arrival_delta_ns": 0.7079231443322249,
+            "native_worst": {
+              "setup": 5.661445362955016,
+              "hold": -0.9434975356744203
+            },
+            "reference_worst": {
+              "setup": 4.851477670202791,
+              "hold": -1.4080005102409086
+            }
+          },
+          "reference_segmentation": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.7874312807792512,
+            "max_abs_hold_delta_ns": 0.6901030377614292,
+            "max_abs_setup_arrival_delta_ns": 0.8624362794820541,
+            "max_abs_hold_arrival_delta_ns": 0.6901030377614288,
+            "native_worst": {
+              "setup": 5.638908950982042,
+              "hold": -0.9512653276671069
+            },
+            "reference_worst": {
+              "setup": 4.851477670202791,
+              "hold": -1.4080005102409086
+            }
+          }
+        },
+        "ff": {
+          "liberty": {
+            "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ff_n40C_3v60.lib",
+            "sha256": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+            "bytes": 20275104
+          },
+          "rc_corner": "min",
+          "runs": {
+            "native": {
+              "scope": {
+                "corner": "ff",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.19551319006780254,
+                "ths_ns": -0.6561916546338902,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 8.57215612977805,
+                "worst_hold_slack_ns": -0.19551319006780254
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 8,
+                  "minimum_period": 8
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 136172
+            },
+            "harness": {
+              "scope": {
+                "corner": "ff",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.31031881121314187,
+                "ths_ns": -1.0362436360983305,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 8.358722056142144,
+                "worst_hold_slack_ns": -0.31031881121314187
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 8,
+                  "minimum_period": 8
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 136072
+            },
+            "merged": {
+              "scope": {
+                "corner": "ff",
+                "wire_model": "spef_rc",
+                "parasitics": "spef",
+                "drc_status": "unchecked",
+                "wire_load": null,
+                "delay_calculator": "nldm_ceff_ramp",
+                "coupling": "grounded_factor_1",
+                "physical_clock_domains": 1,
+                "clock_model": "propagated",
+                "cppr": "off",
+                "backend": "cpu",
+                "precision": "f64"
+              },
+              "metrics": {
+                "wns_ns": 0.0,
+                "tns_ns": 0.0,
+                "violating_endpoints": 0,
+                "whs_ns": -0.19669992033690892,
+                "ths_ns": -0.6650869933133317,
+                "hold_violating_endpoints": 4,
+                "worst_setup_slack_ns": 8.56756325175548,
+                "worst_hold_slack_ns": -0.19669992033690892
+              },
+              "completeness": {
+                "constrained_endpoints": 8,
+                "unconstrained_endpoints": 0,
+                "clock_domains": [
+                  "core"
+                ],
+                "unconstrained_by_reason": {},
+                "unconstrained_inputs": 0,
+                "disabled_arcs": 0,
+                "unanalyzed_arcs": {
+                  "min_pulse_width": 8,
+                  "minimum_period": 8
+                }
+              },
+              "diagnostics": [
+                "D0021",
+                "T0015",
+                "T0074",
+                "T0076"
+              ],
+              "peak_rss_kib": 136396
+            }
+          },
+          "vs_merged_def": {
+            "status": "passed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.004592878022569025,
+            "max_abs_hold_delta_ns": 0.003666825404667673,
+            "max_abs_setup_arrival_delta_ns": 0.006310722374563316,
+            "max_abs_hold_arrival_delta_ns": 0.003666825404667673,
+            "native_worst": {
+              "setup": 8.57215612977805,
+              "hold": -0.19551319006780254
+            },
+            "reference_worst": {
+              "setup": 8.56756325175548,
+              "hold": -0.19669992033690892
+            }
+          },
+          "vs_harness_def": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.21343407363590572,
+            "max_abs_hold_delta_ns": 0.18591636917184529,
+            "max_abs_setup_arrival_delta_ns": 0.2255498488699652,
+            "max_abs_hold_arrival_delta_ns": 0.18591636917184506,
+            "native_worst": {
+              "setup": 8.57215612977805,
+              "hold": -0.19551319006780254
+            },
+            "reference_worst": {
+              "setup": 8.358722056142144,
+              "hold": -0.31031881121314187
+            }
+          },
+          "reference_segmentation": {
+            "status": "failed",
+            "bound_ns": 0.01,
+            "max_abs_setup_delta_ns": 0.2088411956133367,
+            "max_abs_hold_delta_ns": 0.1822495437671776,
+            "max_abs_setup_arrival_delta_ns": 0.2192391264954019,
+            "max_abs_hold_arrival_delta_ns": 0.1822495437671774,
+            "native_worst": {
+              "setup": 8.56756325175548,
+              "hold": -0.19669992033690892
+            },
+            "reference_worst": {
+              "setup": 8.358722056142144,
+              "hold": -0.31031881121314187
+            }
+          }
+        }
+      },
+      "resistance_accounting": {
+        "min": {
+          "status": "passed",
+          "nets": 19,
+          "max_rel_error": 1.7551770144482988e-07,
+          "method": "per net: sum of stored lattice wires Rs*L/W plus vias, against the SPEF resistors"
+        },
+        "nom": {
+          "status": "passed",
+          "nets": 19,
+          "max_rel_error": 2.2101355423055593e-07,
+          "method": "per net: sum of stored lattice wires Rs*L/W plus vias, against the SPEF resistors"
+        },
+        "max": {
+          "status": "passed",
+          "nets": 19,
+          "max_rel_error": 8.829322409549547e-08,
+          "method": "per net: sum of stored lattice wires Rs*L/W plus vias, against the SPEF resistors"
+        }
+      },
+      "unmodeled_metal": {
+        "min": {
+          "via_pad_area_um2": 16.104400000000044,
+          "via_pad_area_outside_wires_um2": 6.4908499999999885,
+          "wire_end_cap_area_um2": 4.678500000000006,
+          "estimated_capacitance_pf": 0.0034575005136972046,
+          "method": "excess area / default width * isolated two-sided ground per um (substrate context)"
+        },
+        "nom": {
+          "via_pad_area_um2": 16.104400000000044,
+          "via_pad_area_outside_wires_um2": 6.4908499999999885,
+          "wire_end_cap_area_um2": 4.678500000000006,
+          "estimated_capacitance_pf": 0.0036557144900869584,
+          "method": "excess area / default width * isolated two-sided ground per um (substrate context)"
+        },
+        "max": {
+          "via_pad_area_um2": 16.104400000000044,
+          "via_pad_area_outside_wires_um2": 6.4908499999999885,
+          "wire_end_cap_area_um2": 4.678500000000006,
+          "estimated_capacitance_pf": 0.0038795042007701867,
+          "method": "excess area / default width * isolated two-sided ground per um (substrate context)"
+        }
+      },
+      "sensitivity": {
+        "ss_max_nominal_resistance": {
+          "sta_vs_merged": {
+            "status": "failed",
+            "max_abs_setup_delta_ns": 0.022971123163355145,
+            "max_abs_hold_delta_ns": 0.018247685962552662
+          },
+          "net_r": {
+            "status": "failed",
+            "eligible": 19,
+            "failing": [
+              "a[0]",
+              "a[1]",
+              "b[0]",
+              "b[1]",
+              "clk",
+              "en",
+              "n4",
+              "q[1]",
+              "y[0]",
+              "y[1]",
+              "z[0]",
+              "z[1]"
+            ],
+            "bound": 0.2,
+            "min_reference_ohm": 20.0,
+            "distribution": {
+              "min": -0.3176548949933606,
+              "median": -0.2384626782295917,
+              "max": -0.09056344028910035,
+              "mean": -0.22116078152664626,
+              "count": 19
+            }
+          },
+          "total_c_rel": -0.08961002979017386
+        },
+        "ss_max_nominal_via_resistance": {
+          "sta_vs_merged": {
+            "status": "failed",
+            "max_abs_setup_delta_ns": 0.022904916694890254,
+            "max_abs_hold_delta_ns": 0.018182380435849854
+          },
+          "net_r": {
+            "status": "failed",
+            "eligible": 19,
+            "failing": [
+              "b[0]",
+              "clk",
+              "y[0]",
+              "y[1]",
+              "z[0]",
+              "z[1]"
+            ],
+            "bound": 0.2,
+            "min_reference_ohm": 20.0,
+            "distribution": {
+              "min": -0.2374765209456904,
+              "median": -0.17960987049614757,
+              "max": -0.0722066843213959,
+              "mean": -0.16774801333247072,
+              "count": 19
+            }
+          },
+          "total_c_rel": -0.08961002979017386
+        },
+        "ff_min_nominal_resistance": {
+          "sta_vs_merged": {
+            "status": "passed",
+            "max_abs_setup_delta_ns": 0.004533476980498108,
+            "max_abs_hold_delta_ns": 0.00360832164127034
+          },
+          "net_r": {
+            "status": "failed",
+            "eligible": 19,
+            "failing": [
+              "clk",
+              "y[0]",
+              "y[1]",
+              "z[0]",
+              "z[1]"
+            ],
+            "bound": 0.2,
+            "min_reference_ohm": 20.0,
+            "distribution": {
+              "min": 0.030404618604689272,
+              "median": 0.16653743107027236,
+              "max": 0.28483021685336674,
+              "mean": 0.15565706661725182,
+              "count": 19
+            }
+          },
+          "total_c_rel": -0.07070384753393329
+        },
+        "ff_min_nominal_via_resistance": {
+          "sta_vs_merged": {
+            "status": "passed",
+            "max_abs_setup_delta_ns": 0.004592878022569025,
+            "max_abs_hold_delta_ns": 0.003666825404667673
+          },
+          "net_r": {
+            "status": "passed",
+            "eligible": 19,
+            "failing": [],
+            "bound": 0.2,
+            "min_reference_ohm": 20.0,
+            "distribution": {
+              "min": 0.009381294652224703,
+              "median": 0.07638557484208497,
+              "max": 0.13385734849283795,
+              "mean": 0.07010901323281356,
+              "count": 19
+            }
+          },
+          "total_c_rel": -0.07070384753393329
+        }
+      },
+      "controls": {
+        "scaled_r_x3": {
+          "status": "detected",
+          "capacitance_unchanged": true
+        },
+        "dropped_net": {
+          "mutation": "*10",
+          "comparison_coverage": {
+            "status": "failed",
+            "only_native": [],
+            "only_reference": [
+              "z[0]"
+            ],
+            "connection_mismatch": [],
+            "nets": 18
+          },
+          "ruststa": {
+            "status": "rejected",
+            "stage": "run",
+            "missing_annotation": true
+          },
+          "status": "detected"
+        },
+        "missing_net": {
+          "mutation": "q[0]",
+          "comparison_coverage": {
+            "status": "failed",
+            "only_native": [
+              "rr_missing_net_q_0"
+            ],
+            "only_reference": [
+              "q[0]"
+            ],
+            "connection_mismatch": [],
+            "nets": 18
+          },
+          "ruststa": {
+            "status": "rejected",
+            "stage": "run",
+            "missing_annotation": false
+          },
+          "status": "detected"
+        },
+        "dropped_connection": {
+          "mutation": "*I *20:I I *D gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+          "comparison_coverage": {
+            "status": "failed",
+            "only_native": [],
+            "only_reference": [],
+            "connection_mismatch": [
+              "clk"
+            ],
+            "nets": 19
+          },
+          "ruststa": {
+            "status": "rejected",
+            "stage": "run",
+            "missing_annotation": false
+          },
+          "status": "detected"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "power_net": "VDD",
+  "ground_net": "VSS",
+  "power_pin": "VDD",
+  "ground_pin": "VSS",
+  "body_power_pins": [
+    "VNW"
+  ],
+  "body_ground_pins": [
+    "VPW"
+  ],
+  "rail_layer": "Metal1",
+  "strap_layer": "Metal2",
+  "via": "Via1_HV",
+  "io_layer": "Metal3",
+  "tie_high": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+    "pin": "Z"
+  },
+  "tie_low": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+    "pin": "ZN"
+  },
+  "filler_cells": [
+    "gf180mcu_fd_sc_mcu7t5v0__fill_64",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_32",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_1"
+  ],
+  "alternating_rows": true,
+  "cell_spacing_sites": 0,
+  "io_width": 1700,
+  "io_min_area": true,
+  "io_spacing": 1600,
+  "strap_width": 800,
+  "strap_spacing": 2000,
+  "max_added_cells": 250000,
+  "max_tie_fanout": 8,
+  "tap": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+    "max_gap": 46000,
+    "well_layer": "Nwell",
+    "substrate_layer": "Pwell"
+  },
+  "clock": {
+    "port": "clk",
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_8",
+    "input_pin": "I",
+    "output_pin": "Z",
+    "sink_pin": "CLK",
+    "max_fanout": 8,
+    "max_buffers": 4096,
+    "max_work": 100000
+  },
+  "placer": {
+    "global_iterations": 12,
+    "cg_iterations": 150,
+    "detailed_passes": 3,
+    "max_net_pins": 256
+  },
+  "io_plan": {
+    "west": [
+      "a[1]",
+      "b[1]",
+      "z[1]",
+      "z[2]"
+    ],
+    "east": [
+      "z[0]",
+      "a[0]",
+      "b[0]",
+      "en",
+      "clk",
+      "low_bit",
+      "y[0]"
+    ],
+    "south": [
+      "z[3]",
+      "a[3]",
+      "b[3]",
+      "y[3]",
+      "high_bit"
+    ],
+    "north": [
+      "a[2]",
+      "b[2]",
+      "y[1]",
+      "y[2]"
+    ],
+    "x_track": [
+      1120,
+      560
+    ],
+    "y_track": [
+      1120,
+      0
+    ]
+  }
+}

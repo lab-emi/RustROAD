@@ -1,0 +1,825 @@
+{
+ "schema": "rustroad.delay-cells.v1",
+ "pdk": "gf180",
+ "library": "gf180mcu_fd_sc_mcu7t5v0",
+ "generator": "scripts/build_delay_cells.py",
+ "sources": [
+  {
+   "role": "liberty_tt",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+   "sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+   "bytes": 20107439
+  },
+  {
+   "role": "liberty_ss",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib",
+   "sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+   "bytes": 19934792
+  },
+  {
+   "role": "liberty_ff",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ff_n40C_3v60.lib",
+   "sha256": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+   "bytes": 20275104
+  },
+  {
+   "role": "cell_lef",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/lef/gf180mcu_fd_sc_mcu7t5v0.lef",
+   "sha256": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+   "bytes": 671072
+  }
+ ],
+ "cell_policy": {
+  "path": "fixtures/flow/cell-policy.json",
+  "sha256": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61"
+ },
+ "corners": [
+  {
+   "name": "tt",
+   "liberty": "tt_025C_3v30",
+   "rc": "nom"
+  },
+  {
+   "name": "ss",
+   "liberty": "ss_125C_3v00",
+   "rc": "max"
+  },
+  {
+   "name": "ff",
+   "liberty": "ff_n40C_3v60",
+   "rc": "min"
+  }
+ ],
+ "representative": {
+  "input_slew_ns": 0.15,
+  "load_pf": 0.01,
+  "reason": "one gate driving one flop D pin plus a short wire; the closure loop re-times every ECO with extracted parasitics"
+ },
+ "selection": {
+  "hold_globs": [
+   "gf180mcu_fd_sc_mcu7t5v0__dly*",
+   "gf180mcu_fd_sc_mcu7t5v0__clkbuf*",
+   "gf180mcu_fd_sc_mcu7t5v0__clkinv*"
+  ],
+  "logic_buffers": [
+   "*__buf_1",
+   "*__buf_2"
+  ],
+  "clock_reserved": [
+   "*__clkbuf_*",
+   "*__clkinv*",
+   "*__clkinvlp*"
+  ],
+  "pnr_exclude": [
+   "gf180mcu_fd_sc_mcu7t5v0__mux2_1",
+   "gf180mcu_fd_sc_mcu7t5v0__oai33_2"
+  ],
+  "antenna_globs": [
+   "gf180mcu_fd_sc_mcu7t5v0__filltie",
+   "gf180mcu_fd_sc_mcu7t5v0__fill_*",
+   "gf180mcu_fd_sc_mcu7t5v0__fillcap_*",
+   "gf180mcu_fd_sc_mcu7t5v0__endcap",
+   "gf180mcu_fd_sc_mcu7t5v0__antenna"
+  ]
+ },
+ "buffers": [
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__buf_1",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 13.1712,
+   "lef_size_um": [
+    3.36,
+    3.92
+   ],
+   "policy_class": "logic",
+   "input_cap_pf": {
+    "tt": 0.002834,
+    "ss": 0.002832,
+    "ff": 0.002877
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.365974846,
+     "fall": 0.40787478
+    },
+    "ss": {
+     "rise": 0.673873971,
+     "fall": 0.754497276
+    },
+    "ff": {
+     "rise": 0.22855716,
+     "fall": 0.256780808
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.318108638,
+     "fall": 0.21775455
+    },
+    "ss": {
+     "rise": 0.597110889,
+     "fall": 0.406774558
+    },
+    "ff": {
+     "rise": 0.191626088,
+     "fall": 0.132113117
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__buf_2",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 17.5616,
+   "lef_size_um": [
+    4.48,
+    3.92
+   ],
+   "policy_class": "logic",
+   "input_cap_pf": {
+    "tt": 0.004859,
+    "ss": 0.004949,
+    "ff": 0.004863
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.272919441,
+     "fall": 0.31171133
+    },
+    "ss": {
+     "rise": 0.486192961,
+     "fall": 0.558150042
+    },
+    "ff": {
+     "rise": 0.176285874,
+     "fall": 0.203536199
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.180616434,
+     "fall": 0.136817206
+    },
+    "ss": {
+     "rise": 0.33760693,
+     "fall": 0.252454587
+    },
+    "ff": {
+     "rise": 0.109578752,
+     "fall": 0.084163709
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlya_1",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 24.1472,
+   "lef_size_um": [
+    6.16,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002348,
+    "ss": 0.002326,
+    "ff": 0.002393
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.680403791,
+     "fall": 0.824714377
+    },
+    "ss": {
+     "rise": 1.310050407,
+     "fall": 1.599348505
+    },
+    "ff": {
+     "rise": 0.403875448,
+     "fall": 0.492843743
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.315617619,
+     "fall": 0.250752005
+    },
+    "ss": {
+     "rise": 0.592125517,
+     "fall": 0.473661633
+    },
+    "ff": {
+     "rise": 0.190073397,
+     "fall": 0.149414525
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlya_2",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 28.5376,
+   "lef_size_um": [
+    7.28,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002289,
+    "ss": 0.002257,
+    "ff": 0.002346
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.681832793,
+     "fall": 0.924008559
+    },
+    "ss": {
+     "rise": 1.315236727,
+     "fall": 1.80458871
+    },
+    "ff": {
+     "rise": 0.404475774,
+     "fall": 0.549044738
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.199246077,
+     "fall": 0.236711275
+    },
+    "ss": {
+     "rise": 0.380152954,
+     "fall": 0.448110283
+    },
+    "ff": {
+     "rise": 0.118167608,
+     "fall": 0.141099435
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlya_4",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 37.3184,
+   "lef_size_um": [
+    9.52,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002426,
+    "ss": 0.002403,
+    "ff": 0.002467
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.810647611,
+     "fall": 1.221005753
+    },
+    "ss": {
+     "rise": 1.563892658,
+     "fall": 2.40625194
+    },
+    "ff": {
+     "rise": 0.482743611,
+     "fall": 0.719576863
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.178223996,
+     "fall": 0.30699759
+    },
+    "ss": {
+     "rise": 0.347937139,
+     "fall": 0.577504368
+    },
+    "ff": {
+     "rise": 0.105522441,
+     "fall": 0.183670621
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyb_1",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 35.1232,
+   "lef_size_um": [
+    8.96,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002713,
+    "ss": 0.002718,
+    "ff": 0.002737
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 1.39875374,
+     "fall": 1.547202323
+    },
+    "ss": {
+     "rise": 2.853885632,
+     "fall": 3.158605217
+    },
+    "ff": {
+     "rise": 0.782625189,
+     "fall": 0.871470149
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.35250204,
+     "fall": 0.360581804
+    },
+    "ss": {
+     "rise": 0.675909602,
+     "fall": 0.704064104
+    },
+    "ff": {
+     "rise": 0.208905468,
+     "fall": 0.208412914
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyb_2",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 39.5136,
+   "lef_size_um": [
+    10.08,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002712,
+    "ss": 0.002718,
+    "ff": 0.002737
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 1.464352145,
+     "fall": 1.770216496
+    },
+    "ss": {
+     "rise": 2.98709979,
+     "fall": 3.635405882
+    },
+    "ff": {
+     "rise": 0.821044316,
+     "fall": 0.990040027
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.24995311,
+     "fall": 0.371397447
+    },
+    "ss": {
+     "rise": 0.489942988,
+     "fall": 0.723493238
+    },
+    "ff": {
+     "rise": 0.146685441,
+     "fall": 0.21342907
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyb_4",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 48.2944,
+   "lef_size_um": [
+    12.32,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002727,
+    "ss": 0.002738,
+    "ff": 0.00275
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 1.698017983,
+     "fall": 2.349715031
+    },
+    "ss": {
+     "rise": 3.453780438,
+     "fall": 4.863457972
+    },
+    "ff": {
+     "rise": 0.955020863,
+     "fall": 1.298186737
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.248430055,
+     "fall": 0.509307102
+    },
+    "ss": {
+     "rise": 0.484470606,
+     "fall": 0.988550688
+    },
+    "ff": {
+     "rise": 0.147141907,
+     "fall": 0.289842196
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyc_1",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 54.88,
+   "lef_size_um": [
+    14.0,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002718,
+    "ss": 0.002727,
+    "ff": 0.002744
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 2.454138423,
+     "fall": 2.622834221
+    },
+    "ss": {
+     "rise": 5.084500623,
+     "fall": 5.436667699
+    },
+    "ff": {
+     "rise": 1.344228884,
+     "fall": 1.445671092
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.355754829,
+     "fall": 0.367957282
+    },
+    "ss": {
+     "rise": 0.682335933,
+     "fall": 0.719526196
+    },
+    "ff": {
+     "rise": 0.210231701,
+     "fall": 0.212322195
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyc_2",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 59.2704,
+   "lef_size_um": [
+    15.12,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002711,
+    "ss": 0.002717,
+    "ff": 0.002738
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 2.504331021,
+     "fall": 2.825281983
+    },
+    "ss": {
+     "rise": 5.178502359,
+     "fall": 5.863100454
+    },
+    "ff": {
+     "rise": 1.372723549,
+     "fall": 1.548349604
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.24989989,
+     "fall": 0.3728923
+    },
+    "ss": {
+     "rise": 0.490867305,
+     "fall": 0.725773309
+    },
+    "ff": {
+     "rise": 0.146432455,
+     "fall": 0.21383636
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyc_4",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 68.0512,
+   "lef_size_um": [
+    17.36,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.00274,
+    "ss": 0.002755,
+    "ff": 0.002762
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 2.720383473,
+     "fall": 3.372789337
+    },
+    "ss": {
+     "rise": 5.608907794,
+     "fall": 7.026517575
+    },
+    "ff": {
+     "rise": 1.504812743,
+     "fall": 1.848167728
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.245682819,
+     "fall": 0.505240655
+    },
+    "ss": {
+     "rise": 0.479632094,
+     "fall": 0.981342129
+    },
+    "ff": {
+     "rise": 0.144840604,
+     "fall": 0.28753578
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyd_1",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 74.6368,
+   "lef_size_um": [
+    19.04,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002712,
+    "ss": 0.002718,
+    "ff": 0.002738
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 3.469422938,
+     "fall": 3.642871531
+    },
+    "ss": {
+     "rise": 7.218441021,
+     "fall": 7.579425221
+    },
+    "ff": {
+     "rise": 1.886347582,
+     "fall": 1.988600833
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.350022545,
+     "fall": 0.360016568
+    },
+    "ss": {
+     "rise": 0.669734807,
+     "fall": 0.701581537
+    },
+    "ff": {
+     "rise": 0.207379235,
+     "fall": 0.208398337
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyd_2",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 79.0272,
+   "lef_size_um": [
+    20.16,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002738,
+    "ss": 0.002752,
+    "ff": 0.002759
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 3.532766675,
+     "fall": 3.859448591
+    },
+    "ss": {
+     "rise": 7.348339344,
+     "fall": 8.044110268
+    },
+    "ff": {
+     "rise": 1.921817685,
+     "fall": 2.101456216
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.247274262,
+     "fall": 0.369190987
+    },
+    "ss": {
+     "rise": 0.484666696,
+     "fall": 0.718168783
+    },
+    "ff": {
+     "rise": 0.144877314,
+     "fall": 0.211435977
+    }
+   }
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__dlyd_4",
+   "input_pin": "I",
+   "output_pin": "Z",
+   "function": "I",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 87.808,
+   "lef_size_um": [
+    22.4,
+    3.92
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002712,
+    "ss": 0.002719,
+    "ff": 0.002738
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 3.763209881,
+     "fall": 4.426579711
+    },
+    "ss": {
+     "rise": 7.807703515,
+     "fall": 9.251381049
+    },
+    "ff": {
+     "rise": 2.054103446,
+     "fall": 2.405458431
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.244550724,
+     "fall": 0.504382653
+    },
+    "ss": {
+     "rise": 0.478892104,
+     "fall": 0.978908609
+    },
+    "ff": {
+     "rise": 0.144921083,
+     "fall": 0.286739897
+    }
+   }
+  }
+ ],
+ "antenna_cells": [
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__antenna",
+   "pin": "I",
+   "area_um2": 4.3904,
+   "lef_size_um": [
+    1.12,
+    3.92
+   ],
+   "lef_diff_area_um2": 0.4104,
+   "lef_gate_area_um2": 0.0,
+   "policy_class": "physical_only"
+  }
+ ],
+ "excluded": [
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_12",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_16",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_2",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_20",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_3",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_4",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_8",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_1",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_12",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_16",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_2",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_20",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_3",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_4",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "gf180mcu_fd_sc_mcu7t5v0__clkinv_8",
+   "reason": "reserved for the clock tree (selection policy)"
+  }
+ ]
+}

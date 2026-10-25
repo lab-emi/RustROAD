@@ -1,0 +1,615 @@
+{
+  "schema": "rustroad.signoff-manifest.v1",
+  "generated_utc": "20261023T185758",
+  "generator": "scripts/signoff/manifest.py generate",
+  "policy": {
+    "verdict_rule": "any identity mismatch, missing image/tool/file => unverified",
+    "tool_execution": "only inside the pinned iic_osic_tools image via scripts/signoff/container.py",
+    "clean_room": "decks and tools are invoked as black boxes; GPLv3 sky130A_mr.drc is invoked, never copied"
+  },
+  "images": {
+    "iic_osic_tools": {
+      "id": "4c48415d8bd08c04033f4777b65a96299e22c1e94d12a8ea1d9a062697c006ee",
+      "repo_digests": [
+        "docker.io/hpretl/iic-osic-tools@sha256:344fadc67af8c64cc4750633392bb60e8ce05c5f0c3d94f26cde35c068ccf9bc"
+      ],
+      "repo_tags": [
+        "docker.io/hpretl/iic-osic-tools:latest"
+      ],
+      "created": "2026-07-27T19:11:40.94289884Z",
+      "env": [
+        "IIC_OSIC_TOOLS_VERSION=2026.07"
+      ],
+      "previous_repo_digests": [
+        "docker.io/hpretl/iic-osic-tools@sha256:344fadc67af8c64cc4750633392bb60e8ce05c5f0c3d94f26cde35c068ccf9bc",
+        "docker.io/hpretl/iic-osic-tools@sha256:5d6adf1f437cd0f2f8f8614488ec3c247ba8c768f4663a25d5e997b30ccb13b0"
+      ]
+    },
+    "orfs": {
+      "id": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+      "repo_digests": [
+        "docker.io/openroad/orfs@sha256:0a78705613f3135a842983d3fa02564ddd2c50cabdb7c41ae22693196848fe3d"
+      ],
+      "repo_tags": [
+        "docker.io/openroad/orfs:latest"
+      ],
+      "created": "2026-10-11T03:41:17.22985837Z",
+      "env": [],
+      "previous_repo_digests": [
+        "docker.io/openroad/orfs@sha256:0a78705613f3135a842983d3fa02564ddd2c50cabdb7c41ae22693196848fe3d",
+        "docker.io/openroad/orfs@sha256:2894c8431c5b0c778ba39a25dbbf1621ad52546098c43eb211a7f1deb039af66"
+      ]
+    }
+  },
+  "tools": {
+    "magic": {
+      "image": "iic_osic_tools",
+      "version_command": [
+        "/foss/tools/bin/magic",
+        "--version"
+      ],
+      "version_regex": "^\\s*8\\.3\\.678\\s*$",
+      "version_output": "8.3.678",
+      "files": {
+        "/foss/tools/bin/magic": {
+          "sha256": "17f68edb3134f5f539e7e004a45c9ee59e1b459a087efb7c5e93fb0dc3025411",
+          "bytes": 2134,
+          "realpath": "/foss/tools/magic/bin/magic"
+        },
+        "/foss/tools/magic/bin/magic": {
+          "sha256": "17f68edb3134f5f539e7e004a45c9ee59e1b459a087efb7c5e93fb0dc3025411",
+          "bytes": 2134,
+          "realpath": "/foss/tools/magic/bin/magic"
+        },
+        "/foss/tools/magic/lib/magic/tcl/magicexec": {
+          "sha256": "ecbfa8e70394044ce67c697f95a791ea6d71b0be79f53c48fe1aa4fe4576d5fe",
+          "bytes": 19224,
+          "realpath": "/foss/tools/magic/lib/magic/tcl/magicexec"
+        },
+        "/foss/tools/magic/lib/magic/tcl/magicdnull": {
+          "sha256": "de7417829b3d3ca4feb585847991e141202f2e090b1142d651176c7d09432c65",
+          "bytes": 18944,
+          "realpath": "/foss/tools/magic/lib/magic/tcl/magicdnull"
+        },
+        "/foss/tools/magic/lib/magic/tcl/tclmagic.so": {
+          "sha256": "51acad885845d1be393a0ee7011eee55f3d79bec077dce9b0a0eadfb4883a2d1",
+          "bytes": 7958192,
+          "realpath": "/foss/tools/magic/lib/magic/tcl/tclmagic.so"
+        }
+      },
+      "trees": {
+        "/foss/tools/magic/lib/magic": {
+          "files": 359,
+          "sha256": "39c31c775b1fa7fb6345498c28e0eeda071749946b67172db96146cac814ddd1"
+        }
+      }
+    },
+    "netgen": {
+      "image": "iic_osic_tools",
+      "version_command": [
+        "/foss/tools/bin/netgen",
+        "-batch",
+        "quit"
+      ],
+      "version_regex": "Netgen 1\\.5\\.323 ",
+      "version_output": "Netgen 1.5.323 compiled on Mon Jul 27 09:16:59 AM CEST 2026",
+      "files": {
+        "/foss/tools/bin/netgen": {
+          "sha256": "7b25a03f190ae847703e253ceb08662e2d07d1972aad77d558246764fc454dc0",
+          "bytes": 1735,
+          "realpath": "/foss/tools/netgen/bin/netgen"
+        },
+        "/foss/tools/netgen/bin/netgen": {
+          "sha256": "7b25a03f190ae847703e253ceb08662e2d07d1972aad77d558246764fc454dc0",
+          "bytes": 1735,
+          "realpath": "/foss/tools/netgen/bin/netgen"
+        },
+        "/foss/tools/netgen/lib/netgen/tcl/netgenexec": {
+          "sha256": "2c2defd189a177f5710bd71c6164522d962dea8a880a7e31f22bb957f676c582",
+          "bytes": 18856,
+          "realpath": "/foss/tools/netgen/lib/netgen/tcl/netgenexec"
+        },
+        "/foss/tools/netgen/lib/netgen/tcl/tclnetgen.so": {
+          "sha256": "fb0aeb29f4fb4d6da8a8e69eaf4e965ca6b02b5e013d330b8c51d2bc85c6b147",
+          "bytes": 1684104,
+          "realpath": "/foss/tools/netgen/lib/netgen/tcl/tclnetgen.so"
+        }
+      },
+      "trees": {
+        "/foss/tools/netgen/lib/netgen": {
+          "files": 17,
+          "sha256": "1417e526f31ae79fe220f0869b63c391e11e04429ff31708c6608f361e1f3018"
+        }
+      }
+    },
+    "klayout": {
+      "image": "iic_osic_tools",
+      "version_command": [
+        "/foss/tools/klayout/klayout",
+        "-v"
+      ],
+      "version_regex": "^KLayout 0\\.30\\.9\\s*$",
+      "version_output": "KLayout 0.30.9",
+      "files": {
+        "/foss/tools/klayout/klayout": {
+          "sha256": "51fe4ba8b2b057d116171af0607c6e376fcc72c12166ef70d599f687a216f1a8",
+          "bytes": 39400,
+          "realpath": "/foss/tools/klayout/klayout"
+        }
+      },
+      "trees": {
+        "/foss/tools/klayout": {
+          "files": 108,
+          "sha256": "dc9c4ec0323f651ccf5d273f393d81e303a1178b745c93c2b4d5191841ff4a40"
+        }
+      }
+    },
+    "strmxor": {
+      "image": "iic_osic_tools",
+      "version_command": [
+        "/foss/tools/klayout/strmxor",
+        "--version"
+      ],
+      "version_regex": "^0\\.30\\.9 ",
+      "version_output": "0.30.9 r62708771",
+      "files": {
+        "/foss/tools/klayout/strmxor": {
+          "sha256": "5ddc6a82e523b59508fa430d8cd31e0df3a5b2b3b6e64c718a8afb991e2888e8",
+          "bytes": 14664,
+          "realpath": "/foss/tools/klayout/strmxor"
+        }
+      },
+      "trees": {}
+    },
+    "python3": {
+      "image": "iic_osic_tools",
+      "version_command": [
+        "/usr/bin/python3",
+        "-c",
+        "import sys,docopt,klayout.db as k;print(sys.version.split()[0],docopt.__version__,k.__version__)"
+      ],
+      "version_regex": "^3\\.12\\.3 0\\.6\\.2 0\\.30\\.9",
+      "version_output": "3.12.3 0.6.2 0.30.9",
+      "files": {
+        "/usr/bin/python3.12": {
+          "sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118",
+          "bytes": 8020928,
+          "realpath": "/usr/bin/python3.12"
+        },
+        "/usr/local/lib/python3.12/dist-packages/docopt.py": {
+          "sha256": "44c650ebd833d852c8731fa3f0c5759506309622300e4c1954a540d78572cc54",
+          "bytes": 19946,
+          "realpath": "/usr/local/lib/python3.12/dist-packages/docopt.py"
+        }
+      },
+      "trees": {
+        "/usr/local/lib/python3.12/dist-packages/klayout": {
+          "files": 56,
+          "sha256": "517f5d457ef58c9f67937a51777a1d74c343399058103bb12c750f5612ab7d5c"
+        }
+      }
+    },
+    "coreutils": {
+      "image": "iic_osic_tools",
+      "version_command": [
+        "/usr/bin/timeout",
+        "--version"
+      ],
+      "version_regex": "timeout \\(GNU coreutils\\) 9\\.4",
+      "version_output": "timeout (GNU coreutils) 9.4",
+      "files": {
+        "/usr/bin/time": {
+          "sha256": "3b11dec50514a8473e9f6efa7a34d584d0657538c09988f61b72d38ad4991a10",
+          "bytes": 27160,
+          "realpath": "/usr/bin/time"
+        },
+        "/usr/bin/timeout": {
+          "sha256": "4fccd5b0192653a2446b745d5385ea547b78e466150e07ade9e2caff2b7f4e08",
+          "bytes": 39880,
+          "realpath": "/usr/bin/timeout"
+        },
+        "/usr/bin/sha256sum": {
+          "sha256": "9992e1f1feb6f0f396bc8d6691ebc1adbfc269fd628bce84eda1d4ba5c3995c7",
+          "bytes": 39336,
+          "realpath": "/usr/bin/sha256sum"
+        }
+      },
+      "trees": {}
+    },
+    "openroad": {
+      "image": "orfs",
+      "files": {
+        "/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad": {
+          "bytes": 147816048,
+          "realpath": "/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad",
+          "sha256": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2"
+        }
+      },
+      "trees": {},
+      "version_output": "unknown (OpenROAD -version prints 'unknown'; pinned by image id and sha256)"
+    },
+    "opensta": {
+      "host": true,
+      "path": "/home/cgao/.local/share/containers/storage/overlay/c2cc5a7e2baaa2c6bdac6951f759273edbb27a34c710ea4593e43ef22d00e4b8/diff/foss/tools/openroad/bin/sta",
+      "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+      "bytes": 9077264,
+      "version": "3.1.0",
+      "note": "host overlay path of the OpenSTA binary used by the timing harness"
+    }
+  },
+  "not_for_signoff": [
+    {
+      "id": "magic",
+      "path": "/usr/bin/magic",
+      "version": "8.3.105",
+      "reason": "PDK tech files require magic-8.3.411 or newer; host Magic segfaults (rc=139) loading sky130A.tech/gf180mcuD.tech",
+      "not_for_signoff": true,
+      "sha256": "48b77b32097244c66c857ee28769d2a4f434de00e7c02193d0e00c3a94240b2f",
+      "bytes": 2107
+    },
+    {
+      "id": "klayout",
+      "path": "/usr/bin/klayout",
+      "version": "KLayout 0.30.0",
+      "reason": "fails the gf180mcu.drc deck (deep: 'Heap lost: DeepShapeStore'; flat: no netlist extractor)",
+      "not_for_signoff": true,
+      "sha256": "32441e21747f7718500e6c36c028229f6f1ce2ffcfe5b11acf03305047639ee3",
+      "bytes": 78
+    },
+    {
+      "id": "netgen",
+      "path": "/usr/lib/netgen/bin/netgen",
+      "version": "Netgen 1.5.133",
+      "reason": "off-PATH wrapper; different report format; not the pinned 1.5.323",
+      "not_for_signoff": true,
+      "sha256": "ac52d4ed680ee955983c883be61968b6788fe5f96a5514d3f101f7ee71f908ce",
+      "bytes": 1665
+    }
+  ],
+  "pdks": {
+    "sky130": {
+      "library": "sky130_fd_sc_hd",
+      "variant": "sky130A",
+      "family": "sky130",
+      "container_root": "/foss/pdks/sky130A",
+      "host_root": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A",
+      "gds_dbu_um": 0.001,
+      "lef_dbu_per_um": 1000,
+      "boundary_layer": [
+        235,
+        4
+      ],
+      "manufacturing_grid_um": 0.005,
+      "corners": {
+        "tt": {
+          "liberty": "liberty_tt",
+          "rc": "rcx_nom",
+          "role": "typical, reported"
+        },
+        "ss": {
+          "liberty": "liberty_ss",
+          "rc": "rcx_max",
+          "role": "setup and hold"
+        },
+        "ff": {
+          "liberty": "liberty_ff",
+          "rc": "rcx_min",
+          "role": "hold"
+        }
+      },
+      "distribution": "Ciel/open_pdks",
+      "version": "f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7",
+      "files": {
+        "tech_lef": {
+          "path": "libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef",
+          "sha256": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+          "bytes": 18167
+        },
+        "cell_lef": {
+          "path": "libs.ref/sky130_fd_sc_hd/lef/sky130_fd_sc_hd.lef",
+          "sha256": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+          "bytes": 1415362
+        },
+        "cell_gds": {
+          "path": "libs.ref/sky130_fd_sc_hd/gds/sky130_fd_sc_hd.gds",
+          "sha256": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+          "bytes": 4194544
+        },
+        "liberty_tt": {
+          "path": "libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+          "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+          "bytes": 12841637
+        },
+        "liberty_ss": {
+          "path": "libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_100C_1v60.lib",
+          "sha256": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+          "bytes": 12845260
+        },
+        "liberty_ff": {
+          "path": "libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v95.lib",
+          "sha256": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+          "bytes": 12918504
+        },
+        "cell_spice": {
+          "path": "libs.ref/sky130_fd_sc_hd/spice/sky130_fd_sc_hd.spice",
+          "sha256": "6dec6626decd1ee15afacafab9925b1a336ab344b7b5e1bec9d7483f2a6badc3",
+          "bytes": 926412
+        },
+        "cell_cdl": {
+          "path": "libs.ref/sky130_fd_sc_hd/cdl/sky130_fd_sc_hd.cdl",
+          "sha256": "c5ad822d02fcd67ce5c387346cd3f89f05e21624725825773d51a5ac338d7091",
+          "bytes": 1038807
+        },
+        "magicrc": {
+          "path": "libs.tech/magic/sky130A.magicrc",
+          "sha256": "e4ac71308a9fe97cff2d421982888921578f3febf55dd87f351be70730f705b8",
+          "bytes": 2494
+        },
+        "magic_tech": {
+          "path": "libs.tech/magic/sky130A.tech",
+          "sha256": "f23e3f5a7c8669820ac35393b95b71242da72e8ab36ccb18ee29c77958399043",
+          "bytes": 168450
+        },
+        "magic_tcl": {
+          "path": "libs.tech/magic/sky130A.tcl",
+          "sha256": "5c10ecc59236b7a023650ad5ccbd206c077ad902ca4fe551d358af17327fa9dc",
+          "bytes": 255519
+        },
+        "magic_check_density": {
+          "path": "libs.tech/magic/check_density.py",
+          "sha256": "9ef4c226f45014d20419f38388a205a55ff40589cddd1f97ffb5c6a1e0ab0a1a",
+          "bytes": 29948
+        },
+        "netgen_setup": {
+          "path": "libs.tech/netgen/sky130A_setup.tcl",
+          "sha256": "7a33f3f54fab57a9d9b0887ac7b7b64ce6c454110e8b7f01f3cfb90a1282dc94",
+          "bytes": 19891
+        },
+        "klayout_drc": {
+          "path": "libs.tech/klayout/drc/sky130A_mr.drc",
+          "sha256": "caf4a6b08cb12f78d6bb2d120737424c786b3bae8d6489234b9b269e91107bfc",
+          "bytes": 53154
+        },
+        "klayout_density": {
+          "path": "libs.tech/klayout/drc/met_min_ca_density.lydrc",
+          "sha256": "4e4a63809f597bdf9bbf69901fe0df1e8edaf67ad39d659637db7c953e0289b6",
+          "bytes": 3968
+        },
+        "klayout_lvs": {
+          "path": "libs.tech/klayout/lvs/sky130.lvs",
+          "sha256": "5b4ede4bdb4744b60e42c9b29baa93f40bb24430fb8f3a48a276a712a492ac38",
+          "bytes": 109038
+        },
+        "klayout_map": {
+          "path": "libs.tech/klayout/tech/sky130A.map",
+          "sha256": "80a0e06eb733f1ebd3b37f971162112dee2ec0834751ac54ae71a3eead6fbf14",
+          "bytes": 1676
+        },
+        "klayout_lyp": {
+          "path": "libs.tech/klayout/tech/sky130A.lyp",
+          "sha256": "dd71d4d404bef41c040f02511023fb1f6891000fb87decc635ddc285b25bf041",
+          "bytes": 246962
+        },
+        "klayout_lyt": {
+          "path": "libs.tech/klayout/tech/sky130A.lyt",
+          "sha256": "747e5e3192adb11ef332fb7fdea5b953a67bab96f98eba9fd496a3113225f4b3",
+          "bytes": 6325
+        },
+        "rcx_min": {
+          "path": "libs.tech/librelane/rules.openrcx.sky130A.min.calibre",
+          "sha256": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+          "bytes": 45435
+        },
+        "rcx_nom": {
+          "path": "libs.tech/librelane/rules.openrcx.sky130A.nom.calibre",
+          "sha256": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+          "bytes": 45409
+        },
+        "rcx_max": {
+          "path": "libs.tech/librelane/rules.openrcx.sky130A.max.calibre",
+          "sha256": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+          "bytes": 45404
+        },
+        "synth_exclude": {
+          "path": "libs.tech/librelane/sky130_fd_sc_hd/synth_excluded.cells",
+          "sha256": "873fb0ef2daea4b386cf3f337b38f674cd7265ffa860bc5cc9482d01f1cf9a5e",
+          "bytes": 620
+        },
+        "pnr_exclude": {
+          "path": "libs.tech/librelane/sky130_fd_sc_hd/pnr_excluded.cells",
+          "sha256": "2b047a124fcee8a933b112df88acbfad4d0db40aa7b19dcc145b9ae4eb57d3f7",
+          "bytes": 100
+        },
+        "librelane_pdk_config": {
+          "path": "libs.tech/librelane/config.tcl",
+          "sha256": "845f8254fa26b3c1a0e8523e537310bf616ff77ec9d3656c6a6e18645963cb69",
+          "bytes": 7740
+        },
+        "librelane_scl_config": {
+          "path": "libs.tech/librelane/sky130_fd_sc_hd/config.tcl",
+          "sha256": "95e3255c71e104c9b050f5758f64607683b9cddf17c910687b8aa033b3bf2667",
+          "bytes": 2056
+        }
+      },
+      "trees": {
+        "ngspice_models": {
+          "path": "libs.tech/ngspice",
+          "sha256": "6867371e10a4a8803d68500c970fcf7cb2269d9652d8a275a93d3848b4e78852",
+          "files": 181
+        }
+      }
+    },
+    "gf180": {
+      "library": "gf180mcu_fd_sc_mcu7t5v0",
+      "variant": "gf180mcuD",
+      "family": "gf180mcu",
+      "container_root": "/foss/pdks/gf180mcuD",
+      "host_root": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD",
+      "gds_dbu_um": 0.001,
+      "lef_dbu_per_um": 2000,
+      "boundary_layer": [
+        0,
+        0
+      ],
+      "manufacturing_grid_um": 0.005,
+      "corners": {
+        "tt": {
+          "liberty": "liberty_tt",
+          "rc": "rcx_nom",
+          "role": "typical, reported"
+        },
+        "ss": {
+          "liberty": "liberty_ss",
+          "rc": "rcx_max",
+          "role": "setup and hold"
+        },
+        "ff": {
+          "liberty": "liberty_ff",
+          "rc": "rcx_min",
+          "role": "hold"
+        }
+      },
+      "distribution": "Ciel/open_pdks",
+      "version": "f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7",
+      "files": {
+        "tech_lef": {
+          "path": "libs.ref/gf180mcu_fd_sc_mcu7t5v0/techlef/gf180mcu_fd_sc_mcu7t5v0__nom.tlef",
+          "sha256": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+          "bytes": 33047
+        },
+        "cell_lef": {
+          "path": "libs.ref/gf180mcu_fd_sc_mcu7t5v0/lef/gf180mcu_fd_sc_mcu7t5v0.lef",
+          "sha256": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+          "bytes": 671072
+        },
+        "cell_gds": {
+          "path": "libs.ref/gf180mcu_fd_sc_mcu7t5v0/gds/gf180mcu_fd_sc_mcu7t5v0.gds",
+          "sha256": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+          "bytes": 1450948
+        },
+        "liberty_tt": {
+          "path": "libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+          "sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+          "bytes": 20107439
+        },
+        "liberty_ss": {
+          "path": "libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib",
+          "sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+          "bytes": 19934792
+        },
+        "liberty_ff": {
+          "path": "libs.ref/gf180mcu_fd_sc_mcu7t5v0/lib/gf180mcu_fd_sc_mcu7t5v0__ff_n40C_3v60.lib",
+          "sha256": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+          "bytes": 20275104
+        },
+        "cell_spice": {
+          "path": "libs.ref/gf180mcu_fd_sc_mcu7t5v0/spice/gf180mcu_fd_sc_mcu7t5v0.spice",
+          "sha256": "0e126c5e10e45e705a83acfa47f6fd2c4ef0357e99c339dec43cdc16bfb13664",
+          "bytes": 412516
+        },
+        "cell_cdl": {
+          "path": "libs.ref/gf180mcu_fd_sc_mcu7t5v0/cdl/gf180mcu_fd_sc_mcu7t5v0.cdl",
+          "sha256": "8c7f781f8bd314070f390559ec09ffdab07d7cb25533a9790df62a43f99ff175",
+          "bytes": 412502
+        },
+        "magicrc": {
+          "path": "libs.tech/magic/gf180mcuD.magicrc",
+          "sha256": "bee634bb8cb8752b91d31c6c5d03b134422c529c2ff8e49fa85f77320927cb49",
+          "bytes": 1997
+        },
+        "magic_tech": {
+          "path": "libs.tech/magic/gf180mcuD.tech",
+          "sha256": "f0c3a445aa0a2a9b7a1f10530a6c011800a41fcad36c12d8bb9b792a59c74f44",
+          "bytes": 114040
+        },
+        "magic_tcl": {
+          "path": "libs.tech/magic/gf180mcuD.tcl",
+          "sha256": "346f57fe91261a5c8e06bf9083c1dd2b2140c832c611470266cab85289932c0c",
+          "bytes": 167620
+        },
+        "netgen_setup": {
+          "path": "libs.tech/netgen/gf180mcuD_setup.tcl",
+          "sha256": "eb6217e33acb2c81680351745bc184a2ee37b31a25d37f4dce423f61ba466fe4",
+          "bytes": 16935
+        },
+        "klayout_drc": {
+          "path": "libs.tech/klayout/tech/drc/gf180mcu.drc",
+          "sha256": "e7c7d2597890cfcb4cf0e5312f5652051a119fb3e1cc1772a6e5c04594bc65d8",
+          "bytes": 6428
+        },
+        "klayout_lvs": {
+          "path": "libs.tech/klayout/tech/lvs/gf180mcu.lvs",
+          "sha256": "09a4f1f1a6fe1fc1e4e193ae5ae1c2b1c49ba190f9e135ffd72d45c14637fde9",
+          "bytes": 14394
+        },
+        "klayout_lvs_runner": {
+          "path": "libs.tech/klayout/tech/lvs/run_lvs.py",
+          "sha256": "2efe3199e67b6693ccd8b2817a0aa341b76e9b3d10d1413f9484f81fc896c9d5",
+          "bytes": 14580
+        },
+        "klayout_map": {
+          "path": "libs.tech/klayout/tech/gf180mcu.map",
+          "sha256": "ac49b08c732c00945c054bce61a4d7f413f84887e0e4e1a66fd20018db2f5d28",
+          "bytes": 667
+        },
+        "klayout_lyp": {
+          "path": "libs.tech/klayout/tech/gf180mcu.lyp",
+          "sha256": "df2554c382713e671425ac9c6250c512e86e33bc469d70eee1c128878aaeb927",
+          "bytes": 55130
+        },
+        "klayout_lyt": {
+          "path": "libs.tech/klayout/tech/gf180mcu.lyt",
+          "sha256": "bc782cd127cdf0a694225c5c65d9f19affa7cf894f49da3ffc0c44943890e7d8",
+          "bytes": 8379
+        },
+        "rcx_min": {
+          "path": "libs.tech/librelane/rules.openrcx.gf180mcuD.min",
+          "sha256": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+          "bytes": 31290
+        },
+        "rcx_nom": {
+          "path": "libs.tech/librelane/rules.openrcx.gf180mcuD.nom",
+          "sha256": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+          "bytes": 31291
+        },
+        "rcx_max": {
+          "path": "libs.tech/librelane/rules.openrcx.gf180mcuD.max",
+          "sha256": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+          "bytes": 31286
+        },
+        "synth_exclude": {
+          "path": "libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/synth_exclude.cells",
+          "sha256": "65958d46c78006e215e53c77227773ca9d69e3767d9944772a29260ea3ffd06e",
+          "bytes": 417
+        },
+        "pnr_exclude": {
+          "path": "libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/pnr_exclude.cells",
+          "sha256": "a46ab41fe9f38cd763051045c11a9bf345e0e26ea7029ae47e510dd7fb1206e3",
+          "bytes": 64
+        },
+        "librelane_pdk_config": {
+          "path": "libs.tech/librelane/config.tcl",
+          "sha256": "962b8c36eb81f5ada2dc9f5359d3942370b22551df1ea80acbb5fb2a9c9151ed",
+          "bytes": 9125
+        },
+        "librelane_scl_config": {
+          "path": "libs.tech/librelane/gf180mcu_fd_sc_mcu7t5v0/config.tcl",
+          "sha256": "2941595ae7e516ad910e2d50c9a405d31401e6e5c93d6bd7edff6c82d26d31f7",
+          "bytes": 1885
+        }
+      },
+      "trees": {
+        "klayout_drc_tree": {
+          "path": "libs.tech/klayout/tech/drc",
+          "sha256": "726ed7dddbf2bb13be1f7a5210df001462ba7b36d6aee229ed5cc0037fa00626",
+          "files": 48
+        },
+        "klayout_lvs_tree": {
+          "path": "libs.tech/klayout/tech/lvs",
+          "sha256": "3f6c93233c6e69a613b67a98266d312c71abcae13afd17cd6d44ed7e1d039a6a",
+          "files": 32
+        }
+      }
+    }
+  }
+}

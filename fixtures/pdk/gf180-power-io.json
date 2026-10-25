@@ -1,0 +1,39 @@
+{
+  "power_net": "VDD",
+  "ground_net": "VSS",
+  "power_pin": "VDD",
+  "ground_pin": "VSS",
+  "body_power_pins": [
+    "VNW"
+  ],
+  "body_ground_pins": [
+    "VPW"
+  ],
+  "rail_layer": "Metal1",
+  "strap_layer": "Metal2",
+  "via": "Via1_HV",
+  "io_layer": "Metal3",
+  "tie_high": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+    "pin": "Z"
+  },
+  "tie_low": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+    "pin": "ZN"
+  },
+  "filler_cells": [
+    "gf180mcu_fd_sc_mcu7t5v0__fill_64",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_32",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_1"
+  ],
+  "alternating_rows": true,
+  "io_width": 800,
+  "io_spacing": 1600,
+  "strap_width": 800,
+  "strap_spacing": 2000,
+  "max_added_cells": 2000
+}

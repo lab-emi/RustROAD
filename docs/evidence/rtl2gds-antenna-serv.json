@@ -1,0 +1,782 @@
+{
+ "schema": "rustroad.rtl2gds-final.v1",
+ "generator": "scripts/rtl2gds_evidence.py",
+ "scope": {
+  "level": "block/macro",
+  "pad_ring": "not_applicable (block level, no pad ring)",
+  "seal_ring": "not_applicable (block level, no seal ring)",
+  "density": "reported separately (density_status); not part of the gate (owner decision)",
+  "ir_drop": "unchecked",
+  "electromigration": "unchecked",
+  "signal_integrity": "unchecked (coupling grounded)",
+  "ocv": "unchecked",
+  "cppr": "unchecked",
+  "clocks": "propagated, RustROAD CTS",
+  "async_reset_pulse_width": "unchecked: minimum pulse width of asynchronous set/clear inputs is a requirement on the reset source outside the block (pins listed per PDK in mpw_min_period); their recovery/removal checks are timed",
+  "antenna": "native check-antenna with a 0.10 safety margin + foundry deck (deck is the signoff gate)"
+ },
+ "runs": [
+  {
+   "run": "S6-serv-gf180",
+   "design": "serv",
+   "status": "failed",
+   "exit_code": 1,
+   "failed_items": [
+    "gf180:hold_closure",
+    "gf180:timing_setup",
+    "gf180:timing_hold",
+    "gf180:drv",
+    "gf180:timing_accuracy",
+    "gf180:lvs_netgen",
+    "gf180:lvs_klayout",
+    "gf180:controls"
+   ],
+   "unverified_items": [
+    "gf180:cec_prelayout",
+    "gf180:mpw_min_period",
+    "gf180:cec_final",
+    "gf180:cec_powered"
+   ],
+   "not_applicable_items": [],
+   "global_statuses": {
+    "tools_identity": "passed",
+    "openroad_image": "passed",
+    "design_manifest": "passed",
+    "budget_floors": "passed",
+    "manifest_provenance": "passed",
+    "sdc_rendering": "passed"
+   },
+   "revision": {
+    "head": "d8ccbf49bc39605df7eb02f41cedd1367a3561e9",
+    "branch": "feat/rtl2gds-antenna-dev",
+    "dirty": false,
+    "dirty_paths": 0,
+    "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+    "rustroad_sha256": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   },
+   "wall_seconds": 5821.678,
+   "peak_rss_kib": 1290152,
+   "processes": 706,
+   "tools": {
+    "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+    "rusteda": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+    "ruststa": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+    "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+    "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+    "opensta": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+    "openroad": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+    "rustroad": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   }
+  }
+ ],
+ "rows": [
+  {
+   "design": "serv",
+   "pdk": "gf180",
+   "recipe": "track",
+   "run": "S6-serv-gf180",
+   "gate_status": "failed",
+   "failed": [
+    "hold_closure",
+    "timing_setup",
+    "timing_hold",
+    "drv",
+    "timing_accuracy",
+    "lvs_netgen",
+    "lvs_klayout",
+    "controls"
+   ],
+   "unverified": [
+    "cec_prelayout",
+    "mpw_min_period",
+    "cec_final",
+    "cec_powered"
+   ],
+   "not_applicable": [],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "unverified",
+     "reason": "RTL vs mapped netlist: RustSys passed, Yosys equiv_simple unverified"
+    },
+    "hold_closure": {
+     "status": "failed",
+     "reason": "native RustSTA holdsetup not closed after 8 iteration(s)"
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "failed",
+     "reason": "native: setup below 0.0 ns: [{'engine': 'ruststa', 'corner': 'tt', 'worst_setup_ns': -17.058265001343862, 'margin_ns': 0.0}, {'engine': 'opensta', 'corner': 'tt', 'worst_setup_ns': -17.141624450684, 'margin_ns': 0.0}, {'engine': 'ruststa', 'corner': 'ss', 'worst_setup_ns': -46.30270758410272, 'margin_ns': 0.0}, {'engine': 'opensta', 'corner': 'ss', 'worst_setup_ns': -46.347915649414, 'margin_ns': ..."
+    },
+    "timing_hold": {
+     "status": "failed",
+     "reason": "native: hold below 0.05 ns: [{'engine': 'ruststa', 'corner': 'tt', 'worst_hold_ns': -2.3387916291556494, 'margin_ns': 0.05}, {'engine': 'opensta', 'corner': 'tt', 'worst_hold_ns': -2.345363855362, 'margin_ns': 0.05}, {'engine': 'ruststa', 'corner': 'ss', 'worst_hold_ns': -4.80295971498254, 'margin_ns': 0.05}, {'engine': 'opensta', 'corner': 'ss', 'worst_hold_ns': -4.810758590698, 'margin_ns': 0.05..."
+    },
+    "mpw_min_period": {
+     "status": "unverified",
+     "reason": "openrcx: openrcx SPEF: gf180_final_openrcx_run_gating: exit 1: RC meshparallel edge in i_dbus_ack is unsupported"
+    },
+    "drv": {
+     "status": "failed",
+     "reason": "native: RustSTA drv_status violated; RustSTA max_transition violation at tt; OpenSTA max_transition violation at tt; RustSTA max_capacitance violation at tt; OpenSTA max_capacitance violation at tt; RustSTA max_fanout violation at tt; OpenSTA max_fanout violation at tt; RustSTA max_transition violation at ss; OpenSTA max_transition violation at ss; RustSTA max_capacitance violation at ss; OpenSTA ..."
+    },
+    "timing_accuracy": {
+     "status": "failed",
+     "reason": "native: parity outside 1 ps: ['tt:endpoints', 'tt:pulse', 'tt:drv', 'ss:endpoints', 'ss:pulse', 'ss:drv', 'ff:endpoints', 'ff:pulse', 'ff:drv']; openrcx: openrcx SPEF: gf180_final_openrcx_run_gating: exit 1: RC meshparallel edge in i_dbus_ack is unsupported"
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "failed",
+     "reason": "see lvs_netgen.json"
+    },
+    "lvs_klayout": {
+     "status": "failed",
+     "reason": "see lvs_klayout.json"
+    },
+    "cec_final": {
+     "status": "unverified",
+     "reason": "RTL vs final netlist: RustSys passed, Yosys equiv_simple unverified"
+    },
+    "cec_powered": {
+     "status": "unverified",
+     "reason": "RTL vs powered netlist: RustSys passed, Yosys equiv_simple unverified"
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "failed",
+     "reason": "not detected: ['inverted_output']; did not run: []"
+    },
+    "density": {
+     "status": "failed",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": -17.058265001343862,
+        "worst_hold_ns": -2.3387916291556494
+       },
+       "opensta": {
+        "worst_setup_ns": -17.141624450684,
+        "worst_hold_ns": -2.345363855362
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": -46.30270758410272,
+        "worst_hold_ns": -4.80295971498254
+       },
+       "opensta": {
+        "worst_setup_ns": -46.347915649414,
+        "worst_hold_ns": -4.810758590698
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": -5.315641157757513,
+        "worst_hold_ns": -1.2961545073559666
+       },
+       "opensta": {
+        "worst_setup_ns": -5.392379283905,
+        "worst_hold_ns": -1.301697134972
+       }
+      }
+     },
+     "openrcx": {}
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 216.23,
+       "pulse_ps": 2.2959,
+       "drv_equal": false
+      },
+      "ss": {
+       "endpoints_ps": 246.1705,
+       "pulse_ps": 2.2159,
+       "drv_equal": false
+      },
+      "ff": {
+       "endpoints_ps": 172.0466,
+       "pulse_ps": 1.9008,
+       "drv_equal": false
+      }
+     },
+     "openrcx": {
+      "status": "unverified",
+      "reason": "openrcx SPEF: gf180_final_openrcx_run_gating: exit 1: RC meshparallel edge in i_dbus_ack is unsupported"
+     }
+    }
+   },
+   "closure": {
+    "status": "failed",
+    "iterations": 8,
+    "max_iterations": 8,
+    "target_margin_ns": 0.07,
+    "sizing": true,
+    "hold_cells_planned": 0,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 170,
+    "cells_resized": 1792,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": -55.02185902883993,
+        "hold_ns": -2.3383504633080348
+       },
+       "ss": {
+        "setup_ns": -134.7086002832774,
+        "hold_ns": -4.785954594087516
+       },
+       "ff": {
+        "setup_ns": -23.27238303504599,
+        "hold_ns": -1.298619638431112
+       }
+      },
+      "drv": 35676,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 256,
+       "candidates": 3363,
+       "by_reason": {
+        "setup": 22,
+        "max_transition": 256,
+        "max_capacitance": 13
+       },
+       "failing_setup_endpoints": 1370,
+       "drv_violations": 35676,
+       "utilization_after": 0.4515
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 22,
+       "before": 22,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": -62.42848578835342,
+        "hold_ns": -2.3264208975907583
+       },
+       "ss": {
+        "setup_ns": -149.0544315923708,
+        "hold_ns": -4.778267828412447
+       },
+       "ff": {
+        "setup_ns": -27.564853866185427,
+        "hold_ns": -1.2878495859976251
+       }
+      },
+      "drv": 34873,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 256,
+       "candidates": 3315,
+       "by_reason": {
+        "setup": 2,
+        "max_transition": 256,
+        "max_capacitance": 6
+       },
+       "failing_setup_endpoints": 1373,
+       "drv_violations": 34873,
+       "utilization_after": 0.4703
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 25,
+       "before": 25,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 2,
+      "worst": {
+       "tt": {
+        "setup_ns": -62.62472370130412,
+        "hold_ns": -2.425550216688248
+       },
+       "ss": {
+        "setup_ns": -149.55965018044512,
+        "hold_ns": -4.999242334349096
+       },
+       "ff": {
+        "setup_ns": -27.817159122224133,
+        "hold_ns": -1.3389835275010484
+       }
+      },
+      "drv": 33705,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 256,
+       "candidates": 3323,
+       "by_reason": {
+        "setup": 10,
+        "max_transition": 256,
+        "max_capacitance": 25
+       },
+       "failing_setup_endpoints": 1372,
+       "drv_violations": 33705,
+       "utilization_after": 0.4835
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 28,
+       "before": 27,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 3,
+      "worst": {
+       "tt": {
+        "setup_ns": -16.44486693244959,
+        "hold_ns": -2.4005272049042516
+       },
+       "ss": {
+        "setup_ns": -46.79445874053611,
+        "hold_ns": -4.938988923512622
+       },
+       "ff": {
+        "setup_ns": -4.187843282781314,
+        "hold_ns": -1.327267391069086
+       }
+      },
+      "drv": 29532,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 256,
+       "candidates": 3184,
+       "by_reason": {
+        "setup": 6,
+        "max_transition": 256,
+        "max_capacitance": 15
+       },
+       "failing_setup_endpoints": 1370,
+       "drv_violations": 29532,
+       "utilization_after": 0.4964
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 23,
+       "before": 23,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 4,
+      "worst": {
+       "tt": {
+        "setup_ns": -15.61893730685786,
+        "hold_ns": -2.3107309110522793
+       },
+       "ss": {
+        "setup_ns": -45.23437377106189,
+        "hold_ns": -4.7339044579449014
+       },
+       "ff": {
+        "setup_ns": -3.6801606397111186,
+        "hold_ns": -1.284837990599545
+       }
+      },
+      "drv": 26038,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 256,
+       "candidates": 2880,
+       "by_reason": {
+        "setup": 7,
+        "max_transition": 256,
+        "max_capacitance": 4
+       },
+       "failing_setup_endpoints": 1369,
+       "drv_violations": 26038,
+       "utilization_after": 0.5119
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 20,
+       "before": 20,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 5,
+      "worst": {
+       "tt": {
+        "setup_ns": -16.86133272837158,
+        "hold_ns": -2.4038594023193545
+       },
+       "ss": {
+        "setup_ns": -47.722295344042905,
+        "hold_ns": -4.908329696189922
+       },
+       "ff": {
+        "setup_ns": -4.370202793935928,
+        "hold_ns": -1.3409820731537438
+       }
+      },
+      "drv": 25163,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 256,
+       "candidates": 2850,
+       "by_reason": {
+        "setup": 5,
+        "max_transition": 256,
+        "max_capacitance": 1
+       },
+       "failing_setup_endpoints": 1368,
+       "drv_violations": 25163,
+       "utilization_after": 0.5302
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 16,
+       "before": 16,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 6,
+      "worst": {
+       "tt": {
+        "setup_ns": -17.794466182351165,
+        "hold_ns": -2.389365126917172
+       },
+       "ss": {
+        "setup_ns": -49.77520087735806,
+        "hold_ns": -4.904047080067983
+       },
+       "ff": {
+        "setup_ns": -4.868828950186394,
+        "hold_ns": -1.3242137688021574
+       }
+      },
+      "drv": 25601,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 256,
+       "candidates": 2926,
+       "by_reason": {
+        "setup": 6,
+        "max_transition": 256,
+        "max_capacitance": 1
+       },
+       "failing_setup_endpoints": 1380,
+       "drv_violations": 25601,
+       "utilization_after": 0.5503
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 20,
+       "before": 20,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 7,
+      "worst": {
+       "tt": {
+        "setup_ns": -17.058265001343862,
+        "hold_ns": -2.3387916291556494
+       },
+       "ss": {
+        "setup_ns": -46.30270758410272,
+        "hold_ns": -4.80295971498254
+       },
+       "ff": {
+        "setup_ns": -5.315641157757513,
+        "hold_ns": -1.2961545073559666
+       }
+      },
+      "drv": 25482,
+      "hold_eco": null,
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 16,
+       "before": 16,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": "iteration bound reached"
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "clock_buffer": 193,
+     "logic": 6285,
+     "physical_only": 19512
+    },
+    "total": 25990,
+    "area_um2": {
+     "clock_buffer": 11015.514,
+     "logic": 250597.446,
+     "physical_only": 193741.766
+    }
+   },
+   "die": {
+    "width_um": 695.52,
+    "height_um": 697.76,
+    "area_um2": 485306.035
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "failed",
+     "count": 1
+    },
+    "lvs_klayout": {
+     "status": "failed",
+     "count": 4
+    },
+    "density": {
+     "status": "failed",
+     "count": 6
+    }
+   },
+   "controls": {
+    "removed_hold_cell": "not_applicable",
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "planted_hold_uncertainty": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": false,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 21
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 78
+   },
+   "mpw_async_unchecked": null,
+   "wall_seconds": 5821.101,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.475,
+     "peak_rss_kib": 104344
+    },
+    {
+     "step": "floorplan",
+     "wall_seconds": 1.782,
+     "peak_rss_kib": 30788
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 2041.961,
+     "peak_rss_kib": 843624
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 4.417,
+     "peak_rss_kib": 185248
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.377,
+     "peak_rss_kib": 171296
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.541,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 4.676,
+     "peak_rss_kib": 289996
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 51.542,
+     "peak_rss_kib": 841992
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 590.743,
+     "peak_rss_kib": 1267040
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 3.879,
+     "peak_rss_kib": 120324
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 3.919,
+     "peak_rss_kib": 118688
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 32.012,
+     "peak_rss_kib": 805304
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 1.133,
+     "peak_rss_kib": 79256
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.491,
+     "peak_rss_kib": 105476
+    },
+    {
+     "step": "rerun_floorplan",
+     "wall_seconds": 1.846,
+     "peak_rss_kib": 30352
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 2002.58,
+     "peak_rss_kib": 843140
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 4.179,
+     "peak_rss_kib": 190044
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.38,
+     "peak_rss_kib": 171952
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 2010.33,
+     "peak_rss_kib": 843140
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 1072.371,
+     "peak_rss_kib": 1290152
+    }
+   ],
+   "peak_rss_kib": 1290152
+  }
+ ],
+ "table": {
+  "serv/gf180": {
+   "status": "failed",
+   "failed": [
+    "hold_closure",
+    "timing_setup",
+    "timing_hold",
+    "drv",
+    "timing_accuracy",
+    "lvs_netgen",
+    "lvs_klayout",
+    "controls"
+   ],
+   "unverified": [
+    "cec_prelayout",
+    "mpw_min_period",
+    "cec_final",
+    "cec_powered"
+   ]
+  }
+ }
+}

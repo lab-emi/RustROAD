@@ -1,0 +1,1133 @@
+{
+  "schema": "rustroad.logic-verification.v1",
+  "status": "passed",
+  "pdks": [
+    {
+      "pdk": "sky130",
+      "status": "passed",
+      "source_lib_sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+      "synthesis": {
+        "status": "passed",
+        "verdict": "equivalent",
+        "cells": {
+          "sky130_fd_sc_hd__dfxtp_1": 1,
+          "sky130_fd_sc_hd__xor2_4": 1
+        },
+        "area": 47.5456,
+        "time_unit_ns": 1.0
+      },
+      "original_library_sta": {
+        "status": "passed",
+        "workspace": "/mnt/data2/cgao/git/RustROAD/.work/logic-suite-v2/sky130_original_workspace",
+        "scope": {
+          "corner": "tt",
+          "wire_model": "wireload_lumped",
+          "parasitics": "none",
+          "drc_status": "unchecked",
+          "wire_load": "Small",
+          "delay_calculator": "nldm_lumped",
+          "clock_model": "ideal",
+          "cppr": "off",
+          "backend": "cpu",
+          "precision": "f64"
+        },
+        "completeness": {
+          "constrained_endpoints": 2,
+          "unconstrained_endpoints": 0,
+          "clock_domains": [
+            "core"
+          ],
+          "unconstrained_by_reason": {},
+          "unconstrained_inputs": 0,
+          "disabled_arcs": 0,
+          "unanalyzed_arcs": {
+            "min_pulse_width": 1
+          }
+        },
+        "metrics": {
+          "wns_ns": 0.0,
+          "tns_ns": 0.0,
+          "violating_endpoints": 0,
+          "whs_ns": 0.0,
+          "ths_ns": 0.0,
+          "hold_violating_endpoints": 0,
+          "worst_setup_slack_ns": 9.432276327887784,
+          "worst_hold_slack_ns": 0.29727164669770473
+        },
+        "diagnostics": [
+          {
+            "severity": "warning",
+            "code": "T0015",
+            "location": null,
+            "message": "corner 'tt': 1 unanalyzed 'min_pulse_width' arc(s) across 1 instance(s)",
+            "help": null
+          }
+        ],
+        "endpoints": [
+          {
+            "endpoint": "y",
+            "handle": "port4",
+            "kind": "output_port",
+            "path_group": "core",
+            "capture_clock": "core",
+            "setup_slack_ns": 9.432276327887784,
+            "hold_slack_ns": 0.5406693679540548,
+            "worst_setup_handle": "path1",
+            "worst_hold_handle": "path4"
+          },
+          {
+            "endpoint": "r0/D",
+            "handle": "pin4",
+            "kind": "flip_flop",
+            "path_group": "core",
+            "capture_clock": "core",
+            "setup_slack_ns": 9.517151005927001,
+            "hold_slack_ns": 0.29727164669770473,
+            "worst_setup_handle": "path2",
+            "worst_hold_handle": "path3"
+          }
+        ],
+        "full_check": {
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0
+        },
+        "both_check": {
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0
+        },
+        "incremental_noop": {
+          "scope": "no netlist or constraint edits",
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0,
+          "diagnostics": [
+            {
+              "severity": "warning",
+              "code": "T0015",
+              "location": null,
+              "message": "corner 'tt': 1 unanalyzed 'min_pulse_width' arc(s) across 1 instance(s)",
+              "help": null
+            }
+          ]
+        }
+      },
+      "ideal_projection": {
+        "purpose": "verification_only_ideal_wires",
+        "original": "/mnt/data2/cgao/git/RustSys/.work/pdk-trial/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+        "original_sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "projected": "/mnt/data2/cgao/git/RustROAD/.work/logic-suite-v2/sky130_verification_ideal.lib",
+        "projected_sha256": "1c6372ecc8fe4ae03326de976c5c14cc2d68e44426526561d8b3c1cb77b434b1",
+        "removed_spans": [
+          {
+            "start_byte": 1468,
+            "end_byte": 1781,
+            "sha256": "ccbc5aed5b2240d5672349c33471ee5edde11be79c3681fb9bf0e02c63dcb227"
+          },
+          {
+            "start_byte": 1783,
+            "end_byte": 2097,
+            "sha256": "632610e2804d51508877597f407555128b493aaca4246c8ff5a24455e953a5c3"
+          },
+          {
+            "start_byte": 2099,
+            "end_byte": 2412,
+            "sha256": "925ae3844b1029238fbd9ff9756e223526b62d163396095e0378b82a76ecf323"
+          },
+          {
+            "start_byte": 2414,
+            "end_byte": 2726,
+            "sha256": "cfb6b04ee205102d3c79a9dda19344c5b0662ef5e0a4dda874abdce7bde5fb48"
+          },
+          {
+            "start_byte": 2728,
+            "end_byte": 2761,
+            "sha256": "e193524f965ddf26a4d6931c8ab0fc46814274a7d9013e11abdacc57105a7575"
+          },
+          {
+            "start_byte": 2762,
+            "end_byte": 2795,
+            "sha256": "0e9bdb4878310c34cf477c87cb478004a1267643aaf86cd621b44db1ffbc28cd"
+          }
+        ],
+        "cell_functions_and_nldm": "unchanged",
+        "production_library": "unmodified"
+      },
+      "ideal_library_sta": {
+        "status": "passed",
+        "workspace": "/mnt/data2/cgao/git/RustROAD/.work/logic-suite-v2/sky130_ideal_workspace",
+        "scope": {
+          "corner": "tt",
+          "wire_model": "ideal",
+          "parasitics": "none",
+          "drc_status": "unchecked",
+          "wire_load": null,
+          "delay_calculator": "nldm_lumped",
+          "clock_model": "ideal",
+          "cppr": "off",
+          "backend": "cpu",
+          "precision": "f64"
+        },
+        "completeness": {
+          "constrained_endpoints": 2,
+          "unconstrained_endpoints": 0,
+          "clock_domains": [
+            "core"
+          ],
+          "unconstrained_by_reason": {},
+          "unconstrained_inputs": 0,
+          "disabled_arcs": 0,
+          "unanalyzed_arcs": {
+            "min_pulse_width": 1
+          }
+        },
+        "metrics": {
+          "wns_ns": 0.0,
+          "tns_ns": 0.0,
+          "violating_endpoints": 0,
+          "whs_ns": 0.0,
+          "ths_ns": 0.0,
+          "hold_violating_endpoints": 0,
+          "worst_setup_slack_ns": 9.432276327887784,
+          "worst_hold_slack_ns": 0.2962878686148402
+        },
+        "diagnostics": [
+          {
+            "severity": "warning",
+            "code": "T0015",
+            "location": null,
+            "message": "corner 'tt': 1 unanalyzed 'min_pulse_width' arc(s) across 1 instance(s)",
+            "help": null
+          }
+        ],
+        "endpoints": [
+          {
+            "endpoint": "y",
+            "handle": "port4",
+            "kind": "output_port",
+            "path_group": "core",
+            "capture_clock": "core",
+            "setup_slack_ns": 9.432276327887784,
+            "hold_slack_ns": 0.5406693679540548,
+            "worst_setup_handle": "path1",
+            "worst_hold_handle": "path4"
+          },
+          {
+            "endpoint": "r0/D",
+            "handle": "pin4",
+            "kind": "flip_flop",
+            "path_group": "core",
+            "capture_clock": "core",
+            "setup_slack_ns": 9.518239907453928,
+            "hold_slack_ns": 0.2962878686148402,
+            "worst_setup_handle": "path2",
+            "worst_hold_handle": "path3"
+          }
+        ],
+        "full_check": {
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0
+        },
+        "both_check": {
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0
+        },
+        "incremental_noop": {
+          "scope": "no netlist or constraint edits",
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0,
+          "diagnostics": [
+            {
+              "severity": "warning",
+              "code": "T0015",
+              "location": null,
+              "message": "corner 'tt': 1 unanalyzed 'min_pulse_width' arc(s) across 1 instance(s)",
+              "help": null
+            }
+          ]
+        }
+      },
+      "external_cec": {
+        "status": "passed",
+        "method": "Yosys equiv_simple -seq 2 -undef plus equiv_status -assert",
+        "controls": [
+          {
+            "control": "good",
+            "expected_result_observed": true,
+            "receipt": "sky130_yosys_good"
+          },
+          {
+            "control": "bad",
+            "expected_result_observed": true,
+            "receipt": "sky130_yosys_bad"
+          }
+        ],
+        "initial_state": "no reset sequence or initialization assumptions"
+      },
+      "external_sta": {
+        "status": "passed",
+        "scope": "same_verification_only_ideal_library_on_both_engines",
+        "corner": "tt",
+        "wire_model": "ideal",
+        "clock_model": "ideal",
+        "parasitics": "none",
+        "unconstrained_endpoints": 0,
+        "tolerance_ns": 0.001,
+        "comparisons": [
+          {
+            "endpoint": "y",
+            "kind": "setup",
+            "ruststa_ns": 9.432276327887784,
+            "opensta_ns": 9.432276725769,
+            "absolute_difference_ns": 3.9788121597439385e-07
+          },
+          {
+            "endpoint": "y",
+            "kind": "hold",
+            "ruststa_ns": 0.5406693679540548,
+            "opensta_ns": 0.540669381618,
+            "absolute_difference_ns": 1.3663945197528449e-08
+          },
+          {
+            "endpoint": "r0/D",
+            "kind": "setup",
+            "ruststa_ns": 9.518239907453928,
+            "opensta_ns": 9.51824092865,
+            "absolute_difference_ns": 1.0211960717043667e-06
+          },
+          {
+            "endpoint": "r0/D",
+            "kind": "hold",
+            "ruststa_ns": 0.2962878686148402,
+            "opensta_ns": 0.296287864447,
+            "absolute_difference_ns": 4.167840184088334e-09
+          }
+        ],
+        "max_abs_difference_ns": 1.0211960717043667e-06,
+        "warnings": [],
+        "receipt": "sky130_opensta"
+      },
+      "simulation": {
+        "status": "passed",
+        "method": "exhaustive two-input truth table sampled after clock; RTL and mapped gate outputs",
+        "cases": 4,
+        "initial_state": "only sampled after first clock; no claim about arbitrary initial state from simulation",
+        "model_producer": "Yosys Liberty function import; independent CEC separately covers arbitrary initial state",
+        "controls": [
+          {
+            "control": "good",
+            "expected_result_observed": true,
+            "receipt": "sky130_sim_good"
+          },
+          {
+            "control": "negative",
+            "expected_result_observed": true,
+            "receipt": "sky130_sim_negative"
+          }
+        ]
+      },
+      "elapsed_seconds": 4.753388177952729
+    },
+    {
+      "pdk": "gf180",
+      "status": "passed",
+      "source_lib_sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+      "synthesis": {
+        "status": "passed",
+        "verdict": "equivalent",
+        "cells": {
+          "gf180mcu_fd_sc_mcu7t5v0__dffq_1": 1,
+          "gf180mcu_fd_sc_mcu7t5v0__xor2_2": 1
+        },
+        "area": 103.17439999999999,
+        "time_unit_ns": 1.0
+      },
+      "original_library_sta": {
+        "status": "passed",
+        "workspace": "/mnt/data2/cgao/git/RustROAD/.work/logic-suite-v2/gf180_original_workspace",
+        "scope": {
+          "corner": "tt",
+          "wire_model": "ideal",
+          "parasitics": "none",
+          "drc_status": "unchecked",
+          "wire_load": null,
+          "delay_calculator": "nldm_lumped",
+          "clock_model": "ideal",
+          "cppr": "off",
+          "backend": "cpu",
+          "precision": "f64"
+        },
+        "completeness": {
+          "constrained_endpoints": 2,
+          "unconstrained_endpoints": 0,
+          "clock_domains": [
+            "core"
+          ],
+          "unconstrained_by_reason": {},
+          "unconstrained_inputs": 0,
+          "disabled_arcs": 0,
+          "unanalyzed_arcs": {
+            "min_pulse_width": 2,
+            "minimum_period": 2
+          }
+        },
+        "metrics": {
+          "wns_ns": 0.0,
+          "tns_ns": 0.0,
+          "violating_endpoints": 0,
+          "whs_ns": 0.0,
+          "ths_ns": 0.0,
+          "hold_violating_endpoints": 0,
+          "worst_setup_slack_ns": 8.672568525727085,
+          "worst_hold_slack_ns": 0.46655197380687974
+        },
+        "diagnostics": [
+          {
+            "severity": "warning",
+            "code": "T0015",
+            "location": null,
+            "message": "corner 'tt': 2 unanalyzed 'min_pulse_width' arc(s) across 1 instance(s)",
+            "help": null
+          },
+          {
+            "severity": "warning",
+            "code": "T0015",
+            "location": null,
+            "message": "corner 'tt': 2 unanalyzed 'minimum_period' arc(s) across 1 instance(s)",
+            "help": null
+          }
+        ],
+        "endpoints": [
+          {
+            "endpoint": "y",
+            "handle": "port4",
+            "kind": "output_port",
+            "path_group": "core",
+            "capture_clock": "core",
+            "setup_slack_ns": 8.672568525727085,
+            "hold_slack_ns": 1.1753221294810465,
+            "worst_setup_handle": "path1",
+            "worst_hold_handle": "path4"
+          },
+          {
+            "endpoint": "r0/D",
+            "handle": "pin4",
+            "kind": "flip_flop",
+            "path_group": "core",
+            "capture_clock": "core",
+            "setup_slack_ns": 8.767571962686944,
+            "hold_slack_ns": 0.46655197380687974,
+            "worst_setup_handle": "path2",
+            "worst_hold_handle": "path3"
+          }
+        ],
+        "full_check": {
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0
+        },
+        "both_check": {
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0
+        },
+        "incremental_noop": {
+          "scope": "no netlist or constraint edits",
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0,
+          "diagnostics": [
+            {
+              "severity": "warning",
+              "code": "T0015",
+              "location": null,
+              "message": "corner 'tt': 2 unanalyzed 'min_pulse_width' arc(s) across 1 instance(s)",
+              "help": null
+            },
+            {
+              "severity": "warning",
+              "code": "T0015",
+              "location": null,
+              "message": "corner 'tt': 2 unanalyzed 'minimum_period' arc(s) across 1 instance(s)",
+              "help": null
+            }
+          ]
+        }
+      },
+      "ideal_projection": {
+        "purpose": "verification_only_ideal_wires",
+        "original": "/mnt/data2/cgao/git/RustSys/.work/pdk-trial/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+        "original_sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "projected": "/mnt/data2/cgao/git/RustROAD/.work/logic-suite-v2/gf180_verification_ideal.lib",
+        "projected_sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "removed_spans": [],
+        "cell_functions_and_nldm": "unchanged",
+        "production_library": "unmodified"
+      },
+      "ideal_library_sta": {
+        "status": "passed",
+        "workspace": "/mnt/data2/cgao/git/RustROAD/.work/logic-suite-v2/gf180_original_workspace",
+        "scope": {
+          "corner": "tt",
+          "wire_model": "ideal",
+          "parasitics": "none",
+          "drc_status": "unchecked",
+          "wire_load": null,
+          "delay_calculator": "nldm_lumped",
+          "clock_model": "ideal",
+          "cppr": "off",
+          "backend": "cpu",
+          "precision": "f64"
+        },
+        "completeness": {
+          "constrained_endpoints": 2,
+          "unconstrained_endpoints": 0,
+          "clock_domains": [
+            "core"
+          ],
+          "unconstrained_by_reason": {},
+          "unconstrained_inputs": 0,
+          "disabled_arcs": 0,
+          "unanalyzed_arcs": {
+            "min_pulse_width": 2,
+            "minimum_period": 2
+          }
+        },
+        "metrics": {
+          "wns_ns": 0.0,
+          "tns_ns": 0.0,
+          "violating_endpoints": 0,
+          "whs_ns": 0.0,
+          "ths_ns": 0.0,
+          "hold_violating_endpoints": 0,
+          "worst_setup_slack_ns": 8.672568525727085,
+          "worst_hold_slack_ns": 0.46655197380687974
+        },
+        "diagnostics": [
+          {
+            "severity": "warning",
+            "code": "T0015",
+            "location": null,
+            "message": "corner 'tt': 2 unanalyzed 'min_pulse_width' arc(s) across 1 instance(s)",
+            "help": null
+          },
+          {
+            "severity": "warning",
+            "code": "T0015",
+            "location": null,
+            "message": "corner 'tt': 2 unanalyzed 'minimum_period' arc(s) across 1 instance(s)",
+            "help": null
+          }
+        ],
+        "endpoints": [
+          {
+            "endpoint": "y",
+            "handle": "port4",
+            "kind": "output_port",
+            "path_group": "core",
+            "capture_clock": "core",
+            "setup_slack_ns": 8.672568525727085,
+            "hold_slack_ns": 1.1753221294810465,
+            "worst_setup_handle": "path1",
+            "worst_hold_handle": "path4"
+          },
+          {
+            "endpoint": "r0/D",
+            "handle": "pin4",
+            "kind": "flip_flop",
+            "path_group": "core",
+            "capture_clock": "core",
+            "setup_slack_ns": 8.767571962686944,
+            "hold_slack_ns": 0.46655197380687974,
+            "worst_setup_handle": "path2",
+            "worst_hold_handle": "path3"
+          }
+        ],
+        "full_check": {
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0
+        },
+        "both_check": {
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0
+        },
+        "incremental_noop": {
+          "scope": "no netlist or constraint edits",
+          "verdict": "agree",
+          "max_abs_difference_ns": 0.0,
+          "diagnostics": [
+            {
+              "severity": "warning",
+              "code": "T0015",
+              "location": null,
+              "message": "corner 'tt': 2 unanalyzed 'min_pulse_width' arc(s) across 1 instance(s)",
+              "help": null
+            },
+            {
+              "severity": "warning",
+              "code": "T0015",
+              "location": null,
+              "message": "corner 'tt': 2 unanalyzed 'minimum_period' arc(s) across 1 instance(s)",
+              "help": null
+            }
+          ]
+        }
+      },
+      "external_cec": {
+        "status": "passed",
+        "method": "Yosys equiv_simple -seq 2 -undef plus equiv_status -assert",
+        "controls": [
+          {
+            "control": "good",
+            "expected_result_observed": true,
+            "receipt": "gf180_yosys_good"
+          },
+          {
+            "control": "bad",
+            "expected_result_observed": true,
+            "receipt": "gf180_yosys_bad"
+          }
+        ],
+        "initial_state": "no reset sequence or initialization assumptions"
+      },
+      "external_sta": {
+        "status": "passed",
+        "scope": "same_verification_only_ideal_library_on_both_engines",
+        "corner": "tt",
+        "wire_model": "ideal",
+        "clock_model": "ideal",
+        "parasitics": "none",
+        "unconstrained_endpoints": 0,
+        "tolerance_ns": 0.001,
+        "comparisons": [
+          {
+            "endpoint": "y",
+            "kind": "setup",
+            "ruststa_ns": 8.672568525727085,
+            "opensta_ns": 8.672568321228,
+            "absolute_difference_ns": 2.0449908433306518e-07
+          },
+          {
+            "endpoint": "y",
+            "kind": "hold",
+            "ruststa_ns": 1.1753221294810465,
+            "opensta_ns": 1.175322175026,
+            "absolute_difference_ns": 4.554495336428488e-08
+          },
+          {
+            "endpoint": "r0/D",
+            "kind": "setup",
+            "ruststa_ns": 8.767571962686944,
+            "opensta_ns": 8.76757144928,
+            "absolute_difference_ns": 5.134069436252275e-07
+          },
+          {
+            "endpoint": "r0/D",
+            "kind": "hold",
+            "ruststa_ns": 0.46655197380687974,
+            "opensta_ns": 0.466551929712,
+            "absolute_difference_ns": 4.409487974754711e-08
+          }
+        ],
+        "max_abs_difference_ns": 5.134069436252275e-07,
+        "warnings": [],
+        "receipt": "gf180_opensta"
+      },
+      "simulation": {
+        "status": "passed",
+        "method": "exhaustive two-input truth table sampled after clock; RTL and mapped gate outputs",
+        "cases": 4,
+        "initial_state": "only sampled after first clock; no claim about arbitrary initial state from simulation",
+        "model_producer": "Yosys Liberty function import; independent CEC separately covers arbitrary initial state",
+        "controls": [
+          {
+            "control": "good",
+            "expected_result_observed": true,
+            "receipt": "gf180_sim_good"
+          },
+          {
+            "control": "negative",
+            "expected_result_observed": true,
+            "receipt": "gf180_sim_negative"
+          }
+        ]
+      },
+      "elapsed_seconds": 5.12570345797576
+    }
+  ],
+  "limitation": "Pinned RustSTA has no --spef import or --wire-model CLI; extracted-parasitic timing is unsupported.",
+  "preflight": "               total        used        free      shared  buff/cache   available\nMem:            59Gi        12Gi       1.6Gi       254Mi        46Gi        47Gi\nSwap:          127Gi        12Gi       115Gi\n",
+  "memory_estimate": {
+    "objects": 128,
+    "arcs": 256,
+    "bytes_per_entry": 256,
+    "corners": 1,
+    "threads": 2,
+    "graph_and_tags_mib_upper_bound": 4,
+    "parser_and_library_mib_upper_bound": 640,
+    "process_headroom_mib": 256,
+    "fixture_projection_mib_upper_bound": 256,
+    "concurrent_processes": 1,
+    "max_ranked_paths": 8,
+    "max_sat_conflicts_per_obligation": 10000,
+    "max_sweep_candidates": 256,
+    "all_paths_materialized": false
+  },
+  "verification_source": {
+    "path": "/mnt/data2/cgao/git/RustROAD/scripts/verify_logic.py",
+    "sha256": "f43959f4930b716ef53e0340dcbb72f27c4aa2338839a87387aa04106bf1a12f"
+  },
+  "tools": {
+    "rustsys": {
+      "status": "available",
+      "path": "/mnt/data2/cgao/git/RustSys/target/release/rustsys",
+      "entrypoint_sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
+      "version": "rustsys 0.1.0 (runtimes: cpu, cuda)",
+      "receipt": "rustsys_version"
+    },
+    "rusteda": {
+      "status": "available",
+      "path": "/mnt/data2/cgao/git/RustSTA/target/release/rusteda",
+      "entrypoint_sha256": "8fcf8e0eefa05e14c3b3d6ac367839f5ff95059f6d416e2e8fab0262667b2429",
+      "version": "rusteda 0.1.0",
+      "receipt": "rusteda_version"
+    },
+    "ruststa": {
+      "status": "available",
+      "path": "/mnt/data2/cgao/git/RustSTA/target/release/ruststa",
+      "entrypoint_sha256": "b1a8389c7684aaf8a8e05f89635fac5ed2ee15aa380c8f8d8c40b1780f08668d",
+      "version": "ruststa 0.1.0 (backends: cpu)",
+      "receipt": "ruststa_version"
+    },
+    "yosys": {
+      "status": "available",
+      "path": "/mnt/data2/cgao/git/RustSys/.work/lec-verification/tools/yosys",
+      "entrypoint_sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+      "version": "Yosys 0.67 (git sha1 2d1509d1b, Release, GNU /usr/bin/c++ 13.3.0)",
+      "receipt": "yosys_version"
+    },
+    "opensta": {
+      "status": "available",
+      "path": "/home/cgao/.local/share/containers/storage/overlay/c2cc5a7e2baaa2c6bdac6951f759273edbb27a34c710ea4593e43ef22d00e4b8/diff/foss/tools/openroad/bin/sta",
+      "entrypoint_sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+      "version": "3.1.0",
+      "receipt": "opensta_version"
+    },
+    "verilator": {
+      "status": "available",
+      "path": "/usr/bin/verilator",
+      "entrypoint_sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+      "version": "Verilator 5.032 2025-01-01 rev (Debian 5.032-1)",
+      "receipt": "verilator_version"
+    }
+  },
+  "peak_process_rss_kib": 290124,
+  "rss_measurement_status": "complete",
+  "full_rtl_to_gds_status": "unverified",
+  "physical": {
+    "placement": "not_run",
+    "routing": "not_run",
+    "drc": "unchecked",
+    "lvs": "unchecked",
+    "extracted_sta": "unsupported"
+  },
+  "identity_check": true,
+  "raw_evidence": {
+    "summary": ".work/logic-suite-v2/summary.json",
+    "summary_sha256": "bc199c52a20a82fdedd8998c77821f08c53993d1c7705bdc38b02567bc58276a",
+    "receipts": ".work/logic-suite-v2/receipts"
+  },
+  "resource_measurement": {
+    "suite_wall_seconds": 10.09,
+    "suite_peak_rss_kib": 290124,
+    "scope": "maximum process RSS, not aggregate process-family memory",
+    "outer_time_receipt": ".work/logic-suite-v2.time",
+    "outer_time_receipt_sha256": "912902e65252ad14be0f2fae9fda2b0550b49d222ff2b566b7b4802090a83243"
+  },
+  "receipt_index": [
+    {
+      "label": "rustsys_version",
+      "exit_code": 0,
+      "peak_rss_kib": 8304,
+      "elapsed_seconds": 0.0028660179814323783,
+      "receipt_path": ".work/logic-suite-v2/receipts/rustsys_version/receipt.json",
+      "receipt_sha256": "a2f0d805914c50342b670cc868a8facd59ede966f58e537c547f0deb01f45066"
+    },
+    {
+      "label": "rusteda_version",
+      "exit_code": 0,
+      "peak_rss_kib": 7764,
+      "elapsed_seconds": 0.0027728459681384265,
+      "receipt_path": ".work/logic-suite-v2/receipts/rusteda_version/receipt.json",
+      "receipt_sha256": "cba56f5c2c36ec42df414368066aa2e516b08c84e1968bc4e7815c97d8a98bfe"
+    },
+    {
+      "label": "ruststa_version",
+      "exit_code": 0,
+      "peak_rss_kib": 8000,
+      "elapsed_seconds": 0.002707185980398208,
+      "receipt_path": ".work/logic-suite-v2/receipts/ruststa_version/receipt.json",
+      "receipt_sha256": "ec961381bf6ae53e8a8d87499694b3c67b24c5ff4a674eb2190e3fcbc1677324"
+    },
+    {
+      "label": "yosys_version",
+      "exit_code": 0,
+      "peak_rss_kib": 25924,
+      "elapsed_seconds": 0.005838626006152481,
+      "receipt_path": ".work/logic-suite-v2/receipts/yosys_version/receipt.json",
+      "receipt_sha256": "91e3faa8977a7936e6a4b29af47522495193f53db45841c05ff9b6e940e5ae8d"
+    },
+    {
+      "label": "opensta_version",
+      "exit_code": 0,
+      "peak_rss_kib": 8048,
+      "elapsed_seconds": 0.0030636200099252164,
+      "receipt_path": ".work/logic-suite-v2/receipts/opensta_version/receipt.json",
+      "receipt_sha256": "e3109aa8b3c401a6cf7451b7971c889f5467401957e87684ac00504b284ee2ba"
+    },
+    {
+      "label": "verilator_version",
+      "exit_code": 0,
+      "peak_rss_kib": 12736,
+      "elapsed_seconds": 0.023291057033929974,
+      "receipt_path": ".work/logic-suite-v2/receipts/verilator_version/receipt.json",
+      "receipt_sha256": "9b9d7880b98a67b270da927dd6c3edd4e6841e7e91021c05d1a877a7d3e21481"
+    },
+    {
+      "label": "sky130_synth",
+      "exit_code": 0,
+      "peak_rss_kib": 61736,
+      "elapsed_seconds": 0.13613704196177423,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_synth/receipt.json",
+      "receipt_sha256": "9d50db39f9d0fa66f9c6bf413d768cdbe9038b848c156b1ff86335c0adb9d854"
+    },
+    {
+      "label": "sky130_check_synth",
+      "exit_code": 0,
+      "peak_rss_kib": 61984,
+      "elapsed_seconds": 0.10468028800096363,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_check_synth/receipt.json",
+      "receipt_sha256": "f93e580eeecc1a37cd1a599bca9bb0042f79dd892d25f158cccf2704b4062ef6"
+    },
+    {
+      "label": "sky130_original_init",
+      "exit_code": 0,
+      "peak_rss_kib": 8028,
+      "elapsed_seconds": 0.005624854005873203,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_original_init/receipt.json",
+      "receipt_sha256": "d2ccb04a46f7b5dca0eee37653344393ec15730a3fb31ab1f495b91beefdeb8e"
+    },
+    {
+      "label": "sky130_original_import",
+      "exit_code": 0,
+      "peak_rss_kib": 66452,
+      "elapsed_seconds": 0.08771876397076994,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_original_import/receipt.json",
+      "receipt_sha256": "b9c78ceba60ba2be1b341506706a034a015ce859bfb2d0a4e1ac092e7f0867d8"
+    },
+    {
+      "label": "sky130_original_run",
+      "exit_code": 0,
+      "peak_rss_kib": 26060,
+      "elapsed_seconds": 0.016520267992746085,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_original_run/receipt.json",
+      "receipt_sha256": "5053e190dff8a69090cf89350e8b2421f937746ef85ae02b22baa3ac3a1b30e3"
+    },
+    {
+      "label": "sky130_original_report",
+      "exit_code": 0,
+      "peak_rss_kib": 8028,
+      "elapsed_seconds": 0.00365052797133103,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_original_report/receipt.json",
+      "receipt_sha256": "56ef6c31e7454e89a62f3cafc6e8e33ccf0c257e90aeea57daa94b31caadb1b2"
+    },
+    {
+      "label": "sky130_original_check_full",
+      "exit_code": 0,
+      "peak_rss_kib": 25648,
+      "elapsed_seconds": 0.016536347975488752,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_original_check_full/receipt.json",
+      "receipt_sha256": "cd6a8839129c93d0be2df3f54a5d494c22ec8cc2a49970e7f7958c19ee08b7b0"
+    },
+    {
+      "label": "sky130_original_check_both",
+      "exit_code": 0,
+      "peak_rss_kib": 40060,
+      "elapsed_seconds": 0.026849212998058647,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_original_check_both/receipt.json",
+      "receipt_sha256": "05b7e7eeb4ab25fe5341c6b84276dea915b74ba6058b81cddb78df8c93e6d9be"
+    },
+    {
+      "label": "sky130_original_update",
+      "exit_code": 0,
+      "peak_rss_kib": 26648,
+      "elapsed_seconds": 0.01648224698146805,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_original_update/receipt.json",
+      "receipt_sha256": "5bd029e2ce2f59de4026268ee4690004491d64e1dbd8716e90e846ea68381c52"
+    },
+    {
+      "label": "sky130_original_updated_check_full",
+      "exit_code": 0,
+      "peak_rss_kib": 25664,
+      "elapsed_seconds": 0.015737998008262366,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_original_updated_check_full/receipt.json",
+      "receipt_sha256": "34d6a51d2fe82ac97d94f68de268c55d5b7b22069f853dd7f7a48280104fdeac"
+    },
+    {
+      "label": "sky130_ideal_init",
+      "exit_code": 0,
+      "peak_rss_kib": 8072,
+      "elapsed_seconds": 0.006215132016222924,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_ideal_init/receipt.json",
+      "receipt_sha256": "c6d772ad9b98711564afbb933cc11f644b458b71b8ce7b1b7ec1daf121502213"
+    },
+    {
+      "label": "sky130_ideal_import",
+      "exit_code": 0,
+      "peak_rss_kib": 67364,
+      "elapsed_seconds": 0.08730434899916872,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_ideal_import/receipt.json",
+      "receipt_sha256": "8a6cc9c8ddc45d0c28c64ea966539b83d2a154b5c4334adfc96978184680aa38"
+    },
+    {
+      "label": "sky130_ideal_run",
+      "exit_code": 0,
+      "peak_rss_kib": 24952,
+      "elapsed_seconds": 0.017695273039862514,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_ideal_run/receipt.json",
+      "receipt_sha256": "0ee2fdb191fd3f5ff265a94a7ed45018e1c894fc370d52f47d760309c2950b85"
+    },
+    {
+      "label": "sky130_ideal_report",
+      "exit_code": 0,
+      "peak_rss_kib": 8084,
+      "elapsed_seconds": 0.003760189050808549,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_ideal_report/receipt.json",
+      "receipt_sha256": "5945270332276181b20200cd7ae3574797382f0bd8e537469e33013c23fb69ad"
+    },
+    {
+      "label": "sky130_ideal_check_full",
+      "exit_code": 0,
+      "peak_rss_kib": 25996,
+      "elapsed_seconds": 0.016510866989847273,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_ideal_check_full/receipt.json",
+      "receipt_sha256": "f103c7ea81b7f9f773c7de64c9e4cc249bdb9d2a3d9a58e95b93afccaf41d19b"
+    },
+    {
+      "label": "sky130_ideal_check_both",
+      "exit_code": 0,
+      "peak_rss_kib": 39880,
+      "elapsed_seconds": 0.026370507024694234,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_ideal_check_both/receipt.json",
+      "receipt_sha256": "16edb57b96aa4e68150a3347d46fe578130d21759c010952c143916916268ff8"
+    },
+    {
+      "label": "sky130_ideal_update",
+      "exit_code": 0,
+      "peak_rss_kib": 26600,
+      "elapsed_seconds": 0.018293130968231708,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_ideal_update/receipt.json",
+      "receipt_sha256": "fb0c75ad5dce2403a5857095db6d87b2744f6363eda5328eb1b519f769bef4ec"
+    },
+    {
+      "label": "sky130_ideal_updated_check_full",
+      "exit_code": 0,
+      "peak_rss_kib": 25792,
+      "elapsed_seconds": 0.016959412954747677,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_ideal_updated_check_full/receipt.json",
+      "receipt_sha256": "96eaf90baff87a53ee70d758f00e316583a2f1d3fc70ca0a8bc02a54e89cfd61"
+    },
+    {
+      "label": "sky130_yosys_good",
+      "exit_code": 0,
+      "peak_rss_kib": 66268,
+      "elapsed_seconds": 0.03935444704256952,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_yosys_good/receipt.json",
+      "receipt_sha256": "d6361f40c0b4d8d48d0d27e1b76d7127166aaace81995216f630f96de5257386"
+    },
+    {
+      "label": "sky130_yosys_bad",
+      "exit_code": 1,
+      "peak_rss_kib": 62448,
+      "elapsed_seconds": 0.03964618203463033,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_yosys_bad/receipt.json",
+      "receipt_sha256": "eb15117d165671a30078a014e53a72c070b8ab1619549096e5aac3bd9cd479ab"
+    },
+    {
+      "label": "sky130_opensta",
+      "exit_code": 0,
+      "peak_rss_kib": 51460,
+      "elapsed_seconds": 0.14107654697727412,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_opensta/receipt.json",
+      "receipt_sha256": "5f167b7e9cd6896d0dee90b197a49f8ba1c21429929f2fa3009ce08cfab565c0"
+    },
+    {
+      "label": "sky130_sim_model",
+      "exit_code": 0,
+      "peak_rss_kib": 64856,
+      "elapsed_seconds": 0.04029397002886981,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_sim_model/receipt.json",
+      "receipt_sha256": "a597db47b12a83b69e8849a5163c3cabb50b954c4457b240cf9e7ea96c61a58b"
+    },
+    {
+      "label": "sky130_sim_compile",
+      "exit_code": 0,
+      "peak_rss_kib": 290124,
+      "elapsed_seconds": 1.531767348991707,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_sim_compile/receipt.json",
+      "receipt_sha256": "a6e763d719bf37d37e51fc27908dfa2c52fa087c2af07513dca4179950a5e13d"
+    },
+    {
+      "label": "sky130_sim_good",
+      "exit_code": 0,
+      "peak_rss_kib": 8328,
+      "elapsed_seconds": 0.0038054600008763373,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_sim_good/receipt.json",
+      "receipt_sha256": "0320e9e192c12c66536662a976667c673f4dc9b2f399355ae6e3212fbd7964b1"
+    },
+    {
+      "label": "sky130_sim_negative",
+      "exit_code": 134,
+      "peak_rss_kib": 8016,
+      "elapsed_seconds": 2.1107667710166425,
+      "receipt_path": ".work/logic-suite-v2/receipts/sky130_sim_negative/receipt.json",
+      "receipt_sha256": "da5c70d4a69d1378cd02f3f11d039c6f91042ba0ce4a8f59414984abeb615bd8"
+    },
+    {
+      "label": "gf180_synth",
+      "exit_code": 0,
+      "peak_rss_kib": 104472,
+      "elapsed_seconds": 0.23872546199709177,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_synth/receipt.json",
+      "receipt_sha256": "c8bf3f694f26a6f9d23e6ed308dea8303f6b6249a4ffb15856720088753c61a0"
+    },
+    {
+      "label": "gf180_check_synth",
+      "exit_code": 0,
+      "peak_rss_kib": 107224,
+      "elapsed_seconds": 0.18611995002720505,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_check_synth/receipt.json",
+      "receipt_sha256": "a5a1a9baf6de1e5553d4687708155f255627dafb0d41c5ac8c0aee189f635ac4"
+    },
+    {
+      "label": "gf180_original_init",
+      "exit_code": 0,
+      "peak_rss_kib": 8080,
+      "elapsed_seconds": 0.006004247989039868,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_original_init/receipt.json",
+      "receipt_sha256": "e68e3e0235cea9a50888e3d58998b2227865d9dc3613e66d02c5915698201a88"
+    },
+    {
+      "label": "gf180_original_import",
+      "exit_code": 0,
+      "peak_rss_kib": 119768,
+      "elapsed_seconds": 0.15789550804765895,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_original_import/receipt.json",
+      "receipt_sha256": "6d703d06951f2e771b7f9d4917b13ed6e7cc552b30e168c5502599d9aa8bc342"
+    },
+    {
+      "label": "gf180_original_run",
+      "exit_code": 0,
+      "peak_rss_kib": 51768,
+      "elapsed_seconds": 0.027644814050290734,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_original_run/receipt.json",
+      "receipt_sha256": "41333395025c8db9e2f51a9d20fbc069faee907ac999c666b3bee12166310320"
+    },
+    {
+      "label": "gf180_original_report",
+      "exit_code": 0,
+      "peak_rss_kib": 8072,
+      "elapsed_seconds": 0.004035723046399653,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_original_report/receipt.json",
+      "receipt_sha256": "160a16fbf2982da5bdcaaaae853951f226055428b77dcb681cf0ed2135723826"
+    },
+    {
+      "label": "gf180_original_check_full",
+      "exit_code": 0,
+      "peak_rss_kib": 52192,
+      "elapsed_seconds": 0.027062456007115543,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_original_check_full/receipt.json",
+      "receipt_sha256": "65ec6e4f2589c951a95149e1045533df1566ae75b91c605a7af144c9f3e23190"
+    },
+    {
+      "label": "gf180_original_check_both",
+      "exit_code": 0,
+      "peak_rss_kib": 85388,
+      "elapsed_seconds": 0.05130254500545561,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_original_check_both/receipt.json",
+      "receipt_sha256": "96afc20a021cbd1816811ad6519c512deace743e53851ecfade63b0eeaf2309a"
+    },
+    {
+      "label": "gf180_original_update",
+      "exit_code": 0,
+      "peak_rss_kib": 53380,
+      "elapsed_seconds": 0.027744624996557832,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_original_update/receipt.json",
+      "receipt_sha256": "514195edb507ebfa3d8e24baa2954e4e82dc08b0b14b7d7b9ce2bfd8ed83f138"
+    },
+    {
+      "label": "gf180_original_updated_check_full",
+      "exit_code": 0,
+      "peak_rss_kib": 52428,
+      "elapsed_seconds": 0.026876304007600993,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_original_updated_check_full/receipt.json",
+      "receipt_sha256": "7632b5de1349987d41a3d857a067c6644cac1fc3a1e3592a33f34c7df066b855"
+    },
+    {
+      "label": "gf180_yosys_good",
+      "exit_code": 0,
+      "peak_rss_kib": 83124,
+      "elapsed_seconds": 0.05185106297722086,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_yosys_good/receipt.json",
+      "receipt_sha256": "9d72a1d24a58a60fdc6a67256c185ad8ae8baf29bfb2c9cfa82f2b3f10343ff4"
+    },
+    {
+      "label": "gf180_yosys_bad",
+      "exit_code": 1,
+      "peak_rss_kib": 80116,
+      "elapsed_seconds": 0.0501609300263226,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_yosys_bad/receipt.json",
+      "receipt_sha256": "e047667f81bd483212173e74ab988b0ab3ace6549ed4b2ca42522228d865c7f0"
+    },
+    {
+      "label": "gf180_opensta",
+      "exit_code": 0,
+      "peak_rss_kib": 63120,
+      "elapsed_seconds": 0.2397377549787052,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_opensta/receipt.json",
+      "receipt_sha256": "f1bde4d9d00a7d7691f4378e7d03f9d05882914ae83b4226ee7e6b46437bb796"
+    },
+    {
+      "label": "gf180_sim_model",
+      "exit_code": 0,
+      "peak_rss_kib": 82928,
+      "elapsed_seconds": 0.049626402964349836,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_sim_model/receipt.json",
+      "receipt_sha256": "8fe02b3a5aee2a0f8c5d2822687a980f3424415793c3c5eccc86241e545ffd7d"
+    },
+    {
+      "label": "gf180_sim_compile",
+      "exit_code": 0,
+      "peak_rss_kib": 289460,
+      "elapsed_seconds": 1.5377715280046687,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_sim_compile/receipt.json",
+      "receipt_sha256": "abc05f7cd2e6d44044c937d84c4cc16ba1fa1d9db4ca9d9be8a35aa03acc8524"
+    },
+    {
+      "label": "gf180_sim_good",
+      "exit_code": 0,
+      "peak_rss_kib": 8136,
+      "elapsed_seconds": 0.004686361993663013,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_sim_good/receipt.json",
+      "receipt_sha256": "3f3f318e479d634597c5b9db586af624872298f4b6ac632b156318102baffa09"
+    },
+    {
+      "label": "gf180_sim_negative",
+      "exit_code": 134,
+      "peak_rss_kib": 7956,
+      "elapsed_seconds": 2.1100219800136983,
+      "receipt_path": ".work/logic-suite-v2/receipts/gf180_sim_negative/receipt.json",
+      "receipt_sha256": "a576766f718ebcc9c6c1077baf8a32eb30775d189e9ab9d2b6a3fcc8fa43948e"
+    }
+  ],
+  "fixture_identity": {
+    "lane_smoke.sv": "e5682e772e6a95dcb9f21419d4ae213e090ac6ae8a9e75e1d9eace721cc3685c",
+    "lane_bad.sv": "b93afb6fe2133343ece20a80af11e1f123724674ffc7411ffd66cc5e0424dc73",
+    "lane_smoke.sdc": "523d51ee3aa5886e572afd7d13026a3d496be7124a5065f5033fada0dbc28b2a"
+  }
+}

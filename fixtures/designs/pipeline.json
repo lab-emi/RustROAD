@@ -1,0 +1,232 @@
+{
+  "schema": "rustroad.design.v3",
+  "name": "pipeline",
+  "description": "Two-stage registered pipeline (fixtures/flow/pipeline.v): 4 flip-flops, XOR/AND datapath, one clock.",
+  "top": "lane_smoke",
+  "rtl": [
+    {
+      "path": "fixtures/flow/pipeline.v",
+      "sha256": "1239bbd086f74052a8f27bdd70db0cdf0e9caf2f7454c72f4b794ab409e3f6f5"
+    }
+  ],
+  "clock": {
+    "port": "clk",
+    "name": "core"
+  },
+  "sdc": {
+    "reference_clock": {
+      "path": "fixtures/flow/cts.sdc",
+      "sha256": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c"
+    },
+    "io_template": {
+      "path": "fixtures/designs/postroute-io.sdc.tmpl",
+      "sha256": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07"
+    },
+    "period_derivation": {
+      "path": "fixtures/designs/pipeline/clock-period.json",
+      "sha256": "d1856c8616a382582888653251bf5b6b35d2d2a86fec9459105cec7a928848bd"
+    },
+    "note": "signoff SDC per PDK = pdks.<tag>.sdc_clock (reference_clock with the period of the owner rule, period_derivation) + io_template filled from the RTL port list; the CTS reads the clock SDC"
+  },
+  "recipe": {
+    "physical": "legacy",
+    "floorplan": null
+  },
+  "stretch": false,
+  "pdks_unavailable": {},
+  "pdk_profiles": {
+    "path": "fixtures/pdk/local-routing.json",
+    "sha256": "057a44b6061fada1dfb0222cee426e2498e890ce235794df2e68a1481c23dbfd"
+  },
+  "cell_policy": {
+    "path": "fixtures/flow/cell-policy.json",
+    "sha256": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37"
+  },
+  "signoff_manifest": {
+    "path": "fixtures/flow/signoff-pinned.json",
+    "sha256": "26fc1a1f230ee3c1b4ea568e549d87c96d84d3087ba47382926bbe097adbaf9b"
+  },
+  "tools": {
+    "path": "fixtures/flow/rtl2gds-tools.json",
+    "sha256": "716076ef663eab3b38a6c50eb737fe8ecbdac693d4974d2273678add531701f3"
+  },
+  "pdks": {
+    "sky130": {
+      "floorplan": {
+        "path": "fixtures/designs/pipeline/sky130-floorplan.json",
+        "sha256": "0e6db14b53fc631975645e6c6833792740e7ac16194e946c0a835cb098c91529"
+      },
+      "physical_config": {
+        "path": "fixtures/pdk/sky130-routed-physical.json",
+        "sha256": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838"
+      },
+      "routing_config": {
+        "path": "fixtures/pdk/sky130-routing.json",
+        "sha256": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656"
+      },
+      "delay_cells": {
+        "path": "fixtures/pdk/sky130-delay-cells.json",
+        "sha256": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50"
+      },
+      "gds_layer_map": {
+        "path": "fixtures/pdk/sky130-gds-map.json",
+        "sha256": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46"
+      },
+      "rc_profiles": {
+        "min": {
+          "path": "fixtures/pdk/sky130-rc-min.json",
+          "sha256": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d"
+        },
+        "nom": {
+          "path": "fixtures/pdk/sky130-rc-nom.json",
+          "sha256": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a"
+        },
+        "max": {
+          "path": "fixtures/pdk/sky130-rc-max.json",
+          "sha256": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e"
+        }
+      },
+      "corners": [
+        {
+          "name": "tt",
+          "liberty": "tt_025C_1v80",
+          "rc": "nom"
+        },
+        {
+          "name": "ss",
+          "liberty": "ss_100C_1v60",
+          "rc": "max"
+        },
+        {
+          "name": "ff",
+          "liberty": "ff_n40C_1v95",
+          "rc": "min"
+        }
+      ],
+      "frozen": {
+        "cell_gds": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+        "cell_lef": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+        "cell_policy": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37",
+        "delay_cells": "2f2d9110a402457728da305a32b79a0c0b2bbf88afd1b612a7c7dc943ca39c50",
+        "gds_layer_map": "b514e3a34d49bd423209f74a9348d328665bb13071a2b9de2170b8e71158aa46",
+        "liberty_ff": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+        "liberty_ss": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+        "liberty_tt": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+        "openrcx_rules_ff": "b11177d33b33878c080a0c1db6c6dd022e89c64ebf21cc87e0ac4d9c68378a63",
+        "openrcx_rules_ss": "008ce6e4867fa9a68b16dbc50df596967d503f6c29b317354689f61f4c249220",
+        "openrcx_rules_tt": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "physical_config": "b798df27d9ec78ae8c8d03d3e42a9817468d7e6553da0be1f41da911893a2838",
+        "rc_profile_ff": "c2bfc10157266280d40956f9a5129e70534c5323c0a233d4abdd856b3661dd7d",
+        "rc_profile_ss": "f21420fb3f107e3898051ed1da5ebc5921db9297b23b80073754da7dfe42534e",
+        "rc_profile_tt": "2e87ae4bede4c69f1a02bf9b08e823b80dd4b80eabf99b15e3235f5981b4a58a",
+        "routing_profile": "ac55dc1bc22ecd7d6a3a8a83ad4b42374a4ceea52d4f68326e415e6127afb656",
+        "sdc_cts": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "sdc_postroute": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "technology_lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519"
+      },
+      "sdc_clock": {
+        "path": "fixtures/designs/pipeline/sky130-cts.sdc",
+        "sha256": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c"
+      }
+    },
+    "gf180": {
+      "floorplan": {
+        "path": "fixtures/designs/pipeline/gf180-floorplan.json",
+        "sha256": "272ce90fd7f536149830d4ebcdc397bf53ff0a93d890ba1c50a27f9c1b374ebf"
+      },
+      "physical_config": {
+        "path": "fixtures/pdk/gf180-routed-physical.json",
+        "sha256": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9"
+      },
+      "routing_config": {
+        "path": "fixtures/pdk/gf180-routing.json",
+        "sha256": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3"
+      },
+      "delay_cells": {
+        "path": "fixtures/pdk/gf180-delay-cells.json",
+        "sha256": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9"
+      },
+      "gds_layer_map": {
+        "path": "fixtures/pdk/gf180-gds-map.json",
+        "sha256": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af"
+      },
+      "rc_profiles": {
+        "min": {
+          "path": "fixtures/pdk/gf180-rc-min.json",
+          "sha256": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55"
+        },
+        "nom": {
+          "path": "fixtures/pdk/gf180-rc-nom.json",
+          "sha256": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4"
+        },
+        "max": {
+          "path": "fixtures/pdk/gf180-rc-max.json",
+          "sha256": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8"
+        }
+      },
+      "corners": [
+        {
+          "name": "tt",
+          "liberty": "tt_025C_3v30",
+          "rc": "nom"
+        },
+        {
+          "name": "ss",
+          "liberty": "ss_125C_3v00",
+          "rc": "max"
+        },
+        {
+          "name": "ff",
+          "liberty": "ff_n40C_3v60",
+          "rc": "min"
+        }
+      ],
+      "frozen": {
+        "cell_gds": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+        "cell_lef": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+        "cell_policy": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37",
+        "delay_cells": "f0013b4c872dbc0339a9585c96b3bb29b3f4332514b39ac3d4a0b2995af7fda9",
+        "gds_layer_map": "85f3d612ff4e8f79c5cd1b027b45a76a21f1983dffc38af184ef6b9195e520af",
+        "liberty_ff": "a222740b574d0699c8a416400bd9746ecb8556bc87a515ab7fb80f911e2cd74b",
+        "liberty_ss": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6",
+        "liberty_tt": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+        "openrcx_rules_ff": "5cf275c985ffd49096407d22891910fea34aff5a915db8a5b9a7c1e04b737e00",
+        "openrcx_rules_ss": "0ee103cf2108f2fd945087551b6dd1eaf4ee55af60571de2983878c8a271515f",
+        "openrcx_rules_tt": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "physical_config": "8054e191f87d0c05aa90a9b7805e85b3ad92c3f84bb923619ea1d96c430427a9",
+        "rc_profile_ff": "a951e05fbb490bb0eb943a7cc56c221c36ee3798c6ac2f96f3733915d3552c55",
+        "rc_profile_ss": "0b50294013a7e2f96509eeac4ed998a4c9b7e6181d1a83b3300b4d99c9050fb8",
+        "rc_profile_tt": "467b51fed6288a85b42ab466ddcb1f9ffdc7630bef128d06f6baa716484918f4",
+        "routing_profile": "bbdccce95de0c895a9c3680f40878907da8734ac220f9911593212a94b69c3f3",
+        "sdc_cts": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c",
+        "sdc_postroute": "f557ef93d45ea9e904843d478ff5691933f6ceb577e6e34e372676b14aa9bab6",
+        "technology_lef": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd"
+      },
+      "sdc_clock": {
+        "path": "fixtures/designs/pipeline/gf180-cts.sdc",
+        "sha256": "350fc0892f9e25baf3942ab2332e1a492aa296f249adaeb575be670ac58cf89c"
+      }
+    }
+  },
+  "verification": {
+    "cosim_vectors": 4096,
+    "cosim_seed": "0x5eed2026c0ffee01",
+    "rustsys_budget": 10000,
+    "rustsys_model_budget": 10000,
+    "rustsys_sweep_max_candidates": 256,
+    "yosys_equiv_seq": 2
+  },
+  "budgets": {
+    "hold_margin_ns": 0.05,
+    "hold_eco_target_margin_ns": 0.05,
+    "setup_margin_ns": 0.0,
+    "hold_eco_setup_margin_ns": 0.05,
+    "parity_ns": 0.001,
+    "max_hold_iterations": 4,
+    "process_timeout_s": 120,
+    "process_memory_mib": 2048,
+    "max_wall_s": 3600,
+    "container_memory": "4g",
+    "container_timeout_s": 900
+  }
+}

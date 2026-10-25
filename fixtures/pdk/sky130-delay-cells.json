@@ -1,0 +1,905 @@
+{
+ "schema": "rustroad.delay-cells.v1",
+ "pdk": "sky130",
+ "library": "sky130_fd_sc_hd",
+ "generator": "scripts/build_delay_cells.py",
+ "sources": [
+  {
+   "role": "liberty_tt",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+   "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+   "bytes": 12841637
+  },
+  {
+   "role": "liberty_ss",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_100C_1v60.lib",
+   "sha256": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+   "bytes": 12845260
+  },
+  {
+   "role": "liberty_ff",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v95.lib",
+   "sha256": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+   "bytes": 12918504
+  },
+  {
+   "role": "cell_lef",
+   "path": "/home/cgao/.local/share/containers/storage/overlay/a2565b13ab35f5571d6aab9328dc383594b36360107bd8dd9c5516a02dc64674/diff/foss/pdks/ciel/sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A/libs.ref/sky130_fd_sc_hd/lef/sky130_fd_sc_hd.lef",
+   "sha256": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+   "bytes": 1415362
+  }
+ ],
+ "cell_policy": {
+  "path": "fixtures/flow/cell-policy.json",
+  "sha256": "8bcec6875f6bee9dad22fdaeaf4ada57639a6c6d340884ac66bd21bea7aa7e61"
+ },
+ "corners": [
+  {
+   "name": "tt",
+   "liberty": "tt_025C_1v80",
+   "rc": "nom"
+  },
+  {
+   "name": "ss",
+   "liberty": "ss_100C_1v60",
+   "rc": "max"
+  },
+  {
+   "name": "ff",
+   "liberty": "ff_n40C_1v95",
+   "rc": "min"
+  }
+ ],
+ "representative": {
+  "input_slew_ns": 0.05,
+  "load_pf": 0.005,
+  "reason": "one gate driving one flop D pin plus a short wire; the closure loop re-times every ECO with extracted parasitics"
+ },
+ "selection": {
+  "hold_globs": [
+   "sky130_fd_sc_hd__clkbuf*",
+   "sky130_fd_sc_hd__clkinv*",
+   "sky130_fd_sc_hd__clkinvlp*",
+   "sky130_fd_sc_hd__clkdlybuf*",
+   "sky130_fd_sc_hd__dlygate*",
+   "sky130_fd_sc_hd__dlymetal*"
+  ],
+  "logic_buffers": [
+   "*__buf_1",
+   "*__buf_2"
+  ],
+  "clock_reserved": [
+   "*__clkbuf_*",
+   "*__clkinv*",
+   "*__clkinvlp*"
+  ],
+  "pnr_exclude": [
+   "sky130_fd_sc_hd__lpflow_*",
+   "sky130_fd_sc_hd__probe*"
+  ],
+  "antenna_globs": [
+   "sky130_fd_sc_hd__tap*",
+   "sky130_fd_sc_hd__decap*",
+   "sky130_fd_sc_hd__fill*",
+   "sky130_fd_sc_hd__diode*"
+  ]
+ },
+ "buffers": [
+  {
+   "name": "sky130_fd_sc_hd__buf_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 3.7536,
+   "lef_size_um": [
+    1.38,
+    2.72
+   ],
+   "policy_class": "logic",
+   "input_cap_pf": {
+    "tt": 0.002103,
+    "ss": 0.002061,
+    "ff": 0.002164
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.099978675,
+     "fall": 0.100202901
+    },
+    "ss": {
+     "rise": 0.170680954,
+     "fall": 0.171133886
+    },
+    "ff": {
+     "rise": 0.068615875,
+     "fall": 0.071653154
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.070595148,
+     "fall": 0.039127673
+    },
+    "ss": {
+     "rise": 0.114576581,
+     "fall": 0.07492132
+    },
+    "ff": {
+     "rise": 0.052172907,
+     "fall": 0.02709011
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__buf_2",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 5.0048,
+   "lef_size_um": [
+    1.84,
+    2.72
+   ],
+   "policy_class": "logic",
+   "input_cap_pf": {
+    "tt": 0.001727,
+    "ss": 0.001689,
+    "ff": 0.001799
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.101343803,
+     "fall": 0.122951274
+    },
+    "ss": {
+     "rise": 0.174168593,
+     "fall": 0.227939024
+    },
+    "ff": {
+     "rise": 0.070449621,
+     "fall": 0.084022924
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.037383104,
+     "fall": 0.029438908
+    },
+    "ss": {
+     "rise": 0.06294155,
+     "fall": 0.05475228
+    },
+    "ff": {
+     "rise": 0.026943914,
+     "fall": 0.02123983
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s15_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 10.0096,
+   "lef_size_um": [
+    3.68,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002199,
+    "ss": 0.002189,
+    "ff": 0.002239
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.190211396,
+     "fall": 0.195377724
+    },
+    "ss": {
+     "rise": 0.340133981,
+     "fall": 0.347925214
+    },
+    "ff": {
+     "rise": 0.128906236,
+     "fall": 0.134660108
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.059179297,
+     "fall": 0.050651708
+    },
+    "ss": {
+     "rise": 0.09558848,
+     "fall": 0.092628189
+    },
+    "ff": {
+     "rise": 0.044060053,
+     "fall": 0.035028339
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s15_2",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 11.2608,
+   "lef_size_um": [
+    4.14,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002204,
+    "ss": 0.002196,
+    "ff": 0.002243
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.191431938,
+     "fall": 0.202078028
+    },
+    "ss": {
+     "rise": 0.346572759,
+     "fall": 0.35730227
+    },
+    "ff": {
+     "rise": 0.1285236,
+     "fall": 0.139282218
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.038805226,
+     "fall": 0.035452635
+    },
+    "ss": {
+     "rise": 0.063740234,
+     "fall": 0.06185875
+    },
+    "ff": {
+     "rise": 0.028569092,
+     "fall": 0.025741319
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s18_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 10.0096,
+   "lef_size_um": [
+    3.68,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002201,
+    "ss": 0.002192,
+    "ff": 0.002239
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.204213469,
+     "fall": 0.208529709
+    },
+    "ss": {
+     "rise": 0.36000873,
+     "fall": 0.366606979
+    },
+    "ff": {
+     "rise": 0.139660205,
+     "fall": 0.144670043
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.059575578,
+     "fall": 0.051240928
+    },
+    "ss": {
+     "rise": 0.095716411,
+     "fall": 0.093799963
+    },
+    "ff": {
+     "rise": 0.04417433,
+     "fall": 0.03542637
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s18_2",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 10.0096,
+   "lef_size_um": [
+    3.68,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002206,
+    "ss": 0.002058,
+    "ff": 0.002246
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.195609579,
+     "fall": 0.210630156
+    },
+    "ss": {
+     "rise": 0.322485667,
+     "fall": 0.342832445
+    },
+    "ff": {
+     "rise": 0.132903249,
+     "fall": 0.145939591
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.037872172,
+     "fall": 0.036184693
+    },
+    "ss": {
+     "rise": 0.057429904,
+     "fall": 0.059641449
+    },
+    "ff": {
+     "rise": 0.02770532,
+     "fall": 0.026006789
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s25_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 10.0096,
+   "lef_size_um": [
+    3.68,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002208,
+    "ss": 0.002203,
+    "ff": 0.002247
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.26027217,
+     "fall": 0.257529697
+    },
+    "ss": {
+     "rise": 0.478204722,
+     "fall": 0.472747607
+    },
+    "ff": {
+     "rise": 0.174653229,
+     "fall": 0.174607521
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.06631903,
+     "fall": 0.055794758
+    },
+    "ss": {
+     "rise": 0.108739132,
+     "fall": 0.10394774
+    },
+    "ff": {
+     "rise": 0.048540844,
+     "fall": 0.038224028
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s25_2",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 10.0096,
+   "lef_size_um": [
+    3.68,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002209,
+    "ss": 0.002204,
+    "ff": 0.002247
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.256701008,
+     "fall": 0.272245254
+    },
+    "ss": {
+     "rise": 0.472813557,
+     "fall": 0.504935642
+    },
+    "ff": {
+     "rise": 0.171766339,
+     "fall": 0.182835926
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.040547525,
+     "fall": 0.041939037
+    },
+    "ss": {
+     "rise": 0.068006214,
+     "fall": 0.078095104
+    },
+    "ff": {
+     "rise": 0.029262998,
+     "fall": 0.029570956
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s50_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 10.0096,
+   "lef_size_um": [
+    3.68,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002171,
+    "ss": 0.002046,
+    "ff": 0.002205
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.484972972,
+     "fall": 0.434945942
+    },
+    "ss": {
+     "rise": 0.810607092,
+     "fall": 0.726490232
+    },
+    "ff": {
+     "rise": 0.328402293,
+     "fall": 0.293232179
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.06812033,
+     "fall": 0.066376767
+    },
+    "ss": {
+     "rise": 0.104649572,
+     "fall": 0.117582396
+    },
+    "ff": {
+     "rise": 0.049176767,
+     "fall": 0.045071597
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkdlybuf4s50_2",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 11.2608,
+   "lef_size_um": [
+    4.14,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.002163,
+    "ss": 0.002168,
+    "ff": 0.002196
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.4920332,
+     "fall": 0.484784501
+    },
+    "ss": {
+     "rise": 0.870322506,
+     "fall": 0.872689909
+    },
+    "ff": {
+     "rise": 0.332123938,
+     "fall": 0.323890125
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.048284219,
+     "fall": 0.057154515
+    },
+    "ss": {
+     "rise": 0.08178951,
+     "fall": 0.1021837
+    },
+    "ff": {
+     "rise": 0.033988044,
+     "fall": 0.040287742
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlygate4sd1_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 8.7584,
+   "lef_size_um": [
+    3.22,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.001645,
+    "ss": 0.001559,
+    "ff": 0.001764
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.205417542,
+     "fall": 0.238578275
+    },
+    "ss": {
+     "rise": 0.385339046,
+     "fall": 0.485175951
+    },
+    "ff": {
+     "rise": 0.13813628,
+     "fall": 0.15835747
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.061362425,
+     "fall": 0.042178474
+    },
+    "ss": {
+     "rise": 0.097470273,
+     "fall": 0.082216877
+    },
+    "ff": {
+     "rise": 0.045986863,
+     "fall": 0.02953714
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlygate4sd2_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 8.7584,
+   "lef_size_um": [
+    3.22,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.001676,
+    "ss": 0.00159,
+    "ff": 0.001797
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.221923069,
+     "fall": 0.256446909
+    },
+    "ss": {
+     "rise": 0.420133949,
+     "fall": 0.524108346
+    },
+    "ff": {
+     "rise": 0.149459842,
+     "fall": 0.170322203
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.062783289,
+     "fall": 0.04336616
+    },
+    "ss": {
+     "rise": 0.100468739,
+     "fall": 0.085875307
+    },
+    "ff": {
+     "rise": 0.04684755,
+     "fall": 0.030387562
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlygate4sd3_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 10.0096,
+   "lef_size_um": [
+    3.68,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.001641,
+    "ss": 0.001566,
+    "ff": 0.001752
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.554458577,
+     "fall": 0.566020631
+    },
+    "ss": {
+     "rise": 1.06396364,
+     "fall": 1.148612598
+    },
+    "ff": {
+     "rise": 0.387724501,
+     "fall": 0.378248413
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.074777108,
+     "fall": 0.066107632
+    },
+    "ss": {
+     "rise": 0.126094994,
+     "fall": 0.133232752
+    },
+    "ff": {
+     "rise": 0.054123448,
+     "fall": 0.047489753
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlymetal6s2s_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 12.512,
+   "lef_size_um": [
+    4.6,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.001666,
+    "ss": 0.001583,
+    "ff": 0.001785
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.112960355,
+     "fall": 0.145129666
+    },
+    "ss": {
+     "rise": 0.185561112,
+     "fall": 0.287131093
+    },
+    "ff": {
+     "rise": 0.080784641,
+     "fall": 0.098585511
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.078560992,
+     "fall": 0.048373928
+    },
+    "ss": {
+     "rise": 0.118873915,
+     "fall": 0.093606794
+    },
+    "ff": {
+     "rise": 0.061212506,
+     "fall": 0.034358884
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlymetal6s4s_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 12.512,
+   "lef_size_um": [
+    4.6,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.001664,
+    "ss": 0.001582,
+    "ff": 0.001782
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.19105342,
+     "fall": 0.258579472
+    },
+    "ss": {
+     "rise": 0.330834182,
+     "fall": 0.534652458
+    },
+    "ff": {
+     "rise": 0.132254332,
+     "fall": 0.169331933
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.079591199,
+     "fall": 0.048900152
+    },
+    "ss": {
+     "rise": 0.120351756,
+     "fall": 0.094517784
+    },
+    "ff": {
+     "rise": 0.061950673,
+     "fall": 0.034840858
+    }
+   }
+  },
+  {
+   "name": "sky130_fd_sc_hd__dlymetal6s6s_1",
+   "input_pin": "A",
+   "output_pin": "X",
+   "function": "(A)",
+   "function_check": "identity: Liberty function equals the only input pin in every corner",
+   "timing_sense": "positive_unate",
+   "area_um2": 12.512,
+   "lef_size_um": [
+    4.6,
+    2.72
+   ],
+   "policy_class": "cts_hold",
+   "input_cap_pf": {
+    "tt": 0.001665,
+    "ss": 0.001583,
+    "ff": 0.001784
+   },
+   "delay_ns": {
+    "tt": {
+     "rise": 0.258988024,
+     "fall": 0.364940465
+    },
+    "ss": {
+     "rise": 0.461056667,
+     "fall": 0.769721022
+    },
+    "ff": {
+     "rise": 0.175640975,
+     "fall": 0.235123689
+    }
+   },
+   "output_slew_ns": {
+    "tt": {
+     "rise": 0.061271708,
+     "fall": 0.042390028
+    },
+    "ss": {
+     "rise": 0.097023956,
+     "fall": 0.082946425
+    },
+    "ff": {
+     "rise": 0.045984548,
+     "fall": 0.029791477
+    }
+   }
+  }
+ ],
+ "antenna_cells": [
+  {
+   "name": "sky130_fd_sc_hd__diode_2",
+   "pin": "DIODE",
+   "area_um2": 2.5024,
+   "lef_size_um": [
+    0.92,
+    2.72
+   ],
+   "lef_diff_area_um2": 0.4347,
+   "lef_gate_area_um2": 0.4347,
+   "policy_class": "physical_only"
+  }
+ ],
+ "excluded": [
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_1",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_16",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_2",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_4",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkbuf_8",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_1",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_16",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_2",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_4",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinv_8",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinvlp_2",
+   "reason": "reserved for the clock tree (selection policy)"
+  },
+  {
+   "name": "sky130_fd_sc_hd__clkinvlp_4",
+   "reason": "reserved for the clock tree (selection policy)"
+  }
+ ]
+}

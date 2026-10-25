@@ -1,0 +1,117 @@
+{
+  "power_net": "VDD",
+  "ground_net": "VSS",
+  "power_pin": "VPWR",
+  "ground_pin": "VGND",
+  "body_power_pins": [
+    "VPB"
+  ],
+  "body_ground_pins": [
+    "VNB"
+  ],
+  "rail_layer": "met1",
+  "strap_layer": "met2",
+  "via": "M1M2_PR",
+  "io_layer": "met3",
+  "tie_high": {
+    "cell": "sky130_fd_sc_hd__inv_1",
+    "pin": "Y",
+    "rail_input": {
+      "pin": "A",
+      "supply": "ground"
+    }
+  },
+  "tie_low": {
+    "cell": "sky130_fd_sc_hd__inv_1",
+    "pin": "Y",
+    "rail_input": {
+      "pin": "A",
+      "supply": "power"
+    }
+  },
+  "constant_cells": [
+    {
+      "cell": "sky130_fd_sc_hd__conb_1",
+      "high": [
+        "HI"
+      ],
+      "low": [
+        "LO"
+      ]
+    }
+  ],
+  "filler_cells": [
+    "sky130_fd_sc_hd__fill_8",
+    "sky130_fd_sc_hd__fill_4",
+    "sky130_fd_sc_hd__fill_2",
+    "sky130_fd_sc_hd__fill_1"
+  ],
+  "alternating_rows": true,
+  "cell_spacing_sites": 0,
+  "io_width": 990,
+  "io_min_area": true,
+  "io_spacing": 800,
+  "strap_width": 400,
+  "strap_spacing": 1000,
+  "max_added_cells": 250000,
+  "max_tie_fanout": 8,
+  "tap": {
+    "cell": "sky130_fd_sc_hd__tapvpwrvgnd_1",
+    "max_gap": 20000,
+    "well_layer": "nwell",
+    "substrate_layer": "pwell"
+  },
+  "placer": {
+    "global_iterations": 12,
+    "cg_iterations": 150,
+    "detailed_passes": 3,
+    "max_net_pins": 256
+  },
+  "io_plan": {
+    "west": [
+      "op_i[0]",
+      "op_i[2]",
+      "op_i[1]",
+      "a_i[7]",
+      "y_o[0]",
+      "b_i[7]",
+      "a_i[6]",
+      "a_i[5]",
+      "carry_o"
+    ],
+    "east": [
+      "y_o[4]",
+      "b_i[4]",
+      "a_i[3]",
+      "y_o[2]",
+      "y_o[3]",
+      "b_i[3]",
+      "y_o[1]"
+    ],
+    "south": [
+      "a_i[0]",
+      "b_i[0]",
+      "b_i[2]",
+      "b_i[1]",
+      "a_i[2]",
+      "a_i[1]",
+      "a_i[4]"
+    ],
+    "north": [
+      "y_o[6]",
+      "y_o[7]",
+      "zero_o",
+      "b_i[6]",
+      "b_i[5]",
+      "y_o[5]"
+    ],
+    "x_track": [
+      460,
+      230
+    ],
+    "y_track": [
+      680,
+      340
+    ]
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema": "rustroad.pdk-validation.v1",
+  "date": "2026-10-23",
+  "version": "0.2.0",
+  "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+  "unit_integration": {
+    "passed": 36,
+    "failed": 0,
+    "separately_run_corpus_tests": 2,
+    "max_rss_kib": 164400,
+    "wall_clock": "0:00.47",
+    "exit_status": 0
+  },
+  "real_lef_corpus": {
+    "passed": 2,
+    "failed": 0,
+    "sky130_macros": 437,
+    "gf180_macros": 229,
+    "gf180_polygon_shapes": 2157,
+    "max_rss_kib": 30136,
+    "wall_clock": "0:00.12",
+    "exit_status": 0
+  },
+  "clippy": {
+    "status": "passed",
+    "warnings": "denied",
+    "max_rss_kib": 199304,
+    "wall_clock": "0:01.66",
+    "exit_status": 0
+  },
+  "release": {
+    "status": "passed",
+    "max_rss_kib": 270800,
+    "wall_clock": "0:05.74",
+    "exit_status": 0
+  },
+  "binary_sha256": "807e90f4b6cae9d0a120961a05690499afccbe2d987dd2e108256713e70342ee",
+  "source_sha256": {
+    "crates/rustroad-cli/src/main.rs": "d8f433467dc69804ab5869124e3cbc313b8d8f0f1107234ef0cb4e781cf57b68",
+    "crates/rustroad-core/src/connectivity.rs": "c607b606c6e925390951a2cf338ff5f8ea067767ec5fc81c6cf0cac02b7b68c5",
+    "crates/rustroad-core/src/lib.rs": "03fc6df5a68b8731713c780468243168f1bcc28d9c380dd6519b6f9f68292707",
+    "crates/rustroad-flow/src/lib.rs": "f6b2b0a2cdaf5a3bfc8ae306bc926124c1334a260364ca1e2845cd334b7e1885",
+    "crates/rustroad-formats/src/lef.rs": "8cd2988d143a458312a6d546acd2920948c23ebaa70054c0a369a66e508ae6ac",
+    "crates/rustroad-formats/src/lib.rs": "b6b712fb8b09b0ea176c42821480e808a0d89516073bfcc60781a1674e566132",
+    "crates/rustroad-formats/src/verilog.rs": "2c50f26e19f2864af4661d786b682d75b47aa5bb2ef9599dff97b73cb360d7dc",
+    "crates/rustroad-workspace/src/lib.rs": "5f4f18969f25707d8b8d4b1368eba9e0a767bbf964808d5e8fe3bc2c8b050c96",
+    "crates/rustroad-workspace/src/pdk.rs": "519aa5d0c3a96dffb7e74e8d4e518062948b110ab2aec10ae1861b5a154b5292",
+    "crates/rustroad-workspace/tests/pdk_import.rs": "2fcc3d58f4b9342fda1d13c96b49b0c928eacead23df72adb7da2504e7531b8a",
+    "crates/rustroad-workspace/tests/robustness.rs": "529831c5dde0456d73a53333a45a7a35d98e9f2062807b725fba019e7c930c24"
+  },
+  "commands": [
+    "cargo test --workspace --locked --offline",
+    "cargo test -p rustroad-formats real_ --locked --offline -- --ignored --nocapture",
+    "cargo clippy --workspace --all-targets --locked --offline -- -D warnings"
+  ],
+  "limits": {
+    "virtual_address_mib": 8192,
+    "build_jobs": 2,
+    "test_threads": 2,
+    "rayon_threads": 2,
+    "timeout_seconds": 180
+  },
+  "full_rtl_to_gds_status": "unverified",
+  "report_validation": "HTML source and local links checked; no rendered browser QA claim"
+}

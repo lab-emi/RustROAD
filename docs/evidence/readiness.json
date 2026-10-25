@@ -1,0 +1,439 @@
+{
+  "schema": "rustroad.readiness.v1",
+  "status": "assessed",
+  "scope": "Read-only file identity and dependency assessment; tools and PDK decks have not been validated by this function.",
+  "analysis_scope": {
+    "corner": null,
+    "wire_model": null,
+    "unconstrained_endpoints": null
+  },
+  "identities": [
+    {
+      "role": "tool_rustsys",
+      "path": "/mnt/data2/cgao/git/RustSys/target/release/rustsys",
+      "expected_sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
+      "actual_sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "tool_rusteda",
+      "path": "/mnt/data2/cgao/git/RustSTA/target/release/rusteda",
+      "expected_sha256": "8fcf8e0eefa05e14c3b3d6ac367839f5ff95059f6d416e2e8fab0262667b2429",
+      "actual_sha256": "8fcf8e0eefa05e14c3b3d6ac367839f5ff95059f6d416e2e8fab0262667b2429",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "tool_ruststa",
+      "path": "/mnt/data2/cgao/git/RustSTA/target/release/ruststa",
+      "expected_sha256": "b1a8389c7684aaf8a8e05f89635fac5ed2ee15aa380c8f8d8c40b1780f08668d",
+      "actual_sha256": "b1a8389c7684aaf8a8e05f89635fac5ed2ee15aa380c8f8d8c40b1780f08668d",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "tool_yosys",
+      "path": "/mnt/data2/cgao/git/RustSys/.work/lec-verification/tools/yosys",
+      "expected_sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+      "actual_sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "tool_opensta",
+      "path": "/home/cgao/.local/share/containers/storage/overlay/c2cc5a7e2baaa2c6bdac6951f759273edbb27a34c710ea4593e43ef22d00e4b8/diff/foss/tools/openroad/bin/sta",
+      "expected_sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+      "actual_sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "tool_verilator",
+      "path": "/usr/bin/verilator",
+      "expected_sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+      "actual_sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "tool_klayout",
+      "path": "/usr/bin/klayout",
+      "expected_sha256": "32441e21747f7718500e6c36c028229f6f1ce2ffcfe5b11acf03305047639ee3",
+      "actual_sha256": "32441e21747f7718500e6c36c028229f6f1ce2ffcfe5b11acf03305047639ee3",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "tool_magic",
+      "path": "/usr/bin/magic",
+      "expected_sha256": "48b77b32097244c66c857ee28769d2a4f434de00e7c02193d0e00c3a94240b2f",
+      "actual_sha256": "48b77b32097244c66c857ee28769d2a4f434de00e7c02193d0e00c3a94240b2f",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "tool_ngspice",
+      "path": "/usr/bin/ngspice",
+      "expected_sha256": "25b6a73fafd9b489b92347a6c55fe307db502c1638f53d7d0bf439b5f7c65e38",
+      "actual_sha256": "25b6a73fafd9b489b92347a6c55fe307db502c1638f53d7d0bf439b5f7c65e38",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "tool_netgen",
+      "path": "/usr/lib/netgen/bin/netgen",
+      "expected_sha256": "ac52d4ed680ee955983c883be61968b6788fe5f96a5514d3f101f7ee71f908ce",
+      "actual_sha256": "ac52d4ed680ee955983c883be61968b6788fe5f96a5514d3f101f7ee71f908ce",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "sky130_fd_sc_hd_liberty",
+      "path": "/mnt/data2/cgao/git/RustSys/.work/pdk-trial/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+      "expected_sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+      "actual_sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "sky130_fd_sc_hd_technology_lef",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    },
+    {
+      "role": "sky130_fd_sc_hd_cell_lef",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    },
+    {
+      "role": "sky130_fd_sc_hd_cell_gds",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    },
+    {
+      "role": "sky130_fd_sc_hd_drc_deck",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    },
+    {
+      "role": "sky130_fd_sc_hd_lvs_setup",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    },
+    {
+      "role": "gf180mcu_fd_sc_mcu7t5v0_liberty",
+      "path": "/mnt/data2/cgao/git/RustSys/.work/pdk-trial/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+      "expected_sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+      "actual_sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53",
+      "status": "available",
+      "reason": null
+    },
+    {
+      "role": "gf180mcu_fd_sc_mcu7t5v0_technology_lef",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    },
+    {
+      "role": "gf180mcu_fd_sc_mcu7t5v0_cell_lef",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    },
+    {
+      "role": "gf180mcu_fd_sc_mcu7t5v0_cell_gds",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    },
+    {
+      "role": "gf180mcu_fd_sc_mcu7t5v0_drc_deck",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    },
+    {
+      "role": "gf180mcu_fd_sc_mcu7t5v0_lvs_setup",
+      "path": null,
+      "expected_sha256": null,
+      "actual_sha256": null,
+      "status": "unverified",
+      "reason": "no pinned input configured"
+    }
+  ],
+  "stages": [
+    {
+      "stage": "synthesis",
+      "pdk": "sky130_fd_sc_hd",
+      "status": "ready_to_attempt",
+      "missing": [],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "cec",
+      "pdk": "sky130_fd_sc_hd",
+      "status": "ready_to_attempt",
+      "missing": [],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "simulation",
+      "pdk": "sky130_fd_sc_hd",
+      "status": "ready_to_attempt",
+      "missing": [],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "prelayout_sta",
+      "pdk": "sky130_fd_sc_hd",
+      "status": "ready_to_attempt",
+      "missing": [],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "placement_routing",
+      "pdk": "sky130_fd_sc_hd",
+      "status": "unverified",
+      "missing": [
+        "tool_rustroad",
+        "sky130_fd_sc_hd_technology_lef",
+        "sky130_fd_sc_hd_cell_lef",
+        "rustroad_routing_engine_not_implemented"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "gds_streamout",
+      "pdk": "sky130_fd_sc_hd",
+      "status": "unverified",
+      "missing": [
+        "sky130_fd_sc_hd_cell_gds"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "drc",
+      "pdk": "sky130_fd_sc_hd",
+      "status": "unverified",
+      "missing": [
+        "sky130_fd_sc_hd_drc_deck"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "lvs",
+      "pdk": "sky130_fd_sc_hd",
+      "status": "unverified",
+      "missing": [
+        "sky130_fd_sc_hd_lvs_setup"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "extracted_sta",
+      "pdk": "sky130_fd_sc_hd",
+      "status": "unverified",
+      "missing": [
+        "extracted_parasitics_adapter_not_implemented_for_frozen_probed_ruststa_binary"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": null,
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "synthesis",
+      "pdk": "gf180mcu_fd_sc_mcu7t5v0",
+      "status": "ready_to_attempt",
+      "missing": [],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "cec",
+      "pdk": "gf180mcu_fd_sc_mcu7t5v0",
+      "status": "ready_to_attempt",
+      "missing": [],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "simulation",
+      "pdk": "gf180mcu_fd_sc_mcu7t5v0",
+      "status": "ready_to_attempt",
+      "missing": [],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "prelayout_sta",
+      "pdk": "gf180mcu_fd_sc_mcu7t5v0",
+      "status": "ready_to_attempt",
+      "missing": [],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "placement_routing",
+      "pdk": "gf180mcu_fd_sc_mcu7t5v0",
+      "status": "unverified",
+      "missing": [
+        "tool_rustroad",
+        "gf180mcu_fd_sc_mcu7t5v0_technology_lef",
+        "gf180mcu_fd_sc_mcu7t5v0_cell_lef",
+        "rustroad_routing_engine_not_implemented"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "gds_streamout",
+      "pdk": "gf180mcu_fd_sc_mcu7t5v0",
+      "status": "unverified",
+      "missing": [
+        "gf180mcu_fd_sc_mcu7t5v0_cell_gds"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "drc",
+      "pdk": "gf180mcu_fd_sc_mcu7t5v0",
+      "status": "unverified",
+      "missing": [
+        "gf180mcu_fd_sc_mcu7t5v0_drc_deck"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "lvs",
+      "pdk": "gf180mcu_fd_sc_mcu7t5v0",
+      "status": "unverified",
+      "missing": [
+        "gf180mcu_fd_sc_mcu7t5v0_lvs_setup"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": "tt",
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    },
+    {
+      "stage": "extracted_sta",
+      "pdk": "gf180mcu_fd_sc_mcu7t5v0",
+      "status": "unverified",
+      "missing": [
+        "extracted_parasitics_adapter_not_implemented_for_frozen_probed_ruststa_binary"
+      ],
+      "verification_status": "not_run",
+      "analysis_scope": {
+        "corner": null,
+        "wire_model": null,
+        "unconstrained_endpoints": null
+      }
+    }
+  ],
+  "full_rtl_to_gds_status": "unverified",
+  "limitations": [
+    "A matching executable hash is only an entrypoint pin; shared libraries, wrapper descendants and runtime dependencies require separate provenance.",
+    "Tool version strings are declared metadata until a guarded probe captures them; availability is not successful execution.",
+    "Every flow stage needs independent semantic evidence; a successful process exit is insufficient.",
+    "The frozen RustSTA binary probed for this integration has no SPEF import adapter; this is not a claim about every future source revision. Prelayout timing is not post-route signoff."
+  ]
+}

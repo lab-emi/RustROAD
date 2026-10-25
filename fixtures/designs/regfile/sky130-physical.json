@@ -1,0 +1,134 @@
+{
+  "power_net": "VDD",
+  "ground_net": "VSS",
+  "power_pin": "VPWR",
+  "ground_pin": "VGND",
+  "body_power_pins": [
+    "VPB"
+  ],
+  "body_ground_pins": [
+    "VNB"
+  ],
+  "rail_layer": "met1",
+  "strap_layer": "met2",
+  "via": "M1M2_PR",
+  "io_layer": "met3",
+  "tie_high": {
+    "cell": "sky130_fd_sc_hd__inv_1",
+    "pin": "Y",
+    "rail_input": {
+      "pin": "A",
+      "supply": "ground"
+    }
+  },
+  "tie_low": {
+    "cell": "sky130_fd_sc_hd__inv_1",
+    "pin": "Y",
+    "rail_input": {
+      "pin": "A",
+      "supply": "power"
+    }
+  },
+  "constant_cells": [
+    {
+      "cell": "sky130_fd_sc_hd__conb_1",
+      "high": [
+        "HI"
+      ],
+      "low": [
+        "LO"
+      ]
+    }
+  ],
+  "filler_cells": [
+    "sky130_fd_sc_hd__fill_8",
+    "sky130_fd_sc_hd__fill_4",
+    "sky130_fd_sc_hd__fill_2",
+    "sky130_fd_sc_hd__fill_1"
+  ],
+  "alternating_rows": true,
+  "cell_spacing_sites": 0,
+  "io_width": 990,
+  "io_min_area": true,
+  "io_spacing": 800,
+  "strap_width": 400,
+  "strap_spacing": 1000,
+  "max_added_cells": 250000,
+  "max_tie_fanout": 8,
+  "tap": {
+    "cell": "sky130_fd_sc_hd__tapvpwrvgnd_1",
+    "max_gap": 20000,
+    "well_layer": "nwell",
+    "substrate_layer": "pwell"
+  },
+  "clock": {
+    "port": "clk",
+    "cell": "sky130_fd_sc_hd__clkbuf_2",
+    "input_pin": "A",
+    "output_pin": "X",
+    "sink_pin": "CLK",
+    "max_fanout": 4,
+    "max_buffers": 4096,
+    "max_work": 100000
+  },
+  "placer": {
+    "global_iterations": 12,
+    "cg_iterations": 150,
+    "detailed_passes": 3,
+    "max_net_pins": 256
+  },
+  "io_plan": {
+    "west": [
+      "wdata[1]",
+      "waddr[0]",
+      "we",
+      "waddr[2]",
+      "waddr[1]",
+      "wdata[6]",
+      "wdata[4]",
+      "wdata[3]",
+      "wdata[7]",
+      "rdata_a[7]"
+    ],
+    "east": [
+      "raddr_a[1]",
+      "raddr_a[0]",
+      "clk",
+      "rst_n",
+      "raddr_a[2]",
+      "rdata_a[6]",
+      "rdata_b[6]",
+      "rdata_b[4]"
+    ],
+    "south": [
+      "wdata[0]",
+      "wdata[5]",
+      "rdata_b[0]",
+      "rdata_b[1]",
+      "rdata_a[1]",
+      "rdata_a[0]",
+      "rdata_b[5]",
+      "rdata_a[5]"
+    ],
+    "north": [
+      "rdata_b[7]",
+      "rdata_b[3]",
+      "rdata_a[3]",
+      "wdata[2]",
+      "raddr_b[2]",
+      "raddr_b[1]",
+      "raddr_b[0]",
+      "rdata_b[2]",
+      "rdata_a[4]",
+      "rdata_a[2]"
+    ],
+    "x_track": [
+      460,
+      230
+    ],
+    "y_track": [
+      680,
+      340
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+[INFO ODB-0227] LEF file: /oracle/oracle.lef, created 1 layers, 3 library cells
+[INFO ODB-0127] Reading DEF file: /oracle/positive.def
+[INFO ODB-0128] Design: road_demo
+[INFO ODB-0131]     Created 24 components and 0 component-terminals.
+[INFO ODB-0134] Finished DEF file: /oracle/positive.def
+RUSTROAD_PLACEMENT_ACCEPTED

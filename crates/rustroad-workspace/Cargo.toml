@@ -1,0 +1,22 @@
+[package]
+name = "rustroad-workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rustroad-core.workspace = true
+rustroad-formats.workspace = true
+sha2 = "=0.10.9"
+libc = "=0.2.191"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+fs2.workspace = true
+memmap2.workspace = true
+# The timing engine records source files by xxh3-64 (hold-eco provenance).
+xxhash-rust = { version = "=0.8.19", default-features = false, features = ["xxh3"] }
+
+[lints]
+workspace = true

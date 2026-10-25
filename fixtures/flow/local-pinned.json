@@ -1,0 +1,116 @@
+{
+  "schema": "rustroad.flow.v1",
+  "tools": [
+    {
+      "id": "rustsys",
+      "executable": {
+        "path": "/mnt/data2/cgao/git/RustSys/target/release/rustsys",
+        "sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50"
+      },
+      "version": "rustsys 0.1.0 (runtimes: cpu, cuda)"
+    },
+    {
+      "id": "rusteda",
+      "executable": {
+        "path": "/mnt/data2/cgao/git/RustSTA/target/release/rusteda",
+        "sha256": "8fcf8e0eefa05e14c3b3d6ac367839f5ff95059f6d416e2e8fab0262667b2429"
+      },
+      "version": "rusteda 0.1.0"
+    },
+    {
+      "id": "ruststa",
+      "executable": {
+        "path": "/mnt/data2/cgao/git/RustSTA/target/release/ruststa",
+        "sha256": "b1a8389c7684aaf8a8e05f89635fac5ed2ee15aa380c8f8d8c40b1780f08668d"
+      },
+      "version": "ruststa 0.1.0 (backends: cpu)"
+    },
+    {
+      "id": "yosys",
+      "executable": {
+        "path": "/mnt/data2/cgao/git/RustSys/.work/lec-verification/tools/yosys",
+        "sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad"
+      },
+      "version": "Yosys 0.67 (git sha1 2d1509d1b, Release, GNU /usr/bin/c++ 13.3.0)"
+    },
+    {
+      "id": "opensta",
+      "executable": {
+        "path": "/home/cgao/.local/share/containers/storage/overlay/c2cc5a7e2baaa2c6bdac6951f759273edbb27a34c710ea4593e43ef22d00e4b8/diff/foss/tools/openroad/bin/sta",
+        "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b"
+      },
+      "version": "3.1.0"
+    },
+    {
+      "id": "verilator",
+      "executable": {
+        "path": "/usr/bin/verilator",
+        "sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252"
+      },
+      "version": "Verilator 5.032 2025-01-01 rev (Debian 5.032-1)"
+    },
+    {
+      "id": "klayout",
+      "executable": {
+        "path": "/usr/bin/klayout",
+        "sha256": "32441e21747f7718500e6c36c028229f6f1ce2ffcfe5b11acf03305047639ee3"
+      },
+      "version": "KLayout 0.30.0",
+      "not_for_signoff": "host KLayout 0.30.0 fails the gf180 DRC deck; signoff, reference streamout and XOR use the pinned image in fixtures/flow/signoff-pinned.json (KLayout 0.30.9). Host use is limited to the non-signoff RustROAD subset routing-geometry checker."
+    },
+    {
+      "id": "magic",
+      "executable": {
+        "path": "/usr/bin/magic",
+        "sha256": "48b77b32097244c66c857ee28769d2a4f434de00e7c02193d0e00c3a94240b2f"
+      },
+      "version": "8.3.105",
+      "not_for_signoff": "host Magic 8.3.105 segfaults with the PDK tech files; signoff uses Magic 8.3.678 from the pinned image in fixtures/flow/signoff-pinned.json."
+    },
+    {
+      "id": "ngspice",
+      "executable": {
+        "path": "/usr/bin/ngspice",
+        "sha256": "25b6a73fafd9b489b92347a6c55fe307db502c1638f53d7d0bf439b5f7c65e38"
+      },
+      "version": "******\n** ngspice-45.2 : Circuit level simulation program\n** Compiled with KLU Direct Linear Solver\n** The U. C. Berkeley CAD Group\n** Copyright 1985-1994, Regents of the University of California.\n** Copyright 2001-2025, The ngspice team.\n** Please get your ngspice manual from https://ngspice.sourceforge.io/docs.html\n** Please file your bug-reports at http://ngspice.sourceforge.net/bugrep.html\n** Creation Date: Fri Sep 12 11:58:13 UTC 2025\n******"
+    },
+    {
+      "id": "netgen",
+      "executable": {
+        "path": "/usr/lib/netgen/bin/netgen",
+        "sha256": "ac52d4ed680ee955983c883be61968b6788fe5f96a5514d3f101f7ee71f908ce"
+      },
+      "version": "Netgen 1.5.133 compiled on Thu Dec  1 22:32:11 UTC 2022\nWarning: netgen command 'global' use fully-qualified name '::netgen::global'",
+      "not_for_signoff": "host Netgen 1.5.133 is not the signoff build; LVS uses Netgen 1.5.323 from the pinned image in fixtures/flow/signoff-pinned.json."
+    }
+  ],
+  "pdks": [
+    {
+      "name": "sky130_fd_sc_hd",
+      "corner": "tt",
+      "liberty": {
+        "path": "/mnt/data2/cgao/git/RustSys/.work/pdk-trial/lib/sky130_fd_sc_hd__tt_025C_1v80.lib",
+        "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135"
+      },
+      "technology_lef": null,
+      "cell_lef": null,
+      "cell_gds": null,
+      "drc_deck": null,
+      "lvs_setup": null
+    },
+    {
+      "name": "gf180mcu_fd_sc_mcu7t5v0",
+      "corner": "tt",
+      "liberty": {
+        "path": "/mnt/data2/cgao/git/RustSys/.work/pdk-trial/lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_3v30.lib",
+        "sha256": "f9dee07cf158324934b0c59144d970a2e8313f43533ede6283ec3c136f82fe53"
+      },
+      "technology_lef": null,
+      "cell_lef": null,
+      "cell_gds": null,
+      "drc_deck": null,
+      "lvs_setup": null
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "schema": "rustroad.rtl2gds-tools.v1",
+  "note": "Closeout tool qualification. All paths are checkout-relative symlinks to hash-verified installed executables. Original baseline identities remain in Git history and previous_baseline_sha256 fields. Tool changes require fresh gate results.",
+  "tools": {
+    "rustsys": {
+      "path": ".work/tools/rustsys",
+      "sha256": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+      "provenance": "policy producer RustSys c5ec23c (fixtures/flow/cell-policy.json)",
+      "version": "rustsys 0.1.0 (runtimes: cpu, cuda)"
+    },
+    "rusteda": {
+      "path": ".work/tools/rusteda",
+      "sha256": "c39dbde459db506ab3731be75900eae93bcb71691d8e4945e05c2013f4cdd11a",
+      "provenance": "RustSTA feat/signoff-checks 26bd6eb (0.4.3: resistor loops solved on the nodal conductance system STA-REQ-0730, components without a resistor path joined to the driver STA-REQ-0731; on top of 0.4.2 bdeec7e one-step effective capacitance), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS",
+      "version": "rusteda 0.4.3"
+    },
+    "ruststa": {
+      "path": ".work/tools/ruststa",
+      "sha256": "472de8e8980100310005a817709a68cdda7b376d1fbd51f8ae3ad684aad08fea",
+      "provenance": "RustSTA feat/signoff-checks 26bd6eb (0.4.3: resistor loops solved on the nodal conductance system STA-REQ-0730, components without a resistor path joined to the driver STA-REQ-0731; on top of 0.4.2 bdeec7e one-step effective capacitance), cold release build, .work/sta-signoff/bin SOURCE_COMMIT/SHA256SUMS",
+      "version": "ruststa 0.4.3 (backends: cpu)"
+    },
+    "yosys": {
+      "path": ".work/tools/yosys",
+      "sha256": "de10c3ee405ea4bc4b887041b215ee16a517a87dddc420cc6574b20b113d6327",
+      "provenance": "Closeout host qualification; Yosys 0.70 (git sha1 28ba3cb92, Release, GNU /usr/bin/g++ 16.2.1); explicitly replaces unavailable prior executable",
+      "version": "Yosys 0.70 (git sha1 28ba3cb92, Release, GNU /usr/bin/g++ 16.2.1)",
+      "previous_baseline_sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad"
+    },
+    "verilator": {
+      "path": ".work/tools/verilator",
+      "sha256": "098b09b11ba7d3e904ae13d924a9e8dac8ced5c9d7c9beff3b9d36119a417581",
+      "provenance": "Closeout host qualification; Verilator 5.052 2026-09-05 rev v5.052-61-g983a06a16; explicitly replaces unavailable prior executable",
+      "version": "Verilator 5.052 2026-09-05 rev v5.052-61-g983a06a16",
+      "previous_baseline_sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252"
+    },
+    "opensta": {
+      "path": ".work/tools/opensta",
+      "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+      "provenance": "OpenSTA 3.1.0 (fixtures/flow/local-pinned.json)",
+      "version": "3.1.0"
+    },
+    "openroad": {
+      "image": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
+      "executable": "/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad",
+      "sha256": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+      "provenance": "OpenROAD/OpenRCX image f152917ebc45 (black box)"
+    },
+    "gnu_time": {
+      "path": ".work/tools/time",
+      "sha256": "3b11dec50514a8473e9f6efa7a34d584d0657538c09988f61b72d38ad4991a10",
+      "provenance": "GNU time from the already-pinned signoff image; explicit host measurement path"
+    },
+    "ngspice": {
+      "path": ".work/tools/ngspice",
+      "sha256": "e088057de17fdfe8ea499b11f13a9aaf6f145dc4b1be0f045e583395637f673b",
+      "version": "ngspice-47 (KLU)",
+      "provenance": "Managed ngspice 872486af34517c75e5a413b2ef30c7fea60ea6d7146ba718f1bc6a5db4a5fe71; independent transistor-circuit MPW oracle"
+    }
+  }
+}

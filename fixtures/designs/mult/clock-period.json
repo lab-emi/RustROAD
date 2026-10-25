@@ -1,0 +1,121 @@
+{
+ "schema": "rustroad.clock-period.v1",
+ "design": "mult",
+ "rule": "period = max(10 ns, round_up(1.25 x pre-layout ss+max critical-path delay, 1 ns))",
+ "owner_decision": "2026-10-24 clock period rule",
+ "method": {
+  "netlist": "gate mapped netlist (RustSys + cell policy, deconflict, port-alias buffers)",
+  "constraints": "rendered signoff SDC on the reference clock SDC, set_propagated_clock removed (ideal clock)",
+  "engine": "RustSTA, ss Liberty only, no SPEF, --require-wire-model per PDK",
+  "wire_model": {
+   "gf180": "ideal",
+   "sky130": "wireload_lumped"
+  },
+  "critical_path_delay": "reference period - worst ss setup slack",
+  "rounding": "ceil to 1 ns, floor 10 ns"
+ },
+ "inputs": {
+  "rtl": [
+   {
+    "path": "fixtures/designs/rtl/mult/mult.sv",
+    "sha256": "204ada3070fd992a28bc822994d0c4465e5cdf1f06c55f6218ab0222bef8730f"
+   }
+  ],
+  "reference_clock_sdc": {
+   "path": "fixtures/designs/mult/cts.sdc",
+   "sha256": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550",
+   "period_ns": 10.0
+  },
+  "io_template": {
+   "path": "fixtures/designs/postroute-io.sdc.tmpl",
+   "sha256": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07"
+  },
+  "cell_policy": {
+   "path": "fixtures/flow/cell-policy.json",
+   "sha256": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37"
+  },
+  "tools": {
+   "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "rusteda": "c39dbde459db506ab3731be75900eae93bcb71691d8e4945e05c2013f4cdd11a",
+   "ruststa": "472de8e8980100310005a817709a68cdda7b376d1fbd51f8ae3ad684aad08fea",
+   "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252"
+  }
+ },
+ "pdks": {
+  "sky130": {
+   "liberty_ss": {
+    "name": "sky130_fd_sc_hd__ss_100C_1v60.lib",
+    "sha256": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361"
+   },
+   "netlist": {
+    "kind": "rustsys",
+    "cells": 418,
+    "area": 4122.704000000006,
+    "sha256": "a0e5cf6e583a30dc41790fc2d0261221fbb37e79fbb47d7fa6f80b5dc4a185f2",
+    "instances": 418
+   },
+   "prelayout": {
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "unconstrained_endpoints": null,
+    "startpoint": "b[4]",
+    "endpoint": "r11/D",
+    "arrival_ns": 5.538917706781337,
+    "required_ns": 9.699728019963826,
+    "slack_ns": 4.160810313182489
+   },
+   "critical_path_delay_ns": 5.83919,
+   "scaled_ns": 7.298988,
+   "period_ns": 10,
+   "binding": "floor 10 ns",
+   "clock_sdc": {
+    "path": "fixtures/designs/mult/sky130-cts.sdc",
+    "sha256": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550"
+   },
+   "self_check": {
+    "status": "passed",
+    "worst_slack_at_period_ns": 4.160810313182489,
+    "expected_ns": 4.16081,
+    "endpoint": "r11/D"
+   }
+  },
+  "gf180": {
+   "liberty_ss": {
+    "name": "gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib",
+    "sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6"
+   },
+   "netlist": {
+    "kind": "rustsys",
+    "cells": 367,
+    "area": 11136.249599999997,
+    "sha256": "babfb9bec10ac4542a9e4f14a9832a7e0c72c139a57a4a22f9a6401e6f7beff1",
+    "instances": 367
+   },
+   "prelayout": {
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "unconstrained_endpoints": null,
+    "startpoint": "b[0]",
+    "endpoint": "r10/D",
+    "arrival_ns": 22.422853622598847,
+    "required_ns": 9.015885704117872,
+    "slack_ns": -13.406967918480975
+   },
+   "critical_path_delay_ns": 23.406968,
+   "scaled_ns": 29.25871,
+   "period_ns": 30,
+   "binding": "1.25 x critical path",
+   "clock_sdc": {
+    "path": "fixtures/designs/mult/gf180-cts.sdc",
+    "sha256": "c2da6f902581ac1ca4e238eae045d7fcfb37009f03de1028b065d74dadad3c5e"
+   },
+   "self_check": {
+    "status": "passed",
+    "worst_slack_at_period_ns": 6.5930320815190235,
+    "expected_ns": 6.593032,
+    "endpoint": "r10/D"
+   }
+  }
+ }
+}

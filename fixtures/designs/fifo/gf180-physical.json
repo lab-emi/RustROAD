@@ -1,0 +1,107 @@
+{
+  "power_net": "VDD",
+  "ground_net": "VSS",
+  "power_pin": "VDD",
+  "ground_pin": "VSS",
+  "body_power_pins": [
+    "VNW"
+  ],
+  "body_ground_pins": [
+    "VPW"
+  ],
+  "rail_layer": "Metal1",
+  "strap_layer": "Metal2",
+  "via": "Via1_HV",
+  "io_layer": "Metal3",
+  "tie_high": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+    "pin": "Z"
+  },
+  "tie_low": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+    "pin": "ZN"
+  },
+  "filler_cells": [
+    "gf180mcu_fd_sc_mcu7t5v0__fill_64",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_32",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_1"
+  ],
+  "alternating_rows": true,
+  "cell_spacing_sites": 0,
+  "io_width": 1700,
+  "io_min_area": true,
+  "io_spacing": 1600,
+  "strap_width": 800,
+  "strap_spacing": 2000,
+  "max_added_cells": 250000,
+  "max_tie_fanout": 8,
+  "tap": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+    "max_gap": 46000,
+    "well_layer": "Nwell",
+    "substrate_layer": "Pwell"
+  },
+  "clock": {
+    "port": "clk_i",
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_8",
+    "input_pin": "I",
+    "output_pin": "Z",
+    "sink_pin": "CLK",
+    "max_fanout": 8,
+    "max_buffers": 4096,
+    "max_work": 100000
+  },
+  "placer": {
+    "global_iterations": 12,
+    "cg_iterations": 150,
+    "detailed_passes": 3,
+    "max_net_pins": 256
+  },
+  "io_plan": {
+    "west": [
+      "data_o[2]",
+      "data_i[2]",
+      "data_o[6]",
+      "data_i[6]",
+      "data_o[7]",
+      "data_i[3]",
+      "data_o[3]"
+    ],
+    "east": [
+      "rst_ni",
+      "push_i",
+      "count_o[0]",
+      "count_o[2]",
+      "count_o[1]",
+      "empty_o"
+    ],
+    "south": [
+      "data_o[4]",
+      "data_i[4]",
+      "clk_i",
+      "data_i[5]",
+      "data_o[5]",
+      "data_i[1]",
+      "data_o[1]"
+    ],
+    "north": [
+      "data_i[7]",
+      "data_i[0]",
+      "data_o[0]",
+      "full_o",
+      "pop_i"
+    ],
+    "x_track": [
+      1120,
+      560
+    ],
+    "y_track": [
+      1120,
+      0
+    ]
+  }
+}

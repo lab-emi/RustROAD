@@ -1,0 +1,87 @@
+{
+  "schema": "rustroad.def-controls.v1",
+  "cases": [
+    {
+      "name": "good",
+      "expected_rejection": false,
+      "observed": {
+        "schema": "rustroad.def_legality.v1",
+        "status": "passed",
+        "instances": 24,
+        "rows": 6,
+        "checks": [
+          "identity",
+          "coverage",
+          "row_geometry",
+          "site_alignment",
+          "containment",
+          "overlap"
+        ],
+        "scope": "single-height N-oriented cells; exported DEF subset only",
+        "drc_status": "unchecked",
+        "lvs_status": "unchecked",
+        "routing_status": "unchecked"
+      },
+      "matched_expectation": true
+    },
+    {
+      "name": "overlap",
+      "expected_rejection": true,
+      "observed": {
+        "status": "failed",
+        "diagnostic": "u0: overlaps another cell"
+      },
+      "matched_expectation": true
+    },
+    {
+      "name": "off_grid",
+      "expected_rejection": true,
+      "observed": {
+        "status": "failed",
+        "diagnostic": "u0: off lattice or beyond row"
+      },
+      "matched_expectation": true
+    },
+    {
+      "name": "duplicate",
+      "expected_rejection": true,
+      "observed": {
+        "status": "failed",
+        "diagnostic": "duplicate DEF instance"
+      },
+      "matched_expectation": true
+    },
+    {
+      "name": "missing",
+      "expected_rejection": true,
+      "observed": {
+        "status": "failed",
+        "diagnostic": "missing placed instances"
+      },
+      "matched_expectation": true
+    },
+    {
+      "name": "bad_master",
+      "expected_rejection": true,
+      "observed": {
+        "status": "failed",
+        "diagnostic": "unknown instance or master mismatch"
+      },
+      "matched_expectation": true
+    },
+    {
+      "name": "unsupported",
+      "expected_rejection": true,
+      "observed": {
+        "status": "failed",
+        "diagnostic": "unsupported DEF syntax at line 39"
+      },
+      "matched_expectation": true
+    }
+  ],
+  "input_sha256": "340de95389c2bc32a581d5179fd18213def02d856641fbcfdf7254757cdf5f38",
+  "def_sha256": "e220b05a87e77a375215ea35dcb0d85e30b4dc16fb627769df896a8a0e59dc20",
+  "drc_status": "unchecked",
+  "lvs_status": "unchecked",
+  "status": "passed"
+}

@@ -1,0 +1,118 @@
+{
+  "power_net": "VDD",
+  "ground_net": "VSS",
+  "power_pin": "VDD",
+  "ground_pin": "VSS",
+  "body_power_pins": [
+    "VNW"
+  ],
+  "body_ground_pins": [
+    "VPW"
+  ],
+  "rail_layer": "Metal1",
+  "strap_layer": "Metal2",
+  "via": "Via1_HV",
+  "io_layer": "Metal3",
+  "tie_high": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__tieh",
+    "pin": "Z"
+  },
+  "tie_low": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__tiel",
+    "pin": "ZN"
+  },
+  "filler_cells": [
+    "gf180mcu_fd_sc_mcu7t5v0__fill_64",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_32",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_16",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_8",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_4",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_2",
+    "gf180mcu_fd_sc_mcu7t5v0__fill_1"
+  ],
+  "alternating_rows": true,
+  "cell_spacing_sites": 0,
+  "io_width": 1700,
+  "io_min_area": true,
+  "io_spacing": 1600,
+  "strap_width": 800,
+  "strap_spacing": 2000,
+  "max_added_cells": 250000,
+  "max_tie_fanout": 8,
+  "tap": {
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__filltie",
+    "max_gap": 46000,
+    "well_layer": "Nwell",
+    "substrate_layer": "Pwell"
+  },
+  "clock": {
+    "port": "clk",
+    "cell": "gf180mcu_fd_sc_mcu7t5v0__clkbuf_8",
+    "input_pin": "I",
+    "output_pin": "Z",
+    "sink_pin": "CLK",
+    "max_fanout": 8,
+    "max_buffers": 4096,
+    "max_work": 100000
+  },
+  "placer": {
+    "global_iterations": 12,
+    "cg_iterations": 150,
+    "detailed_passes": 3,
+    "max_net_pins": 256
+  },
+  "io_plan": {
+    "west": [
+      "waddr[2]",
+      "we",
+      "waddr[1]",
+      "waddr[0]",
+      "raddr_b[2]",
+      "wdata[7]",
+      "wdata[3]",
+      "rdata_b[7]",
+      "rdata_b[3]"
+    ],
+    "east": [
+      "wdata[0]",
+      "rdata_a[0]",
+      "rdata_b[0]",
+      "raddr_b[1]",
+      "clk",
+      "rst_n",
+      "raddr_a[2]",
+      "wdata[4]",
+      "raddr_a[1]",
+      "rdata_b[4]",
+      "rdata_a[4]",
+      "wdata[2]",
+      "rdata_b[2]",
+      "rdata_a[2]"
+    ],
+    "south": [
+      "wdata[1]",
+      "rdata_b[1]",
+      "rdata_a[1]",
+      "raddr_b[0]",
+      "raddr_a[0]",
+      "wdata[5]",
+      "rdata_a[5]",
+      "rdata_b[5]"
+    ],
+    "north": [
+      "rdata_a[7]",
+      "rdata_a[3]",
+      "wdata[6]",
+      "rdata_b[6]",
+      "rdata_a[6]"
+    ],
+    "x_track": [
+      1120,
+      560
+    ],
+    "y_track": [
+      1120,
+      0
+    ]
+  }
+}

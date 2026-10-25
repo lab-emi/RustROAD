@@ -1,0 +1,34 @@
+{
+  "accessed_date": "2026-10-23",
+  "classification": "public user documentation, not implementation source",
+  "sources": [
+    {
+      "title": "OpenROAD overview and flow",
+      "url": "https://openroad.readthedocs.io/en/latest/main/README.html"
+    },
+    {
+      "title": "OpenROAD public data API",
+      "url": "https://openroad.readthedocs.io/en/latest/main/src/README.html"
+    },
+    {
+      "title": "OpenROAD global placement user guide",
+      "url": "https://openroad.readthedocs.io/en/latest/main/src/gpl/README.html"
+    },
+    {
+      "title": "OpenROAD detailed placement user guide",
+      "url": "https://openroad.readthedocs.io/en/latest/main/src/dpl/README.html"
+    },
+    {
+      "title": "OpenROAD parasitics extraction user guide",
+      "url": "https://openroad.readthedocs.io/en/latest/main/src/rcx/README.html"
+    },
+    {
+      "title": "ORFS flow variables",
+      "url": "https://openroad-flow-scripts.readthedocs.io/en/latest/user/FlowVariables.html"
+    },
+    {
+      "title": "REA process capture public documentation",
+      "url": "https://github.com/morluto/rea/blob/main/docs/process-capture.md"
+    }
+  ]
+}

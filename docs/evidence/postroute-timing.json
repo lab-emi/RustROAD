@@ -1,0 +1,237 @@
+{
+  "schema": "rustroad.postroute-timing.v1",
+  "date": "2026-10-23",
+  "functional_status": "passed",
+  "timing_accuracy_status": "passed",
+  "status": "partial",
+  "measurement": {
+    "wall_time": "0:14.38",
+    "peak_rss_kib": 404008,
+    "exit_code": 3
+  },
+  "receipts": 90,
+  "tools": {
+    "rustsys": {
+      "sha256": "9c83124e7bcf1a9ced5675672f3587099afec796de3230679fbff638c0b09e50",
+      "bytes": 65663096,
+      "version": "rustsys 0.1.0 (runtimes: cpu, cuda)"
+    },
+    "yosys": {
+      "sha256": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+      "bytes": 74,
+      "version": "Yosys 0.67 (git sha1 2d1509d1b, Release, GNU /usr/bin/c++ 13.3.0)"
+    },
+    "verilator": {
+      "sha256": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+      "bytes": 26226,
+      "version": "Verilator 5.032 2025-01-01 rev (Debian 5.032-1)"
+    },
+    "opensta": {
+      "sha256": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+      "bytes": 9077264,
+      "version": "3.1.0"
+    },
+    "rustroad": {
+      "sha256": "07788f848ed292a470242fba5e551b9752f0871edd05e7373903128b477e77ca",
+      "bytes": 20441288,
+      "version": "rustroad-cli 0.5.0"
+    },
+    "rusteda": {
+      "sha256": "5f19144410590f1e922e74ea99691ec6c18369e4bb97205658ad33cb12591fdb",
+      "bytes": 29105896,
+      "version": "rusteda 0.3.0"
+    },
+    "ruststa": {
+      "sha256": "e9fd98be5db1c52e101a1e2ac8f5f8762bd333ba0a02cd765d3fc1ced276abc3",
+      "bytes": 59179088,
+      "version": "ruststa 0.3.0 (backends: cpu)"
+    },
+    "klayout": {
+      "sha256": "32441e21747f7718500e6c36c028229f6f1ce2ffcfe5b11acf03305047639ee3",
+      "bytes": 78,
+      "version": "KLayout 0.30.0"
+    }
+  },
+  "pdks": [
+    {
+      "pdk": "sky130",
+      "parity": "passed",
+      "tolerance_ns": 0.001,
+      "max_difference_ns": 0.0005490974976520846,
+      "metrics": {
+        "wns_ns": 0.0,
+        "tns_ns": 0.0,
+        "violating_endpoints": 0,
+        "whs_ns": 0.0,
+        "ths_ns": 0.0,
+        "hold_violating_endpoints": 0,
+        "worst_setup_slack_ns": 8.945669658248658,
+        "worst_hold_slack_ns": 0.0002468887865704761
+      },
+      "scope": {
+        "corner": "tt",
+        "wire_model": "spef_rc",
+        "parasitics": "spef",
+        "drc_status": "unchecked",
+        "wire_load": null,
+        "delay_calculator": "nldm_ceff_ramp",
+        "coupling": "grounded_factor_1",
+        "physical_clock_domains": 1,
+        "clock_model": "propagated",
+        "cppr": "off",
+        "backend": "cpu",
+        "precision": "f64"
+      },
+      "completeness": {
+        "constrained_endpoints": 8,
+        "unconstrained_endpoints": 0,
+        "clock_domains": [
+          "core"
+        ],
+        "unconstrained_by_reason": {},
+        "unconstrained_inputs": 0,
+        "disabled_arcs": 0,
+        "unanalyzed_arcs": {
+          "min_pulse_width": 4
+        }
+      },
+      "timing_closure": "met",
+      "geometry": {
+        "status": "passed",
+        "routed_nets": 19,
+        "terminals": 46,
+        "wires": 4964,
+        "vias": 101,
+        "comparison_work": 4286,
+        "components": 120,
+        "subset_drc_status": "passed",
+        "full_drc_status": "unchecked",
+        "negative_controls": {
+          "missing_net_route": "rejected",
+          "supply_short": "rejected"
+        }
+      },
+      "cec": "equivalent",
+      "simulation": {
+        "status": "passed",
+        "vectors": 512,
+        "checked_pipeline_cycles": 511,
+        "initial_state": "unconstrained; y sampled after two edges"
+      },
+      "clock_skew_ns": [
+        0.043527822942,
+        0.02324673906
+      ],
+      "skew_limit_ns": 0.5,
+      "missing_annotation": "rejected",
+      "skew_negative": {
+        "status": "rejected",
+        "skew_ns": [
+          1.744396805763,
+          1.689478397369
+        ],
+        "resistance_scale": 10000
+      },
+      "extraction": {
+        "nets": 19,
+        "corner": "nominal",
+        "rules_sha256": "0b0678968a3d8665ee1ac882df2b0eb31e3896ac05130b9de6bd67ef2027c757",
+        "spef_sha256": "437bf747363652c1a55a980ac8ab8d3ab5823679ecb1d09dad86c3d77e9afd1a"
+      }
+    },
+    {
+      "pdk": "gf180",
+      "parity": "passed",
+      "tolerance_ns": 0.001,
+      "max_difference_ns": 0.0003017938614919835,
+      "metrics": {
+        "wns_ns": 0.0,
+        "tns_ns": 0.0,
+        "violating_endpoints": 0,
+        "whs_ns": -0.6355345830601125,
+        "ths_ns": -2.1930445465871835,
+        "hold_violating_endpoints": 4,
+        "worst_setup_slack_ns": 7.315693878229817,
+        "worst_hold_slack_ns": -0.6355345830601125
+      },
+      "scope": {
+        "corner": "tt",
+        "wire_model": "spef_rc",
+        "parasitics": "spef",
+        "drc_status": "unchecked",
+        "wire_load": null,
+        "delay_calculator": "nldm_ceff_ramp",
+        "coupling": "grounded_factor_1",
+        "physical_clock_domains": 1,
+        "clock_model": "propagated",
+        "cppr": "off",
+        "backend": "cpu",
+        "precision": "f64"
+      },
+      "completeness": {
+        "constrained_endpoints": 8,
+        "unconstrained_endpoints": 0,
+        "clock_domains": [
+          "core"
+        ],
+        "unconstrained_by_reason": {},
+        "unconstrained_inputs": 0,
+        "disabled_arcs": 0,
+        "unanalyzed_arcs": {
+          "min_pulse_width": 8,
+          "minimum_period": 8
+        }
+      },
+      "timing_closure": "violated",
+      "geometry": {
+        "status": "passed",
+        "routed_nets": 19,
+        "terminals": 46,
+        "wires": 4982,
+        "vias": 77,
+        "comparison_work": 3527,
+        "components": 96,
+        "subset_drc_status": "passed",
+        "full_drc_status": "unchecked",
+        "negative_controls": {
+          "missing_net_route": "rejected",
+          "supply_short": "rejected"
+        }
+      },
+      "cec": "equivalent",
+      "simulation": {
+        "status": "passed",
+        "vectors": 512,
+        "checked_pipeline_cycles": 511,
+        "initial_state": "unconstrained; y sampled after two edges"
+      },
+      "clock_skew_ns": [
+        0.074712350965,
+        0.065211392939
+      ],
+      "skew_limit_ns": 1.0,
+      "missing_annotation": "rejected",
+      "skew_negative": {
+        "status": "rejected",
+        "skew_ns": [
+          2.229317188263,
+          2.242554664612
+        ],
+        "resistance_scale": 10000
+      },
+      "extraction": {
+        "nets": 19,
+        "corner": "nominal",
+        "rules_sha256": "d83a04ea28af9b74a097fb479bbab9ed52859a1e3428b33d3151cb5afae62ddf",
+        "spef_sha256": "adeff266886e97029fa49df1ab5cc8576ebe65c3127508a4c37ca087f7f28e40"
+      }
+    }
+  ],
+  "source_sha256": {
+    "scripts/verify_routing.py": "3b86c8c8c831a0e80b492515be240462596f4ca7331142f58609ab1c4f4d7c91",
+    "scripts/routing_reference.py": "5f43e10667599672f4e67314d38742cd738972ebd7f4dadcda4cf91dc34895fa"
+  },
+  "full_drc_status": "unchecked",
+  "lvs_status": "unchecked",
+  "full_rtl_to_gds": "unverified"
+}

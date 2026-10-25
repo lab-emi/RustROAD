@@ -1,0 +1,189 @@
+{
+ "schema": "rustroad.clock-period.v1",
+ "design": "serv",
+ "rule": "period = max(10 ns, round_up(1.25 x pre-layout ss+max critical-path delay, 1 ns))",
+ "owner_decision": "2026-10-24 clock period rule",
+ "method": {
+  "netlist": "gate mapped netlist (RustSys + cell policy, deconflict, port-alias buffers)",
+  "constraints": "rendered signoff SDC on the reference clock SDC, set_propagated_clock removed (ideal clock)",
+  "engine": "RustSTA, ss Liberty only, no SPEF, --require-wire-model per PDK",
+  "wire_model": {
+   "gf180": "ideal",
+   "sky130": "wireload_lumped"
+  },
+  "critical_path_delay": "reference period - worst ss setup slack",
+  "rounding": "ceil to 1 ns, floor 10 ns"
+ },
+ "inputs": {
+  "rtl": [
+   {
+    "path": "fixtures/designs/rtl/serv/serv_aligner.v",
+    "sha256": "adeff8f442db6c93f48e551721146b40c398ab14dcb5b22339746329e7a24f3b"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_alu.v",
+    "sha256": "2e0c31b5b992618e514083aacf10cb38c2229b68b3b1e93d6663104f32143332"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_bufreg.v",
+    "sha256": "76404174ec92c6cf68e0042798dede84d77c5e454c7f428afc7b9f612a3c52d4"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_bufreg2.v",
+    "sha256": "6586c95a64a064ff6f4d001996d33f15e0f6d452e01ebb4da6120db06ddd0a51"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_compdec.v",
+    "sha256": "b1799ad9c5f10756fc336788d4bf871c5a6d4181c2f62568fad1b3bbe86504ae"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_csr.v",
+    "sha256": "2dd7167ed44817d921318a5d463281b43820c25e476039a604e95948be567e62"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_ctrl.v",
+    "sha256": "eb198ba7594f918da2784f9b6f8c82de1b95e3ffdd3383f2f533872999e9dab5"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_debug.v",
+    "sha256": "815a6b0da1a49d41faa72edd8f397f89ec79334b292b94991f60002b0776082f"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_decode.v",
+    "sha256": "eac5b2097ebd1f4587d2aa27aba130897d057dd8a28ba678edce0f2a3c9f640a"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_immdec.v",
+    "sha256": "80ec5a265194eb40f3413742fc9da0a23ed78f8bdf5add3e58b45fa1850b2bd5"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_mem_if.v",
+    "sha256": "a4fbd74579447710ed43e81dd80b4ea9415da0a3425a447f29446f9bd7a9aa6f"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_rf_if.v",
+    "sha256": "63fd0d2ec2f89201b20690c467ebbcae964a85b4570254a95154f832cf0dcb2e"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_rf_ram.v",
+    "sha256": "779ad3243dfa648f276240d260ff4ac1a1e83cc1364afb93d40c586905ce4338"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_rf_ram_if.v",
+    "sha256": "abb39b6bdf4d335bd2f90f75ddb1a410500a1a51a3e9f170453cb491d98d8697"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_rf_top.v",
+    "sha256": "89faedf7530c34305bfbffd261732d95016bf5627f10b7bbafaa8e1fd6cd49c9"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_state.v",
+    "sha256": "f7f981a28ed92243d812b3e6d723a77ec9278c7690eb4a530edc136aed5319b3"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_synth_wrapper.v",
+    "sha256": "ca429e8f6867acb12d702c9c7d1b592dbb81982c7915b75b6eed2962833ccdff"
+   },
+   {
+    "path": "fixtures/designs/rtl/serv/serv_top.v",
+    "sha256": "c35b88bed5732309069203b2d04421622eaae108d5bf5daef3de273daf43388e"
+   }
+  ],
+  "reference_clock_sdc": {
+   "path": "fixtures/designs/serv/cts.sdc",
+   "sha256": "8f52b29350e5b815cf6a280568e302766c2cc7ffd0025afc80b30710757ea550",
+   "period_ns": 10.0
+  },
+  "io_template": {
+   "path": "fixtures/designs/postroute-io.sdc.tmpl",
+   "sha256": "d0af263a4880c8a78e3d3106a1d5f8a9c4a94b79ec23ec542820b4a7fb680a07"
+  },
+  "cell_policy": {
+   "path": "fixtures/flow/cell-policy.json",
+   "sha256": "764f6f8f80cdfbcef9d3f6411601ebae3bd407451c2d966048c11debfd132e37"
+  },
+  "tools": {
+   "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+   "rusteda": "c39dbde459db506ab3731be75900eae93bcb71691d8e4945e05c2013f4cdd11a",
+   "ruststa": "472de8e8980100310005a817709a68cdda7b376d1fbd51f8ae3ad684aad08fea",
+   "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+   "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252"
+  }
+ },
+ "pdks": {
+  "sky130": {
+   "liberty_ss": {
+    "name": "sky130_fd_sc_hd__ss_100C_1v60.lib",
+    "sha256": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361"
+   },
+   "netlist": {
+    "kind": "rustsys",
+    "cells": 7370,
+    "area": 68679.61919999793,
+    "sha256": "1dd4fa7db4fc6b91f4ce932f0a330bc8420ff2312cb5cba363aacfa344f49ba2",
+    "instances": 7434
+   },
+   "prelayout": {
+    "wire_model": "wireload_lumped",
+    "clock_model": "ideal",
+    "unconstrained_endpoints": null,
+    "startpoint": "r9/CLK",
+    "endpoint": "r1171/D",
+    "arrival_ns": 10.524485327148522,
+    "required_ns": 9.674889597560682,
+    "slack_ns": -0.8495957295878398
+   },
+   "critical_path_delay_ns": 10.849596,
+   "scaled_ns": 13.561995,
+   "period_ns": 14,
+   "binding": "1.25 x critical path",
+   "clock_sdc": {
+    "path": "fixtures/designs/serv/sky130-cts.sdc",
+    "sha256": "7179441a4c1a14ce2600350963bfa7f3c68cc90fb1550e741ec52ac15219b2bf"
+   },
+   "self_check": {
+    "status": "passed",
+    "worst_slack_at_period_ns": 3.15040427041216,
+    "expected_ns": 3.150404,
+    "endpoint": "r1171/D"
+   }
+  },
+  "gf180": {
+   "liberty_ss": {
+    "name": "gf180mcu_fd_sc_mcu7t5v0__ss_125C_3v00.lib",
+    "sha256": "5d2f37ba6f43e33aeba26dc1da55c96394a862eeec4148043f1d48bdf65ccea6"
+   },
+   "netlist": {
+    "kind": "rustsys",
+    "cells": 6218,
+    "area": 194395.93600001885,
+    "sha256": "b133d731ea6ac157b945114369b41af63faf1369f81489800155fbe429d1e52f",
+    "instances": 6282
+   },
+   "prelayout": {
+    "wire_model": "ideal",
+    "clock_model": "ideal",
+    "unconstrained_endpoints": null,
+    "startpoint": "r1192/CLK",
+    "endpoint": "r1171/D",
+    "arrival_ns": 32.605537387751326,
+    "required_ns": 9.056983616604786,
+    "slack_ns": -23.54855377114654
+   },
+   "critical_path_delay_ns": 33.548554,
+   "scaled_ns": 41.935693,
+   "period_ns": 42,
+   "binding": "1.25 x critical path",
+   "clock_sdc": {
+    "path": "fixtures/designs/serv/gf180-cts.sdc",
+    "sha256": "4c8c7163e5b66a07a2fe0a608535664885857ebadd4097e459aa427ee8e24229"
+   },
+   "self_check": {
+    "status": "passed",
+    "worst_slack_at_period_ns": 8.451446228853463,
+    "expected_ns": 8.451446,
+    "endpoint": "r1171/D"
+   }
+  }
+ }
+}

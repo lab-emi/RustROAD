@@ -1,0 +1,5 @@
+set_input_delay 0.2 -clock ${clock} [get_ports {${data_inputs}}]
+set_output_delay 0.2 -clock ${clock} [get_ports {${outputs}}]
+set_input_transition 0.1 [get_ports {${inputs}}]
+set_load 0.01 [get_ports {${outputs}}]
+set_propagated_clock [get_clocks ${clock}]

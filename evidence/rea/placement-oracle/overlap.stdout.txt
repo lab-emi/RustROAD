@@ -1,0 +1,11 @@
+[INFO ODB-0227] LEF file: /oracle/oracle.lef, created 1 layers, 3 library cells
+[INFO ODB-0127] Reading DEF file: /oracle/overlap.def
+[INFO ODB-0128] Design: road_demo
+[INFO ODB-0131]     Created 24 components and 0 component-terminals.
+[INFO ODB-0134] Finished DEF file: /oracle/overlap.def
+[WARNING DPL-0005] Overlap check failed (1).
+ u1 (CELL2) overlaps u0 (CELL4)
+[WARNING DPL-0011] Padding check failed (1).
+ u1
+[ERROR DPL-0033] detailed placement checks failed during check placement.
+RUSTROAD_PLACEMENT_REJECTED DPL-0033

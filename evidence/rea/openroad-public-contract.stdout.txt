@@ -1,0 +1,179 @@
+RUSTROAD_PUBLIC_CONTRACT_START
+RUSTROAD_COMMAND read_lef
+read_lef [-tech] [-library] [-tech_name name] filename 
+RUSTROAD_COMMAND read_def
+read_def [-floorplan_initialize|-incremental] [-continue_on_errors] [-tech name]
+   [-chip chip_name] filename 
+RUSTROAD_COMMAND read_verilog
+read_verilog filename 
+RUSTROAD_COMMAND read_liberty
+read_liberty [-corner corner] [-min] [-max] [-infer_latches] filename 
+  The read_liberty command reads a Liberty format library file. The first
+  library that is read sets the units used by SDC/Tcl commands and reporting.
+  The include_file attribute is supported.
+
+  Some Liberty libraries do not include latch groups for cells that describe
+  transparent latches. In that situation the -infer_latches command flag can be
+  used to infer the latches. The timing arcs required for a latch to be
+  inferred should look like the following:
+
+  cell (inferred_latch) {
+  pin(D) {
+  direction : input ;
+  timing () {
+  related_pin : "E" ;
+  timing_type : setup_falling ;
+  }
+  timing () {
+  related_pin : "E" ;
+  timing_type : hold_falling ;
+  }
+  }
+  pin(E) {
+  direction : input;
+  }
+  pin(Q) {
+  direction : output ;
+  timing () {
+  related_pin : "D" ;
+  }
+  timing () {
+  related_pin : "E" ;
+  timing_type : rising_edge ;
+  }
+  }
+  }
+
+  In this example a positive level-sensitive latch is inferred.
+
+  Files compressed with gzip are automatically uncompressed.
+  -corner  Deprecated. Use define_scene to assign Liberty libraries to a scene.
+  -min  Use the library for min-delay (hold) analysis.
+  -max  Use the library for max-delay (setup) analysis.
+  -infer_latches  Infer latches from timing arcs when the Liberty file has no
+    latch groups.
+RUSTROAD_COMMAND read_sdc
+read_sdc [-echo] [-mode mode_name] filename 
+  Read SDC commands from filename.
+
+  If the mode does not exist it is created. Multiple SDC files can append
+  commands to a mode by using the -mode_name argument for each one. If no -mode
+  arguement is is used the commands are added to the current mode.
+
+  The read_sdc command stops and reports any errors encountered while reading a
+  file unless sta_continue_on_error is 1.
+
+  Files compressed with gzip are automatically uncompressed.
+  -echo  Print each command before evaluating it.
+  -mode  Mode for the SDC commands in the file.
+RUSTROAD_COMMAND write_def
+write_def [-version version] filename 
+RUSTROAD_COMMAND write_verilog
+write_verilog [-sort] [-include_pwr_gnd] [-remove_cells cells] filename 
+RUSTROAD_COMMAND write_spef
+write_spef [-net_id net_id] [-nets nets] [-coordinates] filename  
+RUSTROAD_COMMAND read_db
+read_db [-hier] filename 
+RUSTROAD_COMMAND write_db
+write_db [-compression level] filename 
+RUSTROAD_COMMAND initialize_floorplan
+initialize_floorplan [-utilization util] [-aspect_ratio ratio]
+   [-core_space space | {bottom top left right}]
+   [-die_area {lx ly ux uy | x1 y1 x2 y2 ...}]
+   [-core_area {lx ly ux uy | x1 y1 x2 y2 ...}] [-additional_sites site_names]
+   [-site site_name] [-row_parity NONE|ODD|EVEN] [-flip_sites site_names]
+   [-gap space] 
+RUSTROAD_COMMAND global_placement
+global_placement [-skip_initial_place] [-force_center_initial_place]
+   [-skip_nesterov_place] [-timing_driven] [-timing_driven_repair_timing]
+   [-routability_driven] [-virtual_cts] [-incremental] [-skip_io] [-place_ios]
+   [-bin_grid_count grid_count] [-density target_density]
+   [-init_density_penalty init_density_penalty]
+   [-init_wirelength_coef init_wirelength_coef] [-min_phi_coef min_phi_coef]
+   [-max_phi_coef max_phi_coef] [-reference_hpwl reference_hpwl]
+   [-overflow overflow] [-initial_place_max_iter initial_place_max_iter]
+   [-initial_place_max_fanout initial_place_max_fanout] [-routability_use_grt]
+   [-routability_target_rc_metric routability_target_rc_metric]
+   [-routability_check_overflow routability_check_overflow]
+   [-routability_snapshot_overflow routability_snapshot_overflow]
+   [-routability_max_density routability_max_density]
+   [-routability_inflation_ratio_coef routability_inflation_ratio_coef]
+   [-routability_max_inflation_ratio routability_max_inflation_ratio]
+   [-routability_min_congestion_for_inflation routability_min_congestion_for_inflation]
+   [-routability_max_inflation_total routability_max_inflation_total]
+   [-routability_net_weight_max routability_net_weight_max]
+   [-routability_congested_nets_percentage routability_congested_nets_percentage]
+   [-routability_rc_coefficients routability_rc_coefficients]
+   [-keep_resize_below_overflow keep_resize_below_overflow]
+   [-timing_driven_net_reweight_overflow timing_driven_net_reweight_overflow]
+   [-timing_driven_net_weight_max timing_driven_net_weight_max]
+   [-timing_driven_nets_percentage timing_driven_nets_percentage]
+   [-virtual_cts_max_skew_fraction virtual_cts_max_skew_fraction]
+   [-timing_driven_repair_tns_end_percent timing_driven_repair_tns_end_percent]
+   [-pad_left pad_left] [-pad_right pad_right] [-disable_revert_if_diverge]
+   [-disable_pin_density_adjust] [-random_seed random_seed]
+   [-perturb_dist perturb_dist] [-enable_routing_congestion] 
+
+RUSTROAD_COMMAND detailed_placement
+detailed_placement [-max_displacement disp|{disp_x disp_y}]
+   [-disallow_one_site_gaps] [-incremental] [-report_file_name file_name]
+   [-use_diamond_legalizer] [-site_search_window sites]
+   [-row_search_window rows] [-drc_penalty penalty] [-disable_window_extension]
+   [-quiet] 
+  -quiet  Do not report an error if no objects match.
+RUSTROAD_COMMAND check_placement
+check_placement [-verbose] [-disallow_one_site_gaps]
+   [-report_file_name file_name] 
+RUSTROAD_COMMAND clock_tree_synthesis
+clock_tree_synthesis [-wire_unit unit] [-buf_list buflist] [-root_buf buf]
+   [-clk_nets nets] [-tree_buf buf] [-distance_between_buffers]
+   [-branching_point_buffers_distance] [-clustering_exponent]
+   [-clustering_unbalance_ratio] [-sink_clustering_size]
+   [-sink_clustering_max_diameter] [-macro_clustering_size]
+   [-macro_clustering_max_diameter] [-sink_clustering_enable] [-balance_levels]
+   [-sink_clustering_levels levels] [-num_static_layers]
+   [-sink_clustering_buffer] [-obstruction_aware] [-no_obstruction_aware]
+   [-apply_ndr strategy] [-sink_buffer_max_cap_derate] [-dont_use_dummy_load]
+   [-delay_buffer_derate] [-library] [-repair_clock_nets] [-no_insertion_delay] 
+
+RUSTROAD_COMMAND global_route
+global_route [-guide_file out_file] [-congestion_iterations iterations]
+   [-congestion_report_file file_name] [-congestion_report_iter_step steps]
+   [-grid_origin origin] [-critical_nets_percentage percent]
+   [-res_aware_nets_percentage percent] [-skip_large_fanout_nets fanout]
+   [-allow_congestion] [-snapshot_batched_width width] [-verbose]
+   [-start_incremental] [-end_incremental] [-use_cugr] [-resistance_aware]
+   [-infinite_cap] 
+
+RUSTROAD_COMMAND detailed_route
+detailed_route [-output_maze filename] [-output_drc filename]
+   [-output_guide_coverage filename] [-drc_report_iter_step step]
+   [-db_process_node name] [-disable_via_gen] [-droute_end_iter iter]
+   [-via_in_pin_bottom_layer layer] [-via_in_pin_top_layer layer]
+   [-via_access_layer layer] [-or_seed seed] [-or_k k]
+   [-bottom_routing_layer layer] [-top_routing_layer layer] [-verbose level]
+   [-distributed] [-remote_host rhost] [-remote_port rport] [-shared_volume vol]
+   [-cloud_size sz] [-clean_patches] [-no_pin_access] [-min_access_points count]
+   [-save_guide_updates] [-repair_pdn_vias layer] [-single_step_dr] 
+
+RUSTROAD_COMMAND extract_parasitics
+extract_parasitics [-ext_model_file filename] [-corner cornerIndex]
+   [-corner_cnt count] [-max_res ohms] [-coupling_threshold fF]
+   [-debug_net_id id] [-dbg dbg_num ] [-lef_res] [-lef_rc] [-cc_model track]
+   [-context_depth depth] [-no_merge_via_res] [-skip_over_cell ] [-version] 
+
+RUSTROAD_COMMAND report_worst_slack
+report_worst_slack [-min] [-max] [-digits digits] 
+  Report the worst slack in the design.
+  -min  Apply to minimum (hold) analysis.
+  -max  Apply to maximum (setup) analysis.
+  -digits  Number of digits to print after the decimal point.
+RUSTROAD_COMMAND report_tns
+report_tns [-min] [-max] [-digits digits] 
+  Report the total negative slack.
+  -min  Apply to minimum (hold) analysis.
+  -max  Apply to maximum (setup) analysis.
+  -digits  Number of digits to print after the decimal point.
+RUSTROAD_COMMAND report_design_area
+report_design_area 
+RUSTROAD_PUBLIC_CONTRACT_END

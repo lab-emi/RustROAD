@@ -1,0 +1,333 @@
+{
+ "schema": "rustroad.router-drc-evidence.v1",
+ "scope": {
+  "level": "block",
+  "pad_ring": "absent",
+  "seal_ring": "absent",
+  "ir_em_si_ocv_cppr": "unchecked",
+  "streamout": "klayout_lefdef_reference",
+  "density": "reported_separately"
+ },
+ "rustroad": {
+  "sha256": "f7e0c480365ac225a8089e31530f0df0e81c7fa63595c137b5eb1ee96487f732",
+  "branch": "feat/rtl2gds-router",
+  "note": "release build of this branch; debuginfo paths make the hash worktree-specific"
+ },
+ "signoff_image": {
+  "id": "4c48415d8bd08c04033f4777b65a96299e22c1e94d12a8ea1d9a062697c006ee",
+  "versions": [
+   "8.3.678",
+   "Netgen 1.5.323 compiled on Mon Jul 27 09:16:59 AM CEST 2026",
+   "Warning: netgen command 'format' use fully-qualified name '::netgen::format'",
+   "Warning: netgen command 'global' use fully-qualified name '::netgen::global'",
+   "KLayout 0.30.9"
+  ]
+ },
+ "flow": {
+  "command": "python3 scripts/verify_routing.py --workspace <new> --base-rev empty --rustroad target/release/rustroad --rusteda <RustSTA 0.3 rusteda> --ruststa <RustSTA 0.3 ruststa>",
+  "rusteda_sha256": "5f19144410590f1e922e74ea99691ec6c18369e4bb97205658ad33cb12591fdb",
+  "ruststa_sha256": "e9fd98be5db1c52e101a1e2ac8f5f8762bd333ba0a02cd765d3fc1ced276abc3",
+  "status": "partial",
+  "functional_status": "passed",
+  "timing_accuracy_status": "passed",
+  "wall_seconds": 27.97,
+  "peak_host_rss_kib": 403648,
+  "independent_rerun_def_identical": {
+   "sky130": true,
+   "gf180": true
+  }
+ },
+ "signoff": {
+  "command": "python3 scripts/verify_router_signoff.py --run-dir <new> --flow <verify_routing workspace> --rustroad target/release/rustroad",
+  "status": "passed",
+  "wall_seconds": 154.0,
+  "peak_container_rss_kib": 474988
+ },
+ "pdks": {
+  "sky130": {
+   "def_sha256": "3b0edb36a92a581921b553e10dff2cca0efb4d643ab58a3bc5921c857a6e2ae0",
+   "routing": {
+    "nets": 19,
+    "wires": 4940,
+    "vias": 95,
+    "patches": 9,
+    "via_kinds": {
+     "L1M1_PR": 34,
+     "M1M2_PR": 37,
+     "M2M3_PR": 23,
+     "M2M3_PR_MR": 1
+    },
+    "stats": {
+     "grid_nodes": 340560,
+     "expansions": 474443,
+     "comparisons": 59351355,
+     "wire_length_dbu": 735345
+    },
+    "route_all_seconds": 0.598,
+    "route_all_peak_rss_kib": 15888,
+    "repeated_route_def_identical": true
+   },
+   "drc": {
+    "status": "passed",
+    "magic_drc_full_items": 0,
+    "magic_tech": "sky130A",
+    "klayout_main_items": 0,
+    "klayout_main_deck": "sky130A_mr.drc feol,beol,offgrid"
+   },
+   "antenna": {
+    "status": "passed",
+    "items": 0,
+    "oracle": "magic_antennacheck"
+   },
+   "density": {
+    "status": "passed",
+    "items": 0,
+    "categories": {},
+    "note": "reported separately, not part of the block DRC verdict"
+   },
+   "lvs": {
+    "status": "match",
+    "netgen": "match",
+    "klayout": "match",
+    "reference": "RustROAD powered Verilog export (CEC-linked to RTL in verify_routing)"
+   },
+   "access_test": {
+    "tests": 22,
+    "magic_items": 0,
+    "klayout_items": 0,
+    "def_sha256": "48e934d0e533041d94a1eb2f3678bec2c99cfa9469c0f05a9509d120195f6ebb"
+   },
+   "legacy_access_control": {
+    "magic": 0,
+    "klayout": 0,
+    "magic_rules": {},
+    "klayout_rules": {},
+    "note": "informational: same layout routed with lef_rules=false"
+   },
+   "controls": {
+    "notch": {
+     "magic": 2,
+     "klayout": 1,
+     "magic_rules": {
+      "Metal2 spacing < 0.14um (met2.2)": 3
+     },
+     "klayout_rules": {
+      "m2.2": 1
+     },
+     "status": "rejected"
+    },
+    "min_area": {
+     "magic": 1,
+     "klayout": 1,
+     "magic_rules": {
+      "Metal2 minimum area < 0.0676um^2 (met2.6)": 1
+     },
+     "klayout_rules": {
+      "m2.6": 1
+     },
+     "status": "rejected"
+    },
+    "placement_only": {
+     "magic": 0,
+     "klayout": 0,
+     "magic_rules": {},
+     "klayout_rules": {}
+    },
+    "lvs_swapped_pins": {
+     "netgen": "mismatch",
+     "klayout": "mismatch",
+     "status": "rejected"
+    }
+   },
+   "timing": {
+    "worst_setup_slack_ns": 8.923353184072717,
+    "worst_hold_slack_ns": -0.01605064291979519,
+    "hold_violating_endpoints": 1,
+    "opensta_max_difference_ns": 0.000545275042334481,
+    "clock_skew_rise_fall_ns": [
+     0.061944868416,
+     0.033050894737
+    ],
+    "closure": "violated",
+    "corner": "tt nominal RC only"
+   },
+   "inputs": {
+    "tlef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+    "clef": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+    "gds": "8ee881e8b658f27ffb49251de237095b555736548fb4414a487862e96a422187",
+    "map": "80a0e06eb733f1ebd3b37f971162112dee2ec0834751ac54ae71a3eead6fbf14",
+    "magicrc": "e4ac71308a9fe97cff2d421982888921578f3febf55dd87f351be70730f705b8",
+    "netgen": "7a33f3f54fab57a9d9b0887ac7b7b64ce6c454110e8b7f01f3cfb90a1282dc94",
+    "drc": "caf4a6b08cb12f78d6bb2d120737424c786b3bae8d6489234b9b269e91107bfc",
+    "lvs": "5b4ede4bdb4744b60e42c9b29baa93f40bb24430fb8f3a48a276a712a492ac38",
+    "spice": "6dec6626decd1ee15afacafab9925b1a336ab344b7b5e1bec9d7483f2a6badc3",
+    "density": "4e4a63809f597bdf9bbf69901fe0df1e8edaf67ad39d659637db7c953e0289b6"
+   }
+  },
+  "gf180": {
+   "def_sha256": "1b7b46b21cbeb69a46b4f4020cf70f622250e9c77373b180b525cec118e7b0e5",
+   "routing": {
+    "nets": 19,
+    "wires": 5002,
+    "vias": 76,
+    "patches": 1,
+    "via_kinds": {
+     "Via1_HV": 18,
+     "Via1_VH": 18,
+     "Via2_HH": 6,
+     "Via2_HV": 33,
+     "Via2_VH": 1
+    },
+    "stats": {
+     "grid_nodes": 299568,
+     "expansions": 566373,
+     "comparisons": 33413635,
+     "wire_length_dbu": 2061370
+    },
+    "route_all_seconds": 0.567,
+    "route_all_peak_rss_kib": 14296,
+    "repeated_route_def_identical": true
+   },
+   "drc": {
+    "status": "passed",
+    "magic_drc_full_items": 0,
+    "magic_tech": "gf180mcuD",
+    "klayout_main_items": 0,
+    "klayout_main_deck": "gf180mcu.drc decks=all,-antenna,-density variant=gf180mcuD"
+   },
+   "antenna": {
+    "status": "passed",
+    "items": 0,
+    "oracle": "klayout_gf180mcu_antenna_deck"
+   },
+   "density": {
+    "status": "failed",
+    "items": 8,
+    "categories": {
+     "DCF.1b": 1,
+     "PL.8": 1,
+     "M1.4": 1,
+     "M2.4": 1,
+     "M3.4": 1,
+     "M4.4": 1,
+     "M5.4": 1,
+     "MT.3": 1
+    },
+    "note": "reported separately, not part of the block DRC verdict"
+   },
+   "lvs": {
+    "status": "match",
+    "netgen": "match",
+    "klayout": "match",
+    "reference": "RustROAD powered Verilog export (CEC-linked to RTL in verify_routing)"
+   },
+   "access_test": {
+    "tests": 22,
+    "magic_items": 0,
+    "klayout_items": 0,
+    "def_sha256": "55cc063c54d18d74e12f4e28140da28419b2a2e5dfa0858c3cd56112de14c74e"
+   },
+   "legacy_access_control": {
+    "magic": 5,
+    "klayout": 14,
+    "magic_rules": {
+     "Metal2 spacing < 0.28um (M2.2a)": 4,
+     "Metal1 spacing < 0.23um (M1.2a)": 2
+    },
+    "klayout_rules": {
+     "M1.2a": 1,
+     "M2.2a": 13
+    },
+    "note": "informational: same layout routed with lef_rules=false"
+   },
+   "controls": {
+    "notch": {
+     "magic": 3,
+     "klayout": 8,
+     "magic_rules": {
+      "Metal2 spacing < 0.28um (M2.2a)": 3
+     },
+     "klayout_rules": {
+      "M2.2a": 8
+     },
+     "status": "rejected"
+    },
+    "min_area": {
+     "magic": 1,
+     "klayout": 1,
+     "magic_rules": {
+      "Metal2 minimum area < 0.1444um^2 (M2.3)": 1
+     },
+     "klayout_rules": {
+      "M2.3": 1
+     },
+     "status": "rejected"
+    },
+    "placement_only": {
+     "magic": 0,
+     "klayout": 0,
+     "magic_rules": {},
+     "klayout_rules": {}
+    },
+    "lvs_swapped_pins": {
+     "netgen": "mismatch",
+     "klayout": "mismatch",
+     "status": "rejected"
+    }
+   },
+   "timing": {
+    "worst_setup_slack_ns": 7.318195246344864,
+    "worst_hold_slack_ns": -0.6336186917916604,
+    "hold_violating_endpoints": 4,
+    "opensta_max_difference_ns": 0.000300115404827217,
+    "clock_skew_rise_fall_ns": [
+     0.079000860453,
+     0.068952843547
+    ],
+    "closure": "violated",
+    "corner": "tt nominal RC only"
+   },
+   "inputs": {
+    "tlef": "842b186318d53844561af4ec530b4e30d8ba519bcc58d512a363ef255acc7abd",
+    "clef": "47dadf84c21b20f558d043c36271632f07b1c2c2a595b118e2e1050ebb74349b",
+    "gds": "024fdb3942ff4ebf7bce891443c5ff2a5052539a9583d6e864ba0d777d2ad64f",
+    "map": "ac49b08c732c00945c054bce61a4d7f413f84887e0e4e1a66fd20018db2f5d28",
+    "magicrc": "bee634bb8cb8752b91d31c6c5d03b134422c529c2ff8e49fa85f77320927cb49",
+    "netgen": "eb6217e33acb2c81680351745bc184a2ee37b31a25d37f4dce423f61ba466fe4",
+    "drc": "e7c7d2597890cfcb4cf0e5312f5652051a119fb3e1cc1772a6e5c04594bc65d8",
+    "lvs": "2efe3199e67b6693ccd8b2817a0aa341b76e9b3d10d1413f9484f81fc896c9d5",
+    "spice": "0e126c5e10e45e705a83acfa47f6fd2c4ef0357e99c339dec43cdc16bfb13664",
+    "cdl": "8c7f781f8bd314070f390559ec09ffdab07d7cb25533a9790df62a43f99ff175"
+   }
+  }
+ },
+ "baseline_before_this_change": {
+  "sky130": {
+   "magic": 26,
+   "klayout": 9,
+   "rules": {
+    "m1.2": 5,
+    "m2.2": 4
+   }
+  },
+  "gf180": {
+   "magic": 13,
+   "klayout": 7,
+   "rules": {
+    "M1.2a": 4,
+    "M2.3": 3
+   }
+  },
+  "note": "same harness on the unmodified router (fresh verify_routing run of commit 757ae18)"
+ },
+ "dense_six_register_fixture": {
+  "status": "failed",
+  "reason": "BUDGET_EXCEEDED: routing expansion limit: per-sink search, pin 49 net 7, 7 nets done (both PDKs; identical with lef_rules=false)",
+  "inputs": ".work/tap-release-final/{sky130,gf180}_literal.v and _floor.json, standard routing profiles, caps unchanged",
+  "note": "router scaling limit, outside the via-landing/pin-access scope; no scaling claim"
+ },
+ "compatibility": {
+  "legacy_workspaces_reexport_byte_identical": true,
+  "legacy_profile_routes_byte_identical_to_previous_binary": true
+ }
+}

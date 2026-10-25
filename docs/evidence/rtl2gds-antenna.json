@@ -1,0 +1,5854 @@
+{
+ "schema": "rustroad.rtl2gds-final.v1",
+ "generator": "scripts/rtl2gds_evidence.py",
+ "scope": {
+  "level": "block/macro",
+  "pad_ring": "not_applicable (block level, no pad ring)",
+  "seal_ring": "not_applicable (block level, no seal ring)",
+  "density": "reported separately (density_status); not part of the gate (owner decision)",
+  "ir_drop": "unchecked",
+  "electromigration": "unchecked",
+  "signal_integrity": "unchecked (coupling grounded)",
+  "ocv": "unchecked",
+  "cppr": "unchecked",
+  "clocks": "propagated, RustROAD CTS",
+  "async_reset_pulse_width": "unchecked: minimum pulse width of asynchronous set/clear inputs is a requirement on the reset source outside the block (pins listed per PDK in mpw_min_period); their recovery/removal checks are timed",
+  "antenna": "native check-antenna with a 0.10 safety margin + foundry deck (deck is the signoff gate)"
+ },
+ "runs": [
+  {
+   "run": "A1-pipeline",
+   "design": "pipeline",
+   "status": "passed",
+   "exit_code": 0,
+   "failed_items": [],
+   "unverified_items": [],
+   "not_applicable_items": [],
+   "global_statuses": {
+    "tools_identity": "passed",
+    "openroad_image": "passed",
+    "design_manifest": "passed",
+    "budget_floors": "passed",
+    "manifest_provenance": "passed",
+    "sdc_rendering": "passed"
+   },
+   "revision": {
+    "head": "78721871be20b59701ceb67a0d1763eb8a95e6ab",
+    "branch": "feat/rtl2gds-antenna",
+    "dirty": false,
+    "dirty_paths": 0,
+    "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+    "rustroad_sha256": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   },
+   "wall_seconds": 113.239,
+   "peak_rss_kib": 475392,
+   "processes": 295,
+   "tools": {
+    "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+    "rusteda": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+    "ruststa": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+    "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+    "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+    "opensta": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+    "openroad": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+    "rustroad": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   }
+  },
+  {
+   "run": "A1-dense",
+   "design": "dense",
+   "status": "passed",
+   "exit_code": 0,
+   "failed_items": [],
+   "unverified_items": [],
+   "not_applicable_items": [],
+   "global_statuses": {
+    "tools_identity": "passed",
+    "openroad_image": "passed",
+    "design_manifest": "passed",
+    "budget_floors": "passed",
+    "manifest_provenance": "passed",
+    "sdc_rendering": "passed"
+   },
+   "revision": {
+    "head": "78721871be20b59701ceb67a0d1763eb8a95e6ab",
+    "branch": "feat/rtl2gds-antenna",
+    "dirty": false,
+    "dirty_paths": 0,
+    "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+    "rustroad_sha256": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   },
+   "wall_seconds": 117.682,
+   "peak_rss_kib": 475548,
+   "processes": 276,
+   "tools": {
+    "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+    "rusteda": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+    "ruststa": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+    "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+    "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+    "opensta": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+    "openroad": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+    "rustroad": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   }
+  },
+  {
+   "run": "A1-uart_tx",
+   "design": "uart_tx",
+   "status": "failed",
+   "exit_code": 1,
+   "failed_items": [
+    "sky130:timing_accuracy",
+    "gf180:hold_closure",
+    "gf180:timing_setup",
+    "gf180:timing_hold",
+    "gf180:drv",
+    "gf180:timing_accuracy"
+   ],
+   "unverified_items": [],
+   "not_applicable_items": [],
+   "global_statuses": {
+    "tools_identity": "passed",
+    "openroad_image": "passed",
+    "design_manifest": "passed",
+    "budget_floors": "passed",
+    "manifest_provenance": "passed",
+    "sdc_rendering": "passed"
+   },
+   "revision": {
+    "head": "78721871be20b59701ceb67a0d1763eb8a95e6ab",
+    "branch": "feat/rtl2gds-antenna",
+    "dirty": false,
+    "dirty_paths": 0,
+    "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+    "rustroad_sha256": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   },
+   "wall_seconds": 221.756,
+   "peak_rss_kib": 505292,
+   "processes": 595,
+   "tools": {
+    "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+    "rusteda": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+    "ruststa": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+    "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+    "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+    "opensta": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+    "openroad": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+    "rustroad": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   }
+  },
+  {
+   "run": "A2-alu",
+   "design": "alu",
+   "status": "failed",
+   "exit_code": 1,
+   "failed_items": [
+    "sky130:timing_accuracy",
+    "gf180:hold_closure",
+    "gf180:timing_setup",
+    "gf180:drv",
+    "gf180:timing_accuracy"
+   ],
+   "unverified_items": [],
+   "not_applicable_items": [
+    "sky130:mpw_min_period",
+    "gf180:mpw_min_period"
+   ],
+   "global_statuses": {
+    "tools_identity": "passed",
+    "openroad_image": "passed",
+    "design_manifest": "passed",
+    "budget_floors": "passed",
+    "manifest_provenance": "passed",
+    "sdc_rendering": "passed"
+   },
+   "revision": {
+    "head": "78721871be20b59701ceb67a0d1763eb8a95e6ab",
+    "branch": "feat/rtl2gds-antenna",
+    "dirty": false,
+    "dirty_paths": 0,
+    "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+    "rustroad_sha256": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   },
+   "wall_seconds": 339.252,
+   "peak_rss_kib": 528284,
+   "processes": 314,
+   "tools": {
+    "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+    "rusteda": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+    "ruststa": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+    "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+    "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+    "opensta": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+    "openroad": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+    "rustroad": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   }
+  },
+  {
+   "run": "A2-regfile",
+   "design": "regfile",
+   "status": "failed",
+   "exit_code": 1,
+   "failed_items": [
+    "sky130:drv",
+    "sky130:timing_accuracy",
+    "gf180:hold_closure",
+    "gf180:timing_hold",
+    "gf180:drv",
+    "gf180:timing_accuracy"
+   ],
+   "unverified_items": [],
+   "not_applicable_items": [],
+   "global_statuses": {
+    "tools_identity": "passed",
+    "openroad_image": "passed",
+    "design_manifest": "passed",
+    "budget_floors": "passed",
+    "manifest_provenance": "passed",
+    "sdc_rendering": "passed"
+   },
+   "revision": {
+    "head": "78721871be20b59701ceb67a0d1763eb8a95e6ab",
+    "branch": "feat/rtl2gds-antenna",
+    "dirty": false,
+    "dirty_paths": 0,
+    "dirty_digest": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+    "rustroad_sha256": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   },
+   "wall_seconds": 664.253,
+   "peak_rss_kib": 508168,
+   "processes": 584,
+   "tools": {
+    "rustsys": "3de13b3a87deb103f89a3c7456ce9196ccdbf52fd145eab546c1c6e4732be4ae",
+    "rusteda": "13050846f817687a94103a270df476d9a76285a7d3d992b68fa25124c4d39864",
+    "ruststa": "3e80fde686c8c7b191779d5750423a324a02f5e8d46ceaec53cb9aa6af6cf14b",
+    "yosys": "acf8487fd4eb54a71043bf29c461a8f10511813155c2989e5eb1e045b874a6ad",
+    "verilator": "672a1ccf3468902f66387049f001b04f254bbcece7d5e816e3861715889bf252",
+    "opensta": "49ddbd40385e6b54152aed6d7435e4114e409e5f168884d8945374a42f00301b",
+    "openroad": "faf4843f6712e56507d1ee3db7c3984c8bc3c732af5c79ca0221b04c4ab150a2",
+    "rustroad": "492d0c593b8c440644983b31c8c7ee0fb24d2f94e4934dcf732a1a5a409c8f53"
+   }
+  }
+ ],
+ "rows": [
+  {
+   "design": "pipeline",
+   "pdk": "sky130",
+   "recipe": "legacy",
+   "run": "A1-pipeline",
+   "gate_status": "passed",
+   "failed": [],
+   "unverified": [],
+   "not_applicable": [],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_hold": {
+     "status": "passed",
+     "reason": null
+    },
+    "mpw_min_period": {
+     "status": "passed",
+     "reason": null
+    },
+    "drv": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_accuracy": {
+     "status": "passed",
+     "reason": null
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "unverified",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 9.08763419145182,
+        "worst_hold_ns": 0.08091612984406826
+       },
+       "opensta": {
+        "worst_setup_ns": 9.087491035461,
+        "worst_hold_ns": 0.080875143409
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 8.49097311883781,
+        "worst_hold_ns": 0.06458005468294642
+       },
+       "opensta": {
+        "worst_setup_ns": 8.490673065186,
+        "worst_hold_ns": 0.064465686679
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 9.327687344763392,
+        "worst_hold_ns": 0.1145345107710859
+       },
+       "opensta": {
+        "worst_setup_ns": 9.327614784241,
+        "worst_hold_ns": 0.114521495998
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 9.092171164487516,
+        "worst_hold_ns": 0.07583042777715937
+       },
+       "opensta": {
+        "worst_setup_ns": 9.091998100281,
+        "worst_hold_ns": 0.075775668025
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 8.494776616860188,
+        "worst_hold_ns": 0.05572219757125679
+       },
+       "opensta": {
+        "worst_setup_ns": 8.495097160339,
+        "worst_hold_ns": 0.055679488927
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 9.33054703505653,
+        "worst_hold_ns": 0.1115143354068277
+       },
+       "opensta": {
+        "worst_setup_ns": 9.33039855957,
+        "worst_hold_ns": 0.111468963325
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 0.1616,
+       "pulse_ps": 0.0463,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 0.3057,
+       "pulse_ps": 0.1254,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.0814,
+       "pulse_ps": 0.0263,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 0.1958,
+       "pulse_ps": 0.0831,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 0.3205,
+       "pulse_ps": 0.0416,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.1628,
+       "pulse_ps": 0.0832,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "passed",
+    "iterations": 3,
+    "max_iterations": 4,
+    "target_margin_ns": 0.05,
+    "sizing": false,
+    "hold_cells_planned": 4,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 1,
+    "cells_resized": 0,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 9.100891743041618,
+        "hold_ns": -0.009049285116361327
+       },
+       "ss": {
+        "setup_ns": 8.516706953961972,
+        "hold_ns": -0.10812959354844931
+       },
+       "ff": {
+        "setup_ns": 9.33474859078322,
+        "hold_ns": 0.05457733621167693
+       }
+      },
+      "drv": null,
+      "hold_eco": {
+       "violating_sinks": 3,
+       "planned_sinks": 3,
+       "cells": 3,
+       "area_um2": 11.2608
+      },
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 1,
+       "before": 1,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": 9.084571978987004,
+        "hold_ns": 0.06688773549470428
+       },
+       "ss": {
+        "setup_ns": 8.481044765544477,
+        "hold_ns": 0.03553523034149397
+       },
+       "ff": {
+        "setup_ns": 9.325215783582586,
+        "hold_ns": 0.09425765746188436
+       }
+      },
+      "drv": null,
+      "hold_eco": {
+       "violating_sinks": 1,
+       "planned_sinks": 1,
+       "cells": 1,
+       "area_um2": 3.7536
+      },
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 2,
+      "worst": {
+       "tt": {
+        "setup_ns": 9.08763419145182,
+        "hold_ns": 0.08091612984406826
+       },
+       "ss": {
+        "setup_ns": 8.49097311883781,
+        "hold_ns": 0.06458005468294642
+       },
+       "ff": {
+        "setup_ns": 9.327687344763392,
+        "hold_ns": 0.1145345107710859
+       }
+      },
+      "drv": null,
+      "hold_eco": null,
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "clock_buffer": 3,
+     "hold_cell": 4,
+     "logic": 10,
+     "physical_only": 123
+    },
+    "total": 140,
+    "area_um2": {
+     "clock_buffer": 11.261,
+     "hold_cell": 15.014,
+     "logic": 142.637,
+     "physical_only": 832.048
+    }
+   },
+   "die": {
+    "width_um": 57.5,
+    "height_um": 48.96,
+    "area_um2": 2815.2
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "unverified",
+     "count": null
+    }
+   },
+   "controls": {
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "removed_hold_cell": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 16
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 55
+   },
+   "mpw_async_unchecked": null,
+   "wall_seconds": 50.501,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.133,
+     "peak_rss_kib": 61912
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 3.069,
+     "peak_rss_kib": 121200
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 0.995,
+     "peak_rss_kib": 108424
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.029,
+     "peak_rss_kib": 18508
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.024,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 0.162,
+     "peak_rss_kib": 62832
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 1.887,
+     "peak_rss_kib": 120884
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 11.563,
+     "peak_rss_kib": 474828
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 0.158,
+     "peak_rss_kib": 63628
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 0.171,
+     "peak_rss_kib": 63648
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 1.839,
+     "peak_rss_kib": 288948
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 0.766,
+     "peak_rss_kib": 61928
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.138,
+     "peak_rss_kib": 61912
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 2.97,
+     "peak_rss_kib": 121220
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 0.969,
+     "peak_rss_kib": 108960
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.029,
+     "peak_rss_kib": 18420
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 4.129,
+     "peak_rss_kib": 121220
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 25.272,
+     "peak_rss_kib": 475392
+    }
+   ],
+   "peak_rss_kib": 475392
+  },
+  {
+   "design": "pipeline",
+   "pdk": "gf180",
+   "recipe": "legacy",
+   "run": "A1-pipeline",
+   "gate_status": "passed",
+   "failed": [],
+   "unverified": [],
+   "not_applicable": [],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_hold": {
+     "status": "passed",
+     "reason": null
+    },
+    "mpw_min_period": {
+     "status": "passed",
+     "reason": null
+    },
+    "drv": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_accuracy": {
+     "status": "passed",
+     "reason": null
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "failed",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 7.46105543263267,
+        "worst_hold_ns": 0.24156418899847754
+       },
+       "opensta": {
+        "worst_setup_ns": 7.461035728455,
+        "worst_hold_ns": 0.241543784738
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 4.844104505829436,
+        "worst_hold_ns": 0.362088586010864
+       },
+       "opensta": {
+        "worst_setup_ns": 4.84410572052,
+        "worst_hold_ns": 0.36208859086
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.547623497569393,
+        "worst_hold_ns": 0.1942148250466148
+       },
+       "opensta": {
+        "worst_setup_ns": 8.547598838806,
+        "worst_hold_ns": 0.194193333387
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 7.463964172867033,
+        "worst_hold_ns": 0.2405742794680804
+       },
+       "opensta": {
+        "worst_setup_ns": 7.463933467865,
+        "worst_hold_ns": 0.24055197835
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 4.852230418776879,
+        "worst_hold_ns": 0.36154441960255834
+       },
+       "opensta": {
+        "worst_setup_ns": 4.85221862793,
+        "worst_hold_ns": 0.361523151398
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.549281472909945,
+        "worst_hold_ns": 0.1938359303315127
+       },
+       "opensta": {
+        "worst_setup_ns": 8.549252510071,
+        "worst_hold_ns": 0.193814083934
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 0.0852,
+       "pulse_ps": 0.018,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 0.1011,
+       "pulse_ps": 0.0006,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.0746,
+       "pulse_ps": 0.0151,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 0.0922,
+       "pulse_ps": 0.0188,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 0.1422,
+       "pulse_ps": 0.0265,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.0715,
+       "pulse_ps": 0.0156,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "passed",
+    "iterations": 2,
+    "max_iterations": 4,
+    "target_margin_ns": 0.05,
+    "sizing": false,
+    "hold_cells_planned": 4,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 0,
+    "cells_resized": 0,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 7.688717165593755,
+        "hold_ns": -0.39899191425467007
+       },
+       "ss": {
+        "setup_ns": 5.63001195859839,
+        "hold_ns": -0.9115811915834465
+       },
+       "ff": {
+        "setup_ns": 8.564741023880629,
+        "hold_ns": -0.18286362498551328
+       }
+      },
+      "drv": null,
+      "hold_eco": {
+       "violating_sinks": 4,
+       "planned_sinks": 4,
+       "cells": 4,
+       "area_um2": 96.5888
+      },
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": 7.46105543263267,
+        "hold_ns": 0.24156418899847754
+       },
+       "ss": {
+        "setup_ns": 4.844104505829436,
+        "hold_ns": 0.362088586010864
+       },
+       "ff": {
+        "setup_ns": 8.547623497569393,
+        "hold_ns": 0.1942148250466148
+       }
+      },
+      "drv": null,
+      "hold_eco": null,
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "clock_buffer": 3,
+     "hold_cell": 4,
+     "logic": 10,
+     "physical_only": 119
+    },
+    "total": 136,
+    "area_um2": {
+     "clock_buffer": 39.514,
+     "hold_cell": 96.589,
+     "logic": 412.698,
+     "physical_only": 1207.36
+    }
+   },
+   "die": {
+    "width_um": 70.0,
+    "height_um": 70.56,
+    "area_um2": 4939.2
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "failed",
+     "count": 8
+    }
+   },
+   "controls": {
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "removed_hold_cell": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 15
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 54
+   },
+   "mpw_async_unchecked": null,
+   "wall_seconds": 62.236,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.226,
+     "peak_rss_kib": 104932
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 2.22,
+     "peak_rss_kib": 231248
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 1.39,
+     "peak_rss_kib": 122812
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.02,
+     "peak_rss_kib": 12548
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.013,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 0.262,
+     "peak_rss_kib": 107168
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 3.174,
+     "peak_rss_kib": 231872
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 15.043,
+     "peak_rss_kib": 447520
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 0.289,
+     "peak_rss_kib": 107472
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 0.279,
+     "peak_rss_kib": 106460
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 1.761,
+     "peak_rss_kib": 288732
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 0.999,
+     "peak_rss_kib": 79512
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.259,
+     "peak_rss_kib": 104668
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 2.211,
+     "peak_rss_kib": 231488
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 1.425,
+     "peak_rss_kib": 123476
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.016,
+     "peak_rss_kib": 12540
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 3.942,
+     "peak_rss_kib": 231488
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 32.266,
+     "peak_rss_kib": 447120
+    }
+   ],
+   "peak_rss_kib": 447520
+  },
+  {
+   "design": "dense",
+   "pdk": "sky130",
+   "recipe": "track",
+   "run": "A1-dense",
+   "gate_status": "passed",
+   "failed": [],
+   "unverified": [],
+   "not_applicable": [],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_hold": {
+     "status": "passed",
+     "reason": null
+    },
+    "mpw_min_period": {
+     "status": "passed",
+     "reason": null
+    },
+    "drv": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_accuracy": {
+     "status": "passed",
+     "reason": null
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "unverified",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 9.171932379058644,
+        "worst_hold_ns": 0.1415814666564742
+       },
+       "opensta": {
+        "worst_setup_ns": 9.171736717224,
+        "worst_hold_ns": 0.141486227512
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 8.663971683969473,
+        "worst_hold_ns": 0.18488884621150198
+       },
+       "opensta": {
+        "worst_setup_ns": 8.663514137268,
+        "worst_hold_ns": 0.184626400471
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 9.372451173123803,
+        "worst_hold_ns": 0.12537264840612927
+       },
+       "opensta": {
+        "worst_setup_ns": 9.372374534607,
+        "worst_hold_ns": 0.125345900655
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 9.173888828512128,
+        "worst_hold_ns": 0.14358825408261666
+       },
+       "opensta": {
+        "worst_setup_ns": 9.173662185669,
+        "worst_hold_ns": 0.143488496542
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 8.670604655514705,
+        "worst_hold_ns": 0.18775254510790695
+       },
+       "opensta": {
+        "worst_setup_ns": 8.670347213745,
+        "worst_hold_ns": 0.187640681863
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 9.373519492706732,
+        "worst_hold_ns": 0.1268633119491829
+       },
+       "opensta": {
+        "worst_setup_ns": 9.373333930969,
+        "worst_hold_ns": 0.126782476902
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 0.4718,
+       "pulse_ps": 0.1315,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 0.9705,
+       "pulse_ps": 0.3505,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.4458,
+       "pulse_ps": 0.0353,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 0.4523,
+       "pulse_ps": 0.1367,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 0.861,
+       "pulse_ps": 0.1326,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.4238,
+       "pulse_ps": 0.1381,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "passed",
+    "iterations": 1,
+    "max_iterations": 8,
+    "target_margin_ns": 0.07,
+    "sizing": true,
+    "hold_cells_planned": 0,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 0,
+    "cells_resized": 0,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 9.171932379058644,
+        "hold_ns": 0.1415814666564742
+       },
+       "ss": {
+        "setup_ns": 8.663971683969473,
+        "hold_ns": 0.18488884621150198
+       },
+       "ff": {
+        "setup_ns": 9.372451173123803,
+        "hold_ns": 0.12537264840612927
+       }
+      },
+      "drv": 0,
+      "hold_eco": null,
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "clock_buffer": 1,
+     "logic": 18,
+     "physical_only": 237,
+     "tie": 2
+    },
+    "total": 258,
+    "area_um2": {
+     "clock_buffer": 5.005,
+     "logic": 265.254,
+     "physical_only": 1392.586,
+     "tie": 7.507
+    }
+   },
+   "die": {
+    "width_um": 61.18,
+    "height_um": 62.56,
+    "area_um2": 3827.421
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "unverified",
+     "count": null
+    }
+   },
+   "controls": {
+    "removed_hold_cell": "not_applicable",
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "planted_hold_uncertainty": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 14
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 54
+   },
+   "mpw_async_unchecked": null,
+   "wall_seconds": 51.77,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.0,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "floorplan",
+     "wall_seconds": 0.017,
+     "peak_rss_kib": 12368
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 2.042,
+     "peak_rss_kib": 120452
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 1.04,
+     "peak_rss_kib": 109052
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.026,
+     "peak_rss_kib": 18588
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.026,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 0.165,
+     "peak_rss_kib": 62716
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 1.979,
+     "peak_rss_kib": 120868
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 13.371,
+     "peak_rss_kib": 475308
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 0.16,
+     "peak_rss_kib": 62928
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 0.167,
+     "peak_rss_kib": 62640
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 1.712,
+     "peak_rss_kib": 289300
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 0.377,
+     "peak_rss_kib": 61524
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.0,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "rerun_floorplan",
+     "wall_seconds": 0.018,
+     "peak_rss_kib": 12484
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 1.99,
+     "peak_rss_kib": 120576
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 1.148,
+     "peak_rss_kib": 109028
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.026,
+     "peak_rss_kib": 18216
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 3.203,
+     "peak_rss_kib": 120576
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 27.176,
+     "peak_rss_kib": 475548
+    }
+   ],
+   "peak_rss_kib": 475548
+  },
+  {
+   "design": "dense",
+   "pdk": "gf180",
+   "recipe": "track",
+   "run": "A1-dense",
+   "gate_status": "passed",
+   "failed": [],
+   "unverified": [],
+   "not_applicable": [],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_hold": {
+     "status": "passed",
+     "reason": null
+    },
+    "mpw_min_period": {
+     "status": "passed",
+     "reason": null
+    },
+    "drv": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_accuracy": {
+     "status": "passed",
+     "reason": null
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "failed",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 8.175202656947329,
+        "worst_hold_ns": 0.3358466496315719
+       },
+       "opensta": {
+        "worst_setup_ns": 8.175127029419,
+        "worst_hold_ns": 0.33583599329
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 6.595371830028689,
+        "worst_hold_ns": 0.5527572655699249
+       },
+       "opensta": {
+        "worst_setup_ns": 6.595290660858,
+        "worst_hold_ns": 0.552746117115
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.845256933015936,
+        "worst_hold_ns": 0.24125998455420872
+       },
+       "opensta": {
+        "worst_setup_ns": 8.845185279846,
+        "worst_hold_ns": 0.241250246763
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 8.178990770283463,
+        "worst_hold_ns": 0.33467243405653596
+       },
+       "opensta": {
+        "worst_setup_ns": 8.178913116455,
+        "worst_hold_ns": 0.334661483765
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 6.602110151328292,
+        "worst_hold_ns": 0.5499419703124575
+       },
+       "opensta": {
+        "worst_setup_ns": 6.602011680603,
+        "worst_hold_ns": 0.54992878437
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.847643651513367,
+        "worst_hold_ns": 0.2406889516707862
+       },
+       "opensta": {
+        "worst_setup_ns": 8.847575187683,
+        "worst_hold_ns": 0.240679293871
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 0.08,
+       "pulse_ps": 0.0032,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 0.0867,
+       "pulse_ps": 0.0021,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.0753,
+       "pulse_ps": 0.0034,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 0.0824,
+       "pulse_ps": 0.003,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 0.1046,
+       "pulse_ps": 0.0027,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.0719,
+       "pulse_ps": 0.0034,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "passed",
+    "iterations": 2,
+    "max_iterations": 8,
+    "target_margin_ns": 0.07,
+    "sizing": true,
+    "hold_cells_planned": 4,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 0,
+    "cells_resized": 0,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.192846036738164,
+        "hold_ns": -0.000541002240594668
+       },
+       "ss": {
+        "setup_ns": 6.63342916521553,
+        "hold_ns": -0.12016640223173602
+       },
+       "ff": {
+        "setup_ns": 8.854753146601142,
+        "hold_ns": 0.047117577675085676
+       }
+      },
+      "drv": 0,
+      "hold_eco": {
+       "violating_sinks": 4,
+       "planned_sinks": 4,
+       "cells": 4,
+       "area_um2": 52.6848
+      },
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.175202656947329,
+        "hold_ns": 0.3358466496315719
+       },
+       "ss": {
+        "setup_ns": 6.595371830028689,
+        "hold_ns": 0.5527572655699249
+       },
+       "ff": {
+        "setup_ns": 8.845256933015936,
+        "hold_ns": 0.24125998455420872
+       }
+      },
+      "drv": 0,
+      "hold_eco": null,
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "clock_buffer": 1,
+     "hold_cell": 4,
+     "logic": 22,
+     "physical_only": 142,
+     "tie": 2
+    },
+    "total": 171,
+    "area_um2": {
+     "clock_buffer": 57.075,
+     "hold_cell": 52.685,
+     "logic": 926.374,
+     "physical_only": 1457.613,
+     "tie": 17.562
+    }
+   },
+   "die": {
+    "width_um": 69.44,
+    "height_um": 74.48,
+    "area_um2": 5171.891
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "failed",
+     "count": 8
+    }
+   },
+   "controls": {
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "removed_hold_cell": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 15
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 55
+   },
+   "mpw_async_unchecked": null,
+   "wall_seconds": 65.257,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.0,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "floorplan",
+     "wall_seconds": 0.012,
+     "peak_rss_kib": 9784
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 3.67,
+     "peak_rss_kib": 231440
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 1.306,
+     "peak_rss_kib": 123328
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.016,
+     "peak_rss_kib": 12020
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.014,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 0.258,
+     "peak_rss_kib": 106432
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 3.207,
+     "peak_rss_kib": 231352
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 16.234,
+     "peak_rss_kib": 450524
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 0.257,
+     "peak_rss_kib": 107200
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 0.264,
+     "peak_rss_kib": 107200
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 1.77,
+     "peak_rss_kib": 288960
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 0.954,
+     "peak_rss_kib": 79720
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.0,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "rerun_floorplan",
+     "wall_seconds": 0.013,
+     "peak_rss_kib": 9704
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 3.686,
+     "peak_rss_kib": 231112
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 1.444,
+     "peak_rss_kib": 123804
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.024,
+     "peak_rss_kib": 12536
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 5.197,
+     "peak_rss_kib": 231112
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 31.762,
+     "peak_rss_kib": 451200
+    }
+   ],
+   "peak_rss_kib": 451200
+  },
+  {
+   "design": "uart_tx",
+   "pdk": "sky130",
+   "recipe": "track",
+   "run": "A1-uart_tx",
+   "gate_status": "failed",
+   "failed": [
+    "timing_accuracy"
+   ],
+   "unverified": [],
+   "not_applicable": [],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_hold": {
+     "status": "passed",
+     "reason": null
+    },
+    "mpw_min_period": {
+     "status": "passed",
+     "reason": null
+    },
+    "drv": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_accuracy": {
+     "status": "failed",
+     "reason": "native: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints']; openrcx: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ff:endpoints']"
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "unverified",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 8.456136794010222,
+        "worst_hold_ns": 0.10520665558928177
+       },
+       "opensta": {
+        "worst_setup_ns": 8.455127716064,
+        "worst_hold_ns": 0.105026215315
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 6.9171840906947155,
+        "worst_hold_ns": 0.1303554224981055
+       },
+       "opensta": {
+        "worst_setup_ns": 6.914677143097,
+        "worst_hold_ns": 0.129920527339
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.928537370261001,
+        "worst_hold_ns": 0.08109082483813096
+       },
+       "opensta": {
+        "worst_setup_ns": 8.928033828735,
+        "worst_hold_ns": 0.081048250198
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 8.460621550349783,
+        "worst_hold_ns": 0.0897439030804712
+       },
+       "opensta": {
+        "worst_setup_ns": 8.45946598053,
+        "worst_hold_ns": 0.089540019631
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 6.923651548236508,
+        "worst_hold_ns": 0.10642331727146326
+       },
+       "opensta": {
+        "worst_setup_ns": 6.922249794006,
+        "worst_hold_ns": 0.106230080128
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.935272216231773,
+        "worst_hold_ns": 0.07327021401646411
+       },
+       "opensta": {
+        "worst_setup_ns": 8.934231758118,
+        "worst_hold_ns": 0.073122985661
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 1.2995,
+       "pulse_ps": 0.2922,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 2.5894,
+       "pulse_ps": 0.719,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.5035,
+       "pulse_ps": 0.1334,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 1.4311,
+       "pulse_ps": 0.3154,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 1.4776,
+       "pulse_ps": 0.3297,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 1.0405,
+       "pulse_ps": 0.3408,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "passed",
+    "iterations": 5,
+    "max_iterations": 8,
+    "target_margin_ns": 0.07,
+    "sizing": true,
+    "hold_cells_planned": 42,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 2,
+    "cells_resized": 0,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.482768495685502,
+        "hold_ns": -0.5457951881290034
+       },
+       "ss": {
+        "setup_ns": 6.985061083106039,
+        "hold_ns": -1.1323158919806857
+       },
+       "ff": {
+        "setup_ns": 8.933378833996596,
+        "hold_ns": -0.3034359067629019
+       }
+      },
+      "drv": 0,
+      "hold_eco": {
+       "violating_sinks": 17,
+       "planned_sinks": 17,
+       "cells": 32,
+       "area_um2": 220.21120000000008
+      },
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.465488132235873,
+        "hold_ns": 0.07652947075270888
+       },
+       "ss": {
+        "setup_ns": 7.009845698466076,
+        "hold_ns": 0.035399340677295665
+       },
+       "ff": {
+        "setup_ns": 8.906579186471285,
+        "hold_ns": 0.09776267809910272
+       }
+      },
+      "drv": 0,
+      "hold_eco": {
+       "violating_sinks": 7,
+       "planned_sinks": 7,
+       "cells": 7,
+       "area_um2": 26.275199999999998
+      },
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 2,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.494816893381017,
+        "hold_ns": 0.08025321660948515
+       },
+       "ss": {
+        "setup_ns": 7.0447732961352,
+        "hold_ns": 0.044533574877968496
+       },
+       "ff": {
+        "setup_ns": 8.928677043867632,
+        "hold_ns": 0.09466685879787384
+       }
+      },
+      "drv": 0,
+      "hold_eco": {
+       "violating_sinks": 2,
+       "planned_sinks": 2,
+       "cells": 2,
+       "area_um2": 7.5072
+      },
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 1,
+       "before": 1,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 3,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.499227138738126,
+        "hold_ns": 0.0852510755891881
+       },
+       "ss": {
+        "setup_ns": 7.0109628557626404,
+        "hold_ns": 0.051951560124272156
+       },
+       "ff": {
+        "setup_ns": 8.922858545297144,
+        "hold_ns": 0.08259220912747894
+       }
+      },
+      "drv": 0,
+      "hold_eco": {
+       "violating_sinks": 1,
+       "planned_sinks": 1,
+       "cells": 1,
+       "area_um2": 3.7536
+      },
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 4,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.456136794010222,
+        "hold_ns": 0.10520665558928177
+       },
+       "ss": {
+        "setup_ns": 6.9171840906947155,
+        "hold_ns": 0.1303554224981055
+       },
+       "ff": {
+        "setup_ns": 8.928537370261001,
+        "hold_ns": 0.08109082483813096
+       }
+      },
+      "drv": 0,
+      "hold_eco": null,
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 1,
+       "before": 1,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "clock_buffer": 3,
+     "hold_cell": 42,
+     "logic": 89,
+     "physical_only": 476
+    },
+    "total": 610,
+    "area_um2": {
+     "clock_buffer": 15.014,
+     "hold_cell": 257.747,
+     "logic": 982.192,
+     "physical_only": 2406.058
+    }
+   },
+   "die": {
+    "width_um": 81.42,
+    "height_um": 81.6,
+    "area_um2": 6643.872
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "unverified",
+     "count": null
+    }
+   },
+   "controls": {
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "removed_hold_cell": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 18
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 58
+   },
+   "mpw_async_unchecked": 16,
+   "wall_seconds": 111.266,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.146,
+     "peak_rss_kib": 62224
+    },
+    {
+     "step": "floorplan",
+     "wall_seconds": 0.02,
+     "peak_rss_kib": 12576
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 9.472,
+     "peak_rss_kib": 121128
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 1.056,
+     "peak_rss_kib": 109496
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.032,
+     "peak_rss_kib": 19440
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.038,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 0.417,
+     "peak_rss_kib": 63604
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 3.046,
+     "peak_rss_kib": 120520
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 26.997,
+     "peak_rss_kib": 504996
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 0.416,
+     "peak_rss_kib": 63568
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 0.42,
+     "peak_rss_kib": 63508
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 2.187,
+     "peak_rss_kib": 288832
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 1.119,
+     "peak_rss_kib": 61860
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.181,
+     "peak_rss_kib": 62168
+    },
+    {
+     "step": "rerun_floorplan",
+     "wall_seconds": 0.02,
+     "peak_rss_kib": 12936
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 9.241,
+     "peak_rss_kib": 121544
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 1.187,
+     "peak_rss_kib": 109400
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.035,
+     "peak_rss_kib": 19216
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 10.693,
+     "peak_rss_kib": 121544
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 54.886,
+     "peak_rss_kib": 505292
+    }
+   ],
+   "peak_rss_kib": 505292
+  },
+  {
+   "design": "uart_tx",
+   "pdk": "gf180",
+   "recipe": "track",
+   "run": "A1-uart_tx",
+   "gate_status": "failed",
+   "failed": [
+    "hold_closure",
+    "timing_setup",
+    "timing_hold",
+    "drv",
+    "timing_accuracy"
+   ],
+   "unverified": [],
+   "not_applicable": [],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "failed",
+     "reason": "native RustSTA holdsetup not closed after 8 iteration(s)"
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "failed",
+     "reason": "native: setup below 0.0 ns: [{'engine': 'ruststa', 'corner': 'ss', 'worst_setup_ns': -1.3584636398932446, 'margin_ns': 0.0}, {'engine': 'opensta', 'corner': 'ss', 'worst_setup_ns': -1.362820148468, 'margin_ns': 0.0}]; openrcx: setup below 0.0 ns: [{'engine': 'ruststa', 'corner': 'ss', 'worst_setup_ns': -1.357082021223805, 'margin_ns': 0.0}, {'engine': 'opensta', 'corner': 'ss', 'worst_setup_ns': -..."
+    },
+    "timing_hold": {
+     "status": "failed",
+     "reason": "native: hold below 0.05 ns: [{'engine': 'ruststa', 'corner': 'tt', 'worst_hold_ns': -1.0657216084776426, 'margin_ns': 0.05}, {'engine': 'opensta', 'corner': 'tt', 'worst_hold_ns': -1.065859436989, 'margin_ns': 0.05}, {'engine': 'ruststa', 'corner': 'ss', 'worst_hold_ns': -2.225602340820811, 'margin_ns': 0.05}, {'engine': 'opensta', 'corner': 'ss', 'worst_hold_ns': -2.225779294968, 'margin_ns': 0.0..."
+    },
+    "mpw_min_period": {
+     "status": "passed",
+     "reason": null
+    },
+    "drv": {
+     "status": "failed",
+     "reason": "native: RustSTA drv_status violated; RustSTA max_transition violation at tt; OpenSTA max_transition violation at tt; RustSTA max_capacitance violation at tt; OpenSTA max_capacitance violation at tt; RustSTA max_transition violation at ss; OpenSTA max_transition violation at ss; RustSTA max_capacitance violation at ss; OpenSTA max_capacitance violation at ss; RustSTA max_transition violation at ff;..."
+    },
+    "timing_accuracy": {
+     "status": "failed",
+     "reason": "native: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ff:endpoints']; openrcx: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ff:endpoints']"
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "failed",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 4.324344128038967,
+        "worst_hold_ns": -1.0657216084776426
+       },
+       "opensta": {
+        "worst_setup_ns": 4.320572376251,
+        "worst_hold_ns": -1.065859436989
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": -1.3584636398932446,
+        "worst_hold_ns": -2.225602340820811
+       },
+       "opensta": {
+        "worst_setup_ns": -1.362820148468,
+        "worst_hold_ns": -2.225779294968
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 6.695889263888725,
+        "worst_hold_ns": -0.5714669636877407
+       },
+       "opensta": {
+        "worst_setup_ns": 6.692397117615,
+        "worst_hold_ns": -0.571577012539
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 4.327664416887088,
+        "worst_hold_ns": -1.064563921357752
+       },
+       "opensta": {
+        "worst_setup_ns": 4.323786258698,
+        "worst_hold_ns": -1.064707159996
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": -1.357082021223805,
+        "worst_hold_ns": -2.2237466807980186
+       },
+       "opensta": {
+        "worst_setup_ns": -1.362288117409,
+        "worst_hold_ns": -2.223972320557
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 6.699248296333725,
+        "worst_hold_ns": -0.570771031403279
+       },
+       "opensta": {
+        "worst_setup_ns": 6.695896148682,
+        "worst_hold_ns": -0.570875763893
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 3.8063,
+       "pulse_ps": 0.0456,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 4.3567,
+       "pulse_ps": 0.0454,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 3.5072,
+       "pulse_ps": 0.0422,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 3.9134,
+       "pulse_ps": 0.0478,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 5.2127,
+       "pulse_ps": 0.0569,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 3.3655,
+       "pulse_ps": 0.0394,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "failed",
+    "iterations": 8,
+    "max_iterations": 8,
+    "target_margin_ns": 0.07,
+    "sizing": true,
+    "hold_cells_planned": 0,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 0,
+    "cells_resized": 65,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 4.830971612123898,
+        "hold_ns": -1.0572088517466458
+       },
+       "ss": {
+        "setup_ns": -0.6056046756507207,
+        "hold_ns": -2.2012518541690693
+       },
+       "ff": {
+        "setup_ns": 7.0757918877462895,
+        "hold_ns": -0.5691100310968206
+       }
+      },
+      "drv": 262,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 37,
+       "candidates": 41,
+       "by_reason": {
+        "setup": 3,
+        "max_transition": 36,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 1,
+       "drv_violations": 262,
+       "utilization_after": 0.468
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": 4.5968333716475085,
+        "hold_ns": -1.0516951241382824
+       },
+       "ss": {
+        "setup_ns": -0.8272754951129784,
+        "hold_ns": -2.1940434427977014
+       },
+       "ff": {
+        "setup_ns": 6.862214495441451,
+        "hold_ns": -0.5644847249774877
+       }
+      },
+      "drv": 248,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 15,
+       "candidates": 39,
+       "by_reason": {
+        "setup": 7,
+        "max_transition": 10,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 10,
+       "drv_violations": 248,
+       "utilization_after": 0.4952
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 2,
+      "worst": {
+       "tt": {
+        "setup_ns": 4.548814438770018,
+        "hold_ns": -1.0572930995951793
+       },
+       "ss": {
+        "setup_ns": -0.8950360621513092,
+        "hold_ns": -2.204585236115228
+       },
+       "ff": {
+        "setup_ns": 6.827435034267041,
+        "hold_ns": -0.5678741583708801
+       }
+      },
+      "drv": 255,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 9,
+       "candidates": 39,
+       "by_reason": {
+        "setup": 6,
+        "max_transition": 5,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 11,
+       "drv_violations": 255,
+       "utilization_after": 0.5129
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 3,
+      "worst": {
+       "tt": {
+        "setup_ns": 4.371145502292295,
+        "hold_ns": -1.0537512647317273
+       },
+       "ss": {
+        "setup_ns": -1.2559158294048292,
+        "hold_ns": -2.198307038620988
+       },
+       "ff": {
+        "setup_ns": 6.719911567954233,
+        "hold_ns": -0.5658026802605298
+       }
+      },
+      "drv": 224,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 1,
+       "candidates": 37,
+       "by_reason": {
+        "setup": 1,
+        "max_transition": 0,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 12,
+       "drv_violations": 224,
+       "utilization_after": 0.5133
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 4,
+      "worst": {
+       "tt": {
+        "setup_ns": 4.373005034386741,
+        "hold_ns": -1.053705019095073
+       },
+       "ss": {
+        "setup_ns": -1.252713780235723,
+        "hold_ns": -2.197168709222988
+       },
+       "ff": {
+        "setup_ns": 6.721033257029623,
+        "hold_ns": -0.5660616676367793
+       }
+      },
+      "drv": 235,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 1,
+       "candidates": 37,
+       "by_reason": {
+        "setup": 1,
+        "max_transition": 0,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 12,
+       "drv_violations": 235,
+       "utilization_after": 0.5152
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 5,
+      "worst": {
+       "tt": {
+        "setup_ns": 4.307317938852512,
+        "hold_ns": -1.0666713634967369
+       },
+       "ss": {
+        "setup_ns": -1.3973201164893698,
+        "hold_ns": -2.2261620420714303
+       },
+       "ff": {
+        "setup_ns": 6.686819971791887,
+        "hold_ns": -0.5725346729050173
+       }
+      },
+      "drv": 235,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 1,
+       "candidates": 36,
+       "by_reason": {
+        "setup": 1,
+        "max_transition": 0,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 13,
+       "drv_violations": 235,
+       "utilization_after": 0.517
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 6,
+      "worst": {
+       "tt": {
+        "setup_ns": 4.351865006957737,
+        "hold_ns": -1.053815957167395
+       },
+       "ss": {
+        "setup_ns": -1.3038261169582999,
+        "hold_ns": -2.1981924035720675
+       },
+       "ff": {
+        "setup_ns": 6.711225415619993,
+        "hold_ns": -0.5657371425973196
+       }
+      },
+      "drv": 239,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 1,
+       "candidates": 36,
+       "by_reason": {
+        "setup": 1,
+        "max_transition": 0,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 13,
+       "drv_violations": 239,
+       "utilization_after": 0.5189
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 7,
+      "worst": {
+       "tt": {
+        "setup_ns": 4.324344128038967,
+        "hold_ns": -1.0657216084776426
+       },
+       "ss": {
+        "setup_ns": -1.3584636398932446,
+        "hold_ns": -2.225602340820811
+       },
+       "ff": {
+        "setup_ns": 6.695889263888725,
+        "hold_ns": -0.5714669636877407
+       }
+      },
+      "drv": 243,
+      "hold_eco": null,
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": "iteration bound reached"
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "clock_buffer": 3,
+     "logic": 100,
+     "physical_only": 419
+    },
+    "total": 522,
+    "area_um2": {
+     "clock_buffer": 171.226,
+     "logic": 4954.566,
+     "physical_only": 4423.328
+    }
+   },
+   "die": {
+    "width_um": 117.6,
+    "height_um": 121.52,
+    "area_um2": 14290.752
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "failed",
+     "count": 7
+    }
+   },
+   "controls": {
+    "removed_hold_cell": "not_applicable",
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "planted_hold_uncertainty": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 21
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 61
+   },
+   "mpw_async_unchecked": 16,
+   "wall_seconds": 109.957,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.239,
+     "peak_rss_kib": 104384
+    },
+    {
+     "step": "floorplan",
+     "wall_seconds": 0.015,
+     "peak_rss_kib": 10248
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 12.813,
+     "peak_rss_kib": 231364
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 1.372,
+     "peak_rss_kib": 124280
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.02,
+     "peak_rss_kib": 13112
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.021,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 0.499,
+     "peak_rss_kib": 106944
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 4.733,
+     "peak_rss_kib": 231064
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 24.107,
+     "peak_rss_kib": 455944
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 0.506,
+     "peak_rss_kib": 106952
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 0.496,
+     "peak_rss_kib": 106904
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 1.996,
+     "peak_rss_kib": 287820
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 0.471,
+     "peak_rss_kib": 78560
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.237,
+     "peak_rss_kib": 104664
+    },
+    {
+     "step": "rerun_floorplan",
+     "wall_seconds": 0.014,
+     "peak_rss_kib": 10200
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 13.129,
+     "peak_rss_kib": 231740
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 1.413,
+     "peak_rss_kib": 124208
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.022,
+     "peak_rss_kib": 12884
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 14.852,
+     "peak_rss_kib": 231740
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 47.474,
+     "peak_rss_kib": 455124
+    }
+   ],
+   "peak_rss_kib": 455944
+  },
+  {
+   "design": "alu",
+   "pdk": "sky130",
+   "recipe": "track",
+   "run": "A2-alu",
+   "gate_status": "failed",
+   "failed": [
+    "timing_accuracy"
+   ],
+   "unverified": [],
+   "not_applicable": [
+    "mpw_min_period"
+   ],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_hold": {
+     "status": "passed",
+     "reason": null
+    },
+    "mpw_min_period": {
+     "status": "not_applicable",
+     "reason": "native: combinational design: no clocked cell; both engines report no pulse-width or period check {'ruststa_pulse_width_status': 'unconstrained', 'ruststa_pulse_rows': 0, 'ruststa_period_rows': 0, 'opensta_mpw_rows': 0, 'opensta_period_rows': 0, 'ruststa_unchecked_pulse_pins': 0}; openrcx: combinational design: no clocked cell; both engines report no pulse-width or period check {'ruststa_pulse_wid..."
+    },
+    "drv": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_accuracy": {
+     "status": "failed",
+     "reason": "native: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ff:endpoints']; openrcx: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ff:endpoints']"
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "unverified",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 7.559577353318828,
+        "worst_hold_ns": 0.6337219311317287
+       },
+       "opensta": {
+        "worst_setup_ns": 7.558369159698,
+        "worst_hold_ns": 0.63479167223
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 5.760163457171659,
+        "worst_hold_ns": 0.890940485177714
+       },
+       "opensta": {
+        "worst_setup_ns": 5.75736951828,
+        "worst_hold_ns": 0.891347467899
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.25550886012323,
+        "worst_hold_ns": 0.5252463742968376
+       },
+       "opensta": {
+        "worst_setup_ns": 8.255048751831,
+        "worst_hold_ns": 0.526719808578
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 7.584548845990254,
+        "worst_hold_ns": 0.6300966460188376
+       },
+       "opensta": {
+        "worst_setup_ns": 7.583171844482,
+        "worst_hold_ns": 0.630873799324
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 5.823570805321176,
+        "worst_hold_ns": 0.8835222299295706
+       },
+       "opensta": {
+        "worst_setup_ns": 5.821632385254,
+        "worst_hold_ns": 0.883755981922
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.267365228825248,
+        "worst_hold_ns": 0.5227342432299602
+       },
+       "opensta": {
+        "worst_setup_ns": 8.266265869141,
+        "worst_hold_ns": 0.523496568203
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 1.6567,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 3.2603,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 1.4734,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 2.0741,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 1.9454,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 1.4924,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "passed",
+    "iterations": 2,
+    "max_iterations": 8,
+    "target_margin_ns": 0.07,
+    "sizing": true,
+    "hold_cells_planned": 0,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 1,
+    "cells_resized": 2,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 7.5472643474920496,
+        "hold_ns": 0.6291435596150146
+       },
+       "ss": {
+        "setup_ns": 5.73954268894055,
+        "hold_ns": 0.8826760864871478
+       },
+       "ff": {
+        "setup_ns": 8.249913185863024,
+        "hold_ns": 0.522534826778863
+       }
+      },
+      "drv": 12,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 2,
+       "candidates": 2,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 2,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 12,
+       "utilization_after": 0.3454
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": 7.559577353318828,
+        "hold_ns": 0.6337219311317287
+       },
+       "ss": {
+        "setup_ns": 5.760163457171659,
+        "hold_ns": 0.890940485177714
+       },
+       "ff": {
+        "setup_ns": 8.25550886012323,
+        "hold_ns": 0.5252463742968376
+       }
+      },
+      "drv": 0,
+      "hold_eco": null,
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 1,
+       "before": 1,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "logic": 253,
+     "physical_only": 837
+    },
+    "total": 1090,
+    "area_um2": {
+     "logic": 2294.701,
+     "physical_only": 4349.171
+    }
+   },
+   "die": {
+    "width_um": 101.66,
+    "height_um": 103.36,
+    "area_um2": 10507.578
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "unverified",
+     "count": null
+    }
+   },
+   "controls": {
+    "removed_hold_cell": "not_applicable",
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "planted_hold_uncertainty": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 15
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 56
+   },
+   "mpw_async_unchecked": null,
+   "wall_seconds": 184.999,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.175,
+     "peak_rss_kib": 61140
+    },
+    {
+     "step": "floorplan",
+     "wall_seconds": 0.03,
+     "peak_rss_kib": 13512
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 7.641,
+     "peak_rss_kib": 121160
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 1.139,
+     "peak_rss_kib": 110444
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.037,
+     "peak_rss_kib": 19916
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.044,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 4.734,
+     "peak_rss_kib": 325668
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 4.094,
+     "peak_rss_kib": 121132
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 46.673,
+     "peak_rss_kib": 528028
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 4.649,
+     "peak_rss_kib": 325884
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 4.532,
+     "peak_rss_kib": 326180
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 3.745,
+     "peak_rss_kib": 325876
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 0.035,
+     "peak_rss_kib": 13160
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.152,
+     "peak_rss_kib": 61676
+    },
+    {
+     "step": "rerun_floorplan",
+     "wall_seconds": 0.028,
+     "peak_rss_kib": 13568
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 7.294,
+     "peak_rss_kib": 121160
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 1.072,
+     "peak_rss_kib": 110612
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.037,
+     "peak_rss_kib": 20176
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 8.617,
+     "peak_rss_kib": 121160
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 98.519,
+     "peak_rss_kib": 528284
+    }
+   ],
+   "peak_rss_kib": 528284
+  },
+  {
+   "design": "alu",
+   "pdk": "gf180",
+   "recipe": "track",
+   "run": "A2-alu",
+   "gate_status": "failed",
+   "failed": [
+    "hold_closure",
+    "timing_setup",
+    "drv",
+    "timing_accuracy"
+   ],
+   "unverified": [],
+   "not_applicable": [
+    "mpw_min_period"
+   ],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "failed",
+     "reason": "native RustSTA holdsetup not closed after 3 iteration(s)"
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "failed",
+     "reason": "native: setup below 0.0 ns: [{'engine': 'ruststa', 'corner': 'ss', 'worst_setup_ns': -3.945558360772619, 'margin_ns': 0.0}, {'engine': 'opensta', 'corner': 'ss', 'worst_setup_ns': -3.946366786957, 'margin_ns': 0.0}]; openrcx: setup below 0.0 ns: [{'engine': 'ruststa', 'corner': 'ss', 'worst_setup_ns': -3.903613880997609, 'margin_ns': 0.0}, {'engine': 'opensta', 'corner': 'ss', 'worst_setup_ns': -3..."
+    },
+    "timing_hold": {
+     "status": "passed",
+     "reason": null
+    },
+    "mpw_min_period": {
+     "status": "not_applicable",
+     "reason": "native: combinational design: no clocked cell; both engines report no pulse-width or period check {'ruststa_pulse_width_status': 'unconstrained', 'ruststa_pulse_rows': 0, 'ruststa_period_rows': 0, 'opensta_mpw_rows': 0, 'opensta_period_rows': 0, 'ruststa_unchecked_pulse_pins': 0}; openrcx: combinational design: no clocked cell; both engines report no pulse-width or period check {'ruststa_pulse_wid..."
+    },
+    "drv": {
+     "status": "failed",
+     "reason": "native: RustSTA drv_status violated; RustSTA max_transition violation at tt; OpenSTA max_transition violation at tt; RustSTA max_capacitance violation at tt; OpenSTA max_capacitance violation at tt; RustSTA max_transition violation at ss; OpenSTA max_transition violation at ss; RustSTA max_capacitance violation at ss; OpenSTA max_capacitance violation at ss; RustSTA max_transition violation at ff;..."
+    },
+    "timing_accuracy": {
+     "status": "failed",
+     "reason": "native: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ff:endpoints']; openrcx: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ff:endpoints']"
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "failed",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 2.9454274327691126,
+        "worst_hold_ns": 0.8149775355863556
+       },
+       "opensta": {
+        "worst_setup_ns": 2.944759607315,
+        "worst_hold_ns": 0.814992547035
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": -3.945558360772619,
+        "worst_hold_ns": 1.2674648366545922
+       },
+       "opensta": {
+        "worst_setup_ns": -3.946366786957,
+        "worst_hold_ns": 1.267482876778
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 5.775070721172815,
+        "worst_hold_ns": 0.6255987338378133
+       },
+       "opensta": {
+        "worst_setup_ns": 5.774507045746,
+        "worst_hold_ns": 0.625616908073
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 2.9707621404680227,
+        "worst_hold_ns": 0.8075734647436524
+       },
+       "opensta": {
+        "worst_setup_ns": 2.970070123672,
+        "worst_hold_ns": 0.807589709759
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": -3.903613880997609,
+        "worst_hold_ns": 1.250708833659529
+       },
+       "opensta": {
+        "worst_setup_ns": -3.90442276001,
+        "worst_hold_ns": 1.250733375549
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 5.792403503428988,
+        "worst_hold_ns": 0.6214440872344089
+       },
+       "opensta": {
+        "worst_setup_ns": 5.791858673096,
+        "worst_hold_ns": 0.621462106705
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 1.8311,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 2.1126,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 1.7114,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 1.8682,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 2.5576,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 1.6275,
+       "pulse_ps": 0.0,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "failed",
+    "iterations": 3,
+    "max_iterations": 8,
+    "target_margin_ns": 0.07,
+    "sizing": true,
+    "hold_cells_planned": 0,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 0,
+    "cells_resized": 188,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 2.6298484817067918,
+        "hold_ns": 0.8354297390032311
+       },
+       "ss": {
+        "setup_ns": -4.627300935478917,
+        "hold_ns": 1.299295014047749
+       },
+       "ff": {
+        "setup_ns": 5.6076393803788935,
+        "hold_ns": 0.6395773385975162
+       }
+      },
+      "drv": 467,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 124,
+       "candidates": 140,
+       "by_reason": {
+        "setup": 31,
+        "max_transition": 114,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 6,
+       "drv_violations": 467,
+       "utilization_after": 0.6196
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": 2.8214685525219165,
+        "hold_ns": 0.7886467569680929
+       },
+       "ss": {
+        "setup_ns": -4.18431287810691,
+        "hold_ns": 1.204296678875648
+       },
+       "ff": {
+        "setup_ns": 5.702956288467297,
+        "hold_ns": 0.6118012408937049
+       }
+      },
+      "drv": 499,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 60,
+       "candidates": 144,
+       "by_reason": {
+        "setup": 7,
+        "max_transition": 58,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 4,
+       "drv_violations": 499,
+       "utilization_after": 0.6969
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 2,
+      "worst": {
+       "tt": {
+        "setup_ns": 2.9454274327691126,
+        "hold_ns": 0.8149775355863556
+       },
+       "ss": {
+        "setup_ns": -3.945558360772619,
+        "hold_ns": 1.2674648366545922
+       },
+       "ff": {
+        "setup_ns": 5.775070721172815,
+        "hold_ns": 0.6255987338378133
+       }
+      },
+      "drv": 421,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 4,
+       "candidates": 120,
+       "by_reason": {
+        "setup": 2,
+        "max_transition": 3,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 3,
+       "drv_violations": 421,
+       "utilization_after": 0.6999
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "logic": 252,
+     "physical_only": 566
+    },
+    "total": 818,
+    "area_um2": {
+     "logic": 10291.098,
+     "physical_only": 4476.013
+    }
+   },
+   "die": {
+    "width_um": 141.68,
+    "height_um": 145.04,
+    "area_um2": 20549.267
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "failed",
+     "count": 7
+    }
+   },
+   "controls": {
+    "removed_hold_cell": "not_applicable",
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "planted_hold_uncertainty": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 16
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 57
+   },
+   "mpw_async_unchecked": null,
+   "wall_seconds": 153.612,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.249,
+     "peak_rss_kib": 104652
+    },
+    {
+     "step": "floorplan",
+     "wall_seconds": 0.023,
+     "peak_rss_kib": 10680
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 8.386,
+     "peak_rss_kib": 231540
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 1.399,
+     "peak_rss_kib": 125636
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.025,
+     "peak_rss_kib": 14748
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.03,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 5.089,
+     "peak_rss_kib": 337932
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 6.573,
+     "peak_rss_kib": 231296
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 33.418,
+     "peak_rss_kib": 464024
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 5.178,
+     "peak_rss_kib": 338476
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 4.99,
+     "peak_rss_kib": 338552
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 4.024,
+     "peak_rss_kib": 338516
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 0.034,
+     "peak_rss_kib": 9768
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.246,
+     "peak_rss_kib": 104656
+    },
+    {
+     "step": "rerun_floorplan",
+     "wall_seconds": 0.023,
+     "peak_rss_kib": 10736
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 8.457,
+     "peak_rss_kib": 231428
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 1.458,
+     "peak_rss_kib": 125688
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.026,
+     "peak_rss_kib": 15036
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 10.256,
+     "peak_rss_kib": 231428
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 73.577,
+     "peak_rss_kib": 462184
+    }
+   ],
+   "peak_rss_kib": 464024
+  },
+  {
+   "design": "regfile",
+   "pdk": "sky130",
+   "recipe": "track",
+   "run": "A2-regfile",
+   "gate_status": "failed",
+   "failed": [
+    "drv",
+    "timing_accuracy"
+   ],
+   "unverified": [],
+   "not_applicable": [],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_hold": {
+     "status": "passed",
+     "reason": null
+    },
+    "mpw_min_period": {
+     "status": "passed",
+     "reason": null
+    },
+    "drv": {
+     "status": "failed",
+     "reason": "native: RustSTA drv_status violated; RustSTA max_transition violation at ss; OpenSTA max_transition violation at ss; RustSTA max_capacitance violation at ss; OpenSTA max_capacitance violation at ss; openrcx: RustSTA drv_status violated; RustSTA max_transition violation at ss; OpenSTA max_transition violation at ss; RustSTA max_capacitance violation at ss; OpenSTA max_capacitance violation at ss"
+    },
+    "timing_accuracy": {
+     "status": "failed",
+     "reason": "native: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ss:pulse']; openrcx: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ss:pulse', 'ff:pulse']"
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "unverified",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 8.227483716923022,
+        "worst_hold_ns": 0.08126735815595099
+       },
+       "opensta": {
+        "worst_setup_ns": 8.226612091064,
+        "worst_hold_ns": 0.080453701317
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 6.769933209476697,
+        "worst_hold_ns": 0.10896111182442358
+       },
+       "opensta": {
+        "worst_setup_ns": 6.767452716827,
+        "worst_hold_ns": 0.106985203922
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.782133064547113,
+        "worst_hold_ns": 0.12029563990135
+       },
+       "opensta": {
+        "worst_setup_ns": 8.781755447388,
+        "worst_hold_ns": 0.119966343045
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 8.254176787310515,
+        "worst_hold_ns": 0.09497137850460147
+       },
+       "opensta": {
+        "worst_setup_ns": 8.253213882446,
+        "worst_hold_ns": 0.09408929199
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 6.81810734011048,
+        "worst_hold_ns": 0.12587099030929094
+       },
+       "opensta": {
+        "worst_setup_ns": 6.816607952118,
+        "worst_hold_ns": 0.124676384032
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 8.797043581175487,
+        "worst_hold_ns": 0.12783973723391545
+       },
+       "opensta": {
+        "worst_setup_ns": 8.796277046204,
+        "worst_hold_ns": 0.127251461148
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 1.0552,
+       "pulse_ps": 0.8681,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 2.9926,
+       "pulse_ps": 1.8223,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.4409,
+       "pulse_ps": 0.4843,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 1.1249,
+       "pulse_ps": 0.9359,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 2.1323,
+       "pulse_ps": 1.1475,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 0.7899,
+       "pulse_ps": 1.0077,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "passed",
+    "iterations": 5,
+    "max_iterations": 8,
+    "target_margin_ns": 0.07,
+    "sizing": true,
+    "hold_cells_planned": 287,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 2,
+    "cells_resized": 0,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.258366513064843,
+        "hold_ns": -0.7674198834608357
+       },
+       "ss": {
+        "setup_ns": 6.826274126851226,
+        "hold_ns": -1.5366813542043625
+       },
+       "ff": {
+        "setup_ns": 8.798942921224105,
+        "hold_ns": -0.44242885578317165
+       }
+      },
+      "drv": 15,
+      "hold_eco": {
+       "violating_sinks": 120,
+       "planned_sinks": 120,
+       "cells": 195,
+       "area_um2": 1772.9504
+      },
+      "size_eco": {
+       "resized": 0,
+       "candidates": 1,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 0,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 15,
+       "utilization_after": 0.4756
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.223120662087267,
+        "hold_ns": -0.00878371894470964
+       },
+       "ss": {
+        "setup_ns": 6.745949130445424,
+        "hold_ns": -0.07405244802978839
+       },
+       "ff": {
+        "setup_ns": 8.782097459563282,
+        "hold_ns": 0.056708444672211755
+       }
+      },
+      "drv": 11,
+      "hold_eco": {
+       "violating_sinks": 80,
+       "planned_sinks": 80,
+       "cells": 80,
+       "area_um2": 300.28800000000035
+      },
+      "size_eco": {
+       "resized": 0,
+       "candidates": 1,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 0,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 11,
+       "utilization_after": 0.6489
+      },
+      "antenna": "violated",
+      "antenna_jumpers": {
+       "status": "unrepaired",
+       "jumpers": 0,
+       "before": 1,
+       "after": 1,
+       "unrepaired": [
+        {
+         "net": "raddr_a[0]",
+         "layer": "met1",
+         "ratio": 376.55555555555554,
+         "effective_limit": 360.0,
+         "reason": "no legal jumper position on the gates' partial net"
+        }
+       ]
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 2,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.203564431795076,
+        "hold_ns": 0.03721861854418207
+       },
+       "ss": {
+        "setup_ns": 6.730220050209427,
+        "hold_ns": 0.019208175888848267
+       },
+       "ff": {
+        "setup_ns": 8.766898496968114,
+        "hold_ns": 0.07700368850762562
+       }
+      },
+      "drv": 47,
+      "hold_eco": {
+       "violating_sinks": 5,
+       "planned_sinks": 5,
+       "cells": 5,
+       "area_um2": 18.768
+      },
+      "size_eco": {
+       "resized": 0,
+       "candidates": 3,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 0,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 47,
+       "utilization_after": 0.6782
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 3,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.162718612234475,
+        "hold_ns": 0.008880871961463033
+       },
+       "ss": {
+        "setup_ns": 6.654047175171476,
+        "hold_ns": -0.06859330887361748
+       },
+       "ff": {
+        "setup_ns": 8.74408216297263,
+        "hold_ns": 0.09260910934474442
+       }
+      },
+      "drv": 31,
+      "hold_eco": {
+       "violating_sinks": 7,
+       "planned_sinks": 7,
+       "cells": 7,
+       "area_um2": 26.275199999999998
+      },
+      "size_eco": {
+       "resized": 0,
+       "candidates": 2,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 0,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 31,
+       "utilization_after": 0.6801
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 1,
+       "before": 1,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 4,
+      "worst": {
+       "tt": {
+        "setup_ns": 8.227483716923022,
+        "hold_ns": 0.08126735815595099
+       },
+       "ss": {
+        "setup_ns": 6.769933209476697,
+        "hold_ns": 0.10896111182442358
+       },
+       "ff": {
+        "setup_ns": 8.782133064547113,
+        "hold_ns": 0.12029563990135
+       }
+      },
+      "drv": 12,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 0,
+       "candidates": 1,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 0,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 12,
+       "utilization_after": 0.6826
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "repaired",
+       "jumpers": 1,
+       "before": 1,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": "no repair applies (setup/DRV not resizable further)"
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "clock_buffer": 9,
+     "hold_cell": 287,
+     "logic": 372,
+     "physical_only": 873
+    },
+    "total": 1541,
+    "area_um2": {
+     "clock_buffer": 45.043,
+     "hold_cell": 2118.282,
+     "logic": 4865.917,
+     "physical_only": 3201.821
+    }
+   },
+   "die": {
+    "width_um": 121.9,
+    "height_um": 122.4,
+    "area_um2": 14920.56
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "unverified",
+     "count": null
+    }
+   },
+   "controls": {
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "removed_hold_cell": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 18
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 58
+   },
+   "mpw_async_unchecked": 64,
+   "wall_seconds": 431.13,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.153,
+     "peak_rss_kib": 62416
+    },
+    {
+     "step": "floorplan",
+     "wall_seconds": 0.045,
+     "peak_rss_kib": 13692
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 33.793,
+     "peak_rss_kib": 121464
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 1.168,
+     "peak_rss_kib": 113420
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.052,
+     "peak_rss_kib": 22676
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.065,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 0.579,
+     "peak_rss_kib": 67696
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 9.367,
+     "peak_rss_kib": 120776
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 113.334,
+     "peak_rss_kib": 508008
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 0.589,
+     "peak_rss_kib": 73740
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 0.603,
+     "peak_rss_kib": 73484
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 6.158,
+     "peak_rss_kib": 322740
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 2.879,
+     "peak_rss_kib": 62248
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.15,
+     "peak_rss_kib": 62476
+    },
+    {
+     "step": "rerun_floorplan",
+     "wall_seconds": 0.044,
+     "peak_rss_kib": 13756
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 33.272,
+     "peak_rss_kib": 121148
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 1.156,
+     "peak_rss_kib": 113492
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.06,
+     "peak_rss_kib": 21304
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 34.735,
+     "peak_rss_kib": 121148
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 227.237,
+     "peak_rss_kib": 508168
+    }
+   ],
+   "peak_rss_kib": 508168
+  },
+  {
+   "design": "regfile",
+   "pdk": "gf180",
+   "recipe": "track",
+   "run": "A2-regfile",
+   "gate_status": "failed",
+   "failed": [
+    "hold_closure",
+    "timing_hold",
+    "drv",
+    "timing_accuracy"
+   ],
+   "unverified": [],
+   "not_applicable": [],
+   "statuses": {
+    "inputs_frozen": {
+     "status": "passed",
+     "reason": null
+    },
+    "implementation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_policy": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_prelayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "hold_closure": {
+     "status": "failed",
+     "reason": "native RustSTA holdsetup not closed after 8 iteration(s)"
+    },
+    "antenna_native": {
+     "status": "passed",
+     "reason": null
+    },
+    "extraction": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_setup": {
+     "status": "passed",
+     "reason": null
+    },
+    "timing_hold": {
+     "status": "failed",
+     "reason": "native: hold below 0.05 ns: [{'engine': 'ruststa', 'corner': 'tt', 'worst_hold_ns': -1.3674178255260079, 'margin_ns': 0.05}, {'engine': 'opensta', 'corner': 'tt', 'worst_hold_ns': -1.36897444725, 'margin_ns': 0.05}, {'engine': 'ruststa', 'corner': 'ss', 'worst_hold_ns': -2.845604531454083, 'margin_ns': 0.05}, {'engine': 'opensta', 'corner': 'ss', 'worst_hold_ns': -2.846927642822, 'margin_ns': 0.05..."
+    },
+    "mpw_min_period": {
+     "status": "passed",
+     "reason": null
+    },
+    "drv": {
+     "status": "failed",
+     "reason": "native: RustSTA drv_status violated; RustSTA max_transition violation at tt; OpenSTA max_transition violation at tt; RustSTA max_capacitance violation at tt; OpenSTA max_capacitance violation at tt; RustSTA max_transition violation at ss; OpenSTA max_transition violation at ss; RustSTA max_capacitance violation at ss; OpenSTA max_capacitance violation at ss; RustSTA max_transition violation at ff;..."
+    },
+    "timing_accuracy": {
+     "status": "failed",
+     "reason": "native: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ff:endpoints']; openrcx: parity outside 1 ps: ['tt:endpoints', 'ss:endpoints', 'ff:endpoints']"
+    },
+    "gds_xor": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_magic": {
+     "status": "passed",
+     "reason": null
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "reason": null
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_final": {
+     "status": "passed",
+     "reason": null
+    },
+    "cec_powered": {
+     "status": "passed",
+     "reason": null
+    },
+    "simulation": {
+     "status": "passed",
+     "reason": null
+    },
+    "cell_proofs": {
+     "status": "passed",
+     "reason": null
+    },
+    "artifact_binding": {
+     "status": "passed",
+     "reason": null
+    },
+    "determinism": {
+     "status": "passed",
+     "reason": null
+    },
+    "controls": {
+     "status": "passed",
+     "reason": null
+    },
+    "density": {
+     "status": "failed",
+     "reason": "see density.json"
+    }
+   },
+   "timing": {
+    "worst": {
+     "native": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 5.09241501011009,
+        "worst_hold_ns": -1.3674178255260079
+       },
+       "opensta": {
+        "worst_setup_ns": 5.091077327728,
+        "worst_hold_ns": -1.36897444725
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 0.3096544419022731,
+        "worst_hold_ns": -2.845604531454083
+       },
+       "opensta": {
+        "worst_setup_ns": 0.308418184519,
+        "worst_hold_ns": -2.846927642822
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 7.103353900530874,
+        "worst_hold_ns": -0.7409119224253744
+       },
+       "opensta": {
+        "worst_setup_ns": 7.102115631104,
+        "worst_hold_ns": -0.742395401001
+       }
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "ruststa": {
+        "worst_setup_ns": 5.108979919126899,
+        "worst_hold_ns": -1.3648035770372682
+       },
+       "opensta": {
+        "worst_setup_ns": 5.107574939728,
+        "worst_hold_ns": -1.366426587105
+       }
+      },
+      "ss": {
+       "ruststa": {
+        "worst_setup_ns": 0.3380807163539181,
+        "worst_hold_ns": -2.840988052288233
+       },
+       "opensta": {
+        "worst_setup_ns": 0.336068958044,
+        "worst_hold_ns": -2.843232393265
+       }
+      },
+      "ff": {
+       "ruststa": {
+        "worst_setup_ns": 7.113643881038602,
+        "worst_hold_ns": -0.7392520655744702
+       },
+       "opensta": {
+        "worst_setup_ns": 7.11248254776,
+        "worst_hold_ns": -0.740637183189
+       }
+      }
+     }
+    },
+    "parity": {
+     "native": {
+      "tt": {
+       "endpoints_ps": 2.9751,
+       "pulse_ps": 0.1617,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 3.1194,
+       "pulse_ps": 0.2722,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 2.6009,
+       "pulse_ps": 0.3193,
+       "drv_equal": true
+      }
+     },
+     "openrcx": {
+      "tt": {
+       "endpoints_ps": 3.0395,
+       "pulse_ps": 0.4407,
+       "drv_equal": true
+      },
+      "ss": {
+       "endpoints_ps": 3.9758,
+       "pulse_ps": 0.3205,
+       "drv_equal": true
+      },
+      "ff": {
+       "endpoints_ps": 2.3408,
+       "pulse_ps": 0.2953,
+       "drv_equal": true
+      }
+     }
+    }
+   },
+   "closure": {
+    "status": "failed",
+    "iterations": 8,
+    "max_iterations": 8,
+    "target_margin_ns": 0.07,
+    "sizing": true,
+    "hold_cells_planned": 0,
+    "antenna_diodes_planned": 0,
+    "antenna_jumpers": 0,
+    "cells_resized": 102,
+    "trace": [
+     {
+      "iteration": 0,
+      "worst": {
+       "tt": {
+        "setup_ns": 5.104305948819932,
+        "hold_ns": -1.3129034309365195
+       },
+       "ss": {
+        "setup_ns": 0.34199634751617936,
+        "hold_ns": -2.7192473427509425
+       },
+       "ff": {
+        "setup_ns": 7.108020614898529,
+        "hold_ns": -0.7137618334253418
+       }
+      },
+      "drv": 578,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 42,
+       "candidates": 54,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 42,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 578,
+       "utilization_after": 0.3899
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 1,
+      "worst": {
+       "tt": {
+        "setup_ns": 5.055204599606944,
+        "hold_ns": -1.3480992453472724
+       },
+       "ss": {
+        "setup_ns": 0.25044757059703926,
+        "hold_ns": -2.792539981652312
+       },
+       "ff": {
+        "setup_ns": 7.079523710015271,
+        "hold_ns": -0.7330222678684603
+       }
+      },
+      "drv": 426,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 34,
+       "candidates": 63,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 34,
+        "max_capacitance": 1
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 426,
+       "utilization_after": 0.4048
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 2,
+      "worst": {
+       "tt": {
+        "setup_ns": 5.0184344774708,
+        "hold_ns": -1.3869785207501337
+       },
+       "ss": {
+        "setup_ns": 0.17290948078338708,
+        "hold_ns": -2.875389416021586
+       },
+       "ff": {
+        "setup_ns": 7.056970673680105,
+        "hold_ns": -0.7538954951786923
+       }
+      },
+      "drv": 380,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 11,
+       "candidates": 53,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 11,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 380,
+       "utilization_after": 0.4083
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 3,
+      "worst": {
+       "tt": {
+        "setup_ns": 4.9649914909307205,
+        "hold_ns": -1.3265558673064628
+       },
+       "ss": {
+        "setup_ns": 0.04715313040019353,
+        "hold_ns": -2.7536235097969195
+       },
+       "ff": {
+        "setup_ns": 7.033583005229566,
+        "hold_ns": -0.719928019981904
+       }
+      },
+      "drv": 354,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 6,
+       "candidates": 51,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 6,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 354,
+       "utilization_after": 0.409
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 4,
+      "worst": {
+       "tt": {
+        "setup_ns": 5.002034049091911,
+        "hold_ns": -1.3981473626786167
+       },
+       "ss": {
+        "setup_ns": 0.12761446980821844,
+        "hold_ns": -2.9035099154021196
+       },
+       "ff": {
+        "setup_ns": 7.051818276845188,
+        "hold_ns": -0.7588268764639865
+       }
+      },
+      "drv": 357,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 1,
+       "candidates": 46,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 1,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 357,
+       "utilization_after": 0.4091
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 5,
+      "worst": {
+       "tt": {
+        "setup_ns": 5.032697912994235,
+        "hold_ns": -1.3570356714118725
+       },
+       "ss": {
+        "setup_ns": 0.19951551527192457,
+        "hold_ns": -2.812940168236727
+       },
+       "ff": {
+        "setup_ns": 7.06730673331138,
+        "hold_ns": -0.7376186377871443
+       }
+      },
+      "drv": 355,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 5,
+       "candidates": 47,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 5,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 355,
+       "utilization_after": 0.4097
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 6,
+      "worst": {
+       "tt": {
+        "setup_ns": 5.004488812811003,
+        "hold_ns": -1.3818079038732332
+       },
+       "ss": {
+        "setup_ns": 0.12404829213837765,
+        "hold_ns": -2.8720510258865866
+       },
+       "ff": {
+        "setup_ns": 7.053878321531092,
+        "hold_ns": -0.7487841662691723
+       }
+      },
+      "drv": 367,
+      "hold_eco": null,
+      "size_eco": {
+       "resized": 3,
+       "candidates": 47,
+       "by_reason": {
+        "setup": 0,
+        "max_transition": 3,
+        "max_capacitance": 0
+       },
+       "failing_setup_endpoints": 0,
+       "drv_violations": 367,
+       "utilization_after": 0.4109
+      },
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": null
+     },
+     {
+      "iteration": 7,
+      "worst": {
+       "tt": {
+        "setup_ns": 5.09241501011009,
+        "hold_ns": -1.3674178255260079
+       },
+       "ss": {
+        "setup_ns": 0.3096544419022731,
+        "hold_ns": -2.845604531454083
+       },
+       "ff": {
+        "setup_ns": 7.103353900530874,
+        "hold_ns": -0.7409119224253744
+       }
+      },
+      "drv": 330,
+      "hold_eco": null,
+      "size_eco": null,
+      "antenna": "passed",
+      "antenna_jumpers": {
+       "status": "clean",
+       "jumpers": 0,
+       "before": 0,
+       "after": 0,
+       "unrepaired": []
+      },
+      "stopped": "iteration bound reached"
+     }
+    ]
+   },
+   "cells": {
+    "count": {
+     "clock_buffer": 9,
+     "logic": 358,
+     "physical_only": 1741
+    },
+    "total": 2108,
+    "area_um2": {
+     "clock_buffer": 513.677,
+     "logic": 15291.763,
+     "physical_only": 21411.981
+    }
+   },
+   "die": {
+    "width_um": 213.92,
+    "height_um": 215.6,
+    "area_um2": 46121.152
+   },
+   "signoff": {
+    "gds_xor": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_magic": {
+     "status": "passed",
+     "count": 0
+    },
+    "drc_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "antenna_deck": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_netgen": {
+     "status": "passed",
+     "count": 0
+    },
+    "lvs_klayout": {
+     "status": "passed",
+     "count": 0
+    },
+    "density": {
+     "status": "failed",
+     "count": 8
+    }
+   },
+   "controls": {
+    "removed_hold_cell": "not_applicable",
+    "drc_spacing": true,
+    "label_swap": true,
+    "removed_via": true,
+    "planted_hold_uncertainty": true,
+    "tampered_sdc": true,
+    "tampered_spef": true,
+    "inverted_output": true,
+    "missing_tool": true,
+    "relaxed_manifest": true,
+    "antenna_planted": true,
+    "tampered_artifact": true
+   },
+   "determinism": {
+    "status": "passed",
+    "artifacts": 21
+   },
+   "artifact_binding": {
+    "status": "passed",
+    "artifacts": 61
+   },
+   "mpw_async_unchecked": 64,
+   "wall_seconds": 232.423,
+   "steps": [
+    {
+     "step": "synthesis",
+     "wall_seconds": 0.236,
+     "peak_rss_kib": 104024
+    },
+    {
+     "step": "floorplan",
+     "wall_seconds": 0.034,
+     "peak_rss_kib": 10792
+    },
+    {
+     "step": "place_cts_route_closure",
+     "wall_seconds": 39.82,
+     "peak_rss_kib": 231416
+    },
+    {
+     "step": "openrcx",
+     "wall_seconds": 1.447,
+     "peak_rss_kib": 127476
+    },
+    {
+     "step": "gds_export",
+     "wall_seconds": 0.033,
+     "peak_rss_kib": 18680
+    },
+    {
+     "step": "cell_policy",
+     "wall_seconds": 0.048,
+     "peak_rss_kib": null
+    },
+    {
+     "step": "cec_prelayout",
+     "wall_seconds": 0.558,
+     "peak_rss_kib": 106732
+    },
+    {
+     "step": "timing",
+     "wall_seconds": 8.379,
+     "peak_rss_kib": 231560
+    },
+    {
+     "step": "signoff",
+     "wall_seconds": 40.553,
+     "peak_rss_kib": 469900
+    },
+    {
+     "step": "cec_final",
+     "wall_seconds": 0.561,
+     "peak_rss_kib": 106704
+    },
+    {
+     "step": "cec_powered",
+     "wall_seconds": 0.584,
+     "peak_rss_kib": 107136
+    },
+    {
+     "step": "simulation",
+     "wall_seconds": 4.875,
+     "peak_rss_kib": 289812
+    },
+    {
+     "step": "cell_proofs",
+     "wall_seconds": 0.504,
+     "peak_rss_kib": 78976
+    },
+    {
+     "step": "rerun_synthesis",
+     "wall_seconds": 0.25,
+     "peak_rss_kib": 104152
+    },
+    {
+     "step": "rerun_floorplan",
+     "wall_seconds": 0.037,
+     "peak_rss_kib": 10776
+    },
+    {
+     "step": "rerun_place_cts_route_closure",
+     "wall_seconds": 39.979,
+     "peak_rss_kib": 231624
+    },
+    {
+     "step": "rerun_openrcx",
+     "wall_seconds": 1.449,
+     "peak_rss_kib": 127776
+    },
+    {
+     "step": "rerun_gds_export",
+     "wall_seconds": 0.037,
+     "peak_rss_kib": 19236
+    },
+    {
+     "step": "determinism_rerun",
+     "wall_seconds": 41.809,
+     "peak_rss_kib": 231624
+    },
+    {
+     "step": "controls",
+     "wall_seconds": 92.609,
+     "peak_rss_kib": 467512
+    }
+   ],
+   "peak_rss_kib": 469900
+  }
+ ],
+ "table": {
+  "pipeline/sky130": {
+   "status": "passed",
+   "failed": [],
+   "unverified": []
+  },
+  "pipeline/gf180": {
+   "status": "passed",
+   "failed": [],
+   "unverified": []
+  },
+  "dense/sky130": {
+   "status": "passed",
+   "failed": [],
+   "unverified": []
+  },
+  "dense/gf180": {
+   "status": "passed",
+   "failed": [],
+   "unverified": []
+  },
+  "uart_tx/sky130": {
+   "status": "failed",
+   "failed": [
+    "timing_accuracy"
+   ],
+   "unverified": []
+  },
+  "uart_tx/gf180": {
+   "status": "failed",
+   "failed": [
+    "hold_closure",
+    "timing_setup",
+    "timing_hold",
+    "drv",
+    "timing_accuracy"
+   ],
+   "unverified": []
+  },
+  "alu/sky130": {
+   "status": "failed",
+   "failed": [
+    "timing_accuracy"
+   ],
+   "unverified": []
+  },
+  "alu/gf180": {
+   "status": "failed",
+   "failed": [
+    "hold_closure",
+    "timing_setup",
+    "drv",
+    "timing_accuracy"
+   ],
+   "unverified": []
+  },
+  "regfile/sky130": {
+   "status": "failed",
+   "failed": [
+    "drv",
+    "timing_accuracy"
+   ],
+   "unverified": []
+  },
+  "regfile/gf180": {
+   "status": "failed",
+   "failed": [
+    "hold_closure",
+    "timing_hold",
+    "drv",
+    "timing_accuracy"
+   ],
+   "unverified": []
+  }
+ }
+}

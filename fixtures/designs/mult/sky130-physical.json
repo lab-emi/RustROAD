@@ -1,0 +1,141 @@
+{
+  "power_net": "VDD",
+  "ground_net": "VSS",
+  "power_pin": "VPWR",
+  "ground_pin": "VGND",
+  "body_power_pins": [
+    "VPB"
+  ],
+  "body_ground_pins": [
+    "VNB"
+  ],
+  "rail_layer": "met1",
+  "strap_layer": "met2",
+  "via": "M1M2_PR",
+  "io_layer": "met3",
+  "tie_high": {
+    "cell": "sky130_fd_sc_hd__inv_1",
+    "pin": "Y",
+    "rail_input": {
+      "pin": "A",
+      "supply": "ground"
+    }
+  },
+  "tie_low": {
+    "cell": "sky130_fd_sc_hd__inv_1",
+    "pin": "Y",
+    "rail_input": {
+      "pin": "A",
+      "supply": "power"
+    }
+  },
+  "constant_cells": [
+    {
+      "cell": "sky130_fd_sc_hd__conb_1",
+      "high": [
+        "HI"
+      ],
+      "low": [
+        "LO"
+      ]
+    }
+  ],
+  "filler_cells": [
+    "sky130_fd_sc_hd__fill_8",
+    "sky130_fd_sc_hd__fill_4",
+    "sky130_fd_sc_hd__fill_2",
+    "sky130_fd_sc_hd__fill_1"
+  ],
+  "alternating_rows": true,
+  "cell_spacing_sites": 0,
+  "io_width": 990,
+  "io_min_area": true,
+  "io_spacing": 800,
+  "strap_width": 400,
+  "strap_spacing": 1000,
+  "max_added_cells": 250000,
+  "max_tie_fanout": 8,
+  "tap": {
+    "cell": "sky130_fd_sc_hd__tapvpwrvgnd_1",
+    "max_gap": 20000,
+    "well_layer": "nwell",
+    "substrate_layer": "pwell"
+  },
+  "clock": {
+    "port": "clk",
+    "cell": "sky130_fd_sc_hd__clkbuf_2",
+    "input_pin": "A",
+    "output_pin": "X",
+    "sink_pin": "CLK",
+    "max_fanout": 4,
+    "max_buffers": 4096,
+    "max_work": 100000
+  },
+  "placer": {
+    "global_iterations": 12,
+    "cg_iterations": 150,
+    "detailed_passes": 3,
+    "max_net_pins": 256
+  },
+  "io_plan": {
+    "west": [
+      "a[3]",
+      "b[3]",
+      "a[4]",
+      "a[5]",
+      "p_q[10]"
+    ],
+    "east": [
+      "up[3]",
+      "p_q[3]",
+      "ua[2]",
+      "p_q[1]",
+      "p_q[5]",
+      "ua[3]",
+      "up[5]",
+      "up[6]",
+      "ua[4]",
+      "up[7]",
+      "up[8]"
+    ],
+    "south": [
+      "a[2]",
+      "a[1]",
+      "b[2]",
+      "b[1]",
+      "a[0]",
+      "p_q[4]",
+      "b[0]",
+      "p_q[0]",
+      "up[2]",
+      "up[1]",
+      "up[0]",
+      "p_q[2]",
+      "ua[0]",
+      "ua[1]",
+      "up[4]"
+    ],
+    "north": [
+      "p_q[11]",
+      "p_q[9]",
+      "b[5]",
+      "b[4]",
+      "p_q[6]",
+      "p_q[8]",
+      "clk",
+      "p_q[7]",
+      "ua[5]",
+      "up[10]",
+      "up[11]",
+      "up[9]"
+    ],
+    "x_track": [
+      460,
+      230
+    ],
+    "y_track": [
+      680,
+      340
+    ]
+  }
+}

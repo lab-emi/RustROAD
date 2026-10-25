@@ -1,0 +1,60 @@
+{
+  "schema": "rustroad.openroad-placement-oracle.v1",
+  "status": "pass",
+  "claim": "geometry-only fixture accepted and intentional overlap rejected; not PDK or signoff coverage",
+  "drc_status": "unchecked",
+  "lvs_status": "unchecked",
+  "timing_status": "unchecked",
+  "runs": {
+    "positive": {
+      "exit": {
+        "code": 0,
+        "signal": 0,
+        "reason": "exited"
+      },
+      "truncated": false,
+      "cleanup": {
+        "owned_process_group": "verified",
+        "temporary_root": "removed"
+      },
+      "evidence_id": "ev_3e8c08f840e3c4835db88dd08578cd017f6401d3c143032d41af0bf0be6ead66",
+      "outer_max_rss_kib": 318180,
+      "outer_wall_clock": "0:01.17",
+      "accepted_marker": true,
+      "rejected_marker": false,
+      "overlap_diagnostic": false
+    },
+    "overlap": {
+      "exit": {
+        "code": 42,
+        "signal": 0,
+        "reason": "exited"
+      },
+      "truncated": false,
+      "cleanup": {
+        "owned_process_group": "verified",
+        "temporary_root": "removed",
+        "unverified_processes": [
+          {
+            "pid": 196314,
+            "reason": "EACCES: permission denied, open '/proc/196314/environ'"
+          },
+          {
+            "pid": 196320,
+            "reason": "EACCES: permission denied, open '/proc/196320/environ'"
+          },
+          {
+            "pid": 196332,
+            "reason": "EACCES: permission denied, open '/proc/196332/environ'"
+          }
+        ]
+      },
+      "evidence_id": "ev_7195babb306cd76256a1b67b30d2abad3ef10769668bb7631047989059d2fb31",
+      "outer_max_rss_kib": 318756,
+      "outer_wall_clock": "0:01.53",
+      "accepted_marker": false,
+      "rejected_marker": true,
+      "overlap_diagnostic": true
+    }
+  }
+}

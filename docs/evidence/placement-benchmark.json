@@ -1,0 +1,78 @@
+{
+  "schema": "rustroad.placement_benchmark.v1",
+  "cells": 50000,
+  "rows": 2500,
+  "binary_sha256": "0fc102fb665270a956560c08433750b50d76c17d1031d7ffec98c4d4fdb9d95a",
+  "measurements": [
+    {
+      "threads": 1,
+      "wall_seconds": 0.37283247598679736,
+      "def_sha256": "1d24c53895d75de97574a9bfac52d449d50ecd833177f7b65e51ec66af86ab74",
+      "legality": {
+        "checks": [
+          "identity",
+          "coverage",
+          "row_geometry",
+          "site_alignment",
+          "containment",
+          "overlap"
+        ],
+        "drc_status": "unchecked",
+        "instances": 50000,
+        "lvs_status": "unchecked",
+        "routing_status": "unchecked",
+        "rows": 2500,
+        "schema": "rustroad.def_legality.v1",
+        "scope": "single-height N-oriented cells; exported DEF subset only",
+        "status": "passed"
+      },
+      "scope": "init + place + mmap/export + independent check"
+    },
+    {
+      "threads": 2,
+      "wall_seconds": 0.3730639700079337,
+      "def_sha256": "1d24c53895d75de97574a9bfac52d449d50ecd833177f7b65e51ec66af86ab74",
+      "legality": {
+        "checks": [
+          "identity",
+          "coverage",
+          "row_geometry",
+          "site_alignment",
+          "containment",
+          "overlap"
+        ],
+        "drc_status": "unchecked",
+        "instances": 50000,
+        "lvs_status": "unchecked",
+        "routing_status": "unchecked",
+        "rows": 2500,
+        "schema": "rustroad.def_legality.v1",
+        "scope": "single-height N-oriented cells; exported DEF subset only",
+        "status": "passed"
+      },
+      "scope": "init + place + mmap/export + independent check"
+    }
+  ],
+  "deterministic_across_threads": true,
+  "reference_performance_comparison": "not_run",
+  "gpu": "not_run",
+  "drc_status": "unchecked",
+  "lvs_status": "unchecked",
+  "routing_status": "not_run",
+  "corner": "not_applicable",
+  "wire_model": "none",
+  "unconstrained_endpoints": null,
+  "resource_measurement": {
+    "max_rss_kib": 62592,
+    "wall_clock": "0:00.79",
+    "exit_status": 0,
+    "scope": "outer maximum process RSS, not synchronized aggregate process-family RSS"
+  },
+  "host": {
+    "os": "Linux 7.0.0-38-generic x86_64",
+    "cpu": "AMD Ryzen 9 9950X3D 16-Core Processor",
+    "logical_cpus": 32
+  },
+  "sample_count_per_configuration": 1,
+  "claims": "Bounded synthetic row packing and legality only; not net-aware placement, PDK physical design, or OpenROAD speed comparison."
+}

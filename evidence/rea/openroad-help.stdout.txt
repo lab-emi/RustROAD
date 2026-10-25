@@ -1,0 +1,18 @@
+Usage: /OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad [-help] [-version] [-no_init] [-no_splash] [-exit] [-gui] [-web] [-threads count|max] [-log file_name] [-metrics file_name] [-db file_name] [-no_settings] [-minimize] cmd_file
+  -help                 show help and exit
+  -version              show version and exit
+  -no_init              do not read .openroad init file
+  -threads count|max    use count threads (default max)
+  -no_splash            do not show the license splash at startup
+  -exit                 exit after reading cmd_file
+  -gui                  start in gui mode
+  -web                  start in web viewer mode
+  -web_port port        web server port (default auto-assigned)
+  -web_bind address     web server bind address (default 127.0.0.1;
+                        a wider bind exposes a Tcl shell to the network)
+  -minimize             start the gui minimized
+  -no_settings          do not load the previous gui settings
+  -log <file_name>      write a log in <file_name>
+  -metrics <file_name>  write metrics in <file_name> in JSON format
+  -db <file_name>      open a .odb database at startup
+  cmd_file              source cmd_file

@@ -1,0 +1,29 @@
+{
+  "schema": "rustroad.tap-gds.v1",
+  "status": "passed",
+  "tap_master": "sky130_fd_sc_hd__tapvpwrvgnd_1",
+  "tap_instances": 32,
+  "contact_counts_per_tap": {
+    "nwell": 2,
+    "substrate": 1
+  },
+  "body_components_contacted": {
+    "nwell": 4,
+    "substrate": 1
+  },
+  "distance_metric": "Manhattan contact-rectangle coverage of all active polygons within each body component",
+  "max_distance_dbu": 15000,
+  "dbu_per_micron": 1000,
+  "gds_scale": 1,
+  "source_shapes": 42,
+  "active_input_cells_checked": 24,
+  "work_units": 269,
+  "negative_controls": {
+    "missing_contact": "rejected",
+    "missing_taps": "rejected",
+    "end_only_taps": "rejected"
+  },
+  "latchup_signoff": "unchecked",
+  "drc_status": "unchecked",
+  "scope": "standard single-well core cells; no deep-well, IO guard-ring, IR/EM or full-deck claim"
+}

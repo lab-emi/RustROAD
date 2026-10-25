@@ -1,0 +1,89 @@
+{
+  "schema": "rustroad.rea-probe-summary.v1",
+  "date": "2026-10-23",
+  "scope": "bounded public CLI and help only; no physical design workload",
+  "oracle_status": "public_interface_observed",
+  "physical_design_correctness": "unverified",
+  "performance_comparison": "unverified",
+  "probes": [
+    {
+      "probe": "version",
+      "evidence_id": "ev_e058a3f7d6dfcb9924cabfd0aceff1508261d8491de65f14c879aaefe345e911",
+      "exit": {
+        "code": 0,
+        "signal": 0,
+        "reason": "exited"
+      },
+      "truncated": false,
+      "cleanup": {
+        "owned_process_group": "verified",
+        "temporary_root": "removed"
+      },
+      "outer_wall_clock": "0:01.21",
+      "outer_max_rss_kib": 326948,
+      "reported_version": "unknown",
+      "source_capture": "openroad-version.capture.json",
+      "source_timing": "openroad-version.time.txt"
+    },
+    {
+      "probe": "help",
+      "evidence_id": "ev_102e87f01c79aabe8e36739c0a366909f82554df5039a329ca69d27ab33d555e",
+      "exit": {
+        "code": 0,
+        "signal": 0,
+        "reason": "exited"
+      },
+      "truncated": false,
+      "cleanup": {
+        "owned_process_group": "verified",
+        "temporary_root": "removed",
+        "unverified_processes": [
+          {
+            "pid": 191163,
+            "reason": "EACCES: permission denied, open '/proc/191163/environ'"
+          },
+          {
+            "pid": 191211,
+            "reason": "EACCES: permission denied, open '/proc/191211/environ'"
+          }
+        ]
+      },
+      "outer_wall_clock": "0:01.51",
+      "outer_max_rss_kib": 318204,
+      "reported_version": null,
+      "source_capture": "openroad-help.capture.json",
+      "source_timing": "openroad-help.time.txt"
+    },
+    {
+      "probe": "public-contract",
+      "evidence_id": "ev_6e0541990f23c800b3e283f66d94f0c30c0d1985b39d830d8ed31792c9aa2096",
+      "exit": {
+        "code": 0,
+        "signal": 0,
+        "reason": "exited"
+      },
+      "truncated": false,
+      "cleanup": {
+        "owned_process_group": "verified",
+        "temporary_root": "removed",
+        "unverified_processes": [
+          {
+            "pid": 191581,
+            "reason": "EACCES: permission denied, open '/proc/191581/environ'"
+          }
+        ]
+      },
+      "outer_wall_clock": "0:01.52",
+      "outer_max_rss_kib": 320276,
+      "reported_version": null,
+      "source_capture": "openroad-public-contract.capture.json",
+      "source_timing": "openroad-public-contract.time.txt"
+    }
+  ],
+  "external_placement_oracle": {
+    "status": "pass",
+    "evidence": "placement-oracle/result.json",
+    "scope": "24-instance geometry-only exported fixture plus overlap negative control",
+    "full_flow_status": "unverified"
+  }
+}

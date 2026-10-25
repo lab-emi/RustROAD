@@ -1,0 +1,75 @@
+{
+ "pdks": {
+  "gf180": {
+   "cases": {
+    "cross": "wire m2 10 0 10.28 20 A; wire m1 0 10 20 10.23 B",
+    "hi_v20": "wire m2 10 0 10.28 20 A",
+    "iso_hi": "wire m2 0 0 40 0.28 A",
+    "iso_lo": "wire m1 0 0 40 0.23 A",
+    "lo_h20": "wire m1 0 10 20 10.23 B",
+    "pair_hi": "wire m2 0 0 40 0.28 A; wire m2 0 0.56 40 0.8400000000000001 B"
+   },
+   "checks": {
+    "crossing_increment_af": {
+     "lower": 40.95270000000005,
+     "upper": 28.512699999999995
+    },
+    "iso_hi": {
+     "magic_af": 2850.67,
+     "rel": 1.3751172145888954e-06,
+     "rules_af": 2850.6660800000004,
+     "status": "passed"
+    },
+    "iso_lo": {
+     "magic_af": 3442.22,
+     "rel": 1.4351224180224886e-06,
+     "rules_af": 3442.2150599999995,
+     "status": "passed"
+    }
+   },
+   "pdk": "gf180",
+   "receipt": {
+    "label": "controls_0",
+    "peak_rss_kib": 65760,
+    "wall_seconds": 0.264
+   },
+   "schema": "rustroad.magic-controls.v1"
+  },
+  "sky130": {
+   "cases": {
+    "cross": "wire m2 10 0 10.14 20 A; wire m1 0 10 20 10.14 B",
+    "hi_v20": "wire m2 10 0 10.14 20 A",
+    "iso_hi": "wire m2 0 0 40 0.14 A",
+    "iso_lo": "wire m1 0 0 40 0.14 A",
+    "lo_h20": "wire m1 0 10 20 10.14 B",
+    "pair_hi": "wire m2 0 0 40 0.14 A; wire m2 0 0.28 40 0.42000000000000004 B"
+   },
+   "checks": {
+    "crossing_increment_af": {
+     "lower": 33.931499999999915,
+     "upper": 25.331499999999778
+    },
+    "iso_hi": {
+     "magic_af": 3129.37,
+     "rel": -8.947479827927938e-07,
+     "rules_af": 3129.3728,
+     "status": "passed"
+    },
+    "iso_lo": {
+     "magic_af": 3401.33,
+     "rel": 7.056068341821288e-07,
+     "rules_af": 3401.3276,
+     "status": "passed"
+    }
+   },
+   "pdk": "sky130",
+   "receipt": {
+    "label": "controls_0",
+    "peak_rss_kib": 70684,
+    "wall_seconds": 0.314
+   },
+   "schema": "rustroad.magic-controls.v1"
+  }
+ },
+ "schema": "rustroad.magic-controls.v1"
+}
