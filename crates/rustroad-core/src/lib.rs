@@ -10,6 +10,7 @@ mod instance_obstacles;
 pub mod io;
 pub mod jumper;
 pub mod memory;
+mod own_pins;
 pub mod place;
 pub mod power;
 pub mod route_batches;

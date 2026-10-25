@@ -34,8 +34,8 @@ use crate::route_search::{History, Search, State};
 use crate::routing::{
     Access, AccessEntry, Blockage, LayerRect, RouteInput, RouteLimits, RouteStats, Routes, Soft,
     Spatial, Terminal, TrackPlan, Via, ViaPair, WIRE, Wire, access_table_at, budget, contains,
-    distance, expand, int, invalid, no_route, overlap, quartile_points, shifted, validate,
-    via_pairs, wire_rect,
+    distance, expand, int, invalid, no_route, quartile_points, shifted, validate, via_pairs,
+    wire_rect,
 };
 use crate::{Rect, Result};
 use std::cmp::Reverse;
@@ -66,7 +66,7 @@ const RECORD_BYTES: u64 = 128;
 /// Escape plans, hash/tree metadata, groups, guides and queues. Completed
 /// wire/via vectors and the active net's raw topology are counted separately.
 const ROUTED_BYTES_PER_TERMINAL: u64 = 768 - 3 * std::mem::size_of::<usize>() as u64;
-const ACTIVE_TOPOLOGY_BYTES: u64 = 160;
+const ACTIVE_TOPOLOGY_BYTES: u64 = 164;
 /// Sorted window index plus construction headroom (one entry per terminal).
 const WINDOW_INDEX_BYTES: u64 = 32;
 type AccessKey = (u32, Vec<(u32, [i64; 2])>);
@@ -1918,13 +1918,26 @@ impl<'a> Router<'a> {
 
     /// Would via `kind` at `at` land on a pin of its own net other than at
     /// that pin's escape top?
-    fn via_on_own_pin(&self, kind: usize, at: [i64; 2], own: &[(u32, Rect, [i64; 2])]) -> bool {
-        self.input.vias[kind].shapes.iter().any(|s| {
-            shifted(s.rect, at).is_ok_and(|r| {
-                own.iter()
-                    .any(|(l, pin, top)| *l == s.layer && overlap(r, *pin) && at != *top)
-            })
-        })
+    fn via_on_own_pin(
+        &mut self,
+        kind: usize,
+        at: [i64; 2],
+        own: &crate::own_pins::OwnPins,
+    ) -> Result<bool> {
+        for shape in &self.input.vias[kind].shapes {
+            if let Ok(rect) = shifted(shape.rect, at)
+                && own.blocks(
+                    shape.layer,
+                    rect,
+                    &[at],
+                    &mut self.spatial.work,
+                    self.limits.max_comparisons,
+                )?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn edge_rect(&self, layer: u32, a: [i64; 2], b: [i64; 2], net: u32) -> Result<Rect> {
@@ -1953,6 +1966,16 @@ impl<'a> Router<'a> {
         rips: &BTreeMap<u32, usize>,
         round: usize,
     ) -> Result<Outcome> {
+        let large_trace = (terminals.len() >= 1024
+            && std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some())
+        .then(std::time::Instant::now);
+        if let Some(started) = large_trace {
+            trace(
+                "large net",
+                started,
+                format_args!("net {net} terminals {} soft {soft}", terminals.len()),
+            );
+        }
         let mut out = NetRoute::default();
         let mut edges = BTreeMap::new();
         let root = plans[&terminals[0].pin].top;
@@ -1977,14 +2000,38 @@ impl<'a> Router<'a> {
         // a path that runs over, or drops a via onto, a pin of its own net
         // would connect that pin a second time (an RC loop through the pin
         // metal that extractors see as a mesh).
-        let own: Vec<(u32, Rect, [i64; 2])> = terminals
-            .iter()
-            .flat_map(|t| {
-                let top = self.graph.point(plans[&t.pin].top).1;
-                t.shapes.iter().map(move |s| (s.layer, s.rect, top))
-            })
-            .collect();
-        for t in &terminals[1..] {
+        let own_count = terminals.iter().try_fold(0usize, |n, t| {
+            n.checked_add(t.shapes.len())
+                .filter(|&n| n <= self.limits.max_active_nodes)
+                .ok_or_else(|| budget("active detailed routing topology: same-net pin geometry"))
+        })?;
+        let mut own = Vec::new();
+        own.try_reserve_exact(own_count)
+            .map_err(|_| budget("same-net pin geometry allocation"))?;
+        for t in terminals {
+            let top = self.graph.point(plans[&t.pin].top).1;
+            own.extend(t.shapes.iter().map(|s| (s.layer, s.rect, top)));
+        }
+        let own = crate::own_pins::OwnPins::new(
+            own,
+            self.input.layers.len(),
+            &mut self.spatial.work,
+            self.limits.max_comparisons,
+        )?;
+        for (sink_index, t) in terminals[1..].iter().enumerate() {
+            if let Some(started) = large_trace
+                && sink_index.is_multiple_of(256)
+            {
+                trace(
+                    "large net progress",
+                    started,
+                    format_args!(
+                        "net {net} sink {sink_index}/{} expansions {}",
+                        terminals.len(),
+                        self.expansions
+                    ),
+                );
+            }
             let start = plans[&t.pin].top;
             let start_via = plans[&t.pin].top_via;
             if tree.contains(&start) {
@@ -2098,8 +2145,13 @@ impl<'a> Router<'a> {
                         Move::Via(pi) => {
                             // A wire that ends here on this layer wants the
                             // pad elongated along it (end-of-line enclosure).
-                            let mut kinds = self.graph.pairs[pi].kinds.clone();
-                            kinds.retain(|&k| !self.via_on_own_pin(k, p, &own));
+                            let original = self.graph.pairs[pi].kinds.clone();
+                            let mut kinds = Vec::with_capacity(original.len());
+                            for kind in original {
+                                if !self.via_on_own_pin(kind, p, &own)? {
+                                    kinds.push(kind);
+                                }
+                            }
                             if kinds.is_empty() {
                                 continue;
                             }
@@ -2173,9 +2225,13 @@ impl<'a> Router<'a> {
                         }
                         _ => {
                             let rect = self.edge_rect(layer, p, q, net)?;
-                            if own.iter().any(|(l, r, top)| {
-                                *l == layer && overlap(rect, *r) && p != *top && q != *top
-                            }) {
+                            if own.blocks(
+                                layer,
+                                rect,
+                                &[p, q],
+                                &mut self.spatial.work,
+                                self.limits.max_comparisons,
+                            )? {
                                 continue;
                             }
                             if soft {
