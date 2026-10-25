@@ -69,6 +69,26 @@ const ROUTED_BYTES_PER_TERMINAL: u64 = 768;
 const ACTIVE_TOPOLOGY_BYTES: u64 = 160;
 /// Sorted window index plus construction headroom (one entry per terminal).
 const WINDOW_INDEX_BYTES: u64 = 32;
+type AccessKey = (u32, Vec<(u32, [i64; 2])>);
+type AccessTables = BTreeMap<AccessKey, Vec<AccessEntry>>;
+
+fn access_key(class: u32, origin: [i64; 2], points: &[(u32, [i64; 2])]) -> Result<AccessKey> {
+    Ok((
+        class,
+        points
+            .iter()
+            .map(|&(layer, p)| {
+                Ok((
+                    layer,
+                    [
+                        int(i128::from(p[0]) - i128::from(origin[0]))?,
+                        int(i128::from(p[1]) - i128::from(origin[1]))?,
+                    ],
+                ))
+            })
+            .collect::<Result<_>>()?,
+    ))
+}
 
 /// Immutable x-interval index for pin-access repair. A query scans only
 /// lower bounds in [query.lx - widest_window, query.ux], then checks y and
@@ -769,29 +789,6 @@ impl<'a> Router<'a> {
 
     // ---------------------------------------------------------------- access
 
-    /// Access table cache key: class and instance origin modulo the track
-    /// pattern period, so on-graph landing points are identical per key.
-    fn period(&self) -> (i64, i64) {
-        let gcd = |mut a: i64, mut b: i64| {
-            while b != 0 {
-                (a, b) = (b, a % b);
-            }
-            a
-        };
-        // Node x coordinates are vertical-layer tracks, y horizontal ones.
-        let mut p = [1i64, 1i64];
-        for g in &self.graph.layers {
-            let (pitch, _) = self.plan.tracks[g.layer as usize].unwrap();
-            let axis = usize::from(!g.vertical);
-            if p[axis] == 0 {
-                continue;
-            }
-            let l = p[axis] / gcd(p[axis], pitch) * pitch;
-            p[axis] = if l > 1 << 24 { 0 } else { l };
-        }
-        (p[0], p[1])
-    }
-
     /// On-graph points of the pin layers inside the shapes (absolute).
     fn graph_points(&self, shapes: &[LayerRect]) -> Vec<(u32, [i64; 2])> {
         let mut out = BTreeSet::new();
@@ -826,43 +823,23 @@ impl<'a> Router<'a> {
     fn starts(
         &mut self,
         t: &Terminal,
-        tables: &mut BTreeMap<(u32, i64, i64), Vec<AccessEntry>>,
+        tables: &mut AccessTables,
+        with_via_kinds: bool,
     ) -> Result<Vec<(u32, [i64; 2], u64, Option<Vec<usize>>)>> {
         let step = self.input.step as u64;
         let generic = bounded_points(&t.shapes, self.input.grid, Some(self.input.die))?;
         let on_graph = self.graph_points(&t.shapes);
         let mut starts = Vec::new();
         if let Some((class, origin)) = t.class {
-            let (px, py) = self.period();
-            let key = (
-                class,
-                if px > 0 {
-                    origin[0].rem_euclid(px)
-                } else {
-                    origin[0]
-                },
-                if py > 0 {
-                    origin[1].rem_euclid(py)
-                } else {
-                    origin[1]
-                },
-            );
+            // These are the exact inputs of the relative geometry computation.
+            // Unrelated upper-layer track phases must not fragment this cache.
+            let key = access_key(class, origin, &on_graph)?;
             if !tables.contains_key(&key) {
-                let rel = |(l, p): &(u32, [i64; 2])| -> Result<(u32, [i64; 2])> {
-                    Ok((
-                        *l,
-                        [
-                            int(i128::from(p[0]) - i128::from(origin[0]))?,
-                            int(i128::from(p[1]) - i128::from(origin[1]))?,
-                        ],
-                    ))
-                };
                 let c = &self.input.access_classes[class as usize];
                 let mut points: Vec<(u32, [i64; 2])> =
                     bounded_points(&c.shapes, self.input.grid, None)?;
                 let known: BTreeSet<_> = points.iter().copied().collect();
-                for p in &on_graph {
-                    let r = rel(p)?;
+                for &r in &key.1 {
                     if !known.contains(&r) {
                         points.push(r);
                     }
@@ -882,6 +859,7 @@ impl<'a> Router<'a> {
                         .iter()
                         .map(|e| (e.kinds.capacity() * std::mem::size_of::<usize>() + 16) as u64)
                         .sum::<u64>()
+                    + (key.1.capacity() * std::mem::size_of::<(u32, [i64; 2])>()) as u64
                     + 256;
                 let cap = access_cache_limit(self.plan);
                 if bytes > cap {
@@ -910,7 +888,7 @@ impl<'a> Router<'a> {
                     .filter(|&n| n <= self.limits.max_comparisons)
                     .ok_or_else(|| budget("routing comparison limit"))?;
                 self.access_cache_bytes += bytes;
-                tables.insert(key, table);
+                tables.insert(key.clone(), table);
             }
             let allowed: BTreeSet<_> = generic.iter().chain(&on_graph).copied().collect();
             for e in &tables[&key] {
@@ -920,7 +898,7 @@ impl<'a> Router<'a> {
                 ];
                 if allowed.contains(&(e.layer, p)) && contains(self.input.die, p) {
                     let cost = if e.fits { 0 } else { step };
-                    starts.push((e.layer, p, cost, Some(e.kinds.clone())));
+                    starts.push((e.layer, p, cost, with_via_kinds.then(|| e.kinds.clone())));
                 }
             }
         }
@@ -962,13 +940,9 @@ impl<'a> Router<'a> {
     }
 
     /// One terminal escape search; None when no legal escape exists.
-    fn escape(
-        &mut self,
-        t: &Terminal,
-        tables: &mut BTreeMap<(u32, i64, i64), Vec<AccessEntry>>,
-    ) -> Result<Option<Plan>> {
+    fn escape(&mut self, t: &Terminal, tables: &mut AccessTables) -> Result<Option<Plan>> {
         let input = self.input;
-        let starts = self.starts(t, tables)?;
+        let starts = self.starts(t, tables, true)?;
         if starts.is_empty() {
             return Ok(None);
         }
@@ -1289,8 +1263,20 @@ impl<'a> Router<'a> {
         // Most constrained first: fewest start candidates, then pin index.
         let mut order: Vec<(usize, u32, usize)> = Vec::with_capacity(terminals.len());
         for (i, t) in terminals.iter().enumerate() {
-            let n = self.starts(t, &mut tables)?.len();
+            let n = self.starts(t, &mut tables, false)?.len();
             order.push((n, t.pin, i));
+            if i.is_multiple_of(100_000) {
+                trace(
+                    "access count",
+                    started,
+                    format_args!(
+                        "terminals {i}/{} tables {} work {}",
+                        terminals.len(),
+                        tables.len(),
+                        self.spatial.work
+                    ),
+                );
+            }
         }
         order.sort_unstable();
         trace(
@@ -3198,5 +3184,19 @@ mod tests {
         assert!(work < 11_000, "queries must avoid whole-design rescans");
         assert!(WindowIndex::new(&windows, &mut 0, 9999).is_err());
         assert!(index.overlapping(&windows, windows[0], &mut 0, 99).is_err());
+    }
+    #[test]
+    fn access_keys_share_exact_geometry_across_unrelated_track_phases() {
+        let points = [(0, [10, 20]), (0, [30, 40]), (2, [50, 60])];
+        let key = access_key(7, [0, 0], &points).unwrap();
+        // Arbitrary translation, deliberately unrelated to any track LCM.
+        let translated: Vec<_> = points
+            .iter()
+            .map(|&(l, p)| (l, [p[0] - 37, p[1] + 93]))
+            .collect();
+        assert_eq!(key, access_key(7, [-37, 93], &translated).unwrap());
+        assert_ne!(key, access_key(8, [-37, 93], &translated).unwrap());
+        assert_ne!(key, access_key(7, [-37, 93], &translated[..2]).unwrap());
+        assert!(access_key(7, [i64::MIN, 0], &[(0, [i64::MAX, 0])]).is_err());
     }
 }
