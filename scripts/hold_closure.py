@@ -772,6 +772,14 @@ class Flow:
         # Inputs of each timed instance: the upstream drivers whose output
         # slew a violating driver sees (chain co-sizing).
         fanin = {}
+        pins_on = {}
+        for name, (master, conns) in timed.items():
+            for net in conns.values():
+                pins_on[net.lstrip('\\')] = pins_on.get(net.lstrip('\\'), 0) + 1
+        # Small nets of each instance (clock and other wide nets excluded):
+        # two edits of one round on one of them are coupled.
+        inst_nets = {name: {n.lstrip('\\') for n in conns.values() if pins_on.get(n.lstrip('\\'), 0) <= 8}
+                     for name, (master, conns) in timed.items()}
         for name, (master, conns) in timed.items():
             for pin, net in conns.items():
                 if (((lef.get(master) or {}).get(pin) or {}).get('direction') or '') == 'INPUT':
@@ -973,13 +981,20 @@ class Flow:
                                     -(m['tns'] - base['tns']), k), cands[k], m))
             scored.sort()
             take, insts = [], set()
+            nets_taken = set()
             for key_, (inst, cand_edits, why), m in scored:
                 if any(i in insts for i, _ in cand_edits) or len(take) >= WHATIF_ACCEPT_PER_ROUND:
+                    continue
+                # Each candidate was evaluated alone: two on one net (a buffer
+                # shrunk while its sink grows, GF180 alu) can violate together.
+                touched_nets = set().union(*(inst_nets.get(i, set()) for i, _ in cand_edits))
+                if touched_nets & nets_taken:
                     continue
                 grow = sum((widths[cell] - widths[mapped[i][0]]) * floor['site']['height'] for i, cell in cand_edits)
                 if grow > 0 and used + grow > SIZE_MAX_UTILIZATION * rows_area:
                     continue
                 used += max(grow, 0)
+                nets_taken |= touched_nets
                 for i, cell in cand_edits:
                     insts.add(i)
                     take.append((i, cell))
@@ -990,6 +1005,40 @@ class Flow:
             prev_base = base
             if not take:
                 break
+        last = history[-1] if history else None
+        if last and last.get('accepted') and len(last['accepted']) > last.get('first_size', 1) and \
+                not last.get('reverted') and budget - spent >= 1:
+            # The last round's edits were never timed together (the next
+            # round's base does that): one candidate with all of them on top
+            # of the base they were chosen on; worse than that base -> keep
+            # only the round's best edit.
+            newer = dict(last['accepted'])
+            older = {i: c for i, c in accepted.items() if i not in newer}
+            doc = dict(schema='rusteda.edits.v1', base=[dict(op='resize', instance=i, cell=c) for i, c in sorted(older.items())],
+                       candidates=[dict(id='v0', edits=[dict(op='resize', instance=i, cell=c) for i, c in last['accepted']])],
+                       report=dict(endpoints=[], paths=[]))
+            vf = jdump(h.root / f'{t}_whatif_verify.json', doc)
+            r = h.run(f'{t}_whatif_verify', [str(x) for x in [
+                self.tools['ruststa'], '-w', sta['workspace'], '--format', 'json', 'whatif', '--rev', sta['revision'],
+                '--edits', vf, '--max-candidates', '1024', '--max-edits', '4096', '--timeout', WHATIF_TIMEOUT_S,
+                '--threads', '2', '-q']])
+            spent += 1
+            self.whatif_spent += 1
+            try:
+                d = json.loads(bounded_text(Path(r['stdout']), 256 * 1024 ** 2))
+            except (ValueError, OSError):
+                d = {}
+            cand = (d.get('candidates') or [{}])[0]
+            ok = r['exit_code'] == 0 and d.get('base') and cand.get('status') == 'evaluated' and cand.get('values')
+            if ok:
+                together, before = metrics(cand['values']), last['base']
+                if not better(together, before, 'drv'):
+                    for i, _ in last['accepted'][last.get('first_size', 1):]:
+                        accepted.pop(i, None)
+                    last['reverted'] = [i for i, _ in last['accepted'][last.get('first_size', 1):]]
+                last['verified'] = dict(together=together, kept=not last.get('reverted'))
+            else:
+                last['verified'] = dict(status='failed', exit_code=r['exit_code'])
         ops = [dict(op='resize_cell', instance=i, cell=c) for i, c in sorted(accepted.items())]
         summary = dict(resized=len(ops), candidates=len(prio), traced_setup_endpoints=traced,
                        whatif_candidates=spent, whatif_loop_candidates=self.whatif_spent,
