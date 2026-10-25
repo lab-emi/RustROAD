@@ -3220,4 +3220,39 @@ mod tests {
         assert_ne!(key, access_key(7, [-37, 93], &translated[..2]).unwrap());
         assert!(access_key(7, [i64::MIN, 0], &[(0, [i64::MAX, 0])]).is_err());
     }
+    #[test]
+    fn branched_tree_routes_without_exploring_its_empty_bounding_box() {
+        let points = [[100, 100], [39_900, 100], [39_900, 39_900], [100, 39_900]];
+        let mut design = input(
+            points
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    terminal(
+                        i as u32,
+                        0,
+                        i == 0,
+                        rect(p[0] - 10, p[1] - 10, p[0] + 10, p[1] + 10),
+                    )
+                })
+                .collect(),
+            vec![],
+        );
+        design.die = rect(0, 0, 40_000, 40_000);
+        let plan = design.tracks.as_mut().unwrap();
+        plan.gcell = 40_000; // one guide cell; no narrow-guide shortcut
+        plan.memory_mib = 256;
+        let limits = RouteLimits {
+            max_grid_nodes: 4_000_000,
+            max_expansions: 100_000,
+            max_search_expansions: 20_000,
+            max_heap: 50_000,
+            max_comparisons: 20_000_000,
+            ..Default::default()
+        };
+        let routed = route_cpu_ref(&design, &limits).unwrap();
+        assert_eq!(routed.nets, vec![0]);
+        assert_eq!(routed.access.len(), 4);
+        assert!(routed.stats.expansions < 100_000);
+    }
 }
