@@ -1,0 +1,3 @@
+# Versions used by the bounded field-solver regression tests.
+numpy==2.4.4
+scipy==1.18.0

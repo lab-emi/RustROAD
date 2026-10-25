@@ -135,11 +135,14 @@ class Runner:
         if maxrss.exists():
             maxrss.unlink()
 
+        inherited = resource.getrlimit(resource.RLIMIT_AS)
+        memory_limit = min([HOST_AS_BYTES] + [x for x in inherited if x != resource.RLIM_INFINITY])
+
         def limit():
-            resource.setrlimit(resource.RLIMIT_AS, (HOST_AS_BYTES, HOST_AS_BYTES))
+            resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
 
         spawn = dict(preexec_fn=limit) if PRLIMIT is None else {}
-        command = argv if PRLIMIT is None else [PRLIMIT, f"--as={HOST_AS_BYTES}", "--", *argv]
+        command = argv if PRLIMIT is None else [PRLIMIT, f"--as={memory_limit}", "--", *argv]
         if GNU_TIME:
             command = [GNU_TIME, "-f", "%M", "-o", str(maxrss), *command]
         start = time.monotonic()
@@ -161,6 +164,7 @@ class Runner:
                 time.sleep(0.02)
         wall = time.monotonic() - start
         code = os.waitstatus_to_exitcode(status)
+        proc.returncode = code  # wait4 already reaped it; Popen must not wait again.
         peak, source = usage.ru_maxrss, "wait4"
         if timed_out:
             # The killed wrapper's own rusage says nothing about the tool.
@@ -171,6 +175,7 @@ class Runner:
             except (OSError, ValueError, IndexError):
                 pass
         receipt = dict(label=label, argv=argv, exit_code=code, timed_out=timed_out,
+                       memory_limit_bytes=memory_limit,
                        wall_seconds=round(wall, 3), peak_rss_kib=peak, rss_source=source,
                        stdout=str(out), stderr=str(err))
         (d / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")

@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -139,6 +140,14 @@ endmodule
 
 
 class Receipts(unittest.TestCase):
+    def test_stricter_parent_memory_cap_is_preserved(self):
+        with tempfile.TemporaryDirectory() as d:
+            runner = scale_flow.Runner(Path(d))
+            with mock.patch.object(scale_flow.resource, "getrlimit", return_value=(256*1024**2, 512*1024**2)):
+                result = runner.run("bounded", ["true"])
+            self.assertEqual(result["exit_code"], 0)
+            self.assertEqual(result["memory_limit_bytes"], 256*1024**2)
+
     def test_peak_rss_is_the_tool_and_timeouts_are_unmeasured(self):
         with tempfile.TemporaryDirectory() as d:
             r = scale_flow.Runner(Path(d))
