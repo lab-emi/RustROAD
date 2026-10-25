@@ -66,7 +66,8 @@ const RECORD_BYTES: u64 = 128;
 /// Escape plans, hash/tree metadata, groups, guides and queues. Completed
 /// wire/via vectors and the active net's raw topology are counted separately.
 const ROUTED_BYTES_PER_TERMINAL: u64 = 768 - 3 * std::mem::size_of::<usize>() as u64;
-const ACTIVE_TOPOLOGY_BYTES: u64 = 164;
+const ACTIVE_TOPOLOGY_BYTES: u64 = 172;
+const MAX_VIA_PAD_ENTRIES: usize = 1_000_000;
 /// Sorted window index plus construction headroom (one entry per terminal).
 const WINDOW_INDEX_BYTES: u64 = 32;
 type AccessKey = (u32, Vec<(u32, [i64; 2])>);
@@ -487,6 +488,9 @@ pub(crate) fn check_plan(input: &RouteInput, plan: &TrackPlan) -> Result<()> {
     if !input.rules {
         return Err(invalid("track router requires LEF-rule mode"));
     }
+    if input.layers.len().saturating_mul(input.vias.len()) > MAX_VIA_PAD_ENTRIES {
+        return Err(budget("via-pad area table"));
+    }
     if plan.tracks.len() != input.layers.len()
         || plan.gcell <= 0
         || plan.global_iterations > 1000
@@ -652,6 +656,7 @@ fn memory_estimate_limited(
         .saturating_add((nodes.min(limits.max_heap) as u64).saturating_mul(128))
         .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES))
         .saturating_add(access_memory)
+        .saturating_add(layers.saturating_mul(input.vias.len() as u64 + 32))
         .saturating_add(crate::routing_target::MEMORY_ALLOWANCE),
         spatial: index(added),
         routed: t
@@ -875,6 +880,8 @@ struct Router<'a> {
     /// Per input layer: may two vias stack through it (every via pad on the
     /// layer meets the LEF AREA alone)?
     stack_ok: Vec<bool>,
+    /// Actual via-kind pad area certificates, indexed by layer then kind.
+    via_pad_ok: Vec<Vec<bool>>,
     /// Per input layer: wire run (DBU) between an entering and a leaving via
     /// on a layer that is not `stack_ok` (AREA / width, rounded up).
     min_run: Vec<u64>,
@@ -930,6 +937,17 @@ enum Outcome {
 impl<'a> Router<'a> {
     fn width(&self, layer: u32) -> i64 {
         self.input.layers[layer as usize].width
+    }
+    fn escape_pad_ok(&self, plan: &Plan) -> bool {
+        let (layer, at) = self.graph.point(plan.top);
+        plan.vias.iter().any(|v| {
+            v.at == at
+                && self.input.vias[v.kind as usize]
+                    .shapes
+                    .iter()
+                    .any(|s| s.layer == layer)
+                && self.via_pad_ok[layer as usize][v.kind as usize]
+        })
     }
     /// Runtime guard: the process's peak resident set (where the platform
     /// reports it) must stay within `memory_mib`; checked at phase
@@ -2031,11 +2049,10 @@ impl<'a> Router<'a> {
         let mut target =
             crate::routing_target::TreeDistance::new(self.graph.slot[&root_layer], root_point);
         let mut tree: HashSet<u32> = HashSet::from([root]);
-        // Tree nodes with an incident via: a path may not join them with
-        // another via through a layer whose single pads are below AREA.
-        let mut via_nodes: HashSet<u32> = HashSet::new();
+        // Tree junctions remember whether an actual incident pad meets AREA.
+        let mut via_nodes: HashMap<u32, bool> = HashMap::new();
         if plans[&terminals[0].pin].top_via {
-            via_nodes.insert(root);
+            via_nodes.insert(root, self.escape_pad_ok(&plans[&terminals[0].pin]));
         }
         let mut victims_all: BTreeSet<u32> = BTreeSet::new();
         let via_cost = self.plan.via_cost;
@@ -2082,6 +2099,7 @@ impl<'a> Router<'a> {
             }
             let start = plans[&t.pin].top;
             let start_via = plans[&t.pin].top_via;
+            let start_pad_ok = self.escape_pad_ok(&plans[&t.pin]);
             if tree.contains(&start) {
                 continue;
             }
@@ -2163,9 +2181,9 @@ impl<'a> Router<'a> {
                 let p = self.graph.xy(l, t_, s_);
                 let target_distance = target.bounds_distance(p);
                 self.graph.neighbors(id, &mut nbuf);
-                // On a layer whose single via pads are below AREA, a via may
-                // leave only after a wire run of at least AREA / width since
-                // the via that entered the layer (no pad-only islands).
+                // A sufficient actual pad certifies AREA even if some other
+                // via variant on this layer is smaller. Otherwise retain the
+                // conservative minimum-wire-run requirement.
                 let no_stack = !self.stack_ok[layer as usize] && {
                     let need = self.min_run[layer as usize];
                     let mut run = 0u64;
@@ -2173,16 +2191,15 @@ impl<'a> Router<'a> {
                     let mut steps = 0usize;
                     loop {
                         if cur == start {
-                            break start_via && run < need;
+                            break start_via && !start_pad_ok && run < need;
                         }
-                        if self
+                        let previous = self
                             .search
                             .get(cur)
-                            .ok_or_else(|| invalid("missing routing parent state"))?
-                            .kind
-                            != WIRE
-                        {
-                            break run < need;
+                            .ok_or_else(|| invalid("missing routing parent state"))?;
+                        if previous.kind != WIRE {
+                            let kind = previous.kind as usize;
+                            break !self.via_pad_ok[layer as usize][kind] && run < need;
                         }
                         let prev = self
                             .search
@@ -2198,9 +2215,6 @@ impl<'a> Router<'a> {
                     }
                 };
                 for &(next, mv) in nbuf.iter() {
-                    if no_stack && matches!(mv, Move::Via(_)) {
-                        continue;
-                    }
                     let (nl, q) = self.graph.point(next);
                     if matches!(mv, Move::Along)
                         && id.abs_diff(next) > 1
@@ -2210,13 +2224,6 @@ impl<'a> Router<'a> {
                     }
                     let joins = tree.contains(&next);
                     if self.gmark[self.cells.of(q) as usize] != self.gepoch && !joins {
-                        continue;
-                    }
-                    if joins
-                        && matches!(mv, Move::Via(_))
-                        && !self.stack_ok[nl as usize]
-                        && via_nodes.contains(&next)
-                    {
                         continue;
                     }
                     let mut step = match mv {
@@ -2300,6 +2307,15 @@ impl<'a> Router<'a> {
                             let original = self.graph.pairs[pi].kinds.clone();
                             let mut kinds = Vec::with_capacity(original.len());
                             for kind in original {
+                                if no_stack && !self.via_pad_ok[layer as usize][kind] {
+                                    continue;
+                                }
+                                if joins
+                                    && via_nodes.get(&next) == Some(&false)
+                                    && !self.via_pad_ok[nl as usize][kind]
+                                {
+                                    continue;
+                                }
                                 if !self.via_on_own_pin(kind, p, &own)? {
                                     kinds.push(kind);
                                 }
@@ -2526,8 +2542,13 @@ impl<'a> Router<'a> {
                         &mut self.spatial.work,
                         self.limits.max_comparisons,
                     )?;
-                    via_nodes.insert(a);
-                    via_nodes.insert(b);
+                    for (node, layer) in [(a, la), (b, lb)] {
+                        let enough = self.via_pad_ok[layer as usize][kind as usize];
+                        via_nodes
+                            .entry(node)
+                            .and_modify(|value| *value |= enough)
+                            .or_insert(enough);
+                    }
                     if soft
                         && let Soft::Clear { victims, .. } =
                             self.spatial.via_probe_soft(kind as usize, pa, net)?
@@ -2594,7 +2615,10 @@ impl<'a> Router<'a> {
             )?;
             tree.insert(start);
             if start_via {
-                via_nodes.insert(start);
+                via_nodes
+                    .entry(start)
+                    .and_modify(|value| *value |= start_pad_ok)
+                    .or_insert(start_pad_ok);
             }
         }
         victims_all.remove(&net);
@@ -2743,6 +2767,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         gmark: vec![0; gl],
         gepoch: 0,
         stack_ok: vec![true; input.layers.len()],
+        via_pad_ok: vec![vec![true; input.vias.len()]; input.layers.len()],
         min_run: vec![0; input.layers.len()],
         access_entries: 0,
         access_cache_bytes: 0,
@@ -2754,12 +2779,18 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         r.min_run[i] = u64::try_from(min)
             .unwrap_or(0)
             .div_ceil(l.width.max(1) as u64);
-        r.stack_ok[i] = input.vias.iter().all(|v| {
-            v.shapes.iter().filter(|s| s.layer == i as u32).all(|s| {
-                i128::from(s.rect.ux - s.rect.lx) * i128::from(s.rect.uy - s.rect.ly)
-                    >= i128::from(min)
-            })
-        });
+        for (kind, via) in input.vias.iter().enumerate() {
+            let pads: Vec<_> = via
+                .shapes
+                .iter()
+                .filter(|s| s.layer == i as u32)
+                .map(|s| s.rect)
+                .collect();
+            r.via_pad_ok[i][kind] = pads.is_empty()
+                || route_rules::union_area(&pads, &mut r.spatial.work, limits.max_comparisons)?
+                    >= i128::from(min);
+        }
+        r.stack_ok[i] = r.via_pad_ok[i].iter().all(|&enough| enough);
     }
     r.guard("setup")?;
     trace("spatial index", t0, format_args!("work {}", r.spatial.work));
@@ -3414,6 +3445,56 @@ mod tests {
         assert_eq!(
             ordered.iter().map(|t| t.pin).collect::<Vec<_>>(),
             permuted.iter().map(|t| t.pin).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn actual_via_pad_area_allows_a_legal_stack_despite_a_smaller_variant() {
+        // M2 offers only isolated via landing squares, so the only connection
+        // crosses M3. The large actual pad meets M2 AREA; an unused small
+        // variant must not force a wire run out of the isolated landing.
+        let mut blocks = vec![Blockage {
+            layer: 0,
+            rect: rect(140, 0, 860, 1000),
+            net: None,
+        }];
+        for r in [
+            rect(0, 0, 1000, 60),
+            rect(0, 140, 1000, 1000),
+            rect(0, 60, 60, 140),
+            rect(140, 60, 860, 140),
+            rect(940, 60, 1000, 140),
+        ] {
+            blocks.push(Blockage {
+                layer: 1,
+                rect: r,
+                net: None,
+            });
+        }
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(890, 90, 910, 110)),
+            ],
+            blocks,
+        );
+        design.layers[1].min_area = Some(400);
+        let mut small = via("small", 0, 3, 1);
+        small.shapes.iter_mut().find(|s| s.layer == 1).unwrap().rect = rect(-5, -5, 5, 5);
+        design.vias.push(small);
+        let out = route_cpu_ref(&design, &limits()).unwrap();
+        validate(&design, &out, &limits()).unwrap();
+        assert!(out.wires.iter().any(|w| w.layer == 2));
+        for via in &mut design.vias {
+            for pad in &mut via.shapes {
+                if pad.layer == 1 {
+                    pad.rect = rect(-5, -5, 5, 5);
+                }
+            }
+        }
+        assert!(
+            route_cpu_ref(&design, &limits()).is_err(),
+            "undersized isolated pads cannot stack"
         );
     }
 

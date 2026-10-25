@@ -710,3 +710,9 @@ outward. A remote I/O driver therefore need not be the first geometric root
 of the undirected route tree. Logical driver identities are unchanged. The
 ordering reuses each net's terminal slice, takes bounded `O(N log N)` work,
 and is charged to the comparison budget before sorting.
+
+Via junctions use the area of the actual via pads. A smaller unused variant
+does not force a wire run when an incident pad already meets the layer's
+minimum area. Otherwise the minimum-run requirement remains. The pad table
+has a one-million-entry cap, is included in memory admission, and is checked
+before search; final geometry validation still checks the complete union.
