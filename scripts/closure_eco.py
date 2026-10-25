@@ -574,17 +574,24 @@ class Planner:
         fixed_pts = [self.ports[p] for p in fixed if p in self.ports]
         trunk_est = cw * hpwl([driver_pos] + [centroid(g) for g in groups] + fixed_pts)
         fixed_pf = OUTPUT_PORT_LOAD_PF * len(fixed)
-        arr = None
-        if model is not None and self.pos_of(driver) is not None:
-            arr = self.arrange(groups, loads, driver_pos, trunk_est, fixed_pf + kept_pf, cw, target, model)
         per_group = None
-        if arr is None:
-            if driver_cap_pf is not None:
-                per_group = (driver_cap_pf - kept_pf - trunk_est - fixed_pf) / len(groups)
-                if per_group < prof.buffers[0].cap:
-                    per_group = None  # over budget anyway: the driver is resized next
-            arr = dict(mode="cluster" if model is None else "unbounded", member=None, loads=loads,
-                       picks=[pick_buffer(prof, load, target, driver_slope, per_group) for load in loads])
+        if driver_cap_pf is not None:
+            per_group = (driver_cap_pf - kept_pf - trunk_est - fixed_pf) / len(groups)
+            if per_group < prof.buffers[0].cap:
+                per_group = None  # over budget anyway: the driver is resized next
+        arr = dict(mode="cluster", member=None, loads=loads,
+                   picks=[pick_buffer(prof, load, target, driver_slope, per_group) for load in loads])
+        if model is not None and self.pos_of(driver) is not None:
+            # The plain arrangement relies on the driver taking its load, if
+            # need be after the whatif sizing grows it. A weak driver (even
+            # its best member cannot take it: the largest member, a delay
+            # cell, a family slow at any load) gets the co-sized arrangement.
+            plain = sum(b.cap for b in arr["picks"]) + trunk_est + fixed_pf + kept_pf
+            best = max((c for _, c in model.members if c is not None), default=None)
+            if best is not None and plain > best:
+                co = self.arrange(groups, loads, driver_pos, trunk_est, fixed_pf + kept_pf, cw, target, model)
+                if co is not None:
+                    arr = co
         at_driver = arr["mode"] == "driver"
         level, made, cost, under = [], [], {}, {}
         for g, b, load in zip(groups, arr["picks"], arr["loads"]):

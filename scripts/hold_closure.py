@@ -132,10 +132,13 @@ STA_FILE_LIMIT = {'legacy': None, 'track': 1024 * 1024 ** 2}
 # netlist at 0.76 no longer passed CTS packing ("baseline packing ran out of
 # intervals"), and with 0.70 for resizes only, buffers alone reached 0.76
 # while the sizing that fixes small-fanout nets (alu, 1-2 sites each) was
-# refused. One cap for both, below the packing failure.
+# refused. One cap for both, below the packing failure. Lowered from 0.74:
+# GF180 alu netlists at 0.7255 and 0.7304 (many buf_8/buf_12, about one tap
+# interval each) failed placement packing the same way (DRV co-sizing dev
+# runs D1/D2, 2026-10-25).
 SIZE_MAX_RESIZES = 256
 SIZE_MAX_SETUP_ENDPOINTS = 48
-SIZE_MAX_UTILIZATION = 0.74
+SIZE_MAX_UTILIZATION = 0.70
 # Closure loop (track recipe): a setup ECO that improved the worst setup
 # slack by less than this over the previous layout counts as stagnant; the
 # loop then moves on to hold repair instead of spending the remaining
