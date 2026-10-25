@@ -81,6 +81,10 @@ allowances against `--extract-memory-mib`. Runtime peak RSS is checked during
 extraction. Larger object limits still fail when their combined estimate exceeds
 the memory allowance. `stats.memory` reports the estimate and cap. The CLI reads
 the workspace once, converting the segment length under the same snapshot lock.
+Owned-conductor bins use a shared insertion-ordered entry array and fixed
+headers. The estimate accounts for entry-vector reallocation and bounds header
+count by each routing layer's actual conductor extent. Virtual cell geometry
+keeps its separate index. Candidate order and per-bin work counts are preserved.
 
 SPEF formatting retains the numeric RC network once and generates labeled nets one
 at a time. A compact coupling incidence table preserves record order; the name

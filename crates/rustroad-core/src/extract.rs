@@ -9,6 +9,7 @@
 use crate::routing::{RouteLayer, RouteVia, Routes, Terminal};
 use crate::{Error, Rect, Result};
 use std::collections::{BTreeMap, HashMap};
+mod bins;
 mod geometry;
 use geometry::{InstanceGeometry, Shapes};
 
@@ -284,24 +285,91 @@ fn extraction_bin(input: &ExtractInput<'_>) -> Result<i64> {
     Ok((size as i64) * 2)
 }
 
+fn bin_count(bounds: &[Option<Rect>], bin: i64, cap: usize) -> u64 {
+    let cap = cap as u128;
+    let mut total = 0u128;
+    for rect in bounds.iter().flatten() {
+        let width =
+            (i128::from(rect.ux.div_euclid(bin)) - i128::from(rect.lx.div_euclid(bin)) + 1) as u128;
+        let height =
+            (i128::from(rect.uy.div_euclid(bin)) - i128::from(rect.ly.div_euclid(bin)) + 1) as u128;
+        total = total.saturating_add(width.saturating_mul(height)).min(cap);
+    }
+    total as u64
+}
+
+fn populated_bin_bound(input: &ExtractInput<'_>, limits: &ExtractLimits, bin: i64) -> Result<u64> {
+    let mut bounds = vec![None::<Rect>; input.layers.len()];
+    let mut work = 0usize;
+    let mut include = |layer: u32, rect: Rect| -> Result<()> {
+        work = work
+            .checked_add(1)
+            .filter(|&n| n <= limits.max_work)
+            .ok_or_else(|| budget("extraction bin estimate work"))?;
+        let item = bounds
+            .get_mut(layer as usize)
+            .ok_or_else(|| invalid("extraction shape layer"))?;
+        if !rect.valid() {
+            return Err(invalid("extraction shape bounds"));
+        }
+        if input.layers[layer as usize].vertical.is_none() {
+            return Ok(());
+        }
+        *item = Some(match *item {
+            None => rect,
+            Some(r) => Rect {
+                lx: r.lx.min(rect.lx),
+                ly: r.ly.min(rect.ly),
+                ux: r.ux.max(rect.ux),
+                uy: r.uy.max(rect.uy),
+            },
+        });
+        Ok(())
+    };
+    for wire in &input.routes.wires {
+        let layer = input
+            .layers
+            .get(wire.layer as usize)
+            .ok_or_else(|| invalid("extraction wire layer"))?;
+        include(wire.layer, crate::routing::wire_rect(wire, layer.width)?)?;
+    }
+    for via in &input.routes.vias {
+        let kind = input
+            .vias
+            .get(via.kind as usize)
+            .ok_or_else(|| invalid("extraction via kind"))?;
+        for shape in &kind.shapes {
+            include(shape.layer, crate::routing::shifted(shape.rect, via.at)?)?;
+        }
+    }
+    for patch in &input.routes.patches {
+        include(patch.layer, patch.rect)?;
+    }
+    for shape in input.passive {
+        include(shape.layer, shape.rect)?;
+    }
+    Ok(bin_count(&bounds, bin, limits.max_bin_entries))
+}
+
 fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<ExtractMemory> {
     let live = crate::memory::live_bytes().unwrap_or(input.held_bytes);
     let held = live.max(input.held_bytes);
     let held = held.saturating_add(held.div_ceil(4));
+    let bin = extraction_bin(input)?;
+    let populated = populated_bin_bound(input, limits, bin)?;
     let working = (limits.max_nodes as u64)
         .saturating_mul(64)
         .saturating_add((limits.max_elements as u64).saturating_mul(16))
         .saturating_add((limits.max_shapes as u64).saturating_mul(320))
         .saturating_add((limits.max_couplings as u64).saturating_mul(128))
-        .saturating_add((limits.max_bin_entries as u64).saturating_mul(96))
+        // Linked entries include old+new vector storage during reallocation;
+        // fixed headers include hash-table occupancy and rehash headroom.
+        .saturating_add((limits.max_bin_entries as u64).saturating_mul(24))
+        .saturating_add(populated.saturating_mul(96))
         .saturating_add((input.routes.nets.len() as u64).saturating_mul(192))
         .saturating_add(limits.candidate_scratch_bytes() as u64);
-    let geometry = InstanceGeometry::estimated_bytes(
-        input.instances,
-        extraction_bin(input)?,
-        input.layers.len(),
-        limits,
-    )?;
+    let geometry =
+        InstanceGeometry::estimated_bytes(input.instances, bin, input.layers.len(), limits)?;
     let memory = ExtractMemory {
         held_bytes: held,
         working_bytes: working,
@@ -991,7 +1059,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
 
 struct Bins<'a> {
     size: i64,
-    map: HashMap<(u32, i64, i64), Vec<u32>>,
+    map: bins::BinLists,
     instances: Option<InstanceGeometry<'a>>,
 }
 impl Bins<'_> {
@@ -1015,13 +1083,13 @@ impl Bins<'_> {
         }
         for x in x0..=x1 {
             for y in y0..=y1 {
-                let list = self.map.get(&(layer, x, y)).map_or(&[][..], Vec::as_slice);
+                let list = self.map.iter((layer, x, y));
                 stats.work = stats
                     .work
                     .checked_add(list.len().max(1))
                     .filter(|&n| n <= limits.max_work)
                     .ok_or_else(|| budget("extraction work"))?;
-                for &id in list {
+                for id in list {
                     visitor(id, shapes.get(id))?;
                 }
             }
@@ -1176,7 +1244,8 @@ fn add_piece(
     }
     for bx in x0..=x1 {
         for by in y0..=y1 {
-            bins.map.entry((layer, bx, by)).or_default().push(shape);
+            bins.map
+                .push((layer, bx, by), shape, limits.max_bin_entries)?;
         }
     }
     Ok(())
@@ -1469,9 +1538,10 @@ fn add_passive_strips(
         'search: for &layer in routing.iter().filter(|&&l| l != sh.layer) {
             for bx in x0..=x1 {
                 for by in y0..=y1 {
-                    let Some(list) = bins.map.get(&(layer, bx, by)) else {
+                    let list = bins.map.iter((layer, bx, by));
+                    if list.len() == 0 {
                         continue;
-                    };
+                    }
                     stats.work = stats
                         .work
                         .checked_add(list.len())
@@ -1479,7 +1549,7 @@ fn add_passive_strips(
                     if stats.work > limits.max_work {
                         return Err(budget("extraction work"));
                     }
-                    for &o in list {
+                    for o in list {
                         let q = &shapes.get(o);
                         if matches!(q.owner, Owner::Run(_))
                             && q.rect.lx < r.ux
@@ -1711,7 +1781,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     let bin_size = extraction_bin(input)?;
     let mut bins = Bins {
         size: bin_size,
-        map: HashMap::new(),
+        map: bins::BinLists::default(),
         instances: InstanceGeometry::new(&shapes, bin_size, input.layers.len(), limits)?,
     };
     let mut entries = 0usize;
@@ -1729,7 +1799,8 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         }
         for bx in x0..=x1 {
             for by in y0..=y1 {
-                bins.map.entry((s.layer, bx, by)).or_default().push(i);
+                bins.map
+                    .push((s.layer, bx, by), i, limits.max_bin_entries)?;
             }
         }
     }
@@ -2273,6 +2344,27 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
 mod tests {
     use super::*;
     use crate::routing::{Access, LayerRect, Patch, RouteStats, Via, Wire};
+
+    #[test]
+    fn spatial_header_bound_covers_negative_bins_and_saturates_extreme_extents() {
+        let r = Rect {
+            lx: -11,
+            ly: -20,
+            ux: 11,
+            uy: 20,
+        };
+        assert_eq!(bin_count(&[Some(r)], 10, 1000), 20);
+        assert_eq!(bin_count(&[Some(r), Some(r)], 10, 1000), 40);
+        assert_eq!(bin_count(&[Some(r), Some(r)], 10, 25), 25);
+        let huge = Rect {
+            lx: i64::MIN,
+            ly: i64::MIN,
+            ux: i64::MAX,
+            uy: i64::MAX,
+        };
+        assert_eq!(bin_count(&[Some(huge)], 1, 17), 17);
+        assert_eq!(bin_count(&[None], 1, 17), 0);
+    }
 
     const DBU: f64 = 1000.0;
     fn rows() -> Vec<[f64; 3]> {
