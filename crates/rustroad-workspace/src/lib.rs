@@ -18,8 +18,9 @@ pub mod gds;
 pub mod pdk;
 pub mod physical;
 pub mod routing;
+mod storage;
 pub mod ties;
-use rustroad_core::connectivity::{ConnectedDesign, ConnectivityLimits, PinOwner};
+use rustroad_core::connectivity::{ConnectedDesign, PinOwner};
 
 /// design.json cap (also bounds the schema-5 mirrors). 64 MiB holds the
 /// netlist, connectivity and filler records of ~25k-instance blocks; route
@@ -63,6 +64,8 @@ pub enum Stage {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tables: Option<storage::Tables>,
     pub format_version: u32,
     pub revision: String,
     pub parent_revision: String,
@@ -254,6 +257,14 @@ struct ConnectionMaps {
     _net_pins: Option<Mmap>,
 }
 impl Snapshot {
+    /// Move the owned IR into a mutation while retaining its exclusive lock.
+    /// The caller keeps the returned lock alive through revision publication.
+    pub(crate) fn into_metadata(self) -> (File, Metadata) {
+        let Self {
+            _lock, metadata, ..
+        } = self;
+        (_lock, metadata)
+    }
     pub fn metadata(&self) -> &Metadata {
         &self.metadata
     }
@@ -278,7 +289,7 @@ impl Snapshot {
                     &self.metadata.design,
                     &records,
                     &physical.connectivity,
-                    &ConnectivityLimits::default(),
+                    &pdk::connection_limits(&self.metadata.design)?,
                     output,
                 )?;
             }
@@ -327,6 +338,7 @@ pub fn init(path: &Path, base_rev: &str, design: Design, limits: &Limits) -> Res
     let db = DesignDb::new(&design, limits)?;
     let records = db.unplaced_records();
     let metadata = Metadata {
+        tables: None,
         format_version: 1,
         revision: String::new(),
         parent_revision: current,
@@ -391,7 +403,7 @@ pub fn place_with(
     let current = head(path)?;
     check_base(base_rev, &current)?;
     let snapshot = load(path, lock, limits)?;
-    let mut metadata = snapshot.metadata.clone();
+    let (_lock, mut metadata) = snapshot.into_metadata();
     if let Some(w) = weights {
         let bundle = metadata.physical.as_mut().ok_or_else(|| {
             Error::Invalid("net weights need a physical (import-pdk) workspace".into())
@@ -549,6 +561,7 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         MAX_METADATA_BYTES,
     )?)?;
     let mut metadata = metadata;
+    storage::restore(&mut metadata, &revision_dir, limits)?;
     if !matches!(metadata.format_version, 1..=6)
         || metadata.revision != current
         || revision_number(&metadata.parent_revision)? >= revision_number(&current)?
@@ -618,7 +631,11 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         routing.routes = decoded;
     }
     let connections = if let Some(physical) = &metadata.physical {
-        pdk::validate_bundle(physical, &metadata.design, &ConnectivityLimits::default())?;
+        pdk::validate_bundle(
+            physical,
+            &metadata.design,
+            &pdk::connection_limits(&metadata.design)?,
+        )?;
         Some(read_connection_tables(
             &revision_dir,
             &metadata.design,
@@ -708,8 +725,15 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
 
 fn check_placed(snapshot: &Snapshot) -> Result<()> {
     let records = snapshot.records().collect::<Vec<_>>();
-    rustroad_core::validate_placement(&snapshot.metadata.design, &records, &Limits::default())
-        .map_err(|e| Error::Invalid(e.to_string()))?;
+    rustroad_core::validate_placement(
+        &snapshot.metadata.design,
+        &records,
+        &Limits {
+            max_cells: snapshot.metadata.design.cells.len().max(250_000),
+            ..Limits::default()
+        },
+    )
+    .map_err(|e| Error::Invalid(e.to_string()))?;
     Ok(())
 }
 
@@ -792,7 +816,7 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
         held = Some(std::mem::replace(&mut r.routes, empty));
         route_table = Some(bytes);
     }
-    let bytes = serialize_bounded(&metadata)?;
+    let bytes = storage::serialize(&mut metadata, &directory)?;
     if let Some(routes) = held
         && let Some(r) = metadata.physical.as_mut().and_then(|p| p.routing.as_mut())
     {
@@ -814,7 +838,11 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
     table.flush()?;
     table.get_ref().sync_all()?;
     if let Some(physical) = &metadata.physical {
-        pdk::validate_bundle(physical, &metadata.design, &ConnectivityLimits::default())?;
+        pdk::validate_bundle(
+            physical,
+            &metadata.design,
+            &pdk::connection_limits(&metadata.design)?,
+        )?;
         write_connection_tables(&directory, &metadata.design, &physical.connectivity)?;
         if let Some(table) = &route_table {
             write_new(&directory.join(routing::ROUTE_TABLE), table)?;
@@ -859,7 +887,7 @@ fn write_connection_tables(
     design: &Design,
     model: &ConnectedDesign,
 ) -> Result<()> {
-    let csr = model.lower_csr(design, &ConnectivityLimits::default())?;
+    let csr = model.lower_csr(design, &pdk::connection_limits(design)?)?;
     let write_table =
         |name: &str, produce: &mut dyn FnMut(&mut BufWriter<File>) -> Result<()>| -> Result<()> {
             let file = OpenOptions::new()
@@ -918,7 +946,7 @@ fn read_connection_tables(
     design: &Design,
     model: &ConnectedDesign,
 ) -> Result<ConnectionMaps> {
-    let csr = model.lower_csr(design, &ConnectivityLimits::default())?;
+    let csr = model.lower_csr(design, &pdk::connection_limits(design)?)?;
     let pins = map_table(
         &directory.join("pins.rbin"),
         model

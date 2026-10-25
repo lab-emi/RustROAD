@@ -1090,8 +1090,8 @@ pub fn route(
         return Err(fail("place before routing"));
     }
     rustroad_core::memory::trace("loaded");
-    let mut metadata = snapshot.metadata().clone();
     let placed: Vec<_> = snapshot.records().collect();
+    let (_lock, mut metadata) = snapshot.into_metadata();
     rustroad_core::memory::trace("cloned");
     let bundle = metadata
         .physical

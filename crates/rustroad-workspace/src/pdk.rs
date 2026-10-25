@@ -11,6 +11,7 @@ use rustroad_formats::{lef, verilog};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 const MAX_LEF_BYTES: u64 = 64 * 1024 * 1024;
@@ -117,6 +118,55 @@ pub(crate) fn read_input(path: &Path, limit: u64, role: &str) -> Result<(String,
         .map_err(|_| Error::Invalid(format!("{role}: input is not UTF-8")))?;
     Ok((text, pin))
 }
+
+/// Hash exactly the bytes consumed by the streaming structural reader.
+pub(crate) fn read_netlist(
+    path: &Path,
+    limits: &verilog::VerilogLimits,
+) -> Result<(verilog::Netlist, SourcePin)> {
+    struct Hashed<R> {
+        reader: R,
+        hash: Sha256,
+        bytes: u64,
+    }
+    impl<R: Read> Read for Hashed<R> {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            let count = self.reader.read(output)?;
+            self.hash.update(&output[..count]);
+            self.bytes += count as u64;
+            Ok(count)
+        }
+    }
+    let file = std::fs::File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(invalid("mapped netlist must be a regular file"));
+    }
+    if meta.len() > limits.max_input_bytes as u64 {
+        return Err(budget("mapped netlist input byte limit"));
+    }
+    let mut reader = Hashed {
+        reader: file,
+        hash: Sha256::new(),
+        bytes: 0,
+    };
+    let netlist =
+        verilog::parse_verilog_reader(BufReader::with_capacity(1024 * 1024, &mut reader), limits)
+            .map_err(|error| match error {
+            verilog::VerilogError::Budget(message) => budget(message),
+            other => invalid(other.to_string()),
+        })?;
+    if reader.bytes != meta.len() {
+        return Err(invalid("mapped netlist changed while reading"));
+    }
+    let pin = SourcePin {
+        role: "mapped_verilog".into(),
+        path: path.to_path_buf(),
+        sha256: format!("{:x}", reader.hash.finalize()),
+        bytes: reader.bytes as usize,
+    };
+    Ok((netlist, pin))
+}
 fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())
 }
@@ -124,12 +174,28 @@ fn budget(message: impl Into<String>) -> Error {
     Error::Budget(message.into())
 }
 
-fn input_preflight(sources: &ImportSources) -> Result<()> {
+/// Internal validation capacities follow a design that was already admitted by
+/// the caller's object budget. They never increase the initial import budget.
+pub(crate) fn connection_limits(design: &Design) -> Result<ConnectivityLimits> {
+    if design.cells.len() > 8_000_000 {
+        return Err(budget("physical design exceeds eight-million-cell ceiling"));
+    }
+    let cells = design.cells.len().max(250_000);
+    Ok(ConnectivityLimits {
+        max_instances: cells,
+        max_nets: cells.saturating_mul(4),
+        max_pins: cells.saturating_mul(16),
+        max_aliases: cells.saturating_mul(16),
+        ..ConnectivityLimits::default()
+    })
+}
+
+fn input_preflight(sources: &ImportSources, netlist_bytes: usize) -> Result<()> {
     let mut total = 0u64;
     for (path, limit) in [
         (&sources.technology_lef, MAX_LEF_BYTES),
         (&sources.cell_lef, MAX_LEF_BYTES),
-        (&sources.netlist, MAX_NETLIST_BYTES),
+        (&sources.netlist, netlist_bytes as u64),
         (&sources.floorplan, MAX_NETLIST_BYTES),
     ] {
         let metadata = std::fs::metadata(path)?;
@@ -142,7 +208,7 @@ fn input_preflight(sources: &ImportSources) -> Result<()> {
         total = total
             .checked_add(metadata.len())
             .ok_or_else(|| budget("PDK input byte count overflow"))?;
-        if total > MAX_AGGREGATE_BYTES {
+        if total > MAX_AGGREGATE_BYTES + netlist_bytes as u64 {
             return Err(budget("PDK aggregate source budget exceeded"));
         }
     }
@@ -169,16 +235,26 @@ pub(crate) fn validate_bundle(
     for source in &bundle.sources {
         if source.sha256.len() != 64
             || !source.sha256.bytes().all(|b| b.is_ascii_hexdigit())
-            || source.bytes > MAX_LEF_BYTES as usize
+            || source.bytes
+                > if source.role == "mapped_verilog" {
+                    2 * 1024 * 1024 * 1024
+                } else {
+                    MAX_LEF_BYTES as usize
+                }
         {
             return Err(invalid("invalid source pin"));
         }
     }
-    if bundle.sources.iter().map(|p| p.bytes as u64).sum::<u64>() > MAX_AGGREGATE_BYTES {
+    if bundle.sources.iter().map(|p| p.bytes as u64).sum::<u64>()
+        > MAX_AGGREGATE_BYTES + 2 * 1024 * 1024 * 1024
+    {
         return Err(budget("stored PDK source aggregate limit exceeded"));
     }
-    verilog::validate_netlist(&bundle.netlist, &verilog::VerilogLimits::default())
-        .map_err(|e| invalid(e.to_string()))?;
+    verilog::validate_netlist(
+        &bundle.netlist,
+        &verilog::VerilogLimits::large_design_ceiling(),
+    )
+    .map_err(|e| invalid(e.to_string()))?;
     for (instance, cell) in bundle.netlist.instances.iter().zip(&design.cells) {
         if instance.name != cell.name || instance.cell != cell.master {
             return Err(invalid("netlist instances and geometry differ"));
@@ -291,27 +367,50 @@ pub fn import_pdk_with_config(
     connection_limits: &ConnectivityLimits,
     config_path: Option<&Path>,
 ) -> Result<Summary> {
-    let _lock = lock(path, true, true)?;
-    let current = head(path)?;
-    check_base(base_rev, &current)?;
-    input_preflight(sources)?;
-    let (floor_text, floor_pin) = read_input(&sources.floorplan, MAX_NETLIST_BYTES, "floorplan")?;
-    let floor: Floorplan = serde_json::from_str(&floor_text)?;
-    if floor.rows.len() > limits.max_rows {
-        return Err(budget("floorplan max_rows exceeded"));
-    }
-    let vlimits = verilog::VerilogLimits {
+    let parser = verilog::VerilogLimits {
         max_instances: limits.max_cells,
         max_connections: connection_limits.max_pins,
         max_nets: connection_limits.max_nets,
         max_expr_nodes: connection_limits.max_pins,
         ..Default::default()
     };
-    let (verilog_text, verilog_pin) =
-        read_input(&sources.netlist, MAX_NETLIST_BYTES, "mapped_verilog")?;
-    let mut netlist =
-        verilog::parse_verilog(&verilog_text, &vlimits).map_err(|e| invalid(e.to_string()))?;
-    drop(verilog_text);
+    import_pdk_bounded(
+        path,
+        base_rev,
+        sources,
+        limits,
+        connection_limits,
+        config_path,
+        &parser,
+    )
+}
+
+/// Import with explicit input-byte and parser work budgets.
+pub fn import_pdk_bounded(
+    path: &Path,
+    base_rev: &str,
+    sources: &ImportSources,
+    limits: &Limits,
+    connection_limits: &ConnectivityLimits,
+    config_path: Option<&Path>,
+    parser: &verilog::VerilogLimits,
+) -> Result<Summary> {
+    if parser.max_input_bytes > 2 * 1024 * 1024 * 1024
+        || parser.max_instances > limits.max_cells
+        || limits.max_cells > 8_000_000
+    {
+        return Err(budget("physical import limits exceed absolute ceiling"));
+    }
+    let _lock = lock(path, true, true)?;
+    let current = head(path)?;
+    check_base(base_rev, &current)?;
+    input_preflight(sources, parser.max_input_bytes)?;
+    let (floor_text, floor_pin) = read_input(&sources.floorplan, MAX_NETLIST_BYTES, "floorplan")?;
+    let floor: Floorplan = serde_json::from_str(&floor_text)?;
+    if floor.rows.len() > limits.max_rows {
+        return Err(budget("floorplan max_rows exceeded"));
+    }
+    let (mut netlist, verilog_pin) = read_netlist(&sources.netlist, parser)?;
     if floor.name != netlist.module {
         return Err(invalid("floorplan name does not match the mapped module"));
     }
@@ -329,7 +428,7 @@ pub fn import_pdk_with_config(
         .iter()
         .map(|p| p.bytes as u64)
         .sum::<u64>();
-    if actual_bytes > MAX_AGGREGATE_BYTES {
+    if actual_bytes > MAX_AGGREGATE_BYTES + parser.max_input_bytes as u64 {
         return Err(budget("PDK aggregate source budget exceeded during read"));
     }
     let cells = lef::parse_lef(&cell_text, floor.units_per_micron, &llef)
@@ -510,7 +609,9 @@ pub fn import_pdk_with_config(
     if let Some(pin) = config_pin {
         source_pins.push(pin);
     }
-    if source_pins.iter().map(|p| p.bytes as u64).sum::<u64>() > MAX_AGGREGATE_BYTES {
+    if source_pins.iter().map(|p| p.bytes as u64).sum::<u64>()
+        > MAX_AGGREGATE_BYTES + 2 * 1024 * 1024 * 1024
+    {
         return Err(budget("physical import aggregate byte budget"));
     }
     let physical = PhysicalBundle {
@@ -534,6 +635,7 @@ pub fn import_pdk_with_config(
     validate_bundle(&physical, &design, connection_limits)?;
     let records = DesignDb::new(&design, limits)?.unplaced_records();
     let metadata = Metadata {
+        tables: None,
         format_version: if physical
             .config
             .as_ref()

@@ -176,18 +176,18 @@ fn master<'a>(spec: TieSpec<'a>, work: &mut Work<'_>) -> TieResult<Master<'a>> {
 }
 
 // Count serialization without constructing a second unbounded JSON buffer.
-fn input_bound(netlist: &verilog::Netlist) -> TieResult<()> {
+fn input_bound(netlist: &verilog::Netlist, limits: &TieLimits) -> TieResult<()> {
     struct Counter {
-        remaining: usize,
+        remaining: u64,
         exceeded: bool,
     }
     impl Write for Counter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if bytes.len() > self.remaining {
+            if bytes.len() as u64 > self.remaining {
                 self.exceeded = true;
                 return Err(std::io::Error::other("tie input AST byte cap"));
             }
-            self.remaining -= bytes.len();
+            self.remaining -= bytes.len() as u64;
             Ok(bytes.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
@@ -195,12 +195,12 @@ fn input_bound(netlist: &verilog::Netlist) -> TieResult<()> {
         }
     }
     let mut counter = Counter {
-        remaining: 16 * 1024 * 1024,
+        remaining: (limits.max_work as u64).clamp(16 * 1024 * 1024, 16 * 1024 * 1024 * 1024),
         exceeded: false,
     };
     if let Err(error) = serde_json::to_writer(&mut counter, netlist) {
         if counter.exceeded {
-            return Err(budget("input AST exceeds 16 MiB serialized limit"));
+            return Err(budget("input AST exceeds configured serialized byte limit"));
         }
         return Err(invalid(error.to_string()));
     }
@@ -480,7 +480,7 @@ impl Transform<'_> {
         if self.cells.len() >= self.work.limits.max_new_cells {
             return Err(budget("max_new_cells exceeded"));
         }
-        let vlimits = verilog::VerilogLimits::default();
+        let vlimits = verilog::VerilogLimits::large_design_ceiling();
         if self.base_cells + self.cells.len() >= vlimits.max_instances
             || self.base_wires + self.wires.len() >= vlimits.max_nets
         {
@@ -737,7 +737,7 @@ pub fn dissolve_constant_cells(
             });
         }
     }
-    verilog::validate_netlist(&out, &verilog::VerilogLimits::default())
+    verilog::validate_netlist(&out, &verilog::VerilogLimits::large_design_ceiling())
         .map_err(|e| invalid(e.to_string()))?;
     Ok((out, dissolved))
 }
@@ -775,9 +775,9 @@ pub fn materialize_constants_with(
     low: TieSpec<'_>,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, TieReport)> {
-    verilog::validate_netlist(netlist, &verilog::VerilogLimits::default())
+    verilog::validate_netlist(netlist, &verilog::VerilogLimits::large_design_ceiling())
         .map_err(|e| invalid(e.to_string()))?;
-    input_bound(netlist)?;
+    input_bound(netlist, limits)?;
     if high.cell.name == low.cell.name
         && high.pin == low.pin
         && !matches!((high.rail, low.rail), (Some(h), Some(l)) if h.0 == l.0 && h.1 != l.1)
@@ -898,7 +898,7 @@ pub fn materialize_constants_with(
     }
     rewritten.wires.extend(transform.wires);
     rewritten.instances.extend(transform.cells);
-    verilog::validate_netlist(&rewritten, &verilog::VerilogLimits::default())
+    verilog::validate_netlist(&rewritten, &verilog::VerilogLimits::large_design_ceiling())
         .map_err(|e| invalid(e.to_string()))?;
     Ok((rewritten, transform.report))
 }

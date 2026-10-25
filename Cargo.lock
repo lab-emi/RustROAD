@@ -283,6 +283,7 @@ dependencies = [
  "clap",
  "rayon",
  "rustroad-core",
+ "rustroad-formats",
  "rustroad-flow",
  "rustroad-workspace",
  "serde",

@@ -13,6 +13,9 @@ struct Cli {
     threads: u16,
     #[arg(long, global = true, default_value_t = 250_000)]
     max_cells: usize,
+    /// Maximum mapped-Verilog input size; storage/parser scratch stays bounded.
+    #[arg(long, global = true, default_value_t = 16, value_parser = clap::value_parser!(u64).range(1..=2048))]
+    max_input_mib: u64,
     #[arg(long, global = true, default_value_t = 100_000)]
     max_rows: usize,
     #[arg(long, global = true, default_value_t = 350_000)]
@@ -348,6 +351,37 @@ fn emit(value: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    let parser_limits = rustroad_formats::verilog::VerilogLimits {
+        max_input_bytes: cli.max_input_mib as usize * 1024 * 1024,
+        max_tokens: (cli.max_input_mib as usize * 1024 * 1024).clamp(2_000_000, 500_000_000),
+        max_instances: cli.max_cells,
+        max_connections: cli.max_pins,
+        max_expr_nodes: cli.max_pins,
+        max_nets: cli.max_nets,
+        ..Default::default()
+    };
+    let connectivity_limits = rustroad_core::connectivity::ConnectivityLimits {
+        max_instances: cli.max_cells,
+        max_nets: cli.max_nets,
+        max_pins: cli.max_pins,
+        max_aliases: cli.max_aliases,
+        ..Default::default()
+    };
+    let mut floor_limits = rustroad_workspace::floorplan::FloorplanLimits {
+        verilog: parser_limits.clone(),
+        connectivity: connectivity_limits.clone(),
+        placement: rustroad_core::place::PlaceLimits {
+            max_cells: cli.max_cells,
+            max_pins: cli.max_pins,
+            max_work: (cli.max_cells as u64)
+                .saturating_mul(50_000)
+                .max(20_000_000_000),
+        },
+        ..Default::default()
+    };
+    if cli.max_input_mib > 16 || cli.max_cells > 250_000 {
+        floor_limits.ties.max_work = (cli.max_input_mib as usize * 1024 * 1024).saturating_mul(16);
+    }
     // File-only ECO commands read netlists/reports and write new files; they
     // never open a workspace, so --workspace is not required for them.
     match &cli.command {
@@ -416,7 +450,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             out_floorplan,
             out_physical_config,
         } => {
-            return emit(&rustroad_workspace::floorplan::floorplan(
+            return emit(&rustroad_workspace::floorplan::floorplan_with_limits(
                 &rustroad_workspace::floorplan::FloorplanRequest {
                     tech_lef: tech_lef.clone(),
                     cell_lef: cell_lef.clone(),
@@ -433,6 +467,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     out_floorplan: out_floorplan.clone(),
                     out_physical_config: out_physical_config.clone(),
                 },
+                &floor_limits,
             )?);
         }
         Command::ApplyEco {
@@ -515,13 +550,14 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 netlist,
                 floorplan,
             };
-            emit(&rustroad_workspace::pdk::import_pdk_with_config(
+            emit(&rustroad_workspace::pdk::import_pdk_bounded(
                 &workspace,
                 &base_rev,
                 &sources,
                 &limits,
                 &connection_limits,
                 physical_config.as_deref(),
+                &parser_limits,
             )?)
         }
         Command::Place {

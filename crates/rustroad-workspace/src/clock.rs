@@ -351,8 +351,8 @@ pub fn synthesize_with_sdc(
     if snapshot.metadata().stage != Stage::Placed {
         return Err(fail("place the design before clock synthesis"));
     }
-    let mut metadata = snapshot.metadata().clone();
     let positions: Vec<Placed> = snapshot.records().collect();
+    let (_lock, mut metadata) = snapshot.into_metadata();
     let bundle = metadata
         .physical
         .as_mut()

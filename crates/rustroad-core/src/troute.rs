@@ -30,6 +30,7 @@
 //! Every search, queue and table is capped; see docs/scaling.md for the
 //! memory estimate that `check_plan` and `route` enforce before allocating.
 use crate::route_rules;
+use crate::route_search::{History, Search, State};
 use crate::routing::{
     Access, AccessEntry, Blockage, LayerRect, RouteInput, RouteLimits, RouteStats, Routes, Soft,
     Spatial, Terminal, TrackPlan, Via, ViaPair, WIRE, Wire, access_table_at, budget, contains,
@@ -389,11 +390,18 @@ pub(crate) fn graph_nodes(input: &RouteInput, limits: &RouteLimits) -> Result<us
 /// Upfront whole-route estimate for this input (graph `nodes`, `gcells`),
 /// computed without allocating router state: fixed bin entries are counted
 /// shape by shape, the bin grid from the die and obstacle extent.
-pub fn memory_estimate(input: &RouteInput, nodes: usize, gcells: usize) -> Result<MemoryEstimate> {
+fn memory_estimate_limited(
+    input: &RouteInput,
+    nodes: usize,
+    gcells: usize,
+    limits: &RouteLimits,
+) -> Result<MemoryEstimate> {
     let bin = crate::routing::bin_side(input)?;
     let (.., cells) = crate::routing::bin_extent(input, bin);
     let layers = input.layers.len() as u64;
-    let grid = cells.saturating_mul(layers).saturating_mul(GRID_BYTES);
+    let slots = cells.saturating_mul(layers);
+    let sparse_bins = slots > 1_000_000;
+
     let mut fixed_entries = 0u64;
     for b in &input.obstacles {
         let span = |lo: i64, hi: i64| (hi.div_euclid(bin) - lo.div_euclid(bin) + 1).max(0) as u64;
@@ -404,6 +412,12 @@ pub fn memory_estimate(input: &RouteInput, nodes: usize, gcells: usize) -> Resul
     let t = input.terminals.len() as u64;
     let added = t.saturating_mul(SHAPES_PER_TERMINAL);
     let index = |shapes: u64| {
+        let entries = fixed_entries.saturating_add(shapes.saturating_mul(ENTRIES_PER_SHAPE));
+        let grid = if sparse_bins {
+            slots.min(entries).saturating_mul(96)
+        } else {
+            slots.saturating_mul(GRID_BYTES)
+        };
         grid.saturating_add((o + shapes).saturating_mul(SHAPE_BYTES))
             .saturating_add(
                 fixed_entries
@@ -420,13 +434,29 @@ pub fn memory_estimate(input: &RouteInput, nodes: usize, gcells: usize) -> Resul
     }
     Ok(MemoryEstimate {
         held: input.held_bytes,
-        search: (nodes as u64)
-            .saturating_mul(NODE_BYTES)
-            .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES)),
+        search: (if nodes <= crate::route_search::DENSE_NODES {
+            (nodes as u64).saturating_mul(NODE_BYTES)
+        } else {
+            (nodes.min(limits.max_search_expansions.saturating_add(limits.max_heap)) as u64)
+                .saturating_mul(64)
+        })
+        .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES)),
         spatial: index(added),
         routed: t
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
-            .saturating_add((nodes as u64).saturating_mul(ROUTED_BYTES_PER_NODE)),
+            .saturating_add(
+                (nodes.min(limits.max_expansions.saturating_add(input.terminals.len())) as u64)
+                    .saturating_mul(if nodes <= crate::route_search::DENSE_NODES {
+                        ROUTED_BYTES_PER_NODE
+                    } else {
+                        64
+                    }),
+            )
+            .saturating_add(if nodes <= crate::route_search::DENSE_NODES {
+                0
+            } else {
+                (nodes.min(limits.max_expansions) as u64).saturating_mul(32)
+            }),
         check: index(records.saturating_mul(2))
             .saturating_add(records.saturating_mul(RECORD_BYTES)),
     })
@@ -443,7 +473,7 @@ pub(crate) fn estimate_for(
     };
     let graph = Graph::new(input, plan, limits)?;
     let cells = Cells::new(input.die, plan.gcell)?;
-    memory_estimate(input, graph.len, cells.len()).map(Some)
+    memory_estimate_limited(input, graph.len, cells.len(), limits).map(Some)
 }
 
 /// GCell grid over the die.
@@ -561,12 +591,9 @@ struct Router<'a> {
     slots: HashMap<u32, usize>,
     expansions: usize,
     // Detailed search state.
-    cost: Vec<u64>,
-    parent: Vec<u32>,
-    via_kind: Vec<u32>,
-    tag: Vec<u32>,
+    search: Search,
     epoch: u32,
-    history: Vec<u16>,
+    history: History,
     gmark: Vec<u32>,
     gepoch: u32,
     /// Per input layer: may two vias stack through it (every via pad on the
@@ -1632,10 +1659,15 @@ impl<'a> Router<'a> {
                 )
             };
             let mut heap = BinaryHeap::new();
-            self.cost[start as usize] = 0;
-            self.parent[start as usize] = NONE;
-            self.via_kind[start as usize] = WIRE;
-            self.tag[start as usize] = epoch;
+            self.search.begin(epoch);
+            self.search.set(
+                start,
+                State {
+                    cost: 0,
+                    parent: NONE,
+                    kind: WIRE,
+                },
+            )?;
             heap.push(Reverse((
                 heuristic(self.graph.point(start).1)?,
                 0u64,
@@ -1644,7 +1676,7 @@ impl<'a> Router<'a> {
             let mut found = None;
             let mut search = 0usize;
             while let Some(Reverse((_, cost, id))) = heap.pop() {
-                if self.tag[id as usize] != epoch || self.cost[id as usize] != cost {
+                if self.search.get(id).is_none_or(|s| s.cost != cost) {
                     continue;
                 }
                 if tree.contains(&id) {
@@ -1668,10 +1700,20 @@ impl<'a> Router<'a> {
                         if cur == start {
                             break start_via && run < need;
                         }
-                        if self.via_kind[cur as usize] != WIRE {
+                        if self
+                            .search
+                            .get(cur)
+                            .ok_or_else(|| invalid("missing routing parent state"))?
+                            .kind
+                            != WIRE
+                        {
                             break run < need;
                         }
-                        let prev = self.parent[cur as usize];
+                        let prev = self
+                            .search
+                            .get(cur)
+                            .ok_or_else(|| invalid("missing routing parent state"))?
+                            .parent;
                         run += distance(self.graph.point(cur).1, self.graph.point(prev).1)?;
                         cur = prev;
                         steps += 1;
@@ -1701,9 +1743,9 @@ impl<'a> Router<'a> {
                         Move::Wrong => distance(p, q)?.saturating_mul(wrong),
                         Move::Via(_) => via_cost,
                     };
-                    step = step.saturating_add(u64::from(self.history[next as usize]) * hist_unit);
+                    step = step.saturating_add(u64::from(self.history.get(next)) * hist_unit);
                     let base = cost.saturating_add(step);
-                    if self.tag[next as usize] == epoch && self.cost[next as usize] <= base {
+                    if self.search.get(next).is_some_and(|s| s.cost <= base) {
                         continue;
                     }
                     let (kind, extra) = match mv {
@@ -1715,8 +1757,23 @@ impl<'a> Router<'a> {
                             if kinds.is_empty() {
                                 continue;
                             }
-                            if id != start && self.via_kind[id as usize] == WIRE {
-                                let prev = self.graph.point(self.parent[id as usize]).1;
+                            if id != start
+                                && self
+                                    .search
+                                    .get(id)
+                                    .ok_or_else(|| invalid("missing routing parent state"))?
+                                    .kind
+                                    == WIRE
+                            {
+                                let prev = self
+                                    .graph
+                                    .point(
+                                        self.search
+                                            .get(id)
+                                            .ok_or_else(|| invalid("missing routing parent state"))?
+                                            .parent,
+                                    )
+                                    .1;
                                 let vertical = prev[0] == p[0];
                                 kinds.sort_by_key(|k| !self.pad_along(*k, layer, vertical));
                             }
@@ -1801,13 +1858,17 @@ impl<'a> Router<'a> {
                         }
                     };
                     let nc = base.saturating_add(extra);
-                    if self.tag[next as usize] == epoch && self.cost[next as usize] <= nc {
+                    if self.search.get(next).is_some_and(|s| s.cost <= nc) {
                         continue;
                     }
-                    self.tag[next as usize] = epoch;
-                    self.cost[next as usize] = nc;
-                    self.parent[next as usize] = id;
-                    self.via_kind[next as usize] = kind;
+                    self.search.set(
+                        next,
+                        State {
+                            cost: nc,
+                            parent: id,
+                            kind,
+                        },
+                    )?;
                     if heap.len() >= self.limits.max_heap {
                         return Err(budget("routing frontier limit"));
                     }
@@ -1822,9 +1883,16 @@ impl<'a> Router<'a> {
             };
             // Trace back, commit shapes so later sinks see this net's metal.
             let mut path = Vec::new();
-            while self.parent[current as usize] != NONE {
-                let prev = self.parent[current as usize];
-                path.push((prev, current, self.via_kind[current as usize]));
+            loop {
+                let state = self
+                    .search
+                    .get(current)
+                    .ok_or_else(|| invalid("missing routing trace state"))?;
+                if state.parent == NONE {
+                    break;
+                }
+                let prev = state.parent;
+                path.push((prev, current, state.kind));
                 current = prev;
                 if path.len() > self.limits.max_search_expansions {
                     return Err(budget("routing trace limit"));
@@ -1863,7 +1931,7 @@ impl<'a> Router<'a> {
                         && !victims.is_empty()
                     {
                         victims_all.extend(victims);
-                        self.history[b as usize] = self.history[b as usize].saturating_add(1);
+                        self.history.increment(b)?;
                     }
                     for s in &self.input.vias[kind as usize].shapes {
                         out.shapes.push(self.spatial.add_routed(Blockage {
@@ -1897,7 +1965,7 @@ impl<'a> Router<'a> {
                     {
                         victims_all.extend(victims);
                         for &n in &nodes {
-                            self.history[n as usize] = self.history[n as usize].saturating_add(1);
+                            self.history.increment(n)?;
                         }
                     }
                     out.shapes.push(self.spatial.add_routed(Blockage {
@@ -1938,7 +2006,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         .ok_or_else(|| invalid("track plan absent"))?;
     let graph = Graph::new(input, plan, limits)?;
     let cells = Cells::new(input.die, plan.gcell)?;
-    let estimate = memory_estimate(input, graph.len, cells.len())?;
+    let estimate = memory_estimate_limited(input, graph.len, cells.len(), limits)?;
     trace(
         "estimate",
         t0,
@@ -1998,12 +2066,15 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         pairs,
         slots,
         expansions: 0,
-        cost: vec![u64::MAX; n],
-        parent: vec![NONE; n],
-        via_kind: vec![WIRE; n],
-        tag: vec![0; n],
+        search: Search::new(
+            n,
+            limits
+                .max_search_expansions
+                .saturating_add(limits.max_heap)
+                .min(n),
+        )?,
         epoch: 0,
-        history: vec![0; n],
+        history: History::new(n, limits.max_expansions.min(n))?,
         gmark: vec![0; gl],
         gepoch: 0,
         stack_ok: vec![true; input.layers.len()],
@@ -2453,6 +2524,37 @@ mod tests {
     }
 
     #[test]
+    fn large_implicit_grid_routes_with_bounded_sparse_state() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(890, 890, 910, 910)),
+            ],
+            Vec::new(),
+        );
+        design.die = rect(0, 0, 400_000, 400_000);
+        let plan = design.tracks.as_mut().expect("track plan");
+        plan.gcell = 10_000;
+        plan.memory_mib = 256;
+        let caps = RouteLimits {
+            max_grid_nodes: 400_000_000,
+            max_expansions: 100_000,
+            max_search_expansions: 5_000,
+            max_heap: 20_000,
+            ..RouteLimits::default()
+        };
+        let estimate = estimate_for(&design, &caps)
+            .expect("estimate")
+            .expect("track estimate");
+        assert!(estimate.total() < 32 * 1024 * 1024, "{estimate:?}");
+        let result = route_cpu_ref(&design, &caps).expect("route the local connection");
+        assert_eq!(result.stats.grid_nodes, 300_000_000);
+        assert_eq!(result.nets, vec![0]);
+        assert!(!result.wires.is_empty());
+        assert!(result.stats.expansions <= caps.max_expansions);
+    }
+
+    #[test]
     fn track_graph_nodes_follow_pitch_and_offset() {
         let i = input(Vec::new(), Vec::new());
         let g = Graph::new(&i, i.tracks.as_ref().unwrap(), &limits()).unwrap();
@@ -2693,7 +2795,7 @@ mod tests {
             let err = route_cpu_ref(&small, &limits()).unwrap_err();
             assert!(err.to_string().contains("peak resident set"), "{err}");
         }
-        let e = memory_estimate(&i, 1_000_000, 10_000).unwrap();
+        let e = memory_estimate_limited(&i, 1_000_000, 10_000, &RouteLimits::default()).unwrap();
         assert!(e.search > 24_000_000 && e.total() > e.search + e.spatial);
         i.held_bytes = 1 << 40;
         assert!(matches!(

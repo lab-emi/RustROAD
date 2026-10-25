@@ -1,10 +1,10 @@
 //! Bounded structural Verilog interchange, independently implemented for RustROAD.
 //!
-//! Before implementation: at the 16 MiB input cap, at most 2M lexer tokens
-//! (approximately 96 MiB including vector capacity), token/AST identifier copies
-//! (approximately 64 MiB), 1M expression nodes (approximately 64 MiB), and bounded
-//! declaration/validation maps (approximately 96 MiB) give a conservative peak
-//! below 384 MiB. Data is single-corner and shared; no graph paths, cones, clauses
+//! The lexer retains one token and scans comments without copying them. Total
+//! token work, identifier/constant lengths, AST objects and validation maps are
+//! independently capped. At the default 16 MiB input cap the retained AST and
+//! declaration/validation maps remain below the prior 384 MiB estimate; no
+//! full-input token vector or identifier copies are retained. Data is single-corner and shared; no graph paths, cones, clauses
 //! or per-thread design copies are materialized. Expression recursion is capped
 //! at 32 by default, leaving room for tagged AST JSON inside workspace metadata.
 //! Tiny unit fixtures consume less than 1 MiB each; run at most
@@ -16,7 +16,7 @@
 //! attributes, preprocessing and implicit nets produce explicit errors.
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
+use std::io::{BufRead, Write};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,6 +45,21 @@ impl Default for VerilogLimits {
             max_depth: 32,
             max_identifier_bytes: 4096,
             max_constant_bits: 65_536,
+        }
+    }
+}
+impl VerilogLimits {
+    /// Absolute validation ceiling for already allocated large-design records.
+    /// Import callers must still supply their smaller per-operation budgets.
+    pub fn large_design_ceiling() -> Self {
+        Self {
+            max_input_bytes: 2 * 1024 * 1024 * 1024,
+            max_tokens: 500_000_000,
+            max_instances: 8_000_000,
+            max_connections: 128_000_000,
+            max_nets: 32_000_000,
+            max_expr_nodes: 128_000_000,
+            ..Self::default()
         }
     }
 }
@@ -428,114 +443,203 @@ fn simple_identifier(name: &str) -> bool {
         && !reserved(name)
 }
 
-fn lex(input: &str, limits: &VerilogLimits) -> Result<Vec<Token>> {
-    if input.len() > limits.max_input_bytes {
-        return Err(budget("input byte limit"));
-    }
-    let bytes = input.as_bytes();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i].is_ascii_whitespace() {
-            i += 1;
-            continue;
+/// A one-token lexer. Input and comment storage do not grow with file size.
+struct Lexer<'a, R> {
+    input: R,
+    limits: &'a VerilogLimits,
+    offset: usize,
+    tokens: usize,
+    utf8_left: u8,
+    utf8_min: u8,
+    utf8_max: u8,
+}
+impl<R: BufRead> Lexer<'_, R> {
+    fn peek(&mut self) -> Result<Option<u8>> {
+        let value = self.input.fill_buf()?.first().copied();
+        if value.is_none() && self.utf8_left != 0 {
+            return Err(syntax(self.offset, "incomplete UTF-8 sequence"));
         }
-        let start = i;
-        if bytes[i..].starts_with(b"//") || bytes[i..].starts_with(b"/*") {
-            let block = bytes[i + 1] == b'*';
-            i += 2;
-            let content_start = i;
-            if block {
-                while i + 1 < bytes.len() && !bytes[i..].starts_with(b"*/") {
-                    i += 1;
-                }
-                if i + 1 == bytes.len() || i >= bytes.len() {
-                    return Err(syntax(start, "unterminated block comment"));
-                }
-            } else {
-                while i < bytes.len() && bytes[i] != b'\n' {
-                    i += 1;
-                }
+        Ok(value)
+    }
+    fn byte(&mut self) -> Result<Option<u8>> {
+        let Some(value) = self.peek()? else {
+            return Ok(None);
+        };
+        if self.offset >= self.limits.max_input_bytes {
+            return Err(budget("input byte limit"));
+        }
+        if self.utf8_left > 0 {
+            if !(self.utf8_min..=self.utf8_max).contains(&value) {
+                return Err(syntax(self.offset, "invalid UTF-8 sequence"));
             }
-            let comment = input[content_start..i].to_ascii_lowercase();
+            self.utf8_left -= 1;
+            self.utf8_min = 0x80;
+            self.utf8_max = 0xbf;
+        } else {
+            (self.utf8_left, self.utf8_min, self.utf8_max) = match value {
+                0..=0x7f => (0, 0x80, 0xbf),
+                0xc2..=0xdf => (1, 0x80, 0xbf),
+                0xe0 => (2, 0xa0, 0xbf),
+                0xe1..=0xec | 0xee..=0xef => (2, 0x80, 0xbf),
+                0xed => (2, 0x80, 0x9f),
+                0xf0 => (3, 0x90, 0xbf),
+                0xf1..=0xf3 => (3, 0x80, 0xbf),
+                0xf4 => (3, 0x80, 0x8f),
+                _ => return Err(syntax(self.offset, "invalid UTF-8 sequence")),
+            };
+        }
+        self.input.consume(1);
+        self.offset += 1;
+        Ok(Some(value))
+    }
+    fn comment(&mut self, block: bool, start: usize) -> Result<()> {
+        let mut window = [0u8; 16];
+        let mut used = 0usize;
+        loop {
+            let Some(b) = self.byte()? else {
+                return if block {
+                    Err(syntax(start, "unterminated block comment"))
+                } else {
+                    Ok(())
+                };
+            };
+            if block && b == b'*' && self.peek()? == Some(b'/') {
+                self.byte()?;
+                return Ok(());
+            }
+            if !block && b == b'\n' {
+                return Ok(());
+            }
+            if used < window.len() {
+                window[used] = b.to_ascii_lowercase();
+                used += 1;
+            } else {
+                window.copy_within(1.., 0);
+                window[15] = b.to_ascii_lowercase();
+            }
             if [
-                "translate_off",
-                "translate_on",
-                "synopsys ",
-                "synthesis ",
-                "syn_black_box",
-                "verilator ",
+                b"translate_off".as_slice(),
+                b"translate_on",
+                b"synopsys ",
+                b"synthesis ",
+                b"syn_black_box",
+                b"verilator ",
             ]
             .iter()
-            .any(|p| comment.contains(p))
+            .any(|p| window[..used].ends_with(p))
             {
                 return Err(syntax(start, "semantic comment pragma is unsupported"));
             }
-            if block {
-                i += 2;
-            }
-            continue;
         }
-        if out.len() >= limits.max_tokens {
-            return Err(budget("token limit"));
-        }
-        let kind = if bytes[i] == b'\\' {
-            i += 1;
-            let begin = i;
-            while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
-                i += 1;
+    }
+    fn next_token(&mut self) -> Result<Option<Token>> {
+        loop {
+            let start = self.offset;
+            let Some(b) = self.byte()? else {
+                return Ok(None);
+            };
+            if b.is_ascii_whitespace() {
+                continue;
             }
-            if i == bytes.len() {
+            if b == b'/' {
+                match self.byte()? {
+                    Some(b'/') => self.comment(false, start)?,
+                    Some(b'*') => self.comment(true, start)?,
+                    _ => {
+                        return Err(syntax(
+                            start,
+                            "unsupported token/operator/preprocessor/attribute",
+                        ));
+                    }
+                }
+                continue;
+            }
+            if self.tokens >= self.limits.max_tokens {
+                return Err(budget("token limit"));
+            }
+            self.tokens += 1;
+            let kind = if b == b'\\' {
+                let mut name = Vec::new();
+                while let Some(next) = self.peek()? {
+                    if next.is_ascii_whitespace() {
+                        break;
+                    }
+                    if name.len() >= self.limits.max_identifier_bytes {
+                        return Err(budget("empty or oversized identifier"));
+                    }
+                    name.push(self.byte()?.expect("peeked byte remains available"));
+                }
+                if self.peek()?.is_none() {
+                    return Err(syntax(
+                        start,
+                        "escaped identifier needs a whitespace terminator",
+                    ));
+                }
+                let name = String::from_utf8(name)
+                    .map_err(|_| syntax(start, "invalid UTF-8 identifier"))?;
+                identifier_ok(&name, self.limits)?;
+                Kind::Ident(name, true)
+            } else if b.is_ascii_alphabetic() || matches!(b, b'_' | b'$') {
+                let mut name = vec![b];
+                while let Some(next) = self.peek()? {
+                    if !(next.is_ascii_alphanumeric() || matches!(next, b'_' | b'$')) {
+                        break;
+                    }
+                    if name.len() >= self.limits.max_identifier_bytes {
+                        return Err(budget("empty or oversized identifier"));
+                    }
+                    name.push(self.byte()?.expect("peeked byte remains available"));
+                }
+                let name = String::from_utf8(name).expect("simple identifier contains only ASCII");
+                identifier_ok(&name, self.limits)?;
+                Kind::Ident(name, false)
+            } else if b.is_ascii_digit() || b == b'\'' {
+                let mut value = vec![b];
+                while let Some(next) = self.peek()? {
+                    if !(next.is_ascii_alphanumeric() || matches!(next, b'_' | b'\'' | b'?')) {
+                        break;
+                    }
+                    if value.len()
+                        >= self
+                            .limits
+                            .max_constant_bits
+                            .saturating_mul(2)
+                            .saturating_add(32)
+                    {
+                        return Err(budget("constant text limit"));
+                    }
+                    value.push(self.byte()?.expect("peeked byte remains available"));
+                }
+                let value = String::from_utf8(value).expect("constant contains only ASCII");
+                constant_ok(&value, self.limits).map_err(|e| match e {
+                    VerilogError::Syntax { message, .. } => syntax(start, message),
+                    other => other,
+                })?;
+                Kind::Number(value)
+            } else if b"();,.:[]{}=-#".contains(&b) {
+                Kind::Punct(b)
+            } else {
                 return Err(syntax(
                     start,
-                    "escaped identifier needs a whitespace terminator",
+                    "unsupported token/operator/preprocessor/attribute",
                 ));
-            }
-            let name = &input[begin..i];
-            identifier_ok(name, limits)?;
-            Kind::Ident(name.into(), true)
-        } else if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' || bytes[i] == b'$' {
-            i += 1;
-            while i < bytes.len()
-                && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'$')
-            {
-                i += 1;
-            }
-            let name = &input[start..i];
-            identifier_ok(name, limits)?;
-            Kind::Ident(name.into(), false)
-        } else if bytes[i].is_ascii_digit() || bytes[i] == b'\'' {
-            i += 1;
-            while i < bytes.len()
-                && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'_' | b'\'' | b'?'))
-            {
-                i += 1;
-            }
-            let value = &input[start..i];
-            constant_ok(value, limits).map_err(|e| match e {
-                VerilogError::Syntax { message, .. } => syntax(start, message),
-                other => other,
-            })?;
-            Kind::Number(value.into())
-        } else if b"();,.:[]{}=-#".contains(&bytes[i]) {
-            i += 1;
-            Kind::Punct(bytes[start])
-        } else {
-            return Err(syntax(
-                start,
-                "unsupported token/operator/preprocessor/attribute",
-            ));
-        };
-        out.push(Token {
-            kind,
-            offset: start,
-        });
+            };
+            return Ok(Some(Token {
+                kind,
+                offset: start,
+            }));
+        }
     }
-    Ok(out)
 }
 
 fn constant_ok(value: &str, limits: &VerilogLimits) -> Result<()> {
-    if value.len() > limits.max_input_bytes {
+    if value.len() > limits.max_input_bytes
+        || value.len()
+            > limits
+                .max_constant_bits
+                .saturating_mul(2)
+                .saturating_add(32)
+    {
         return Err(budget("constant text limit"));
     }
     let lower = value.to_ascii_lowercase();
@@ -603,33 +707,42 @@ fn unsigned_decimal(value: &str) -> Result<u64> {
         .map_err(|_| syntax(0, "decimal integer exceeds u64"))
 }
 
-struct Parser<'a> {
-    tokens: Vec<Token>,
-    pos: usize,
+struct Parser<'a, R> {
+    lexer: Lexer<'a, R>,
+    token: Option<Token>,
+    lexical_error: Option<VerilogError>,
     limits: &'a VerilogLimits,
     expr_nodes: usize,
     connections: usize,
 }
-impl Parser<'_> {
+impl<R: BufRead> Parser<'_, R> {
+    fn advance(&mut self) {
+        match self.lexer.next_token() {
+            Ok(token) => self.token = token,
+            Err(error) => {
+                self.token = None;
+                self.lexical_error = Some(error);
+            }
+        }
+    }
     fn offset(&self) -> usize {
-        self.tokens.get(self.pos).map_or(0, |t| t.offset)
+        self.token.as_ref().map_or(0, |t| t.offset)
     }
     fn error(&self, message: &str) -> VerilogError {
         syntax(self.offset(), message)
     }
     fn keyword(&mut self, value: &str) -> bool {
-        if matches!(self.tokens.get(self.pos), Some(Token { kind: Kind::Ident(s, false), .. }) if s == value)
+        if matches!(self.token.as_ref(), Some(Token { kind: Kind::Ident(s, false), .. }) if s == value)
         {
-            self.pos += 1;
+            self.advance();
             true
         } else {
             false
         }
     }
     fn punct(&mut self, value: u8) -> bool {
-        if matches!(self.tokens.get(self.pos), Some(Token { kind: Kind::Punct(b), .. }) if *b == value)
-        {
-            self.pos += 1;
+        if matches!(self.token.as_ref(), Some(Token { kind: Kind::Punct(b), .. }) if *b == value) {
+            self.advance();
             true
         } else {
             false
@@ -646,13 +759,13 @@ impl Parser<'_> {
         }
     }
     fn ident(&mut self) -> Result<String> {
-        match self.tokens.get(self.pos) {
+        match self.token.as_ref() {
             Some(Token {
                 kind: Kind::Ident(s, escaped),
                 ..
             }) if *escaped || (!reserved(s) && !s.starts_with('$')) => {
                 let result = s.clone();
-                self.pos += 1;
+                self.advance();
                 Ok(result)
             }
             _ => {
@@ -666,12 +779,12 @@ impl Parser<'_> {
         let Some(Token {
             kind: Kind::Number(s),
             ..
-        }) = self.tokens.get(self.pos)
+        }) = self.token.as_ref()
         else {
             return Err(self.error("range/select requires a decimal integer"));
         };
         let number = unsigned_decimal(s)?;
-        self.pos += 1;
+        self.advance();
         let value = if negative {
             -i128::from(number)
         } else {
@@ -721,10 +834,10 @@ impl Parser<'_> {
         if let Some(Token {
             kind: Kind::Number(s),
             ..
-        }) = self.tokens.get(self.pos)
+        }) = self.token.as_ref()
         {
             let value = s.clone();
-            self.pos += 1;
+            self.advance();
             return Ok(Expr::Constant(value));
         }
         let name = self.ident()?;
@@ -747,6 +860,14 @@ impl Parser<'_> {
         Ok(result)
     }
     fn parse(mut self) -> Result<Netlist> {
+        self.advance();
+        let result = self.parse_inner();
+        match self.lexical_error {
+            Some(error) => Err(error),
+            None => result,
+        }
+    }
+    fn parse_inner(&mut self) -> Result<Netlist> {
         if !self.keyword("module") {
             return Err(self.error("expected one flat module"));
         }
@@ -796,7 +917,7 @@ impl Parser<'_> {
         let mut instances = Vec::new();
         let port_names: HashSet<_> = order.iter().cloned().collect();
         while !self.keyword("endmodule") {
-            if self.pos == self.tokens.len() {
+            if self.token.is_none() {
                 return Err(self.error("missing endmodule"));
             }
             if let Some(direction) = self.direction() {
@@ -906,7 +1027,7 @@ impl Parser<'_> {
                 }
             }
         }
-        if self.pos != self.tokens.len() {
+        if self.token.is_some() {
             return Err(self.error("multiple modules/trailing constructs are unsupported"));
         }
         let ports = order
@@ -932,9 +1053,30 @@ impl Parser<'_> {
 /// Parse a flat mapped module. Names retain their exact logical spelling;
 /// the leading backslash and terminating whitespace are syntax, not name data.
 pub fn parse_verilog(input: &str, limits: &VerilogLimits) -> Result<Netlist> {
+    if input.len() > limits.max_input_bytes {
+        return Err(budget("input byte limit"));
+    }
+    parse_verilog_reader(input.as_bytes(), limits)
+}
+
+/// Parse a flat mapped module from a buffered stream with constant lexer storage.
+///
+/// # Errors
+/// Returns explicit I/O, encoding, unsupported-syntax, or configured-budget errors.
+/// The reader is consumed through EOF on success, including trailing comments.
+pub fn parse_verilog_reader(reader: impl BufRead, limits: &VerilogLimits) -> Result<Netlist> {
     Parser {
-        tokens: lex(input, limits)?,
-        pos: 0,
+        lexer: Lexer {
+            input: reader,
+            limits,
+            offset: 0,
+            tokens: 0,
+            utf8_left: 0,
+            utf8_min: 0x80,
+            utf8_max: 0xbf,
+        },
+        token: None,
+        lexical_error: None,
         limits,
         expr_nodes: 0,
         connections: 0,

@@ -12,6 +12,7 @@ pub mod memory;
 pub mod place;
 pub mod power;
 pub(crate) mod route_rules;
+mod route_search;
 pub mod routing;
 pub mod supply;
 pub mod tap;

@@ -34,7 +34,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 const MAX_LEF_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_NETLIST_BYTES: u64 = 16 * 1024 * 1024;
+
+#[derive(Clone, Debug, Default)]
+pub struct FloorplanLimits {
+    pub verilog: verilog::VerilogLimits,
+    pub ties: crate::ties::TieLimits,
+    pub connectivity: ConnectivityLimits,
+    pub placement: PlaceLimits,
+}
 
 pub struct FloorplanRequest {
     pub tech_lef: PathBuf,
@@ -170,6 +177,19 @@ fn gcd(mut a: i64, mut b: i64) -> i64 {
 }
 
 pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
+    floorplan_with_limits(req, &FloorplanLimits::default())
+}
+
+/// Derive a floorplan under explicitly admitted input, object and work budgets.
+pub fn floorplan_with_limits(
+    req: &FloorplanRequest,
+    limits: &FloorplanLimits,
+) -> Result<FloorplanReport> {
+    if limits.verilog.max_input_bytes > 2 * 1024 * 1024 * 1024
+        || limits.verilog.max_instances > 8_000_000
+    {
+        return Err(invalid("floorplan input limits exceed absolute ceilings"));
+    }
     if !(req.utilization > 0.05 && req.utilization <= 0.95)
         || !(req.aspect >= 0.1 && req.aspect <= 10.0)
         || !(req.margin_um >= 0.0 && req.margin_um <= 10_000.0)
@@ -223,10 +243,7 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
     }
     cfg.io_plan = None;
     cfg.validate()?;
-    let (net_text, _) = read_input(&req.netlist, MAX_NETLIST_BYTES, "mapped_verilog")?;
-    let netlist = verilog::parse_verilog(&net_text, &verilog::VerilogLimits::default())
-        .map_err(|e| invalid(e.to_string()))?;
-    drop(net_text);
+    let (netlist, _) = crate::pdk::read_netlist(&req.netlist, &limits.verilog)?;
     let find = |name: &str| {
         tech.macros
             .iter()
@@ -255,21 +272,16 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
         pin: &cfg.tie_low.pin,
         rail: cfg.tie_low.rail(),
     };
-    let (netlist, _) = crate::ties::dissolve_constant_cells(
-        &netlist,
-        &specs,
-        high,
-        low,
-        &crate::ties::TieLimits::default(),
-    )
-    .map_err(|e| invalid(e.to_string()))?;
-    let (netlist, ties) = crate::ties::materialize_constants_with(
-        &netlist,
-        high,
-        low,
-        &crate::ties::TieLimits::default(),
-    )
-    .map_err(|e| invalid(e.to_string()))?;
+    let (rewritten, _) =
+        crate::ties::dissolve_constant_cells(&netlist, &specs, high, low, &limits.ties)
+            .map_err(|e| invalid(e.to_string()))?;
+    drop(netlist);
+    let netlist = rewritten;
+    let (rewritten, ties) =
+        crate::ties::materialize_constants_with(&netlist, high, low, &limits.ties)
+            .map_err(|e| invalid(e.to_string()))?;
+    drop(netlist);
+    let netlist = rewritten;
     let site = tech
         .sites
         .iter()
@@ -487,12 +499,8 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
         .iter()
         .map(|i| index[i.cell.as_str()])
         .collect();
-    let (ports, nets, pins) = crate::pdk::link(
-        &netlist,
-        &masters,
-        &instance_masters,
-        &ConnectivityLimits::default(),
-    )?;
+    let (ports, nets, pins) =
+        crate::pdk::link(&netlist, &masters, &instance_masters, &limits.connectivity)?;
     let io_names: Vec<String> = ports.iter().flat_map(|p| p.bits.iter().cloned()).collect();
     let mut net_pins: Vec<Vec<(Option<u32>, Option<usize>)>> = vec![Vec::new(); nets.len()];
     let bit_index: HashMap<&str, usize> = io_names
@@ -528,6 +536,11 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
         .iter()
         .map(|i| find(&i.cell).map(|m| m.size[0]))
         .collect::<Result<_>>()?;
+    let module = netlist.module.clone();
+    let logic_cells = netlist.instances.len() - ties.new_cells;
+    drop(netlist);
+    drop(pins);
+    drop(nets);
     let pc = cfg.placer.clone().unwrap_or_default();
     let place_with = |io: &[rustroad_core::io::IoPin]| -> Result<(Vec<[i64; 2]>, u64)> {
         let centre: HashMap<&str, [i64; 2]> = io
@@ -561,7 +574,7 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
             nets,
             intervals: intervals.clone(),
         };
-        let r = rustroad_core::place::place(&problem, &pc, &PlaceLimits::default())?;
+        let r = rustroad_core::place::place(&problem, &pc, &limits.placement)?;
         Ok((r.positions, r.hpwl))
     };
     let mut io =
@@ -597,7 +610,7 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
     cfg.io_plan = Some(plan);
     cfg.validate()?;
     let floor_json = serde_json::json!({
-        "name": netlist.module,
+        "name": module,
         "units_per_micron": dbu,
         "die_area": die,
         "core_area": core,
@@ -620,14 +633,14 @@ pub fn floorplan(req: &FloorplanRequest) -> Result<FloorplanReport> {
     let um2 = |v: f64| v / f64::from(dbu) / f64::from(dbu);
     Ok(FloorplanReport {
         schema: "rustroad.floorplan-report.v1",
-        design: netlist.module.clone(),
+        design: module,
         units_per_micron: dbu,
         die_area: die,
         core_area: core,
         rows,
         row_length_dbu: length,
         tap_period: cfg.tap.as_ref().map(|_| k),
-        logic_cells: netlist.instances.len() - ties.new_cells,
+        logic_cells,
         tie_cells: ties.new_cells,
         clock_buffers_estimate: buffers,
         cell_area_um2: um2(area as f64 * sh as f64),

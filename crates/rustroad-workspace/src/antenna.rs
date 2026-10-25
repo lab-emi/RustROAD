@@ -1296,8 +1296,8 @@ pub fn repair_antenna(
     let current = crate::head(path)?;
     crate::check_base(base_rev, &current)?;
     let snapshot = crate::load(path, lock, limits)?;
-    let mut metadata = snapshot.metadata().clone();
     let placed: Vec<_> = snapshot.records().collect();
+    let (_lock, mut metadata) = snapshot.into_metadata();
     let design = metadata.design.clone();
     let bundle = metadata
         .physical

@@ -48,7 +48,7 @@ impl RouteLimits {
     pub fn ceiling() -> Self {
         Self {
             max_axis: 1 << 20,
-            max_grid_nodes: 64_000_000,
+            max_grid_nodes: u32::MAX as usize - 1,
             max_obstacles: 8_000_000,
             max_bin_entries: 64_000_000,
             max_segments: 8_000_000,
@@ -365,6 +365,7 @@ const NIL: u32 = u32::MAX;
 /// allocated on its first shape: 8 bytes per bin plus 8 bytes per entry.
 /// Bins outside the grid (never produced by router inputs) use a hash map.
 struct BinGrid {
+    sparse: bool,
     bx0: i64,
     by0: i64,
     nx: i64,
@@ -401,10 +402,17 @@ impl BinGrid {
         (dx >= 0 && dy >= 0 && dx < self.nx && dy < self.ny).then(|| (dy * self.nx + dx) as usize)
     }
     fn push(&mut self, layer: u32, x: i64, y: i64, id: usize) -> Result<()> {
-        let Some(k) = self.slot(x, y) else {
-            self.overflow.entry((layer, x, y)).or_default().push(id);
+        if self.sparse || self.slot(x, y).is_none() {
+            self.overflow
+                .try_reserve(1)
+                .map_err(|_| budget("sparse routing bin allocation"))?;
+            let bin = self.overflow.entry((layer, x, y)).or_default();
+            bin.try_reserve(1)
+                .map_err(|_| budget("sparse routing bin entries"))?;
+            bin.push(id);
             return Ok(());
-        };
+        }
+        let k = self.slot(x, y).expect("dense bin is inside the grid");
         let e = u32::try_from(self.entries.len())
             .ok()
             .filter(|&e| e != NIL)
@@ -425,7 +433,7 @@ impl BinGrid {
         Ok(())
     }
     fn iter(&self, layer: u32, x: i64, y: i64) -> BinIter<'_> {
-        match self.slot(x, y) {
+        match self.slot(x, y).filter(|_| !self.sparse) {
             Some(k) => BinIter::Chain {
                 entries: &self.entries,
                 at: self.cells[layer as usize].get(k).map_or(NIL, |c| c[0]),
@@ -439,7 +447,7 @@ impl BinGrid {
     }
     /// Grid bins allocated over all layers.
     fn allocated(&self) -> usize {
-        self.cells.iter().map(Vec::len).sum()
+        self.cells.iter().map(Vec::len).sum::<usize>() + self.overflow.len()
     }
 }
 /// Bin index range `[x0, x1] x [y0, y1]` covering the die and every fixed
@@ -498,15 +506,13 @@ impl<'a> Spatial<'a> {
         // uses bins of two access steps (the lattice router keeps eight).
         let bin = bin_side(input)?;
         let (x0, x1, y0, y1, cells) = bin_extent(input, bin);
-        if cells.saturating_mul(input.layers.len() as u64) > limits.max_bin_entries as u64 {
-            return Err(budget("routing spatial-bin grid"));
-        }
         let mut s = Self {
             input,
             limits,
             bin,
             shapes: Vec::new(),
             bins: BinGrid {
+                sparse: cells.saturating_mul(input.layers.len() as u64) > 1_000_000,
                 bx0: x0,
                 by0: y0,
                 nx: x1 - x0 + 1,
