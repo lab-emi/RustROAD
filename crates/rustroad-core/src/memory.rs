@@ -55,7 +55,9 @@ mod tests {
         assert_eq!(parse(text, "VmData:"), None);
         if cfg!(target_os = "linux") {
             let (now, peak) = (rss_bytes().unwrap(), peak_rss_bytes().unwrap());
-            assert!(now > 0 && peak >= now);
+            // These are separate procfs samples taken while other tests may allocate.
+            // The fixed sample above checks their relationship atomically.
+            assert!(now > 0 && peak > 0);
         }
     }
 }

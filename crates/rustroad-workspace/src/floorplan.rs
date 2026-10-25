@@ -185,6 +185,16 @@ pub fn floorplan_with_limits(
     req: &FloorplanRequest,
     limits: &FloorplanLimits,
 ) -> Result<FloorplanReport> {
+    let started = std::time::Instant::now();
+    let trace = |stage: &str| {
+        if std::env::var_os("RUSTROAD_FLOORPLAN_TRACE").is_some() {
+            eprintln!(
+                "[floorplan] {stage}: {:.3}s",
+                started.elapsed().as_secs_f64()
+            );
+            rustroad_core::memory::trace(stage);
+        }
+    };
     if limits.verilog.max_input_bytes > 2 * 1024 * 1024 * 1024
         || limits.verilog.max_instances > 8_000_000
     {
@@ -244,6 +254,7 @@ pub fn floorplan_with_limits(
     cfg.io_plan = None;
     cfg.validate()?;
     let (netlist, _) = crate::pdk::read_netlist(&req.netlist, &limits.verilog)?;
+    trace("netlist parsed");
     let find = |name: &str| {
         tech.macros
             .iter()
@@ -277,11 +288,13 @@ pub fn floorplan_with_limits(
             .map_err(|e| invalid(e.to_string()))?;
     drop(netlist);
     let netlist = rewritten;
+    trace("constant cells dissolved");
     let (rewritten, ties) =
         crate::ties::materialize_constants_with(&netlist, high, low, &limits.ties)
             .map_err(|e| invalid(e.to_string()))?;
     drop(netlist);
     let netlist = rewritten;
+    trace("constants materialized");
     let site = tech
         .sites
         .iter()
@@ -501,6 +514,7 @@ pub fn floorplan_with_limits(
         .collect();
     let (ports, nets, pins) =
         crate::pdk::link(&netlist, &masters, &instance_masters, &limits.connectivity)?;
+    trace("connectivity linked");
     let io_names: Vec<String> = ports.iter().flat_map(|p| p.bits.iter().cloned()).collect();
     let mut net_pins: Vec<Vec<(Option<u32>, Option<usize>)>> = vec![Vec::new(); nets.len()];
     let bit_index: HashMap<&str, usize> = io_names
@@ -541,6 +555,7 @@ pub fn floorplan_with_limits(
     drop(netlist);
     drop(pins);
     drop(nets);
+    trace("placement input prepared");
     let pc = cfg.placer.clone().unwrap_or_default();
     let place_with = |io: &[rustroad_core::io::IoPin]| -> Result<(Vec<[i64; 2]>, u64)> {
         let centre: HashMap<&str, [i64; 2]> = io
@@ -584,6 +599,7 @@ pub fn floorplan_with_limits(
     let mut hpwl = 0;
     for _ in 0..2 {
         let (positions, h) = place_with(&io)?;
+        trace("placement pass finished");
         hpwl = h;
         let p = io_plan(
             &io_names,

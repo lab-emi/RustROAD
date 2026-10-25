@@ -237,12 +237,12 @@ fn spill(metadata: &mut Metadata, directory: &Path) -> Result<Vec<u8>> {
 }
 
 /// Restore vectors after validating the file identity and all framing bounds.
-pub(crate) fn restore(metadata: &mut Metadata, directory: &Path, limits: &Limits) -> Result<()> {
+pub(crate) fn restore(metadata: &mut Metadata, directory: &Path, limits: &Limits) -> Result<u32> {
     if metadata.format_version != 7 {
         if metadata.tables.is_some() {
             return Err(invalid("side tables require workspace schema 7"));
         }
-        return Ok(());
+        return Ok(metadata.format_version);
     }
     let table = metadata
         .tables
@@ -342,8 +342,19 @@ pub(crate) fn restore(metadata: &mut Metadata, directory: &Path, limits: &Limits
     if r.offset != r.bytes.len() {
         return Err(invalid("trailing physical side-table bytes"));
     }
-    metadata.format_version = table.logical_version;
-    Ok(())
+    Ok(table.logical_version)
+}
+
+pub(crate) fn logical_version(metadata: &Metadata) -> Result<u32> {
+    if metadata.format_version == 7 {
+        metadata
+            .tables
+            .as_ref()
+            .map(|t| t.logical_version)
+            .ok_or_else(|| invalid("schema 7 missing table descriptor"))
+    } else {
+        Ok(metadata.format_version)
+    }
 }
 
 #[cfg(test)]
@@ -384,7 +395,9 @@ mod tests {
         let mut decoded: Metadata = serde_json::from_slice(&json).expect("small revision metadata");
         assert!(decoded.design.cells.is_empty());
         assert_eq!(decoded.format_version, 7);
-        restore(&mut decoded, &dir, &Limits::default()).expect("restore cells");
+        let logical = restore(&mut decoded, &dir, &Limits::default()).expect("restore cells");
+        assert_eq!(decoded.format_version, 7);
+        decoded.format_version = logical;
         decoded.tables = None;
         assert_eq!(
             serde_json::to_value(decoded).expect("restored metadata"),
@@ -422,8 +435,9 @@ mod tests {
         let expected = serde_json::to_value(&metadata).expect("original vectors");
         let json = spill(&mut metadata, &dir).expect("serialize physical vectors");
         let mut decoded: Metadata = serde_json::from_slice(&json).expect("small metadata");
-        restore(&mut decoded, &dir, &Limits::default())
+        let logical = restore(&mut decoded, &dir, &Limits::default())
             .expect("restore fixed and variable records");
+        decoded.format_version = logical;
         decoded.tables = None;
         assert_eq!(
             serde_json::to_value(decoded).expect("decoded vectors"),

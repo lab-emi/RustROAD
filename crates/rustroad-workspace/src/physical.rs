@@ -711,6 +711,8 @@ pub(super) fn clear_fillers(design: &mut Design, bundle: &mut PhysicalBundle) ->
     Ok(())
 }
 pub(super) fn relink(bundle: &mut PhysicalBundle) -> Result<()> {
+    let connection_limits =
+        crate::pdk::connection_limits_for_cells(bundle.netlist.instances.len())?;
     let lookup: HashMap<_, _> = bundle
         .connectivity
         .masters
@@ -733,7 +735,7 @@ pub(super) fn relink(bundle: &mut PhysicalBundle) -> Result<()> {
         &bundle.netlist,
         &bundle.connectivity.masters,
         &im,
-        &ConnectivityLimits::default(),
+        &connection_limits,
     )?;
     if let Some(cfg) = &bundle.config {
         attach_supplies(
@@ -743,7 +745,7 @@ pub(super) fn relink(bundle: &mut PhysicalBundle) -> Result<()> {
             &mut nets,
             &mut pins,
             cfg,
-            &ConnectivityLimits::default(),
+            &connection_limits,
         )?;
     }
     bundle.connectivity.instance_masters = im;
@@ -940,7 +942,7 @@ pub(super) fn prepare(
     relink(bundle)?;
     bundle
         .connectivity
-        .validate(design, &ConnectivityLimits::default())?;
+        .validate(design, &crate::pdk::connection_limits(design)?)?;
     let state = layout(design, bundle, &placed)?;
     let expansions = bundle
         .generated_fillers
@@ -986,7 +988,14 @@ pub(super) fn layout(
         .as_ref()
         .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
     validate_tap_master(bundle)?;
-    rustroad_core::validate_placement(design, placed, &Limits::default())?;
+    rustroad_core::validate_placement(
+        design,
+        placed,
+        &Limits {
+            max_cells: design.cells.len().max(250_000),
+            ..Limits::default()
+        },
+    )?;
     let mut intervals: Vec<_> = placed
         .iter()
         .map(|p| (p.y, p.x, p.x.checked_add(p.width).unwrap()))
@@ -1739,7 +1748,7 @@ pub(super) fn export_def(
         }
     }
     writeln!(output, "END PINS")?;
-    let csr = model.lower_csr(design, &ConnectivityLimits::default())?;
+    let csr = model.lower_csr(design, &crate::pdk::connection_limits(design)?)?;
     let mut routed_wires = HashMap::<u32, Vec<_>>::new();
     let mut routed_vias = HashMap::<u32, Vec<_>>::new();
     let mut routed_patches = HashMap::<u32, Vec<_>>::new();

@@ -177,10 +177,13 @@ fn budget(message: impl Into<String>) -> Error {
 /// Internal validation capacities follow a design that was already admitted by
 /// the caller's object budget. They never increase the initial import budget.
 pub(crate) fn connection_limits(design: &Design) -> Result<ConnectivityLimits> {
-    if design.cells.len() > 8_000_000 {
+    connection_limits_for_cells(design.cells.len())
+}
+pub(crate) fn connection_limits_for_cells(count: usize) -> Result<ConnectivityLimits> {
+    if count > 8_000_000 {
         return Err(budget("physical design exceeds eight-million-cell ceiling"));
     }
-    let cells = design.cells.len().max(250_000);
+    let cells = count.max(250_000);
     Ok(ConnectivityLimits {
         max_instances: cells,
         max_nets: cells.saturating_mul(4),
@@ -443,6 +446,10 @@ pub fn import_pdk_bounded(
         (None, None)
     };
     let mut tie_report = None;
+    let mut tie_limits = crate::ties::TieLimits::default();
+    if parser.max_input_bytes > 16 * 1024 * 1024 {
+        tie_limits.max_work = parser.max_input_bytes.saturating_mul(16);
+    }
     if let Some(cfg) = &config {
         let find = |name: &str| {
             tech.macros
@@ -472,14 +479,9 @@ pub fn import_pdk_bounded(
             pin: &cfg.tie_low.pin,
             rail: cfg.tie_low.rail(),
         };
-        let (dissolved, count) = crate::ties::dissolve_constant_cells(
-            &netlist,
-            &specs,
-            high,
-            low,
-            &crate::ties::TieLimits::default(),
-        )
-        .map_err(|e| invalid(e.to_string()))?;
+        let (dissolved, count) =
+            crate::ties::dissolve_constant_cells(&netlist, &specs, high, low, &tie_limits)
+                .map_err(|e| invalid(e.to_string()))?;
         let (updated, mut report) = crate::ties::materialize_constants_with(
             &dissolved,
             high,
@@ -1077,14 +1079,35 @@ pub(super) fn link(
                         instance.name, spec.name
                     ))
                 })?;
-                let bits = signals.expand(expr, limits.max_pins)?;
+                // Mapped cell pins are overwhelmingly scalar. Borrow their
+                // existing bit list instead of allocating once per connection.
+                let single;
+                let expanded;
+                let bits: &[usize] = match expr {
+                    verilog::Expr::Ident(name) => {
+                        &signals
+                            .declared
+                            .get(name)
+                            .ok_or_else(|| invalid(format!("undeclared signal {name}")))?
+                            .1
+                    }
+                    verilog::Expr::BitSelect { name, index } => {
+                        single = [signals.bit(name, *index)?];
+                        &single
+                    }
+                    verilog::Expr::Unconnected => &[],
+                    _ => {
+                        expanded = signals.expand(expr, limits.max_pins)?;
+                        &expanded
+                    }
+                };
                 connection_work = connection_work
                     .checked_add(bits.len())
                     .ok_or_else(|| budget("connection work overflow"))?;
                 if connection_work > limits.max_pins {
                     return Err(budget("connection expansion work limit exceeded"));
                 }
-                match bits.as_slice() {
+                match bits {
                     [] => None,
                     [i] => Some(signal_nets[*i]),
                     _ => {

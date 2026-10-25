@@ -598,19 +598,50 @@ fn legalize(problem: &PlaceProblem, target: &[[f64; 2]], work: &mut Work) -> Res
                 if best.is_some_and(|b| dy >= b.0) {
                     continue;
                 }
-                for &i in &by_row[r] {
+                let intervals = &by_row[r];
+                let middle =
+                    intervals.partition_point(|&i| ((ivs[i].ux - w).max(ivs[i].lx) as f64) < tx);
+                let (mut left, mut right) = (middle, middle);
+                let lower_bound = |i: usize| {
+                    let v = ivs[i];
+                    let x = tx.clamp(v.lx as f64, (v.ux - w).max(v.lx) as f64);
+                    (x - tx).abs() + dy
+                };
+                loop {
+                    let before = left
+                        .checked_sub(1)
+                        .map(|k| (lower_bound(intervals[k]), intervals[k]));
+                    let after = intervals.get(right).map(|&i| (lower_bound(i), i));
+                    let (bound, i) = match (before, after) {
+                        (None, None) => break,
+                        (Some(a), Some(b)) if a.0 <= b.0 => {
+                            left -= 1;
+                            a
+                        }
+                        (Some(a), None) => {
+                            left -= 1;
+                            a
+                        }
+                        (_, Some(b)) => {
+                            right += 1;
+                            b
+                        }
+                    };
+                    // Both directions have monotone distance lower bounds.
+                    // A positive fill penalty cannot make a farther interval win.
+                    if best.is_some_and(|b| bound > b.0) {
+                        break;
+                    }
                     work.add(1)?;
                     let v = ivs[i];
                     let need = if members[i].is_empty() { w } else { w + gap };
                     if used[i] + need > v.ux - v.lx {
                         continue;
                     }
-                    // Displacement estimate, plus a crowding term so cells
-                    // spread over equally close intervals.
                     let x = tx.clamp(v.lx as f64, (v.ux - w) as f64);
                     let fill = (used[i] + need) as f64 / (v.ux - v.lx) as f64;
                     let cost = (x - tx).abs() + dy + fill * problem.row_height as f64;
-                    if best.is_none_or(|b| cost < b.0) {
+                    if best.is_none_or(|b| cost < b.0 || (cost == b.0 && i < b.1)) {
                         best = Some((cost, i));
                     }
                 }
@@ -691,11 +722,17 @@ fn detailed(
     problem: &PlaceProblem,
     pos: &mut [[i64; 2]],
     passes: usize,
+    max_net_pins: usize,
     work: &mut Work,
 ) -> Result<()> {
     let n = pos.len();
     let mut nets_of: Vec<Vec<u32>> = vec![Vec::new(); n];
     for (k, net) in problem.nets.iter().enumerate() {
+        work.add(1)?;
+        if net.len() < 2 || net.len() > max_net_pins {
+            continue;
+        }
+        work.add(net.len() as u64)?;
         for p in net {
             if let PinRef::Cell(c) = p {
                 let v = &mut nets_of[*c as usize];
@@ -724,16 +761,21 @@ fn detailed(
     };
     // Weighted (milli-unit) HPWL; with no weights every net counts 1000x,
     // which orders moves exactly like the unweighted sum.
-    let cost = |pos: &[[i64; 2]], cells: &[usize]| -> u64 {
+    let cost = |pos: &[[i64; 2]], cells: &[usize], work: &mut Work| -> Result<u64> {
         let mut ks: Vec<u32> = cells
             .iter()
             .flat_map(|c| nets_of[*c].iter().copied())
             .collect();
         ks.sort_unstable();
         ks.dedup();
-        ks.iter()
-            .map(|k| net_hpwl(pos, *k).saturating_mul(u64::from(problem.weight(*k as usize))))
-            .fold(0u64, u64::saturating_add)
+        let mut total = 0u64;
+        for &k in &ks {
+            work.add(problem.nets[k as usize].len() as u64)?;
+            total = total.saturating_add(
+                net_hpwl(pos, k).saturating_mul(u64::from(problem.weight(k as usize))),
+            );
+        }
+        Ok(total)
     };
     let gap = problem.gap;
     for _ in 0..passes {
@@ -762,11 +804,11 @@ fn detailed(
                 if problem.widths[a] != problem.widths[b] {
                     continue;
                 }
-                let before = cost(pos, &[a, b]);
+                let before = cost(pos, &[a, b], work)?;
                 let (pa, pb) = (pos[a], pos[b]);
                 pos[a] = pb;
                 pos[b] = pa;
-                if cost(pos, &[a, b]) < before {
+                if cost(pos, &[a, b], work)? < before {
                     v[j - 1].2 = b;
                     v[j].2 = a;
                     improved = true;
@@ -782,6 +824,7 @@ fn detailed(
             let mut xs = Vec::new();
             let mut ys = Vec::new();
             for &k in &nets_of[c] {
+                work.add(problem.nets[k as usize].len() as u64)?;
                 let (mut x0, mut x1, mut y0, mut y1) = (i64::MAX, i64::MIN, i64::MAX, i64::MIN);
                 for p in &problem.nets[k as usize] {
                     let [x, y] = match *p {
@@ -812,45 +855,62 @@ fn detailed(
             let cur = find(pos[c]).unwrap();
             // Candidate gaps in rows near my.
             let mut best: Option<(u64, usize, i64)> = None;
-            let before = cost(pos, &[c]);
-            for (i, v) in problem.intervals.iter().enumerate() {
-                if (v.y + problem.row_height / 2 - my).abs() > 2 * problem.row_height
-                    || v.ux < mx - 8 * problem.row_height
-                    || v.lx > mx + 8 * problem.row_height
-                {
-                    continue;
-                }
-                work.add(occ[i].len() as u64 + 1)?;
-                let mut left = v.lx;
-                let items = &occ[i];
-                for k in 0..=items.len() {
-                    let right = if k < items.len() { items[k].0 } else { v.ux };
-                    // Free gap [left, right) (own cell counts as free).
-                    let (gl, gr) = (left, right);
-                    if k < items.len() && items[k].2 == c {
-                        left = left.max(items[k].0); // keep scanning past self
-                        continue;
-                    }
-                    let room_end = if k < items.len() { gr - gap } else { gr };
-                    if room_end - gl >= w {
-                        let want = mx - w / 2;
-                        let x = gl
-                            + (((want - gl).clamp(0, room_end - w - gl)) / problem.site)
-                                * problem.site;
-                        if x >= gl && x + w <= room_end {
-                            let old = pos[c];
-                            pos[c] = [x, v.y];
-                            let after = cost(pos, &[c]);
-                            pos[c] = old;
-                            if after < before && best.is_none_or(|b| after < b.0) {
-                                best = Some((after, i, x));
+            let before = cost(pos, &[c], work)?;
+            let height = i128::from(problem.row_height);
+            let low_y = i128::from(my) - 2 * height;
+            let high_y = i128::from(my) + 2 * height;
+            let low_x = i128::from(mx) - 8 * height;
+            let high_x = i128::from(mx) + 8 * height;
+            let first = problem
+                .intervals
+                .partition_point(|v| i128::from(v.y) + height / 2 < low_y);
+            let end = problem
+                .intervals
+                .partition_point(|v| i128::from(v.y) + height / 2 <= high_y);
+            let mut row_start = first;
+            while row_start < end {
+                let row_y = problem.intervals[row_start].y;
+                let row_end =
+                    row_start + problem.intervals[row_start..end].partition_point(|v| v.y == row_y);
+                let row = &problem.intervals[row_start..row_end];
+                let x_start = row.partition_point(|v| i128::from(v.ux) < low_x);
+                let x_end = row.partition_point(|v| i128::from(v.lx) <= high_x);
+                let first_interval = row_start + x_start;
+                for (relative, items) in occ[first_interval..row_start + x_end].iter().enumerate() {
+                    let i = first_interval + relative;
+                    let v = &problem.intervals[i];
+                    work.add(items.len() as u64 + 1)?;
+                    let mut left = v.lx;
+                    for k in 0..=items.len() {
+                        let right = if k < items.len() { items[k].0 } else { v.ux };
+                        // Free gap [left, right) (own cell counts as free).
+                        let (gl, gr) = (left, right);
+                        if k < items.len() && items[k].2 == c {
+                            left = left.max(items[k].0); // keep scanning past self
+                            continue;
+                        }
+                        let room_end = if k < items.len() { gr - gap } else { gr };
+                        if room_end - gl >= w {
+                            let want = mx - w / 2;
+                            let x = gl
+                                + (((want - gl).clamp(0, room_end - w - gl)) / problem.site)
+                                    * problem.site;
+                            if x >= gl && x + w <= room_end {
+                                let old = pos[c];
+                                pos[c] = [x, v.y];
+                                let after = cost(pos, &[c], work)?;
+                                pos[c] = old;
+                                if after < before && best.is_none_or(|b| after < b.0) {
+                                    best = Some((after, i, x));
+                                }
                             }
                         }
-                    }
-                    if k < items.len() {
-                        left = items[k].0 + items[k].1 + gap;
+                        if k < items.len() {
+                            left = items[k].0 + items[k].1 + gap;
+                        }
                     }
                 }
+                row_start = row_end;
             }
             if let Some((_, i, x)) = best {
                 occ[cur].retain(|e| e.2 != c);
@@ -1046,7 +1106,13 @@ pub fn place_seeded(
         .collect();
     let global_hpwl = hpwl(problem, &global);
     let mut legal = legalize(problem, &targets, &mut work)?;
-    detailed(problem, &mut legal, config.detailed_passes, &mut work)?;
+    detailed(
+        problem,
+        &mut legal,
+        config.detailed_passes,
+        config.max_net_pins,
+        &mut work,
+    )?;
     check_legal(problem, &legal)?;
     Ok(PlaceResult {
         hpwl: hpwl(problem, &legal),
@@ -1141,7 +1207,13 @@ pub fn place(
         .collect();
     let global_hpwl = hpwl(problem, &global);
     let mut legal = legalize(problem, &targets, &mut work)?;
-    detailed(problem, &mut legal, config.detailed_passes, &mut work)?;
+    detailed(
+        problem,
+        &mut legal,
+        config.detailed_passes,
+        config.max_net_pins,
+        &mut work,
+    )?;
     check_legal(problem, &legal)?;
     Ok(PlaceResult {
         hpwl: hpwl(problem, &legal),
@@ -1307,5 +1379,29 @@ mod tests {
             place(&p, &PlaceConfig::default(), &tight),
             Err(Error::Budget(_))
         ));
+    }
+
+    #[test]
+    fn global_fanout_cutoff_also_applies_to_detailed_placement() {
+        let base = chain(1024, 32, 1000);
+        let mut with_clock = chain(1024, 32, 1000);
+        with_clock.nets.push((0..1024).map(PinRef::Cell).collect());
+        let config = PlaceConfig {
+            global_iterations: 2,
+            cg_iterations: 10,
+            detailed_passes: 1,
+            max_net_pins: 16,
+        };
+        let caps = PlaceLimits {
+            max_work: 10_000_000,
+            ..PlaceLimits::default()
+        };
+        let expected = place(&base, &config, &caps).expect("bounded chain placement");
+        let actual = place(&with_clock, &config, &caps)
+            .expect("high-fanout net is outside the placement model");
+        assert_eq!(actual.positions, expected.positions);
+        check_legal(&with_clock, &actual.positions)
+            .expect("legal placement with the ignored clock");
+        assert!(actual.work < caps.max_work);
     }
 }

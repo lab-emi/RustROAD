@@ -561,16 +561,16 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         MAX_METADATA_BYTES,
     )?)?;
     let mut metadata = metadata;
-    storage::restore(&mut metadata, &revision_dir, limits)?;
-    if !matches!(metadata.format_version, 1..=6)
+    let format_version = storage::restore(&mut metadata, &revision_dir, limits)?;
+    if !matches!(format_version, 1..=6)
         || metadata.revision != current
         || revision_number(&metadata.parent_revision)? >= revision_number(&current)?
     {
         return Err(Error::Invalid("snapshot schema/revision mismatch".into()));
     }
     metadata.design.validate(limits)?;
-    if (metadata.format_version >= 2) != metadata.physical.is_some()
-        || (metadata.format_version >= 3)
+    if (format_version >= 2) != metadata.physical.is_some()
+        || (format_version >= 3)
             != metadata
                 .physical
                 .as_ref()
@@ -578,7 +578,7 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
     {
         return Err(Error::Invalid("connected schema/payload mismatch".into()));
     }
-    if (metadata.format_version >= 4)
+    if (format_version >= 4)
         != metadata.physical.as_ref().is_some_and(|p| {
             p.routing.is_some()
                 || p.config
@@ -588,12 +588,12 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
     {
         return Err(Error::Invalid("tap schema/configuration mismatch".into()));
     }
-    if (metadata.format_version >= 5)
+    if (format_version >= 5)
         != metadata
             .physical
             .as_ref()
             .is_some_and(|p| p.routing.is_some())
-        || (metadata.format_version == 6)
+        || (format_version == 6)
             != metadata
                 .physical
                 .as_ref()
@@ -603,7 +603,7 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
         return Err(Error::Invalid("routing schema/payload mismatch".into()));
     }
     // Schema 6: the route records live in the authoritative routes.rbin.
-    if metadata.format_version == 6 {
+    if format_version == 6 {
         let routing = metadata
             .physical
             .as_mut()
@@ -622,11 +622,13 @@ fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
                 "schema 6 routes must live only in routes.rbin".into(),
             ));
         }
-        let bytes = read_bounded(
-            &revision_dir.join(routing::ROUTE_TABLE),
-            routing::MAX_ROUTE_TABLE_BYTES as u64,
-        )?;
-        let mut decoded = routing::decode_route_table(&bytes, &table)?;
+        if table.bytes > routing::MAX_ROUTE_TABLE_BYTES {
+            return Err(Error::Budget("route table byte cap".into()));
+        }
+        let length =
+            usize::try_from(table.bytes).map_err(|_| Error::Budget("route table length".into()))?;
+        let map = map_table(&revision_dir.join(routing::ROUTE_TABLE), length)?;
+        let mut decoded = routing::decode_route_table(map.as_deref().unwrap_or(&[]), &table)?;
         decoded.stats = routing.routes.stats.clone();
         routing.routes = decoded;
     }
@@ -738,6 +740,7 @@ fn check_placed(snapshot: &Snapshot) -> Result<()> {
 }
 
 fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Summary> {
+    metadata.format_version = storage::logical_version(&metadata)?;
     if let Some(p) = &metadata.physical {
         metadata.format_version = if p
             .routing
@@ -786,25 +789,16 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
     })?;
     // Schema 6: move the route records out of design.json into routes.rbin.
     let mut held = None;
-    let mut route_table = None;
     if metadata.format_version == 6 {
         let r = metadata
             .physical
             .as_mut()
             .and_then(|p| p.routing.as_mut())
             .unwrap();
-        let bytes = routing::route_table_bytes(&r.routes)?;
-        use sha2::{Digest, Sha256};
-        r.table = Some(routing::RoutesTable {
-            file: routing::ROUTE_TABLE.into(),
-            sha256: format!("{:x}", Sha256::digest(&bytes)),
-            bytes: bytes.len() as u64,
-            wires: r.routes.wires.len(),
-            vias: r.routes.vias.len(),
-            access: r.routes.access.len(),
-            patches: r.routes.patches.len(),
-            nets: r.routes.nets.len(),
-        });
+        r.table = Some(routing::write_route_table(
+            &r.routes,
+            &directory.join(routing::ROUTE_TABLE),
+        )?);
         let empty = rustroad_core::routing::Routes {
             wires: Vec::new(),
             vias: Vec::new(),
@@ -814,7 +808,6 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
             stats: r.routes.stats.clone(),
         };
         held = Some(std::mem::replace(&mut r.routes, empty));
-        route_table = Some(bytes);
     }
     let bytes = storage::serialize(&mut metadata, &directory)?;
     if let Some(routes) = held
@@ -844,9 +837,9 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
             &pdk::connection_limits(&metadata.design)?,
         )?;
         write_connection_tables(&directory, &metadata.design, &physical.connectivity)?;
-        if let Some(table) = &route_table {
-            write_new(&directory.join(routing::ROUTE_TABLE), table)?;
-        } else if let Some(routing) = &physical.routing {
+        if let Some(routing) = &physical.routing
+            && routing.table.is_none()
+        {
             write_new(
                 &directory.join("routing.rbin"),
                 &crate::routing::table_bytes(routing)?,

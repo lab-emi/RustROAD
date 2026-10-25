@@ -10,7 +10,7 @@ use rustroad_core::{Design, Limits, Placed, Rect};
 use rustroad_formats::lef::LefGeometry;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -179,38 +179,73 @@ pub struct RoutesTable {
     pub patches: usize,
     pub nets: usize,
 }
-/// Byte cap of the authoritative route table (8M records).
-pub const MAX_ROUTE_TABLE_BYTES: usize = 512 * 1024 * 1024;
+/// Byte cap of the streamed authoritative route table.
+pub const MAX_ROUTE_TABLE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub(crate) const ROUTE_TABLE: &str = "routes.rbin";
 /// Schema 6 route table: the schema-5 records followed by one net record each.
-pub(crate) fn route_table_bytes(routes: &Routes) -> Result<Vec<u8>> {
-    let n = routes
-        .wires
-        .len()
-        .checked_add(routes.vias.len())
-        .and_then(|n| n.checked_add(routes.access.len()))
-        .and_then(|n| n.checked_add(routes.patches.len()))
-        .and_then(|n| n.checked_add(routes.nets.len()))
-        .and_then(|n| n.checked_mul(64))
-        .ok_or_else(|| Error::Budget("route table overflow".into()))?;
-    if n > MAX_ROUTE_TABLE_BYTES {
+pub(crate) fn write_route_table(routes: &Routes, path: &Path) -> Result<RoutesTable> {
+    use sha2::{Digest, Sha256};
+    let count = [
+        routes.wires.len(),
+        routes.vias.len(),
+        routes.access.len(),
+        routes.patches.len(),
+        routes.nets.len(),
+    ]
+    .into_iter()
+    .try_fold(0usize, |sum, n| sum.checked_add(n))
+    .ok_or_else(|| Error::Budget("route record count overflow".into()))?;
+    let bytes = (count as u64)
+        .checked_mul(64)
+        .ok_or_else(|| Error::Budget("route table length overflow".into()))?;
+    if bytes > MAX_ROUTE_TABLE_BYTES {
         return Err(Error::Budget("route table byte cap".into()));
     }
-    let mut data = Vec::with_capacity(n);
-    records(routes, &mut data);
-    for net in &routes.nets {
-        for x in [5, i64::from(*net), 0, 0, 0, 0, 0, 0] {
-            data.extend_from_slice(&x.to_le_bytes());
+    struct Output {
+        file: BufWriter<std::fs::File>,
+        hash: Sha256,
+    }
+    impl Write for Output {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.file.write_all(data)?;
+            self.hash.update(data);
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.file.flush()
         }
     }
-    Ok(data)
+    let file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(path)?;
+    let mut output = Output {
+        file: BufWriter::with_capacity(256 * 1024, file),
+        hash: Sha256::new(),
+    };
+    records(routes, &mut output)?;
+    for &net in &routes.nets {
+        write_record([5, i64::from(net), 0, 0, 0, 0, 0, 0], &mut output)?;
+    }
+    output.flush()?;
+    output.file.get_ref().sync_all()?;
+    Ok(RoutesTable {
+        file: ROUTE_TABLE.into(),
+        bytes,
+        sha256: format!("{:x}", output.hash.finalize()),
+        wires: routes.wires.len(),
+        vias: routes.vias.len(),
+        access: routes.access.len(),
+        patches: routes.patches.len(),
+        nets: routes.nets.len(),
+    })
 }
 /// Decode a schema 6 route table; every count must match `table`.
 pub(crate) fn decode_route_table(bytes: &[u8], table: &RoutesTable) -> Result<Routes> {
     let bad = |s: &str| Error::Invalid(format!("route table: {s}"));
     if bytes.len() as u64 != table.bytes
         || !bytes.len().is_multiple_of(64)
-        || bytes.len() > MAX_ROUTE_TABLE_BYTES
+        || bytes.len() as u64 > MAX_ROUTE_TABLE_BYTES
     {
         return Err(bad("length"));
     }
@@ -218,14 +253,47 @@ pub(crate) fn decode_route_table(bytes: &[u8], table: &RoutesTable) -> Result<Ro
     if format!("{:x}", Sha256::digest(bytes)) != table.sha256 {
         return Err(bad("sha256 differs from design.json"));
     }
+    let count = [
+        table.wires,
+        table.vias,
+        table.access,
+        table.patches,
+        table.nets,
+    ]
+    .into_iter()
+    .try_fold(0usize, |sum, n| sum.checked_add(n))
+    .ok_or_else(|| bad("record count overflow"))?;
+    if count != bytes.len() / 64 {
+        return Err(bad("record counts disagree with file size"));
+    }
     let mut routes = Routes {
-        wires: Vec::with_capacity(table.wires),
-        vias: Vec::with_capacity(table.vias),
-        access: Vec::with_capacity(table.access),
-        patches: Vec::with_capacity(table.patches),
-        nets: Vec::with_capacity(table.nets),
+        wires: Vec::new(),
+        vias: Vec::new(),
+        access: Vec::new(),
+        patches: Vec::new(),
+        nets: Vec::new(),
         stats: Default::default(),
     };
+    routes
+        .wires
+        .try_reserve_exact(table.wires)
+        .map_err(|_| bad("wire allocation"))?;
+    routes
+        .vias
+        .try_reserve_exact(table.vias)
+        .map_err(|_| bad("via allocation"))?;
+    routes
+        .access
+        .try_reserve_exact(table.access)
+        .map_err(|_| bad("access allocation"))?;
+    routes
+        .patches
+        .try_reserve_exact(table.patches)
+        .map_err(|_| bad("patch allocation"))?;
+    routes
+        .nets
+        .try_reserve_exact(table.nets)
+        .map_err(|_| bad("net allocation"))?;
     let u32_of = |v: i64| u32::try_from(v).map_err(|_| bad("index out of range"));
     let mut last = 0i64;
     for chunk in bytes.chunks_exact(64) {
@@ -1227,15 +1295,18 @@ pub(crate) fn table_bytes(state: &RoutingState) -> Result<Vec<u8>> {
         return Err(Error::Budget("routing table byte cap".into()));
     }
     let mut data = Vec::with_capacity(n);
-    records(&state.routes, &mut data);
+    records(&state.routes, &mut data)?;
     Ok(data)
 }
-fn records(routes: &Routes, data: &mut Vec<u8>) {
-    let mut record = |v: [i64; 8]| {
-        for x in v {
-            data.extend_from_slice(&x.to_le_bytes());
-        }
-    };
+fn write_record(values: [i64; 8], output: &mut impl Write) -> std::io::Result<()> {
+    let mut bytes = [0u8; 64];
+    for (chunk, value) in bytes.chunks_exact_mut(8).zip(values) {
+        chunk.copy_from_slice(&value.to_le_bytes());
+    }
+    output.write_all(&bytes)
+}
+fn records(routes: &Routes, data: &mut impl Write) -> std::io::Result<()> {
+    let mut record = |v: [i64; 8]| write_record(v, data);
     for w in &routes.wires {
         record([
             1,
@@ -1246,10 +1317,10 @@ fn records(routes: &Routes, data: &mut Vec<u8>) {
             w.end[0],
             w.end[1],
             0,
-        ]);
+        ])?;
     }
     for v in &routes.vias {
-        record([2, v.net as i64, v.kind as i64, v.at[0], v.at[1], 0, 0, 0]);
+        record([2, v.net as i64, v.kind as i64, v.at[0], v.at[1], 0, 0, 0])?;
     }
     for p in &routes.access {
         record([
@@ -1261,7 +1332,7 @@ fn records(routes: &Routes, data: &mut Vec<u8>) {
             p.at[1],
             0,
             0,
-        ]);
+        ])?;
     }
     for p in &routes.patches {
         record([
@@ -1273,8 +1344,9 @@ fn records(routes: &Routes, data: &mut Vec<u8>) {
             p.rect.ux,
             p.rect.uy,
             0,
-        ]);
+        ])?;
     }
+    Ok(())
 }
 pub(crate) fn write_def_paths(
     state: &RoutingState,
