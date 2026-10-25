@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -117,6 +118,14 @@ class DeviationPolicy(unittest.TestCase):
         self.assertEqual(driver_waveforms(text)["fall"]["slew_ns"], .21)
         with self.assertRaises(D.GateError):
             driver_waveforms(text.split('A v')[0])
+
+    def test_model_hash_helper_loads_in_the_main_gate_import_environment(self):
+        scripts = str(Path(__file__).resolve().parents[1])
+        code = (f"import sys,types; sys.path.insert(0,{scripts!r}); "
+                "sys.modules['signoff']=types.ModuleType('signoff'); "
+                "from mpw_circuit import model_tree_digest; "
+                f"assert model_tree_digest(__import__('pathlib').Path({str(self.root)!r}))[1] == 5")
+        subprocess.run([sys.executable, "-c", code], check=True, timeout=10)
 
 
 if __name__ == "__main__":

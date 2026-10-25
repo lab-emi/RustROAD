@@ -11,11 +11,17 @@ import json
 import math
 from pathlib import Path
 import re
+import sys
 
 import compare_spef
 import liberty_lite as LL
 from rtl2gds_design import GateError, sha256_file
 from verify_logic import bounded_text
+
+# The main gate already imports scripts/signoff/signoff.py as ``signoff``.
+# Use the same direct helper-module import as the other signoff callers.
+sys.path.insert(0, str(Path(__file__).with_name("signoff")))
+from manifest import tree_digest as model_tree_digest
 
 MAX_NODES = 10000
 MAX_ELEMENTS = 50000
@@ -117,9 +123,8 @@ class Circuit:
         self.model = self.pdk_root / "libs.tech/ngspice/sky130.lib.spice"
         if not self.model.is_file():
             raise GateError("MPW oracle: transistor corner model is unavailable")
-        from signoff.manifest import tree_digest
         self.model_identity = self.pdk["trees"].get("ngspice_models", {})
-        observed = tree_digest(self.pdk_root / self.model_identity.get("path", "missing"))
+        observed = model_tree_digest(self.pdk_root / self.model_identity.get("path", "missing"))
         if observed != (self.model_identity.get("sha256"), self.model_identity.get("files")):
             raise GateError("MPW oracle: transistor model tree is missing or differs from its pin")
         cell_text = bounded_text(self.cell_spice, MAX_BYTES)
