@@ -761,6 +761,7 @@ struct Router<'a> {
     limits: &'a RouteLimits,
     graph: Graph,
     access_hops: Vec<Vec<u16>>,
+    target_costs: crate::routing_target::CostModel,
     cells: Cells,
     spatial: Spatial<'a>,
     pairs: Vec<ViaPair>,
@@ -1904,7 +1905,9 @@ impl<'a> Router<'a> {
         let mut out = NetRoute::default();
         let mut edges = BTreeMap::new();
         let root = plans[&terminals[0].pin].top;
-        let mut target = crate::routing_target::TreeDistance::new(self.graph.point(root).1);
+        let (root_layer, root_point) = self.graph.point(root);
+        let mut target =
+            crate::routing_target::TreeDistance::new(self.graph.slot[&root_layer], root_point);
         let mut tree: HashSet<u32> = HashSet::from([root]);
         // Tree nodes with an incident via: a path may not join them with
         // another via through a layer whose single pads are below AREA.
@@ -1941,6 +1944,9 @@ impl<'a> Router<'a> {
                 .checked_add(1)
                 .ok_or_else(|| budget("routing search count"))?;
             let epoch = self.epoch;
+            // Prefer greater progress when admissible total costs tie. Taking
+            // the smallest g first floods every equally short interior path.
+            // Node id remains the final deterministic tie-break.
             let mut heap = BinaryHeap::new();
             self.search.begin(epoch);
             self.search.set(
@@ -1953,16 +1959,18 @@ impl<'a> Router<'a> {
             )?;
             heap.push(Reverse((
                 target.distance(
+                    self.graph.slot[&self.graph.point(start).0],
                     self.graph.point(start).1,
+                    &self.target_costs,
                     &mut self.spatial.work,
                     self.limits.max_comparisons,
                 )?,
-                0u64,
+                Reverse(0u64),
                 start,
             )));
             let mut found = None;
             let mut search = 0usize;
-            while let Some(Reverse((_, cost, id))) = heap.pop() {
+            while let Some(Reverse((_, Reverse(cost), id))) = heap.pop() {
                 if self.search.get(id).is_none_or(|s| s.cost != cost) {
                     continue;
                 }
@@ -2161,11 +2169,13 @@ impl<'a> Router<'a> {
                     }
                     heap.push(Reverse((
                         nc.saturating_add(target.distance(
+                            self.graph.slot[&nl],
                             q,
+                            &self.target_costs,
                             &mut self.spatial.work,
                             self.limits.max_comparisons,
                         )?),
-                        nc,
+                        Reverse(nc),
                         next,
                     )));
                 }
@@ -2221,6 +2231,20 @@ impl<'a> Router<'a> {
                     e.0.push((lo, hi));
                     e.1.push(b);
                 } else {
+                    target.add(
+                        self.graph.slot[&la],
+                        pa,
+                        pa,
+                        &mut self.spatial.work,
+                        self.limits.max_comparisons,
+                    )?;
+                    target.add(
+                        self.graph.slot[&lb],
+                        pb,
+                        pb,
+                        &mut self.spatial.work,
+                        self.limits.max_comparisons,
+                    )?;
                     via_nodes.insert(a);
                     via_nodes.insert(b);
                     if soft
@@ -2255,7 +2279,13 @@ impl<'a> Router<'a> {
                     } else {
                         ([lo, cross], [hi, cross])
                     };
-                    target.add(pa, pb, &mut self.spatial.work, self.limits.max_comparisons)?;
+                    target.add(
+                        self.graph.slot[&layer],
+                        pa,
+                        pb,
+                        &mut self.spatial.work,
+                        self.limits.max_comparisons,
+                    )?;
                     let rect = self.edge_rect(layer, pa, pb, net)?;
                     if soft
                         && let Soft::Clear { victims, .. } =
@@ -2275,6 +2305,7 @@ impl<'a> Router<'a> {
                 }
             }
             target.add(
+                self.graph.slot[&self.graph.point(start).0],
                 self.graph.point(start).1,
                 self.graph.point(start).1,
                 &mut self.spatial.work,
@@ -2394,12 +2425,23 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
     let n = graph.len;
     let gl = cells.len();
     let access_hops = graph.hop_distances()?;
+    let target_costs = crate::routing_target::CostModel::new(
+        &graph.layers.iter().map(|l| l.vertical).collect::<Vec<_>>(),
+        &graph
+            .pairs
+            .iter()
+            .map(|p| (p.lower, p.upper))
+            .collect::<Vec<_>>(),
+        plan.via_cost,
+        plan.wrong_way_factor,
+    )?;
     let mut r = Router {
         input,
         plan,
         limits,
         graph,
         access_hops,
+        target_costs,
         cells,
         spatial: Spatial::new(input, limits)?,
         pairs,
@@ -3360,6 +3402,33 @@ mod tests {
         assert_eq!(routed.access.len(), 4);
         assert!(routed.stats.expansions < 100_000);
     }
+    #[test]
+    fn diagonal_route_bounds_equal_cost_frontiers() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(39_890, 39_890, 39_910, 39_910)),
+            ],
+            vec![],
+        );
+        design.die = rect(0, 0, 40_000, 40_000);
+        let plan = design.tracks.as_mut().unwrap();
+        plan.gcell = 40_000;
+        plan.memory_mib = 256;
+        let limits = RouteLimits {
+            max_grid_nodes: 4_000_000,
+            max_expansions: 40_000,
+            max_search_expansions: 20_000,
+            max_heap: 50_000,
+            max_comparisons: 10_000_000,
+            ..Default::default()
+        };
+        let routed = route_cpu_ref(&design, &limits).unwrap();
+        assert_eq!(routed.nets, vec![0]);
+        assert_eq!(routed.access.len(), 2);
+        assert!(routed.stats.expansions < 40_000);
+    }
+
     #[test]
     fn access_potential_uses_exact_axis_distances_and_shortest_layer_hops() {
         assert_eq!(nearest_axis(&[-10, 10], 0), 10);
