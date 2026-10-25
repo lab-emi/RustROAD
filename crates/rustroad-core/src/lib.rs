@@ -16,6 +16,7 @@ pub(crate) mod route_rules;
 mod route_search;
 pub mod routing;
 mod routing_target;
+mod rule_index;
 pub mod supply;
 pub mod tap;
 pub(crate) mod troute;

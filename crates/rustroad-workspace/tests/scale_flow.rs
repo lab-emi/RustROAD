@@ -641,8 +641,10 @@ fn net_weights_are_stored_applied_and_validated() {
 fn old_route_limits_default_the_independent_active_topology_bound() {
     let mut value = serde_json::to_value(rustroad_core::routing::RouteLimits::default()).unwrap();
     value.as_object_mut().unwrap().remove("max_active_nodes");
+    value.as_object_mut().unwrap().remove("max_rule_violations");
     let mut limits: rustroad_core::routing::RouteLimits = serde_json::from_value(value).unwrap();
     assert_eq!(limits.max_active_nodes, 200_000);
+    assert_eq!(limits.max_rule_violations, 100_000);
     limits.validate_track().unwrap();
     limits.max_active_nodes = 0;
     assert!(limits.validate_track().is_err());

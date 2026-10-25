@@ -13,7 +13,9 @@
 //!
 //! This is a native self-check only. Foundry Magic/KLayout decks remain the
 //! independent DRC oracle (Rule 8).
-use crate::routing::{RouteInput, RouteLimits, Routes, shifted, wire_rect};
+use crate::routing::{
+    Patch, RouteInput, RouteLimits, Routes, Terminal, Via, Wire, shifted, wire_rect,
+};
 use crate::{Error, Rect, Result};
 use std::collections::BTreeMap;
 
@@ -526,9 +528,31 @@ fn merge_runs(mut horizontal: Vec<Rect>, mut vertical: Vec<Rect>) -> Vec<Rect> {
 }
 
 /// All same-net metal per (net, routing layer), sorted by lx.
+#[cfg(test)]
 pub(crate) fn collect(
     input: &RouteInput,
     routes: &Routes,
+) -> Result<BTreeMap<(u32, u32), Vec<Shape>>> {
+    let mut selected = routes.nets.clone();
+    selected.sort_unstable();
+    selected.dedup();
+    collect_parts(
+        input,
+        routes.wires.iter(),
+        routes.vias.iter(),
+        routes.patches.iter(),
+        input.terminals.iter(),
+        &selected,
+    )
+}
+
+pub(crate) fn collect_parts<'a>(
+    input: &RouteInput,
+    wires: impl Iterator<Item = &'a Wire>,
+    vias: impl Iterator<Item = &'a Via>,
+    patches: impl Iterator<Item = &'a Patch>,
+    terminals: impl Iterator<Item = &'a Terminal>,
+    selected: &[u32],
 ) -> Result<BTreeMap<(u32, u32), Vec<Shape>>> {
     let routing = |l: u32| {
         input
@@ -536,9 +560,8 @@ pub(crate) fn collect(
             .get(l as usize)
             .is_some_and(|l| l.vertical.is_some())
     };
-    let selected: std::collections::BTreeSet<u32> = routes.nets.iter().copied().collect();
     let mut runs = BTreeMap::<(u32, u32), (Vec<Rect>, Vec<Rect>)>::new();
-    for w in &routes.wires {
+    for w in wires {
         let rect = wire_rect(w, input.layers[w.layer as usize].width)?;
         let e = runs.entry((w.net, w.layer)).or_default();
         if w.start[1] == w.end[1] {
@@ -557,7 +580,7 @@ pub(crate) fn collect(
                 origin: Origin::Route,
             }));
     }
-    for v in &routes.vias {
+    for v in vias {
         for s in &input.vias[v.kind as usize].shapes {
             if routing(s.layer) {
                 groups.entry((v.net, s.layer)).or_default().push(Shape {
@@ -567,14 +590,14 @@ pub(crate) fn collect(
             }
         }
     }
-    for p in &routes.patches {
+    for p in patches {
         groups.entry((p.net, p.layer)).or_default().push(Shape {
             rect: p.rect,
             origin: Origin::Patch,
         });
     }
-    for t in &input.terminals {
-        if !selected.contains(&t.net) {
+    for t in terminals {
+        if selected.binary_search(&t.net).is_err() {
             continue;
         }
         for s in &t.shapes {
@@ -601,6 +624,27 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
     i
 }
 
+fn push_violation(
+    out: &mut Vec<Violation>,
+    shape_count: &mut usize,
+    value: Violation,
+    cap: usize,
+) -> Result<()> {
+    let shapes = match &value {
+        Violation::Area { shapes, .. } => shapes.len(),
+        _ => 0,
+    };
+    if out.len() >= cap {
+        return Err(Error::Budget("same-net diagnostic count".into()));
+    }
+    *shape_count = shape_count
+        .checked_add(shapes)
+        .filter(|&n| n <= cap.saturating_mul(16))
+        .ok_or_else(|| Error::Budget("same-net diagnostic shape count".into()))?;
+    out.push(value);
+    Ok(())
+}
+
 /// Every same-net rule violation of the stored geometry, deterministic order.
 pub(crate) fn check(
     input: &RouteInput,
@@ -609,101 +653,125 @@ pub(crate) fn check(
     work: &mut usize,
 ) -> Result<Vec<Violation>> {
     let cap = limits.max_comparisons;
-    let groups = collect(input, routes)?;
+    let index = crate::rule_index::RuleIndex::new(input, routes, work, cap)?;
     let mut out = Vec::new();
-    for (&(net, layer), shapes) in &groups {
-        let rule = &input.layers[layer as usize];
-        let s = rule.spacing;
-        let n = shapes.len();
-        let mut parent: Vec<usize> = (0..n).collect();
-        for i in 0..n {
-            let a = shapes[i];
-            for (j, b) in shapes.iter().enumerate().skip(i + 1) {
-                if i128::from(b.rect.lx) >= i128::from(a.rect.ux) + i128::from(s) {
-                    break;
-                }
-                charge(work, 1, cap)?;
-                match relation(a.rect, b.rect, s) {
-                    Relation::Connected => {
-                        let (x, y) = (find(&mut parent, i), find(&mut parent, j));
-                        parent[x.max(y)] = x.min(y);
+    let mut diagnostic_shapes = 0;
+    for &net in index.nets() {
+        let groups = index.collect(input, routes, net, limits, work)?;
+        for (&(net, layer), shapes) in &groups {
+            let rule = &input.layers[layer as usize];
+            let s = rule.spacing;
+            let n = shapes.len();
+            let mut parent: Vec<usize> = (0..n).collect();
+            for i in 0..n {
+                let a = shapes[i];
+                for (j, b) in shapes.iter().enumerate().skip(i + 1) {
+                    if i128::from(b.rect.lx) >= i128::from(a.rect.ux) + i128::from(s) {
+                        break;
                     }
-                    Relation::Far => {}
-                    Relation::Near => {
-                        if a.origin == Origin::Pin && b.origin == Origin::Pin {
-                            continue;
+                    charge(work, 1, cap)?;
+                    match relation(a.rect, b.rect, s) {
+                        Relation::Connected => {
+                            let (x, y) = (find(&mut parent, i), find(&mut parent, j));
+                            parent[x.max(y)] = x.min(y);
                         }
-                        let region = gap_region(a.rect, b.rect);
-                        let rest = shapes
-                            .iter()
-                            .enumerate()
-                            .filter(|(k, c)| {
-                                *k != i
-                                    && *k != j
-                                    && c.rect.lx < region.ux
-                                    && c.rect.ux > region.lx
-                                    && c.rect.ly < region.uy
-                                    && c.rect.uy > region.ly
-                            })
-                            .map(|(_, c)| c.rect);
-                        if !covered(region, rest, work, cap)? {
-                            out.push(Violation::Spacing {
+                        Relation::Far => {}
+                        Relation::Near => {
+                            if a.origin == Origin::Pin && b.origin == Origin::Pin {
+                                continue;
+                            }
+                            let region = gap_region(a.rect, b.rect);
+                            let rest = shapes
+                                .iter()
+                                .enumerate()
+                                .filter(|(k, c)| {
+                                    *k != i
+                                        && *k != j
+                                        && c.rect.lx < region.ux
+                                        && c.rect.ux > region.lx
+                                        && c.rect.ly < region.uy
+                                        && c.rect.uy > region.ly
+                                })
+                                .map(|(_, c)| c.rect);
+                            if !covered(region, rest, work, cap)? {
+                                push_violation(
+                                    &mut out,
+                                    &mut diagnostic_shapes,
+                                    Violation::Spacing {
+                                        net,
+                                        layer,
+                                        a: a.rect,
+                                        b: b.rect,
+                                    },
+                                    limits.max_rule_violations,
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
+            let mut members = BTreeMap::<usize, Vec<usize>>::new();
+            for i in 0..n {
+                let root = find(&mut parent, i);
+                members.entry(root).or_default().push(i);
+            }
+            for list in members.values() {
+                let route = list.iter().any(|&i| shapes[i].origin == Origin::Route);
+                if !route {
+                    if let Some(&i) = list.iter().find(|&&i| shapes[i].origin == Origin::Patch) {
+                        push_violation(
+                            &mut out,
+                            &mut diagnostic_shapes,
+                            Violation::Floating {
                                 net,
                                 layer,
-                                a: a.rect,
-                                b: b.rect,
-                            });
+                                rect: shapes[i].rect,
+                            },
+                            limits.max_rule_violations,
+                        )?;
+                    }
+                    continue;
+                }
+                if input.tracks.is_some()
+                    && list.len() >= 3
+                    && let Some(min) = rule.min_area
+                {
+                    // Holes below four times the AREA rule are filled (the LEF
+                    // MINENCLOSEDAREA is not retained; every same-net hole of
+                    // this size can only be filled, never routed through).
+                    let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
+                    for h in holes(&rects, work, cap)? {
+                        let a = i128::from(h.ux - h.lx) * i128::from(h.uy - h.ly);
+                        if a < 4 * i128::from(min) {
+                            push_violation(
+                                &mut out,
+                                &mut diagnostic_shapes,
+                                Violation::Hole {
+                                    net,
+                                    layer,
+                                    rect: h,
+                                },
+                                limits.max_rule_violations,
+                            )?;
                         }
                     }
                 }
-            }
-        }
-        let mut members = BTreeMap::<usize, Vec<usize>>::new();
-        for i in 0..n {
-            let root = find(&mut parent, i);
-            members.entry(root).or_default().push(i);
-        }
-        for list in members.values() {
-            let route = list.iter().any(|&i| shapes[i].origin == Origin::Route);
-            if !route {
-                if let Some(&i) = list.iter().find(|&&i| shapes[i].origin == Origin::Patch) {
-                    out.push(Violation::Floating {
-                        net,
-                        layer,
-                        rect: shapes[i].rect,
-                    });
-                }
-                continue;
-            }
-            if input.tracks.is_some()
-                && list.len() >= 3
-                && let Some(min) = rule.min_area
-            {
-                // Holes below four times the AREA rule are filled (the LEF
-                // MINENCLOSEDAREA is not retained; every same-net hole of
-                // this size can only be filled, never routed through).
-                let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
-                for h in holes(&rects, work, cap)? {
-                    let a = i128::from(h.ux - h.lx) * i128::from(h.uy - h.ly);
-                    if a < 4 * i128::from(min) {
-                        out.push(Violation::Hole {
-                            net,
-                            layer,
-                            rect: h,
-                        });
+                if let Some(min) = rule.min_area {
+                    let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
+                    let area = union_area(&rects, work, cap)?;
+                    if area < i128::from(min) {
+                        push_violation(
+                            &mut out,
+                            &mut diagnostic_shapes,
+                            Violation::Area {
+                                net,
+                                layer,
+                                area,
+                                shapes: rects,
+                            },
+                            limits.max_rule_violations,
+                        )?;
                     }
-                }
-            }
-            if let Some(min) = rule.min_area {
-                let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
-                let area = union_area(&rects, work, cap)?;
-                if area < i128::from(min) {
-                    out.push(Violation::Area {
-                        net,
-                        layer,
-                        area,
-                        shapes: rects,
-                    });
                 }
             }
         }

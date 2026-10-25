@@ -29,9 +29,16 @@ pub struct RouteLimits {
     /// Nodes or raw edges retained for one detailed net, independently of the design output size.
     #[serde(default = "default_active_nodes")]
     pub max_active_nodes: usize,
+    /// Retained same-net violations per check; exceeding the limit is an error.
+    #[serde(default = "default_rule_violations")]
+    pub max_rule_violations: usize,
     pub max_comparisons: usize,
     pub max_heap: usize,
 }
+fn default_rule_violations() -> usize {
+    100_000
+}
+
 fn default_active_nodes() -> usize {
     200_000
 }
@@ -47,6 +54,7 @@ impl Default for RouteLimits {
             max_expansions: 2_000_000,
             max_search_expansions: 200_000,
             max_active_nodes: default_active_nodes(),
+            max_rule_violations: default_rule_violations(),
             max_comparisons: 200_000_000,
             max_heap: 500_000,
         }
@@ -66,6 +74,7 @@ impl RouteLimits {
             max_expansions: 2_000_000_000,
             max_search_expansions: 50_000_000,
             max_active_nodes: 50_000_000,
+            max_rule_violations: 1_000_000,
             max_comparisons: 1usize << 40,
             max_heap: 64_000_000,
         }
@@ -87,6 +96,7 @@ impl RouteLimits {
             (self.max_expansions, hard.max_expansions),
             (self.max_search_expansions, hard.max_search_expansions),
             (self.max_active_nodes, hard.max_active_nodes),
+            (self.max_rule_violations, hard.max_rule_violations),
             (self.max_comparisons, hard.max_comparisons),
             (self.max_heap, hard.max_heap),
         ] {
@@ -2373,7 +2383,12 @@ pub(crate) fn cleanup_report(
                 .iter()
                 .any(|v| matches!(v, Violation::Area { .. }))
         {
-            Some(route_rules::collect(input, out)?)
+            Some(crate::rule_index::RuleIndex::new(
+                input,
+                out,
+                &mut work,
+                limits.max_comparisons,
+            )?)
         } else {
             None
         };
@@ -2470,18 +2485,24 @@ fn area_stub(
     shapes: &[Rect],
     limits: &RouteLimits,
     work: &mut usize,
-    cache: Option<&BTreeMap<(u32, u32), Vec<route_rules::Shape>>>,
+    cache: Option<&crate::rule_index::RuleIndex>,
 ) -> Result<Option<Wire>> {
     let rule = &input.layers[layer as usize];
     let Some(min) = rule.min_area else {
         return Ok(None);
     };
     let cap = limits.max_comparisons;
+    let owned;
+    let index = if let Some(index) = cache {
+        index
+    } else {
+        owned = crate::rule_index::RuleIndex::new(input, out, work, cap)?;
+        &owned
+    };
     let inside = |p: [i64; 2]| shapes.iter().any(|s| contains(*s, p));
     let mut anchors: Vec<[i64; 2]> = Vec::new();
-    let vias: BTreeSet<[i64; 2]> = out
-        .vias
-        .iter()
+    let vias: BTreeSet<[i64; 2]> = index
+        .vias(out, net)?
         .filter(|v| {
             v.net == net
                 && input.vias[v.kind as usize]
@@ -2493,28 +2514,20 @@ fn area_stub(
         .map(|v| v.at)
         .collect();
     anchors.extend(vias.iter().copied());
-    let ends: BTreeSet<[i64; 2]> = out
-        .wires
-        .iter()
+    let ends: BTreeSet<[i64; 2]> = index
+        .wires(out, net)?
         .filter(|w| w.net == net && w.layer == layer)
         .flat_map(|w| [w.start, w.end])
         .filter(|p| inside(*p))
         .collect();
     anchors.extend(ends.into_iter().filter(|p| !vias.contains(p)));
-    let others: Vec<Rect> = match cache {
-        // Track mode: one same-net collection per repair round (shapes of
-        // this round's own patches are re-checked in the next round).
-        Some(groups) => groups
-            .get(&(net, layer))
-            .map(|g| g.iter().map(|s| s.rect).collect())
-            .unwrap_or_default(),
-        None => route_rules::collect(input, out)?
-            .remove(&(net, layer))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| s.rect)
-            .collect(),
-    };
+    let others: Vec<Rect> = index
+        .collect(input, out, net, limits, work)?
+        .remove(&(net, layer))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|shape| shape.rect)
+        .collect();
     let span = shapes
         .iter()
         .map(|s| (s.ux - s.lx).max(s.uy - s.ly))

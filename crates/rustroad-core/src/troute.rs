@@ -2996,6 +2996,220 @@ mod tests {
         RouteLimits::default()
     }
 
+    fn rule_scale_fixture() -> (RouteInput, Routes) {
+        let mut terminals = Vec::new();
+        let mut wires = Vec::new();
+        let mut vias = Vec::new();
+        for net in 0..100_001u32 {
+            let x = i64::from(net % 1000) * 400 + 100;
+            let y = i64::from(net / 1000) * 400 + 100;
+            terminals.push(terminal(
+                2 * net,
+                net,
+                true,
+                rect(x - 10, y - 10, x + 10, y + 10),
+            ));
+            terminals.push(terminal(
+                2 * net + 1,
+                net,
+                false,
+                rect(x + 110, y - 10, x + 130, y + 10),
+            ));
+            for start in [0, 40, 80] {
+                wires.push(Wire {
+                    net,
+                    layer: 0,
+                    start: [x + start, y],
+                    end: [x + start + 40, y],
+                });
+            }
+            vias.push(Via {
+                net,
+                kind: 0,
+                at: [x + 40, y],
+            });
+        }
+        let mut design = input(terminals, vec![]);
+        design.die = rect(0, 0, 400_000, 401_000);
+        let routes = Routes {
+            wires,
+            vias,
+            access: vec![],
+            patches: vec![],
+            nets: (0..100_001).collect(),
+            stats: Default::default(),
+        };
+        (design, routes)
+    }
+
+    #[test]
+    #[ignore = "memory comparison fixture; run under an OS memory and wall-clock guard"]
+    fn rule_groups_whole_design_memory_fixture() {
+        let (design, routes) = rule_scale_fixture();
+        let groups = crate::route_rules::collect(&design, &routes).unwrap();
+        assert_eq!(groups.len(), 200_002);
+        assert_eq!(groups.values().map(Vec::len).sum::<usize>(), 500_005);
+    }
+
+    #[test]
+    #[ignore = "memory comparison fixture; run under an OS memory and wall-clock guard"]
+    fn rule_groups_indexed_memory_fixture() {
+        let (design, routes) = rule_scale_fixture();
+        let mut work = 0;
+        let limits = RouteLimits {
+            max_comparisons: 1_000_000_000,
+            ..limits()
+        };
+        let index =
+            crate::rule_index::RuleIndex::new(&design, &routes, &mut work, limits.max_comparisons)
+                .unwrap();
+        let mut shapes = 0;
+        let mut groups = 0;
+        for &net in index.nets() {
+            let collected = index
+                .collect(&design, &routes, net, &limits, &mut work)
+                .unwrap();
+            groups += collected.len();
+            shapes += collected.values().map(Vec::len).sum::<usize>();
+        }
+        assert_eq!(groups, 200_002);
+        assert_eq!(shapes, 500_005);
+    }
+
+    #[test]
+    fn same_net_rule_diagnostic_limit_never_reports_a_clean_layout() {
+        let design = input(vec![], vec![]);
+        let routes = Routes {
+            wires: [100, 130, 160]
+                .into_iter()
+                .map(|y| Wire {
+                    net: 1,
+                    layer: 0,
+                    start: [100, y],
+                    end: [200, y],
+                })
+                .collect(),
+            vias: vec![],
+            patches: vec![],
+            access: vec![],
+            nets: vec![1],
+            stats: Default::default(),
+        };
+        let all = crate::route_rules::check(&design, &routes, &limits(), &mut 0).unwrap();
+        assert_eq!(all.len(), 2);
+        let capped = RouteLimits {
+            max_rule_violations: 1,
+            ..limits()
+        };
+        let error = crate::route_rules::check(&design, &routes, &capped, &mut 0).unwrap_err();
+        assert!(error.to_string().contains("same-net diagnostic count"));
+    }
+
+    #[test]
+    fn indexed_rule_groups_match_whole_collection_and_freeze_the_round() {
+        let design = input(
+            vec![
+                terminal(0, 9, false, rect(90, 90, 110, 110)),
+                terminal(1, 2, true, rect(10, 10, 30, 30)),
+                terminal(2, 4, false, rect(290, 290, 310, 310)),
+            ],
+            vec![],
+        );
+        let mut routes = Routes {
+            wires: vec![
+                Wire {
+                    net: 9,
+                    layer: 0,
+                    start: [100, 100],
+                    end: [140, 100],
+                },
+                Wire {
+                    net: 2,
+                    layer: 0,
+                    start: [20, 20],
+                    end: [60, 20],
+                },
+                Wire {
+                    net: 9,
+                    layer: 0,
+                    start: [120, 100],
+                    end: [160, 100],
+                },
+            ],
+            vias: vec![
+                Via {
+                    net: 9,
+                    kind: 0,
+                    at: [100, 100],
+                },
+                Via {
+                    net: 4,
+                    kind: 1,
+                    at: [300, 300],
+                },
+            ],
+            patches: vec![crate::routing::Patch {
+                net: 2,
+                layer: 0,
+                rect: rect(40, 10, 50, 30),
+            }],
+            access: vec![],
+            nets: vec![9, 2],
+            stats: Default::default(),
+        };
+        let expected = crate::route_rules::collect(&design, &routes).unwrap();
+        let index = crate::rule_index::RuleIndex::new(&design, &routes, &mut 0, 10_000).unwrap();
+        let mut actual = BTreeMap::new();
+        for &net in index.nets() {
+            actual.extend(
+                index
+                    .collect(&design, &routes, net, &limits(), &mut 0)
+                    .unwrap(),
+            );
+        }
+        let normalized = |groups: BTreeMap<_, Vec<crate::route_rules::Shape>>| {
+            groups
+                .into_iter()
+                .map(|(key, values)| {
+                    (
+                        key,
+                        values
+                            .into_iter()
+                            .map(|s| (s.rect, s.origin))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(normalized(actual), normalized(expected));
+        let original = index
+            .collect(&design, &routes, 9, &limits(), &mut 0)
+            .unwrap();
+        routes.wires.push(Wire {
+            net: 9,
+            layer: 0,
+            start: [160, 100],
+            end: [200, 100],
+        });
+        assert_eq!(index.wires(&routes, 9).unwrap().count(), 3);
+        assert_eq!(
+            normalized(
+                index
+                    .collect(&design, &routes, 9, &limits(), &mut 0)
+                    .unwrap()
+            ),
+            normalized(original)
+        );
+        let tiny = RouteLimits {
+            max_obstacles: 1,
+            ..limits()
+        };
+        assert!(index.collect(&design, &routes, 9, &tiny, &mut 0).is_err());
+        assert!(crate::rule_index::RuleIndex::new(&design, &routes, &mut 0, 1).is_err());
+        routes.wires.clear();
+        assert!(index.wires(&routes, 9).is_err());
+    }
+
     #[test]
     fn large_implicit_grid_routes_with_bounded_sparse_state() {
         let mut design = input(

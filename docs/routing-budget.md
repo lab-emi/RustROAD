@@ -112,6 +112,13 @@ Local pin-repair interval queries charge candidate scans to the work budget.
 Wire normalization retains line maps and junction sets for one net at a time;
 assembly emits normalized runs directly, without a second full raw-wire copy.
 The work counter covers all nets and the output cap is checked before appending.
+Same-net rule checks keep compact source indices and collect one net's shapes
+at a time. Each group is bounded by the obstacle cap and sixteen times the
+active-node cap. The per-check diagnostic limit defaults to 100,000 and has a
+one-million ceiling; minimum-area diagnostic payloads also have a separate
+sixteen-shapes-per-diagnostic aggregate bound. Exceeding a bound is an error,
+never a clean DRC result. Area repair keeps the original round's geometry while
+including newly appended wire/via anchors.
 While routing, the process' peak RSS is checked at phase boundaries and during
 search and access reservation. Every search, queue, repair round and rip-up
 count remains bounded. Reaching a limit returns `BUDGET_EXCEEDED` or `NO_ROUTE`
