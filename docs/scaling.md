@@ -47,6 +47,11 @@ below describe the earlier small-block release.
 - The detailed frontier uses indexed priority updates, with one pending entry
   per node. Queue growth is independent of how often a better path reaches
   that node; its memory allowance is included in the route preflight.
+- Target distance uses an exact bounded segment index, including layer changes
+  and directional costs. Exceeding `max_target_segments` fails explicitly;
+  large trees never silently collapse to one bounding box. Rip-up penalties
+  use the displaced net's history once, without a multiplier from unrelated
+  repairs or the current net's attempts.
 - Bounded preferred-track spans reduce search through open channels while
   retaining ordinary moves, full-wire collision checks and intermediate guide
   checks. Large sparse hole checks use a bounded sweep rather than allocating
@@ -84,6 +89,9 @@ below describe the earlier small-block release.
   including top-level output aliases. Mixed signal/constant buses preserve
   their declared bit order. Independent Yosys equivalence and wrong-output
   controls cover both baseline PDKs.
+- Independent GDS metadata counts use bounded hierarchy dynamic programming.
+  Complete XOR label lists are sorted through bounded disk chunks and merges,
+  retaining exact hashes and negative controls without a full label vector.
 
 ## What changed
 
@@ -212,16 +220,18 @@ on stdout.
    edges (negotiated congestion, clean-room). The dilated GCell set of each
    net (`guide_margin` 1) is its guide.
 4. **Detailed routing.** Nets in order of guide size. Each sink: A* from its
-   escape top to the net's tree (multi-target, heuristic = distance to the
-   tree's bounding box), restricted to the guide, then to the guide box plus
+   escape top to the net's tree. A bounded spatial index finds the distance
+   to actual tree segments, including unavoidable layer changes and directional
+   costs. `heuristic_weight` defaults to one; explicit values up to sixteen
+   can favor progress without changing geometric checks or resource limits.
+   Search is restricted to the guide, then to the guide box plus
    `expand_margin` (4) GCells. Every wire edge and via is checked by the
    spatial index against obstacles, pins, escapes and other nets (via
    variants as in `lef_rules`); a same-net near miss costs one via. On a
-   layer whose single via pads are below `AREA` (sky130 li1/met1/met3/met4,
-   GF180 Metal1-4) a via may leave only after a wire run of at least
-   `AREA / width` since the via that entered the layer, and a path may not
-   join the tree with a via at a tree node that already has one, so no
-   pad-only min-area island is created. A via taken right after a wire
+   layer with `AREA` constraints, initial routes defer path-dependent area
+   checks to bounded geometric repair. Strict retries accept actual via-pad
+   area certificates or require a sufficient intervening wire run. Final
+   area validation is always required. A via taken right after a wire
    prefers the variant whose pad is elongated along that wire; after
    routing, variants are re-picked where exactly one wire ends at a via on a
    layer and the pad runs across it (LEF58 end-of-line enclosure, e.g.
@@ -230,7 +240,7 @@ on stdout.
    one spatial shape.
 5. **Rip-up and reroute.** A net that fails is re-tried in a soft mode in a
    wider box: routed metal of other nets is crossable at
-   `10 x via_cost x (1 + round) x (1 + rips of that net)`; nets it crosses
+   `10 x via_cost x (1 + rip-ups of the crossed net)`; nets it crosses
    are ripped up and queued; contested nodes gain history cost for every
    later search. Bounded by `max_ripups_per_net` (24) and
    `max_repair_rounds` (200k); fixed geometry (pins, obstructions, supply,
