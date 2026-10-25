@@ -602,6 +602,7 @@ fn memory_estimate_limited(
             (nodes.min(limits.max_search_expansions.saturating_add(limits.max_heap)) as u64)
                 .saturating_mul(64)
         })
+        .saturating_add((nodes.min(limits.max_heap) as u64).saturating_mul(128))
         .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES))
         .saturating_add(access_memory)
         .saturating_add(crate::routing_target::MEMORY_ALLOWANCE),
@@ -2045,7 +2046,7 @@ impl<'a> Router<'a> {
             // Prefer greater progress when admissible total costs tie. Taking
             // the smallest g first floods every equally short interior path.
             // Node id remains the final deterministic tie-break.
-            let mut heap = BinaryHeap::new();
+            let mut heap = crate::route_queue::Pending::new(self.limits.max_heap);
             self.search.begin(epoch);
             self.search.set(
                 start,
@@ -2055,7 +2056,7 @@ impl<'a> Router<'a> {
                     kind: WIRE,
                 },
             )?;
-            heap.push(Reverse((
+            heap.offer((
                 target.distance(
                     self.graph.slot[&self.graph.point(start).0],
                     self.graph.point(start).1,
@@ -2065,10 +2066,10 @@ impl<'a> Router<'a> {
                 )?,
                 Reverse(0u64),
                 start,
-            )));
+            ))?;
             let mut found = None;
             let mut search = 0usize;
-            while let Some(Reverse((_, Reverse(cost), id))) = heap.pop() {
+            while let Some((_, Reverse(cost), id)) = heap.pop() {
                 if self.search.get(id).is_none_or(|s| s.cost != cost) {
                     continue;
                 }
@@ -2290,10 +2291,7 @@ impl<'a> Router<'a> {
                             kind,
                         },
                     )?;
-                    if heap.len() >= self.limits.max_heap {
-                        return Err(budget("routing frontier limit"));
-                    }
-                    heap.push(Reverse((
+                    heap.offer((
                         nc.saturating_add(target.distance(
                             self.graph.slot[&nl],
                             q,
@@ -2303,7 +2301,8 @@ impl<'a> Router<'a> {
                         )?),
                         Reverse(nc),
                         next,
-                    )));
+                    ))
+                    .map_err(|e| budget(&format!("{e}; pin {} net {net}", t.pin)))?;
                 }
             }
             let Some(mut current) = found else {
@@ -3506,7 +3505,9 @@ mod tests {
         let estimate = estimate_for(&design, &caps)
             .expect("estimate")
             .expect("track estimate");
-        assert!(estimate.total() < 32 * 1024 * 1024, "{estimate:?}");
+        // Includes the indexed frontier while remaining independent of the
+        // 300-million-node implicit lattice size.
+        assert!(estimate.total() < 40 * 1024 * 1024, "{estimate:?}");
         let result = route_cpu_ref(&design, &caps).expect("route the local connection");
         assert_eq!(result.stats.grid_nodes, 300_000_000);
         assert_eq!(result.nets, vec![0]);
@@ -3751,12 +3752,12 @@ mod tests {
             ..RouteLimits::default()
         };
         assert!(route_cpu_ref(&i, &absurd).is_err());
-        // The runtime guard: an estimate below a 2 MiB cap still stops once
+        // The runtime guard: an estimate below a 4 MiB cap still stops once
         // the process' peak resident set (any test process) is above it.
         if crate::memory::peak_rss_bytes().is_some() {
             let mut small = input(i.terminals.clone(), Vec::new());
-            small.tracks.as_mut().unwrap().memory_mib = 2;
-            assert!(estimate_for(&small, &limits()).unwrap().unwrap().total() < 2 << 20);
+            small.tracks.as_mut().unwrap().memory_mib = 4;
+            assert!(estimate_for(&small, &limits()).unwrap().unwrap().total() < 4 << 20);
             let err = route_cpu_ref(&small, &limits()).unwrap_err();
             assert!(err.to_string().contains("peak resident set"), "{err}");
         }

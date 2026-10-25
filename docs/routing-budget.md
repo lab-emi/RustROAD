@@ -95,6 +95,12 @@ and charged at 164 bytes per admitted node/edge, independently of the design's
 output segment budget. A large design can permit many completed routes without
 reserving the entire output budget for one live search tree.
 
+The detailed-search frontier retains one entry per open node. Updating a
+node's cost adjusts that entry in place; stale duplicates cannot consume the
+frontier allowance. `max_heap` limits unique pending nodes. Its estimate reserves
+128 bytes per possible pending node for priorities, lookup positions and
+allocation headroom, separately from the visited search state.
+
 `route` checks a whole-process estimate against `track_router.memory_mib`
 (default 2048, at most 65536). Before loading it uses the process baseline plus
 3x the revision's serialized size. Once the complete routing input is decoded,

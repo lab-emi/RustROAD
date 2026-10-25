@@ -44,6 +44,9 @@ below describe the earlier small-block release.
   completed nets retain collinear runs rather than every track edge. Clock
   membership uses an indexed bit mask, and supply-net IDs are resolved once
   for the entire input build.
+- The detailed frontier uses indexed priority updates, with one pending entry
+  per node. Queue growth is independent of how often a better path reaches
+  that node; its memory allowance is included in the route preflight.
 - `track_router.max_history_entries` independently bounds congestion history
   (default 4,000,000). Pin-access memoization has a bounded memory cache;
   eviction recomputes the same geometry. Object/work limits, the whole-process

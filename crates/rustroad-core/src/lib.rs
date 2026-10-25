@@ -15,6 +15,7 @@ pub mod place;
 pub mod power;
 pub mod route_batches;
 mod route_graph;
+mod route_queue;
 pub(crate) mod route_rules;
 mod route_search;
 pub mod routing;
