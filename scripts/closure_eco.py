@@ -95,6 +95,11 @@ NEAR_ROWS = 1.5
 # next to it: detailed placement then never moves the buffer towards its
 # cluster (that move costs the driver-side HPWL as much as it saves).
 DRIVER_NET_WEIGHT = 8000
+# Best-effort rebalance of a violating weak-driver net (nothing meets the
+# planning target): accepted when the driver's model transition is at most
+# this fraction of the limit and BEST_EFFORT_GAIN_NS below the observed one.
+BEST_EFFORT = 0.985
+BEST_EFFORT_GAIN_NS = 0.02
 # A weak driver's input-slew degradation (observed transition above the
 # Liberty model at the observed load, 0.2 ns input) is subtracted from its
 # target, at most this fraction of the limit.
@@ -815,7 +820,8 @@ class Planner:
         return None
 
     def rebalance(self, net: str, items: list, fixed: list, total: float, cw: float, target: float,
-                  model: DriverModel, out_load: dict) -> dict | None:
+                  model: DriverModel, out_load: dict, observed: float | None = None,
+                  slew_limit: float | None = None) -> dict | None:
         """A violating net whose sinks are all ECO buffers and whose driver
         cannot take its load: co-size the existing tree with its driver.
         Options, first feasible wins (current driver member, then larger):
@@ -826,7 +832,14 @@ class Planner:
         driver in front of all of them (it drives the existing trunk).
         Setup guard as for new buffers: an extra delay in front of a buffer
         input pin with less than CRITICAL_SLACK_NS of setup slack, or one that
-        leaves less than SETUP_GUARD_NS, blocks the option. Returns the record or None (nothing feasible)."""
+        leaves less than SETUP_GUARD_NS, blocks
+        the option. When the buffers already sit next to the driver, the
+        observed wire of the net (routed: pin access, couplings) replaces the
+        near-wire estimate. Nothing feasible at the target: `best effort` --
+        the root buffer whose input gives the driver the lowest model
+        transition, if that is below BEST_EFFORT x the limit and at least
+        BEST_EFFORT_GAIN_NS below the observed one. Returns the record,
+        {failed: [...]}, or None (no data)."""
         driver = self.n.driver[net]
         driver_pos = self.pos_of(driver)
         if driver_pos is None or "/" not in driver:
@@ -844,6 +857,13 @@ class Planner:
             if len(outs) != 1 or outs[0] not in out_load or old is None:
                 return None
             bufs.append((inst, it, old, out_load[outs[0]], out_load[outs[0]] + cw * manhattan(driver_pos, it.pos)))
+        wire = total - fixed_pf - sum(b[2].cap for b in bufs)
+        dw = self.widths.get(self.n.instances[driver.rsplit("/", 1)[0]][0], 0)
+        if all(manhattan(driver_pos, b[1].pos) <= (dw + b[2].width) // 2 + 2 * NEAR_ROWS * self.row_h for b in bufs):
+            # Already next to the driver: moving them changes nothing, and
+            # the routed wire is what a new root would see as well.
+            near = max(near, wire / len(bufs))
+            bufs = [(i, it, old, l0, l0) for i, it, old, l0, _ in bufs]
 
         def room(i):
             return None if i.slack is None else i.slack - self.consumed.get(i.name, 0.0)
@@ -889,36 +909,72 @@ class Planner:
             if blocked:
                 tried.append(f"{mode}@{member}: setup guard ({len(blocked)} buffers)")
                 continue
-            rec = dict(net=net, why="drv:rebalance ECO buffers", items=len(items), load_before_pf=round(total, 5),
-                       arrangement=mode, driver_target_ns=round(model.target, 4), tried=tried)
-            if mode == "driver":
-                resized = {}
-                for (inst, it, old, load0, load1), b in zip(bufs, picks):
-                    if b.name != old.name:
-                        self.resizes[inst] = (b.name, "co-sized next to its driver")
-                        resized[inst] = b.name
-                    self.place_at(inst, b.width, driver_pos)
-                rec.update(moved=[inst for inst, *_ in bufs], resized=resized,
-                           driver_load_after_pf=round(sum(b.cap for b in picks) + fixed_pf + near * len(bufs), 5))
-            else:
-                inst = self.emit(items, root)
-                self.place_at(inst, root.width, driver_pos)
-                rec.update(root=dict(instance=inst, cell=root.name, load_pf=round(root_load, 5),
-                                     slew_ns=round(root.slew_at(root_load), 4)),
-                           driver_load_after_pf=round(root.cap + fixed_pf + near, 5))
-            for name, d in spend.items():
-                if d > 0:
-                    self.consume(name, self.consumed.get(name, 0.0) + d)
-            self.weights[net] = DRIVER_NET_WEIGHT
-            dinst = driver.rsplit("/", 1)[0]
-            if member != self.n.instances[dinst][0]:
-                self.resizes[dinst] = (member, "co-sized with its buffers")
-                rec["driver_resized_to"] = member
-            self.touched.add(dinst)
-            self.touched.update(inst for inst, *_ in bufs)
-            self.records.append(rec)
-            return rec
+            return self.rebalanced(net, mode, member, items, bufs, picks if mode == "driver" else None,
+                                   root if mode == "root" else None, root_load if mode == "root" else None,
+                                   spend, near, fixed_pf, total, model, tried, driver, driver_pos)
+        if observed is not None and slew_limit is not None:
+            # Best effort (headroom-limited drivers: GF180 aoi22 with a routed
+            # wire of 4-6 fF even next to its buffer): the smallest load a root
+            # buffer can present.
+            best = None
+            root_load = total - fixed_pf
+            for member, cap in model.members:
+                for b in prof.buffers:
+                    if b.slew_at(root_load) > target:
+                        continue
+                    pred = prof.slew_at(member, b.cap + near + fixed_pf)
+                    if pred is None:
+                        continue
+                    pred += model.degradation
+                    key_ = (round(pred, 6), b.cap, b.name, member)
+                    if best is None or key_ < best[0]:
+                        best = (key_, member, b, pred)
+            if best is not None and best[3] <= BEST_EFFORT * slew_limit and best[3] <= observed - BEST_EFFORT_GAIN_NS:
+                _, member, root, pred = best
+                spend = {it.name: root.delay_at(root_load) + SLEW_SENSITIVITY * root.slew_at(root_load)
+                         for _, it, _, _, _ in bufs}
+                item = {i.name: i for _, i, _, _, _ in bufs}
+                if not any(d > 0 and room(item[n]) is not None and
+                           (room(item[n]) < CRITICAL_SLACK_NS or room(item[n]) - d < SETUP_GUARD_NS)
+                           for n, d in spend.items()):
+                    tried.append(f"best effort: root {root.name}, model transition {pred:.3f} ns (observed {observed:.3f})")
+                    return self.rebalanced(net, "root", member, items, bufs, None, root, root_load, spend, near,
+                                           fixed_pf, total, model, tried, driver, driver_pos)
+                tried.append("best effort: setup guard")
         return dict(failed=tried)
+
+    def rebalanced(self, net, mode, member, items, bufs, picks, root, root_load, spend, near, fixed_pf, total,
+                   model, tried, driver, driver_pos) -> dict:
+        """Emit one rebalance decision (see `rebalance`)."""
+        rec = dict(net=net, why="drv:rebalance ECO buffers", items=len(items), load_before_pf=round(total, 5),
+                   arrangement=mode, driver_target_ns=round(model.target, 4), tried=tried)
+        if mode == "driver":
+            resized = {}
+            for (inst, it, old, load0, load1), b in zip(bufs, picks):
+                if b.name != old.name:
+                    self.resizes[inst] = (b.name, "co-sized next to its driver")
+                    resized[inst] = b.name
+                self.place_at(inst, b.width, driver_pos)
+            rec.update(moved=[inst for inst, *_ in bufs], resized=resized,
+                       driver_load_after_pf=round(sum(b.cap for b in picks) + fixed_pf + near * len(bufs), 5))
+        else:
+            inst = self.emit(items, root)
+            self.place_at(inst, root.width, driver_pos)
+            rec.update(root=dict(instance=inst, cell=root.name, load_pf=round(root_load, 5),
+                                 slew_ns=round(root.slew_at(root_load), 4)),
+                       driver_load_after_pf=round(root.cap + fixed_pf + near, 5))
+        for name, d in spend.items():
+            if d > 0:
+                self.consume(name, self.consumed.get(name, 0.0) + d)
+        self.weights[net] = DRIVER_NET_WEIGHT
+        dinst = driver.rsplit("/", 1)[0]
+        if member != self.n.instances[dinst][0]:
+            self.resizes[dinst] = (member, "co-sized with its buffers")
+            rec["driver_resized_to"] = member
+        self.touched.add(dinst)
+        self.touched.update(inst for inst, *_ in bufs)
+        self.records.append(rec)
+        return rec
 
 
 def hold_capacity(hold_drive: dict | None, master: str, target: float) -> float | None:
@@ -986,7 +1042,8 @@ def design_wire_cap(n: Netlist, pl, prof: Profile, out_load: dict) -> float:
 def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, drv_rows: list, pins: dict,
                    corner: str, max_width: int | None, seq: int, row_h: int, widths: dict,
                    setup_critical: bool, frozen: set | frozenset = frozenset(),
-                   max_added_width: int | None = None, hold_drive: dict | None = None, spacing: int = 0) -> dict:
+                   max_added_width: int | None = None, hold_drive: dict | None = None, spacing: int = 0,
+                   sizing_failed: set | frozenset = frozenset()) -> dict:
     """Plan buffers (and driver resizes) for one layout.
 
     drv_rows: RustSTA drv rows (every corner); pins: corner -> {pin: setup
@@ -997,7 +1054,9 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
     loop's utilization cap), a net whose buffers would exceed it is skipped;
     hold_drive: delay-cell master -> (characterized load pF, worst output
     transition ns there) from the delay-cell profile (hold cells have no
-    sizing family; `hold_capacity`).
+    sizing family; `hold_capacity`); sizing_failed: small-fanout nets the
+    previous layout left to the whatif sizing (buffered now if they still
+    violate).
     Returns {ops, resizes, records, skipped, added_width_dbu, next_seq,
     positions (instance -> lower-left DBU seed of the next placement),
     weights (net -> placement weight), touched (instances decided here)}.
@@ -1154,7 +1213,7 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
                 # Small fanout: a larger driver fixes it when one exists (the
                 # sizing step decides with RustSTA whatif); a buffer only when
                 # no family member meets the target at this load.
-                if prof.upsize_for(master, total, DRIVER_TARGET * slew_limit, max_width):
+                if prof.upsize_for(master, total, DRIVER_TARGET * slew_limit, max_width) and net not in sizing_failed:
                     skipped[net] = "fanout <= 2: left to whatif sizing"
                     continue
             # Setup-critical sinks never go behind a buffer (it would add its
@@ -1173,7 +1232,8 @@ def plan_buffering(netlist_text: str, lef: dict, def_text: str, profile: dict, d
                     skipped[net] = "sinks are ECO buffers already: left to sizing"
                     continue
                 m = pl.mark()
-                rec = pl.rebalance(net, items, fixed, total, cw, target, dmodel, out_load)
+                rec = pl.rebalance(net, items, fixed, total, cw, target, dmodel, out_load,
+                                   max(e["slew"].values(), default=None), slew_limit)
                 if rec is not None and "failed" not in rec and max_added_width is not None and \
                         pl.added_width > max_added_width:
                     pl.rollback(m)

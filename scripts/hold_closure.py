@@ -792,9 +792,11 @@ class Flow:
                     want(inst, -10.0 + row['slack'] / max(row['limit'], 1e-9), 'drv')
                     if row['slack'] < 0:
                         violators[inst] = min(violators.get(inst, 0.0), row['slack'] / max(row['limit'], 1e-9))
-                # ECO buffers loading the net may shrink (less input capacitance).
+                # ECO buffers loading the net may shrink (less input capacitance);
+                # on a violating net every sink may (GF180 mult: nor2_2 into one
+                # nor2_4 input, 17.6 fF).
                 for sink in sinks_of.get(net, []):
-                    if sink.startswith('rr_eco_buf_'):
+                    if sink.startswith('rr_eco_buf_') or row['slack'] < 0:
                         want(sink, -9.0 + row['slack'] / max(row['limit'], 1e-9), 'drv_sink')
         # The upstream drivers of violating drivers may grow (a sharper input
         # slew, and room for the violating driver's own upsizing).
@@ -1109,7 +1111,10 @@ class Flow:
         seq = max(CE.next_sequence(text), CE.next_sequence(bounded_text(apply_to, 64 * 1024 ** 2)) if apply_to else 0)
         buf = CE.plan_buffering(text, lef, bounded_text(Path(phys['paths']['def']), 64 * 1024 ** 2), prof, drv_rows, pins,
                                 'ss', max_width, seq, floor['site']['height'], widths, setup_failing,
-                                frozen, room, self.hold_drive(), spacing)
+                                frozen, room, self.hold_drive(), spacing, getattr(self, 'left_to_sizing', frozenset()))
+        # A small-fanout net that whatif sizing does not fix by the next layout
+        # gets buffered then.
+        self.left_to_sizing = frozenset(k for k, v in buf['skipped'].items() if v.startswith('fanout <= 2'))
         skip = set(buf['resizes']) | set(buf.get('touched') or [])
         n = CE.parse_netlist(text, lef)
         for rec in buf['records']:
@@ -1590,6 +1595,7 @@ exit
         # DRV co-sizing: placement seeds of cells that must sit next to their
         # driver (next layout only) and weights of those drivers' nets (kept).
         self.seed_positions, self.drv_weights = {}, {}
+        self.left_to_sizing = frozenset()  # small-fanout DRV nets the last plan left to whatif
         self.last_setup_eco, self.no_progress, self.eco_blocked = None, 0, None
         self.whatif_spent = 0
         seed, best = None, None
