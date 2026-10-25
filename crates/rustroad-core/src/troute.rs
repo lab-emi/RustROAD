@@ -230,6 +230,29 @@ fn index_of(v: &[i64], x: i64) -> u32 {
 }
 
 impl Graph {
+    fn hop_distances(&self) -> Result<Vec<Vec<u16>>> {
+        let n = self.layers.len();
+        if n > 64 {
+            return Err(budget("pin-access layer-hop table"));
+        }
+        let mut hops = vec![vec![u16::MAX; n]; n];
+        for (i, row) in hops.iter_mut().enumerate() {
+            row[i] = 0;
+        }
+        for pair in &self.pairs {
+            hops[pair.lower][pair.upper] = 1;
+            hops[pair.upper][pair.lower] = 1;
+        }
+        for via in 0..n {
+            for from in 0..n {
+                for to in 0..n {
+                    hops[from][to] =
+                        hops[from][to].min(hops[from][via].saturating_add(hops[via][to]));
+                }
+            }
+        }
+        Ok(hops)
+    }
     fn new(input: &RouteInput, plan: &TrackPlan, limits: &RouteLimits) -> Result<Self> {
         let mut layers = Vec::new();
         let mut slot = HashMap::new();
@@ -521,6 +544,31 @@ fn memory_estimate_limited(
     let records = t
         .saturating_mul(RECORDS_PER_TERMINAL)
         .min(limits.max_segments as u64);
+    let (mut width, mut height) = (0i128, 0i128);
+    for terminal in &input.terminals {
+        if let Some(first) = terminal.shapes.first() {
+            let (mut lx, mut ly, mut ux, mut uy) =
+                (first.rect.lx, first.rect.ly, first.rect.ux, first.rect.uy);
+            for s in &terminal.shapes[1..] {
+                lx = lx.min(s.rect.lx);
+                ly = ly.min(s.rect.ly);
+                ux = ux.max(s.rect.ux);
+                uy = uy.max(s.rect.uy);
+            }
+            width = width.max(i128::from(ux) - i128::from(lx));
+            height = height.max(i128::from(uy) - i128::from(ly));
+        }
+    }
+    // Only one escape's potential is live. Its axes consist of grid points
+    // within the existing four-step halo, plus at most two end positions.
+    let halo = i128::from(input.step.max(0)).saturating_mul(8);
+    let grid = i128::from(input.grid.max(1));
+    let axis_points = (width + halo) / grid + (height + halo) / grid + 4;
+    let access_memory = u64::try_from(axis_points)
+        .unwrap_or(u64::MAX)
+        .saturating_mul(8)
+        .saturating_add(layers.saturating_mul(layers).saturating_mul(2))
+        .saturating_add(layers.saturating_mul(32));
     if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
         eprintln!(
             "[troute] estimate inputs grid_cells {cells} layers {layers} fixed_entries {fixed_entries} obstacles {o} terminals {t} nodes {nodes} gcells {gcells} held {}",
@@ -536,6 +584,7 @@ fn memory_estimate_limited(
                 .saturating_mul(64)
         })
         .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES))
+        .saturating_add(access_memory)
         .saturating_add(crate::routing_target::MEMORY_ALLOWANCE),
         spatial: index(added),
         routed: t
@@ -680,11 +729,38 @@ impl Local {
     }
 }
 
+fn nearest_axis(axis: &[i64], point: i64) -> u64 {
+    let right = axis.partition_point(|&x| x < point);
+    axis.get(right)
+        .into_iter()
+        .chain(right.checked_sub(1).and_then(|i| axis.get(i)))
+        .map(|&x| point.abs_diff(x))
+        .min()
+        .unwrap_or(0)
+}
+
+struct AccessPotential {
+    dx: Vec<u64>,
+    dy: Vec<u64>,
+    hops: Vec<u64>,
+}
+impl AccessPotential {
+    fn cost(&self, id: u32) -> Result<u64> {
+        let plane = self.dx.len() * self.dy.len();
+        let cell = id as usize % plane;
+        self.dx[cell % self.dx.len()]
+            .checked_add(self.dy[cell / self.dx.len()])
+            .and_then(|d| d.checked_add(self.hops[id as usize / plane]))
+            .ok_or_else(|| budget("pin-access lower-bound cost"))
+    }
+}
+
 struct Router<'a> {
     input: &'a RouteInput,
     plan: &'a TrackPlan,
     limits: &'a RouteLimits,
     graph: Graph,
+    access_hops: Vec<Vec<u16>>,
     cells: Cells,
     spatial: Spatial<'a>,
     pairs: Vec<ViaPair>,
@@ -995,6 +1071,29 @@ impl<'a> Router<'a> {
             xs: xs.into_iter().collect(),
             ys: ys.into_iter().collect(),
         };
+        let goal = &self.graph.layers[goal_slot];
+        let (gx, gy) = if goal.vertical {
+            (&goal.tracks, &goal.stops)
+        } else {
+            (&goal.stops, &goal.tracks)
+        };
+        let potential = AccessPotential {
+            dx: local.xs.iter().map(|&x| nearest_axis(gx, x)).collect(),
+            dy: local.ys.iter().map(|&y| nearest_axis(gy, y)).collect(),
+            hops: slots
+                .iter()
+                .map(|&s| {
+                    let n = self.access_hops[s][goal_slot];
+                    if n == u16::MAX {
+                        Ok(0)
+                    } else {
+                        u64::from(n)
+                            .checked_mul(input.step as u64)
+                            .ok_or_else(|| budget("pin-access layer-hop cost"))
+                    }
+                })
+                .collect::<Result<_>>()?,
+        };
         let plane = local.xs.len() * local.ys.len();
         if plane.saturating_mul(slots.len()) > self.limits.max_grid_nodes {
             return Err(budget("pin access lattice"));
@@ -1030,13 +1129,17 @@ impl<'a> Router<'a> {
                 let id = local.id(li, *at).unwrap();
                 if visited.get(&id).is_none_or(|v| v.0 > *cost) {
                     visited.insert(id, (*cost, NONE, WIRE));
-                    heap.push(Reverse((*cost, id)));
+                    heap.push(Reverse((
+                        cost.saturating_add(potential.cost(id)?),
+                        *cost,
+                        id,
+                    )));
                 }
             }
         }
         let mut found = None;
         let mut search = 0usize;
-        while let Some(Reverse((cost, id))) = heap.pop() {
+        while let Some(Reverse((_, cost, id))) = heap.pop() {
             if visited[&id].0 != cost {
                 continue;
             }
@@ -1164,7 +1267,7 @@ impl<'a> Router<'a> {
                     return Err(budget("pin access frontier"));
                 }
                 visited.insert(nid, (nc, id, kind));
-                heap.push(Reverse((nc, nid)));
+                heap.push(Reverse((nc.saturating_add(potential.cost(nid)?), nc, nid)));
             }
         }
         let Some(top) = found else {
@@ -2290,11 +2393,13 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
     }
     let n = graph.len;
     let gl = cells.len();
+    let access_hops = graph.hop_distances()?;
     let mut r = Router {
         input,
         plan,
         limits,
         graph,
+        access_hops,
         cells,
         spatial: Spatial::new(input, limits)?,
         pairs,
@@ -3254,5 +3359,34 @@ mod tests {
         assert_eq!(routed.nets, vec![0]);
         assert_eq!(routed.access.len(), 4);
         assert!(routed.stats.expansions < 100_000);
+    }
+    #[test]
+    fn access_potential_uses_exact_axis_distances_and_shortest_layer_hops() {
+        assert_eq!(nearest_axis(&[-10, 10], 0), 10);
+        assert_eq!(nearest_axis(&[-10, 10], -12), 2);
+        assert_eq!(nearest_axis(&[-10, 10], 10), 0);
+        let design = input(vec![], vec![]);
+        let mut graph = Graph::new(&design, design.tracks.as_ref().unwrap(), &limits()).unwrap();
+        assert_eq!(graph.hop_distances().unwrap()[0][2], 2);
+        let shortcut = GPair {
+            lower: 0,
+            upper: 2,
+            kinds: vec![],
+            lo_stop_up_track: vec![],
+            lo_track_up_stop: vec![],
+            up_stop_lo_track: vec![],
+            up_track_lo_stop: vec![],
+        };
+        // Only topology matters to this helper; it must not assume adjacent layer ids.
+        graph.pairs.push(shortcut);
+        assert_eq!(graph.hop_distances().unwrap()[0][2], 1);
+        let p = AccessPotential {
+            dx: vec![10, 0],
+            dy: vec![5, 0],
+            hops: vec![80, 0],
+        };
+        assert_eq!(p.cost(0).unwrap(), 95);
+        assert_eq!(p.cost(3).unwrap(), 80);
+        assert_eq!(p.cost(4).unwrap(), 15);
     }
 }

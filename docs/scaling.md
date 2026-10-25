@@ -169,10 +169,12 @@ on stdout.
      cells put their pins on x = 0.28 + 0.56k um: with the LEF offset 500 of
      608 used pin/orientation pairs have no on-track landing, so the profile
      shifts the vertical layers (Metal2, Metal4) by 0.28 um.
-2. **Pin access (conflict aware).** Each terminal searches (Dijkstra) a local
+2. **Pin access (conflict aware).** Each terminal searches (A*) a local
    lattice made of its landing candidates and the nearby track/stop
    coordinates of the layers up to the access layer, and stops at the first
-   on-graph node of the access layer (met2 / Metal2). Candidates are the
+   on-graph node of the access layer (met2 / Metal2). The lower bound is the
+   distance to that layer's track grid plus the minimum via-hop cost; the
+   small layer-hop table is built once. Candidates are the
    on-graph points inside the pin plus the quartile points, checked once per
    (master, orientation, pin, exact relative landing points) by the
    existing LEF-rule access table (other-net blockers, same-pin notches,
