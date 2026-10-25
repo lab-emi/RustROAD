@@ -15,8 +15,12 @@
 //! and continuous aliases. Behavioral statements, operators, parameters, delays,
 //! attributes, preprocessing and implicit nets produce explicit errors.
 use serde::{Deserialize, Serialize};
+use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Write};
+
+mod stream;
+pub use stream::StreamWriter;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1084,9 +1088,9 @@ pub fn parse_verilog_reader(reader: impl BufRead, limits: &VerilogLimits) -> Res
     .parse()
 }
 
-fn validate_expr(
+fn validate_expr<K: Borrow<str> + Eq + std::hash::Hash>(
     expr: &Expr,
-    nets: &HashMap<&str, Option<Range>>,
+    nets: &HashMap<K, Option<Range>>,
     limits: &VerilogLimits,
     nodes: &mut usize,
     depth: usize,

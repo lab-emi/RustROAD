@@ -126,6 +126,14 @@ enum Command {
     ExportVerilog {
         #[arg(long)]
         include_power: bool,
+        /// Maximum emitted bytes; output may be partial on failure.
+        #[arg(long, default_value_t = 16, value_parser = clap::value_parser!(u64).range(1..=16384))]
+        max_output_mib: u64,
+        /// Whole-process export memory allowance including the loaded snapshot.
+        #[arg(long, default_value_t = 2048, value_parser = clap::value_parser!(u64).range(1..=65536))]
+        export_memory_mib: u64,
+        #[arg(long, default_value_t = 200_000_000)]
+        max_export_work: usize,
     },
     /// Read-only native RC extraction of the routed HEAD revision to SPEF.
     Extract {
@@ -291,7 +299,7 @@ enum Command {
     },
     /// Read-only native process-antenna check of the routed HEAD (JSON report).
     CheckAntenna {
-        /// What-if shapes [{net, layer, rect:[lx,ly,ux,uy]}] in DBU merged into nets.
+        /// What-if shapes `[{net, layer, rect:[lx,ly,ux,uy]}]` in DBU merged into nets.
         #[arg(long)]
         extra_shapes: Option<PathBuf>,
         #[arg(long, default_value_t = 200_000)]
@@ -676,11 +684,30 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             output.flush()?;
             Ok(())
         }
-        Command::ExportVerilog { include_power } => {
+        Command::ExportVerilog {
+            include_power,
+            max_output_mib,
+            export_memory_mib,
+            max_export_work,
+        } => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
             let stdout = io::stdout();
             let mut output = io::BufWriter::with_capacity(256 * 1024, stdout.lock());
-            snapshot.export_verilog_with_power(include_power, &mut output)?;
+            let mut syntax = parser_limits.clone();
+            syntax.max_input_bytes = usize::try_from(max_output_mib.saturating_mul(1 << 20))?;
+            snapshot.export_verilog_bounded(
+                if include_power {
+                    rustroad_workspace::netlist_export::SupplyMode::Powered
+                } else {
+                    rustroad_workspace::netlist_export::SupplyMode::Logical
+                },
+                &rustroad_workspace::netlist_export::ExportLimits {
+                    verilog: syntax,
+                    memory_mib: export_memory_mib,
+                    max_work: max_export_work,
+                },
+                &mut output,
+            )?;
             output.flush()?;
             Ok(())
         }

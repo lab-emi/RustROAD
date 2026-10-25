@@ -2002,6 +2002,7 @@ pub(super) fn validate_state(
 /// renaming every use of `w` to `x` (e.g. tie-cell nets). Port-bit targets
 /// and vector aliases are kept, so netlists without such assigns are
 /// unchanged.
+#[cfg(test)]
 fn fold_internal_aliases(netlist: &mut verilog::Netlist) {
     let ports: HashSet<&str> = netlist.ports.iter().map(|p| p.name.as_str()).collect();
     let scalar_ports: HashSet<&str> = netlist
@@ -2084,6 +2085,7 @@ fn fold_internal_aliases(netlist: &mut verilog::Netlist) {
 /// Replace the reserved tie-rail wires by `power`/`ground` (supply port
 /// names in the powered export, `1'b1`/`1'b0` in the logical one) and drop
 /// their declarations.
+#[cfg(test)]
 fn bind_tie_rails(netlist: &mut verilog::Netlist, power: &verilog::Expr, ground: &verilog::Expr) {
     use crate::ties::{RAIL_GROUND_WIRE, RAIL_POWER_WIRE};
     let bind = |e: &mut verilog::Expr| {
@@ -2105,7 +2107,8 @@ fn bind_tie_rails(netlist: &mut verilog::Netlist, power: &verilog::Expr, ground:
         .retain(|w| w.name != RAIL_POWER_WIRE && w.name != RAIL_GROUND_WIRE);
 }
 
-pub(super) fn export_verilog(
+#[cfg(test)]
+pub(super) fn export_verilog_legacy(
     bundle: &PhysicalBundle,
     include_power: bool,
     output: &mut impl Write,

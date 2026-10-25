@@ -16,6 +16,7 @@ pub mod extract;
 pub mod floorplan;
 pub mod gds;
 pub mod input_buffer;
+pub mod netlist_export;
 pub mod pdk;
 pub mod physical;
 mod port_ties;
@@ -315,12 +316,32 @@ impl Snapshot {
         include_power: bool,
         output: &mut impl Write,
     ) -> Result<()> {
+        self.export_verilog_bounded(
+            if include_power {
+                netlist_export::SupplyMode::Powered
+            } else {
+                netlist_export::SupplyMode::Logical
+            },
+            &netlist_export::ExportLimits::default(),
+            output,
+        )
+    }
+    /// Export with explicit structural, output, work and whole-process memory limits.
+    ///
+    /// # Errors
+    /// Rejects missing physical data, malformed records and exhausted export limits.
+    pub fn export_verilog_bounded(
+        &self,
+        mode: netlist_export::SupplyMode,
+        limits: &netlist_export::ExportLimits,
+        output: &mut impl Write,
+    ) -> Result<()> {
         let physical = self
             .metadata
             .physical
             .as_ref()
             .ok_or_else(|| Error::Invalid("no mapped netlist imported".into()))?;
-        crate::physical::export_verilog(physical, include_power, output)?;
+        crate::netlist_export::write(physical, mode, limits, output)?;
         Ok(())
     }
     pub fn connectivity(&self) -> Option<&ConnectedDesign> {

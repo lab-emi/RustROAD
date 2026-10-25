@@ -493,7 +493,8 @@ fn write_verilog_atomic(
             memory_mib: limits.memory_mib,
             next_check: 0,
         };
-        verilog::write_verilog(netlist, &mut sink).map_err(|e| fail("ECO_NETLIST", e))?;
+        verilog::write_verilog_with_limits(netlist, &mut sink, &limits.verilog)
+            .map_err(|e| fail("ECO_NETLIST", e))?;
         sink.flush()?;
         sink.out.get_ref().sync_all()?;
         Ok(Artifact {
