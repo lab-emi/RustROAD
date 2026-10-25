@@ -67,6 +67,61 @@ const RECORD_BYTES: u64 = 128;
 /// wire/via vectors and the active net's raw topology are counted separately.
 const ROUTED_BYTES_PER_TERMINAL: u64 = 768;
 const ACTIVE_TOPOLOGY_BYTES: u64 = 160;
+/// Sorted window index plus construction headroom (one entry per terminal).
+const WINDOW_INDEX_BYTES: u64 = 32;
+
+/// Immutable x-interval index for pin-access repair. A query scans only
+/// lower bounds in [query.lx - widest_window, query.ux], then checks y and
+/// exact overlap. Every candidate and the one-time build are work charged.
+struct WindowIndex {
+    order: Vec<(i64, usize)>,
+    width: i64,
+}
+impl WindowIndex {
+    fn new(windows: &[Rect], work: &mut usize, cap: usize) -> Result<Self> {
+        *work = work
+            .checked_add(windows.len())
+            .filter(|&n| n <= cap)
+            .ok_or_else(|| budget("pin access window-index work"))?;
+        let mut order = Vec::new();
+        order
+            .try_reserve_exact(windows.len())
+            .map_err(|_| budget("pin access window index"))?;
+        let mut width = 0;
+        for (i, r) in windows.iter().enumerate() {
+            width = width.max(
+                r.ux.checked_sub(r.lx)
+                    .ok_or_else(|| budget("pin access window span"))?,
+            );
+            order.push((r.lx, i));
+        }
+        order.sort_unstable();
+        Ok(Self { order, width })
+    }
+    fn overlapping(
+        &self,
+        windows: &[Rect],
+        query: Rect,
+        work: &mut usize,
+        cap: usize,
+    ) -> Result<Vec<usize>> {
+        let lo = query.lx.saturating_sub(self.width);
+        let begin = self.order.partition_point(|&(x, _)| x < lo);
+        let end = self.order.partition_point(|&(x, _)| x <= query.ux);
+        *work = work
+            .checked_add(end - begin)
+            .filter(|&n| n <= cap)
+            .ok_or_else(|| budget("pin access window-query work"))?;
+        Ok(self.order[begin..end]
+            .iter()
+            .filter_map(|&(_, i)| {
+                let r = windows[i];
+                (r.lx <= query.ux && query.lx <= r.ux && r.ly <= query.uy && query.ly <= r.uy)
+                    .then_some(i)
+            })
+            .collect())
+    }
+}
 
 fn access_cache_limit(plan: &TrackPlan) -> u64 {
     (plan.memory_mib.saturating_mul(1 << 20) / 32).clamp(1 << 16, 64 << 20)
@@ -464,6 +519,7 @@ fn memory_estimate_limited(
         spatial: index(added),
         routed: t
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
+            .saturating_add(t.saturating_mul(WINDOW_INDEX_BYTES))
             .saturating_add(records.saturating_mul(96))
             .saturating_add(
                 (nodes.min(limits.max_segments) as u64).saturating_mul(ACTIVE_TOPOLOGY_BYTES),
@@ -1228,6 +1284,7 @@ impl<'a> Router<'a> {
 
     /// Conflict-aware escapes for every terminal of a routed net.
     fn reserve(&mut self, terminals: &[&'a Terminal]) -> Result<HashMap<u32, Plan>> {
+        let started = std::time::Instant::now();
         let mut tables = BTreeMap::new();
         // Most constrained first: fewest start candidates, then pin index.
         let mut order: Vec<(usize, u32, usize)> = Vec::with_capacity(terminals.len());
@@ -1236,6 +1293,11 @@ impl<'a> Router<'a> {
             order.push((n, t.pin, i));
         }
         order.sort_unstable();
+        trace(
+            "access candidates",
+            started,
+            format_args!("terminals {} work {}", terminals.len(), self.spatial.work),
+        );
         let windows: Vec<Rect> = terminals
             .iter()
             .map(|t| {
@@ -1255,12 +1317,24 @@ impl<'a> Router<'a> {
         let mut owner: BTreeMap<u32, usize> = BTreeMap::new();
         let mut attempts = vec![0usize; terminals.len()];
         let mut rounds = 0usize;
+        let mut window_index = None;
         while let Some(i) = queue.pop_front() {
             rounds += 1;
             if rounds > terminals.len().saturating_mul(8) + 64 {
                 return Err(budget("pin access repair rounds"));
             }
             let t = terminals[i];
+            if rounds.is_multiple_of(100_000) {
+                trace(
+                    "access progress",
+                    started,
+                    format_args!(
+                        "complete {} rounds {rounds} work {}",
+                        plans.len(),
+                        self.spatial.work
+                    ),
+                );
+            }
             if let Some(plan) = self.escape(t, &mut tables)? {
                 plan_records = plan_records
                     .checked_add(plan.wires.len())
@@ -1282,15 +1356,28 @@ impl<'a> Router<'a> {
                 )));
             }
             // Rip up escapes of terminals whose windows overlap this one.
-            let w = windows[i];
-            let victims: Vec<u32> = owner
-                .iter()
-                .filter(|(_, j)| {
-                    let o = windows[**j];
-                    o.lx <= w.ux && w.lx <= o.ux && o.ly <= w.uy && w.ly <= o.uy
-                })
-                .map(|(p, _)| *p)
+            if window_index.is_none() {
+                window_index = Some(WindowIndex::new(
+                    &windows,
+                    &mut self.spatial.work,
+                    self.limits.max_comparisons,
+                )?);
+            }
+            let mut victims: Vec<u32> = window_index
+                .as_ref()
+                .unwrap()
+                .overlapping(
+                    &windows,
+                    windows[i],
+                    &mut self.spatial.work,
+                    self.limits.max_comparisons,
+                )?
+                .into_iter()
+                .map(|j| terminals[j].pin)
+                .filter(|pin| owner.contains_key(pin))
                 .collect();
+            // Match the original ascending-pin repair order exactly.
+            victims.sort_unstable();
             if victims.is_empty() {
                 return Err(no_route(&format!(
                     "pin {} net {} has no legal access",
@@ -2253,6 +2340,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         });
     }
     r.guard("setup")?;
+    trace("spatial index", t0, format_args!("work {}", r.spatial.work));
     let all: Vec<&Terminal> = groups.values().flatten().copied().collect();
     let plans = r.reserve(&all)?;
     r.guard("pin access")?;
@@ -3050,5 +3138,65 @@ mod tests {
         s.remove(routed);
         assert_eq!(probe(&mut s, rect(100, 200, 200, 220)), Some(vec![]));
         assert!(s.clear(1, rect(100, 200, 200, 220), 1).unwrap());
+    }
+    #[test]
+    fn window_index_matches_exhaustive_overlap_and_bounds_work() {
+        let windows: Vec<_> = (0..10_000)
+            .map(|i| {
+                let x = (i % 100) * 10 - 500;
+                let y = (i / 100) * 10 - 500;
+                Rect {
+                    lx: x,
+                    ly: y,
+                    ux: x + 4,
+                    uy: y + 4,
+                }
+            })
+            .collect();
+        let mut work = 0;
+        let index = WindowIndex::new(&windows, &mut work, 20_000).unwrap();
+        for query in [
+            Rect {
+                lx: -502,
+                ly: -502,
+                ux: -499,
+                uy: -499,
+            },
+            Rect {
+                lx: -4,
+                ly: -4,
+                ux: 4,
+                uy: 4,
+            },
+            Rect {
+                lx: 1000,
+                ly: 0,
+                ux: 1004,
+                uy: 4,
+            },
+            Rect {
+                lx: -15,
+                ly: 12,
+                ux: 23,
+                uy: 26,
+            },
+        ] {
+            let mut actual = index
+                .overlapping(&windows, query, &mut work, 20_000)
+                .unwrap();
+            actual.sort_unstable();
+            let expected: Vec<_> = windows
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| {
+                    (r.lx <= query.ux && query.lx <= r.ux && r.ly <= query.uy && query.ly <= r.uy)
+                        .then_some(i)
+                })
+                .collect();
+            assert_eq!(actual, expected);
+        }
+        assert!(work < 11_000, "queries must avoid whole-design rescans");
+        assert!(WindowIndex::new(&windows, &mut 0, 9999).is_err());
+        assert!(index.overlapping(&windows, windows[0], &mut 0, 99).is_err());
     }
 }
