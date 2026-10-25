@@ -535,7 +535,8 @@ fn memory_estimate_limited(
             (nodes.min(limits.max_search_expansions.saturating_add(limits.max_heap)) as u64)
                 .saturating_mul(64)
         })
-        .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES)),
+        .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES))
+        .saturating_add(crate::routing_target::MEMORY_ALLOWANCE),
         spatial: index(added),
         routed: t
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
@@ -1800,6 +1801,7 @@ impl<'a> Router<'a> {
         let mut out = NetRoute::default();
         let mut edges = BTreeMap::new();
         let root = plans[&terminals[0].pin].top;
+        let mut target = crate::routing_target::TreeDistance::new(self.graph.point(root).1);
         let mut tree: HashSet<u32> = HashSet::from([root]);
         // Tree nodes with an incident via: a path may not join them with
         // another via through a layer whose single pads are below AREA.
@@ -1836,19 +1838,6 @@ impl<'a> Router<'a> {
                 .checked_add(1)
                 .ok_or_else(|| budget("routing search count"))?;
             let epoch = self.epoch;
-            let pts: Vec<[i64; 2]> = tree.iter().map(|id| self.graph.point(*id).1).collect();
-            let bbox = Rect {
-                lx: pts.iter().map(|p| p[0]).min().unwrap(),
-                ly: pts.iter().map(|p| p[1]).min().unwrap(),
-                ux: pts.iter().map(|p| p[0]).max().unwrap(),
-                uy: pts.iter().map(|p| p[1]).max().unwrap(),
-            };
-            let heuristic = |p: [i64; 2]| {
-                distance(
-                    p,
-                    [p[0].clamp(bbox.lx, bbox.ux), p[1].clamp(bbox.ly, bbox.uy)],
-                )
-            };
             let mut heap = BinaryHeap::new();
             self.search.begin(epoch);
             self.search.set(
@@ -1860,7 +1849,11 @@ impl<'a> Router<'a> {
                 },
             )?;
             heap.push(Reverse((
-                heuristic(self.graph.point(start).1)?,
+                target.distance(
+                    self.graph.point(start).1,
+                    &mut self.spatial.work,
+                    self.limits.max_comparisons,
+                )?,
                 0u64,
                 start,
             )));
@@ -2063,7 +2056,15 @@ impl<'a> Router<'a> {
                     if heap.len() >= self.limits.max_heap {
                         return Err(budget("routing frontier limit"));
                     }
-                    heap.push(Reverse((nc.saturating_add(heuristic(q)?), nc, next)));
+                    heap.push(Reverse((
+                        nc.saturating_add(target.distance(
+                            q,
+                            &mut self.spatial.work,
+                            self.limits.max_comparisons,
+                        )?),
+                        nc,
+                        next,
+                    )));
                 }
             }
             let Some(mut current) = found else {
@@ -2151,6 +2152,7 @@ impl<'a> Router<'a> {
                     } else {
                         ([lo, cross], [hi, cross])
                     };
+                    target.add(pa, pb, &mut self.spatial.work, self.limits.max_comparisons)?;
                     let rect = self.edge_rect(layer, pa, pb, net)?;
                     if soft
                         && let Soft::Clear { victims, .. } =
@@ -2169,6 +2171,12 @@ impl<'a> Router<'a> {
                     })?);
                 }
             }
+            target.add(
+                self.graph.point(start).1,
+                self.graph.point(start).1,
+                &mut self.spatial.work,
+                self.limits.max_comparisons,
+            )?;
             tree.insert(start);
             if start_via {
                 via_nodes.insert(start);
