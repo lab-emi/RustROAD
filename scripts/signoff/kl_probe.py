@@ -7,7 +7,6 @@
 # cell, and (with texts_out) every text of the flattened hierarchy as sorted
 # TSV lines plus their count and sha256. Text positions are integer picometres
 # (dbu-independent). Uses only KLayout's public layout API; all work is bounded.
-import hashlib
 import json
 import math
 import pya
@@ -16,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gds_hierarchy import shape_counts
+from label_sort import write_sorted
 
 MAX_TOP_TEXTS = 200000
 MAX_FLAT_TEXTS = 5000000
@@ -86,29 +86,25 @@ if info["top_exists"]:
     except NameError:
         texts_path = None
     if texts_path:
-        lines, flat_truncated = [], False
-        for index in ly.layer_indexes():
-            name = layer_name(index)
-            it = cell.begin_shapes_rec(index)
-            it.shape_flags = pya.Shapes.STexts
-            while not it.at_end():
-                shape = it.shape()
-                if shape.is_text():
-                    if len(lines) >= MAX_FLAT_TEXTS:
-                        flat_truncated = True
-                        break
+        def labels():
+            for index in ly.layer_indexes():
+                name = layer_name(index)
+                it = cell.begin_shapes_rec(index)
+                it.shape_flags = pya.Shapes.STexts
+                while not it.at_end():
+                    shape = it.shape()
+                    if not shape.is_text():
+                        raise RuntimeError("unexpected shape in bounded label traversal")
                     t = shape.text
                     p = it.trans() * pya.Point(t.x, t.y)
-                    lines.append("%s\t%s\t%d\t%d" % (name, json.dumps(t.string), pm(p.x), pm(p.y)))
-                it.next()
-            if flat_truncated:
-                break
-        lines.sort()
-        blob = ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8")
-        with open(texts_path, "wb") as handle:
-            handle.write(blob)
-        info["flat_texts"] = {"path": texts_path, "count": len(lines), "truncated": flat_truncated,
-                              "sha256": None if flat_truncated else hashlib.sha256(blob).hexdigest()}
+                    yield "%s\t%s\t%d\t%d" % (name, json.dumps(t.string), pm(p.x), pm(p.y))
+                    it.next()
+
+        info["flat_texts"] = write_sorted(
+            labels(), texts_path,
+            max_records=int(globals().get("max_flat_texts", MAX_FLAT_TEXTS)),
+            max_bytes=int(globals().get("max_flat_text_bytes", 4 << 30)),
+        )
     instances = 0
     for inst in cell.each_inst():
         instances += inst.size() if inst.is_regular_array() else 1

@@ -699,6 +699,8 @@ class SignoffHarnessTest(unittest.TestCase):
             session.out = Path(d)
             session.top = "top"
             session.spec = {"boundary_layer": [235, 4]}
+            session.probe_max_texts = 5_000_000
+            session.probe_text_mib = 4096
             session.mounts = lambda: []
             calls = []
 

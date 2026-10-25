@@ -730,3 +730,20 @@ with E0514) under `systemd-run MemoryMax=8G`, see `.work/build-check.sh`.
 - strmxor ignores text labels; labels are compared separately.
 - Magic (gf180) merges a second label at the same position into the existing
   port and only warns `Ports ... are electrically shorted`.
+
+## Metadata and label memory
+
+Preflight shape counts use bounded hierarchy dynamic programming, including
+array multiplicities, instead of enumerating every placed shape. Non-XOR checks
+inspect top labels and hierarchy counts without generating a flat label list.
+XOR still requires the complete sorted label multiset and its checked digest.
+
+Label sorting uses 32 MiB chunks, at most 8,192 chunk files and 16 merge inputs.
+Lines are limited to 1 MiB, and record processing has an independent work cap.
+Temporary files are removed on failure; an incomplete result never replaces the
+destination or receives a valid hash. Disk scratch is at most twice the admitted
+encoded label bytes, in addition to any existing destination.
+`--probe-max-texts` defaults to five million and can explicitly admit at most
+250 million labels. `--probe-text-mib` defaults to 4,096 MiB and has a 16,384 MiB
+ceiling. These are output/count limits; they do not increase the KLayout memory
+or wall-clock limits. Exhaustion leaves verification unverified.

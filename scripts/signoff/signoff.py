@@ -194,6 +194,10 @@ class Session:
         self.preflight = None
         self.against_preflight = None
         self.plant = getattr(args, "plant", None)
+        self.probe_max_texts = getattr(args, "probe_max_texts", 5_000_000)
+        self.probe_text_mib = getattr(args, "probe_text_mib", 4096)
+        if not 1 <= self.probe_max_texts <= 250_000_000 or not 1 <= self.probe_text_mib <= 16384:
+            raise ValueError("probe label limits exceed supported bounds")
 
     # -- shared steps ---------------------------------------------------------
     def ensure_identity(self, checks):
@@ -246,7 +250,9 @@ class Session:
                                  "-rd", f"gds={gds_in}", "-rd", f"top={top}", "-rd", f"out=/out/{result.name}",
                                  "-rd", "boundary=%d/%d" % tuple(self.spec["boundary_layer"])]
         if include_texts:
-            command.extend(["-rd", f"texts_out=/out/{texts.name}"])
+            command.extend(["-rd", f"texts_out=/out/{texts.name}",
+                            "-rd", f"max_flat_texts={self.probe_max_texts}",
+                            "-rd", f"max_flat_text_bytes={self.probe_text_mib << 20}"])
         receipt = container.run(command,
                                 out_dir=self.out, label=container.next_label(self.out, f"preflight_{which}"),
                                 ro=self.mounts(), memory="2g", cpus=1, threads=1, timeout=300)
@@ -884,6 +890,10 @@ def build_parser():
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--memory", default="4g")
     parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--probe-max-texts", type=int, default=5_000_000,
+                        help="maximum flattened XOR labels (1..250000000)")
+    parser.add_argument("--probe-text-mib", type=int, default=4096,
+                        help="maximum encoded XOR label bytes in MiB (1..16384)")
     parser.add_argument("--plant", choices=("relative-report",), help=argparse.SUPPRESS)
     return parser
 
