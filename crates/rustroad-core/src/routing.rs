@@ -745,13 +745,19 @@ impl<'a> InstanceIndex<'a> {
     ) -> Result<bool> {
         let source = self.source;
         self.visit_cells(layer, query, work, limits, |i, work| {
-            source.visit(i, layer, |b| {
-                *work = work
-                    .checked_add(1)
-                    .filter(|&n| n <= limits.max_comparisons)
-                    .ok_or_else(|| budget("instance geometry work"))?;
-                visitor(b)
-            })
+            source.visit_near(
+                i,
+                layer,
+                query,
+                || {
+                    *work = work
+                        .checked_add(1)
+                        .filter(|&n| n <= limits.max_comparisons)
+                        .ok_or_else(|| budget("instance geometry work"))?;
+                    Ok(())
+                },
+                |_, b, _| visitor(b),
+            )
         })
     }
     pub(crate) fn visit_cells(

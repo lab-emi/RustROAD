@@ -220,18 +220,24 @@ impl<'a> InstanceGeometry<'a> {
         };
         self.index
             .visit_cells(layer, query, work, &self.limits, |instance, work| {
-                input
-                    .geometry
-                    .visit_indexed(instance, layer, |ordinal, blockage, pin| {
+                input.geometry.visit_near(
+                    instance,
+                    layer,
+                    query,
+                    || {
                         *work = work
                             .checked_add(1)
                             .filter(|&n| n <= self.limits.max_comparisons)
                             .ok_or_else(|| super::budget("instance extraction work"))?;
+                        Ok(())
+                    },
+                    |ordinal, blockage, pin| {
                         visitor(
                             shapes.virtual_id(instance, ordinal),
                             Shapes::passive_shape(input, blockage, pin),
                         )
-                    })
+                    },
+                )
             })
     }
 }

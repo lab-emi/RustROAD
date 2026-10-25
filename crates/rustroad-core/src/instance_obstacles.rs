@@ -194,6 +194,57 @@ impl InstanceObstacles {
         }
         Ok(true)
     }
+    /// Same shape order as `visit_indexed`, but test against an exact local
+    /// query before doing world-coordinate transforms. `probe` charges each
+    /// comparison, including rejected rectangles.
+    pub fn visit_near(
+        &self,
+        instance: usize,
+        layer: u32,
+        query: Rect,
+        mut probe: impl FnMut() -> Result<()>,
+        mut visitor: impl FnMut(usize, Blockage, Option<u32>) -> Result<bool>,
+    ) -> Result<bool> {
+        if !query.valid() {
+            return Err(invalid("invalid instance query rectangle"));
+        }
+        let cell = self
+            .instances
+            .get(instance)
+            .ok_or_else(|| invalid("instance query owner"))?;
+        let master = &self.templates[cell.template as usize];
+        let (lx, ux) = (
+            i128::from(query.lx) - i128::from(cell.at[0]),
+            i128::from(query.ux) - i128::from(cell.at[0]),
+        );
+        let (ly, uy) = match cell.orientation {
+            Orientation::N => (
+                i128::from(query.ly) - i128::from(cell.at[1]),
+                i128::from(query.uy) - i128::from(cell.at[1]),
+            ),
+            Orientation::FS => (
+                i128::from(master.height) + i128::from(cell.at[1]) - i128::from(query.uy),
+                i128::from(master.height) + i128::from(cell.at[1]) - i128::from(query.ly),
+            ),
+        };
+        if let Some(shapes) = master.layers.get(&layer) {
+            for &(ordinal, ref shape) in shapes {
+                probe()?;
+                let r = shape.rect;
+                if i128::from(r.lx) < ux
+                    && lx < i128::from(r.ux)
+                    && i128::from(r.ly) < uy
+                    && ly < i128::from(r.uy)
+                {
+                    let (shape, pin) = self.shape(instance, ordinal)?;
+                    if !visitor(ordinal, shape, pin)? {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
     pub fn heap_bytes(&self) -> u64 {
         let shapes: usize = self
             .templates
@@ -238,34 +289,6 @@ impl InstanceObstacles {
         t.bounds
             .map(|b| transform_rect(b, cell.at[0], cell.at[1], t.height, cell.orientation))
             .transpose()
-    }
-    pub(crate) fn visit(
-        &self,
-        index: usize,
-        layer: u32,
-        mut visitor: impl FnMut(Blockage) -> Result<bool>,
-    ) -> Result<bool> {
-        let cell = self.instances[index];
-        let t = &self.templates[cell.template as usize];
-        if let Some(shapes) = t.layers.get(&layer) {
-            for (_, shape) in shapes {
-                let net = shape
-                    .pin
-                    .map(|pin| self.pin_nets[(cell.pin_start + pin) as usize])
-                    .filter(|&n| n != NO_NET);
-                let rect = transform_rect(
-                    shape.rect,
-                    cell.at[0],
-                    cell.at[1],
-                    t.height,
-                    cell.orientation,
-                )?;
-                if !visitor(Blockage { layer, rect, net })? {
-                    return Ok(false);
-                }
-            }
-        }
-        Ok(true)
     }
 }
 
@@ -361,5 +384,62 @@ mod tests {
         assert_eq!((obstruction.net, owner), (None, None));
         assert!(source.shape(1, 2).is_err());
         assert!(source.shape(2, 0).is_err());
+        for instance in 0..2 {
+            for layer in [0, 2] {
+                for query in [
+                    Rect {
+                        lx: -10,
+                        ly: -20,
+                        ux: -6,
+                        uy: -17,
+                    },
+                    Rect {
+                        lx: 20,
+                        ly: 33,
+                        ux: 24,
+                        uy: 36,
+                    },
+                    Rect {
+                        lx: 100,
+                        ly: 100,
+                        ux: 102,
+                        uy: 102,
+                    },
+                ] {
+                    let mut expected = Vec::new();
+                    for ordinal in 0..source.shape_count(instance).unwrap() {
+                        let (shape, owner) = source.shape(instance, ordinal).unwrap();
+                        let r = shape.rect;
+                        if shape.layer == layer
+                            && r.lx < query.ux
+                            && query.lx < r.ux
+                            && r.ly < query.uy
+                            && query.ly < r.uy
+                        {
+                            expected.push((ordinal, r, shape.net, owner));
+                        }
+                    }
+                    let mut actual = Vec::new();
+                    let mut work = 0;
+                    source
+                        .visit_near(
+                            instance,
+                            layer,
+                            query,
+                            || {
+                                work += 1;
+                                Ok(())
+                            },
+                            |i, shape, owner| {
+                                actual.push((i, shape.rect, shape.net, owner));
+                                Ok(true)
+                            },
+                        )
+                        .unwrap();
+                    assert_eq!(actual, expected);
+                    assert_eq!(work, 1);
+                }
+            }
+        }
     }
 }
