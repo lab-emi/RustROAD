@@ -3,8 +3,8 @@ use crate::pdk::{PhysicalBundle, SourcePin};
 use crate::{Error, Result, Stage, Summary};
 use rustroad_core::connectivity::{Direction, Geometry, PinOwner, PinUse};
 use rustroad_core::routing::{
-    self, AccessClass, Blockage, LayerRect, RouteInput, RouteLayer, RouteLimits, RouteVia, Routes,
-    Terminal,
+    self, AccessClass, Blockage, InstanceObstacles, LayerRect, ObstacleInstance, ObstacleTemplate,
+    RouteInput, RouteLayer, RouteLimits, RouteVia, Routes, TemplateObstacle, Terminal,
 };
 use rustroad_core::{Design, Limits, Placed, Rect};
 use rustroad_formats::lef::LefGeometry;
@@ -648,7 +648,7 @@ pub(crate) fn build_input(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<RouteInput> {
-    build_input_with_owners(design, bundle, placed, config, scope).map(|(input, _)| input)
+    build_input_impl(design, bundle, placed, config, scope, true).map(|(input, _)| input)
 }
 
 /// Same routing input plus one owner per obstacle (parallel vector).
@@ -658,6 +658,48 @@ pub(crate) fn build_input_with_owners(
     placed: &[Placed],
     config: &RoutingConfig,
     scope: RouteScope,
+) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
+    build_input_impl(design, bundle, placed, config, scope, false)
+}
+
+fn obstacle_templates(
+    masters: &[rustroad_core::connectivity::Master],
+    indices: &HashMap<&str, u32>,
+) -> Result<Vec<ObstacleTemplate>> {
+    masters
+        .iter()
+        .map(|m| {
+            let mut shapes = Vec::new();
+            let mut add = |geometry: &Geometry, pin: Option<u32>| -> Result<()> {
+                let name = match geometry {
+                    Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
+                };
+                if let Some(&layer) = indices.get(name.as_str()) {
+                    let (_, rect) = rectangle(geometry)?;
+                    shapes.push(TemplateObstacle { layer, rect, pin });
+                }
+                Ok(())
+            };
+            for (pin, p) in m.pins.iter().enumerate() {
+                for g in p.ports.iter().flatten() {
+                    add(g, Some(pin as u32))?;
+                }
+            }
+            for g in &m.obstructions {
+                add(g, None)?;
+            }
+            ObstacleTemplate::new(m.size[1], m.pins.len() as u32, shapes).map_err(Into::into)
+        })
+        .collect()
+}
+
+fn build_input_impl(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    placed: &[Placed],
+    config: &RoutingConfig,
+    scope: RouteScope,
+    compact_instances: bool,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
     config.validate()?;
     let state = bundle
@@ -670,6 +712,21 @@ pub(crate) fn build_input_with_owners(
         .manufacturing_grid
         .ok_or_else(|| fail("manufacturing grid missing"))?;
     let (layers, vias, indices) = route_technology(bundle, config)?;
+    let templates = if compact_instances {
+        obstacle_templates(&model.masters, &indices)?
+    } else {
+        Vec::new()
+    };
+    let mut instance_records = Vec::new();
+    let mut instance_pin_nets = Vec::new();
+    if compact_instances {
+        instance_records
+            .try_reserve_exact(placed.len())
+            .map_err(|_| Error::Budget("instance geometry allocation".into()))?;
+        instance_pin_nets
+            .try_reserve_exact(model.pins.len())
+            .map_err(|_| Error::Budget("instance pin-net allocation".into()))?;
+    }
     let selected: BTreeSet<_> = match scope {
         RouteScope::Clock => {
             if bundle
@@ -725,6 +782,8 @@ pub(crate) fn build_input_with_owners(
     for (i, p) in placed.iter().enumerate() {
         let master = &model.masters[model.instance_masters[i] as usize];
         let orientation = rustroad_core::placed_orientation(design, p)?;
+        let pin_start = u32::try_from(instance_pin_nets.len())
+            .map_err(|_| fail("instance pin offset overflow"))?;
         let mut pending: Vec<(u32, u32)> = Vec::new();
         for (ti, pin) in master.pins.iter().enumerate() {
             let owner = PinOwner::Instance {
@@ -737,8 +796,25 @@ pub(crate) fn build_input_with_owners(
                 Some((k, _)) => Some(tie_net(model, k)?),
                 None => model.pins[pin_id as usize].net,
             };
+            if compact_instances {
+                instance_pin_nets.push(net.unwrap_or(u32::MAX));
+            }
+            let selected_pin = !pin.use_.is_supply()
+                && net.is_some_and(|n| {
+                    tie.is_some()
+                        || if scope == RouteScope::All {
+                            !model.nets[n as usize].use_.is_supply()
+                        } else {
+                            selected.contains(&n)
+                        }
+                });
             let mut shapes = Vec::new();
-            for geometry in pin.ports.iter().flatten() {
+            for geometry in pin
+                .ports
+                .iter()
+                .flatten()
+                .filter(|_| !compact_instances || selected_pin)
+            {
                 let layer = match geometry {
                     Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
                 };
@@ -747,7 +823,9 @@ pub(crate) fn build_input_with_owners(
                 };
                 let (_, r) = rectangle(geometry)?;
                 let r = rustroad_core::transform_rect(r, p.x, p.y, p.height, orientation)?;
-                push(li, r, net, ObstacleOwner::InstancePin(pin_id))?;
+                if !compact_instances {
+                    push(li, r, net, ObstacleOwner::InstancePin(pin_id))?;
+                }
                 if layers[li as usize].vertical.is_some() {
                     shapes.push(LayerRect { layer: li, rect: r });
                 }
@@ -756,8 +834,7 @@ pub(crate) fn build_input_with_owners(
                 pending.push((k, supply));
             }
             if let Some(n) = net
-                && (selected.contains(&n) || tie.is_some())
-                && !pin.use_.is_supply()
+                && selected_pin
             {
                 let class = if config.lef_rules {
                     let key = (
@@ -794,7 +871,15 @@ pub(crate) fn build_input_with_owners(
                 });
             }
         }
-        for geometry in &master.obstructions {
+        if compact_instances {
+            instance_records.push(ObstacleInstance {
+                template: model.instance_masters[i],
+                pin_start,
+                at: [p.x, p.y],
+                orientation,
+            });
+        }
+        for geometry in master.obstructions.iter().filter(|_| !compact_instances) {
             let layer = match geometry {
                 Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
             };
@@ -979,6 +1064,15 @@ pub(crate) fn build_input_with_owners(
             access_classes: classes,
             tracks,
             ties,
+            instances: if compact_instances {
+                Some(InstanceObstacles::new(
+                    templates,
+                    instance_records,
+                    instance_pin_nets,
+                )?)
+            } else {
+                None
+            },
             held_bytes: 0,
         },
         owners,

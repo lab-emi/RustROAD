@@ -6,6 +6,9 @@
 //! variant per layer pair, a per-(master, orientation, pin) access table and a
 //! bounded post-route same-net pass (dangling-stub pruning, notch patches and
 //! minimum-area stubs, see `route_rules`). Without it, behavior is unchanged.
+pub use crate::instance_obstacles::{
+    InstanceObstacles, ObstacleInstance, ObstacleTemplate, TemplateObstacle,
+};
 use crate::route_rules;
 pub(crate) use crate::route_rules::Violation;
 use crate::{Error, Rect, Result};
@@ -186,6 +189,10 @@ pub fn held_estimate(workspace_bytes: u64, input: &RouteInput) -> u64 {
     // Obstacles plus the caller's parallel owner table (8 bytes each).
     let obstacles = (input.obstacles.len() * (size_of::<Blockage>() + 8)) as u64;
     let ties = (input.ties.len() * size_of::<SupplyTie>()) as u64;
+    let instances = input
+        .instances
+        .as_ref()
+        .map_or(0, InstanceObstacles::heap_bytes);
     PROCESS_BASE_BYTES
         .saturating_add(workspace_bytes.saturating_mul(WORKSPACE_LOAD_FACTOR))
         .saturating_add(
@@ -193,6 +200,7 @@ pub fn held_estimate(workspace_bytes: u64, input: &RouteInput) -> u64 {
                 .saturating_add(terminals)
                 .saturating_add(classes)
                 .saturating_add(ties)
+                .saturating_add(instances)
                 .saturating_mul(2),
         )
 }
@@ -215,6 +223,8 @@ pub struct RouteInput {
     pub layers: Vec<RouteLayer>,
     pub vias: Vec<RouteVia>,
     pub obstacles: Vec<Blockage>,
+    /// Shared cell templates and connectivity; translated only during queries.
+    pub instances: Option<InstanceObstacles>,
     pub terminals: Vec<Terminal>,
     /// Enable LEF-rule mode (variants, access table, same-net cleanup/checks).
     pub rules: bool,
@@ -373,7 +383,9 @@ pub(crate) enum BinMode {
 pub(crate) fn bin_mode(input: &RouteInput, cells: u64) -> BinMode {
     if cells.saturating_mul(input.layers.len() as u64) <= 1_000_000 {
         BinMode::Dense
-    } else if input.obstacles.len() >= 1024 {
+    } else if input.obstacles.len() + input.instances.as_ref().map_or(0, InstanceObstacles::len)
+        >= 1024
+    {
         BinMode::Paged
     } else {
         BinMode::Sparse
@@ -530,8 +542,201 @@ pub(crate) fn bin_side(input: &RouteInput) -> Result<i64> {
     input
         .step
         .checked_mul(if input.tracks.is_some() { 2 } else { 8 })
+        .filter(|&side| side > 0)
         .ok_or_else(|| invalid("bin overflow"))
 }
+
+struct InstanceIndex<'a> {
+    source: &'a InstanceObstacles,
+    bin: i64,
+    bins: BinGrid,
+    marks: Vec<u64>,
+    generation: u64,
+    entries: usize,
+}
+
+fn instance_extent(input: &RouteInput, source: &InstanceObstacles) -> Result<(i64, Rect, usize)> {
+    let bin = input
+        .step
+        .checked_mul(16)
+        .filter(|&side| side > 0)
+        .ok_or_else(|| invalid("instance bin size"))?;
+    let mut bounds = input.die;
+    let mut entries = 0usize;
+    for i in 0..source.len() {
+        if let Some(r) = source.bounds(i)? {
+            bounds.lx = bounds.lx.min(r.lx);
+            bounds.ly = bounds.ly.min(r.ly);
+            bounds.ux = bounds.ux.max(r.ux);
+            bounds.uy = bounds.uy.max(r.uy);
+            let nx = i128::from(r.ux.div_euclid(bin)) - i128::from(r.lx.div_euclid(bin)) + 1;
+            let ny = i128::from(r.uy.div_euclid(bin)) - i128::from(r.ly.div_euclid(bin)) + 1;
+            let n = usize::try_from(nx * ny).map_err(|_| budget("instance bin count"))?;
+            entries = entries
+                .checked_add(n)
+                .ok_or_else(|| budget("instance bin count"))?;
+        }
+    }
+    Ok((bin, bounds, entries))
+}
+
+pub(crate) fn instance_index_bytes(input: &RouteInput, limits: &RouteLimits) -> Result<u64> {
+    let Some(source) = &input.instances else {
+        return Ok(0);
+    };
+    source.validate(input.layers.len(), limits)?;
+    let (bin, b, entries) = instance_extent(input, source)?;
+    if entries > limits.max_bin_entries {
+        return Err(budget("instance bin-entry limit"));
+    }
+    let (x0, x1, y0, y1) = (
+        b.lx.div_euclid(bin),
+        b.ux.div_euclid(bin),
+        b.ly.div_euclid(bin),
+        b.uy.div_euclid(bin),
+    );
+    let slots = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+    let pages = (i128::from(x1.div_euclid(BIN_PAGE_SIDE))
+        - i128::from(x0.div_euclid(BIN_PAGE_SIDE))
+        + 1)
+        * (i128::from(y1.div_euclid(BIN_PAGE_SIDE)) - i128::from(y0.div_euclid(BIN_PAGE_SIDE)) + 1);
+    let grid = if slots <= 1_000_000 {
+        slots as u64 * 8
+    } else if source.len() >= 1024 {
+        u64::try_from(pages)
+            .unwrap_or(u64::MAX)
+            .min(entries as u64)
+            .saturating_mul(8320)
+    } else {
+        u64::try_from(slots)
+            .unwrap_or(u64::MAX)
+            .min(entries as u64)
+            .saturating_mul(96)
+    };
+    Ok(grid
+        .saturating_add(entries as u64 * 16)
+        .saturating_add(source.len() as u64 * 8))
+}
+
+impl<'a> InstanceIndex<'a> {
+    fn new(
+        input: &'a RouteInput,
+        source: &'a InstanceObstacles,
+        limits: &RouteLimits,
+    ) -> Result<Self> {
+        source.validate(input.layers.len(), limits)?;
+        let (bin, b, entries) = instance_extent(input, source)?;
+        if entries > limits.max_bin_entries {
+            return Err(budget("instance bin-entry limit"));
+        }
+        let (x0, x1, y0, y1) = (
+            b.lx.div_euclid(bin),
+            b.ux.div_euclid(bin),
+            b.ly.div_euclid(bin),
+            b.uy.div_euclid(bin),
+        );
+        let cells = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        let mode = if cells <= 1_000_000 {
+            BinMode::Dense
+        } else if source.len() >= 1024 {
+            BinMode::Paged
+        } else {
+            BinMode::Sparse
+        };
+        let mut bins = BinGrid {
+            mode,
+            bx0: x0,
+            by0: y0,
+            nx: x1 - x0 + 1,
+            ny: y1 - y0 + 1,
+            cells: vec![Vec::new()],
+            entries: Vec::new(),
+            pages: HashMap::with_hasher(BuildFx),
+            overflow: HashMap::with_hasher(BuildFx),
+        };
+        for i in 0..source.len() {
+            if let Some(r) = source.bounds(i)? {
+                for x in r.lx.div_euclid(bin)..=r.ux.div_euclid(bin) {
+                    for y in r.ly.div_euclid(bin)..=r.uy.div_euclid(bin) {
+                        bins.push(0, x, y, i)?;
+                    }
+                }
+            }
+        }
+        let mut marks = Vec::new();
+        marks
+            .try_reserve_exact(source.len())
+            .map_err(|_| budget("instance query-mark allocation"))?;
+        marks.resize(source.len(), 0);
+        Ok(Self {
+            source,
+            bin,
+            bins,
+            marks,
+            generation: 0,
+            entries,
+        })
+    }
+    fn visit(
+        &mut self,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        limits: &RouteLimits,
+        mut visitor: impl FnMut(Blockage) -> Result<bool>,
+    ) -> Result<bool> {
+        if !self.source.has_layer(layer) {
+            return Ok(true);
+        }
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| budget("instance query generation"))?;
+        let (x0, x1, y0, y1) = (
+            query.lx.div_euclid(self.bin),
+            query.ux.div_euclid(self.bin),
+            query.ly.div_euclid(self.bin),
+            query.uy.div_euclid(self.bin),
+        );
+        let extent = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        if extent > limits.max_bin_entries as i128 {
+            return Err(budget("instance query extent"));
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                *work = work
+                    .checked_add(1)
+                    .filter(|&n| n <= limits.max_comparisons)
+                    .ok_or_else(|| budget("instance query work"))?;
+                for i in self.bins.iter(0, x, y) {
+                    if self.marks[i] == self.generation {
+                        continue;
+                    }
+                    self.marks[i] = self.generation;
+                    *work = work
+                        .checked_add(1)
+                        .filter(|&n| n <= limits.max_comparisons)
+                        .ok_or_else(|| budget("instance query work"))?;
+                    if !self.source.bounds(i)?.is_some_and(|b| overlap(query, b)) {
+                        continue;
+                    }
+                    let clear = self.source.visit(i, layer, |b| {
+                        *work = work
+                            .checked_add(1)
+                            .filter(|&n| n <= limits.max_comparisons)
+                            .ok_or_else(|| budget("instance geometry work"))?;
+                        visitor(b)
+                    })?;
+                    if !clear {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+}
+
 pub(crate) struct Spatial<'a> {
     pub(crate) input: &'a RouteInput,
     limits: &'a RouteLimits,
@@ -548,6 +753,7 @@ pub(crate) struct Spatial<'a> {
     /// True for rip-up-able routed shapes (track router); obstacles, pins and
     /// reserved pin access are fixed.
     routed: Vec<bool>,
+    instances: Option<InstanceIndex<'a>>,
     /// Supply ties by router net: (supply net, rail zone).
     ties: HashMap<u32, (u32, LayerRect)>,
 }
@@ -557,11 +763,42 @@ pub(crate) enum Soft {
     Blocked,
     Clear { near: bool, victims: Vec<u32> },
 }
+fn same_net_shapes(
+    ties: &HashMap<u32, (u32, LayerRect)>,
+    net: u32,
+    layer: u32,
+    rect: Rect,
+    b: &Blockage,
+) -> bool {
+    if b.net == Some(net) {
+        return true;
+    }
+    match (ties.get(&net), b.net) {
+        (Some((supply, zone)), Some(n)) if n == *supply => {
+            zone.layer == layer
+                && overlap(rect, zone.rect)
+                && route_rules::relation(rect, b.rect, 0) == route_rules::Relation::Connected
+        }
+        _ => false,
+    }
+}
+
 impl<'a> Spatial<'a> {
     pub(crate) fn new(input: &'a RouteInput, limits: &'a RouteLimits) -> Result<Self> {
-        if input.obstacles.len() > limits.max_obstacles {
+        if input
+            .obstacles
+            .len()
+            .saturating_add(input.instances.as_ref().map_or(0, InstanceObstacles::len))
+            > limits.max_obstacles
+        {
             return Err(budget("routing obstacle count"));
         }
+        let instances = input
+            .instances
+            .as_ref()
+            .map(|s| InstanceIndex::new(input, s, limits))
+            .transpose()?;
+        let instance_entries = instances.as_ref().map_or(0, |i| i.entries);
         // The track router queries far more often with short edges; it
         // uses bins of two access steps (the lattice router keeps eight).
         let bin = bin_side(input)?;
@@ -584,10 +821,11 @@ impl<'a> Spatial<'a> {
             },
             marks: vec![0; input.obstacles.len()],
             generation: 0,
-            entries: 0,
+            entries: instance_entries,
             work: 0,
             alive: Vec::new(),
             routed: Vec::new(),
+            instances,
             ties: input
                 .ties
                 .iter()
@@ -602,17 +840,40 @@ impl<'a> Spatial<'a> {
     /// Is stored shape `b` the query net's own metal? A supply tie also owns
     /// supply shapes that its query touches inside its rail zone.
     fn same_net(&self, net: u32, layer: u32, rect: Rect, b: &Blockage) -> bool {
-        if b.net == Some(net) {
-            return true;
-        }
-        match (self.ties.get(&net), b.net) {
-            (Some((supply, zone)), Some(n)) if n == *supply => {
-                zone.layer == layer
-                    && overlap(rect, zone.rect)
-                    && route_rules::relation(rect, b.rect, 0) == route_rules::Relation::Connected
+        same_net_shapes(&self.ties, net, layer, rect, b)
+    }
+    fn probe_instances(
+        &mut self,
+        layer: u32,
+        rect: Rect,
+        query: Rect,
+        net: u32,
+    ) -> Result<Option<bool>> {
+        let Some(instances) = &mut self.instances else {
+            return Ok(Some(false));
+        };
+        let ties = &self.ties;
+        let routing = self.input.layers[layer as usize].vertical.is_some();
+        let rules = self.input.rules;
+        let spacing = self.input.layers[layer as usize].spacing;
+        let mut near = false;
+        let clear = instances.visit(layer, query, &mut self.work, self.limits, |b| {
+            if !overlap(query, b.rect) {
+                return Ok(true);
             }
-            _ => false,
-        }
+            let shared = same_net_shapes(ties, net, layer, rect, &b) && (routing || rect == b.rect);
+            if !shared {
+                return Ok(false);
+            }
+            if rules
+                && routing
+                && route_rules::relation(rect, b.rect, spacing) == route_rules::Relation::Near
+            {
+                near = true;
+            }
+            Ok(true)
+        })?;
+        Ok(clear.then_some(near))
     }
     /// Add a rip-up-able routed shape; returns its id.
     pub(crate) fn add_routed(&mut self, b: Blockage) -> Result<usize> {
@@ -632,10 +893,26 @@ impl<'a> Spatial<'a> {
     }
     /// (allocated grid bins, bin entries, shapes, bin side) for telemetry.
     pub(crate) fn footprint(&self) -> (usize, usize, usize, i64) {
-        (self.bins.allocated(), self.entries, self.len(), self.bin)
+        (
+            self.bins.allocated() + self.instances.as_ref().map_or(0, |i| i.bins.allocated()),
+            self.entries,
+            self.len()
+                + self
+                    .input
+                    .instances
+                    .as_ref()
+                    .map_or(0, InstanceObstacles::len),
+            self.bin,
+        )
     }
     pub(crate) fn add(&mut self, b: Blockage) -> Result<()> {
-        if self.len() >= self.limits.max_obstacles {
+        if self.len().saturating_add(
+            self.input
+                .instances
+                .as_ref()
+                .map_or(0, InstanceObstacles::len),
+        ) >= self.limits.max_obstacles
+        {
             return Err(budget("routing obstacle count"));
         }
         self.index(self.len(), &b)?;
@@ -758,6 +1035,10 @@ impl<'a> Spatial<'a> {
                 }
             }
         }
+        match self.probe_instances(layer, rect, query, net)? {
+            Some(n) => near |= n,
+            None => return Ok(Soft::Blocked),
+        }
         victims.sort_unstable();
         victims.dedup();
         Ok(Soft::Clear { near, victims })
@@ -845,6 +1126,10 @@ impl<'a> Spatial<'a> {
                     }
                 }
             }
+        }
+        match self.probe_instances(layer, rect, query, net)? {
+            Some(n) => near |= n,
+            None => return Ok(None),
         }
         Ok(Some(near))
     }
@@ -956,6 +1241,12 @@ pub(crate) fn preflight(input: &RouteInput, limits: &RouteLimits) -> Result<()> 
             || !v.shapes.iter().any(|s| s.layer == v.upper)
         {
             return Err(invalid("via lacks routing enclosure"));
+        }
+    }
+    if let Some(instances) = &input.instances {
+        instances.validate(input.layers.len(), limits)?;
+        if instances.len().saturating_add(input.obstacles.len()) > limits.max_obstacles {
+            return Err(budget("retained instance-obstacle records"));
         }
     }
     let mut pins = HashSet::new();
@@ -2377,6 +2668,179 @@ mod tests {
     use super::*;
 
     #[test]
+    fn instanced_wall_routes_identically_to_explicit_geometry() {
+        let flat = fixture();
+        let mut instanced = fixture();
+        instanced.obstacles.clear();
+        instanced.instances = Some(
+            InstanceObstacles::new(
+                vec![
+                    ObstacleTemplate::new(
+                        100,
+                        0,
+                        vec![TemplateObstacle {
+                            layer: 0,
+                            rect: Rect {
+                                lx: 0,
+                                ly: 0,
+                                ux: 10,
+                                uy: 100,
+                            },
+                            pin: None,
+                        }],
+                    )
+                    .unwrap(),
+                ],
+                vec![ObstacleInstance {
+                    template: 0,
+                    pin_start: 0,
+                    at: [45, 0],
+                    orientation: crate::Orientation::N,
+                }],
+                Vec::new(),
+            )
+            .unwrap(),
+        );
+        let limits = RouteLimits::default();
+        let expected = route_cpu_ref(&flat, &limits).unwrap();
+        let actual = route_cpu_ref(&instanced, &limits).unwrap();
+        assert_eq!(actual.wires, expected.wires);
+        assert_eq!(actual.vias, expected.vias);
+        assert_eq!(actual.access, expected.access);
+        validate(&instanced, &actual, &limits).unwrap();
+    }
+
+    #[test]
+    fn instanced_flipped_pin_matches_explicit_negative_coordinates() {
+        let mut flat = fixture();
+        flat.die = Rect {
+            lx: -100,
+            ly: -100,
+            ux: 100,
+            uy: 100,
+        };
+        flat.obstacles = vec![Blockage {
+            layer: 0,
+            rect: Rect {
+                lx: -45,
+                ly: -40,
+                ux: -35,
+                uy: -30,
+            },
+            net: Some(7),
+        }];
+        let mut instanced = fixture();
+        instanced.die = flat.die;
+        instanced.obstacles.clear();
+        instanced.instances = Some(
+            InstanceObstacles::new(
+                vec![
+                    ObstacleTemplate::new(
+                        30,
+                        1,
+                        vec![TemplateObstacle {
+                            layer: 0,
+                            rect: Rect {
+                                lx: 0,
+                                ly: 10,
+                                ux: 10,
+                                uy: 20,
+                            },
+                            pin: Some(0),
+                        }],
+                    )
+                    .unwrap(),
+                ],
+                vec![ObstacleInstance {
+                    template: 0,
+                    pin_start: 0,
+                    at: [-45, -50],
+                    orientation: crate::Orientation::FS,
+                }],
+                vec![7],
+            )
+            .unwrap(),
+        );
+        let limits = RouteLimits::default();
+        let mut a = Spatial::new(&flat, &limits).unwrap();
+        let mut b = Spatial::new(&instanced, &limits).unwrap();
+        for net in [7, 8] {
+            for x in (-60..0).step_by(5) {
+                for y in (-60..0).step_by(5) {
+                    let rect = Rect {
+                        lx: x,
+                        ly: y,
+                        ux: x + 2,
+                        uy: y + 2,
+                    };
+                    assert_eq!(
+                        a.probe(0, rect, net).unwrap(),
+                        b.probe(0, rect, net).unwrap()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn millions_of_virtual_obstacles_keep_compact_storage() {
+        let mut input = fixture();
+        input.die = Rect {
+            lx: 0,
+            ly: 0,
+            ux: 20_000,
+            uy: 200_000,
+        };
+        input.obstacles.clear();
+        let template = ObstacleTemplate::new(
+            100,
+            0,
+            (0..102)
+                .map(|_| TemplateObstacle {
+                    layer: 0,
+                    rect: Rect {
+                        lx: 1,
+                        ly: 1,
+                        ux: 3,
+                        uy: 3,
+                    },
+                    pin: None,
+                })
+                .collect(),
+        )
+        .unwrap();
+        let instances = (0..100_000)
+            .map(|i| ObstacleInstance {
+                template: 0,
+                pin_start: 0,
+                at: [(i % 1000) * 20, (i / 1000) * 100],
+                orientation: crate::Orientation::N,
+            })
+            .collect();
+        let provider = InstanceObstacles::new(vec![template], instances, Vec::new()).unwrap();
+        assert_eq!(provider.virtual_shapes(), 10_200_000);
+        assert!(provider.heap_bytes() < 8 * 1024 * 1024);
+        input.instances = Some(provider);
+        let limits = RouteLimits::default();
+        let mut spatial = Spatial::new(&input, &limits).unwrap();
+        assert!(
+            !spatial
+                .clear(
+                    0,
+                    Rect {
+                        lx: 1,
+                        ly: 1,
+                        ux: 2,
+                        uy: 2
+                    },
+                    5
+                )
+                .unwrap()
+        );
+        assert!(spatial.shapes.is_empty());
+    }
+
+    #[test]
     fn every_bin_mode_matches_an_independent_ordered_bucket_oracle() {
         let mut reference = BTreeMap::<(u32, i64, i64), Vec<usize>>::new();
         let mut sequence = Vec::new();
@@ -2587,6 +3051,7 @@ mod tests {
             access_classes: Vec::new(),
             tracks: None,
             ties: Vec::new(),
+            instances: None,
             held_bytes: 0,
         }
     }
@@ -2656,6 +3121,7 @@ mod tests {
             access_classes: Vec::new(),
             tracks: None,
             ties: Vec::new(),
+            instances: None,
             held_bytes: 0,
         }
     }

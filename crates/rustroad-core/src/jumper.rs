@@ -876,6 +876,7 @@ mod tests {
             access_classes: Vec::new(),
             tracks: None,
             ties: Vec::new(),
+            instances: None,
             held_bytes: 0,
         }
     }

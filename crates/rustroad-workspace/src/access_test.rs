@@ -338,6 +338,7 @@ pub fn export_access_test(
         access_classes: classes,
         tracks: None,
         ties: Vec::new(),
+        instances: None,
         held_bytes: 0,
     };
     // The access test always uses the lattice router; a track-router profile

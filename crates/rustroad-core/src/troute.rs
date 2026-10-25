@@ -412,6 +412,7 @@ fn memory_estimate_limited(
         fixed_entries = fixed_entries
             .saturating_add(span(b.rect.lx, b.rect.ux).saturating_mul(span(b.rect.ly, b.rect.uy)));
     }
+    let instance_index = crate::routing::instance_index_bytes(input, limits)?;
     let o = input.obstacles.len() as u64;
     let t = input.terminals.len() as u64;
     let added = t.saturating_mul(SHAPES_PER_TERMINAL);
@@ -424,7 +425,8 @@ fn memory_estimate_limited(
         };
         // Fixed rectangles are shared with RouteInput; only their query marks
         // are additional. Added geometry retains its full state allowance.
-        grid.saturating_add(o.saturating_mul(16))
+        grid.saturating_add(instance_index)
+            .saturating_add(o.saturating_mul(16))
             .saturating_add(shapes.saturating_mul(SHAPE_BYTES))
             .saturating_add(
                 fixed_entries
@@ -2644,6 +2646,7 @@ mod tests {
             access_classes: Vec::new(),
             tracks: Some(plan()),
             ties: Vec::new(),
+            instances: None,
             held_bytes: 0,
         }
     }
