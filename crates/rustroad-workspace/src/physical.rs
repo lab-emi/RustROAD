@@ -71,6 +71,15 @@ pub struct TapConfig {
     pub well_layer: String,
     pub substrate_layer: String,
 }
+/// Explicit PDK identity-buffer role for separating aliased output ports.
+/// Functional equivalence must be verified against the selected Liberty.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PortBuffer {
+    pub cell: String,
+    pub input_pin: String,
+    pub output_pin: String,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhysicalConfig {
@@ -112,6 +121,10 @@ pub struct PhysicalConfig {
     pub tap: Option<TapConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<crate::clock::ClockConfig>,
+    /// Give each output port its own net. Constants get independent sources;
+    /// other aliases and input-to-output feedthroughs use this buffer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port_buffer: Option<PortBuffer>,
     /// Analytic placer (`rustroad_core::place`); absent keeps fixed-order
     /// packing, the deterministic baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -242,6 +255,14 @@ impl PhysicalConfig {
         }
         if let Some(c) = &self.clock {
             c.validate()?;
+        }
+        if let Some(b) = &self.port_buffer
+            && (b.input_pin == b.output_pin
+                || [&b.cell, &b.input_pin, &b.output_pin]
+                    .iter()
+                    .any(|n| !rustroad_core::valid_object_name(n)))
+        {
+            return Err(Error::Invalid("invalid output-port buffer role".into()));
         }
         if let Some(t) = &self.tap
             && (t.max_gap < 0
@@ -816,6 +837,11 @@ pub(super) fn distribute_ties(
                 moved_ports.push((expr, group.active.clone()));
             }
             group.used += 1;
+            if cfg.port_buffer.is_some() {
+                // One physical source per external constant output. Any
+                // subsequent output or internal load starts a fresh source.
+                group.used = cfg.max_tie_fanout;
+            }
         }
     }
     for pin in &model.pins {
@@ -874,6 +900,161 @@ pub(super) fn distribute_ties(
     )?;
     if added != 0 {
         relink(bundle)?;
+    }
+    Ok(())
+}
+
+/// Separate aliased external outputs without scanning or copying full logic
+/// cones. Only port records and a bounded AST rewrite are needed.
+pub(super) fn isolate_output_ports(
+    design: &mut Design,
+    bundle: &mut PhysicalBundle,
+    limits: &Limits,
+) -> Result<()> {
+    let Some(cfg) = &bundle.config else {
+        return Ok(());
+    };
+    let Some(role) = &cfg.port_buffer else {
+        return Ok(());
+    };
+    let model = &bundle.connectivity;
+    let master = model
+        .masters
+        .iter()
+        .find(|m| m.name == role.cell)
+        .ok_or_else(|| Error::Invalid("output-port buffer master missing".into()))?;
+    let signal: Vec<_> = master.pins.iter().filter(|p| !p.use_.is_supply()).collect();
+    if signal.len() != 2
+        || !signal
+            .iter()
+            .any(|p| p.name == role.input_pin && p.direction == Some(Direction::Input))
+        || !signal
+            .iter()
+            .any(|p| p.name == role.output_pin && p.direction == Some(Direction::Output))
+    {
+        return Err(Error::Invalid(
+            "output-port buffer needs one configured input and output".into(),
+        ));
+    }
+    let mut by_net: std::collections::BTreeMap<u32, (bool, Vec<(u32, u32)>)> = Default::default();
+    // Port pins precede instance pins in canonical tables, but do not assume
+    // that ordering when validating imported/reopened data.
+    for pin in &model.pins {
+        let (Some(net), PinOwner::Port { port, bit }) = (pin.net, pin.owner) else {
+            continue;
+        };
+        let group = by_net.entry(net).or_default();
+        match model.ports[port as usize].direction {
+            Direction::Output => group.1.push((port, bit)),
+            _ => group.0 = true,
+        }
+    }
+    let mut ports = Vec::new();
+    for (_, (has_input, outputs)) in by_net {
+        for (port, bit) in outputs.into_iter().skip(usize::from(!has_input)) {
+            let p = &bundle.netlist.ports[port as usize];
+            ports.push(match p.range {
+                None => verilog::Expr::Ident(p.name.clone()),
+                Some(r) => verilog::Expr::BitSelect {
+                    name: p.name.clone(),
+                    index: if r.msb <= r.lsb {
+                        r.msb + i64::from(bit)
+                    } else {
+                        r.msb - i64::from(bit)
+                    },
+                },
+            });
+        }
+    }
+    if ports.is_empty() {
+        return Ok(());
+    }
+    if ports.len() > 100_000
+        || ports.len()
+            > cfg
+                .max_added_cells
+                .saturating_sub(bundle.ties.as_ref().map_or(0, |t| t.new_cells))
+        || ports.len() > limits.max_cells.saturating_sub(design.cells.len())
+    {
+        return Err(Error::Budget("output-port buffer cell limit".into()));
+    }
+    let mut names: HashSet<String> = bundle
+        .netlist
+        .instances
+        .iter()
+        .map(|i| &i.name)
+        .chain(bundle.netlist.wires.iter().map(|w| &w.name))
+        .chain(bundle.netlist.ports.iter().map(|p| &p.name))
+        .filter(|n| n.starts_with("rr_port_"))
+        .cloned()
+        .collect();
+    let mut sequence = 0;
+    let internals = crate::port_ties::detach(
+        &mut bundle.netlist,
+        &ports,
+        &mut names,
+        &mut sequence,
+        limits.max_cells.saturating_mul(16).min(256_000_000),
+        "rr_port_core_",
+    )?;
+    for (port, internal) in ports.into_iter().zip(internals) {
+        let name = loop {
+            if sequence > limits.max_cells.saturating_add(names.len()) {
+                return Err(Error::Budget("output-port buffer name search".into()));
+            }
+            let name = format!("rr_port_buffer_{sequence}");
+            sequence += 1;
+            if names.insert(name.clone()) {
+                break name;
+            }
+        };
+        bundle.netlist.instances.push(verilog::Instance {
+            cell: role.cell.clone(),
+            name: name.clone(),
+            connections: vec![
+                verilog::Connection {
+                    pin: role.input_pin.clone(),
+                    signal: verilog::Expr::Ident(internal),
+                },
+                verilog::Connection {
+                    pin: role.output_pin.clone(),
+                    signal: port,
+                },
+            ],
+        });
+        design.cells.push(Cell {
+            name: name.clone(),
+            master: role.cell.clone(),
+            width: master.size[0],
+            height: master.size[1],
+        });
+        bundle.port_buffers.push(name);
+    }
+    relink(bundle)?;
+    Ok(())
+}
+
+pub(super) fn validate_output_ports(bundle: &PhysicalBundle) -> Result<()> {
+    let Some(cfg) = &bundle.config else {
+        return Ok(());
+    };
+    if cfg.port_buffer.is_none() {
+        return Ok(());
+    }
+    if bundle.port_buffers.len() > 100_000 || bundle.port_buffers.len() > cfg.max_added_cells {
+        return Err(Error::Budget("output-port buffer count".into()));
+    }
+    let mut seen = HashMap::new();
+    for pin in &bundle.connectivity.pins {
+        let (Some(net), PinOwner::Port { port, .. }) = (pin.net, pin.owner) else {
+            continue;
+        };
+        let output = bundle.connectivity.ports[port as usize].direction == Direction::Output;
+        if let Some(previous_output) = seen.insert(net, output)
+            && (previous_output || output)
+        {
+            return Err(Error::Invalid("external output ports share a net".into()));
+        }
     }
     Ok(())
 }
@@ -1097,6 +1278,7 @@ pub(super) fn prepare(
         let width = m.size[0];
         let remaining = cfg
             .max_added_cells
+            .saturating_sub(bundle.port_buffers.len())
             .saturating_sub(bundle.ties.as_ref().map_or(0, |t| t.new_cells))
             .saturating_sub(bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len()))
             .min(limits.max_cells.saturating_sub(design.cells.len()));
@@ -1200,6 +1382,7 @@ pub(super) fn prepare(
                     .ok_or_else(|| Error::Invalid("unfillable row gap".into()))?;
                 if design.cells.len() >= limits.max_cells
                     || bundle.generated_fillers.len()
+                        + bundle.port_buffers.len()
                         + bundle.generated_taps.len()
                         + bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len())
                         + bundle.ties.as_ref().map_or(0, |t| t.new_cells)

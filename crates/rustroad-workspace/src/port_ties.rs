@@ -92,30 +92,59 @@ pub(crate) fn split(
     sequence: &mut usize,
     cap: usize,
 ) -> Result<()> {
-    if moved.is_empty() {
-        return Ok(());
+    detach(
+        netlist,
+        &moved
+            .iter()
+            .map(|(port, _)| port.clone())
+            .collect::<Vec<_>>(),
+        names,
+        sequence,
+        cap,
+        "rr_tie_copy_port_",
+    )?;
+    netlist
+        .assigns
+        .extend(moved.into_iter().map(|(lhs, net)| Assign {
+            lhs,
+            rhs: Expr::Ident(net),
+        }));
+    Ok(())
+}
+
+/// Replace each selected external port in the old circuit by a fresh scalar
+/// internal wire. The caller attaches a new driver to the external port.
+pub(crate) fn detach(
+    netlist: &mut Netlist,
+    ports: &[Expr],
+    names: &mut HashSet<String>,
+    sequence: &mut usize,
+    cap: usize,
+    prefix: &str,
+) -> Result<Vec<String>> {
+    if ports.is_empty() {
+        return Ok(Vec::new());
     }
-    if netlist.wires.len().saturating_add(moved.len()) > 32_000_000 {
+    if netlist.wires.len().saturating_add(ports.len()) > 32_000_000 {
         return Err(Error::Budget("constant-port declaration count".into()));
     }
+    let declarations: HashMap<_, _> = netlist.ports.iter().map(|p| (&p.name, p.range)).collect();
     let mut maps: HashMap<String, PortMap> = HashMap::new();
-    for (port, _) in &moved {
+    let mut aliases = Vec::with_capacity(ports.len());
+    for port in ports {
         let (name, bit) = match port {
             Expr::Ident(n) => (n, None),
             Expr::BitSelect { name, index } => (name, Some(*index)),
             _ => return Err(Error::Invalid("constant-port scalar identity".into())),
         };
-        let range = netlist
-            .ports
-            .iter()
-            .find(|p| &p.name == name)
-            .ok_or_else(|| Error::Invalid("constant-port declaration missing".into()))?
-            .range;
+        let range = *declarations
+            .get(name)
+            .ok_or_else(|| Error::Invalid("constant-port declaration missing".into()))?;
         let alias = loop {
             if *sequence > cap {
                 return Err(Error::Budget("constant-port name search".into()));
             }
-            let alias = format!("rr_tie_copy_port_{sequence}");
+            let alias = format!("{prefix}{sequence}");
             *sequence += 1;
             if names.insert(alias.clone()) {
                 break alias;
@@ -125,6 +154,7 @@ pub(crate) fn split(
             name: alias.clone(),
             range: None,
         });
+        aliases.push(alias.clone());
         if maps
             .entry(name.clone())
             .or_insert_with(|| PortMap {
@@ -148,13 +178,7 @@ pub(crate) fn split(
             rewrite(&mut pin.signal, &maps, &mut work, cap, 0)?;
         }
     }
-    netlist
-        .assigns
-        .extend(moved.into_iter().map(|(lhs, net)| Assign {
-            lhs,
-            rhs: Expr::Ident(net),
-        }));
-    Ok(())
+    Ok(aliases)
 }
 
 #[cfg(test)]

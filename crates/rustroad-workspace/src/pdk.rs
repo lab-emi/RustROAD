@@ -68,6 +68,8 @@ pub struct PhysicalBundle {
     pub generated_fillers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub generated_taps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub port_buffers: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock_tree: Option<crate::clock::ClockReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -321,6 +323,18 @@ pub(crate) fn validate_bundle(
             }
         }
         crate::physical::validate_ties(bundle)?;
+        crate::physical::validate_output_ports(bundle)?;
+        for name in &bundle.port_buffers {
+            if !names.insert(name) {
+                return Err(invalid("duplicate generated port buffer"));
+            }
+            let inst = instance_names
+                .get(name.as_str())
+                .ok_or_else(|| invalid("generated port buffer missing"))?;
+            if Some(inst.cell.as_str()) != cfg.port_buffer.as_ref().map(|b| b.cell.as_str()) {
+                return Err(invalid("generated port buffer uses the wrong master"));
+            }
+        }
         crate::physical::validate_tap_master(bundle)?;
         crate::clock::validate_tree(bundle)?;
         for name in &bundle.generated_taps {
@@ -523,6 +537,9 @@ pub fn import_pdk_bounded(
         if let Some(t) = &c.clock {
             v.extend(t.masters());
         }
+        if let Some(b) = &c.port_buffer {
+            v.push(b.cell.clone());
+        }
         v
     });
     let (technology, masters) = select_technology(&tech, &cells, &floor, &netlist, &extra)?;
@@ -627,6 +644,7 @@ pub fn import_pdk_bounded(
         ties: tie_report,
         generated_fillers: Vec::new(),
         generated_taps: Vec::new(),
+        port_buffers: Vec::new(),
         clock_tree: None,
         routing: None,
         state: None,
@@ -635,6 +653,7 @@ pub fn import_pdk_bounded(
         placement_seed: None,
     };
     crate::physical::distribute_ties(&mut design, &mut physical, limits)?;
+    crate::physical::isolate_output_ports(&mut design, &mut physical, limits)?;
     validate_bundle(&physical, &design, connection_limits)?;
     let records = rustroad_core::snapshot_records(&design, limits)?;
     let metadata = Metadata {

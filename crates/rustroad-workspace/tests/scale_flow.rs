@@ -111,6 +111,7 @@ fn config() -> PhysicalConfig {
         max_added_cells: 512,
         max_tie_fanout: 8,
         tap: None,
+        port_buffer: None,
         clock: None,
         placer: None,
         io_plan: None,

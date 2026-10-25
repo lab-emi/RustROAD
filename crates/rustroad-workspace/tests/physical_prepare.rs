@@ -97,6 +97,7 @@ fn config() -> PhysicalConfig {
         max_added_cells: 64,
         max_tie_fanout: 8,
         tap: None,
+        port_buffer: None,
         clock: None,
         placer: None,
         io_plan: None,
@@ -952,4 +953,35 @@ END LIBRARY\n";
     let error = f.import().unwrap_err();
     assert!(error.to_string().contains("conflicting fixed VIA"));
     assert!(!f.workspace.join("HEAD").exists());
+}
+
+#[test]
+fn output_aliases_and_feedthroughs_have_distinct_external_nets() {
+    let mut cfg = config();
+    cfg.port_buffer = Some(rustroad_workspace::physical::PortBuffer {
+        cell: "BUF".into(),
+        input_pin: "A".into(),
+        output_pin: "Y".into(),
+    });
+    let source = "module chip(input [1:0] a, output [0:1] y, output [1:0] z, output [3:0] c); BUF b0(.A(a[0]), .Y(y[0])); assign y[1]=a[1]; assign z={y[0],y[1]}; assign c=4'b1010; endmodule";
+    let f = Fixture::new(source, &cfg);
+    let report = f.import().unwrap();
+    assert_eq!(report.inserted_port_buffers, Some(3));
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let model = &snapshot.metadata().physical.as_ref().unwrap().connectivity;
+    let mut outputs = std::collections::HashSet::new();
+    for pin in &model.pins {
+        if let PinOwner::Port { port, .. } = pin.owner
+            && model.ports[port as usize].direction
+                == rustroad_core::connectivity::Direction::Output
+        {
+            assert!(outputs.insert(pin.net.unwrap()));
+        }
+    }
+    assert_eq!(outputs.len(), 8);
+    drop(snapshot);
+    cfg.max_added_cells = 4;
+    let blocked = Fixture::new(source, &cfg);
+    assert!(matches!(blocked.import(), Err(Error::Budget(_))));
+    assert!(!blocked.workspace.join("HEAD").exists());
 }

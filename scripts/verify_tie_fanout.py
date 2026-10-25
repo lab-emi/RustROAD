@@ -32,7 +32,7 @@ def main() -> int:
     profiles = json.loads((ROOT / 'fixtures/pdk/local-routing.json').read_text())['pdks']
     rows = []
     for profile in profiles:
-        for variant in ['literal', 'reused', 'ports', 'ports-up']:
+        for variant in ['literal', 'reused', 'ports', 'ports-up', 'aliases']:
             tag = profile['tag']
             folder = out / (tag + '-' + variant)
             folder.mkdir()
@@ -43,7 +43,8 @@ def main() -> int:
                     raise RuntimeError(f'{tag}: {role} identity mismatch')
             config = json.loads((ROOT / profile['config']).read_text())
             buffer = config['clock']
-            config.update(clock=None, max_tie_fanout=8, max_added_cells=1000)
+            config.update(clock=None, max_tie_fanout=8, max_added_cells=1000,
+                          port_buffer={k: buffer[k] for k in ['cell', 'input_pin', 'output_pin']})
             config_path = folder / 'physical.json'
             config_path.write_text(json.dumps(config, indent=2) + '\n')
             floorplan = ROOT / 'fixtures/designs/pipeline' / f'{tag}-floorplan.json'
@@ -70,6 +71,10 @@ def main() -> int:
                 expected.write_text(f"module lane_smoke(input a, output {bus} y); assign y={{{','.join(fields)}}}; endmodule\n")
                 fields[0] = "1'b1"
                 wrong.write_text(f"module lane_smoke(input a, output {bus} y); assign y={{{','.join(fields)}}}; endmodule\n")
+            elif variant == 'aliases':
+                source.write_text(f"module lane_smoke(input [1:0] a, output [0:1] y, output [1:0] z); {buffer['cell']} b0(.{buffer['input_pin']}(a[0]), .{buffer['output_pin']}(y[0])); assign y[1]=a[1]; assign z={{y[0],y[1]}}; endmodule\n")
+                expected.write_text("module lane_smoke(input [1:0] a, output [0:1] y, output [1:0] z); assign y={a[0],a[1]}; assign z={a[0],a[1]}; endmodule\n")
+                wrong.write_text("module lane_smoke(input [1:0] a, output [0:1] y, output [1:0] z); assign y={a[0],a[1]}; assign z={a[1],a[0]}; endmodule\n")
             else:
                 source.write_text("module lane_smoke(output [16:0] y);\nwire zero;\n" + driver + '\n' + cells + '\nendmodule\n')
                 expected.write_text("module lane_smoke(output [16:0] y); assign y=17'b0; endmodule\n")
@@ -81,14 +86,23 @@ def main() -> int:
             revision = (workspace / 'HEAD').read_text().strip()
             metadata = json.loads((workspace / 'revisions' / revision / 'design.json').read_text())
             count = metadata['physical']['ties']['new_cells']
-            expected_new = 3 if variant == 'literal' else 2
+            expected_new = 16 if variant.startswith('ports') else 0 if variant == 'aliases' else 3 if variant == 'literal' else 2
             if count != expected_new:
                 raise RuntimeError(f'{tag}/{variant}: expected {expected_new} inserted sources, got {count}')
+            model = metadata['physical']['connectivity']
+            external = {}
+            for pin in model['pins']:
+                owner = pin['owner']
+                if owner['kind'] != 'port' or pin['net'] is None:
+                    continue
+                external.setdefault(pin['net'], []).append(model['ports'][owner['port']]['direction'])
+            if any('output' in directions and len(directions) != 1 for directions in external.values()):
+                raise RuntimeError(f'{tag}/{variant}: outputs still share external nets')
             export = run_ok(harness, 'export', [road, '--workspace', workspace, 'export-verilog'])
             netlist = Path(export['stdout'])
             proof = external_cec(harness, 'constant_cec', yosys, Path(profile['liberty']['path']), expected, netlist)
             control = external_cec(harness, 'wrong_output_control', yosys, Path(profile['liberty']['path']), wrong, netlist, expected=False)
-            rows.append(dict(pdk=tag, variant=variant, status='passed', inserted_sources=count, constant_sources=2 if variant.startswith('ports') else 3, max_fanout=8, proof=proof,
+            rows.append(dict(pdk=tag, variant=variant, status='passed', inserted_sources=count, constant_sources=16 if variant.startswith('ports') else 0 if variant == 'aliases' else 3, max_fanout=8, proof=proof,
                              negative_control=control, receipts=harness.receipts))
     result = dict(schema='rustroad.tie-fanout-verification.v1', status='passed',
                   rustroad=dict(path=str(road), sha256=sha256(road)),

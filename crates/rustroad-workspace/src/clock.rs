@@ -495,6 +495,7 @@ pub fn synthesize_with_sdc(
         .as_ref()
         .unwrap()
         .max_added_cells
+        .saturating_sub(bundle.port_buffers.len())
         .saturating_sub(bundle.ties.as_ref().map_or(0, |t| t.new_cells));
     let mut levels = 0usize;
     let mut work = 0usize;

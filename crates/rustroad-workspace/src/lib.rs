@@ -99,6 +99,7 @@ pub struct Summary {
     pub io_placement_status: &'static str,
     pub diagnostics: Vec<pdk::Diagnostic>,
     pub inserted_tie_cells: Option<usize>,
+    pub inserted_port_buffers: Option<usize>,
     pub filler_cells: Option<usize>,
     pub rail_continuity_status: &'static str,
     pub body_bias_status: &'static str,
@@ -167,6 +168,7 @@ impl Metadata {
                 .physical
                 .as_ref()
                 .and_then(|p| p.ties.as_ref().map(|t| t.new_cells)),
+            inserted_port_buffers: self.physical.as_ref().map(|p| p.port_buffers.len()),
             filler_cells: self
                 .physical
                 .as_ref()
