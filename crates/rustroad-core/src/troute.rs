@@ -2237,7 +2237,11 @@ impl<'a> Router<'a> {
         let mut victims_all: BTreeSet<u32> = BTreeSet::new();
         let via_cost = self.plan.via_cost;
         let wrong = self.plan.wrong_way_factor;
-        let conflict = via_cost.saturating_mul(10).saturating_mul(1 + round as u64);
+        // Negotiation escalates for this net's repeated conflicts. The total
+        // repair count includes unrelated nets and must not scale path costs.
+        let conflict = via_cost
+            .saturating_mul(10)
+            .saturating_mul(1 + rips.get(&net).copied().unwrap_or(0) as u64);
         let near_cost = via_cost;
         let hist_unit = via_cost / 2;
         let mut nbuf = Vec::with_capacity(8);
@@ -2348,7 +2352,7 @@ impl<'a> Router<'a> {
                 if search == self.limits.max_search_expansions {
                     if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
                         eprintln!(
-                            "[troute] search cap net {net} pin {} soft {soft} start {:?} root {:?} current {:?} tree_nodes {} targets {} cost {cost}",
+                            "[troute] search cap net {net} pin {} soft {soft} repair_step {round} start {:?} root {:?} current {:?} tree_nodes {} targets {} cost {cost}",
                             t.pin,
                             self.graph.point(start),
                             (root_layer, root_point),
@@ -3544,6 +3548,100 @@ mod tests {
     }
     fn limits() -> RouteLimits {
         RouteLimits::default()
+    }
+
+    #[test]
+    fn unrelated_repairs_do_not_make_a_crossing_exceed_the_search_budget() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(9890, 9890, 9910, 9910)),
+            ],
+            Vec::new(),
+        );
+        design.die = rect(0, 0, 10000, 10000);
+        design.tracks.as_mut().unwrap().memory_mib = 256;
+        design.tracks.as_mut().unwrap().heuristic_weight = 4;
+        let limits = RouteLimits {
+            max_search_expansions: 2000,
+            ..limits()
+        };
+        for round in [0, 750] {
+            let plan = design.tracks.as_ref().unwrap();
+            let graph = Graph::new(&design, plan, &limits).unwrap();
+            let nodes = graph.len;
+            let cells = Cells::new(design.die, plan.gcell).unwrap();
+            let cell_count = cells.len();
+            let mut r = Router {
+                input: &design,
+                plan,
+                limits: &limits,
+                access_hops: graph.hop_distances().unwrap(),
+                target_costs: crate::routing_target::CostModel::new(
+                    &[false, true, false],
+                    &[(0, 1), (1, 2)],
+                    plan.via_cost,
+                    plan.wrong_way_factor,
+                )
+                .unwrap(),
+                graph,
+                cells,
+                spatial: Spatial::new(&design, &limits).unwrap(),
+                pairs: via_pairs(&design),
+                slots: HashMap::from([(0, 0), (1, 1), (2, 2)]),
+                expansions: 0,
+                search: Search::new(nodes, nodes).unwrap(),
+                epoch: 0,
+                history: History::new(nodes, nodes).unwrap(),
+                gmark: vec![1; cell_count],
+                gepoch: 1,
+                stack_ok: vec![true; design.layers.len()],
+                via_pad_ok: vec![vec![true; design.vias.len()]; design.layers.len()],
+                min_run: vec![0; design.layers.len()],
+                access_entries: 0,
+                access_cache_bytes: 0,
+            };
+            let terminals: Vec<_> = design.terminals.iter().collect();
+            let plans = r.reserve(&terminals).unwrap();
+            // Three previously routed wires form a cut across all routing layers.
+            // The original input is clear once their owning net has been ripped up.
+            for layer in 0..3 {
+                r.spatial
+                    .add_routed(Blockage {
+                        layer,
+                        rect: rect(0, 4980, 10000, 5020),
+                        net: Some(9),
+                    })
+                    .unwrap();
+            }
+            let outcome = r
+                .route_net(0, &terminals, &plans, true, false, &BTreeMap::new(), round)
+                .unwrap();
+            let Outcome::Routed(route, victims) = outcome else {
+                panic!(
+                    "crossing must finish within 2000 expansions after {round} unrelated repairs"
+                );
+            };
+            assert_eq!(victims, [9], "the crossing must declare the ripped net");
+            let groups = BTreeMap::from([(0, terminals)]);
+            let routes = BTreeMap::from([(0, route)]);
+            let mut out = assemble(
+                &r,
+                &groups,
+                &plans,
+                &routes,
+                &design,
+                &limits,
+                &[(0, 1), (1, 2)],
+            )
+            .unwrap();
+            out.stats.wire_length_dbu = out
+                .wires
+                .iter()
+                .map(|w| w.start[0].abs_diff(w.end[0]) + w.start[1].abs_diff(w.end[1]))
+                .sum();
+            validate(&design, &out, &limits).unwrap();
+        }
     }
 
     #[test]
