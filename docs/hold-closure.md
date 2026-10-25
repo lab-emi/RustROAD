@@ -541,3 +541,20 @@ item disappear.
   clock-buffer profiles and some layout perturbations (router owner, W15).
 - No reference tool source was read. OpenSTA, Yosys, Verilator, Magic,
   KLayout, Netgen and OpenRCX ran only as pinned black-box executables.
+
+
+## Large netlists
+
+File-only `hold-eco`, `apply-eco` and `antenna-eco` use the same bounded streaming
+Verilog reader as physical import. The ordinary 16 MiB, 250,000-cell and
+4,096-operation defaults remain in force. Larger inputs require explicit global
+`--max-input-mib`, `--max-cells`, `--max-nets` and `--max-pins` allowances, plus
+`--eco-memory-mib` and `--max-eco-operations` on the command.
+
+Before reading, the command checks a conservative allowance for both ASTs,
+indexes, reports and temporary output against its memory budget and available
+host RAM. SHA-256 and the timing engine's xxh3 identity are calculated from the
+same byte stream; the timed source is not retained as a second text buffer.
+Output Verilog is streamed through a byte- and memory-checked atomic writer.
+A limit failure leaves no new output. These storage limits do not relax the
+planner's work, chain-length, timing, provenance or equivalence requirements.

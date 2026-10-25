@@ -29,6 +29,34 @@ struct Cli {
     #[command(subcommand)]
     command: Command,
 }
+#[derive(clap::Args)]
+struct EcoBudgetArgs {
+    #[arg(long, default_value_t = 2048, value_parser = clap::value_parser!(u64).range(1..=65536))]
+    eco_memory_mib: u64,
+    #[arg(long, default_value_t = 4096)]
+    max_eco_operations: usize,
+}
+impl EcoBudgetArgs {
+    fn limits(
+        &self,
+        verilog: &rustroad_formats::verilog::VerilogLimits,
+    ) -> rustroad_workspace::eco::EcoInputLimits {
+        let mut verilog = verilog.clone();
+        let defaults = rustroad_formats::verilog::VerilogLimits::default();
+        if verilog.max_input_bytes <= defaults.max_input_bytes
+            && verilog.max_instances <= defaults.max_instances
+            && verilog.max_connections <= defaults.max_connections
+        {
+            verilog.max_tokens = defaults.max_tokens;
+        }
+        rustroad_workspace::eco::EcoInputLimits {
+            verilog,
+            memory_mib: self.eco_memory_mib,
+            max_operations: self.max_eco_operations,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Import the strict JSON physical-design subset into a new workspace.
@@ -172,6 +200,8 @@ enum Command {
     /// netlist source must have the xxh3-64 of --timed-netlist); stale reports
     /// fail STALE_REPORT, an unreadable record REPORT_PROVENANCE.
     HoldEco {
+        #[command(flatten)]
+        budget: EcoBudgetArgs,
         /// Flat mapped Verilog netlist to edit (never overwritten).
         #[arg(long)]
         netlist: PathBuf,
@@ -236,6 +266,8 @@ enum Command {
     /// Plan and apply antenna diodes for the violations of a check-antenna
     /// report on a mapped netlist (files only; no workspace is read or written).
     AntennaEco {
+        #[command(flatten)]
+        budget: EcoBudgetArgs,
         #[arg(long)]
         netlist: PathBuf,
         /// `rustroad check-antenna` JSON (schema rustroad.antenna-check.v1).
@@ -335,6 +367,8 @@ enum Command {
     /// Apply a typed rustroad.eco-plan.v1 to a mapped netlist (files only).
     /// insert_buffer sinks must be cell-LEF INPUT pins.
     ApplyEco {
+        #[command(flatten)]
+        budget: EcoBudgetArgs,
         #[arg(long)]
         netlist: PathBuf,
         #[arg(long)]
@@ -396,6 +430,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // never open a workspace, so --workspace is not required for them.
     match &cli.command {
         Command::HoldEco {
+            budget,
             netlist,
             timed_netlist,
             timed_netlist_sha256,
@@ -418,7 +453,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             out,
             plan_out,
         } => {
-            return emit(&rustroad_workspace::eco::plan_hold(
+            return emit(&rustroad_workspace::eco::plan_hold_with_limits(
                 &rustroad_workspace::eco::HoldEcoRequest {
                     netlist: netlist.clone(),
                     hold_reports: hold_reports.clone(),
@@ -442,6 +477,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     allow_partial: *allow_partial,
                     max_group_sinks: *max_group_sinks,
                 },
+                &budget.limits(&parser_limits),
             )?);
         }
         Command::Floorplan {
@@ -481,6 +517,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             )?);
         }
         Command::ApplyEco {
+            budget,
             netlist,
             plan,
             delay_cells,
@@ -488,16 +525,18 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             sizing_profile,
             out,
         } => {
-            return emit(&rustroad_workspace::eco::apply_plan(
+            return emit(&rustroad_workspace::eco::apply_plan_with_limits(
                 netlist,
                 plan,
                 delay_cells,
                 cell_lef.as_deref(),
                 sizing_profile.as_deref(),
                 out,
+                &budget.limits(&parser_limits),
             )?);
         }
         Command::AntennaEco {
+            budget,
             netlist,
             antenna_report,
             delay_cells,
@@ -508,7 +547,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             out,
             plan_out,
         } => {
-            return emit(&rustroad_workspace::eco::plan_antenna(
+            return emit(&rustroad_workspace::eco::plan_antenna_with_limits(
                 &rustroad_workspace::eco::AntennaEcoRequest {
                     netlist: netlist.clone(),
                     report: antenna_report.clone(),
@@ -520,6 +559,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     out: out.clone(),
                     plan_out: plan_out.clone(),
                 },
+                &budget.limits(&parser_limits),
             )?);
         }
         _ => {}

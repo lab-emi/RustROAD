@@ -126,15 +126,24 @@ pub(crate) fn read_netlist(
     path: &Path,
     limits: &verilog::VerilogLimits,
 ) -> Result<(verilog::Netlist, SourcePin)> {
+    read_netlist_digests(path, limits).map(|(netlist, source, _)| (netlist, source))
+}
+
+pub(crate) fn read_netlist_digests(
+    path: &Path,
+    limits: &verilog::VerilogLimits,
+) -> Result<(verilog::Netlist, SourcePin, String)> {
     struct Hashed<R> {
         reader: R,
         hash: Sha256,
+        xxh3: xxhash_rust::xxh3::Xxh3,
         bytes: u64,
     }
     impl<R: Read> Read for Hashed<R> {
         fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
             let count = self.reader.read(output)?;
             self.hash.update(&output[..count]);
+            self.xxh3.update(&output[..count]);
             self.bytes += count as u64;
             Ok(count)
         }
@@ -150,6 +159,7 @@ pub(crate) fn read_netlist(
     let mut reader = Hashed {
         reader: file,
         hash: Sha256::new(),
+        xxh3: xxhash_rust::xxh3::Xxh3::new(),
         bytes: 0,
     };
     let netlist =
@@ -167,7 +177,8 @@ pub(crate) fn read_netlist(
         sha256: format!("{:x}", reader.hash.finalize()),
         bytes: reader.bytes as usize,
     };
-    Ok((netlist, pin))
+    let digest = format!("xxh3:{:016x}", reader.xxh3.digest());
+    Ok((netlist, pin, digest))
 }
 fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())

@@ -26,10 +26,11 @@
 //! directions are kept), the STA revision record at 4 MiB; per sink the chain
 //! search evaluates at most `max_combinations` multisets (default 200,000,
 //! each O(max_chain x corners)); at most `max_sinks` sinks are planned. Peak
-//! memory is two netlist ASTs plus the timed netlist text (16 MiB cap), the
-//! LEF document and the parsed reports (well below 512 MiB at the input
-//! caps). No timing graph, path or cone is built here; slacks come from the
-//! timing engine.
+//! memory includes two netlist ASTs, bounded indexes, the LEF document and
+//! reports. Netlists are streamed (16 MiB ordinary byte cap); explicitly
+//! larger inputs require an input/object budget and memory allowance. The
+//! timed source text is not retained: SHA256 and xxh3 cover the exact parsed
+//! stream. No timing graph is built here; slacks come from the timing engine.
 mod binding;
 pub use binding::BindingSummary;
 
@@ -55,6 +56,87 @@ const MAX_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PROFILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_NETLIST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_LEF_BYTES: u64 = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug)]
+pub struct EcoInputLimits {
+    pub verilog: VerilogLimits,
+    pub memory_mib: u64,
+    pub max_operations: usize,
+}
+impl Default for EcoInputLimits {
+    fn default() -> Self {
+        Self {
+            verilog: VerilogLimits {
+                max_input_bytes: MAX_NETLIST_BYTES as usize,
+                ..Default::default()
+            },
+            memory_mib: 2048,
+            max_operations: 4096,
+        }
+    }
+}
+impl EcoInputLimits {
+    fn preflight(&self, paths: &[&Path]) -> Result<()> {
+        if self.memory_mib == 0
+            || self.memory_mib > 65_536
+            || self.max_operations == 0
+            || self.max_operations > 1_000_000
+            || self.verilog.max_input_bytes as u64 > 2 << 30
+        {
+            return Err(Error::Budget("ECO input/memory/operation allowance".into()));
+        }
+        let mut bytes = 0u64;
+        for path in paths {
+            let size = fs::metadata(path)?.len();
+            if size > self.verilog.max_input_bytes as u64 {
+                return Err(fail(
+                    "INPUT_FILE",
+                    "ECO netlist exceeds its input byte limit",
+                ));
+            }
+            bytes = bytes.saturating_add(size);
+        }
+        let estimate = bytes
+            .saturating_mul(16)
+            .saturating_add(512 << 20)
+            .saturating_add((self.max_operations as u64).saturating_mul(1024));
+        if estimate > self.memory_mib.saturating_mul(1 << 20) {
+            return Err(Error::Budget(format!(
+                "ECO input estimate {} MiB exceeds memory_mib {}",
+                estimate.div_ceil(1 << 20),
+                self.memory_mib
+            )));
+        }
+        if let Ok(text) = fs::read_to_string("/proc/meminfo")
+            && let Some(available) = text.lines().find_map(|l| {
+                l.strip_prefix("MemAvailable:")
+                    .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
+            })
+            && available.saturating_mul(1024) < estimate
+        {
+            return Err(Error::Budget(
+                "insufficient available memory for ECO inputs".into(),
+            ));
+        }
+        self.guard()
+    }
+    fn guard(&self) -> Result<()> {
+        if rustroad_core::memory::peak_rss_bytes()
+            .is_some_and(|n| n > self.memory_mib.saturating_mul(1 << 20))
+        {
+            return Err(Error::Budget(
+                "ECO peak resident set exceeds memory_mib".into(),
+            ));
+        }
+        Ok(())
+    }
+    fn operations(&self) -> EcoLimits {
+        EcoLimits {
+            max_operations: self.max_operations,
+            ..Default::default()
+        }
+    }
+}
 
 pub(crate) fn fail(code: &'static str, message: impl std::fmt::Display) -> Error {
     Error::Input {
@@ -306,16 +388,20 @@ fn masters_of(netlists: &[&Netlist], profile: &DelayCellProfile) -> BTreeSet<Str
 }
 
 pub fn load_netlist(path: &Path) -> Result<(Netlist, Artifact)> {
-    let (netlist, artifact, _) = load_netlist_text(path)?;
+    let (netlist, artifact, _) = load_netlist_hashed(path, &EcoInputLimits::default())?;
     Ok((netlist, artifact))
 }
 
-/// `load_netlist` that also returns the exact text it parsed.
-fn load_netlist_text(path: &Path) -> Result<(Netlist, Artifact, String)> {
-    let (text, pin) = read_file(path, MAX_NETLIST_BYTES, "mapped_verilog")?;
-    let netlist = verilog::parse_verilog(&text, &VerilogLimits::default())
+/// SHA256 and STA's xxh3 are calculated over the same bytes the lexer consumes.
+fn load_netlist_hashed(
+    path: &Path,
+    limits: &EcoInputLimits,
+) -> Result<(Netlist, Artifact, String)> {
+    limits.preflight(&[path])?;
+    let (netlist, pin, digest) = crate::pdk::read_netlist_digests(path, &limits.verilog)
         .map_err(|e| fail("ECO_NETLIST", e))?;
-    Ok((netlist, artifact_of(&pin), text))
+    limits.guard()?;
+    Ok((netlist, artifact_of(&pin), digest))
 }
 
 /// Write `bytes` to `out` atomically (temp file in the same directory, fsync, rename).
@@ -351,10 +437,84 @@ pub fn write_atomic(out: &Path, bytes: &[u8]) -> Result<Artifact> {
     })
 }
 
-fn verilog_bytes(netlist: &Netlist) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    verilog::write_verilog(netlist, &mut out).map_err(|e| fail("ECO_NETLIST", e))?;
-    Ok(out)
+fn write_verilog_atomic(
+    out: &Path,
+    netlist: &Netlist,
+    limits: &EcoInputLimits,
+) -> Result<Artifact> {
+    struct Sink {
+        out: BufWriter<File>,
+        hash: Sha256,
+        bytes: u64,
+        cap: u64,
+        memory_mib: u64,
+        next_check: u64,
+    }
+    impl Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() as u64 > self.cap.saturating_sub(self.bytes) {
+                return Err(std::io::Error::other("ECO_NETLIST output byte budget"));
+            }
+            if self.bytes >= self.next_check {
+                self.next_check = self.bytes.saturating_add(1 << 20);
+                if rustroad_core::memory::peak_rss_bytes()
+                    .is_some_and(|n| n > self.memory_mib.saturating_mul(1 << 20))
+                {
+                    return Err(std::io::Error::other("ECO_NETLIST memory budget"));
+                }
+            }
+            let n = self.out.write(bytes)?;
+            self.hash.update(&bytes[..n]);
+            self.bytes += n as u64;
+            Ok(n)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.out.flush()
+        }
+    }
+    limits.guard()?;
+    let name = out
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| fail("OUTPUT_PATH", "invalid output filename"))?;
+    let temp = out.with_file_name(format!(".{name}.tmp-{}", std::process::id()));
+    let result = (|| -> Result<Artifact> {
+        let mut sink = Sink {
+            out: BufWriter::with_capacity(
+                256 * 1024,
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&temp)?,
+            ),
+            hash: Sha256::new(),
+            bytes: 0,
+            cap: limits.verilog.max_input_bytes as u64,
+            memory_mib: limits.memory_mib,
+            next_check: 0,
+        };
+        verilog::write_verilog(netlist, &mut sink).map_err(|e| fail("ECO_NETLIST", e))?;
+        sink.flush()?;
+        sink.out.get_ref().sync_all()?;
+        Ok(Artifact {
+            path: out.to_path_buf(),
+            sha256: format!("{:x}", sink.hash.finalize()),
+            bytes: sink.bytes,
+        })
+    })();
+    match result {
+        Ok(artifact) => match fs::rename(&temp, out) {
+            Ok(()) => Ok(artifact),
+            Err(error) => {
+                let _ = fs::remove_file(&temp);
+                Err(error.into())
+            }
+        },
+        Err(error) => {
+            let _ = fs::remove_file(&temp);
+            Err(error)
+        }
+    }
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
@@ -1313,6 +1473,13 @@ fn input_of(cells: &EcoCells, name: &str, ops: &[EcoOp]) -> String {
 }
 
 pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
+    plan_hold_with_limits(request, &EcoInputLimits::default())
+}
+
+pub fn plan_hold_with_limits(
+    request: &HoldEcoRequest,
+    input_limits: &EcoInputLimits,
+) -> Result<HoldPlan> {
     let r = request;
     if !(r.target_margin_ns.is_finite()
         && (0.0..=10.0).contains(&r.target_margin_ns)
@@ -1354,8 +1521,9 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
         ));
     }
     check_outputs(&[&r.netlist, &r.timed_netlist], &r.out, &r.plan_out)?;
-    let (netlist, netlist_pin) = load_netlist(&r.netlist)?;
-    let (timed, timed_pin, timed_text) = load_netlist_text(&r.timed_netlist)?;
+    input_limits.preflight(&[&r.netlist, &r.timed_netlist])?;
+    let (netlist, netlist_pin, _) = load_netlist_hashed(&r.netlist, input_limits)?;
+    let (timed, timed_pin, timed_digest) = load_netlist_hashed(&r.timed_netlist, input_limits)?;
     let (profile, profile_pin) = load_profile(&r.profile)?;
     let (directions, lef_pin) = load_pin_directions(
         &profile,
@@ -1398,34 +1566,32 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
     let mut revision: Option<(String, String)> = None;
     // The first report fixes the revision; its record must name the timed
     // netlist before any row is bound (provenance first, content second).
-    let mut same_revision = |env: &Envelope,
-                             path: &Path,
-                             bind: &mut BindingSummary|
-     -> Result<()> {
-        let (Some(w), Some(v)) = (env.workspace.clone(), env.rev.clone()) else {
-            return Err(fail(
-                "TIMING_REPORT",
-                format!("{} names no STA workspace/revision", path.display()),
-            ));
-        };
-        match &revision {
-            None => {
-                binding::bind_sta_record(&w, &v, &r.timed_netlist, timed_text.as_bytes(), bind)?;
-                revision = Some((w, v));
-                Ok(())
+    let mut same_revision =
+        |env: &Envelope, path: &Path, bind: &mut BindingSummary| -> Result<()> {
+            let (Some(w), Some(v)) = (env.workspace.clone(), env.rev.clone()) else {
+                return Err(fail(
+                    "TIMING_REPORT",
+                    format!("{} names no STA workspace/revision", path.display()),
+                ));
+            };
+            match &revision {
+                None => {
+                    binding::bind_sta_record(&w, &v, &r.timed_netlist, &timed_digest, bind)?;
+                    revision = Some((w, v));
+                    Ok(())
+                }
+                Some(first) if *first == (w.clone(), v.clone()) => Ok(()),
+                Some(first) => Err(fail(
+                    "STALE_REPORT",
+                    format!(
+                        "{} comes from {w} {v}, other reports from {} {}",
+                        path.display(),
+                        first.0,
+                        first.1
+                    ),
+                )),
             }
-            Some(first) if *first == (w.clone(), v.clone()) => Ok(()),
-            Some(first) => Err(fail(
-                "STALE_REPORT",
-                format!(
-                    "{} comes from {w} {v}, other reports from {} {}",
-                    path.display(),
-                    first.0,
-                    first.1
-                ),
-            )),
-        }
-    };
+        };
     let mut timing: BTreeMap<String, EndpointTiming> = BTreeMap::new();
     // endpoint -> corner -> worst hold path stages (path-aware planning).
     let mut paths: BTreeMap<String, BTreeMap<String, Vec<Stage>>> = BTreeMap::new();
@@ -1909,11 +2075,11 @@ pub fn plan_hold(request: &HoldEcoRequest) -> Result<HoldPlan> {
             &netlist,
             &plan.eco,
             &cells,
-            &EcoLimits::default(),
-            &VerilogLimits::default(),
+            &input_limits.operations(),
+            &input_limits.verilog,
         )
         .map_err(|e| fail("ECO_APPLY", e))?;
-        plan.output = Some(write_atomic(&r.out, &verilog_bytes(&edited)?)?);
+        plan.output = Some(write_verilog_atomic(&r.out, &edited, input_limits)?);
         plan.eco_report = Some(report);
     }
     let bytes = serde_json::to_vec_pretty(&plan)?;
@@ -2084,13 +2250,33 @@ pub fn apply_plan(
     sizing: Option<&Path>,
     out: &Path,
 ) -> Result<ApplyReport> {
+    apply_plan_with_limits(
+        netlist,
+        plan,
+        profile,
+        cell_lef,
+        sizing,
+        out,
+        &EcoInputLimits::default(),
+    )
+}
+
+pub fn apply_plan_with_limits(
+    netlist: &Path,
+    plan: &Path,
+    profile: &Path,
+    cell_lef: Option<&Path>,
+    sizing: Option<&Path>,
+    out: &Path,
+    input_limits: &EcoInputLimits,
+) -> Result<ApplyReport> {
     if same_file(netlist, out) {
         return Err(fail(
             "OUTPUT_PATH",
             "--out must not overwrite the input netlist",
         ));
     }
-    let (n, npin) = load_netlist(netlist)?;
+    let (n, npin, _) = load_netlist_hashed(netlist, input_limits)?;
     let (text, ppin) = read_file(plan, MAX_REPORT_BYTES, "eco_plan")?;
     let p: EcoPlan = serde_json::from_str(&text)?;
     let (prof, fpin) = load_profile(profile)?;
@@ -2119,11 +2305,11 @@ pub fn apply_plan(
         &n,
         &p,
         &cells,
-        &EcoLimits::default(),
-        &VerilogLimits::default(),
+        &input_limits.operations(),
+        &input_limits.verilog,
     )
     .map_err(|e| fail("ECO_APPLY", e))?;
-    let output = write_atomic(out, &verilog_bytes(&edited)?)?;
+    let output = write_verilog_atomic(out, &edited, input_limits)?;
     Ok(ApplyReport {
         schema: "rustroad.eco-apply.v1",
         netlist: npin,
@@ -2200,6 +2386,13 @@ pub struct AntennaPlan {
 /// assuming each diode joins the violating partial net (verified afterwards
 /// by re-layout, the native check and the foundry deck).
 pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
+    plan_antenna_with_limits(r, &EcoInputLimits::default())
+}
+
+pub fn plan_antenna_with_limits(
+    r: &AntennaEcoRequest,
+    input_limits: &EcoInputLimits,
+) -> Result<AntennaPlan> {
     if r.min_diodes == 0
         || r.max_diodes_per_net == 0
         || r.max_diodes_per_net > 64
@@ -2217,7 +2410,7 @@ pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
         ));
     }
     check_outputs(&[&r.netlist], &r.out, &r.plan_out)?;
-    let (netlist, netlist_pin) = load_netlist(&r.netlist)?;
+    let (netlist, netlist_pin, _) = load_netlist_hashed(&r.netlist, input_limits)?;
     let (profile, profile_pin) = load_profile(&r.profile)?;
     let cells = profile.eco_cells()?;
     let (text, report_pin) = read_file(&r.report, MAX_REPORT_BYTES, "antenna_report")?;
@@ -2371,11 +2564,11 @@ pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
             &netlist,
             &plan.eco,
             &cells,
-            &EcoLimits::default(),
-            &VerilogLimits::default(),
+            &input_limits.operations(),
+            &input_limits.verilog,
         )
         .map_err(|e| fail("ECO_APPLY", e))?;
-        plan.output = Some(write_atomic(&r.out, &verilog_bytes(&edited)?)?);
+        plan.output = Some(write_verilog_atomic(&r.out, &edited, input_limits)?);
         plan.eco_report = Some(rep);
     }
     write_atomic(&r.plan_out, &serde_json::to_vec_pretty(&plan)?)?;
@@ -2390,4 +2583,65 @@ pub fn plan_antenna(r: &AntennaEcoRequest) -> Result<AntennaPlan> {
         ));
     }
     Ok(plan)
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    #[test]
+    fn large_comment_input_is_streamed_and_hashes_the_exact_parsed_bytes() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.work/eco-input-tests")
+            .join(format!(
+                "{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("input.v");
+        let mut sha = Sha256::new();
+        let mut xxh = xxhash_rust::xxh3::Xxh3::new();
+        {
+            let mut f = BufWriter::new(File::create(&file).unwrap());
+            let mut write = |bytes: &[u8]| {
+                f.write_all(bytes).unwrap();
+                sha.update(bytes);
+                xxh.update(bytes);
+            };
+            write(b"/*");
+            let chunk = vec![b'x'; 1024 * 1024];
+            for _ in 0..20 {
+                write(&chunk);
+            }
+            write(b"*/\nmodule n(); endmodule\n");
+            f.flush().unwrap();
+        }
+        assert!(
+            load_netlist(&file).is_err(),
+            "ordinary16MiB limit stays in force"
+        );
+        let mut limits = EcoInputLimits::default();
+        limits.verilog.max_input_bytes = 32 * 1024 * 1024;
+        let (netlist, artifact, digest) = load_netlist_hashed(&file, &limits).unwrap();
+        assert_eq!(netlist.module, "n");
+        assert_eq!(artifact.sha256, format!("{:x}", sha.finalize()));
+        assert_eq!(digest, format!("xxh3:{:016x}", xxh.digest()));
+        assert!(limits.preflight(&[&file, &file]).is_ok());
+        let mut small = limits.clone();
+        small.memory_mib = 16;
+        assert!(matches!(small.preflight(&[&file]), Err(Error::Budget(_))));
+        let output = root.join("output.v");
+        write_verilog_atomic(&output, &netlist, &limits).unwrap();
+        let mut expected = Vec::new();
+        verilog::write_verilog(&netlist, &mut expected).unwrap();
+        assert_eq!(fs::read(&output).unwrap(), expected);
+        let failed = root.join("limited.v");
+        small = limits;
+        small.verilog.max_input_bytes = 1;
+        assert!(write_verilog_atomic(&failed, &netlist, &small).is_err());
+        assert!(!failed.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 }

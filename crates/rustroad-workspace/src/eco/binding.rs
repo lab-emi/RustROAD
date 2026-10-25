@@ -180,6 +180,7 @@ fn provenance(m: impl std::fmt::Display) -> crate::Error {
 }
 
 /// `xxh3:<16 lowercase hex digits>` of `bytes` (the timing engine's notation).
+#[cfg(test)]
 pub fn xxh3_text(bytes: &[u8]) -> String {
     format!("xxh3:{:016x}", xxhash_rust::xxh3::xxh3_64(bytes))
 }
@@ -247,13 +248,13 @@ fn read_record(path: &Path) -> Result<Vec<u8>> {
 }
 
 /// Provenance binding: the STA revision the reports name must record, as its
-/// netlist source, a file with the xxh3-64 of `timed_bytes` (the exact bytes
+/// netlist source, a file with the xxh3-64 of `timed_digest` (the exact bytes
 /// hold-eco parsed as `--timed-netlist`).
 pub fn bind_sta_record(
     workspace: &str,
     rev: &str,
     timed_path: &Path,
-    timed_bytes: &[u8],
+    timed_digest: &str,
     b: &mut BindingSummary,
 ) -> Result<()> {
     let dir = revision_dir(rev)
@@ -298,7 +299,7 @@ pub fn bind_sta_record(
             record.display()
         )));
     };
-    let actual = xxh3_text(timed_bytes);
+    let actual = timed_digest.to_string();
     if recorded != actual {
         return Err(stale(format!(
             "the reports come from {} {rev}, which timed {src} ({recorded}); --timed-netlist {} \
