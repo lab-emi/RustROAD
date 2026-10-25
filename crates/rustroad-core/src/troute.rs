@@ -614,11 +614,17 @@ struct Router<'a> {
     access_entries: usize,
 }
 
-/// One routed net: graph edges (a, b, kind) and its spatial shape ids.
+/// Completed net geometry; the active search alone retains raw grid edges.
 #[derive(Default, Clone)]
 struct NetRoute {
-    edges: Vec<((u32, u32), u32)>,
+    wires: Vec<Wire>,
+    vias: Vec<Via>,
     shapes: Vec<usize>,
+}
+impl NetRoute {
+    fn segments(&self) -> usize {
+        self.wires.len().saturating_add(self.vias.len())
+    }
 }
 
 fn retain_route(
@@ -628,11 +634,11 @@ fn retain_route(
     route: NetRoute,
     limit: usize,
 ) -> Result<()> {
-    let count = retained_edges.saturating_sub(routes.get(&net).map_or(0, |r| r.edges.len()));
+    let count = retained_edges.saturating_sub(routes.get(&net).map_or(0, NetRoute::segments));
     let count = count
-        .checked_add(route.edges.len())
+        .checked_add(route.segments())
         .filter(|&n| n <= limit)
-        .ok_or_else(|| budget("retained routing-edge limit"))?;
+        .ok_or_else(|| budget("retained routing-segment limit"))?;
     routes.insert(net, route);
     *retained_edges = count;
     Ok(())
@@ -644,7 +650,7 @@ fn remove_route(
     net: u32,
 ) -> Option<NetRoute> {
     let route = routes.remove(&net)?;
-    *retained_edges -= route.edges.len();
+    *retained_edges -= route.segments();
     Some(route)
 }
 
@@ -1575,25 +1581,21 @@ impl<'a> Router<'a> {
             // (layer, point) -> incident wire directions and sides.
             type Ends = HashMap<(u32, [i64; 2]), Vec<(bool, i8)>>;
             let mut ends: Ends = HashMap::new();
-            let mut vias = Vec::new();
-            for &((a, b), kind) in &route.edges {
-                let (la, pa) = self.graph.point(a);
-                let (lb, pb) = self.graph.point(b);
-                if la == lb {
-                    let vertical = pa[0] == pb[0];
-                    let (axis, lo, hi) = if vertical { (1, pa, pb) } else { (0, pa, pb) };
-                    let (lo, hi) = if lo[axis] <= hi[axis] {
-                        (lo, hi)
-                    } else {
-                        (hi, lo)
-                    };
-                    ends.entry((la, lo)).or_default().push((vertical, 1));
-                    ends.entry((la, hi)).or_default().push((vertical, -1));
+            for wire in &route.wires {
+                let la = wire.layer;
+                let (pa, pb) = (wire.start, wire.end);
+                let vertical = pa[0] == pb[0];
+                let axis = usize::from(vertical);
+                let (lo, hi) = if pa[axis] <= pb[axis] {
+                    (pa, pb)
                 } else {
-                    vias.push(((a.min(b), a.max(b)), kind, if la < lb { pa } else { pb }));
-                }
+                    (pb, pa)
+                };
+                ends.entry((la, lo)).or_default().push((vertical, 1));
+                ends.entry((la, hi)).or_default().push((vertical, -1));
             }
-            for (key, kind, at) in vias {
+            for via in &mut route.vias {
+                let (kind, at) = (via.kind, via.at);
                 let v = &self.input.vias[kind as usize];
                 let need = |layer: u32| -> Option<bool> {
                     let list = ends.get(&(layer, at))?;
@@ -1631,11 +1633,7 @@ impl<'a> Router<'a> {
                                 net: Some(net),
                             })?);
                         }
-                        let index = route
-                            .edges
-                            .binary_search_by_key(&key, |(edge, _)| *edge)
-                            .map_err(|_| invalid("routed via edge missing"))?;
-                        route.edges[index].1 = k as u32;
+                        via.kind = k as u32;
                         changed += 1;
                         break;
                     }
@@ -2060,7 +2058,38 @@ impl<'a> Router<'a> {
             }
         }
         victims_all.remove(&net);
-        out.edges = edges.into_iter().collect();
+        let mut wires = Vec::new();
+        for ((a, b), kind) in edges {
+            let (la, pa) = self.graph.point(a);
+            let (lb, pb) = self.graph.point(b);
+            if la == lb {
+                wires.push(Wire {
+                    net,
+                    layer: la,
+                    start: pa,
+                    end: pb,
+                });
+            } else {
+                if kind == WIRE {
+                    return Err(invalid("missing path via"));
+                }
+                out.vias.push(Via { net, kind, at: pa });
+            }
+        }
+        let vias: Vec<&Via> = out
+            .vias
+            .iter()
+            .chain(terminals.iter().flat_map(|t| plans[&t.pin].vias.iter()))
+            .collect();
+        let access: Vec<&Access> = terminals.iter().map(|t| &plans[&t.pin].access).collect();
+        let pairs: Vec<(u32, u32)> = self.input.vias.iter().map(|v| (v.lower, v.upper)).collect();
+        out.wires = crate::wire_runs::collinear_runs(
+            &wires.iter().collect::<Vec<_>>(),
+            &vias,
+            &pairs,
+            &access,
+            self.limits.max_comparisons,
+        )?;
         Ok(Outcome::Routed(out, victims_all.into_iter().collect()))
     }
 }
@@ -2466,7 +2495,7 @@ fn assemble(
             .ok_or_else(|| budget("routing record count overflow"))
     })?;
     let records = routed.values().try_fold(records, |n, r| {
-        n.checked_add(r.edges.len())
+        n.checked_add(r.segments())
             .ok_or_else(|| budget("routing record count overflow"))
     })?;
     if records > limits.max_segments {
@@ -2487,23 +2516,8 @@ fn assemble(
         let route = routed
             .get(&net)
             .ok_or_else(|| no_route(&format!("net {net} left unrouted")))?;
-        for &((a, b), kind) in &route.edges {
-            let (la, pa) = r.graph.point(a);
-            let (lb, pb) = r.graph.point(b);
-            if la == lb {
-                wires.push(Wire {
-                    net,
-                    layer: la,
-                    start: pa,
-                    end: pb,
-                });
-            } else {
-                if kind == WIRE {
-                    return Err(invalid("missing path via"));
-                }
-                vias.push(Via { net, kind, at: pa });
-            }
-        }
+        wires.extend(route.wires.iter().cloned());
+        vias.extend(route.vias.iter().cloned());
     }
     vias.sort_by_key(|v| (v.net, v.kind, v.at));
     vias.dedup();
@@ -2542,7 +2556,13 @@ mod tests {
         let mut routes = BTreeMap::new();
         let mut edges = 0;
         let one = || NetRoute {
-            edges: vec![((1, 2), WIRE)],
+            wires: vec![Wire {
+                net: 1,
+                layer: 0,
+                start: [0, 0],
+                end: [10, 0],
+            }],
+            vias: Vec::new(),
             shapes: Vec::new(),
         };
         retain_route(&mut routes, &mut edges, 1, one(), 1).unwrap();
@@ -2552,7 +2572,7 @@ mod tests {
         remove_route(&mut routes, &mut edges, 1).unwrap();
         assert_eq!(edges, 0);
         retain_route(&mut routes, &mut edges, 2, one(), 1).unwrap();
-        assert_eq!(routes[&2].edges, vec![((1, 2), WIRE)]);
+        assert_eq!(routes[&2].segments(), 1);
     }
 
     #[test]
