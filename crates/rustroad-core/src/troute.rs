@@ -2375,7 +2375,20 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
     let mut retained_edges = 0usize;
     let mut queue: VecDeque<u32> = VecDeque::new();
     let none = BTreeMap::new();
-    for &(_, net) in &order {
+    for (index, &(_, net)) in order.iter().enumerate() {
+        if index.is_multiple_of(10_000) {
+            trace(
+                "detailed progress",
+                t0,
+                format_args!(
+                    "nets {index}/{} failed {} work {} exp {}",
+                    order.len(),
+                    queue.len(),
+                    r.spatial.work,
+                    r.expansions
+                ),
+            );
+        }
         let g = &guides[&net];
         let mut done = false;
         for expand_by in [None, Some(r.plan.expand_margin)] {
