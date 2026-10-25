@@ -4,7 +4,7 @@ use crate::{Orientation, Rect, Result, transform_rect};
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
-const MAX_INSTANCES: usize = 16_000_000;
+const MAX_INSTANCES: usize = crate::MAX_PHYSICAL_INSTANCES;
 const MAX_PINS: usize = 256_000_000;
 const NO_NET: u32 = u32::MAX;
 

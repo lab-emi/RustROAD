@@ -480,7 +480,7 @@ impl Transform<'_> {
         if self.cells.len() >= self.work.limits.max_new_cells {
             return Err(budget("max_new_cells exceeded"));
         }
-        let vlimits = verilog::VerilogLimits::large_design_ceiling();
+        let vlimits = crate::pdk::retained_netlist_limits();
         if self.base_cells + self.cells.len() >= vlimits.max_instances
             || self.base_wires + self.wires.len() >= vlimits.max_nets
         {
@@ -634,7 +634,7 @@ pub fn dissolve_constant_cells(
     low: TieSpec<'_>,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, usize)> {
-    verilog::validate_netlist(netlist, &verilog::VerilogLimits::large_design_ceiling())
+    verilog::validate_netlist(netlist, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
     input_bound(netlist, limits)?;
     dissolve_constant_cells_owned(netlist.clone(), cells, high, low, limits)
@@ -648,7 +648,7 @@ pub fn dissolve_constant_cells_owned(
     low: TieSpec<'_>,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, usize)> {
-    verilog::validate_netlist(&netlist, &verilog::VerilogLimits::large_design_ceiling())
+    verilog::validate_netlist(&netlist, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
     if cells.is_empty() {
         return Ok((netlist, 0));
@@ -749,7 +749,7 @@ pub fn dissolve_constant_cells_owned(
             });
         }
     }
-    verilog::validate_netlist(&out, &verilog::VerilogLimits::large_design_ceiling())
+    verilog::validate_netlist(&out, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
     Ok((out, dissolved))
 }
@@ -787,7 +787,7 @@ pub fn materialize_constants_with(
     low: TieSpec<'_>,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, TieReport)> {
-    verilog::validate_netlist(netlist, &verilog::VerilogLimits::large_design_ceiling())
+    verilog::validate_netlist(netlist, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
     input_bound(netlist, limits)?;
     materialize_constants_owned(netlist.clone(), high, low, limits)
@@ -800,7 +800,7 @@ pub fn materialize_constants_owned(
     low: TieSpec<'_>,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, TieReport)> {
-    verilog::validate_netlist(&netlist, &verilog::VerilogLimits::large_design_ceiling())
+    verilog::validate_netlist(&netlist, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
     input_bound(&netlist, limits)?;
     if high.cell.name == low.cell.name
@@ -909,7 +909,7 @@ pub fn materialize_constants_owned(
     }
     netlist.wires.extend(wires);
     netlist.instances.extend(cells);
-    verilog::validate_netlist(&netlist, &verilog::VerilogLimits::large_design_ceiling())
+    verilog::validate_netlist(&netlist, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
     Ok((netlist, report))
 }

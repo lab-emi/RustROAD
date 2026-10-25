@@ -162,7 +162,7 @@ impl<'a> InstanceGeometry<'a> {
         }
         let Some(die) = die else { return Ok(None) };
         let bounds = RouteLimits {
-            max_obstacles: 16_000_000,
+            max_obstacles: crate::MAX_PHYSICAL_INSTANCES,
             max_bin_entries: limits.max_instance_bin_entries,
             max_comparisons: limits.max_work,
             ..Default::default()

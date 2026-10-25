@@ -19,7 +19,7 @@ const LEGACY_MAGIC: &[u8; 8] = b"RROADB01";
 const MAX_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 1024 * 1024;
 /// Absolute physical-instance ceiling, including fillers, taps and clock cells.
-pub(crate) const MAX_CELLS: usize = 32_000_000;
+pub(crate) const MAX_CELLS: usize = rustroad_core::MAX_PHYSICAL_INSTANCES;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -505,6 +505,20 @@ mod tests {
         );
         std::fs::remove_dir_all(dir).expect("remove test directory");
     }
+    #[test]
+    fn retained_netlist_and_physical_instance_caps_stay_aligned() {
+        let limit = crate::pdk::retained_netlist_limits();
+        assert_eq!(limit.max_instances, MAX_CELLS);
+        assert_eq!(
+            crate::pdk::connection_limits_for_cells(MAX_CELLS)
+                .unwrap()
+                .max_instances,
+            MAX_CELLS
+        );
+        assert!(limit.max_instances >= 18_000_000);
+        assert!(crate::pdk::connection_limits_for_cells(MAX_CELLS + 1).is_err());
+    }
+
     #[test]
     fn capacity_above_sixteen_million_does_not_allocate_unused_rows() {
         let (dir, mut metadata) = fixture();

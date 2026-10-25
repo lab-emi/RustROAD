@@ -21,6 +21,9 @@ pub mod supply;
 pub mod tap;
 pub(crate) mod troute;
 pub use troute::MemoryEstimate;
+
+/// Maximum admitted physical instances, including fillers, taps, and clock buffers.
+pub const MAX_PHYSICAL_INSTANCES: usize = 32_000_000;
 pub mod wire_runs;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

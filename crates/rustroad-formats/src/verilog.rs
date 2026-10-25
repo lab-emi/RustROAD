@@ -49,8 +49,8 @@ impl Default for VerilogLimits {
     }
 }
 impl VerilogLimits {
-    /// Absolute validation ceiling for already allocated large-design records.
-    /// Import callers must still supply their smaller per-operation budgets.
+    /// Large structural validation profile; callers keep their per-operation budgets.
+    /// Physical clients may substitute their independently enforced instance ceiling.
     pub fn large_design_ceiling() -> Self {
         Self {
             max_input_bytes: 2 * 1024 * 1024 * 1024,

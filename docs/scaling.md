@@ -674,3 +674,5 @@ DEF (XOR 0) everywhere. All 16 rows pass every gating item.
   harness, not by RustROAD's importer, which still refuses the ambiguity.
 
 The physical side-table format admits up to 32 million instances, including fillers, taps and clock buffers. Commands still require an explicit sufficient cell capacity and obey the 16 GiB table and 1 MiB record limits; raising a capacity never allocates absent rows.
+
+The physical instance ceiling is shared by stored tables, retained-netlist validation, instance geometry, and extraction indices; per-command limits remain independent and may be lower.

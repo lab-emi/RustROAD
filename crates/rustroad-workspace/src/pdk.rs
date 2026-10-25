@@ -187,6 +187,14 @@ fn budget(message: impl Into<String>) -> Error {
     Error::Budget(message.into())
 }
 
+/// Format validation uses the same physical instance ceiling as the workspace.
+pub(crate) fn retained_netlist_limits() -> verilog::VerilogLimits {
+    verilog::VerilogLimits {
+        max_instances: rustroad_core::MAX_PHYSICAL_INSTANCES,
+        ..verilog::VerilogLimits::large_design_ceiling()
+    }
+}
+
 /// Internal validation capacities follow a design that was already admitted by
 /// the caller's object budget. They never increase the initial import budget.
 pub(crate) fn connection_limits(design: &Design) -> Result<ConnectivityLimits> {
@@ -194,9 +202,7 @@ pub(crate) fn connection_limits(design: &Design) -> Result<ConnectivityLimits> {
 }
 pub(crate) fn connection_limits_for_cells(count: usize) -> Result<ConnectivityLimits> {
     if count > crate::storage::MAX_CELLS {
-        return Err(budget(
-            "physical design exceeds sixteen-million-cell ceiling",
-        ));
+        return Err(budget("physical design exceeds the instance ceiling"));
     }
     let cells = count.max(250_000);
     Ok(ConnectivityLimits {
@@ -268,11 +274,8 @@ pub(crate) fn validate_bundle(
     {
         return Err(budget("stored PDK source aggregate limit exceeded"));
     }
-    verilog::validate_netlist(
-        &bundle.netlist,
-        &verilog::VerilogLimits::large_design_ceiling(),
-    )
-    .map_err(|e| invalid(e.to_string()))?;
+    verilog::validate_netlist(&bundle.netlist, &retained_netlist_limits())
+        .map_err(|e| invalid(e.to_string()))?;
     for (instance, cell) in bundle.netlist.instances.iter().zip(&design.cells) {
         if instance.name != cell.name || instance.cell != cell.master {
             return Err(invalid("netlist instances and geometry differ"));
