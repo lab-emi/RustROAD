@@ -1,5 +1,7 @@
 # RTL-to-GDS on SKY130 and GF180 (`scripts/rtl2gds.py`)
 
+Current closeout results: [2026-10-25 qualification](closeout-2026-10-25.md). The historical measurements below are preserved separately.
+
 One command takes a design manifest from RTL to GDS on SKY130
 (`sky130_fd_sc_hd`) and GF180 (`gf180mcu_fd_sc_mcu7t5v0`) and checks the
 result with independent oracles: RustSys synthesis, RustROAD floorplan,
@@ -14,7 +16,7 @@ RustSTA integration; the detailed engine pages are `docs/closure.md`,
 `docs/hold-closure.md`, `docs/scaling.md`, `docs/signoff.md` and
 `docs/extraction.md`.
 
-## Result
+## Historical integration result
 
 Final runs `E-<design>` (worktree `.work/wt/final2`, RustROAD `aafcbaa`,
 clean tree, release binary `36a47edb`; RustSTA 0.4.3 `26bd6eb`, ruststa
@@ -28,7 +30,7 @@ included). Evidence: `docs/evidence/rtl2gds-final2.json`.
 | only `timing_accuracy` failed (RustSTA vs OpenSTA min-pulse-width parity, 1.28-1.86 ps) | fifo, regfile, mult | - |
 | only `drv` failed (3-12 nets above 1.0 ns at ss) | - | alu, regfile, mult |
 
-11 of 16 design x PDK rows pass every gating status. On all 16 rows setup
+10 of 16 design x PDK rows pass every gating status (the original headline incorrectly said 11). On all 16 rows setup
 (tt, ss) and hold (tt, ss, ff) close on native and OpenRCX SPEF in both
 engines, the native GDS has 0 XOR, 0 Magic and 0 KLayout DRC items, 0
 antenna-deck violations, Netgen and KLayout LVS match, RTL equivalence

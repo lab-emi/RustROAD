@@ -1,6 +1,22 @@
 # RustROAD handoff
 
-## 2026-10-25 — Claude closeout candidate
+## 2026-10-25 — closeout acceptance
+
+- Final baseline: 15 passed + 1 deviation_declared of 16; zero failed/unverified.
+  Qualification commit 1f86687baaf7e6753addb9351b83f3561fd714f4; every row includes full controls, rebuild and binding.
+- Current report: docs/closeout-2026-10-25.md; evidence: docs/evidence/rtl2gds-closeout-2026-10-25.json.
+- The original headline was wrong (10/16, not 11/16). Original evidence is retained.
+- MPW exceptions require all owner-approved conditions and retain the raw mismatch. The
+  mult circuit vote did not justify a waiver; mult/regfile SKY130 instead use lower clock
+  leaf loading and pass ordinary gates. Never weaken endpoint parity or 1.0 ns DRV.
+- A hold-removal mutation can be timing-clean after resizing. Preserve that experiment
+  and require a real planted hold fault; never turn a genuine missed fault into a pass.
+- Tool paths in a subprocess with a changed working directory must be absolute; honor
+  stricter inherited memory caps. GF180 transistor tests need design.ngspice parameters.
+- Independent legal/foundry review, large-scale cases and outstanding RustSTA numerical
+  limits remain open in the superproject. Do not infer tapeout signoff from this matrix.
+
+## 2026-10-25 — Claude closeout implementation notes (historical)
 
 - Source work is isolated on `fix/claude-closeout`; the old sibling worktree is untouched.
 - Requalified installed tool locations and OCI repository digests without weakening SHA checks.
