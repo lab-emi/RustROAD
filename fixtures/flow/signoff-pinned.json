@@ -11,8 +11,7 @@
     "iic_osic_tools": {
       "id": "4c48415d8bd08c04033f4777b65a96299e22c1e94d12a8ea1d9a062697c006ee",
       "repo_digests": [
-        "docker.io/hpretl/iic-osic-tools@sha256:344fadc67af8c64cc4750633392bb60e8ce05c5f0c3d94f26cde35c068ccf9bc",
-        "docker.io/hpretl/iic-osic-tools@sha256:5d6adf1f437cd0f2f8f8614488ec3c247ba8c768f4663a25d5e997b30ccb13b0"
+        "docker.io/hpretl/iic-osic-tools@sha256:344fadc67af8c64cc4750633392bb60e8ce05c5f0c3d94f26cde35c068ccf9bc"
       ],
       "repo_tags": [
         "docker.io/hpretl/iic-osic-tools:latest"
@@ -20,19 +19,26 @@
       "created": "2026-07-27T19:11:40.94289884Z",
       "env": [
         "IIC_OSIC_TOOLS_VERSION=2026.07"
+      ],
+      "previous_repo_digests": [
+        "docker.io/hpretl/iic-osic-tools@sha256:344fadc67af8c64cc4750633392bb60e8ce05c5f0c3d94f26cde35c068ccf9bc",
+        "docker.io/hpretl/iic-osic-tools@sha256:5d6adf1f437cd0f2f8f8614488ec3c247ba8c768f4663a25d5e997b30ccb13b0"
       ]
     },
     "orfs": {
       "id": "f152917ebc458bd015042e44d9dac5af69bcae9fb5657d5121cb4d7226ed0c67",
       "repo_digests": [
-        "docker.io/openroad/orfs@sha256:0a78705613f3135a842983d3fa02564ddd2c50cabdb7c41ae22693196848fe3d",
-        "docker.io/openroad/orfs@sha256:2894c8431c5b0c778ba39a25dbbf1621ad52546098c43eb211a7f1deb039af66"
+        "docker.io/openroad/orfs@sha256:0a78705613f3135a842983d3fa02564ddd2c50cabdb7c41ae22693196848fe3d"
       ],
       "repo_tags": [
         "docker.io/openroad/orfs:latest"
       ],
       "created": "2026-10-11T03:41:17.22985837Z",
-      "env": []
+      "env": [],
+      "previous_repo_digests": [
+        "docker.io/openroad/orfs@sha256:0a78705613f3135a842983d3fa02564ddd2c50cabdb7c41ae22693196848fe3d",
+        "docker.io/openroad/orfs@sha256:2894c8431c5b0c778ba39a25dbbf1621ad52546098c43eb211a7f1deb039af66"
+      ]
     }
   },
   "tools": {

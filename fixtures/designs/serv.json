@@ -116,7 +116,7 @@
   },
   "signoff_manifest": {
     "path": "fixtures/flow/signoff-pinned.json",
-    "sha256": "446347653af195e1337997f57309fa4d8efec1c31be55b9b3a41067ea8775c24"
+    "sha256": "9fbc84ff3b90e666a504610834aea9c7462c0daeebdc2b22c39cabaccd13c77a"
   },
   "tools": {
     "path": "fixtures/flow/rtl2gds-tools.json",
