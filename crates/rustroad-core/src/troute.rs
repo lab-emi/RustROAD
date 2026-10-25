@@ -65,7 +65,7 @@ const RECORDS_PER_TERMINAL: u64 = 10;
 const RECORD_BYTES: u64 = 128;
 /// Escape plans, hash/tree metadata, groups, guides and queues. Completed
 /// wire/via vectors and the active net's raw topology are counted separately.
-const ROUTED_BYTES_PER_TERMINAL: u64 = 768;
+const ROUTED_BYTES_PER_TERMINAL: u64 = 768 - 3 * std::mem::size_of::<usize>() as u64;
 const ACTIVE_TOPOLOGY_BYTES: u64 = 160;
 /// Sorted window index plus construction headroom (one entry per terminal).
 const WINDOW_INDEX_BYTES: u64 = 32;
@@ -723,9 +723,9 @@ struct Plan {
     top: u32,
     /// The escape reaches `top` through a via (a further via would stack).
     top_via: bool,
-    wires: Vec<Wire>,
-    vias: Vec<Via>,
-    shapes: Vec<usize>,
+    wires: Box<[Wire]>,
+    vias: Box<[Via]>,
+    shapes: Box<[usize]>,
 }
 
 /// Local search lattice for one terminal's escape.
@@ -1376,9 +1376,9 @@ impl<'a> Router<'a> {
             },
             top: top_node,
             top_via,
-            wires,
-            vias,
-            shapes,
+            wires: wires.into_boxed_slice(),
+            vias: vias.into_boxed_slice(),
+            shapes: shapes.into_boxed_slice(),
         }))
     }
 
@@ -3011,6 +3011,90 @@ mod tests {
     }
     fn limits() -> RouteLimits {
         RouteLimits::default()
+    }
+
+    // This fixture intentionally reproduces push-grown spare capacity.
+    #[allow(clippy::vec_init_then_push)]
+    fn escape_buffers(net: u32) -> (Vec<Wire>, Vec<Via>, Vec<usize>) {
+        let mut wires = Vec::new();
+        wires.push(Wire {
+            net,
+            layer: 0,
+            start: [0, 0],
+            end: [10, 0],
+        });
+        let mut vias = Vec::new();
+        vias.push(Via {
+            net,
+            kind: 0,
+            at: [10, 0],
+        });
+        let mut shapes = Vec::new();
+        for i in 0..6 {
+            shapes.push(i);
+        }
+        (wires, vias, shapes)
+    }
+
+    #[test]
+    #[ignore = "isolated memory fixture; use an OS memory/time guard"]
+    fn retained_escape_untrimmed_memory_fixture() {
+        type Untrimmed = (Access, u32, bool, Vec<Wire>, Vec<Via>, Vec<usize>);
+        let mut plans: Vec<Untrimmed> = Vec::with_capacity(500_001);
+        for net in 0..500_001 {
+            let (wires, vias, shapes) = escape_buffers(net);
+            plans.push((
+                Access {
+                    pin: net,
+                    net,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                net,
+                true,
+                wires,
+                vias,
+                shapes,
+            ));
+        }
+        assert_eq!(
+            plans
+                .iter()
+                .map(|p| p.3.len() + p.4.len() + p.5.len())
+                .sum::<usize>(),
+            500_001 * 8
+        );
+        std::hint::black_box(plans);
+    }
+
+    #[test]
+    #[ignore = "isolated memory fixture; use an OS memory/time guard"]
+    fn retained_escape_compact_memory_fixture() {
+        let mut plans = Vec::with_capacity(500_001);
+        for net in 0..500_001 {
+            let (wires, vias, shapes) = escape_buffers(net);
+            plans.push(Plan {
+                access: Access {
+                    pin: net,
+                    net,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                top: net,
+                top_via: true,
+                wires: wires.into_boxed_slice(),
+                vias: vias.into_boxed_slice(),
+                shapes: shapes.into_boxed_slice(),
+            });
+        }
+        assert_eq!(
+            plans
+                .iter()
+                .map(|p| p.wires.len() + p.vias.len() + p.shapes.len())
+                .sum::<usize>(),
+            500_001 * 8
+        );
+        std::hint::black_box(plans);
     }
 
     fn rule_scale_fixture() -> (RouteInput, Routes) {

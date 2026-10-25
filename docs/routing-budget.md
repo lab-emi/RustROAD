@@ -111,6 +111,8 @@ capped at 64 MiB, and `max_history_entries` separately bounds congestion history
 Local pin-repair interval queries charge candidate scans to the work budget.
 Wire normalization retains line maps and junction sets for one net at a time;
 assembly emits normalized runs directly, without a second full raw-wire copy.
+Completed pin escapes retain exact-length boxed slices for their wires, vias
+and shape handles, rather than the spare capacity of growable vectors.
 The work counter covers all nets and the output cap is checked before appending.
 Same-net rule checks keep compact source indices and collect one net's shapes
 at a time. Each group is bounded by the obstacle cap and sixteen times the
