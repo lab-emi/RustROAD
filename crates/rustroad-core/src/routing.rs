@@ -359,13 +359,33 @@ impl std::hash::Hasher for Fx {
     }
 }
 const NIL: u32 = u32::MAX;
+pub(crate) const BIN_PAGE_SIDE: i64 = 32;
+const BIN_PAGE_CELLS: usize = (BIN_PAGE_SIDE * BIN_PAGE_SIDE) as usize;
+type BinPageKey = (u32, i64, i64);
+type BinPage = Box<[[u32; 2]; BIN_PAGE_CELLS]>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BinMode {
+    Dense,
+    Paged,
+    Sparse,
+}
+pub(crate) fn bin_mode(input: &RouteInput, cells: u64) -> BinMode {
+    if cells.saturating_mul(input.layers.len() as u64) <= 1_000_000 {
+        BinMode::Dense
+    } else if input.obstacles.len() >= 1024 {
+        BinMode::Paged
+    } else {
+        BinMode::Sparse
+    }
+}
 /// Spatial bins: one dense head/tail grid per layer over the die and every
 /// fixed shape, entries chained in insertion order (so iteration order, and
 /// with it every work count, matches a per-bin list). A layer's grid is
 /// allocated on its first shape: 8 bytes per bin plus 8 bytes per entry.
 /// Bins outside the grid (never produced by router inputs) use a hash map.
 struct BinGrid {
-    sparse: bool,
+    mode: BinMode,
     bx0: i64,
     by0: i64,
     nx: i64,
@@ -374,6 +394,7 @@ struct BinGrid {
     cells: Vec<Vec<[u32; 2]>>,
     /// `[shape id, next entry]`.
     entries: Vec<[u32; 2]>,
+    pages: HashMap<BinPageKey, BinPage, BuildFx>,
     overflow: HashMap<(u32, i64, i64), Vec<usize>, BuildFx>,
 }
 enum BinIter<'g> {
@@ -402,7 +423,9 @@ impl BinGrid {
         (dx >= 0 && dy >= 0 && dx < self.nx && dy < self.ny).then(|| (dy * self.nx + dx) as usize)
     }
     fn push(&mut self, layer: u32, x: i64, y: i64, id: usize) -> Result<()> {
-        if self.sparse || self.slot(x, y).is_none() {
+        if self.mode == BinMode::Sparse
+            || (self.mode == BinMode::Dense && self.slot(x, y).is_none())
+        {
             self.overflow
                 .try_reserve(1)
                 .map_err(|_| budget("sparse routing bin allocation"))?;
@@ -412,17 +435,35 @@ impl BinGrid {
             bin.push(id);
             return Ok(());
         }
-        let k = self.slot(x, y).expect("dense bin is inside the grid");
         let e = u32::try_from(self.entries.len())
             .ok()
             .filter(|&e| e != NIL)
             .ok_or_else(|| budget("routing spatial-bin count"))?;
         let id = u32::try_from(id).map_err(|_| budget("routing obstacle count"))?;
-        let grid = &mut self.cells[layer as usize];
-        if grid.is_empty() {
-            grid.resize((self.nx * self.ny) as usize, [NIL, NIL]);
-        }
-        let cell = &mut grid[k];
+        let cell = if self.mode == BinMode::Paged {
+            let key = (
+                layer,
+                x.div_euclid(BIN_PAGE_SIDE),
+                y.div_euclid(BIN_PAGE_SIDE),
+            );
+            self.pages
+                .try_reserve(1)
+                .map_err(|_| budget("routing bin-page allocation"))?;
+            let page = self
+                .pages
+                .entry(key)
+                .or_insert_with(|| Box::new([[NIL, NIL]; BIN_PAGE_CELLS]));
+            let slot = (y.rem_euclid(BIN_PAGE_SIDE) * BIN_PAGE_SIDE + x.rem_euclid(BIN_PAGE_SIDE))
+                as usize;
+            &mut page[slot]
+        } else {
+            let k = self.slot(x, y).expect("dense bin is inside the grid");
+            let grid = &mut self.cells[layer as usize];
+            if grid.is_empty() {
+                grid.resize((self.nx * self.ny) as usize, [NIL, NIL]);
+            }
+            &mut grid[k]
+        };
         if cell[1] == NIL {
             cell[0] = e;
         } else {
@@ -433,7 +474,20 @@ impl BinGrid {
         Ok(())
     }
     fn iter(&self, layer: u32, x: i64, y: i64) -> BinIter<'_> {
-        match self.slot(x, y).filter(|_| !self.sparse) {
+        if self.mode == BinMode::Paged {
+            let key = (
+                layer,
+                x.div_euclid(BIN_PAGE_SIDE),
+                y.div_euclid(BIN_PAGE_SIDE),
+            );
+            let slot = (y.rem_euclid(BIN_PAGE_SIDE) * BIN_PAGE_SIDE + x.rem_euclid(BIN_PAGE_SIDE))
+                as usize;
+            return BinIter::Chain {
+                entries: &self.entries,
+                at: self.pages.get(&key).map_or(NIL, |p| p[slot][0]),
+            };
+        }
+        match self.slot(x, y).filter(|_| self.mode == BinMode::Dense) {
             Some(k) => BinIter::Chain {
                 entries: &self.entries,
                 at: self.cells[layer as usize].get(k).map_or(NIL, |c| c[0]),
@@ -447,7 +501,9 @@ impl BinGrid {
     }
     /// Grid bins allocated over all layers.
     fn allocated(&self) -> usize {
-        self.cells.iter().map(Vec::len).sum::<usize>() + self.overflow.len()
+        self.cells.iter().map(Vec::len).sum::<usize>()
+            + self.overflow.len()
+            + self.pages.len() * BIN_PAGE_CELLS
     }
 }
 /// Bin index range `[x0, x1] x [y0, y1]` covering the die and every fixed
@@ -516,13 +572,14 @@ impl<'a> Spatial<'a> {
             bin,
             shapes: Vec::new(),
             bins: BinGrid {
-                sparse: cells.saturating_mul(input.layers.len() as u64) > 1_000_000,
+                mode: bin_mode(input, cells),
                 bx0: x0,
                 by0: y0,
                 nx: x1 - x0 + 1,
                 ny: y1 - y0 + 1,
                 cells: vec![Vec::new(); input.layers.len()],
                 entries: Vec::new(),
+                pages: HashMap::with_hasher(BuildFx),
                 overflow: HashMap::with_hasher(BuildFx),
             },
             marks: vec![0; input.obstacles.len()],
@@ -2320,6 +2377,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_bin_mode_matches_an_independent_ordered_bucket_oracle() {
+        let mut reference = BTreeMap::<(u32, i64, i64), Vec<usize>>::new();
+        let mut sequence = Vec::new();
+        let mut random = 0x25bd_7c91_ae02_1843u64;
+        for id in 0..4096usize {
+            random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let x = ((random >> 16) % 201) as i64 - 100;
+            let y = ((random >> 32) % 201) as i64 - 100;
+            let layer = (random & 1) as u32;
+            sequence.push((layer, x, y, id));
+            reference.entry((layer, x, y)).or_default().push(id);
+        }
+        for mode in [BinMode::Dense, BinMode::Sparse, BinMode::Paged] {
+            let mut grid = BinGrid {
+                mode,
+                bx0: -64,
+                by0: -64,
+                nx: 129,
+                ny: 129,
+                cells: vec![Vec::new(); 2],
+                entries: Vec::new(),
+                pages: HashMap::with_hasher(BuildFx),
+                overflow: HashMap::with_hasher(BuildFx),
+            };
+            for &(layer, x, y, id) in &sequence {
+                grid.push(layer, x, y, id).unwrap();
+            }
+            for (&(layer, x, y), expected) in &reference {
+                assert_eq!(grid.iter(layer, x, y).collect::<Vec<_>>(), *expected);
+            }
+            assert_eq!(grid.iter(0, 300, -300).count(), 0);
+        }
+    }
+
+    #[test]
     fn immutable_obstacles_are_shared_and_survive_route_ripup() {
         let input = fixture();
         let limits = RouteLimits::default();
@@ -2353,6 +2445,46 @@ mod tests {
         spatial.remove(id);
         assert!(spatial.clear(0, routed, 8).unwrap());
         assert!(!spatial.clear(0, fixed, 8).unwrap());
+    }
+
+    #[test]
+    fn large_spatial_extent_allocates_only_touched_pages() {
+        let mut input = fixture();
+        input.die = Rect {
+            lx: -100_000,
+            ly: -100_000,
+            ux: 100_000,
+            uy: 100_000,
+        };
+        input.obstacles = vec![input.obstacles[0].clone(); 1024];
+        let limits = RouteLimits::default();
+        let mut spatial = Spatial::new(&input, &limits).unwrap();
+        assert!(spatial.bins.mode == BinMode::Paged);
+        assert_eq!(spatial.bins.pages.len(), 1);
+        let fixed = Rect {
+            lx: 46,
+            ly: 20,
+            ux: 54,
+            uy: 30,
+        };
+        assert!(!spatial.clear(0, fixed, 8).unwrap());
+        let negative = Rect {
+            lx: -100,
+            ly: -100,
+            ux: -90,
+            uy: -90,
+        };
+        let id = spatial
+            .add_routed(Blockage {
+                layer: 0,
+                rect: negative,
+                net: Some(7),
+            })
+            .unwrap();
+        assert_eq!(spatial.bins.pages.len(), 2);
+        assert!(!spatial.clear(0, negative, 8).unwrap());
+        spatial.remove(id);
+        assert!(spatial.clear(0, negative, 8).unwrap());
     }
 
     fn fixture() -> RouteInput {

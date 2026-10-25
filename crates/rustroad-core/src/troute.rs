@@ -397,10 +397,14 @@ fn memory_estimate_limited(
     limits: &RouteLimits,
 ) -> Result<MemoryEstimate> {
     let bin = crate::routing::bin_side(input)?;
-    let (.., cells) = crate::routing::bin_extent(input, bin);
+    let (x0, x1, y0, y1, cells) = crate::routing::bin_extent(input, bin);
     let layers = input.layers.len() as u64;
     let slots = cells.saturating_mul(layers);
-    let sparse_bins = slots > 1_000_000;
+    let mode = crate::routing::bin_mode(input, cells);
+    let page_side = crate::routing::BIN_PAGE_SIDE;
+    let page_x = (x1.div_euclid(page_side) - x0.div_euclid(page_side) + 1) as u64;
+    let page_y = (y1.div_euclid(page_side) - y0.div_euclid(page_side) + 1) as u64;
+    let pages = page_x.saturating_mul(page_y).saturating_mul(layers);
 
     let mut fixed_entries = 0u64;
     for b in &input.obstacles {
@@ -413,10 +417,10 @@ fn memory_estimate_limited(
     let added = t.saturating_mul(SHAPES_PER_TERMINAL);
     let index = |shapes: u64| {
         let entries = fixed_entries.saturating_add(shapes.saturating_mul(ENTRIES_PER_SHAPE));
-        let grid = if sparse_bins {
-            slots.min(entries).saturating_mul(96)
-        } else {
-            slots.saturating_mul(GRID_BYTES)
+        let grid = match mode {
+            crate::routing::BinMode::Sparse => slots.min(entries).saturating_mul(96),
+            crate::routing::BinMode::Paged => pages.min(entries).saturating_mul(8320),
+            crate::routing::BinMode::Dense => slots.saturating_mul(GRID_BYTES),
         };
         // Fixed rectangles are shared with RouteInput; only their query marks
         // are additional. Added geometry retains its full state allowance.
