@@ -866,16 +866,13 @@ impl<'a> Router<'a> {
             let g = &self.graph.layers[l];
             let (cs, ss) = (&g.tracks, &g.stops);
             let (xv, yv) = if g.vertical { (cs, ss) } else { (ss, cs) };
-            xs.extend(
-                xv.iter()
-                    .copied()
-                    .filter(|&x| bounds.lx <= x && x <= bounds.ux),
-            );
-            ys.extend(
-                yv.iter()
-                    .copied()
-                    .filter(|&y| bounds.ly <= y && y <= bounds.uy),
-            );
+            // A local escape must not scan the full-chip axes for every pin.
+            let x0 = xv.partition_point(|&x| x < bounds.lx);
+            let x1 = xv.partition_point(|&x| x <= bounds.ux);
+            let y0 = yv.partition_point(|&y| y < bounds.ly);
+            let y1 = yv.partition_point(|&y| y <= bounds.uy);
+            xs.extend(xv[x0..x1].iter().copied());
+            ys.extend(yv[y0..y1].iter().copied());
         }
         let local = Local {
             xs: xs.into_iter().collect(),

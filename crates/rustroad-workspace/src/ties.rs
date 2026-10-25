@@ -634,8 +634,24 @@ pub fn dissolve_constant_cells(
     low: TieSpec<'_>,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, usize)> {
+    verilog::validate_netlist(netlist, &verilog::VerilogLimits::large_design_ceiling())
+        .map_err(|e| invalid(e.to_string()))?;
+    input_bound(netlist, limits)?;
+    dissolve_constant_cells_owned(netlist.clone(), cells, high, low, limits)
+}
+
+/// Consuming constant-cell rewrite; unchanged instances retain their allocations.
+pub fn dissolve_constant_cells_owned(
+    mut netlist: verilog::Netlist,
+    cells: &[ConstantCellSpec<'_>],
+    high: TieSpec<'_>,
+    low: TieSpec<'_>,
+    limits: &TieLimits,
+) -> TieResult<(verilog::Netlist, usize)> {
+    verilog::validate_netlist(&netlist, &verilog::VerilogLimits::large_design_ceiling())
+        .map_err(|e| invalid(e.to_string()))?;
     if cells.is_empty() {
-        return Ok((netlist.clone(), 0));
+        return Ok((netlist, 0));
     }
     let mut work = Work { used: 0, limits };
     let mut values: HashMap<&str, HashMap<&str, bool>> = HashMap::new();
@@ -673,19 +689,15 @@ pub fn dissolve_constant_cells(
             )));
         }
     }
-    let mut out = verilog::Netlist {
-        module: netlist.module.clone(),
-        ports: netlist.ports.clone(),
-        wires: netlist.wires.clone(),
-        assigns: netlist.assigns.clone(),
-        instances: Vec::with_capacity(netlist.instances.len()),
-    };
+    let instances = std::mem::take(&mut netlist.instances);
+    let mut out = netlist;
+    out.instances = Vec::with_capacity(instances.len());
     let literal = |value: bool| verilog::Expr::Constant(if value { "1'b1" } else { "1'b0" }.into());
     let mut dissolved = 0usize;
-    for instance in &netlist.instances {
+    for instance in instances {
         work.charge(1)?;
         let Some(map) = values.get(instance.cell.as_str()) else {
-            out.instances.push(instance.clone());
+            out.instances.push(instance);
             continue;
         };
         let mut driven = Vec::new();
@@ -778,6 +790,19 @@ pub fn materialize_constants_with(
     verilog::validate_netlist(netlist, &verilog::VerilogLimits::large_design_ceiling())
         .map_err(|e| invalid(e.to_string()))?;
     input_bound(netlist, limits)?;
+    materialize_constants_owned(netlist.clone(), high, low, limits)
+}
+
+/// Rewrite literals in place, retaining all unchanged netlist record allocations.
+pub fn materialize_constants_owned(
+    mut netlist: verilog::Netlist,
+    high: TieSpec<'_>,
+    low: TieSpec<'_>,
+    limits: &TieLimits,
+) -> TieResult<(verilog::Netlist, TieReport)> {
+    verilog::validate_netlist(&netlist, &verilog::VerilogLimits::large_design_ceiling())
+        .map_err(|e| invalid(e.to_string()))?;
+    input_bound(&netlist, limits)?;
     if high.cell.name == low.cell.name
         && high.pin == low.pin
         && !matches!((high.rail, low.rail), (Some(h), Some(l)) if h.0 == l.0 && h.1 != l.1)
@@ -847,24 +872,13 @@ pub fn materialize_constants_with(
         },
         rails_used: [false; 2],
     };
-    let mut rewritten = verilog::Netlist {
-        module: netlist.module.clone(),
-        ports: netlist.ports.clone(),
-        wires: netlist.wires.clone(),
-        assigns: Vec::with_capacity(netlist.assigns.len()),
-        instances: Vec::with_capacity(netlist.instances.len()),
-    };
-    for assign in &netlist.assigns {
+    for assign in &mut netlist.assigns {
         let width = transform.width(&assign.lhs, 1)?;
-        rewritten.assigns.push(verilog::Assign {
-            lhs: assign.lhs.clone(),
-            rhs: transform.rewrite(&assign.rhs, Some(width), 1)?,
-        });
+        assign.rhs = transform.rewrite(&assign.rhs, Some(width), 1)?;
     }
-    for instance in &netlist.instances {
-        let mut connections = Vec::with_capacity(instance.connections.len());
-        for connection in &instance.connections {
-            let signal = match transform.existing_rail(
+    for instance in &mut netlist.instances {
+        for connection in &mut instance.connections {
+            connection.signal = match transform.existing_rail(
                 &instance.cell,
                 &connection.pin,
                 &connection.signal,
@@ -872,35 +886,32 @@ pub fn materialize_constants_with(
                 Some(rail) => rail,
                 None => transform.rewrite(&connection.signal, Some(1), 1)?,
             };
-            connections.push(verilog::Connection {
-                pin: connection.pin.clone(),
-                signal,
-            });
         }
-        rewritten.instances.push(verilog::Instance {
-            name: instance.name.clone(),
-            cell: instance.cell.clone(),
-            connections,
-        });
     }
     transform.report.new_cells = transform.cells.len();
-    for (used, wire) in transform
-        .rails_used
+    let Transform {
+        report,
+        cells,
+        wires,
+        rails_used,
+        ..
+    } = transform;
+    for (used, wire) in rails_used
         .into_iter()
         .zip([RAIL_POWER_WIRE, RAIL_GROUND_WIRE])
     {
         if used {
-            rewritten.wires.push(verilog::Wire {
+            netlist.wires.push(verilog::Wire {
                 name: wire.into(),
                 range: None,
             });
         }
     }
-    rewritten.wires.extend(transform.wires);
-    rewritten.instances.extend(transform.cells);
-    verilog::validate_netlist(&rewritten, &verilog::VerilogLimits::large_design_ceiling())
+    netlist.wires.extend(wires);
+    netlist.instances.extend(cells);
+    verilog::validate_netlist(&netlist, &verilog::VerilogLimits::large_design_ceiling())
         .map_err(|e| invalid(e.to_string()))?;
-    Ok((rewritten, transform.report))
+    Ok((netlist, report))
 }
 
 #[cfg(test)]

@@ -480,17 +480,16 @@ pub fn import_pdk_bounded(
             rail: cfg.tie_low.rail(),
         };
         let (dissolved, count) =
-            crate::ties::dissolve_constant_cells(&netlist, &specs, high, low, &tie_limits)
+            crate::ties::dissolve_constant_cells_owned(netlist, &specs, high, low, &tie_limits)
                 .map_err(|e| invalid(e.to_string()))?;
-        let (updated, mut report) = crate::ties::materialize_constants_with(
-            &dissolved,
+        let remaining_cells = limits.max_cells.saturating_sub(dissolved.instances.len());
+        let (updated, mut report) = crate::ties::materialize_constants_owned(
+            dissolved,
             high,
             low,
             &crate::ties::TieLimits {
-                max_new_cells: cfg
-                    .max_added_cells
-                    .min(limits.max_cells.saturating_sub(netlist.instances.len())),
-                ..Default::default()
+                max_new_cells: cfg.max_added_cells.min(remaining_cells),
+                ..tie_limits
             },
         )
         .map_err(|e| invalid(e.to_string()))?;

@@ -306,6 +306,13 @@ pub(crate) fn decode_route_table(bytes: &[u8], table: &RoutesTable) -> Result<Ro
         }
         last = r[0];
         match r[0] {
+            1 if routes.wires.len() >= table.wires => return Err(bad("too many wire records")),
+            2 if routes.vias.len() >= table.vias => return Err(bad("too many via records")),
+            3 if routes.access.len() >= table.access => return Err(bad("too many access records")),
+            4 if routes.patches.len() >= table.patches => {
+                return Err(bad("too many patch records"));
+            }
+            5 if routes.nets.len() >= table.nets => return Err(bad("too many net records")),
             1 => routes.wires.push(routing::Wire {
                 net: u32_of(r[1])?,
                 layer: u32_of(r[2])?,

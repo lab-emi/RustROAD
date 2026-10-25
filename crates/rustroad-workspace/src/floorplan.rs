@@ -284,15 +284,13 @@ pub fn floorplan_with_limits(
         rail: cfg.tie_low.rail(),
     };
     let (rewritten, _) =
-        crate::ties::dissolve_constant_cells(&netlist, &specs, high, low, &limits.ties)
+        crate::ties::dissolve_constant_cells_owned(netlist, &specs, high, low, &limits.ties)
             .map_err(|e| invalid(e.to_string()))?;
-    drop(netlist);
     let netlist = rewritten;
     trace("constant cells dissolved");
     let (rewritten, ties) =
-        crate::ties::materialize_constants_with(&netlist, high, low, &limits.ties)
+        crate::ties::materialize_constants_owned(netlist, high, low, &limits.ties)
             .map_err(|e| invalid(e.to_string()))?;
-    drop(netlist);
     let netlist = rewritten;
     trace("constants materialized");
     let site = tech

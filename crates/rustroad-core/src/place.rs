@@ -22,6 +22,7 @@
 //! O(cells + pins); work is counted against `PlaceLimits::max_work`.
 //! See docs/scaling.md for the estimate.
 use crate::{Error, Result};
+use rayon::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PinRef {
@@ -241,6 +242,27 @@ struct Csr {
     col: Vec<u32>,
     val: Vec<f64>,
 }
+
+fn multiply(diag: &[f64], csr: &Csr, values: &[f64], output: &mut [f64]) {
+    let row = |i: usize, result: &mut f64| {
+        let mut sum = diag[i] * values[i];
+        for k in csr.start[i]..csr.start[i + 1] {
+            sum += csr.val[k] * values[csr.col[k] as usize];
+        }
+        *result = sum;
+    };
+    if output.len() >= 16_384 {
+        output
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, value)| row(i, value));
+    } else {
+        output
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, value)| row(i, value));
+    }
+}
 fn compress(n: usize, mut off: Vec<(u32, u32, f64)>) -> Csr {
     off.sort_unstable_by_key(|e| (e.0, e.1));
     let mut start = vec![0usize; n + 1];
@@ -273,18 +295,9 @@ fn solve(
     work: &mut Work,
 ) -> Result<()> {
     let n = x.len();
-    let mul = |v: &[f64], out: &mut [f64]| {
-        for i in 0..n {
-            let mut s = diag[i] * v[i];
-            for k in csr.start[i]..csr.start[i + 1] {
-                s += csr.val[k] * v[csr.col[k] as usize];
-            }
-            out[i] = s;
-        }
-    };
     let mut r = vec![0.0; n];
     let mut ap = vec![0.0; n];
-    mul(x, &mut ap);
+    multiply(diag, csr, x, &mut ap);
     for i in 0..n {
         r[i] = b[i] - ap[i];
     }
@@ -298,7 +311,7 @@ fn solve(
         if rn <= 1e-9 * norm_b {
             break;
         }
-        mul(&p, &mut ap);
+        multiply(diag, csr, &p, &mut ap);
         let pap: f64 = p.iter().zip(&ap).map(|(a, b)| a * b).sum();
         if pap <= 0.0 || !pap.is_finite() {
             break;
@@ -1226,6 +1239,38 @@ pub fn place(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn csr_rows_match_an_analytic_result_and_are_bitwise_thread_independent() {
+        let n = 32_768;
+        let diag = vec![2.0; n];
+        let mut off = Vec::with_capacity((n - 1) * 2);
+        for i in 1..n {
+            off.push((i as u32, i as u32 - 1, -1.0));
+            off.push((i as u32 - 1, i as u32, -1.0));
+        }
+        let csr = compress(n, off);
+        let values = vec![1.0; n];
+        let evaluate = |threads| {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("test pool");
+            let mut output = vec![0.0; n];
+            pool.install(|| multiply(&diag, &csr, &values, &mut output));
+            output
+        };
+        let one = evaluate(1);
+        let four = evaluate(4);
+        assert_eq!(one.first(), Some(&1.0));
+        assert_eq!(one.last(), Some(&1.0));
+        assert!(one[1..n - 1].iter().all(|v| *v == 0.0));
+        assert!(
+            one.iter()
+                .zip(four)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+        );
+    }
     fn chain(n: usize, rows: usize, width: i64) -> PlaceProblem {
         let mut nets = vec![vec![PinRef::Fixed([0, 50]), PinRef::Cell(0)]];
         for i in 1..n {
