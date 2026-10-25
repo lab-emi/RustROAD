@@ -170,6 +170,11 @@ the current net's attempts nor the total unrelated repair count multiplies that
 penalty again. Spatial congestion history remains active. The repair counter
 still enforces the global work bound, without making the same local conflict
 arbitrarily costly as independent nets are added to a batch.
+Only unit wire segments that actually cross another routed net gain spatial
+history. A crossing on one part of a merged line does not mark its clear or
+disconnected portions. Collinear merging retains endpoint IDs and processes
+runs in place, without separate endpoint and merged-run copies. Exact conflict
+queries use the existing comparison bound and history entry limit.
 
 Preferred-track moves can span 16, 64 or 256 stops. Each full wire is checked
 against geometry, and every intermediate point must obey the guide and tree

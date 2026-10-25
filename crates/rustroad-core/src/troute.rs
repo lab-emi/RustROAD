@@ -2734,8 +2734,8 @@ impl<'a> Router<'a> {
             }
             // Collinear new wire edges of one track line become one shape.
             type Line = (u32, bool, i64);
-            type Spans = (Vec<(i64, i64)>, Vec<u32>);
-            let mut lines: BTreeMap<Line, Spans> = BTreeMap::new();
+            type Span = (i64, i64, u32, u32);
+            let mut lines: BTreeMap<Line, Vec<Span>> = BTreeMap::new();
             for &(a, b, kind) in &path {
                 let (la, pa) = self.graph.point(a);
                 let (lb, pb) = self.graph.point(b);
@@ -2762,9 +2762,10 @@ impl<'a> Router<'a> {
                     } else {
                         (pa[1], pa[0].min(pb[0]), pa[0].max(pb[0]))
                     };
-                    let e = lines.entry((la, vertical, cross)).or_default();
-                    e.0.push((lo, hi));
-                    e.1.push(b);
+                    lines
+                        .entry((la, vertical, cross))
+                        .or_default()
+                        .push((lo, hi, a, b));
                 } else {
                     target.add(
                         self.graph.slot[&la],
@@ -2804,16 +2805,16 @@ impl<'a> Router<'a> {
                     }
                 }
             }
-            for ((layer, vertical, cross), (mut spans, nodes)) in lines {
+            for ((layer, vertical, cross), mut spans) in lines {
                 spans.sort_unstable();
-                let mut merged: Vec<(i64, i64)> = Vec::with_capacity(spans.len());
-                for (lo, hi) in spans {
-                    match merged.last_mut() {
-                        Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
-                        _ => merged.push((lo, hi)),
+                let mut first = 0;
+                while first < spans.len() {
+                    let (lo, mut hi, _, _) = spans[first];
+                    let mut end = first + 1;
+                    while end < spans.len() && spans[end].0 <= hi {
+                        hi = hi.max(spans[end].1);
+                        end += 1;
                     }
-                }
-                for (lo, hi) in merged {
                     let (pa, pb) = if vertical {
                         ([cross, lo], [cross, hi])
                     } else {
@@ -2833,8 +2834,27 @@ impl<'a> Router<'a> {
                         && !victims.is_empty()
                     {
                         victims_all.extend(victims);
-                        for &n in &nodes {
-                            self.history.increment(n)?;
+                        // A crossing is local to its conflicting unit edges.
+                        // Marking the entire run also penalizes clear space and
+                        // can exhaust sparse history on a single long wire.
+                        for &(_, _, a, b) in &spans[first..end] {
+                            let unit = self.edge_rect(
+                                layer,
+                                self.graph.point(a).1,
+                                self.graph.point(b).1,
+                                net,
+                            )?;
+                            match self.spatial.probe_soft(layer, unit, net)? {
+                                Soft::Clear { victims, .. } if !victims.is_empty() => {
+                                    self.history.increment(b)?;
+                                }
+                                Soft::Clear { .. } => {}
+                                Soft::Blocked => {
+                                    return Err(invalid(
+                                        "merged routing span contains blocked unit geometry",
+                                    ));
+                                }
+                            }
                         }
                     }
                     out.shapes.push(self.spatial.add_routed(Blockage {
@@ -2842,6 +2862,7 @@ impl<'a> Router<'a> {
                         rect,
                         net: Some(net),
                     })?);
+                    first = end;
                 }
             }
             target.add(
@@ -3595,7 +3616,12 @@ mod tests {
             max_search_expansions: 2000,
             ..limits()
         };
-        for (round, current_rips, victim_rips) in [(0, 0, 0), (750, 0, 0), (750, 23, 23)] {
+        for (round, current_rips, victim_rips, history_limit) in [
+            (0, 0, 0, None),
+            (750, 0, 0, None),
+            (750, 23, 23, None),
+            (0, 0, 0, Some(16)),
+        ] {
             let plan = design.tracks.as_ref().unwrap();
             let graph = Graph::new(&design, plan, &limits).unwrap();
             let nodes = graph.len;
@@ -3621,7 +3647,12 @@ mod tests {
                 expansions: 0,
                 search: Search::new(nodes, nodes).unwrap(),
                 epoch: 0,
-                history: History::new(nodes, nodes).unwrap(),
+                history: match history_limit {
+                    // Embed the small fixture in the sparse history backend
+                    // to check a real storage limit without a huge layout.
+                    Some(cap) => History::new(3_000_000_000, cap).unwrap(),
+                    None => History::new(nodes, nodes).unwrap(),
+                },
                 gmark: vec![1; cell_count],
                 gepoch: 1,
                 stack_ok: vec![true; design.layers.len()],
@@ -3661,6 +3692,21 @@ mod tests {
                 );
             };
             assert_eq!(victims, [9], "the crossing must declare the ripped net");
+            if history_limit.is_some() {
+                assert!(nodes <= 200_000, "bounded history inspection fixture");
+                let mut marked = 0;
+                for id in 0..nodes as u32 {
+                    if r.history.get(id) != 0 {
+                        let p = r.graph.point(id).1;
+                        assert!(
+                            (4900..=5100).contains(&p[1]),
+                            "clear wire location {p:?} was marked congested"
+                        );
+                        marked += 1;
+                    }
+                }
+                assert!((1..=16).contains(&marked), "localized history: {marked}");
+            }
             let groups = BTreeMap::from([(0, terminals)]);
             let routes = BTreeMap::from([(0, route)]);
             let mut out = assemble(
