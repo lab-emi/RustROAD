@@ -253,6 +253,12 @@ pub fn floorplan_with_limits(
     }
     cfg.io_plan = None;
     cfg.validate()?;
+    if cfg.input_buffer.is_some() {
+        return Err(fail(
+            "FLOORPLAN_INPUT_BUFFER_POLICY",
+            "input buffering requires an explicit fixed floorplan; derive the base floorplan before applying input_buffer during import",
+        ));
+    }
     let (netlist, _) = crate::pdk::read_netlist(&req.netlist, &limits.verilog)?;
     trace("netlist parsed");
     let find = |name: &str| {

@@ -15,6 +15,7 @@ pub mod eco;
 pub mod extract;
 pub mod floorplan;
 pub mod gds;
+pub mod input_buffer;
 pub mod pdk;
 pub mod physical;
 mod port_ties;
@@ -100,6 +101,7 @@ pub struct Summary {
     pub diagnostics: Vec<pdk::Diagnostic>,
     pub inserted_tie_cells: Option<usize>,
     pub inserted_port_buffers: Option<usize>,
+    pub inserted_input_buffers: Option<usize>,
     pub filler_cells: Option<usize>,
     pub rail_continuity_status: &'static str,
     pub body_bias_status: &'static str,
@@ -169,6 +171,10 @@ impl Metadata {
                 .as_ref()
                 .and_then(|p| p.ties.as_ref().map(|t| t.new_cells)),
             inserted_port_buffers: self.physical.as_ref().map(|p| p.port_buffers.len()),
+            inserted_input_buffers: self
+                .physical
+                .as_ref()
+                .and_then(|p| p.input_buffers.as_ref().map(|r| r.buffers.len())),
             filler_cells: self
                 .physical
                 .as_ref()

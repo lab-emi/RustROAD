@@ -125,6 +125,9 @@ pub struct PhysicalConfig {
     /// other aliases and input-to-output feedthroughs use this buffer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port_buffer: Option<PortBuffer>,
+    /// Optional bounded trees on nonclock primary inputs; clocks remain under CTS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_buffer: Option<crate::input_buffer::Config>,
     /// Analytic placer (`rustroad_core::place`); absent keeps fixed-order
     /// packing, the deterministic baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -254,6 +257,9 @@ impl PhysicalConfig {
             ));
         }
         if let Some(c) = &self.clock {
+            c.validate()?;
+        }
+        if let Some(c) = &self.input_buffer {
             c.validate()?;
         }
         if let Some(b) = &self.port_buffer
@@ -1279,6 +1285,7 @@ pub(super) fn prepare(
         let remaining = cfg
             .max_added_cells
             .saturating_sub(bundle.port_buffers.len())
+            .saturating_sub(bundle.input_buffers.as_ref().map_or(0, |r| r.buffers.len()))
             .saturating_sub(bundle.ties.as_ref().map_or(0, |t| t.new_cells))
             .saturating_sub(bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len()))
             .min(limits.max_cells.saturating_sub(design.cells.len()));
@@ -1383,6 +1390,7 @@ pub(super) fn prepare(
                 if design.cells.len() >= limits.max_cells
                     || bundle.generated_fillers.len()
                         + bundle.port_buffers.len()
+                        + bundle.input_buffers.as_ref().map_or(0, |r| r.buffers.len())
                         + bundle.generated_taps.len()
                         + bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len())
                         + bundle.ties.as_ref().map_or(0, |t| t.new_cells)

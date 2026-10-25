@@ -6,11 +6,14 @@ Run: python3 -m unittest discover -s scripts/tests -v
 from __future__ import annotations
 
 import json
+import copy
+import hashlib
 import re
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent
@@ -22,6 +25,8 @@ import rtl2gds_controls as C  # noqa: E402
 import rtl2gds_design as D  # noqa: E402
 import rtl2gds_logic as L  # noqa: E402
 import rtl2gds_timing as T  # noqa: E402
+import rtl2gds as R  # noqa: E402
+from hold_closure import Flow  # noqa: E402
 
 PORTS_JSON = {"ports": {
     "clk": {"direction": "input", "bits": [2]},
@@ -39,6 +44,65 @@ PIPELINE_TAIL = ("set_input_delay 0.2 -clock core [get_ports {en a b}]\n"
 
 
 class Statuses(unittest.TestCase):
+    def test_input_buffer_override_is_bound_before_execution(self):
+        manifest = json.loads((SCRIPTS.parent / 'fixtures/designs/pipeline_track.json').read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            ctx = SimpleNamespace(manifest=manifest, clock=manifest['clock'],
+                                  args=SimpleNamespace(input_buffer_fanout=2),
+                                  h=SimpleNamespace(root=Path(directory)))
+            gate = R.PdkGate(ctx, 'sky130', {'tag': 'sky130'})
+            actual = Path(gate.p['config']).read_bytes()
+            self.assertEqual(json.loads(actual)['input_buffer']['max_fanout'], 2)
+            self.assertEqual(gate.spec['frozen']['physical_config'], hashlib.sha256(actual).hexdigest())
+            self.assertEqual(gate.spec['frozen']['input_buffer_policy'],
+                             gate.p['input_buffer_override']['policy_sha256'])
+            bad = copy.deepcopy(manifest)
+            bad['pdks']['sky130']['frozen']['physical_config'] = '0' * 64
+            ctx.manifest = bad
+            with self.assertRaisesRegex(D.GateError, 'unpinned physical'):
+                R.PdkGate(ctx, 'sky130', {'tag': 'sky130'})
+            self.assertEqual(Path(gate.p['config']).read_bytes(), actual)
+
+    def test_fixed_floorplan_override_rejects_unrelated_configuration_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / 'base.json'
+            base.write_text('{"marker": 1}\n')
+            policy = root / 'policy.json'
+            policy.write_text('{"max_fanout": 2}\n')
+            floor = root / 'floor.json'
+            floor.write_text('{"unchanged_floorplan": true}\n')
+            derived = root / 'derived.json'
+            effective = json.loads(base.read_text())
+            effective['input_buffer'] = json.loads(policy.read_text())
+            derived.write_text(json.dumps(effective, indent=2) + '\n')
+            producer = {'physical': base.read_bytes()}
+
+            def run(*_args):
+                (root / 'sky130_floorplan_check.json').write_bytes(floor.read_bytes())
+                (root / 'sky130_physical_check.json').write_bytes(producer['physical'])
+                return {}
+
+            flow = object.__new__(Flow)
+            flow.tag = 'sky130'
+            flow.h = SimpleNamespace(root=root, json_command=run)
+            flow.tools = {'rustroad': 'unused'}
+            flow.routing = root / 'routing.json'
+            flow.config = derived
+            flow.design = SimpleNamespace(floorplan_recipe=dict(utilization=.5, aspect=1, margin_um=10),
+                                          physical_profile=base, floorplan=floor, clocked=False)
+            flow.p = dict(technology_lef={'path': 'unused'}, cell_lef={'path': 'unused'},
+                          input_buffer_override=dict(base_path=str(base),
+                              base_sha256=hashlib.sha256(base.read_bytes()).hexdigest(),
+                              policy_path=str(policy), policy_sha256=hashlib.sha256(policy.read_bytes()).hexdigest(),
+                              policy=json.loads(policy.read_text())))
+            self.assertEqual(flow.reproduce_floorplan(root / 'unused.v')['status'], 'passed')
+            producer['physical'] = b'{"marker": 2}\n'
+            self.assertEqual(flow.reproduce_floorplan(root / 'unused.v')['status'], 'failed')
+            producer['physical'] = base.read_bytes()
+            policy.write_text('{"max_fanout": 3}\n')
+            self.assertEqual(flow.reproduce_floorplan(root / 'unused.v')['status'], 'failed')
+
     def test_route_antenna_plant_uses_existing_gate_connected_metal(self):
         definition = """VERSION 5.8 ;
 DIEAREA ( 0 0 ) ( 1000 1000 ) ;

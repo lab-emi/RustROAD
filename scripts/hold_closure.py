@@ -320,6 +320,8 @@ class Flow:
         files.update({f'openrcx_rules_{c}': v for c, v in self.openrcx_rules.items()})
         if self.design.sizing_profile is not None:
             files['sizing_profile'] = self.design.sizing_profile
+        if self.p.get('input_buffer_override'):
+            files['input_buffer_policy'] = Path(self.p['input_buffer_override']['policy_path'])
         return {k: fingerprint(v) for k, v in sorted(files.items())}
 
     # ------------------------------------------------------------ physical
@@ -364,8 +366,22 @@ class Flow:
             '--margin-um', fp['margin_um'], *clock, '--out-floorplan', floor, '--out-physical-config', phys]])
         same_floor = floor.read_bytes() == self.design.floorplan.read_bytes()
         same_phys = phys.read_bytes() == self.config.read_bytes()
+        override = self.p.get('input_buffer_override')
+        policy_bound = None
+        if override:
+            base = Path(override['base_path']).read_bytes()
+            policy_bytes = Path(override['policy_path']).read_bytes()
+            policy_bound = (hashlib.sha256(base).hexdigest() == override['base_sha256']
+                            and hashlib.sha256(policy_bytes).hexdigest() == override['policy_sha256'])
+            generated = json.loads(phys.read_text())
+            if generated.get('input_buffer') is not None:
+                raise ValueError('base floorplan unexpectedly contains an input-buffer policy')
+            generated['input_buffer'] = override['policy']
+            expected = (json.dumps(generated, indent=2) + '\n').encode()
+            same_phys = policy_bound and phys.read_bytes() == base and expected == self.config.read_bytes()
         return dict(status='passed' if same_floor and same_phys else 'failed', floorplan_identical=same_floor,
                     physical_config_identical=same_phys, recipe=fp,
+                    input_buffer_policy_bound=policy_bound,
                     report={k: rep.get(k) for k in ('die_area', 'core_area', 'rows', 'estimated_utilization', 'io_pins',
                                                     'clock_buffers_estimate', 'cell_area_um2')})
 

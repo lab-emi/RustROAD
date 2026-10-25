@@ -1,7 +1,8 @@
 //! Self-authored integration fixture: four 1 x 2 um masters, three routing
-//! layers, one cut layer/via, two ten-site rows, and at most 20 instances.
-//! Before implementation: source/AST/geometry/maps/exports total < 1 MiB per
-//! test; two concurrent test workers stay < 2 MiB incremental fixture memory.
+//! layers, one cut layer/via and two rows. Input-buffer refusal tests use at
+//! most 1,000 instances; other fixtures have fewer than 150.
+//! Before implementation: source/AST/geometry/maps/exports total < 8 MiB per
+//! test; two concurrent test workers stay < 16 MiB incremental fixture memory.
 //! No PDK parse, path traversal, SAT problem or unbounded fixture generation.
 //! Use repository CARGO_BUILD_JOBS=2/RUST_TEST_THREADS=2 and OS/time guards.
 //! This tests workspace integration; real-PDK OpenDB/CEC remain separate gates.
@@ -98,6 +99,7 @@ fn config() -> PhysicalConfig {
         max_tie_fanout: 8,
         tap: None,
         port_buffer: None,
+        input_buffer: None,
         clock: None,
         placer: None,
         io_plan: None,
@@ -218,6 +220,206 @@ fn clock_fixture(max_buffers: usize) -> Fixture {
         "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule",
         &c,
     )
+}
+
+fn input_policy() -> rustroad_workspace::input_buffer::Config {
+    rustroad_workspace::input_buffer::Config {
+        cell: "BUF".into(),
+        input_pin: "A".into(),
+        output_pin: "Y".into(),
+        max_fanout: 8,
+        max_buffers: 128,
+        max_sinks: 1000,
+        max_work: 100_000,
+        memory_mib: 16,
+    }
+}
+
+fn input_logic(count: usize) -> String {
+    assert!(count <= 650, "bounded fanout fixture");
+    let mut text = format!("module chip(input a, output [{}:0] y);\n", count - 1);
+    for i in 0..count {
+        text.push_str(&format!("BUF b{i}(.A(a),.Y(y[{i}]));\n"));
+    }
+    text.push_str("endmodule\n");
+    text
+}
+
+fn widen_input_fixture(f: &Fixture) {
+    let mut floor: serde_json::Value =
+        serde_json::from_slice(&fs::read(&f.sources.floorplan).unwrap()).unwrap();
+    floor["die_area"]["ux"] = 60_000.into();
+    floor["core_area"]["ux"] = 55_000.into();
+    for row in floor["rows"].as_array_mut().unwrap() {
+        row["x_end"] = 55_000.into();
+    }
+    fs::write(&f.sources.floorplan, serde_json::to_vec(&floor).unwrap()).unwrap();
+}
+
+#[test]
+fn input_trees_preserve_bus_bits_and_clock_ownership_after_replacement() {
+    for range in ["[1:0]", "[0:1]"] {
+        let mut cfg = config();
+        cfg.max_added_cells = 128;
+        cfg.input_buffer = Some(input_policy());
+        cfg.clock = Some(rustroad_workspace::clock::ClockConfig {
+            port: "clk".into(),
+            cell: "BUF".into(),
+            input_pin: "A".into(),
+            output_pin: "Y".into(),
+            sink_pin: "A".into(),
+            max_fanout: 4,
+            max_buffers: 32,
+            max_work: 10_000,
+            level_cells: Vec::new(),
+        });
+        let mut logic = format!(
+            "module chip(input {range} a, input clk, output [30:0] y);\nwire rr_input_net_2;\n"
+        );
+        for i in 0..31 {
+            let source = if i < 17 {
+                "a[0]"
+            } else if i < 22 {
+                "a[1]"
+            } else {
+                "clk"
+            };
+            let name = if i == 0 {
+                "rr_input_buffer_0".into()
+            } else {
+                format!("b{i}")
+            };
+            logic.push_str(&format!("BUF {name}(.A({source}),.Y(y[{i}]));\n"));
+        }
+        logic.push_str("endmodule\n");
+        let f = Fixture::new(&logic, &cfg);
+        widen_input_fixture(&f);
+        let imported = f.import().unwrap();
+        assert_eq!(imported.inserted_input_buffers, Some(3));
+        let snapshot = read(&f.workspace, &limits()).unwrap();
+        let report = snapshot
+            .metadata()
+            .physical
+            .as_ref()
+            .unwrap()
+            .input_buffers
+            .as_ref()
+            .unwrap();
+        assert_eq!(report.trees.len(), 1);
+        assert_eq!(report.trees[0].port, "a");
+        assert_eq!(report.trees[0].bit, u32::from(range == "[1:0]"));
+        assert_eq!(report.trees[0].sinks, 17);
+        assert_eq!(report.skipped_clock_inputs, 1);
+        assert!(report.buffers.iter().all(|b| b.name != "rr_input_buffer_0"));
+        drop(snapshot);
+        place(&f.workspace, "rev1", &limits()).unwrap();
+        let clock = rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+        assert_eq!(clock.inserted_input_buffers, Some(3));
+        let snapshot = read(&f.workspace, &limits()).unwrap();
+        let mut output = Vec::new();
+        snapshot.export_verilog(&mut output).unwrap();
+        assert!(!output.is_empty());
+    }
+}
+
+#[test]
+fn input_trees_have_bounded_multilevel_topology_and_reject_a_cycle() {
+    let mut cfg = config();
+    cfg.input_buffer = Some(input_policy());
+    let f = Fixture::new(&input_logic(73), &cfg);
+    widen_input_fixture(&f);
+    assert_eq!(f.import().unwrap().inserted_input_buffers, Some(12));
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let report = snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .input_buffers
+        .as_ref()
+        .unwrap();
+    assert_eq!(report.trees[0].levels, 2);
+    let leaf = report.buffers[0].instance;
+    let root = report.buffers[10].instance;
+    drop(snapshot);
+    let path = f.workspace.join("revisions/rev1/design.json");
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let physical = &mut value["physical"];
+    let signal =
+        physical["netlist"]["instances"][leaf as usize]["connections"][1]["signal"].clone();
+    physical["netlist"]["instances"][root as usize]["connections"][0]["signal"] = signal;
+    let net = physical["connectivity"]["pins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["owner"]["instance"] == leaf && p["owner"]["terminal"] == 1)
+        .unwrap()["net"]
+        .clone();
+    for pin in physical["connectivity"]["pins"].as_array_mut().unwrap() {
+        if pin["owner"]["instance"] == root && pin["owner"]["terminal"] == 0 {
+            pin["net"] = net.clone();
+        }
+    }
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let error = match read(&f.workspace, &limits()) {
+        Ok(_) => panic!("cyclic input buffer topology was accepted"),
+        Err(e) => e,
+    };
+    assert!(error.to_string().contains("cyclic"), "{error}");
+    assert_eq!(f.head(), "rev1\n");
+}
+
+#[test]
+fn input_buffer_budgets_fail_before_publication() {
+    for budget in ["buffers", "sinks", "work", "total", "memory"] {
+        let mut cfg = config();
+        let mut policy = input_policy();
+        let count = if budget == "memory" { 650 } else { 17 };
+        match budget {
+            "buffers" => policy.max_buffers = 2,
+            "sinks" => policy.max_sinks = 16,
+            "work" => policy.max_work = 1,
+            "total" => cfg.max_added_cells = 2,
+            "memory" => {
+                cfg.max_added_cells = 1000;
+                policy.max_buffers = 500;
+                policy.max_fanout = 3;
+                policy.memory_mib = 1;
+            }
+            _ => unreachable!(),
+        }
+        cfg.input_buffer = Some(policy);
+        let f = Fixture::new(&input_logic(count), &cfg);
+        let error = f.import().unwrap_err();
+        assert!(matches!(error, Error::Budget(_)), "{budget}: {error}");
+        assert!(
+            !f.workspace.join("HEAD").exists(),
+            "{budget} published a revision"
+        );
+    }
+}
+
+#[test]
+fn input_tree_passive_loads_are_counted_without_becoming_functional_endpoints() {
+    let mut cfg = config();
+    cfg.input_buffer = Some(input_policy());
+    let logic = input_logic(17).replace("endmodule", "DIO d0(.D(a)); endmodule");
+    let f = Fixture::new(&logic, &cfg);
+    let diode = "MACRO DIO CLASS CORE ANTENNACELL ; ORIGIN 0 0 ; SIZE 1 BY 2 ; SITE s ; SYMMETRY X Y ;\nPIN D DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M1 ; RECT 0.3 0.4 0.5 0.6 ; END END D\nEND DIO\nEND LIBRARY";
+    fs::write(&f.sources.cell_lef, library().replace("END LIBRARY", diode)).unwrap();
+    assert_eq!(f.import().unwrap().inserted_input_buffers, Some(3));
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let tree = &snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .input_buffers
+        .as_ref()
+        .unwrap()
+        .trees[0];
+    assert_eq!(tree.sinks, 17);
+    assert_eq!(tree.loads, 18);
 }
 
 #[test]

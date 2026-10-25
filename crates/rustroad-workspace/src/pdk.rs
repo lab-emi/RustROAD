@@ -71,6 +71,8 @@ pub struct PhysicalBundle {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub port_buffers: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_buffers: Option<crate::input_buffer::Report>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock_tree: Option<crate::clock::ClockReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<crate::routing::RoutingState>,
@@ -303,6 +305,10 @@ pub(crate) fn validate_bundle(
             .generated_fillers
             .len()
             .checked_add(bundle.generated_taps.len())
+            .and_then(|n| n.checked_add(bundle.port_buffers.len()))
+            .and_then(|n| {
+                n.checked_add(bundle.input_buffers.as_ref().map_or(0, |r| r.buffers.len()))
+            })
             .and_then(|n| n.checked_add(bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len())))
             .and_then(|n| n.checked_add(bundle.ties.as_ref().map_or(0, |t| t.new_cells)))
             .ok_or_else(|| budget("generated physical-cell count overflow"))?;
@@ -338,6 +344,7 @@ pub(crate) fn validate_bundle(
         }
         crate::physical::validate_ties(bundle)?;
         crate::physical::validate_output_ports(bundle)?;
+        crate::input_buffer::validate(bundle)?;
         for name in &bundle.port_buffers {
             if !names.insert(name) {
                 return Err(invalid("duplicate generated port buffer"));
@@ -365,6 +372,7 @@ pub(crate) fn validate_bundle(
             }
         }
     } else if bundle.ties.is_some()
+        || bundle.input_buffers.is_some()
         || bundle.clock_tree.is_some()
         || bundle.routing.is_some()
         || bundle.state.is_some()
@@ -554,6 +562,9 @@ pub fn import_pdk_bounded(
         if let Some(b) = &c.port_buffer {
             v.push(b.cell.clone());
         }
+        if let Some(b) = &c.input_buffer {
+            v.push(b.cell.clone());
+        }
         v
     });
     let (technology, masters) = select_technology(&tech, &cells, &floor, &netlist, &extra)?;
@@ -659,6 +670,7 @@ pub fn import_pdk_bounded(
         generated_fillers: Vec::new(),
         generated_taps: Vec::new(),
         port_buffers: Vec::new(),
+        input_buffers: None,
         clock_tree: None,
         routing: None,
         state: None,
@@ -668,6 +680,7 @@ pub fn import_pdk_bounded(
     };
     crate::physical::distribute_ties(&mut design, &mut physical, limits)?;
     crate::physical::isolate_output_ports(&mut design, &mut physical, limits)?;
+    crate::input_buffer::insert(&mut design, &mut physical, limits)?;
     validate_bundle(&physical, &design, connection_limits)?;
     let records = rustroad_core::snapshot_records(&design, limits)?;
     let metadata = Metadata {

@@ -89,6 +89,9 @@ below describe the earlier small-block release.
   including top-level output aliases. Mixed signal/constant buses preserve
   their declared bit order. Independent Yosys equivalence and wrong-output
   controls cover both baseline PDKs.
+- Optional [primary-input trees](input-buffering.md) bound nonclock input
+  fanout before placement, with explicit buffer, sink, work and memory limits.
+  They use a fixed floorplan; automatic sizing refuses the policy explicitly.
 - Independent GDS metadata counts use bounded hierarchy dynamic programming.
   Complete XOR label lists are sorted through bounded disk chunks and merges,
   retaining exact hashes and negative controls without a full label vector.

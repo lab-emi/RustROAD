@@ -112,6 +112,7 @@ fn config() -> PhysicalConfig {
         max_tie_fanout: 8,
         tap: None,
         port_buffer: None,
+        input_buffer: None,
         clock: None,
         placer: None,
         io_plan: None,
@@ -450,6 +451,28 @@ END TAP\nEND LIBRARY\n";
     .err()
     .expect("an output path equal to an input is refused");
     assert!(refused.to_string().contains("OUTPUT_PATH"), "{refused}");
+}
+
+#[test]
+fn floorplan_does_not_silently_omit_input_buffer_area() {
+    let f = Fixture::new();
+    let mut profile: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.path("profile.json")).unwrap()).unwrap();
+    profile["input_buffer"] = serde_json::json!({
+        "cell":"BUF","input_pin":"A","output_pin":"Y","max_fanout":8,
+        "max_buffers":100,"max_sinks":1000,"max_work":100000,"memory_mib":16
+    });
+    fs::write(
+        f.path("profile.json"),
+        serde_json::to_vec(&profile).unwrap(),
+    )
+    .unwrap();
+    let error = f.floorplan("input-buffer").unwrap_err();
+    assert!(
+        error.to_string().contains("FLOORPLAN_INPUT_BUFFER_POLICY"),
+        "{error}"
+    );
+    assert!(!f.path("input-buffer-floor.json").exists());
 }
 
 /// Rail-input ties: BUF with A on a rail is the constant source. `b24` keeps

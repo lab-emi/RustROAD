@@ -105,6 +105,7 @@ fn config() -> PhysicalConfig {
         max_tie_fanout: 8,
         tap: None,
         port_buffer: None,
+        input_buffer: None,
         clock: Some(rustroad_workspace::clock::ClockConfig {
             port: "a".into(),
             cell: "BUF".into(),
