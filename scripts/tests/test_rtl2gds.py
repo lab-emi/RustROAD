@@ -244,6 +244,27 @@ class SdcAndPorts(unittest.TestCase):
         with self.assertRaises(D.GateError):
             L.verilator_ports(xml, "other")
 
+    def test_verilator_json_ports_and_budgets(self):
+        data = dict(type="NETLIST", types=[
+            dict(type="REFDTYPE", addr="ref", refDTypep="enum"),
+            dict(type="ENUMDTYPE", addr="enum", refDTypep="wide"),
+            dict(type="BASICDTYPE", addr="wide", keyword="logic", range="2:0"),
+            dict(type="BASICDTYPE", addr="bit", keyword="logic")],
+            modules=[dict(type="MODULE", name="alu", stmtsp=[
+                dict(type="VAR", name="op", isPrimaryIO=True, direction="INPUT", dtypep="ref"),
+                dict(type="VAR", name="z", isPrimaryIO=True, direction="OUTPUT", dtypep="bit"),
+                dict(type="VAR", name="internal", direction="INPUT", dtypep="bit")])])
+        ports = L.verilator_json_ports(json.dumps(data), "alu")
+        self.assertEqual([(p["name"], p["width"]) for p in ports], [("op", 3), ("z", 1)])
+        self.assertEqual(ports[0]["bits"], ["op[0]", "op[1]", "op[2]"])
+        with self.assertRaises(D.GateError):
+            L.verilator_json_ports(json.dumps(data), "alu", max_nodes=2)
+        with self.assertRaises(D.GateError):
+            L.verilator_json_ports(json.dumps(data), "alu", max_bits=2)
+        data["types"][0]["refDTypep"] = "ref"
+        with self.assertRaises(D.GateError):
+            L.verilator_json_ports(json.dumps(data), "alu")
+
     def test_ports_and_rendering_reproduce_the_pipeline_sdc(self):
         ports = D.ports_from_yosys_json(PORTS_JSON)
         self.assertEqual([p["name"] for p in ports], ["clk", "en", "a", "b", "y", "z"])

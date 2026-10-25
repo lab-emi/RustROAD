@@ -217,8 +217,85 @@ def verilator_ports(xml_text: str, top: str) -> list[dict]:
     return ports
 
 
+def verilator_json_ports(text: str, top: str, max_nodes: int = 200000,
+                         max_depth: int = 128, max_bits: int = 1000000) -> list[dict]:
+    """Read only the public JSON output's top-level port declarations.
+
+    Verilator 5.046+ removed XML output. This adapter is bounded and rejects
+    unsupported aggregate types rather than guessing their interface width.
+    """
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError) as error:
+        raise GateError(f"invalid Verilator JSON: {error}") from error
+    if not isinstance(data, dict) or data.get("type") != "NETLIST":
+        raise GateError("Verilator JSON root is not a NETLIST")
+    stack, count, types, modules = [(data, 0)], 0, {}, []
+    while stack:
+        node, depth = stack.pop()
+        count += 1
+        if count > max_nodes or depth > max_depth:
+            raise GateError("Verilator JSON node/depth budget exceeded")
+        if isinstance(node, dict):
+            kind = str(node.get("type", ""))
+            if kind.endswith("DTYPE") and node.get("addr"):
+                if node["addr"] in types:
+                    raise GateError("duplicate Verilator JSON type identifier")
+                types[node["addr"]] = node
+            if kind == "MODULE" and node.get("name") == top:
+                modules.append(node)
+            stack.extend((v, depth + 1) for v in reversed(list(node.values()))
+                         if isinstance(v, (dict, list)))
+        elif isinstance(node, list):
+            stack.extend((v, depth + 1) for v in reversed(node) if isinstance(v, (dict, list)))
+    if len(modules) != 1:
+        raise GateError(f"Verilator JSON has no unique top module {top}")
+    ports, names, bits = [], set(), 0
+    for var in modules[0].get("stmtsp", []):
+        if not isinstance(var, dict):
+            raise GateError("invalid Verilator JSON statement")
+        if var.get("type") != "VAR" or var.get("isPrimaryIO") is not True:
+            continue
+        name = var.get("origName") or var.get("name")
+        direction = str(var.get("direction", "")).lower()
+        if not name or name in names or direction not in ("input", "output", "inout"):
+            raise GateError("invalid or duplicate Verilator JSON port")
+        names.add(name)
+        ref, seen = var.get("dtypep"), set()
+        while ref in types and types[ref].get("type") in ("REFDTYPE", "ENUMDTYPE"):
+            if ref in seen or len(seen) >= 16:
+                raise GateError(f"port {name}: type-reference cycle/budget")
+            seen.add(ref)
+            ref = types[ref].get("refDTypep")
+        dtype = types.get(ref)
+        if not dtype or dtype.get("type") != "BASICDTYPE":
+            raise GateError(f"port {name}: unsupported Verilator JSON dtype")
+        declared_range = dtype.get("range")
+        if declared_range is None:
+            if dtype.get("keyword") not in ("logic", "bit", "reg", "wire"):
+                raise GateError(f"port {name}: unsupported scalar dtype")
+            msb = lsb = 0
+        else:
+            match = re.fullmatch(r"(-?\d+):(-?\d+)", str(declared_range))
+            if not match:
+                raise GateError(f"port {name}: invalid range")
+            msb, lsb = map(int, match.groups())
+        width = abs(msb - lsb) + 1
+        bits += width
+        if bits > max_bits:
+            raise GateError("Verilator JSON port-bit budget exceeded")
+        vector = width > 1
+        ports.append(dict(name=name, direction=direction, width=width,
+                          msb=msb if vector else 0, lsb=lsb if vector else 0, vector=vector,
+                          bits=[f"{name}[{i}]" for i in range(min(msb, lsb), max(msb, lsb) + 1)]
+                          if vector else [name]))
+    if not ports:
+        raise GateError(f"Verilator JSON top {top} has no ports")
+    return ports
+
+
 def rtl_ports(h, tools: dict, rtl: list[Path], top: str) -> tuple[list[dict], dict]:
-    """Ports of the RTL top: Yosys first; Verilator XML when Yosys cannot elaborate."""
+    """Ports of the RTL top: Yosys, then the public Verilator XML/JSON interface."""
     from rtl2gds_design import ports_from_yosys_json
     try:
         return ports_from_yosys_json(rtl_module(h, "rtl_ports", tools["yosys"], rtl, top)), dict(tool="yosys")
@@ -228,10 +305,17 @@ def rtl_ports(h, tools: dict, rtl: list[Path], top: str) -> tuple[list[dict], di
     r = run(h, "rtl_ports_verilator", [tools["verilator"], "--xml-only", "-Wno-fatal", "--Mdir", out,
                                        "--top-module", top, *rtl])
     xml = out / f"V{top}.xml"
-    if r["exit_code"] != 0 or not xml.is_file():
-        raise GateError(f"neither Yosys nor Verilator could elaborate the RTL ({yosys_error})")
-    return verilator_ports(_text(xml, 64 * 1024 ** 2), top), dict(
-        tool="verilator --xml-only", yosys=yosys_error, yosys_frontend=yosys_frontend_error(h, tools["yosys"], rtl, top))
+    if r["exit_code"] == 0 and xml.is_file():
+        ports, interface = verilator_ports(_text(xml, 64 * 1024 ** 2), top), "xml"
+    else:
+        result = run(h, "rtl_ports_verilator_json", [tools["verilator"], "--json-only", "-Wno-fatal",
+                     "--Mdir", out, "--top-module", top, *rtl])
+        tree = out / f"V{top}.tree.json"
+        if result["exit_code"] != 0 or not tree.is_file():
+            raise GateError(f"neither Yosys nor Verilator could elaborate the RTL ({yosys_error})")
+        ports, interface = verilator_json_ports(_text(tree, 64 * 1024 ** 2), top), "json"
+    return ports, dict(tool=f"verilator --{interface}-only", yosys=yosys_error,
+                       yosys_frontend=yosys_frontend_error(h, tools["yosys"], rtl, top))
 
 
 def yosys_frontend_error(h, yosys: Path, rtl: list[Path], top: str, label: str = "rtl_frontend_probe") -> str | None:
