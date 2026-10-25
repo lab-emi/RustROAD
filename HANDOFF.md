@@ -22,6 +22,13 @@
   The first integrated FIFO run caught this and remained unverified; its evidence is retained.
 - The old status headline was miscounted: the archived matrix has 10 passes and six failures.
   Compact reports now compute counts and preserve every MPW declaration and its original error.
+- A removed hold cell is not necessarily a timing fault after driver resizes. Check removal
+  in both engines at every corner; if it remains hold-clean, retain that experiment and require
+  a separate planted hold violation. Do not demand that the oracle reject a valid design, and
+  do not silently count an ineffective mutation as a detected fault.
+- Full 17fb611 qualification exposed that the mult clock-net circuit did not support every
+  proposed declaration. It remained failed. Physical pilots halve clock-leaf fanout (8 -> 4)
+  for mult/regfile SKY130, retaining the frozen SDC and all acceptance thresholds.
 
 ## 2026-10-25 — final RTL-to-GDS integration (feat/rtl2gds-final2; read this first)
 

@@ -359,7 +359,7 @@ statuses:
 | `cell_proofs` | inserted hold and clock cells | Yosys sat proof per corner, wrong polarity rejected, native ECO refuses an inverter |
 | `artifact_binding` | sha256 of every artifact, tool and input + RustROAD revision | re-hashed after every oracle and control |
 | `determinism` | a second full build in `<pdk>_rerun/` | byte compare (OpenRCX `*DATE` line removed, listed) |
-| `controls` | eleven planted defects | each rejected by its own oracle (`removed_hold_cell` is replaced by `planted_hold_uncertainty` when no hold cell exists) |
+| `controls` | eleven planted defects | each rejected by its own oracle; a hold-removal experiment that is still timing-clean is recorded and replaced by an explicit hold violation |
 
 Reported only: `density` (`density_status`; owner decision: not part of the
 block DRC verdict). Global statuses: `tools_identity` (pinned binaries and the
@@ -421,7 +421,7 @@ virtual clock (zero physical clock domains required).
 | `label_swap` | two input-port labels exchanged | Netgen, KLayout LVS (own results) and the XOR label comparison |
 | `removed_via` | one routing via of a two-terminal signal net deleted | Netgen and KLayout LVS |
 | `removed_hold_cell` | the hold chain of the worst iteration-0 endpoint that a chain feeds, fresh layout | RustSTA and OpenSTA hold gate |
-| `planted_hold_uncertainty` | (only when no hold cell exists) `set_clock_uncertainty -hold 2.0` in a copy of the SDC | RustSTA and OpenSTA hold gate |
+| `planted_hold_uncertainty` | when no hold cell exists, or both engines prove removal still meets hold: `set_clock_uncertainty -hold 2.0` in a copy of the SDC | RustSTA and OpenSTA hold gate |
 | `tampered_sdc` | `set_input_delay 0.2` -> `0.6` in the rendered SDC | frozen-input sha256 |
 | `tampered_spef` | every R of the native ss SPEF x1000 | SPEF sha256 vs the extraction receipt (re-timing reported) |
 | `inverted_output` | bit 0 of the first output driven through a PDK inverter in a copy of the final netlist (names kept) | RustSys `not-equivalent`, the second CEC oracle, co-simulation mismatches |
