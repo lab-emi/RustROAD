@@ -59,6 +59,12 @@ fn default_wrong_way() -> u64 {
 fn default_memory_mib() -> u64 {
     2048
 }
+fn default_history_entries() -> usize {
+    routing::DEFAULT_MAX_HISTORY_ENTRIES
+}
+fn default_history(value: &usize) -> bool {
+    *value == default_history_entries()
+}
 /// Track router (`rustroad_core::routing::TrackPlan`): per-layer tracks from
 /// LEF PITCH/OFFSET, GCell global routing, rip-up and reroute. Requires
 /// `lef_rules`. Budgets: docs/scaling.md.
@@ -87,6 +93,11 @@ pub struct TrackRouterConfig {
     pub wrong_way_factor: u64,
     #[serde(default = "default_memory_mib")]
     pub memory_mib: u64,
+    #[serde(
+        default = "default_history_entries",
+        skip_serializing_if = "default_history"
+    )]
+    pub max_history_entries: usize,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -111,6 +122,8 @@ impl RoutingConfig {
         if let Some(t) = &self.track_router {
             self.limits.validate_track()?;
             if !self.lef_rules
+                || t.max_history_entries == 0
+                || t.max_history_entries > 64_000_000
                 || t.tracks.len() > 16
                 || t.tracks
                     .iter()
@@ -1161,6 +1174,7 @@ pub(crate) fn track_plan(
         via_cost: config.via_cost,
         wrong_way_factor: config.wrong_way_factor,
         memory_mib: config.memory_mib,
+        max_history_entries: config.max_history_entries,
     })
 }
 /// Relative (origin 0,0) pin and same-master other-net geometry of one

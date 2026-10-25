@@ -63,13 +63,14 @@ const ENTRIES_PER_SHAPE: u64 = 4;
 /// 5.2-7.0) and bytes per record across the output and the same-net groups.
 const RECORDS_PER_TERMINAL: u64 = 10;
 const RECORD_BYTES: u64 = 128;
-/// Routed state per terminal (per-net edge maps, escape plans, guides,
-/// queues), calibrated on the scale blocks (docs/scaling.md: 2.8-4.8 KiB
-/// per terminal measured with the per-node term below).
-const ROUTED_BYTES_PER_TERMINAL: u64 = 4096;
-/// Routed graph edges are bounded by the nodes they occupy (one net per
-/// node): bytes per node of per-net edge maps.
-const ROUTED_BYTES_PER_NODE: u64 = 8;
+/// Escape plans, hash/tree metadata, groups, guides and queues. Completed
+/// wire/via vectors and the active net's raw topology are counted separately.
+const ROUTED_BYTES_PER_TERMINAL: u64 = 768;
+const ACTIVE_TOPOLOGY_BYTES: u64 = 160;
+
+fn access_cache_limit(plan: &TrackPlan) -> u64 {
+    (plan.memory_mib.saturating_mul(1 << 20) / 32).clamp(1 << 16, 64 << 20)
+}
 
 /// Upfront whole-route memory estimate (bytes) of the track router.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -357,6 +358,8 @@ pub(crate) fn check_plan(input: &RouteInput, plan: &TrackPlan) -> Result<()> {
         || plan.wrong_way_factor > 1000
         || plan.memory_mib == 0
         || plan.memory_mib > 65_536
+        || plan.max_history_entries == 0
+        || plan.max_history_entries > 64_000_000
     {
         return Err(invalid("track plan parameters"));
     }
@@ -415,7 +418,13 @@ fn memory_estimate_limited(
     let instance_index = crate::routing::instance_index_bytes(input, limits)?;
     let o = input.obstacles.len() as u64;
     let t = input.terminals.len() as u64;
-    let added = t.saturating_mul(SHAPES_PER_TERMINAL);
+    let fixed_records = input
+        .obstacles
+        .len()
+        .saturating_add(input.instances.as_ref().map_or(0, |i| i.len()));
+    let added = t
+        .saturating_mul(SHAPES_PER_TERMINAL)
+        .min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
     let index = |shapes: u64| {
         let entries = fixed_entries.saturating_add(shapes.saturating_mul(ENTRIES_PER_SHAPE));
         let grid = match mode {
@@ -434,7 +443,9 @@ fn memory_estimate_limited(
                     .saturating_mul(ENTRY_BYTES),
             )
     };
-    let records = t.saturating_mul(RECORDS_PER_TERMINAL);
+    let records = t
+        .saturating_mul(RECORDS_PER_TERMINAL)
+        .min(limits.max_segments as u64);
     if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
         eprintln!(
             "[troute] estimate inputs grid_cells {cells} layers {layers} fixed_entries {fixed_entries} obstacles {o} terminals {t} nodes {nodes} gcells {gcells} held {}",
@@ -453,18 +464,21 @@ fn memory_estimate_limited(
         spatial: index(added),
         routed: t
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
+            .saturating_add(records.saturating_mul(96))
             .saturating_add(
-                (nodes.min(limits.max_expansions.saturating_add(input.terminals.len())) as u64)
-                    .saturating_mul(if nodes <= crate::route_search::DENSE_NODES {
-                        ROUTED_BYTES_PER_NODE
-                    } else {
-                        64
-                    }),
+                (nodes.min(limits.max_segments) as u64).saturating_mul(ACTIVE_TOPOLOGY_BYTES),
             )
+            .saturating_add(access_cache_limit(
+                input.tracks.as_ref().expect("track plan"),
+            ))
             .saturating_add(if nodes <= crate::route_search::DENSE_NODES {
                 0
             } else {
-                (nodes.min(limits.max_expansions) as u64).saturating_mul(32)
+                (nodes
+                    .min(limits.max_expansions)
+                    .min(input.tracks.as_ref().unwrap().max_history_entries)
+                    as u64)
+                    .saturating_mul(32)
             }),
         check: index(records.saturating_mul(2))
             .saturating_add(records.saturating_mul(RECORD_BYTES)),
@@ -612,6 +626,7 @@ struct Router<'a> {
     /// on a layer that is not `stack_ok` (AREA / width, rounded up).
     min_run: Vec<u64>,
     access_entries: usize,
+    access_cache_bytes: u64,
 }
 
 /// Completed net geometry; the active search alone retains raw grid edges.
@@ -776,7 +791,7 @@ impl<'a> Router<'a> {
                     origin[1]
                 },
             );
-            if let std::collections::btree_map::Entry::Vacant(slot) = tables.entry(key) {
+            if !tables.contains_key(&key) {
                 let rel = |(l, p): &(u32, [i64; 2])| -> Result<(u32, [i64; 2])> {
                     Ok((
                         *l,
@@ -806,6 +821,27 @@ impl<'a> Router<'a> {
                     &mut work,
                     self.limits,
                 )?;
+                let bytes = (table.capacity() * std::mem::size_of::<AccessEntry>()) as u64
+                    + table
+                        .iter()
+                        .map(|e| (e.kinds.capacity() * std::mem::size_of::<usize>() + 16) as u64)
+                        .sum::<u64>()
+                    + 256;
+                let cap = access_cache_limit(self.plan);
+                if bytes > cap {
+                    return Err(budget("single pin access table memory limit"));
+                }
+                if self.access_cache_bytes.saturating_add(bytes) > cap {
+                    self.spatial.work = self
+                        .spatial
+                        .work
+                        .checked_add(self.access_entries)
+                        .filter(|&n| n <= self.limits.max_comparisons)
+                        .ok_or_else(|| budget("access cache work limit"))?;
+                    tables.clear();
+                    self.access_entries = 0;
+                    self.access_cache_bytes = 0;
+                }
                 self.access_entries = self
                     .access_entries
                     .checked_add(table.len())
@@ -815,8 +851,10 @@ impl<'a> Router<'a> {
                     .spatial
                     .work
                     .checked_add(work)
+                    .filter(|&n| n <= self.limits.max_comparisons)
                     .ok_or_else(|| budget("routing comparison limit"))?;
-                slot.insert(table);
+                self.access_cache_bytes += bytes;
+                tables.insert(key, table);
             }
             let allowed: BTreeSet<_> = generic.iter().chain(&on_graph).copied().collect();
             for e in &tables[&key] {
@@ -1231,6 +1269,9 @@ impl<'a> Router<'a> {
                     .ok_or_else(|| budget("pin access retained-record limit"))?;
                 plans.insert(t.pin, plan);
                 owner.insert(t.pin, i);
+                if plans.len().is_multiple_of(4096) {
+                    self.guard("pin access")?;
+                }
                 continue;
             }
             attempts[i] += 1;
@@ -1438,6 +1479,9 @@ impl<'a> Router<'a> {
                             break;
                         }
                         work += 1;
+                        if work.is_multiple_of(1 << 16) {
+                            self.guard("global search")?;
+                        }
                         if work > self.limits.max_expansions {
                             return Err(budget("global routing expansion limit"));
                         }
@@ -2183,12 +2227,16 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 .min(n),
         )?,
         epoch: 0,
-        history: History::new(n, limits.max_expansions.min(n))?,
+        history: History::new(
+            n,
+            limits.max_expansions.min(n).min(plan.max_history_entries),
+        )?,
         gmark: vec![0; gl],
         gepoch: 0,
         stack_ok: vec![true; input.layers.len()],
         min_run: vec![0; input.layers.len()],
         access_entries: 0,
+        access_cache_bytes: 0,
     };
     for (i, l) in input.layers.iter().enumerate() {
         let Some(min) = l.min_area else {
@@ -2634,6 +2682,7 @@ mod tests {
             via_cost: 80,
             wrong_way_factor: 4,
             memory_mib: 64,
+            max_history_entries: crate::routing::DEFAULT_MAX_HISTORY_ENTRIES,
         }
     }
     fn terminal(pin: u32, net: u32, driver: bool, r: Rect) -> Terminal {
@@ -2959,6 +3008,10 @@ mod tests {
         }
         assert!(route_cpu_ref(&i, &limits()).is_err());
         i.tracks.as_mut().unwrap().capacity_percent = 80;
+        i.tracks.as_mut().unwrap().max_history_entries = 0;
+        assert!(route_cpu_ref(&i, &limits()).is_err(), "zero history budget");
+        i.tracks.as_mut().unwrap().max_history_entries =
+            crate::routing::DEFAULT_MAX_HISTORY_ENTRIES;
         i.tracks.as_mut().unwrap().tracks[0] = Some((43, 20));
         assert!(route_cpu_ref(&i, &limits()).is_err(), "off-grid pitch");
         i.tracks.as_mut().unwrap().tracks[0] = Some((40, 20));

@@ -52,9 +52,9 @@ impl RouteLimits {
         Self {
             max_axis: 1 << 20,
             max_grid_nodes: u32::MAX as usize - 1,
-            max_obstacles: 8_000_000,
-            max_bin_entries: 64_000_000,
-            max_segments: 8_000_000,
+            max_obstacles: 256_000_000,
+            max_bin_entries: 512_000_000,
+            max_segments: 128_000_000,
             max_expansions: 2_000_000_000,
             max_search_expansions: 50_000_000,
             max_comparisons: 1usize << 40,
@@ -162,7 +162,10 @@ pub struct TrackPlan {
     pub wrong_way_factor: u64,
     /// Upfront memory estimate ceiling for graph, guides and search state.
     pub memory_mib: u64,
+    /// Separate cap for cumulative congestion-history entries.
+    pub max_history_entries: usize,
 }
+pub const DEFAULT_MAX_HISTORY_ENTRIES: usize = 4_000_000;
 /// Process baseline counted in every route memory estimate (binary, libc,
 /// stacks, thread pool).
 pub const PROCESS_BASE_BYTES: u64 = 8 << 20;

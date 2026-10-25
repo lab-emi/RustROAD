@@ -11,6 +11,46 @@ IR, EM, SI, OCV and CPPR are `unchecked`; density is reported separately and
 never gates; timing (hold closure, multi-corner STA) runs after merge in the
 unified gate and is not claimed here.
 
+## Large-design implementation (unreleased)
+
+The current branch extends storage and routing preparation for large flat
+netlists. Full OpenC910 RTL-to-GDS qualification remains in progress; these
+implementation changes are not an end-to-end speedup claim. The measurements
+below describe the earlier small-block release.
+
+- Verilog is read through a bounded streaming lexer. The input byte, token,
+  instance, pin and net limits are explicit; the ordinary CLI defaults remain
+  small. `--max-input-mib` admits a larger file without retaining its source or
+  a complete token vector alongside the netlist.
+- Large revisions use workspace schema 7 and hash-bound `model.rbin` frames.
+  Encoding `RROADB02` stores cells, netlist/connectivity records, clock sinks,
+  tap sites and prepared geometry outside the JSON envelope. Readers also
+  accept `RROADB01`. Every frame and array count is checked before decoding;
+  physical and route tables are written and checked incrementally.
+- Immutable placement records are constructed without a duplicate mutable
+  string-interning database. The global placer parallelizes independent
+  matrix rows while retaining arithmetic order within each row and reduction.
+  Detailed placement uses indexed local intervals and gaps; high-fanout nets
+  follow the same explicit cutoff in global and detailed optimization.
+- Routing preparation retains cell geometry once per master, with instance
+  positions/orientations and a compact pin-to-net column. Cell bounding boxes
+  are indexed in pages; pin and obstruction rectangles are translated only
+  when queried. The explicit-geometry path remains available for consumers
+  that require individual shape owners. It must not be confused with a
+  qualification of the extractor at full-chip scale.
+- Large routing grids use bounded sparse search state. Spatial bins allocate
+  32 by 32 pages on populated large layouts. Fixed rectangles are shared;
+  completed nets retain collinear runs rather than every track edge.
+- `track_router.max_history_entries` independently bounds congestion history
+  (default 4,000,000). Pin-access memoization has a bounded memory cache;
+  eviction recomputes the same geometry. Object/work limits, the whole-process
+  memory estimate and the runtime RSS guard remain active. Resource limits
+  are independent of geometric and timing acceptance checks.
+- Constant fanout repair covers inserted and in-place converted tie sources,
+  including top-level output aliases. Mixed signal/constant buses preserve
+  their declared bit order. Independent Yosys equivalence and wrong-output
+  controls cover both baseline PDKs.
+
 ## What changed
 
 | Area | Before | Now |
@@ -24,8 +64,9 @@ unified gate and is not claimed here.
 | Constants (sky130) | `conb_1` tie cells | rail-input ties: `inv_1` with its input routed to its own rail (no `conb_1`) |
 | Spatial index | hash map of bins | dense head/tail grid per layer (same order, same results, 15-30% less peak RSS) |
 
-Everything is `cpu_ref`: deterministic, single worker, integer DBU geometry
-(the placer's solver alone uses f64 and rounds back to the site grid).
+These engines use deterministic CPU reference implementations and integer DBU
+geometry. The placer can parallelize independent matrix rows; the router is
+single-worker. The placer's solver uses f64 and rounds back to the site grid.
 
 ## Floorplan (`rustroad floorplan`)
 
