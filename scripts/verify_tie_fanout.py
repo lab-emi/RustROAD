@@ -32,41 +32,53 @@ def main() -> int:
     profiles = json.loads((ROOT / 'fixtures/pdk/local-routing.json').read_text())['pdks']
     rows = []
     for profile in profiles:
-        tag = profile['tag']
-        folder = out / tag
-        folder.mkdir()
-        harness = PhysicalHarness(folder, argparse.Namespace(threads=2, memory_mib=1024, timeout_seconds=120))
-        for role in ['technology_lef', 'cell_lef', 'liberty']:
-            pin = profile[role]
-            if sha256(Path(pin['path'])) != pin['sha256']:
-                raise RuntimeError(f'{tag}: {role} identity mismatch')
-        config = json.loads((ROOT / profile['config']).read_text())
-        buffer = config['clock']
-        config.update(clock=None, max_tie_fanout=8, max_added_cells=1000)
-        config_path = folder / 'physical.json'
-        config_path.write_text(json.dumps(config, indent=2) + '\n')
-        floorplan = ROOT / 'fixtures/designs/pipeline' / f'{tag}-floorplan.json'
-        source = folder / 'mapped.v'
-        cells = '\n'.join(f"  {buffer['cell']} b{i} (.{buffer['input_pin']}(zero), .{buffer['output_pin']}(y[{i}]));" for i in range(17))
-        source.write_text("module lane_smoke(output [16:0] y);\nwire zero;\nassign zero = 1'b0;\n" + cells + '\nendmodule\n')
-        expected, wrong = folder / 'expected.v', folder / 'wrong.v'
-        expected.write_text("module lane_smoke(output [16:0] y); assign y=17'b0; endmodule\n")
-        wrong.write_text("module lane_smoke(output [16:0] y); assign y=17'b1; endmodule\n")
-        workspace = folder / 'workspace'
-        run_ok(harness, 'import', [road, '--workspace', workspace, 'import-pdk', '--base-rev', 'rev0',
-                                 '--tech-lef', profile['technology_lef']['path'], '--cell-lef', profile['cell_lef']['path'],
-                                 '--netlist', source, '--floorplan', floorplan, '--physical-config', config_path])
-        revision = (workspace / 'HEAD').read_text().strip()
-        metadata = json.loads((workspace / 'revisions' / revision / 'design.json').read_text())
-        count = metadata['physical']['ties']['new_cells']
-        if count != 3:
-            raise RuntimeError(f'{tag}: expected 3 constant sources, got {count}')
-        export = run_ok(harness, 'export', [road, '--workspace', workspace, 'export-verilog'])
-        netlist = Path(export['stdout'])
-        proof = external_cec(harness, 'constant_cec', yosys, Path(profile['liberty']['path']), expected, netlist)
-        control = external_cec(harness, 'wrong_output_control', yosys, Path(profile['liberty']['path']), wrong, netlist, expected=False)
-        rows.append(dict(pdk=tag, status='passed', constant_sources=count, max_fanout=8, proof=proof,
-                         negative_control=control, receipts=harness.receipts))
+        for variant in ['literal', 'reused']:
+            tag = profile['tag']
+            folder = out / (tag + '-' + variant)
+            folder.mkdir()
+            harness = PhysicalHarness(folder, argparse.Namespace(threads=2, memory_mib=1024, timeout_seconds=120))
+            for role in ['technology_lef', 'cell_lef', 'liberty']:
+                pin = profile[role]
+                if sha256(Path(pin['path'])) != pin['sha256']:
+                    raise RuntimeError(f'{tag}: {role} identity mismatch')
+            config = json.loads((ROOT / profile['config']).read_text())
+            buffer = config['clock']
+            config.update(clock=None, max_tie_fanout=8, max_added_cells=1000)
+            config_path = folder / 'physical.json'
+            config_path.write_text(json.dumps(config, indent=2) + '\n')
+            floorplan = ROOT / 'fixtures/designs/pipeline' / f'{tag}-floorplan.json'
+            source = folder / 'mapped.v'
+            cells = '\n'.join(f"  {buffer['cell']} b{i} (.{buffer['input_pin']}(zero), .{buffer['output_pin']}(y[{i}]));" for i in range(17))
+            if variant == 'literal':
+                driver = "assign zero = 1'b0;"
+            else:
+                low = config['tie_low']
+                connections = [f".{low['pin']}(zero)"]
+                if low.get('rail_input'):
+                    rail = low['rail_input']
+                    literal = "1'b1" if rail['supply'] == 'power' else "1'b0"
+                    connections.append(f".{rail['pin']}({literal})")
+                driver = f"{low['cell']} original_source ({', '.join(connections)});"
+            source.write_text("module lane_smoke(output [16:0] y);\nwire zero;\n" + driver + '\n' + cells + '\nendmodule\n')
+            expected, wrong = folder / 'expected.v', folder / 'wrong.v'
+            expected.write_text("module lane_smoke(output [16:0] y); assign y=17'b0; endmodule\n")
+            wrong.write_text("module lane_smoke(output [16:0] y); assign y=17'b1; endmodule\n")
+            workspace = folder / 'workspace'
+            run_ok(harness, 'import', [road, '--workspace', workspace, 'import-pdk', '--base-rev', 'rev0',
+                                     '--tech-lef', profile['technology_lef']['path'], '--cell-lef', profile['cell_lef']['path'],
+                                     '--netlist', source, '--floorplan', floorplan, '--physical-config', config_path])
+            revision = (workspace / 'HEAD').read_text().strip()
+            metadata = json.loads((workspace / 'revisions' / revision / 'design.json').read_text())
+            count = metadata['physical']['ties']['new_cells']
+            expected_new = 3 if variant == 'literal' else 2
+            if count != expected_new:
+                raise RuntimeError(f'{tag}/{variant}: expected {expected_new} inserted sources, got {count}')
+            export = run_ok(harness, 'export', [road, '--workspace', workspace, 'export-verilog'])
+            netlist = Path(export['stdout'])
+            proof = external_cec(harness, 'constant_cec', yosys, Path(profile['liberty']['path']), expected, netlist)
+            control = external_cec(harness, 'wrong_output_control', yosys, Path(profile['liberty']['path']), wrong, netlist, expected=False)
+            rows.append(dict(pdk=tag, variant=variant, status='passed', inserted_sources=count, constant_sources=3, max_fanout=8, proof=proof,
+                             negative_control=control, receipts=harness.receipts))
     result = dict(schema='rustroad.tie-fanout-verification.v1', status='passed',
                   rustroad=dict(path=str(road), sha256=sha256(road)),
                   yosys=dict(path=str(yosys), sha256=sha256(yosys)), pdks=rows)

@@ -792,6 +792,30 @@ fn shared_constant_sources_are_replicated_with_bounded_fanout() {
 }
 
 #[test]
+fn in_place_constant_sources_are_included_in_fanout_repair() {
+    let mut cfg = config();
+    cfg.max_tie_fanout = 1;
+    let f = Fixture::new(
+        "module chip(output y,output z); wire k; HI source(.Y(k)); BUF b0(.A(k),.Y(y)); BUF b1(.A(k),.Y(z)); endmodule",
+        &cfg,
+    );
+    f.import().expect("existing source must be replicated");
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    assert_eq!(bundle.ties.as_ref().unwrap().new_cells, 1);
+    assert!(bundle.netlist.instances.iter().any(|i| i.name == "source"));
+    assert_eq!(
+        bundle
+            .netlist
+            .instances
+            .iter()
+            .filter(|i| i.cell == "HI")
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn constant_top_level_alias_fanout_is_rejected_without_false_repair() {
     let mut cfg = config();
     cfg.max_tie_fanout = 1;

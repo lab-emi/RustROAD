@@ -574,6 +574,83 @@ pub(crate) fn rail_tie_pins(bundle: &PhysicalBundle) -> Vec<(u32, u32)> {
         .collect()
 }
 
+/// Include in-place converted sources as well as newly inserted tie cells.
+/// Only configured constant masters and proven supply-tied inputs qualify.
+fn known_tie_bindings(bundle: &PhysicalBundle) -> Result<Vec<crate::ties::TieBinding>> {
+    let Some(cfg) = &bundle.config else {
+        return Ok(Vec::new());
+    };
+    let model = &bundle.connectivity;
+    if model.instance_masters.len() != bundle.netlist.instances.len() {
+        return Err(Error::Invalid("tie discovery instance count".into()));
+    }
+    let index = rustroad_core::connectivity::PinIndex::new(
+        model,
+        &crate::pdk::connection_limits_for_cells(bundle.netlist.instances.len())?,
+    )?;
+    let mut bindings = bundle
+        .ties
+        .as_ref()
+        .map_or_else(Vec::new, |r| r.bindings.clone());
+    let mut known: HashMap<(String, String), bool> = bindings
+        .iter()
+        .map(|b| ((b.instance.clone(), b.pin.clone()), b.value))
+        .collect();
+    for (i, instance) in bundle.netlist.instances.iter().enumerate() {
+        let master = &model.masters[model.instance_masters[i] as usize];
+        for (value, spec) in [(true, &cfg.tie_high), (false, &cfg.tie_low)] {
+            if instance.cell != spec.cell {
+                continue;
+            }
+            if let Some((input, power)) = spec.rail() {
+                let terminal = master
+                    .pins
+                    .iter()
+                    .position(|p| p.name == input)
+                    .ok_or_else(|| Error::Invalid("tie discovery input pin".into()))?;
+                let pin = index.get(PinOwner::Instance {
+                    instance: i as u32,
+                    terminal: terminal as u32,
+                })?;
+                let Some(net) = model.pins[pin as usize].net else {
+                    continue;
+                };
+                let want = if power { PinUse::Power } else { PinUse::Ground };
+                if model.nets[net as usize].use_ != want {
+                    continue;
+                }
+            }
+            let terminal = master
+                .pins
+                .iter()
+                .position(|p| p.name == spec.pin)
+                .ok_or_else(|| Error::Invalid("tie discovery output pin".into()))?;
+            let pin = index.get(PinOwner::Instance {
+                instance: i as u32,
+                terminal: terminal as u32,
+            })?;
+            let Some(net) = model.pins[pin as usize].net else {
+                continue;
+            };
+            let key = (instance.name.clone(), spec.pin.clone());
+            if let Some(previous) = known.get(&key) {
+                if *previous != value {
+                    return Err(Error::Invalid("tie discovery polarity conflict".into()));
+                }
+                continue;
+            }
+            known.insert(key, value);
+            bindings.push(crate::ties::TieBinding {
+                instance: instance.name.clone(),
+                pin: spec.pin.clone(),
+                net: model.nets[net as usize].name.clone(),
+                value,
+            });
+        }
+    }
+    Ok(bindings)
+}
+
 /// Clone only the constant sources already identified by the tie pass. Each
 /// scalar sink moves to an identical source once the physical fanout is full.
 pub(super) fn distribute_ties(
@@ -581,10 +658,11 @@ pub(super) fn distribute_ties(
     bundle: &mut PhysicalBundle,
     limits: &Limits,
 ) -> Result<()> {
+    let all_bindings = known_tie_bindings(bundle)?;
     let (Some(cfg), Some(report)) = (&bundle.config, &mut bundle.ties) else {
         return Ok(());
     };
-    if report.bindings.is_empty() {
+    if all_bindings.is_empty() {
         return Ok(());
     }
     let model = &bundle.connectivity;
@@ -598,23 +676,19 @@ pub(super) fn distribute_ties(
         active: String,
         used: usize,
     }
-    let wanted: HashMap<&str, usize> = report
-        .bindings
-        .iter()
-        .enumerate()
-        .map(|(i, b)| (b.instance.as_str(), i))
-        .collect();
-    if wanted.len() != report.bindings.len() {
-        return Err(Error::Invalid("duplicate tie source binding".into()));
+    let mut wanted: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, binding) in all_bindings.iter().enumerate() {
+        wanted.entry(binding.instance.as_str()).or_default().push(i);
     }
-    let mut templates = vec![None; report.bindings.len()];
+    let mut templates = vec![None; all_bindings.len()];
     for (i, instance) in bundle.netlist.instances.iter().enumerate() {
-        if let Some(&binding) = wanted.get(instance.name.as_str()) {
-            templates[binding] = Some((instance.clone(), model.instance_masters[i]));
+        if let Some(bindings) = wanted.get(instance.name.as_str()) {
+            for &binding in bindings {
+                templates[binding] = Some((instance.clone(), model.instance_masters[i]));
+            }
         }
     }
-    let mut groups = report
-        .bindings
+    let mut groups = all_bindings
         .iter()
         .zip(templates)
         .map(|(b, template)| {
@@ -709,6 +783,15 @@ pub(super) fn distribute_ties(
             };
             let mut cell = group.template.clone();
             cell.name = name.clone();
+            for pin in &model.masters[group.master as usize].pins {
+                if pin.direction == Some(Direction::Output)
+                    && pin.name != group.binding.pin
+                    && let Some(connection) =
+                        cell.connections.iter_mut().find(|c| c.pin == pin.name)
+                {
+                    connection.signal = verilog::Expr::Unconnected;
+                }
+            }
             cell.connections
                 .iter_mut()
                 .find(|c| c.pin == group.binding.pin)
@@ -780,14 +863,11 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
         return Err(Error::Invalid("tie report polarity/count mismatch".into()));
     }
     let model = &bundle.connectivity;
-    if report.bindings.is_empty() {
+    let bindings = known_tie_bindings(bundle)?;
+    if bindings.is_empty() {
         return Ok(());
     }
-    let required: HashSet<&str> = report
-        .bindings
-        .iter()
-        .map(|b| b.instance.as_str())
-        .collect();
+    let required: HashSet<&str> = bindings.iter().map(|b| b.instance.as_str()).collect();
     let instances: HashMap<_, _> = bundle
         .netlist
         .instances
@@ -830,11 +910,11 @@ pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
         })
         .collect();
     let mut binding_names = HashSet::new();
-    for binding in &report.bindings {
+    for binding in &bindings {
         let &i = instances
             .get(binding.instance.as_str())
             .ok_or_else(|| Error::Invalid("missing tie instance".into()))?;
-        if !binding_names.insert(binding.instance.as_str()) {
+        if !binding_names.insert((binding.instance.as_str(), binding.pin.as_str())) {
             return Err(Error::Invalid("duplicate tie report instance".into()));
         }
         let spec = if binding.value {
