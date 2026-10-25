@@ -464,6 +464,7 @@ pub(crate) fn check_plan(input: &RouteInput, plan: &TrackPlan) -> Result<()> {
         || plan.via_cost > 1 << 40
         || plan.wrong_way_factor == 0
         || plan.wrong_way_factor > 1000
+        || !(1..=16).contains(&plan.heuristic_weight)
         || plan.memory_mib == 0
         || plan.memory_mib > 65_536
         || plan.max_history_entries == 0
@@ -2053,7 +2054,7 @@ impl<'a> Router<'a> {
                 .checked_add(1)
                 .ok_or_else(|| budget("routing search count"))?;
             let epoch = self.epoch;
-            // Prefer greater progress when admissible total costs tie. Taking
+            // Prefer greater progress when priority costs tie. Taking
             // the smallest g first floods every equally short interior path.
             // Node id remains the final deterministic tie-break.
             let mut heap = crate::route_queue::Pending::new(self.limits.max_heap);
@@ -2067,13 +2068,15 @@ impl<'a> Router<'a> {
                 },
             )?;
             heap.offer((
-                target.distance(
-                    self.graph.slot[&self.graph.point(start).0],
-                    self.graph.point(start).1,
-                    &self.target_costs,
-                    &mut self.spatial.work,
-                    self.limits.max_comparisons,
-                )?,
+                target
+                    .distance(
+                        self.graph.slot[&self.graph.point(start).0],
+                        self.graph.point(start).1,
+                        &self.target_costs,
+                        &mut self.spatial.work,
+                        self.limits.max_comparisons,
+                    )?
+                    .saturating_mul(self.plan.heuristic_weight),
                 Reverse(0u64),
                 start,
             ))?;
@@ -2373,13 +2376,17 @@ impl<'a> Router<'a> {
                         },
                     )?;
                     heap.offer((
-                        nc.saturating_add(target.distance(
-                            self.graph.slot[&nl],
-                            q,
-                            &self.target_costs,
-                            &mut self.spatial.work,
-                            self.limits.max_comparisons,
-                        )?),
+                        nc.saturating_add(
+                            target
+                                .distance(
+                                    self.graph.slot[&nl],
+                                    q,
+                                    &self.target_costs,
+                                    &mut self.spatial.work,
+                                    self.limits.max_comparisons,
+                                )?
+                                .saturating_mul(self.plan.heuristic_weight),
+                        ),
                         Reverse(nc),
                         next,
                     ))
@@ -3170,6 +3177,7 @@ mod tests {
             max_repair_rounds: 1000,
             via_cost: 80,
             wrong_way_factor: 4,
+            heuristic_weight: 1,
             memory_mib: 64,
             max_history_entries: crate::routing::DEFAULT_MAX_HISTORY_ENTRIES,
         }
@@ -3273,6 +3281,49 @@ mod tests {
             let b = graph.locate(next);
             assert_eq!((a.0, a.1), (b.0, b.1));
             assert!(node.abs_diff(next) <= 256);
+        }
+    }
+
+    #[test]
+    fn weighted_search_is_deterministic_checked_and_still_budgeted() {
+        let mut obstacles = Vec::new();
+        for layer in [0, 1, 2] {
+            for rect in [rect(4980, 0, 5020, 4930), rect(4980, 5070, 5020, 10000)] {
+                obstacles.push(Blockage {
+                    layer,
+                    rect,
+                    net: None,
+                });
+            }
+        }
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(10, 10, 30, 30)),
+                terminal(1, 0, false, rect(9970, 9970, 9990, 9990)),
+            ],
+            obstacles,
+        );
+        design.die = rect(0, 0, 10000, 10000);
+        design.tracks.as_mut().unwrap().gcell = 1000;
+        design.tracks.as_mut().unwrap().memory_mib = 256;
+        design.tracks.as_mut().unwrap().heuristic_weight = 2;
+        let weighted = route_cpu_ref(&design, &limits()).unwrap();
+        validate(&design, &weighted, &limits()).unwrap();
+        let again = route_cpu_ref(&design, &limits()).unwrap();
+        assert_eq!(weighted.wires, again.wires);
+        assert_eq!(weighted.vias, again.vias);
+        assert_eq!(weighted.access, again.access);
+        let capped = RouteLimits {
+            max_expansions: weighted.stats.expansions - 1,
+            ..limits()
+        };
+        assert!(matches!(
+            route_cpu_ref(&design, &capped),
+            Err(crate::Error::Budget(_))
+        ));
+        for invalid_weight in [0, 17, u64::MAX] {
+            design.tracks.as_mut().unwrap().heuristic_weight = invalid_weight;
+            assert!(check_plan(&design, design.tracks.as_ref().unwrap()).is_err());
         }
     }
 

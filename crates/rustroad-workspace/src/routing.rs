@@ -56,6 +56,12 @@ fn default_repair_rounds() -> usize {
 fn default_wrong_way() -> u64 {
     4
 }
+fn default_heuristic_weight() -> u64 {
+    1
+}
+fn is_default_heuristic_weight(value: &u64) -> bool {
+    *value == 1
+}
 fn default_memory_mib() -> u64 {
     2048
 }
@@ -91,6 +97,12 @@ pub struct TrackRouterConfig {
     pub max_repair_rounds: usize,
     #[serde(default = "default_wrong_way")]
     pub wrong_way_factor: u64,
+    /// Detailed-search priority weight (1..=16); above one favors progress.
+    #[serde(
+        default = "default_heuristic_weight",
+        skip_serializing_if = "is_default_heuristic_weight"
+    )]
+    pub heuristic_weight: u64,
     #[serde(default = "default_memory_mib")]
     pub memory_mib: u64,
     #[serde(
@@ -1225,6 +1237,7 @@ pub(crate) fn track_plan(
         max_repair_rounds: config.max_repair_rounds,
         via_cost: config.via_cost,
         wrong_way_factor: config.wrong_way_factor,
+        heuristic_weight: config.heuristic_weight,
         memory_mib: config.memory_mib,
         max_history_entries: config.max_history_entries,
     })

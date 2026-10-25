@@ -201,6 +201,9 @@ pub struct TrackPlan {
     pub via_cost: u64,
     /// Cost multiplier of non-preferred-direction wire edges.
     pub wrong_way_factor: u64,
+    /// Integer multiplier of the detailed-search lower bound (1..=16).
+    /// Values above one favor progress over shortest-path optimality.
+    pub heuristic_weight: u64,
     /// Upfront memory estimate ceiling for graph, guides and search state.
     pub memory_mib: u64,
     /// Separate cap for cumulative congestion-history entries.

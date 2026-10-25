@@ -160,7 +160,8 @@ class PdkGate:
         self.details: dict = {}
         batch = getattr(ctx.args, "route_batch_terminals", None)
         hard_search = getattr(ctx.args, "route_hard_search_expansions", None)
-        if batch is not None or hard_search is not None:
+        weight = getattr(ctx.args, "route_heuristic_weight", None)
+        if batch is not None or hard_search is not None or weight is not None:
             original = Path(p["routing_config"])
             source = original.read_bytes()
             source_hash = hashlib.sha256(source).hexdigest()
@@ -173,6 +174,10 @@ class PdkGate:
                 if "limits" not in routing:
                     raise GateError("hard-search override requires an explicit routing limits object")
                 routing["limits"]["max_hard_search_expansions"] = hard_search
+            if weight is not None:
+                if "track_router" not in routing:
+                    raise GateError("heuristic override requires a track-router profile")
+                routing["track_router"]["heuristic_weight"] = weight
             derived = ctx.h.root / f"{tag}_batch_routing.json"
             encoded = (json.dumps(routing, indent=2) + "\n").encode()
             expected_hash = hashlib.sha256(encoded).hexdigest()
@@ -181,7 +186,8 @@ class PdkGate:
             p["routing_config"] = str(derived)
             self.details["batch_routing_config"] = dict(path=str(derived), sha256=expected_hash,
                                                         source_sha256=source_hash, terminals=batch,
-                                                        hard_search_expansions=hard_search)
+                                                        hard_search_expansions=hard_search,
+                                                        heuristic_weight=weight)
         self.container_peaks: list = []  # peak RSS of every signoff container run (steps)
         want = [(c["name"], c["liberty"], c["rc"]) for c in self.spec["corners"]]
         if want != CORNERS[tag]:
@@ -603,6 +609,7 @@ def main(argv=None) -> int:
     ap.add_argument("--preflight-only", action="store_true")
     ap.add_argument("--route-batch-terminals", type=int, help="opt-in bounded routing batches of whole nets (2..1000000 terminals)")
     ap.add_argument("--route-hard-search-expansions", type=int, help="bounded hard search before repair; at most the profile's full search limit")
+    ap.add_argument("--route-heuristic-weight", type=int, help="detailed track-search priority weight (1..16)")
     ap.add_argument("--small-extraction-budgets", action="store_true",
                     help="use default small-design RC object/work caps, including for a track-router fixture")
     ap.add_argument("--evidence", type=Path, help="also write the compact tracked evidence JSON")
@@ -613,6 +620,8 @@ def main(argv=None) -> int:
         ap.error("--route-batch-terminals must be in 2..1000000")
     if args.route_hard_search_expansions is not None and not 1 <= args.route_hard_search_expansions <= 50_000_000:
         ap.error("--route-hard-search-expansions must be in 1..50000000")
+    if args.route_heuristic_weight is not None and not 1 <= args.route_heuristic_weight <= 16:
+        ap.error("--route-heuristic-weight must be in 1..16")
     if args.evidence_from:
         if args.evidence is None:
             ap.error("--evidence-from needs --evidence")
@@ -640,6 +649,8 @@ def main(argv=None) -> int:
         summary["routing_batches"] = dict(max_terminals=args.route_batch_terminals, scope="whole nets; final combined geometry validated")
     if args.route_hard_search_expansions is not None:
         summary["routing_hard_search_expansions"] = args.route_hard_search_expansions
+    if args.route_heuristic_weight is not None:
+        summary["routing_heuristic_weight"] = args.route_heuristic_weight
     if args.small_extraction_budgets:
         summary["extraction_budgets"] = "default small-design caps"
     h = None
