@@ -135,7 +135,11 @@ never a clean DRC result. Area repair keeps the original round's geometry while
 including newly appended wire/via anchors.
 The compressed hole grid has its own `max_rule_grid_cells` bound (one million
 cells by default, four million maximum). Multiplication and this limit are
-checked before allocating coverage, labels or the flood-fill frontier.
+checked before allocating coverage, labels or the flood-fill frontier. An
+oversized sparse plane uses an exact sweep of free-space components instead;
+its explicitly estimated workspace is capped at 64 bytes per grid-budget unit.
+The sweep preserves dense flood-fill component boxes and ordering, and its
+coverage, union and output work is charged to the same comparison limit.
 While routing, the process' peak RSS is checked at phase boundaries and during
 search and access reservation. Every search, queue, repair round and rip-up
 count remains bounded. Reaching a limit returns `BUDGET_EXCEEDED` or `NO_ROUTE`
@@ -161,6 +165,12 @@ attempts. Soft-search and aggregate resource limits remain terminal failures.
 `max_hard_search_expansions` can hand off earlier; it defaults to the full
 per-search limit and cannot exceed it. Lowering this optional limit does not
 increase soft-search, total-work, frontier or memory allowances.
+
+Preferred-track moves can span 16, 64 or 256 stops. Each full wire is checked
+against geometry, and every intermediate point must obey the guide and tree
+constraints; congestion history is included along the whole span. Ordinary
+single-step moves remain available. Chosen spans are expanded into unit edges
+before topology/output limits and final geometry validation.
 
 Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
 remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared

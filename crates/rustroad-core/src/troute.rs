@@ -376,6 +376,16 @@ impl Graph {
         if s + 1 < g.stops.len() {
             out.push((id + 1, Move::Along));
         }
+        // Additional straight, fully checked moves accelerate large open
+        // channels. Unit moves remain available for every turn and obstacle.
+        for jump in [16usize, 64, 256] {
+            if s >= jump {
+                out.push((id - jump as u32, Move::Along));
+            }
+            if s + jump < g.stops.len() {
+                out.push((id + jump as u32, Move::Along));
+            }
+        }
         let n = g.stops.len() as u32;
         if t > 0 {
             out.push((id - n, Move::Wrong));
@@ -2156,7 +2166,50 @@ impl<'a> Router<'a> {
                         Move::Wrong => distance(p, q)?.saturating_mul(wrong),
                         Move::Via(_) => via_cost,
                     };
-                    step = step.saturating_add(u64::from(self.history.get(next)) * hist_unit);
+                    if self
+                        .search
+                        .get(next)
+                        .is_some_and(|s| s.cost <= cost.saturating_add(step))
+                    {
+                        continue;
+                    }
+                    let jump = if matches!(mv, Move::Along) {
+                        id.abs_diff(next) as usize
+                    } else {
+                        1
+                    };
+                    if jump > 1 {
+                        self.spatial.work = self
+                            .spatial
+                            .work
+                            .checked_add(jump)
+                            .filter(|&n| n <= self.limits.max_comparisons)
+                            .ok_or_else(|| budget("routing macro-move work"))?;
+                        let mut usable = true;
+                        for node in id.min(next)..=id.max(next) {
+                            if node == id {
+                                continue;
+                            }
+                            if (node != next && tree.contains(&node))
+                                || (self.gmark[self.cells.of(self.graph.point(node).1) as usize]
+                                    != self.gepoch
+                                    && !(node == next && joins))
+                            {
+                                usable = false;
+                                break;
+                            }
+                            step = step.saturating_add(
+                                u64::from(self.history.get(node)).saturating_mul(hist_unit),
+                            );
+                        }
+                        if !usable {
+                            continue;
+                        }
+                    } else {
+                        step = step.saturating_add(
+                            u64::from(self.history.get(next)).saturating_mul(hist_unit),
+                        );
+                    }
                     let base = cost.saturating_add(step);
                     if self.search.get(next).is_some_and(|s| s.cost <= base) {
                         continue;
@@ -2322,7 +2375,21 @@ impl<'a> Router<'a> {
                     break;
                 }
                 let prev = state.parent;
-                path.push((prev, current, state.kind));
+                let a = self.graph.locate(prev);
+                let b = self.graph.locate(current);
+                if state.kind == WIRE && a.0 == b.0 && a.1 == b.1 && prev.abs_diff(current) > 1 {
+                    let mut at = current;
+                    while at != prev {
+                        if path.len() >= self.limits.max_search_expansions {
+                            return Err(budget("routing macro trace limit"));
+                        }
+                        let before = if at < prev { at + 1 } else { at - 1 };
+                        path.push((before, at, state.kind));
+                        at = before;
+                    }
+                } else {
+                    path.push((prev, current, state.kind));
+                }
                 current = prev;
                 if path.len() > self.limits.max_search_expansions {
                     return Err(budget("routing trace limit"));
@@ -3143,6 +3210,45 @@ mod tests {
     }
 
     #[test]
+    fn long_track_moves_keep_checked_unit_geometry_under_a_tight_search_budget() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(10, 10, 30, 30)),
+                terminal(1, 0, false, rect(9970, 9970, 9990, 9990)),
+            ],
+            Vec::new(),
+        );
+        design.die = rect(0, 0, 10000, 10000);
+        let plan = design.tracks.as_mut().unwrap();
+        plan.gcell = 40;
+        plan.capacity_percent = 100;
+        plan.memory_mib = 256;
+        let bounded = RouteLimits {
+            max_expansions: 800,
+            ..limits()
+        };
+        let result = route_cpu_ref(&design, &bounded).unwrap();
+        validate(&design, &result, &bounded).unwrap();
+        assert!(result.stats.expansions < 800);
+        assert_eq!(result.access.len(), 2);
+        let graph = Graph::new(&design, design.tracks.as_ref().unwrap(), &bounded).unwrap();
+        let node = graph.find(0, [500, 500]).unwrap();
+        let mut neighbours = Vec::new();
+        graph.neighbors(node, &mut neighbours);
+        let long: Vec<_> = neighbours
+            .iter()
+            .filter(|(next, kind)| *kind == Move::Along && node.abs_diff(*next) > 1)
+            .collect();
+        assert!(!long.is_empty() && long.len() <= 6);
+        for &&(next, _) in &long {
+            let a = graph.locate(node);
+            let b = graph.locate(next);
+            assert_eq!((a.0, a.1), (b.0, b.1));
+            assert!(node.abs_diff(next) <= 256);
+        }
+    }
+
+    #[test]
     fn bounded_batches_preserve_all_nets_and_validate_the_combined_geometry() {
         let mut design = input(
             vec![
@@ -3527,8 +3633,15 @@ mod tests {
         assert_eq!(g.point(id), (1, [100, 220]));
         let mut n = Vec::new();
         g.neighbors(id, &mut n);
-        // Two along-track, two wrong-way, via down and via up.
-        assert_eq!(n.len(), 6);
+        // Two unit along-track, two wrong-way, via down and via up;
+        // additional long moves keep the same underlying graph nodes.
+        assert_eq!(
+            n.iter()
+                .filter(|(next, kind)| *kind != Move::Along || id.abs_diff(*next) == 1)
+                .count(),
+            6
+        );
+        assert!(n.len() > 6);
         assert_eq!(graph_nodes(&i, &limits()).unwrap(), g.len);
     }
 

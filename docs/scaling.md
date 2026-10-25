@@ -47,6 +47,10 @@ below describe the earlier small-block release.
 - The detailed frontier uses indexed priority updates, with one pending entry
   per node. Queue growth is independent of how often a better path reaches
   that node; its memory allowance is included in the route preflight.
+- Bounded preferred-track spans reduce search through open channels while
+  retaining ordinary moves, full-wire collision checks and intermediate guide
+  checks. Large sparse hole checks use a bounded sweep rather than allocating
+  the Cartesian product of x/y coordinates.
 - `track_router.max_history_entries` independently bounds congestion history
   (default 4,000,000). Pin-access memoization has a bounded memory cache;
   eviction recomputes the same geometry. Object/work limits, the whole-process
