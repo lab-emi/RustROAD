@@ -176,6 +176,7 @@ fn run(text: &str) -> Result<String, String> {
     };
     let network = extract_cpu_ref(
         &ExtractInput {
+            held_bytes: 0,
             instances: None,
             layers: &layers,
             vias: &[],

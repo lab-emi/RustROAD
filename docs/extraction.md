@@ -28,7 +28,9 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   --corner max --out /path/outside/W/routed_max.spef \
   [--max-spef-mib 32] [--max-segment-um 25] [--max-rc-nodes 500000] \
   [--max-coupling-caps 1000000] [--max-extract-work 200000000] \
-  [--max-rc-elements 1000000] [--max-extract-candidates 4096]
+  [--max-rc-elements 1000000] [--max-extract-candidates 4096] \
+  [--extract-memory-mib 2048] [--max-extract-shapes 2000000] \
+  [--max-extract-bin-entries 8000000]
 ```
 
 * The workspace is opened under its shared lock and never written. `--out`
@@ -40,7 +42,7 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   technology LEF. Every routing and cut layer the router used must be in the
   profile. A routed width different from the calibrated width is an explicit
   error (non-default widths are unsupported).
-* The byte cap (`--max-spef-mib`, at most 256) is enforced while writing.
+* The byte cap (`--max-spef-mib`, at most 16,384) is enforced while writing.
   Shape, node, element, coupling, candidate, bin and work budgets fail with
   `BUDGET_EXCEEDED`. Errors use the existing `{status, code, message}` stderr
   envelope and exit code 2.
@@ -60,11 +62,25 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   (`MAX_CANDIDATES_CEILING`); the quadratic intervals x candidates work stays
   charged to `--max-extract-work`. The report states `max_candidates_per_run`,
   `candidate_scratch_bytes` and the observed `stats.max_run_candidates`.
-  `--max-rc-elements` (resistors + nodes + 2 x couplings, ceiling 8x the
-  default) is a command-line budget too. SERV (scale-stream layout, sky130,
+  `--max-rc-elements` (resistors + nodes + 2 x couplings, explicitly bounded by the
+  whole-process memory allowance) is a command-line budget too. SERV (scale-stream layout, sky130,
   7,959 nets): 8,054 candidates on its largest run, 4.3 M elements, work
   7.4e9, 20.6 s and 521 MB peak; the track recipe of the gate passes 65,536
   candidates (2.9 MB scratch) and 8 M elements.
+
+Cell pin and obstruction geometry is shared per master and decoded only for
+local queries. The default virtual-shape budget is 256 million and the separate
+instance-index budget is 64 million entries; they can be set with
+`--max-virtual-shapes` and `--max-instance-bin-entries`. Crossing conductors use
+one marking bit per virtual shape and generate their contribution strips as
+needed. They do not create a flat design-sized rectangle/strip array.
+
+Before RC-tree construction, the extractor checks the loaded process footprint,
+with 25% headroom, plus graph, retained-shape, coupling, spatial-index and scratch
+allowances against `--extract-memory-mib`. Runtime peak RSS is checked during
+extraction. Larger object limits still fail when their combined estimate exceeds
+the memory allowance. `stats.memory` reports the estimate and cap. The CLI reads
+the workspace once, converting the segment length under the same snapshot lock.
 
 SPEF formatting retains the numeric RC network once and generates labeled nets one
 at a time. A compact coupling incidence table preserves record order; the name

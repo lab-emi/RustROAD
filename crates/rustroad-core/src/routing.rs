@@ -605,15 +605,27 @@ pub(crate) fn instance_index_bytes(input: &RouteInput, limits: &RouteLimits) -> 
     let Some(source) = &input.instances else {
         return Ok(0);
     };
-    source.validate(input.layers.len(), limits)?;
-    let (bin, b, entries) = instance_extent(
+    instance_geometry_bytes(
+        source,
         input.die,
         input
             .step
             .checked_mul(16)
             .ok_or_else(|| budget("instance bin size"))?,
-        source,
-    )?;
+        input.layers.len(),
+        limits,
+    )
+}
+
+pub(crate) fn instance_geometry_bytes(
+    source: &InstanceObstacles,
+    die: Rect,
+    bin: i64,
+    layer_count: usize,
+    limits: &RouteLimits,
+) -> Result<u64> {
+    source.validate(layer_count, limits)?;
+    let (bin, b, entries) = instance_extent(die, bin, source)?;
     if entries > limits.max_bin_entries {
         return Err(budget("instance bin-entry limit"));
     }

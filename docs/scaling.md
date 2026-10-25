@@ -35,9 +35,10 @@ below describe the earlier small-block release.
 - Routing preparation retains cell geometry once per master, with instance
   positions/orientations and a compact pin-to-net column. Cell bounding boxes
   are indexed in pages; pin and obstruction rectangles are translated only
-  when queried. The explicit-geometry path remains available for consumers
-  that require individual shape owners. It must not be confused with a
-  qualification of the extractor at full-chip scale.
+  when queried. Native RC extraction also uses shared shapes and global pin identities,
+  generating local conductor contributions without flattening the geometry.
+  The explicit path remains available to other consumers. Full-chip extraction
+  qualification remains separate from these storage changes.
 - Large routing grids use bounded sparse search state. Spatial bins allocate
   32 by 32 pages on populated large layouts. Fixed rectangles are shared;
   completed nets retain collinear runs rather than every track edge. Clock

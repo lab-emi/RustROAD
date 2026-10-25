@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 pub const RC_PROFILE_SCHEMA: &str = "rustroad.rc-profile.v1";
 const MAX_PROFILE_BYTES: u64 = 4 * 1024 * 1024;
 pub const DEFAULT_MAX_SPEF_BYTES: u64 = 32 * 1024 * 1024;
-const HARD_MAX_SPEF_BYTES: u64 = 256 * 1024 * 1024;
+const HARD_MAX_SPEF_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -306,6 +306,29 @@ pub fn extract(
     request: &ExtractRequest,
     limits: &Limits,
 ) -> Result<ExtractReport> {
+    extract_impl(workspace, request, limits, None)
+}
+
+/// CLI length conversion under the same snapshot lock as extraction. This
+/// avoids loading a large workspace once for units and again for the graph.
+pub fn extract_with_segment_um(
+    workspace: &Path,
+    request: &ExtractRequest,
+    limits: &Limits,
+    segment_um: f64,
+) -> Result<ExtractReport> {
+    if !segment_um.is_finite() || !(0.1..=10_000.0).contains(&segment_um) {
+        return Err(fail("segment length must be within 0.1..=10000 um"));
+    }
+    extract_impl(workspace, request, limits, Some(segment_um))
+}
+
+fn extract_impl(
+    workspace: &Path,
+    request: &ExtractRequest,
+    limits: &Limits,
+    segment_um: Option<f64>,
+) -> Result<ExtractReport> {
     if request.max_spef_bytes == 0 || request.max_spef_bytes > HARD_MAX_SPEF_BYTES {
         return Err(Error::Budget("SPEF byte cap outside hard bounds".into()));
     }
@@ -320,6 +343,12 @@ pub fn extract(
     let snapshot = crate::read(workspace, limits)?;
     let metadata = snapshot.metadata();
     let design = &metadata.design;
+    let mut effective = request.clone();
+    if let Some(um) = segment_um {
+        effective.limits.max_segment_length =
+            (um * f64::from(design.units_per_micron)).round() as i64;
+    }
+    let request = &effective;
     let bundle = metadata
         .physical
         .as_ref()
@@ -496,6 +525,9 @@ pub fn extract(
     };
     let network = extract::extract_cpu_ref(
         &extract::ExtractInput {
+            held_bytes: rustroad_core::memory::live_bytes().unwrap_or(
+                crate::routing::revision_bytes(workspace, &metadata.revision)?.saturating_mul(3),
+            ),
             instances: input
                 .instances
                 .as_ref()

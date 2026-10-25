@@ -136,6 +136,19 @@ impl<'a> InstanceGeometry<'a> {
         let Some(input) = shapes.source else {
             return Ok(None);
         };
+        let Some((die, bounds)) = Self::parameters(input, limits)? else {
+            return Ok(None);
+        };
+        let index = InstanceIndex::for_geometry(input.geometry, die, bin, layer_count, &bounds)?;
+        Ok(Some(Self {
+            index,
+            limits: bounds,
+        }))
+    }
+    fn parameters(
+        input: InstancedPassive<'_>,
+        limits: &ExtractLimits,
+    ) -> Result<Option<(Rect, RouteLimits)>> {
         let mut die = None;
         for i in 0..input.geometry.len() {
             if let Some(r) = input.geometry.bounds(i)? {
@@ -154,11 +167,29 @@ impl<'a> InstanceGeometry<'a> {
             max_comparisons: limits.max_work,
             ..Default::default()
         };
-        let index = InstanceIndex::for_geometry(input.geometry, die, bin, layer_count, &bounds)?;
-        Ok(Some(Self {
-            index,
-            limits: bounds,
-        }))
+        Ok(Some((die, bounds)))
+    }
+    pub(super) fn estimated_bytes(
+        input: Option<InstancedPassive<'_>>,
+        bin: i64,
+        layers: usize,
+        limits: &ExtractLimits,
+    ) -> Result<u64> {
+        let Some(input) = input else { return Ok(0) };
+        let Some((die, bounds)) = Self::parameters(input, limits)? else {
+            return Ok(0);
+        };
+        Ok(
+            crate::routing::instance_geometry_bytes(input.geometry, die, bin, layers, &bounds)?
+                .saturating_add((input.geometry.len() as u64 + 1).saturating_mul(4))
+                .saturating_add(
+                    input
+                        .geometry
+                        .virtual_shapes()
+                        .div_ceil(64)
+                        .saturating_mul(8),
+                ),
+        )
     }
     pub(super) fn visit(
         &mut self,

@@ -70,6 +70,8 @@ pub struct ExtractInput<'a> {
     pub passive: &'a [PassiveShape],
     /// Shared cell pin/obstruction geometry, decoded only for local queries.
     pub instances: Option<InstancedPassive<'a>>,
+    /// Caller-held memory allowance; use 0 when only the process probe is available.
+    pub held_bytes: u64,
     pub tech: &'a RcTech,
 }
 #[derive(Clone, Copy)]
@@ -80,6 +82,7 @@ pub struct InstancedPassive<'a> {
 }
 #[derive(Clone, Debug)]
 pub struct ExtractLimits {
+    pub memory_mib: u64,
     /// All conductor shapes (wire runs, via pads, pins, obstructions, supply).
     pub max_shapes: usize,
     /// Virtual shared-template shapes, distinct from retained route records.
@@ -107,6 +110,7 @@ pub struct ExtractLimits {
 impl Default for ExtractLimits {
     fn default() -> Self {
         Self {
+            memory_mib: 2048,
             max_shapes: 2_000_000,
             max_virtual_shapes: 256_000_000,
             max_instance_bin_entries: 64_000_000,
@@ -134,23 +138,25 @@ impl ExtractLimits {
         self.max_candidates.saturating_mul(CANDIDATE_SCRATCH_BYTES)
     }
     pub fn validate(&self) -> Result<()> {
-        let hard = Self::default();
         for (value, ceiling) in [
-            (self.max_shapes, hard.max_shapes),
+            (self.max_shapes, 128_000_000),
             (self.max_virtual_shapes, 1_000_000_000),
             (self.max_instance_bin_entries, 512_000_000),
-            (self.max_nodes, hard.max_nodes * 8),
-            (self.max_elements, hard.max_elements * 8),
-            (self.max_couplings, hard.max_couplings * 8),
+            (self.max_nodes, 64_000_000),
+            (self.max_elements, 256_000_000),
+            (self.max_couplings, 128_000_000),
             // Work counts comparisons, not memory (bounded by the shape,
             // node, element and bin caps): SERV-size blocks need ~2-5e9.
-            (self.max_work, hard.max_work * 64),
+            (self.max_work, 1usize << 40),
             (self.max_candidates, MAX_CANDIDATES_CEILING),
-            (self.max_bin_entries, hard.max_bin_entries),
+            (self.max_bin_entries, 512_000_000),
         ] {
             if value == 0 || value > ceiling {
                 return Err(budget("extraction limit outside hard bounds"));
             }
+        }
+        if self.memory_mib == 0 || self.memory_mib > 65_536 {
+            return Err(budget("extraction memory allowance"));
         }
         if self.max_segment_length <= 0 {
             return Err(invalid("extraction segment length must be positive"));
@@ -185,6 +191,8 @@ pub struct RcCoupling {
 }
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ExtractStats {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<ExtractMemory>,
     pub nets: usize,
     pub lattice_wires: usize,
     pub wire_runs: usize,
@@ -249,6 +257,75 @@ pub struct RcNetwork {
     pub nets: Vec<RcNet>,
     pub couplings: Vec<RcCoupling>,
     pub stats: ExtractStats,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct ExtractMemory {
+    pub held_bytes: u64,
+    pub working_bytes: u64,
+    pub geometry_bytes: u64,
+    pub estimate_bytes: u64,
+    pub limit_bytes: u64,
+}
+
+fn extraction_bin(input: &ExtractInput<'_>) -> Result<i64> {
+    let window = input
+        .tech
+        .layers
+        .iter()
+        .flatten()
+        .flat_map(|m| &m.contexts)
+        .map(|c| c.rows[c.rows.len() - 1][0])
+        .fold(0.0f64, f64::max);
+    let size = (window * input.tech.dbu_per_um).ceil().max(1.0);
+    if !size.is_finite() || size > (i64::MAX / 2) as f64 {
+        return Err(budget("extraction bin size"));
+    }
+    Ok((size as i64) * 2)
+}
+
+fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<ExtractMemory> {
+    let live = crate::memory::live_bytes().unwrap_or(input.held_bytes);
+    let held = live.max(input.held_bytes);
+    let held = held.saturating_add(held.div_ceil(4));
+    let working = (limits.max_nodes as u64)
+        .saturating_mul(64)
+        .saturating_add((limits.max_elements as u64).saturating_mul(16))
+        .saturating_add((limits.max_shapes as u64).saturating_mul(320))
+        .saturating_add((limits.max_couplings as u64).saturating_mul(128))
+        .saturating_add((limits.max_bin_entries as u64).saturating_mul(96))
+        .saturating_add((input.routes.nets.len() as u64).saturating_mul(192))
+        .saturating_add(limits.candidate_scratch_bytes() as u64);
+    let geometry = InstanceGeometry::estimated_bytes(
+        input.instances,
+        extraction_bin(input)?,
+        input.layers.len(),
+        limits,
+    )?;
+    let memory = ExtractMemory {
+        held_bytes: held,
+        working_bytes: working,
+        geometry_bytes: geometry,
+        estimate_bytes: held.saturating_add(working).saturating_add(geometry),
+        limit_bytes: limits.memory_mib.saturating_mul(1 << 20),
+    };
+    if memory.estimate_bytes > memory.limit_bytes {
+        return Err(budget(&format!(
+            "extraction estimate {} MiB exceeds memory_mib {}",
+            memory.estimate_bytes.div_ceil(1 << 20),
+            limits.memory_mib
+        )));
+    }
+    Ok(memory)
+}
+
+fn guard_memory(limits: &ExtractLimits) -> Result<()> {
+    if crate::memory::peak_rss_bytes()
+        .is_some_and(|n| n > limits.memory_mib.saturating_mul(1 << 20))
+    {
+        return Err(budget("extraction peak resident set exceeds memory_mib"));
+    }
+    Ok(())
 }
 
 fn budget(s: &str) -> Error {
@@ -458,7 +535,10 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         pads: Vec::new(),
         pin_nodes: HashMap::new(),
     };
-    for &net in &routes.nets {
+    for (net_index, &net) in routes.nets.iter().enumerate() {
+        if net_index.is_multiple_of(4096) {
+            guard_memory(limits)?;
+        }
         let net_wires = wires.get(&net).map(Vec::as_slice).unwrap_or(&[]);
         let net_vias = vias.get(&net).map(Vec::as_slice).unwrap_or(&[]);
         let net_access = access
@@ -1595,7 +1675,9 @@ fn sample(rows: &[[f64; 3]], spacing: Option<f64>) -> (f64, f64) {
 /// Compute an RC tree for every routed net plus grounded and coupling caps.
 pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<RcNetwork> {
     preflight(input, limits)?;
+    let memory = memory_estimate(input, limits)?;
     let (mut built, mut stats) = build_trees(input, limits)?;
+    stats.memory = Some(memory);
     let tech = input.tech;
     // Conductor shapes: wire-run bodies and passive shapes; the end
     // extensions, via pads and patches are added as pieces below.
@@ -1626,12 +1708,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     let routing_layers: Vec<u32> = (0..input.layers.len() as u32)
         .filter(|&l| tech.layers[l as usize].is_some())
         .collect();
-    let max_window = routing_layers
-        .iter()
-        .filter_map(|&l| tech.layers[l as usize].as_ref())
-        .flat_map(|m| m.contexts.iter().map(|c| c.rows[c.rows.len() - 1][0]))
-        .fold(0.0f64, f64::max);
-    let bin_size = ((max_window * tech.dbu_per_um).ceil() as i64).max(1) * 2;
+    let bin_size = extraction_bin(input)?;
     let mut bins = Bins {
         size: bin_size,
         map: HashMap::new(),
@@ -1724,12 +1801,16 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                 virtual_strip(id, shape, true),
             ]
         });
-    for run in built.runs[..routed_runs]
+    for (run_index, run) in built.runs[..routed_runs]
         .iter()
         .cloned()
         .chain(extra)
         .chain(built.runs[routed_runs..].iter().cloned())
+        .enumerate()
     {
+        if run_index.is_multiple_of(4096) {
+            guard_memory(limits)?;
+        }
         let model = layer_model(input, run.layer)?;
         let ctx_map = contexts[run.layer as usize].as_ref().unwrap();
         let window = model
@@ -2180,6 +2261,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     if elements > limits.max_elements {
         return Err(budget("extraction RC elements"));
     }
+    guard_memory(limits)?;
     Ok(RcNetwork {
         nets: built.nets,
         couplings,
@@ -2347,6 +2429,7 @@ mod tests {
                 routes: r,
                 terminals: t,
                 passive,
+                held_bytes: 0,
                 instances: None,
                 tech,
             },
@@ -2553,6 +2636,7 @@ mod tests {
             ..Default::default()
         };
         let input = ExtractInput {
+            held_bytes: 0,
             instances: None,
             layers: &l,
             vias: &v,
@@ -2817,6 +2901,7 @@ mod tests {
         let v = vias();
         let routed = extract_cpu_ref(
             &ExtractInput {
+                held_bytes: 0,
                 instances: None,
                 layers: &wide_layers,
                 vias: &v,
@@ -2977,6 +3062,7 @@ mod tests {
         let extract = |r: &Routes| {
             extract_cpu_ref(
                 &ExtractInput {
+                    held_bytes: 0,
                     instances: None,
                     layers: &l,
                     vias: &v,
@@ -3460,6 +3546,7 @@ mod tests {
         let (l, v) = (layers(), vias());
         let tk = tech(false);
         let input = ExtractInput {
+            held_bytes: 0,
             instances: None,
             layers: &l,
             vias: &v,
@@ -3499,6 +3586,7 @@ mod tests {
             },
         ];
         let crowded = ExtractInput {
+            held_bytes: 0,
             instances: None,
             passive: &neighbours,
             ..input
@@ -3655,6 +3743,7 @@ mod tests {
                 routes: &r,
                 terminals: &t,
                 passive: &[],
+                held_bytes: 0,
                 instances: Some(InstancedPassive {
                     geometry: &source,
                     signal_nets: &[true, true],
@@ -3771,6 +3860,7 @@ mod tests {
             routes: &r,
             terminals: &t,
             passive: &[],
+            held_bytes: 0,
             instances: Some(InstancedPassive {
                 geometry: &source,
                 signal_nets: &[true],
@@ -3787,6 +3877,56 @@ mod tests {
         };
         assert!(matches!(
             extract_cpu_ref(&input, &limited),
+            Err(Error::Budget(_))
+        ));
+    }
+    #[test]
+    fn extraction_memory_allowance_fails_before_graph_construction() {
+        let r = routes(
+            straight(0, 0, 10),
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 0,
+                    at: [10000, 0],
+                },
+            ],
+            vec![0],
+        );
+        let t = [terminal(0, 0, true), terminal(1, 0, false)];
+        let (l, v, tech) = (layers(), vias(), tech(true));
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            terminals: &t,
+            passive: &[],
+            instances: None,
+            held_bytes: 0,
+            tech: &tech,
+        };
+        let limits = ExtractLimits {
+            memory_mib: 1,
+            ..Default::default()
+        };
+        assert!(matches!(
+            extract_cpu_ref(&input, &limits),
+            Err(Error::Budget(_))
+        ));
+        let reserved = ExtractInput {
+            held_bytes: 1 << 40,
+            ..input
+        };
+        assert!(matches!(
+            extract_cpu_ref(&reserved, &ExtractLimits::default()),
             Err(Error::Budget(_))
         ));
     }

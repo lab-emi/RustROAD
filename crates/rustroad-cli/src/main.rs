@@ -110,8 +110,18 @@ enum Command {
         /// SPEF output path, written atomically outside the workspace.
         #[arg(long)]
         out: PathBuf,
-        #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u64).range(1..=256))]
+        #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u64).range(1..=16384))]
         max_spef_mib: u64,
+        #[arg(long, default_value_t = 2048, value_parser = clap::value_parser!(u64).range(1..=65536))]
+        extract_memory_mib: u64,
+        #[arg(long, default_value_t = 2_000_000)]
+        max_extract_shapes: usize,
+        #[arg(long, default_value_t = 8_000_000)]
+        max_extract_bin_entries: usize,
+        #[arg(long, default_value_t = 256_000_000)]
+        max_virtual_shapes: usize,
+        #[arg(long, default_value_t = 64_000_000)]
+        max_instance_bin_entries: usize,
         /// Straight wire runs longer than this are split into several resistors.
         #[arg(long, default_value_t = 25.0)]
         max_segment_um: f64,
@@ -662,6 +672,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             corner,
             out,
             max_spef_mib,
+            extract_memory_mib,
+            max_extract_shapes,
+            max_extract_bin_entries,
+            max_virtual_shapes,
+            max_instance_bin_entries,
             max_segment_um,
             max_rc_nodes,
             max_coupling_caps,
@@ -672,20 +687,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             if !(max_segment_um.is_finite() && (0.1..=10_000.0).contains(&max_segment_um)) {
                 return Err("INVALID_ARGUMENT: --max-segment-um must be within 0.1..=10000".into());
             }
-            let snapshot_units = rustroad_workspace::read(&workspace, &limits)?
-                .metadata()
-                .design
-                .units_per_micron;
             let extract_limits = rustroad_core::extract::ExtractLimits {
+                memory_mib: extract_memory_mib,
+                max_shapes: max_extract_shapes,
+                max_bin_entries: max_extract_bin_entries,
+                max_virtual_shapes,
+                max_instance_bin_entries,
                 max_nodes: max_rc_nodes,
                 max_couplings: max_coupling_caps,
                 max_elements: max_rc_elements,
                 max_work: max_extract_work,
                 max_candidates: max_extract_candidates,
-                max_segment_length: (max_segment_um * f64::from(snapshot_units)).round() as i64,
-                ..Default::default()
+                max_segment_length: 1, // converted after loading the locked snapshot
             };
-            emit(&rustroad_workspace::extract::extract(
+            emit(&rustroad_workspace::extract::extract_with_segment_um(
                 &workspace,
                 &rustroad_workspace::extract::ExtractRequest {
                     profile: rc_profile,
@@ -695,6 +710,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     limits: extract_limits,
                 },
                 &limits,
+                max_segment_um,
             )?)
         }
         Command::FlowCheck { manifest } => {

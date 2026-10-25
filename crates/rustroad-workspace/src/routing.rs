@@ -1364,7 +1364,7 @@ pub fn route(
     Ok(summary)
 }
 /// On-disk bytes of one workspace revision (metadata and binary tables).
-fn revision_bytes(path: &Path, revision: &str) -> Result<u64> {
+pub(crate) fn revision_bytes(path: &Path, revision: &str) -> Result<u64> {
     let mut total = 0u64;
     for entry in std::fs::read_dir(path.join("revisions").join(revision))? {
         let meta = entry?.metadata()?;
