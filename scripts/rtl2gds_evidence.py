@@ -80,6 +80,20 @@ def die_area(def_path: Path) -> dict | None:
     return dict(width_um=w, height_um=h, area_um2=round(w * h, 3))
 
 
+def declared_evidence(pulse: dict) -> list[dict]:
+    """Keep the original mismatch and proof when reducing a run for publication."""
+    out = []
+    for entry in pulse.get("declared_deviations", []):
+        evidence = entry["evidence"]
+        proof = evidence["proof"]
+        out.append(dict(check=entry["check"], difference_ns=entry["difference_ns"],
+                        valid=evidence["valid"], policy=evidence["policy"],
+                        **{k:proof[k] for k in ("binding", "original", "nearby", "step", "circuit")},
+                        artifacts=[dict(name=a.get("name") or Path(a["path"]).name, sha256=a["sha256"])
+                                   for a in proof["artifacts"]]))
+    return out
+
+
 def timing(pdk: dict) -> dict:
     matrix = pdk["details"].get("timing_matrix") or {}
     acc = (pdk["statuses"].get("timing_accuracy") or {}).get("by_spef") or {}
@@ -87,7 +101,10 @@ def timing(pdk: dict) -> dict:
     for src, v in acc.items():
         parity[src] = {c: dict(endpoints_ps=None if x["endpoints"].get("max_difference_ns") is None
                                else round(x["endpoints"]["max_difference_ns"] * 1e3, 4),
-                               pulse_ps=round((x["pulse"].get("max_difference_ns") or 0) * 1e3, 4),
+                               pulse_ps=None if x["pulse"].get("max_difference_ns") is None
+                               else round(x["pulse"]["max_difference_ns"] * 1e3, 4),
+                               pulse_status=x["pulse"]["status"],
+                               declared_deviations=declared_evidence(x["pulse"]),
                                drv_equal=x["drv"]["status"] == "passed")
                        for c, x in (v.get("corners") or {}).items()}
         if not v.get("corners"):
@@ -138,9 +155,11 @@ def row(summary: dict, pdk: dict, run: Path, sizes: dict, policy: dict) -> dict:
     failed = [k for k in gating if (st.get(k) or {}).get("status") == "failed"]
     unverified = [k for k in gating if (st.get(k) or {}).get("status") in ("unverified", "missing", None)]
     na = [k for k in gating if (st.get(k) or {}).get("status") == "not_applicable"]
+    declared = [k for k in gating if (st.get(k) or {}).get("status") == "deviation_declared"]
     return dict(
         design=summary["design"]["name"], pdk=pdk["pdk"], recipe=summary["design"]["recipe"]["physical"],
         run=run.name, gate_status=pdk["status"], failed=failed, unverified=unverified, not_applicable=na,
+        declared_deviations=declared,
         statuses={k: dict(status=(st.get(k) or {}).get("status"), reason=short((st.get(k) or {}).get("reason")))
                   for k in gating + summary["reported"]},
         timing=timing(pdk), closure=closure(pdk), cells=cells, die=area, signoff=signoff, controls=controls,
@@ -201,6 +220,7 @@ def main(argv=None) -> int:
                          exit_code=summary["exit_code"], failed_items=summary["failed_items"],
                          unverified_items=summary["unverified_items"],
                          not_applicable_items=summary.get("not_applicable_items"),
+                         declared_deviations=summary.get("declared_deviations", []),
                          global_statuses={k: v["status"] for k, v in summary["global_statuses"].items()},
                          revision={k: v for k, v in summary["revision"].items() if k != "rustroad_path"},
                          wall_seconds=summary["resources"]["wall_seconds"],
@@ -213,7 +233,10 @@ def main(argv=None) -> int:
                scope=json.loads((args.runs[0] / "summary.json").read_text())["scope"],
                runs=runs, rows=rows, gf180_drv_dont_use=drv_dont_use(),
                table={f"{r['design']}/{r['pdk']}": dict(status=r["gate_status"], failed=r["failed"],
-                                                         unverified=r["unverified"]) for r in rows})
+                                                         unverified=r["unverified"],
+                                                         declared_deviations=r["declared_deviations"]) for r in rows})
+    out["counts"] = dict(total=len(rows), **{status:sum(r["gate_status"] == status for r in rows)
+                                         for status in ("passed", "deviation_declared", "failed", "unverified")})
     for path in args.extra:
         out.update(json.loads(path.read_text()))
     args.out.parent.mkdir(parents=True, exist_ok=True)

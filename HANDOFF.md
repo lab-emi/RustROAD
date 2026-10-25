@@ -1,5 +1,28 @@
 # RustROAD handoff
 
+## 2026-10-25 — Claude closeout candidate
+
+- Source work is isolated on `fix/claude-closeout`; the old sibling worktree is untouched.
+- Requalified installed tool locations and OCI repository digests without weakening SHA checks.
+  The original Yosys/Verilator executables were unavailable: current pinned versions require
+  fresh gates. Verilator 5.052 exposes public JSON instead of the removed XML interface;
+  the bounded port reader preserves both frozen ALU SDC hashes exactly.
+- The DRV WIP is under fresh dual-oracle verification. GF180 regfile passed its full gate,
+  including controls and a deterministic rebuild; other rows are still being qualified.
+- MPW policy and resource limits are in docs/mpw-deviations.md. A FIFO prototype proved all
+  four failing checks with separate rise/fall brackets; it is not a substitute for the full gate.
+- GNU time is resolved from `RUSTEDA_GNU_TIME` or PATH. Missing timing tooling remains an
+  error; no resource values are invented. Pinned Ngspice and the full SKY130 model tree are
+  part of the declaration inputs. Probe code is included in artifact binding.
+- Do not use one common step bracket for high and low pulse checks: their reference-driver
+  discontinuities occur at different resistance values. Do not subtract a fitted step from
+  the original error. The owner explicitly selected raw agreement at the nearby sample.
+- `scripts/signoff/signoff.py` is imported as `signoff` by the main gate. A new helper must
+  not import `signoff.manifest` as a package; use the existing direct helper-module convention.
+  The first integrated FIFO run caught this and remained unverified; its evidence is retained.
+- The old status headline was miscounted: the archived matrix has 10 passes and six failures.
+  Compact reports now compute counts and preserve every MPW declaration and its original error.
+
 ## 2026-10-25 — final RTL-to-GDS integration (feat/rtl2gds-final2; read this first)
 
 Report: [docs/rtl2gds.md](docs/rtl2gds.md); evidence: `docs/evidence/rtl2gds-final2.json`.

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import rtl2gds_deviation as V
 import rtl2gds_design as D
 import rtl2gds_timing as T
+import rtl2gds_evidence as E
 from mpw_probe import driver_waveforms, scale_resistance
 
 
@@ -126,6 +127,18 @@ class DeviationPolicy(unittest.TestCase):
                 "from mpw_circuit import model_tree_digest; "
                 f"assert model_tree_digest(__import__('pathlib').Path({str(self.root)!r}))[1] == 5")
         subprocess.run([sys.executable, "-c", code], check=True, timeout=10)
+
+    def test_compact_report_preserves_declaration_and_unmeasured_values(self):
+        proof = dict(self.check(self.proof), proof=self.proof)
+        pulse = dict(status="deviation_declared", max_difference_ns=.0012,
+                     declared_deviations=[dict(check="r1/CLK:high", difference_ns=.0012, evidence=proof)])
+        row = dict(details={}, statuses={"timing_accuracy":dict(by_spef={"native":dict(corners={
+            "ss":dict(endpoints=dict(max_difference_ns=None), pulse=pulse, drv=dict(status="passed"))})})})
+        compact = E.timing(row)["parity"]["native"]["ss"]
+        self.assertIsNone(compact["endpoints_ps"])
+        self.assertEqual(compact["pulse_ps"], 1.2)
+        self.assertEqual(compact["pulse_status"], "deviation_declared")
+        self.assertEqual(compact["declared_deviations"][0]["original"], self.original)
 
 
 if __name__ == "__main__":
