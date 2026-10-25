@@ -721,7 +721,9 @@ Exhausting both attempts fails explicitly; no partial result is published.
 Detailed search also offers the track stops bracketing the target coordinate
 as checked macro-wire endpoints. They use the same complete-span obstacle,
 guide, history and topology checks as other long moves, then expand to bounded
-unit edges for the stored route. Unit moves remain available for detours.
+unit edges for the stored route. To limit repeated full-span queries in dense
+layouts, probes are sampled after the first 16 expansions and capped at 1,024
+per sink. Unit moves remain available for detours.
 
 Via junctions use the area of the actual via pads. A smaller unused variant
 does not force a wire run when an incident pad already meets the layer's

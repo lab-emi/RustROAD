@@ -68,6 +68,7 @@ const RECORD_BYTES: u64 = 128;
 const ROUTED_BYTES_PER_TERMINAL: u64 = 768 - 3 * std::mem::size_of::<usize>() as u64;
 const ACTIVE_TOPOLOGY_BYTES: u64 = 172;
 const MAX_VIA_PAD_ENTRIES: usize = 1_000_000;
+const MAX_TARGET_PROJECTIONS_PER_SINK: usize = 1024;
 /// Sorted window index plus construction headroom (one entry per terminal).
 const WINDOW_INDEX_BYTES: u64 = 32;
 type AccessKey = (u32, Vec<(u32, [i64; 2])>);
@@ -2310,6 +2311,7 @@ impl<'a> Router<'a> {
             ))?;
             let mut found = None;
             let mut limited = false;
+            let mut projection_attempts = 0;
             let mut search = 0usize;
             while let Some((_, Reverse(cost), id)) = heap.pop() {
                 if self.search.get(id).is_none_or(|s| s.cost != cost) {
@@ -2358,13 +2360,21 @@ impl<'a> Router<'a> {
                 let p = self.graph.xy(l, t_, s_);
                 let target_distance = target.bounds_distance(p);
                 self.graph.neighbors(id, &mut nbuf);
-                let work = self.graph.target_neighbors(id, root_point, &mut nbuf);
-                self.spatial.work = self
-                    .spatial
-                    .work
-                    .checked_add(work)
-                    .filter(|&n| n <= self.limits.max_comparisons)
-                    .ok_or_else(|| budget("target projection work"))?;
+                // Dense channels otherwise retry nearly identical long-span
+                // probes at every unit stop. These optional edges are sampled;
+                // ordinary edges still cover every legal local detour.
+                if projection_attempts < MAX_TARGET_PROJECTIONS_PER_SINK
+                    && (search <= 16 || s_.is_multiple_of(64))
+                {
+                    projection_attempts += 1;
+                    let work = self.graph.target_neighbors(id, root_point, &mut nbuf);
+                    self.spatial.work = self
+                        .spatial
+                        .work
+                        .checked_add(work)
+                        .filter(|&n| n <= self.limits.max_comparisons)
+                        .ok_or_else(|| budget("target projection work"))?;
+                }
                 // Minimum area depends on the incoming path, so it cannot be
                 // a general edge restriction in a one-cost-per-node search.
                 // Initial routes use bounded geometric cleanup; a net whose
@@ -3098,6 +3108,18 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         // Repair: negotiated rip-up and reroute.
         while let Some(net) = queue.pop_front() {
             round += 1;
+            if round.is_multiple_of(100) {
+                trace(
+                    "repair progress",
+                    t0,
+                    format_args!(
+                        "rounds {round} queued {} work {} exp {}",
+                        queue.len(),
+                        r.spatial.work,
+                        r.expansions
+                    ),
+                );
+            }
             if round > r.plan.max_repair_rounds {
                 return Err(no_route(&format!(
                     "repair rounds exhausted, {} nets unrouted (net {net} first)",
