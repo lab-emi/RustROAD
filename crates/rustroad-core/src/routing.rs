@@ -169,14 +169,39 @@ pub const DEFAULT_MAX_HISTORY_ENTRIES: usize = 4_000_000;
 /// Process baseline counted in every route memory estimate (binary, libc,
 /// stacks, thread pool).
 pub const PROCESS_BASE_BYTES: u64 = 8 << 20;
-/// Resident bytes per on-disk workspace byte once loaded (parsed metadata,
-/// its working copy and the decoded tables; measured 1.9-2.5x).
+/// Conservative pre-load allowance per on-disk workspace byte. This is also
+/// the fallback on platforms without a process-footprint probe.
 pub const WORKSPACE_LOAD_FACTOR: u64 = 3;
 
 /// Bytes the caller holds while the router runs: the process baseline, the
 /// loaded workspace (`workspace_bytes` on disk) and this input, counted
-/// twice (vector growth and the builder's transient lookup tables).
+/// twice (vector growth and the builder's transient lookup tables). Used
+/// before loading or when the platform cannot report the live footprint.
 pub fn held_estimate(workspace_bytes: u64, input: &RouteInput) -> u64 {
+    PROCESS_BASE_BYTES
+        .saturating_add(workspace_bytes.saturating_mul(WORKSPACE_LOAD_FACTOR))
+        .saturating_add(input_heap_estimate(input).saturating_mul(2))
+}
+
+/// After the complete input has been decoded, account for the live process
+/// rather than charging it for already-freed builder maps and metadata clones.
+/// Add 25% allocator/page headroom; never fall below the input's structural
+/// allowance. Callers must include swapped pages in `live_process_bytes`.
+/// Future router allocations are separately covered by MemoryEstimate.
+pub fn loaded_held_estimate(
+    workspace_bytes: u64,
+    input: &RouteInput,
+    live_process_bytes: Option<u64>,
+) -> u64 {
+    match live_process_bytes.filter(|&n| n > 0) {
+        Some(bytes) => bytes
+            .saturating_add(bytes.div_ceil(4))
+            .max(PROCESS_BASE_BYTES.saturating_add(input_heap_estimate(input).saturating_mul(2))),
+        None => held_estimate(workspace_bytes, input),
+    }
+}
+
+fn input_heap_estimate(input: &RouteInput) -> u64 {
     use std::mem::size_of;
     let shapes = |v: &[LayerRect]| std::mem::size_of_val(v) as u64;
     let terminals: u64 = input
@@ -196,16 +221,11 @@ pub fn held_estimate(workspace_bytes: u64, input: &RouteInput) -> u64 {
         .instances
         .as_ref()
         .map_or(0, InstanceObstacles::heap_bytes);
-    PROCESS_BASE_BYTES
-        .saturating_add(workspace_bytes.saturating_mul(WORKSPACE_LOAD_FACTOR))
-        .saturating_add(
-            obstacles
-                .saturating_add(terminals)
-                .saturating_add(classes)
-                .saturating_add(ties)
-                .saturating_add(instances)
-                .saturating_mul(2),
-        )
+    obstacles
+        .saturating_add(terminals)
+        .saturating_add(classes)
+        .saturating_add(ties)
+        .saturating_add(instances)
 }
 
 /// Supply tie (rail-input tie cells): router net `net` holds a cell input
@@ -3378,5 +3398,18 @@ mod tests {
         let mut i = fixture();
         i.vias.clear();
         assert!(route_cpu_ref(&i, &RouteLimits::default()).is_err());
+    }
+    #[test]
+    fn loaded_footprint_keeps_headroom_and_conservative_fallback() {
+        let input = rules_input();
+        let fallback = held_estimate(1 << 30, &input);
+        assert_eq!(loaded_held_estimate(1 << 30, &input, None), fallback);
+        assert_eq!(loaded_held_estimate(1 << 30, &input, Some(0)), fallback);
+        assert_eq!(
+            loaded_held_estimate(1 << 30, &input, Some(1 << 30)),
+            5 << 28
+        );
+        assert!(loaded_held_estimate(0, &input, Some(1)) >= PROCESS_BASE_BYTES);
+        assert_eq!(loaded_held_estimate(0, &input, Some(u64::MAX)), u64::MAX);
     }
 }

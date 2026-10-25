@@ -1246,6 +1246,9 @@ pub struct RouteMemory {
     pub estimate_mib: u64,
     pub memory_mib: u64,
     pub workspace_bytes: u64,
+    /// Live resident + swapped bytes after decoding, before router allocation.
+    /// None means the conservative serialized-size estimate was used.
+    pub live_process_bytes: Option<u64>,
     pub held_mib: u64,
     pub search_mib: u64,
     pub spatial_mib: u64,
@@ -1297,7 +1300,8 @@ pub fn route(
         .as_mut()
         .ok_or_else(|| fail("physical design required"))?;
     let mut input = build_input(&metadata.design, bundle, &placed, &config, scope)?;
-    input.held_bytes = routing::held_estimate(workspace_bytes, &input);
+    let live_process_bytes = rustroad_core::memory::live_bytes();
+    input.held_bytes = routing::loaded_held_estimate(workspace_bytes, &input, live_process_bytes);
     rustroad_core::memory::trace("input");
     let memory = match (
         &config.track_router,
@@ -1307,6 +1311,7 @@ pub fn route(
             estimate_mib: mib(e.total()),
             memory_mib: t.memory_mib,
             workspace_bytes,
+            live_process_bytes,
             held_mib: mib(e.held),
             search_mib: mib(e.search),
             spatial_mib: mib(e.spatial),

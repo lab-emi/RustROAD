@@ -15,6 +15,17 @@ pub fn peak_rss_bytes() -> Option<u64> {
     field("VmHWM:")
 }
 
+/// Current resident plus swapped footprint from one procfs sample. Swapped
+/// workspace pages still need memory if touched again during route validation.
+pub fn live_bytes() -> Option<u64> {
+    let text = std::fs::read_to_string("/proc/self/status").ok()?;
+    live_from_status(&text)
+}
+
+fn live_from_status(text: &str) -> Option<u64> {
+    parse(text, "VmRSS:")?.checked_add(parse(text, "VmSwap:")?)
+}
+
 /// Stderr line `[route] <what> rss <MiB> peak <MiB>` when the
 /// `RUSTROAD_ROUTE_TRACE` environment variable is set (diagnostics only).
 pub fn trace(what: &str) {
@@ -53,6 +64,11 @@ mod tests {
         assert_eq!(parse(text, "VmHWM:"), Some(2048 * 1024));
         assert_eq!(parse(text, "VmSwap:"), None);
         assert_eq!(parse(text, "VmData:"), None);
+        assert_eq!(live_from_status(text), None);
+        assert_eq!(
+            live_from_status("VmRSS: 1024 kB\nVmSwap: 512 kB\n"),
+            Some(1536 * 1024)
+        );
         if cfg!(target_os = "linux") {
             let (now, peak) = (rss_bytes().unwrap(), peak_rss_bytes().unwrap());
             // These are separate procfs samples taken while other tests may allocate.
