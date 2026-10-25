@@ -689,13 +689,8 @@ pub(crate) fn build_input_with_owners(
             .filter_map(|(i, n)| (!n.use_.is_supply()).then_some(i as u32))
             .collect(),
     };
-    let pin_nets: HashMap<_, _> = model.pins.iter().map(|p| (p.owner, p.net)).collect();
-    let pin_ids: HashMap<_, _> = model
-        .pins
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (p.owner, i as u32))
-        .collect();
+    let pin_ids =
+        rustroad_core::connectivity::PinIndex::new(model, &crate::pdk::connection_limits(design)?)?;
     let mut obstacles = Vec::new();
     let mut owners = Vec::new();
     let mut terminals = Vec::new();
@@ -736,10 +731,11 @@ pub(crate) fn build_input_with_owners(
                 instance: i as u32,
                 terminal: ti as u32,
             };
-            let tie = tie_index.get(&pin_ids[&owner]).copied();
+            let pin_id = pin_ids.get(owner)?;
+            let tie = tie_index.get(&pin_id).copied();
             let net = match tie {
                 Some((k, _)) => Some(tie_net(model, k)?),
-                None => pin_nets[&owner],
+                None => model.pins[pin_id as usize].net,
             };
             let mut shapes = Vec::new();
             for geometry in pin.ports.iter().flatten() {
@@ -751,7 +747,7 @@ pub(crate) fn build_input_with_owners(
                 };
                 let (_, r) = rectangle(geometry)?;
                 let r = rustroad_core::transform_rect(r, p.x, p.y, p.height, orientation)?;
-                push(li, r, net, ObstacleOwner::InstancePin(pin_ids[&owner]))?;
+                push(li, r, net, ObstacleOwner::InstancePin(pin_id))?;
                 if layers[li as usize].vertical.is_some() {
                     shapes.push(LayerRect { layer: li, rect: r });
                 }
@@ -790,7 +786,7 @@ pub(crate) fn build_input_with_owners(
                     None
                 };
                 terminals.push(Terminal {
-                    pin: pin_ids[&owner],
+                    pin: pin_id,
                     net: n,
                     driver: pin.direction == Some(Direction::Output),
                     shapes,
@@ -882,13 +878,14 @@ pub(crate) fn build_input_with_owners(
                 port: i as u32,
                 bit: bit as u32,
             };
-            let net = pin_nets[&owner];
-            push(layer, p.rect, net, ObstacleOwner::PortPin(pin_ids[&owner]))?;
+            let pin_id = pin_ids.get(owner)?;
+            let net = model.pins[pin_id as usize].net;
+            push(layer, p.rect, net, ObstacleOwner::PortPin(pin_id))?;
             if let Some(net) = net
                 && selected.contains(&net)
             {
                 terminals.push(Terminal {
-                    pin: pin_ids[&owner],
+                    pin: pin_id,
                     net,
                     driver: port.direction == Direction::Input,
                     shapes: vec![LayerRect {

@@ -146,6 +146,118 @@ pub struct ConnectedDesign {
     pub pins: Vec<Connection>,
 }
 
+/// Compact owner-to-pin lookup. Contiguous owner groups need only their
+/// ranges; valid reordered tables use one bounded u32 permutation per pin.
+pub struct PinIndex {
+    instances: Vec<PinRange>,
+    ports: Vec<PinRange>,
+    permutation: Option<Vec<u32>>,
+}
+
+struct PinRange {
+    start: u32,
+    len: u32,
+}
+
+impl PinIndex {
+    pub fn new(model: &ConnectedDesign, limits: &ConnectivityLimits) -> Result<Self> {
+        if model.instance_masters.len() > limits.max_instances
+            || model.pins.len() > limits.max_pins
+            || model.pins.len() >= u32::MAX as usize
+            || model.ports.len() > limits.max_pins
+        {
+            return Err(Error::Budget("pin index object limit".into()));
+        }
+        let mut count = 0usize;
+        let mut range = |len: usize| -> Result<PinRange> {
+            count = count
+                .checked_add(len)
+                .filter(|&n| n <= limits.max_pins && n < u32::MAX as usize)
+                .ok_or_else(|| Error::Budget("pin index count limit".into()))?;
+            Ok(PinRange {
+                start: u32::MAX,
+                len: len as u32,
+            })
+        };
+        let mut instances = Vec::with_capacity(model.instance_masters.len());
+        for &master in &model.instance_masters {
+            let master = model
+                .masters
+                .get(master as usize)
+                .ok_or_else(|| Error::Invalid("pin index master out of range".into()))?;
+            instances.push(range(master.pins.len())?);
+        }
+        let mut ports = Vec::with_capacity(model.ports.len());
+        for port in &model.ports {
+            ports.push(range(port.bits.len())?);
+        }
+        if count != model.pins.len() {
+            return Err(Error::Invalid("pin index incomplete owner table".into()));
+        }
+        let mut index = Self {
+            instances,
+            ports,
+            permutation: None,
+        };
+        let mut contiguous = true;
+        for (i, pin) in model.pins.iter().enumerate() {
+            let (range, terminal) = index.range_mut(pin.owner)?;
+            if range.start == u32::MAX {
+                range.start = (i as u32).checked_sub(terminal).unwrap_or(u32::MAX);
+            }
+            contiguous &= range.start.checked_add(terminal) == Some(i as u32);
+        }
+        if !contiguous {
+            let mut start = 0;
+            for range in index.instances.iter_mut().chain(&mut index.ports) {
+                range.start = start;
+                start += range.len;
+            }
+            let mut permutation = Vec::new();
+            permutation
+                .try_reserve_exact(count)
+                .map_err(|_| Error::Budget("pin permutation allocation".into()))?;
+            permutation.resize(count, u32::MAX);
+            for (i, pin) in model.pins.iter().enumerate() {
+                let slot = index.slot(pin.owner)? as usize;
+                if permutation[slot] != u32::MAX {
+                    return Err(Error::Invalid("pin index duplicate owner".into()));
+                }
+                permutation[slot] = i as u32;
+            }
+            index.permutation = Some(permutation);
+        }
+        Ok(index)
+    }
+
+    fn range_mut(&mut self, owner: PinOwner) -> Result<(&mut PinRange, u32)> {
+        let (ranges, owner, terminal) = match owner {
+            PinOwner::Instance { instance, terminal } => (&mut self.instances, instance, terminal),
+            PinOwner::Port { port, bit } => (&mut self.ports, port, bit),
+        };
+        match ranges.get_mut(owner as usize) {
+            Some(range) if terminal < range.len => Ok((range, terminal)),
+            _ => Err(Error::Invalid("pin index owner out of range".into())),
+        }
+    }
+
+    fn slot(&self, owner: PinOwner) -> Result<u32> {
+        let (ranges, owner, terminal) = match owner {
+            PinOwner::Instance { instance, terminal } => (&self.instances, instance, terminal),
+            PinOwner::Port { port, bit } => (&self.ports, port, bit),
+        };
+        match ranges.get(owner as usize) {
+            Some(range) if terminal < range.len => Ok(range.start + terminal),
+            _ => Err(Error::Invalid("pin index owner out of range".into())),
+        }
+    }
+
+    pub fn get(&self, owner: PinOwner) -> Result<u32> {
+        let slot = self.slot(owner)?;
+        Ok(self.permutation.as_ref().map_or(slot, |p| p[slot as usize]))
+    }
+}
+
 impl ConnectedDesign {
     pub fn validate(&self, design: &Design, limits: &ConnectivityLimits) -> Result<()> {
         design.validate(&crate::Limits {
@@ -310,13 +422,13 @@ impl ConnectedDesign {
         if expected_pins != self.pins.len() {
             return Err(Error::Invalid("pin coverage count mismatch".into()));
         }
-        let mut seen = HashSet::with_capacity(self.pins.len());
+        // Coverage/uniqueness needs no hash table for every physical pin.
+        // The common contiguous representation is checked with owner ranges;
+        // valid permutations retain the same bounded validation semantics.
+        drop(PinIndex::new(self, limits)?);
         let mut drivers = vec![0u32; self.nets.len()];
         let mut sinks = vec![0u32; self.nets.len()];
         for pin in &self.pins {
-            if !seen.insert(pin.owner) {
-                return Err(Error::Invalid("duplicate connected pin".into()));
-            }
             let (direction, use_, is_port) = match pin.owner {
                 PinOwner::Instance { instance, terminal } => {
                     let mi = self
@@ -566,4 +678,132 @@ pub fn write_connected_def(
         writeln!(output, " + USE SIGNAL ;")?;
     }
     writeln!(output, "END NETS\nEND DESIGN")
+}
+
+#[cfg(test)]
+mod pin_index_tests {
+    use super::*;
+
+    fn model() -> ConnectedDesign {
+        let master = Master {
+            name: "buffer".into(),
+            class: None,
+            symmetry: Vec::new(),
+            site: "core".into(),
+            size: [10, 10],
+            pins: ["A", "Y"]
+                .into_iter()
+                .map(|name| MasterPin {
+                    name: name.into(),
+                    direction: None,
+                    use_: PinUse::Signal,
+                    shape: None,
+                    ports: Vec::new(),
+                })
+                .collect(),
+            obstructions: Vec::new(),
+        };
+        // Ordinary ports precede instances; an added supply port follows them.
+        let owners = [
+            PinOwner::Port { port: 0, bit: 0 },
+            PinOwner::Port { port: 0, bit: 1 },
+            PinOwner::Instance {
+                instance: 0,
+                terminal: 0,
+            },
+            PinOwner::Instance {
+                instance: 0,
+                terminal: 1,
+            },
+            PinOwner::Instance {
+                instance: 1,
+                terminal: 0,
+            },
+            PinOwner::Instance {
+                instance: 1,
+                terminal: 1,
+            },
+            PinOwner::Port { port: 1, bit: 0 },
+        ];
+        ConnectedDesign {
+            layers: Vec::new(),
+            masters: vec![master],
+            instance_masters: vec![0, 0],
+            ports: vec![
+                Port {
+                    name: "a".into(),
+                    direction: Direction::Input,
+                    bits: vec!["a[0]".into(), "a[1]".into()],
+                    use_: PinUse::Signal,
+                },
+                Port {
+                    name: "VDD".into(),
+                    direction: Direction::Inout,
+                    bits: vec!["VDD".into()],
+                    use_: PinUse::Power,
+                },
+            ],
+            nets: Vec::new(),
+            pins: owners
+                .into_iter()
+                .map(|owner| Connection { owner, net: None })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn index_matches_independent_owner_search_across_pin_orders() {
+        let original = model();
+        for reverse in [false, true] {
+            for rotation in 0..original.pins.len() {
+                let mut model = original.clone();
+                model.pins.rotate_left(rotation);
+                if reverse {
+                    model.pins.reverse();
+                }
+                let index = PinIndex::new(&model, &ConnectivityLimits::default()).unwrap();
+                for pin in &original.pins {
+                    let expected = model
+                        .pins
+                        .iter()
+                        .position(|p| p.owner == pin.owner)
+                        .unwrap();
+                    assert_eq!(index.get(pin.owner).unwrap() as usize, expected);
+                }
+                if rotation == 0 && !reverse {
+                    assert!(
+                        index.permutation.is_none(),
+                        "contiguous groups need no pin-sized table"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn duplicate_missing_invalid_and_over_budget_owners_fail() {
+        let original = model();
+        let mut duplicate = original.clone();
+        duplicate.pins[1] = duplicate.pins[0];
+        assert!(PinIndex::new(&duplicate, &ConnectivityLimits::default()).is_err());
+        let mut missing = original.clone();
+        missing.pins.pop();
+        assert!(PinIndex::new(&missing, &ConnectivityLimits::default()).is_err());
+        let mut invalid = original.clone();
+        invalid.pins[1].owner = PinOwner::Instance {
+            instance: 0,
+            terminal: 99,
+        };
+        assert!(PinIndex::new(&invalid, &ConnectivityLimits::default()).is_err());
+        assert!(
+            PinIndex::new(
+                &original,
+                &ConnectivityLimits {
+                    max_pins: 6,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+    }
 }

@@ -17,7 +17,8 @@ const FILE: &str = "model.rbin";
 const MAGIC: &[u8; 8] = b"RROADB01";
 const MAX_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 1024 * 1024;
-const MAX_CELLS: usize = 8_000_000;
+/// Absolute physical-instance ceiling, including fillers, taps and clock cells.
+pub(crate) const MAX_CELLS: usize = 16_000_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

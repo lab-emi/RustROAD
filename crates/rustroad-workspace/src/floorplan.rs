@@ -196,7 +196,7 @@ pub fn floorplan_with_limits(
         }
     };
     if limits.verilog.max_input_bytes > 2 * 1024 * 1024 * 1024
-        || limits.verilog.max_instances > 8_000_000
+        || limits.verilog.max_instances > crate::storage::MAX_CELLS
     {
         return Err(invalid("floorplan input limits exceed absolute ceilings"));
     }

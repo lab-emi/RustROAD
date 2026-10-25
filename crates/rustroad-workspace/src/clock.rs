@@ -210,7 +210,8 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
     if report.buffers.is_empty()
         || report.buffers.len() > cfg.max_buffers
         || report.sinks.is_empty()
-        || report.sinks.len() > 1_000_000
+        || report.sinks.len() > cfg.max_work
+        || report.sinks.len() > cfg.max_buffers.saturating_mul(fanout)
         || report.levels == 0
         || report.levels > 32
         || report.max_fanout != fanout
@@ -257,7 +258,10 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
     }
     let model = &bundle.connectivity;
     let root = root_net(bundle, cfg)?;
-    let mut receivers = vec![Vec::new(); model.nets.len()];
+    // Only clock-tree nets need receiver lists. Collecting every data-net
+    // receiver duplicated the complete design graph during clock validation.
+    let mut receivers = HashMap::with_capacity(buffers.len() + 1);
+    receivers.insert(root, Vec::new());
     let mut outputs = HashMap::new();
     for pin in &model.pins {
         if let (PinOwner::Instance { instance, terminal }, Some(net)) = (pin.owner, pin.net) {
@@ -266,13 +270,30 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
             if spec.use_.is_supply() {
                 continue;
             }
-            if spec.direction == Some(Direction::Input) {
-                receivers[net as usize].push((instance as usize, terminal as usize));
-            } else if spec.direction == Some(Direction::Output)
+            if spec.direction == Some(Direction::Output)
                 && buffers.contains(&(instance as usize))
                 && spec.name == cfg.output_pin
             {
                 outputs.insert(instance as usize, net);
+                if receivers.insert(net, Vec::new()).is_some() {
+                    return Err(fail("merged clock-buffer output net"));
+                }
+            }
+        }
+    }
+    let mut receiver_count = 0usize;
+    for pin in &model.pins {
+        if let (PinOwner::Instance { instance, terminal }, Some(net)) = (pin.owner, pin.net)
+            && let Some(list) = receivers.get_mut(&net)
+        {
+            let spec = &model.masters[model.instance_masters[instance as usize] as usize].pins
+                [terminal as usize];
+            if !spec.use_.is_supply() && spec.direction == Some(Direction::Input) {
+                receiver_count += 1;
+                if receiver_count > cfg.max_work || list.len() >= fanout {
+                    return Err(budget("clock receiver work/fanout limit"));
+                }
+                list.push((instance as usize, terminal as usize));
             }
         }
     }
@@ -285,10 +306,13 @@ pub(crate) fn validate_tree(bundle: &PhysicalBundle) -> Result<()> {
         if depth > 32 || !visited.insert(net) {
             return Err(fail("clock cycle or merged tree branch"));
         }
-        if receivers[net as usize].is_empty() || receivers[net as usize].len() > fanout {
+        let list = receivers
+            .get(&net)
+            .ok_or_else(|| fail("clock output net missing"))?;
+        if list.is_empty() || list.len() > fanout {
             return Err(fail("clock fanout exceeded"));
         }
-        for &(instance, terminal) in &receivers[net as usize] {
+        for &(instance, terminal) in list {
             work += 1;
             if work > cfg.max_work {
                 return Err(budget("clock validation max_work"));
@@ -408,38 +432,62 @@ pub fn synthesize_with_sdc(
             sinks.push((
                 positions[instance as usize].y,
                 positions[instance as usize].x,
-                bundle.netlist.instances[instance as usize].name.clone(),
-                p.name.clone(),
+                instance as usize,
             ));
+            if sinks.len() > cfg.max_work || sinks.len() > cfg.max_buffers.saturating_mul(fanout) {
+                return Err(budget("clock sink count"));
+            }
         }
     }
     if sinks.is_empty() {
         return Err(fail("clock has no selected sinks"));
     }
-    sinks.sort();
+    sinks.sort_unstable_by(|a, b| {
+        (a.0, a.1).cmp(&(b.0, b.1)).then_with(|| {
+            bundle.netlist.instances[a.2]
+                .name
+                .cmp(&bundle.netlist.instances[b.2].name)
+        })
+    });
     let leaves: Vec<_> = sinks
         .iter()
         .map(|s| ClockSink {
-            instance: s.2.clone(),
-            pin: s.3.clone(),
+            instance: bundle.netlist.instances[s.2].name.clone(),
+            pin: cfg.sink_pin.clone(),
         })
         .collect();
+    let mut current: Vec<_> = sinks.into_iter().map(|s| s.2).collect();
+    // clear_fillers retains the logical instance order. Remap the sorted sink
+    // indices even when a valid loaded revision interleaves generated cells.
+    let removed: Vec<usize> = {
+        let generated: HashSet<&str> = bundle
+            .generated_fillers
+            .iter()
+            .chain(&bundle.generated_taps)
+            .map(String::as_str)
+            .collect();
+        bundle
+            .netlist
+            .instances
+            .iter()
+            .enumerate()
+            .filter_map(|(i, instance)| generated.contains(instance.name.as_str()).then_some(i))
+            .collect()
+    };
+    for index in &mut current {
+        *index -= removed.partition_point(|removed| removed < index);
+    }
+    drop(removed);
     crate::physical::clear_fillers(&mut metadata.design, bundle)?;
-    let map: HashMap<_, _> = bundle
-        .netlist
-        .instances
-        .iter()
-        .enumerate()
-        .map(|(i, x)| (x.name.clone(), i))
-        .collect();
-    let mut current: Vec<_> = sinks.into_iter().map(|s| (map[&s.2], s.3)).collect();
     let mut names: HashSet<String> = bundle
         .netlist
         .instances
         .iter()
-        .map(|i| i.name.clone())
-        .chain(bundle.netlist.wires.iter().map(|w| w.name.clone()))
-        .chain(bundle.netlist.ports.iter().map(|p| p.name.clone()))
+        .map(|i| i.name.as_str())
+        .chain(bundle.netlist.wires.iter().map(|w| w.name.as_str()))
+        .chain(bundle.netlist.ports.iter().map(|p| p.name.as_str()))
+        .filter(|n| n.starts_with("rr_clkbuf_") || n.starts_with("rr_clock_"))
+        .map(str::to_owned)
         .collect();
     let mut buffers = Vec::new();
     let available_buffers = bundle
@@ -485,7 +533,12 @@ pub fn synthesize_with_sdc(
                     break (n, w);
                 }
             };
-            for (instance, pin) in group {
+            let pin = if levels == 1 {
+                &cfg.sink_pin
+            } else {
+                &cfg.input_pin
+            };
+            for instance in group {
                 bundle.netlist.instances[*instance]
                     .connections
                     .iter_mut()
@@ -519,7 +572,7 @@ pub fn synthesize_with_sdc(
                 height: size[1],
             });
             buffers.push(name);
-            next.push((i, cfg.input_pin.clone()));
+            next.push(i);
         }
         current = next;
         if current.len() == 1 {

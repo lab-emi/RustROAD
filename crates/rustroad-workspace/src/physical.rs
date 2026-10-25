@@ -251,7 +251,7 @@ impl PhysicalConfig {
         {
             return Err(Error::Invalid("invalid tap policy".into()));
         }
-        if self.max_added_cells > 250_000
+        if self.max_added_cells > crate::storage::MAX_CELLS
             || self.constant_cells.len() > 16
             || self.constant_cells.iter().any(|c| {
                 c.high.len() + c.low.len() == 0
@@ -713,6 +713,12 @@ pub(super) fn clear_fillers(design: &mut Design, bundle: &mut PhysicalBundle) ->
 pub(super) fn relink(bundle: &mut PhysicalBundle) -> Result<()> {
     let connection_limits =
         crate::pdk::connection_limits_for_cells(bundle.netlist.instances.len())?;
+    // All consumers use the rebuilt tables. Release obsolete connectivity
+    // before allocating its replacement; failed edits never publish metadata.
+    bundle.connectivity.instance_masters = Vec::new();
+    bundle.connectivity.ports = Vec::new();
+    bundle.connectivity.nets = Vec::new();
+    bundle.connectivity.pins = Vec::new();
     let lookup: HashMap<_, _> = bundle
         .connectivity
         .masters
@@ -1060,7 +1066,13 @@ pub(super) fn layout(
             ground_pin: cfg.ground_pin.clone(),
             rail_layer: cfg.rail_layer.clone(),
         },
-        &RailLimits::default(),
+        &RailLimits {
+            max_cells: design.cells.len().max(250_000),
+            max_rows: design.rows.len().max(100_000),
+            max_intervals: design.cells.len().saturating_mul(8).max(1_000_000),
+            max_work: design.cells.len().saturating_mul(128).max(64_000_000),
+            ..RailLimits::default()
+        },
     )
     .map_err(|e| Error::Invalid(e.to_string()))?;
     if rails.status != "pass" {
@@ -1135,12 +1147,8 @@ pub(super) fn layout(
             .iter()
             .find(|m| m.name == tap.cell)
             .unwrap();
-        let report = rustroad_core::tap::reserve(
-            design,
-            m.size[0],
-            tap.max_gap,
-            &rustroad_core::tap::TapLimits::default(),
-        )?;
+        let report =
+            rustroad_core::tap::reserve(design, m.size[0], tap.max_gap, &tap_limits(design, cfg))?;
         let indices: HashMap<_, _> = design
             .cells
             .iter()
@@ -1241,6 +1249,19 @@ pub(crate) fn io_pins(design: &Design, bundle: &PhysicalBundle) -> Result<Vec<Io
     .map_err(|e| Error::Invalid(e.to_string()))
 }
 
+fn tap_limits(design: &Design, cfg: &PhysicalConfig) -> rustroad_core::tap::TapLimits {
+    rustroad_core::tap::TapLimits {
+        max_taps: cfg.max_added_cells,
+        max_work: design
+            .cells
+            .len()
+            .saturating_mul(4)
+            .saturating_add(cfg.max_added_cells.saturating_mul(2))
+            .saturating_add(design.rows.len())
+            .max(1_000_000),
+    }
+}
+
 /// Free row intervals between reserved taps (whole rows without taps).
 pub(crate) fn free_intervals(
     design: &Design,
@@ -1258,12 +1279,8 @@ pub(crate) fn free_intervals(
             .iter()
             .find(|m| m.name == tap.cell)
             .ok_or_else(|| Error::Invalid("tap master absent".into()))?;
-        let report = rustroad_core::tap::reserve(
-            design,
-            m.size[0],
-            tap.max_gap,
-            &rustroad_core::tap::TapLimits::default(),
-        )?;
+        let report =
+            rustroad_core::tap::reserve(design, m.size[0], tap.max_gap, &tap_limits(design, cfg))?;
         for pair in report.sites.windows(2) {
             if pair[0].row == pair[1].row {
                 let x = pair[0].x + pair[0].width;
@@ -1382,6 +1399,10 @@ fn analytic(
     };
     let place_limits = rustroad_core::place::PlaceLimits {
         max_cells: limits.max_cells,
+        max_pins: model
+            .pins
+            .len()
+            .max(rustroad_core::place::PlaceLimits::default().max_pins),
         ..Default::default()
     };
     let mut seed_use = None;

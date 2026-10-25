@@ -55,10 +55,10 @@ impl VerilogLimits {
         Self {
             max_input_bytes: 2 * 1024 * 1024 * 1024,
             max_tokens: 500_000_000,
-            max_instances: 8_000_000,
-            max_connections: 128_000_000,
+            max_instances: 16_000_000,
+            max_connections: 256_000_000,
             max_nets: 32_000_000,
-            max_expr_nodes: 128_000_000,
+            max_expr_nodes: 256_000_000,
             ..Self::default()
         }
     }

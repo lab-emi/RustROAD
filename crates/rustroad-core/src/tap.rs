@@ -66,7 +66,13 @@ pub fn reserve(
     max_gap: i64,
     limits: &TapLimits,
 ) -> Result<TapReport> {
-    design.validate(&Limits::default())?;
+    // The caller's work budget also bounds validation of the admitted design.
+    // A large placement must not be rejected by an unrelated small-fixture cap.
+    design.validate(&Limits {
+        max_cells: limits.max_work,
+        max_rows: limits.max_work,
+        max_expansions: limits.max_work,
+    })?;
     let site = design.site.width;
     if tap_width <= 0 || tap_width % site != 0 || max_gap < 0 {
         return Err(invalid("tap width/gap is not compatible with site lattice"));

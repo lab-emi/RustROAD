@@ -3,8 +3,8 @@ use crate::{
     Error, Metadata, Result, Stage, Summary, check_base, commit, head, lock, read_bounded,
 };
 use rustroad_core::connectivity::{
-    ConnectedDesign, Connection, ConnectivityDb, ConnectivityLimits, Direction, Geometry, Master,
-    MasterPin, Net, PinOwner, PinUse, Port,
+    ConnectedDesign, Connection, ConnectivityLimits, Direction, Geometry, Master, MasterPin, Net,
+    PinOwner, PinUse, Port,
 };
 use rustroad_core::{Cell, Design, DesignDb, Limits, Rect, Row, Site};
 use rustroad_formats::{lef, verilog};
@@ -180,8 +180,10 @@ pub(crate) fn connection_limits(design: &Design) -> Result<ConnectivityLimits> {
     connection_limits_for_cells(design.cells.len())
 }
 pub(crate) fn connection_limits_for_cells(count: usize) -> Result<ConnectivityLimits> {
-    if count > 8_000_000 {
-        return Err(budget("physical design exceeds eight-million-cell ceiling"));
+    if count > crate::storage::MAX_CELLS {
+        return Err(budget(
+            "physical design exceeds sixteen-million-cell ceiling",
+        ));
     }
     let cells = count.max(250_000);
     Ok(ConnectivityLimits {
@@ -400,7 +402,7 @@ pub fn import_pdk_bounded(
 ) -> Result<Summary> {
     if parser.max_input_bytes > 2 * 1024 * 1024 * 1024
         || parser.max_instances > limits.max_cells
-        || limits.max_cells > 8_000_000
+        || limits.max_cells > crate::storage::MAX_CELLS
     {
         return Err(budget("physical import limits exceed absolute ceiling"));
     }
@@ -584,9 +586,8 @@ pub fn import_pdk_bounded(
         nets,
         pins,
     };
-    let db = ConnectivityDb::new(&connectivity, &design, connection_limits)?;
-    let (_, _, pin_count) = db.counts();
-    drop(db);
+    connectivity.validate(&design, connection_limits)?;
+    let pin_count = connectivity.pins.len();
     let supplies = connectivity
         .pins
         .iter()

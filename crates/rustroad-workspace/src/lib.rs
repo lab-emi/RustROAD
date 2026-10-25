@@ -337,6 +337,7 @@ pub fn init(path: &Path, base_rev: &str, design: Design, limits: &Limits) -> Res
     drop(serialize_bounded(&design)?);
     let db = DesignDb::new(&design, limits)?;
     let records = db.unplaced_records();
+    drop(db);
     let metadata = Metadata {
         tables: None,
         format_version: 1,
@@ -433,6 +434,7 @@ pub fn place_with(
     }
     let db = DesignDb::new(&metadata.design, limits)?;
     let placement = place_cpu_ref(&db, limits)?;
+    drop(db);
     let mut records = placement.cells;
     let mut expansions = placement.expansions;
     if let Some(bundle) = &mut metadata.physical
