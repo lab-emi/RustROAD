@@ -359,14 +359,30 @@ pub(crate) fn fill_for_robust(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
     }
 }
 
-/// Bounding boxes of holes enclosed by a rectangle union (compressed grid
-/// flood fill from the outside). Work is O(cells) with cells <= (2n)^2.
+/// Bounding boxes of holes enclosed by a rectangle union. Small planes use
+/// dense flood fill; sparse large planes use a bounded sweep frontier.
 pub(crate) fn holes(
     rects: &[Rect],
     work: &mut usize,
     cap: usize,
     max_cells: usize,
 ) -> Result<Vec<Rect>> {
+    if (rects.len() as u64).saturating_mul(32) > (max_cells as u64).saturating_mul(64) {
+        return Err(Error::Budget(
+            "same-net compressed hole grid coordinates".into(),
+        ));
+    }
+    if rects.iter().any(|r| !r.valid()) {
+        return Err(Error::Invalid("invalid hole-detection rectangle".into()));
+    }
+    charge(
+        work,
+        rects
+            .len()
+            .saturating_mul(rects.len().max(1).ilog2() as usize + 1)
+            .saturating_mul(2),
+        cap,
+    )?;
     let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r.lx, r.ux]).collect();
     let mut ys: Vec<i64> = rects.iter().flat_map(|r| [r.ly, r.uy]).collect();
     xs.sort_unstable();
@@ -377,10 +393,9 @@ pub(crate) fn holes(
         return Ok(Vec::new());
     }
     let (nx, ny) = (xs.len() - 1, ys.len() - 1);
-    let cells = nx
-        .checked_mul(ny)
-        .filter(|&n| n <= max_cells)
-        .ok_or_else(|| Error::Budget("same-net compressed hole grid".into()))?;
+    let Some(cells) = nx.checked_mul(ny).filter(|&n| n <= max_cells) else {
+        return crate::hole_sweep::find(rects, &xs, &ys, work, cap, max_cells);
+    };
     charge(work, cells, cap)?;
     let mut covered = vec![false; cells];
     for r in rects {
@@ -898,12 +913,16 @@ mod scale_tests {
         );
     }
     #[test]
-    fn large_compressed_grid_is_refused_before_allocating_the_plane() {
+    fn large_sparse_compressed_grid_uses_a_bounded_sweep() {
         let rectangles: Vec<_> = (0..5000i64)
             .map(|i| r(3 * i, 5 * i, 3 * i + 1, 5 * i + 1))
             .collect();
-        let error = holes(&rectangles, &mut 0, usize::MAX, 1_000_000).unwrap_err();
-        assert!(error.to_string().contains("same-net compressed hole grid"));
+        assert!(
+            holes(&rectangles, &mut 0, 10_000_000, 1_000_000)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(holes(&rectangles, &mut 0, 10_000_000, 100).is_err());
     }
 
     #[test]

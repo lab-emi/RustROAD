@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 pub mod connectivity;
 pub mod extract;
+mod hole_sweep;
 mod instance_obstacles;
 pub mod io;
 pub mod jumper;
