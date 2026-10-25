@@ -2791,35 +2791,54 @@ fn assemble(
     if records > limits.max_segments {
         return Err(budget("routing intermediate record limit"));
     }
-    let mut wires: Vec<Wire> = Vec::new();
+    let mut runs = Vec::new();
     let mut vias: Vec<Via> = Vec::new();
     let mut access: Vec<Access> = Vec::new();
     let mut nets_out = Vec::new();
+    let mut wire_refs = Vec::new();
+    let mut via_refs = Vec::new();
+    let mut access_refs = Vec::new();
+    let mut work = 0;
     for (&net, terminals) in groups {
         nets_out.push(net);
+        wire_refs.clear();
+        via_refs.clear();
+        access_refs.clear();
         for t in terminals {
             let p = &plans[&t.pin];
-            access.push(p.access.clone());
-            wires.extend(p.wires.iter().cloned());
-            vias.extend(p.vias.iter().cloned());
+            wire_refs.extend(p.wires.iter());
+            via_refs.extend(p.vias.iter());
+            access_refs.push(&p.access);
         }
         let route = routed
             .get(&net)
             .ok_or_else(|| no_route(&format!("net {net} left unrouted")))?;
-        wires.extend(route.wires.iter().cloned());
-        vias.extend(route.vias.iter().cloned());
-    }
-    vias.sort_by_key(|v| (v.net, v.kind, v.at));
-    vias.dedup();
-    let runs = crate::wire_runs::collinear_runs(
-        &wires.iter().collect::<Vec<_>>(),
-        &vias.iter().collect::<Vec<_>>(),
-        via_layers,
-        &access.iter().collect::<Vec<_>>(),
-        limits.max_comparisons,
-    )?;
-    if runs.len() + vias.len() > limits.max_segments {
-        return Err(budget("routing output segment limit"));
+        wire_refs.extend(route.wires.iter());
+        via_refs.extend(route.vias.iter());
+        via_refs.sort_unstable_by_key(|v| (v.kind, v.at));
+        via_refs.dedup();
+        let net_runs = crate::wire_runs::net_runs(
+            &wire_refs,
+            &via_refs,
+            via_layers,
+            &access_refs,
+            &mut work,
+            limits.max_comparisons,
+            limits
+                .max_segments
+                .saturating_sub(runs.len())
+                .saturating_sub(vias.len())
+                .saturating_sub(via_refs.len()),
+        )?;
+        runs.len()
+            .checked_add(vias.len())
+            .and_then(|n| n.checked_add(net_runs.len()))
+            .and_then(|n| n.checked_add(via_refs.len()))
+            .filter(|&n| n <= limits.max_segments)
+            .ok_or_else(|| budget("routing output segment limit"))?;
+        runs.extend(net_runs);
+        vias.extend(via_refs.iter().map(|v| (*v).clone()));
+        access.extend(access_refs.iter().map(|a| (*a).clone()));
     }
     let _ = input;
     Ok(Routes {
