@@ -436,8 +436,11 @@ class Flow:
         rec['spef'] = {}
         for c in self.libs:
             spef = h.root / f'{t}_{self.rc[c]}.spef'
+            extraction_limits = getattr(self.args, 'extract_limits', None)
+            if extraction_limits is None:
+                extraction_limits = EXTRACT_LIMITS[self.design.recipe]
             argv = list(map(str, road + ['extract', '--rc-profile', self.rc_profiles[c], '--corner', self.rc[c],
-                                         '--out', spef, *EXTRACT_LIMITS[self.design.recipe]]))
+                                         '--out', spef, *extraction_limits]))
             # The SPEF is capped by the extractor's own --max-spef-mib; the
             # process file-size limit must not be tighter than that cap.
             r = h.run(f'{t}_extract_{self.rc[c]}', argv, file_limit_bytes=spef_file_limit(argv))

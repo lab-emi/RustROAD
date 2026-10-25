@@ -129,6 +129,7 @@ class Context:
             setup_margin=self.budgets["hold_eco_setup_margin_ns"], physical_config={},
             gate_margin=self.budgets["hold_margin_ns"],
             cell_policy=D.resolve(manifest["cell_policy"]["path"]), manifest=self.signoff_manifest,
+            extract_limits=[] if getattr(args, "small_extraction_budgets", False) else None,
             openrcx=False, antenna_controls=False, signoff=False)
 
 
@@ -586,6 +587,8 @@ def main(argv=None) -> int:
     ap.add_argument("--no-determinism", action="store_true")
     ap.add_argument("--preflight-only", action="store_true")
     ap.add_argument("--route-batch-terminals", type=int, help="opt-in bounded routing batches of whole nets (2..1000000 terminals)")
+    ap.add_argument("--small-extraction-budgets", action="store_true",
+                    help="use default small-design RC object/work caps, including for a track-router fixture")
     ap.add_argument("--evidence", type=Path, help="also write the compact tracked evidence JSON")
     ap.add_argument("--evidence-from", type=Path, metavar="SUMMARY",
                     help="only rewrite --evidence from an existing summary.json (no run)")
@@ -617,6 +620,8 @@ def main(argv=None) -> int:
                    reported=REPORTED, global_statuses={}, pdks=[])
     if args.route_batch_terminals is not None:
         summary["routing_batches"] = dict(max_terminals=args.route_batch_terminals, scope="whole nets; final combined geometry validated")
+    if args.small_extraction_budgets:
+        summary["extraction_budgets"] = "default small-design caps"
     h = None
     ctx = None
     try:
