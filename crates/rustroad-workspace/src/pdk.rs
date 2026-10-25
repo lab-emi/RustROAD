@@ -616,7 +616,7 @@ pub fn import_pdk_bounded(
     {
         return Err(budget("physical import aggregate byte budget"));
     }
-    let physical = PhysicalBundle {
+    let mut physical = PhysicalBundle {
         import_version: 1,
         technology,
         netlist,
@@ -634,6 +634,7 @@ pub fn import_pdk_bounded(
         net_weights: None,
         placement_seed: None,
     };
+    crate::physical::distribute_ties(&mut design, &mut physical, limits)?;
     validate_bundle(&physical, &design, connection_limits)?;
     let records = DesignDb::new(&design, limits)?.unplaced_records();
     let metadata = Metadata {

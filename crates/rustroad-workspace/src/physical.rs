@@ -574,6 +574,198 @@ pub(crate) fn rail_tie_pins(bundle: &PhysicalBundle) -> Vec<(u32, u32)> {
         .collect()
 }
 
+/// Clone only the constant sources already identified by the tie pass. Each
+/// scalar sink moves to an identical source once the physical fanout is full.
+pub(super) fn distribute_ties(
+    design: &mut Design,
+    bundle: &mut PhysicalBundle,
+    limits: &Limits,
+) -> Result<()> {
+    let (Some(cfg), Some(report)) = (&bundle.config, &mut bundle.ties) else {
+        return Ok(());
+    };
+    if report.bindings.is_empty() {
+        return Ok(());
+    }
+    let model = &bundle.connectivity;
+    if model.pins.len() > limits.max_cells.saturating_mul(16) {
+        return Err(Error::Budget("tie distribution pin scan".into()));
+    }
+    struct Group {
+        binding: crate::ties::TieBinding,
+        template: verilog::Instance,
+        master: u32,
+        active: String,
+        used: usize,
+    }
+    let wanted: HashMap<&str, usize> = report
+        .bindings
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.instance.as_str(), i))
+        .collect();
+    if wanted.len() != report.bindings.len() {
+        return Err(Error::Invalid("duplicate tie source binding".into()));
+    }
+    let mut templates = vec![None; report.bindings.len()];
+    for (i, instance) in bundle.netlist.instances.iter().enumerate() {
+        if let Some(&binding) = wanted.get(instance.name.as_str()) {
+            templates[binding] = Some((instance.clone(), model.instance_masters[i]));
+        }
+    }
+    let mut groups = report
+        .bindings
+        .iter()
+        .zip(templates)
+        .map(|(b, template)| {
+            let (template, master) =
+                template.ok_or_else(|| Error::Invalid("tie source missing".into()))?;
+            Ok(Group {
+                binding: b.clone(),
+                template,
+                master,
+                active: b.net.clone(),
+                used: 0,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let by_alias: HashMap<&str, usize> = groups
+        .iter()
+        .enumerate()
+        .map(|(i, g)| (g.binding.net.as_str(), i))
+        .collect();
+    let mut net_groups = HashMap::new();
+    for (net, record) in model.nets.iter().enumerate() {
+        for alias in &record.aliases {
+            if let Some(&group) = by_alias.get(alias.as_str())
+                && net_groups.insert(net as u32, group).is_some()
+            {
+                return Err(Error::Invalid("multiple tie sources on one net".into()));
+            }
+        }
+    }
+    if net_groups.len() != groups.len() {
+        return Err(Error::Invalid("tie net binding missing".into()));
+    }
+    drop(by_alias);
+    // Top-level aliases stay on the original source. Their fanout is reserved
+    // before partitioning instance inputs, independent of pin-record order.
+    for pin in &model.pins {
+        if let (Some(net), PinOwner::Port { port, .. }) = (pin.net, pin.owner)
+            && let Some(&group) = net_groups.get(&net)
+            && model.ports[port as usize].direction == Direction::Output
+        {
+            groups[group].used += 1;
+            if groups[group].used > cfg.max_tie_fanout {
+                return Err(Error::Budget("constant top-level alias fanout".into()));
+            }
+        }
+    }
+    let mut names: HashSet<String> = bundle
+        .netlist
+        .instances
+        .iter()
+        .map(|i| i.name.as_str())
+        .chain(bundle.netlist.wires.iter().map(|w| w.name.as_str()))
+        .chain(bundle.netlist.ports.iter().map(|p| p.name.as_str()))
+        .filter(|n| n.starts_with("rr_tie_copy_"))
+        .map(str::to_owned)
+        .collect();
+    let mut additions = Vec::new();
+    let mut sequence = 0usize;
+    for pin in &model.pins {
+        let (Some(net), PinOwner::Instance { instance, terminal }) = (pin.net, pin.owner) else {
+            continue;
+        };
+        let Some(&group) = net_groups.get(&net) else {
+            continue;
+        };
+        let spec = &model.masters[model.instance_masters[instance as usize] as usize].pins
+            [terminal as usize];
+        if spec.use_.is_supply() || spec.direction != Some(Direction::Input) {
+            continue;
+        }
+        let group = &mut groups[group];
+        if group.used == cfg.max_tie_fanout {
+            if report.new_cells + additions.len() >= cfg.max_added_cells
+                || design.cells.len() + additions.len() >= limits.max_cells
+            {
+                return Err(Error::Budget(
+                    "tie fanout distribution added-cell limit".into(),
+                ));
+            }
+            let (name, net) = loop {
+                if sequence > limits.max_cells.saturating_add(names.len()) {
+                    return Err(Error::Budget("tie distribution name search".into()));
+                }
+                let name = format!("rr_tie_copy_{sequence}");
+                let net = format!("rr_tie_copy_net_{sequence}");
+                sequence += 1;
+                if !names.contains(&name) && !names.contains(&net) {
+                    names.insert(name.clone());
+                    names.insert(net.clone());
+                    break (name, net);
+                }
+            };
+            let mut cell = group.template.clone();
+            cell.name = name.clone();
+            cell.connections
+                .iter_mut()
+                .find(|c| c.pin == group.binding.pin)
+                .ok_or_else(|| Error::Invalid("tie source output missing".into()))?
+                .signal = verilog::Expr::Ident(net.clone());
+            additions.push((
+                cell,
+                crate::ties::TieBinding {
+                    instance: name,
+                    net: net.clone(),
+                    pin: group.binding.pin.clone(),
+                    value: group.binding.value,
+                },
+                group.master,
+            ));
+            group.active = net;
+            group.used = 0;
+        }
+        if group.active != group.binding.net {
+            bundle.netlist.instances[instance as usize]
+                .connections
+                .iter_mut()
+                .find(|c| c.pin == spec.name)
+                .ok_or_else(|| Error::Invalid("tie sink connection missing".into()))?
+                .signal = verilog::Expr::Ident(group.active.clone());
+        }
+        group.used += 1;
+    }
+    let added = additions.len();
+    for (cell, binding, master) in additions {
+        let size = model.masters[master as usize].size;
+        design.cells.push(Cell {
+            name: cell.name.clone(),
+            master: cell.cell.clone(),
+            width: size[0],
+            height: size[1],
+        });
+        bundle.netlist.wires.push(verilog::Wire {
+            name: binding.net.clone(),
+            range: None,
+        });
+        bundle.netlist.instances.push(cell);
+        report.new_cells += 1;
+        report.constant_bits += 1;
+        if binding.value {
+            report.high_cells += 1;
+        } else {
+            report.low_cells += 1;
+        }
+        report.bindings.push(binding);
+    }
+    if added != 0 {
+        relink(bundle)?;
+    }
+    Ok(())
+}
+
 pub(super) fn validate_ties(bundle: &PhysicalBundle) -> Result<()> {
     let (Some(cfg), Some(report)) = (&bundle.config, &bundle.ties) else {
         return Ok(());
@@ -1408,7 +1600,9 @@ fn analytic(
             .pins
             .len()
             .max(rustroad_core::place::PlaceLimits::default().max_pins),
-        ..Default::default()
+        max_work: (design.cells.len() as u64)
+            .saturating_mul(50_000)
+            .max(20_000_000_000),
     };
     let mut seed_use = None;
     let mut seeds = Vec::new();

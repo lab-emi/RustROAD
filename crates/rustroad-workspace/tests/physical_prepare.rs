@@ -749,10 +749,60 @@ fn invalid_config_fanout_and_added_cell_budgets_do_not_publish() {
     assert!(!f.workspace.join("HEAD").exists());
     let mut low_fanout = config();
     low_fanout.max_tie_fanout = 1;
+    low_fanout.max_added_cells = 1;
     let logic = "module chip(input a,output y,output h,output l); wire k; assign k=1'b1; BUF b0(.A(k),.Y(y)); BUF b1(.A(k),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule";
     let f = Fixture::new(logic, &low_fanout);
     let error = f.import().unwrap_err();
     assert!(error.to_string().contains("fanout"));
+    assert!(!f.workspace.join("HEAD").exists());
+}
+
+#[test]
+fn shared_constant_sources_are_replicated_with_bounded_fanout() {
+    let mut cfg = config();
+    cfg.max_tie_fanout = 1;
+    let logic = "module chip(input a,output y,output h,output l); wire k; assign k=1'b1; BUF b0(.A(k),.Y(y)); BUF b1(.A(k),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule";
+    let f = Fixture::new(logic, &cfg);
+    f.import().expect("shared constant should be replicated");
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    assert_eq!(bundle.ties.as_ref().unwrap().new_cells, 2);
+    let input = |name: &str| {
+        bundle
+            .netlist
+            .instances
+            .iter()
+            .find(|i| i.name == name)
+            .unwrap()
+            .connections
+            .iter()
+            .find(|p| p.pin == "A")
+            .unwrap()
+            .signal
+            .clone()
+    };
+    assert_ne!(input("b0"), input("b1"));
+    let copied = bundle
+        .netlist
+        .instances
+        .iter()
+        .find(|i| i.name.starts_with("rr_tie_copy_"))
+        .unwrap();
+    assert_eq!(copied.cell, "HI");
+}
+
+#[test]
+fn constant_top_level_alias_fanout_is_rejected_without_false_repair() {
+    let mut cfg = config();
+    cfg.max_tie_fanout = 1;
+    let f = Fixture::new(
+        "module chip(output a,output b); wire k; assign k=1'b1; assign a=k; assign b=k; endmodule",
+        &cfg,
+    );
+    let error = f
+        .import()
+        .expect_err("top-level aliases need a separate port-buffer policy");
+    assert!(error.to_string().contains("top-level alias fanout"));
     assert!(!f.workspace.join("HEAD").exists());
 }
 
