@@ -39,6 +39,30 @@ PIPELINE_TAIL = ("set_input_delay 0.2 -clock core [get_ports {en a b}]\n"
 
 
 class Statuses(unittest.TestCase):
+    def test_route_antenna_plant_uses_existing_gate_connected_metal(self):
+        definition = """VERSION 5.8 ;
+DIEAREA ( 0 0 ) ( 1000 1000 ) ;
+NETS 2 ;
+- a ( PIN a ) ( gate A ) + USE SIGNAL
+  + ROUTED Metal2 ( 400 80 ) ( 400 700 ) ;
+- b ( PIN b ) ( gate B ) + USE SIGNAL
+  + ROUTED Metal2 ( 100 200 ) ( 900 200 ) ;
+END NETS
+END DESIGN
+"""
+        checks = [dict(net='a', layer='Metal2', gates=['gate/A'], gate_area_um2=1,
+                       diff_area_um2=0),
+                  dict(net='b', layer='Metal2', gates=[], gate_area_um2=0,
+                       diff_area_um2=0)]
+        plants = C.route_antenna_shapes(definition, checks, {'Metal2': 20}, ['a', 'b'], 200, 10)
+        self.assertTrue(plants)
+        first = plants[0]
+        self.assertEqual((first['net'], first['layer'], first['anchor_point']), ('a', 'Metal2', [400, 80]))
+        self.assertEqual(first['rect'], [390, -2000, 410, 90])
+        self.assertTrue(all(p['net'] == 'a' for p in plants))
+        self.assertFalse(C.route_antenna_shapes(definition, checks, {'Metal3': 20}, ['a'], 200, 10))
+        self.assertFalse(C.route_antenna_shapes(definition, checks, {'Metal2': 20}, ['b'], 200, 10))
+
     def test_not_applicable_is_explicit_and_restricted(self):
         self.assertEqual(D.worst(["not_applicable", "passed"]), "passed")
         self.assertEqual(D.worst(["not_applicable", "not_applicable"]), "not_applicable")

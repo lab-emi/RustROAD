@@ -1382,11 +1382,16 @@ class Flow:
         divisor = export['coordinate_divisor']
         require(all(v % divisor == 0 for v in shape['rect']), f'{label}: planted rectangle off the GDS grid')
         rect = ','.join(str(v // divisor) for v in shape['rect'])
+        layer_map = json.loads((ROOT / f'fixtures/pdk/{self.tag}-gds-map.json').read_text())
+        mapped = [entry['net'] for entry in layer_map['layers']
+                  if entry.get('lef') == shape['layer'] and entry.get('kind') == 'routing']
+        require(len(mapped) == 1 and len(mapped[0]) == 1, f'{label}: ambiguous planted GDS layer')
+        metal = '/'.join(str(v) for v in mapped[0][0])
         work = self.h.root / f'{label}_plant'
         out = work / 'planted.gds'
         cmd = ['/foss/tools/klayout/klayout', '-b', '-r', '/scripts/kl_plant.py']
         for k, v in dict(gds='/in/design.gds', out='/out/planted.gds', report='/out/planted.json', kind='rect',
-                         metal=PLANT[self.tag]['gds_layer'], rect=rect).items():
+                         metal=metal, rect=rect).items():
             cmd += ['-rd', f'{k}={v}']
         r = container.run(cmd, out_dir=work, label=container.next_label(work, 'plant_rect'),
                           ro=[(str(ROOT / 'scripts/signoff'), '/scripts'), (str(gds.resolve()), '/in/design.gds')],

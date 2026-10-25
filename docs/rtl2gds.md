@@ -430,14 +430,16 @@ virtual clock (zero physical clock domains required).
 | `missing_tool` | `--tool yosys=<absent>` | exit 3, `tools_identity` unverified |
 | `relaxed_manifest` | untracked manifest copy with `parity_ns` 0.003 | exit 1, `budget_floors` failed, `manifest_provenance` unverified |
 | `tampered_artifact` | one GDS byte flipped; separately one recorded hash edited | binding re-verification |
-| `antenna_planted` | a long wire on an input pin without a diode (fewest sinks first; up to 64 pins x 600/1200/2400 um sky130, 2000/4000/8000 um gf180) whose I/O-layer partial net reaches a gate | native check-antenna and the foundry deck |
+| `antenna_planted` | a long wire on an input pin without a diode, or on an existing gate-connected routed segment of that input net; bounded candidate and length sweeps | native check-antenna and the foundry deck |
 
 `inverted_output` replaces the earlier RTL-wrapper mutant: the wrapper moved
 every register under a hierarchy prefix, so name-based state matching in
 RustSys and Yosys could not start (it was `unverified`, not rejected).
-`antenna_planted` needs a pin whose route stays on the I/O layer: a route
-that leaves the pin upward has no gate at that layer's etch. All controls
-were rejected by their oracle on every row of the evidence run.
+An input pin that leaves upward can have no gate on its I/O-layer partial
+net. In that case the antenna control extends an existing routed segment
+on a gate-connected layer toward the nearest die edge. Both the native
+checker and the independent foundry deck must reject the resulting GDS.
+The candidate sweep is bounded, with at most three foundry-deck attempts.
 
 
 ## Closure loop (summary)
