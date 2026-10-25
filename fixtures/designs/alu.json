@@ -253,7 +253,7 @@
     "setup_margin_ns": 0.0,
     "hold_eco_setup_margin_ns": 0.05,
     "parity_ns": 0.001,
-    "max_hold_iterations": 8,
+    "max_hold_iterations": 10,
     "process_timeout_s": 600,
     "process_memory_mib": 2048,
     "max_wall_s": 3600,

@@ -312,12 +312,14 @@ def finish(m: dict, spec: dict) -> dict:
     out["verification"] = dict(cosim_vectors=4096, cosim_seed="0x5eed2026c0ffee01", rustsys_budget=10000,
                                rustsys_model_budget=10000, rustsys_sweep_max_candidates=256, yosys_equiv_seq=2)
     # Track designs: the closure loop also sizes gates, so it needs more
-    # layouts (regfile gf180 took three hold rounds alone); the ECO hold target
+    # layouts (regfile gf180 took three hold rounds alone; 10 since the DRV
+    # co-sizing round: GF180 alu and mult reached 1-2 nets at 1.00-1.06 ns
+    # on layouts 7-8 of 8 while still improving); the ECO hold target
     # adds a 20 ps guard band for the native-vs-OpenRCX difference (the gate
     # still checks >= 0.05 ns on both SPEFs).
     out["budgets"] = dict(hold_margin_ns=0.05, hold_eco_target_margin_ns=0.07, setup_margin_ns=0.0,
                           hold_eco_setup_margin_ns=0.05, parity_ns=0.001,
-                          max_hold_iterations=8, process_timeout_s=600, process_memory_mib=2048,
+                          max_hold_iterations=10, process_timeout_s=600, process_memory_mib=2048,
                           max_wall_s=14400 if spec.get("stretch") else 3600, container_memory="4g",
                           container_timeout_s=7200 if spec.get("stretch") else 1800)
     problems = D.manifest_problems(out)
