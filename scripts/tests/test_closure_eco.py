@@ -234,19 +234,21 @@ class CoSizing(unittest.TestCase):
         self.assertEqual(res["positions"], {})
         self.assertIn("setup guard", res["skipped"]["n0"])
 
-    def test_free_spot_avoids_cells_and_takes_filler_space(self):
+    def test_free_spot_uses_interval_capacity(self):
+        # One row, a tap at 2000 splits it into [0, 2000) and [2300, 10000).
         deff = ("ROW r0 core 0 0 N DO 100 BY 1 STEP 100 0 ;\nROW r1 core 0 1000 FS DO 100 BY 1 STEP 100 0 ;\n"
-                "COMPONENTS 3 ;\n- a AND2 + PLACED ( 1000 0 ) N ;\n- f x__fill_8 + PLACED ( 1300 0 ) N ;\n"
-                "- b AND2 + PLACED ( 1600 0 ) N ;\nEND COMPONENTS\n")
-        occ = C.Occupancy(deff, {"AND2": 300, "x__fill_8": 300})
+                "COMPONENTS 4 ;\n- t x__filltie + PLACED ( 2000 0 ) N ;\n- a AND2 + PLACED ( 0 0 ) N ;\n"
+                "- f x__fill_8 + PLACED ( 300 0 ) N ;\n- b BIG + PLACED ( 600 0 ) N ;\nEND COMPONENTS\n")
+        occ = C.Occupancy(deff, {"AND2": 300, "x__fill_8": 300, "x__filltie": 300, "BIG": 1300})
         budget = [10 ** 6]
-        # The filler's span (1300..1600) is free: a 300 DBU cell fits exactly.
-        self.assertEqual(occ.spot((1450, 500), 300, "n1", budget), (1300, 0))
-        # Now reserved: the next one goes to the nearest other free span.
-        self.assertNotEqual(occ.spot((1450, 500), 300, "n2", budget)[0:2], (1300, 0))
-        # A moved cell frees its own span first.
+        # [0, 2000) holds 1600 of cells (the filler is free): 400 left there.
+        self.assertEqual(occ.spot((500, 0), 300, "n1", budget), (300, 0))
+        # Full now (100 left): the next one goes to the nearest other interval.
+        x, y = occ.spot((500, 0), 300, "n2", budget)
+        self.assertTrue((x, y) == (300, 1000) or (x >= 2300 and y == 0), (x, y))
+        # A moved cell frees its own capacity first.
         occ.release("a")
-        self.assertEqual(occ.spot((1150, 0), 300, "a", budget), (1000, 0))
+        self.assertEqual(occ.spot((150, 0), 300, "a", budget), (0, 0))
 
     def test_hold_chain_gets_an_isolation_buffer(self):
         net = ("module t(input wire a, input wire clk);\n  wire n1;\n  DLY rr_eco_hold_0 (.A(a), .X(rr_eco_hold_0_n));\n"

@@ -182,7 +182,7 @@ WHATIF_DWS_TOLERANCE = 1e-3
 WHATIF_CHAIN_CANDIDATES = 6
 # DRV/setup ECOs stop (the loop goes on to hold) after this many consecutive
 # layouts on which the previous ECO improved neither the DRV count nor the
-# worst setup slack.
+# worst setup slack, nor repaired any violating net of the layout before.
 SETUP_STAGNATION_ROUNDS = 2
 
 
@@ -1757,7 +1757,14 @@ exit
         drv_count = (sta['drv'] or {}).get('violations') or 0
         record['worst_setup_ns'] = worst
         prev = getattr(self, 'last_setup_eco', None)
-        if prev is not None and prev[0] == it - 1 and worst < prev[1] + SETUP_STAGNATION_NS and drv_count >= prev[2]:
+        # Violating nets of this layout: an ECO that repaired some of them
+        # made progress even when new marginal ones keep the count (GF180
+        # mult: one net at 1.00-1.06 ns per layout, a different one each time).
+        drv_nets = frozenset(r.get('net') or r['pin'] for r in json.loads(bounded_text(
+            Path(sta['files']['drv']), 64 * 1024 ** 2))['sections']['drv']['rows'] if r['slack'] < 0)
+        repaired = bool(prev is not None and len(prev) > 3 and prev[3] - drv_nets)
+        if prev is not None and prev[0] == it - 1 and worst < prev[1] + SETUP_STAGNATION_NS and drv_count >= prev[2] \
+                and not repaired:
             self.no_progress = getattr(self, 'no_progress', 0) + 1
         elif prev is not None and prev[0] == it - 1:
             self.no_progress = 0
@@ -1779,7 +1786,7 @@ exit
             out, summary = self.closure_eco(it, netlist, sta, phys)
             record['size_eco'] = summary
             if out is not None:
-                self.last_setup_eco = (it, worst, drv_count)
+                self.last_setup_eco = (it, worst, drv_count, drv_nets)
                 return out, False
         if not hold_ok:
             if raised is None and self.design.sizing_profile is not None:
@@ -1801,7 +1808,7 @@ exit
                     out, summary = self.closure_eco(it, netlist, sta, phys)
                     record['size_eco'] = summary
                     if out is not None:
-                        self.last_setup_eco = (it, worst, drv_count)
+                        self.last_setup_eco = (it, worst, drv_count, drv_nets)
                         return out, False
                 return netlist, True
             record['hold_eco'] = dict(status=plan['status'], totals=plan['totals'], sinks=plan['sinks'],
@@ -1823,7 +1830,7 @@ exit
                 both, summary = self.closure_eco(it, netlist, sta, phys, apply_to=out, frozen=frozenset(frozen))
                 record['size_eco'] = summary
                 if both is not None:
-                    self.last_setup_eco = (it, worst, drv_count)
+                    self.last_setup_eco = (it, worst, drv_count, drv_nets)
                     return both, False
             return out, False
         if antenna['status'] == 'violated' and setup_ok and drv_ok:

@@ -103,6 +103,10 @@ BEST_EFFORT = 0.985
 # driver (buffer_target).
 HEADROOM_BUFFER_TARGET = 0.7
 BEST_EFFORT_GAIN_NS = 0.02
+# A rebalance must take at least 10 % of the driver's load away (estimated):
+# otherwise it re-plans the arrangement the layout already has (alu: a root
+# in front of a root next to the same driver on consecutive layouts).
+REBALANCE_RELIEF = 0.9
 # A weak driver's input-slew degradation (observed transition above the
 # Liberty model at the observed load, 0.2 ns input) is subtracted from its
 # target, at most this fraction of the limit.
@@ -168,77 +172,88 @@ def parse_netlist(text: str, lef: dict) -> Netlist:
 
 
 # Physical-only masters that the next placement re-inserts (free space for a
-# seeded cell); taps and endcaps stay (they bound the legalizer's intervals).
+# seeded cell); taps and endcaps stay and split the rows into the
+# legalizer's intervals.
 FILLER = re.compile(r"__(fill_|fillcap_|decap_)")
-# Rows searched above and below the wanted position for a free spot.
+TAP = re.compile(r"(filltie|tapvpwrvgnd|__tap|endcap)")
+# Rows searched above and below the wanted position for room.
 FREE_SPOT_ROWS = 6
 
 
 class Occupancy:
-    """Free row space of a placed layout (DEF ROWs minus every component that
-    is not a filler), for seeding a new or moved cell where the legalizer can
-    keep it: a cell seeded into a free span of its interval lands on its
-    seed; one seeded next to a packed driver is pushed to the nearest
-    interval with room (measured on GF180 alu: 87 um). Reservations keep two
-    seeds of one plan apart. Integer DBU."""
+    """Free capacity of the legalizer's intervals (DEF ROWs split at tap and
+    endcap cells; every other non-filler component uses its width) of a
+    placed layout, for seeding a new or moved cell where the next placement
+    keeps it: the legalizer puts a cell into the nearest interval with room
+    and packs that interval by target x, so a cell seeded into such an
+    interval lands next to its seed; seeded next to a driver in a full
+    interval it is pushed to the nearest one with room (measured on GF180
+    alu: 87 um). Reservations keep the seeds of one plan within capacity.
+    Integer DBU."""
 
     def __init__(self, def_text: str, widths: dict, spacing: int = 0):
-        self.rows = []  # (y, x0, x1, site)
+        rows = []
         for m in re.finditer(r"(?m)^ROW \S+ \S+ (-?\d+) (-?\d+) \S+ DO (\d+) BY 1 STEP (\d+) 0 ;", def_text):
             x0, y, n, step = int(m[1]), int(m[2]), int(m[3]), int(m[4])
-            self.rows.append((y, x0, x0 + n * step, step))
-        self.rows.sort()
+            rows.append((y, x0, x0 + n * step, step))
+        rows.sort()
         self.spacing = spacing
-        self.busy: dict[int, list] = {y: [] for y, *_ in self.rows}
-        self.owner: dict[str, tuple] = {}
+        taps: dict[int, list] = {r[0]: [] for r in rows}
+        cells: dict[int, list] = {r[0]: [] for r in rows}
         body = def_text.split("\nCOMPONENTS ", 1)[1].split("\nEND COMPONENTS", 1)[0] if "\nCOMPONENTS " in def_text else ""
         for m in re.finditer(r"(?m)^- (\S+) (\S+) .*?\+ (?:PLACED|FIXED) \( (-?\d+) (-?\d+) \)", body):
-            if FILLER.search(m[2]) or int(m[4]) not in self.busy:
+            y = int(m[4])
+            if FILLER.search(m[2]) or y not in taps:
                 continue
-            span = (int(m[3]), int(m[3]) + widths.get(m[2], 0), key(m[1]))
-            self.busy[int(m[4])].append(span)
-            self.owner[key(m[1])] = (int(m[4]), span)
+            span = (int(m[3]), int(m[3]) + widths.get(m[2], 0))
+            (taps if TAP.search(m[2]) else cells)[y].append((span, key(m[1])))
+        # Intervals: [y, lo, hi, site, free capacity]; the cell -> interval map.
+        self.intervals, self.owner = [], {}
+        for y, x0, x1, site in rows:
+            edges = [x0] + [e for (a, b), _ in sorted(taps[y]) for e in (a, b)] + [x1]
+            for j in range(0, len(edges), 2):
+                lo, hi = edges[j], edges[j + 1]
+                if hi > lo:
+                    self.intervals.append([y, lo, hi, site, hi - lo])
+            for (a, b), name in cells[y]:
+                for k, iv in enumerate(self.intervals):
+                    if iv[0] == y and iv[1] <= a < iv[2]:
+                        iv[4] -= (b - a) + spacing
+                        self.owner[name] = (k, (b - a) + spacing)
+                        break
 
     def release(self, inst: str):
-        """A cell that moves frees its old span."""
+        """A cell that moves frees its old capacity."""
         if inst in self.owner:
-            y, span = self.owner.pop(inst)
-            self.busy[y].remove(span)
+            k, used = self.owner.pop(inst)
+            self.intervals[k][4] += used
 
     def spot(self, centre: tuple, width: int, inst: str, budget: list) -> tuple | None:
-        """Lower-left of the free spot nearest `centre` (Manhattan, centre to
-        centre) that fits `width` plus spacing on both sides, within
-        FREE_SPOT_ROWS rows; reserved for `inst`. None: no room nearby."""
-        if not self.rows:
+        """Lower-left nearest `centre` (Manhattan, as the legalizer measures)
+        in an interval within FREE_SPOT_ROWS rows that has room for `width`;
+        reserved for `inst`. None: no room nearby."""
+        if not self.intervals:
             return None
-        ys = [r[0] for r in self.rows]
+        ys = sorted({iv[0] for iv in self.intervals})
         k = min(range(len(ys)), key=lambda i: (abs(ys[i] - centre[1]), i))
+        near = set(ys[max(0, k - FREE_SPOT_ROWS):k + FREE_SPOT_ROWS + 1])
         best = None
-        for r in self.rows[max(0, k - FREE_SPOT_ROWS):k + FREE_SPOT_ROWS + 1]:
-            y, x0, x1, site = r
-            spans = sorted(self.busy[y])
-            budget[0] -= len(spans) + 1
+        for idx, (y, lo, hi, site, free) in enumerate(self.intervals):
+            budget[0] -= 1
             if budget[0] < 0:
                 raise RuntimeError("closure ECO: free-spot search budget exceeded")
-            edges = [x0] + [e for a, b, _ in spans for e in (a, b)] + [x1]
-            for j in range(0, len(edges), 2):
-                lo, hi = edges[j] + (self.spacing if j else 0), edges[j + 1] - (self.spacing if j + 2 < len(edges) else 0)
-                if hi - lo < width:
-                    continue
-                want = centre[0] - width // 2
-                x = min(max(want, lo), hi - width)
-                x = lo + ((x - lo) // site) * site
-                if x + width > hi:
-                    continue
-                cost = (abs(x + width // 2 - centre[0]) + abs(y - centre[1]), y, x)
-                if best is None or cost < best[0]:
-                    best = (cost, y, x)
+            if y not in near or free < width + self.spacing or hi - lo < width:
+                continue
+            x = min(max(centre[0] - width // 2, lo), hi - width)
+            x = lo + ((x - lo) // site) * site
+            cost = (abs(x + width // 2 - centre[0]) + abs(y - centre[1]), y, x)
+            if best is None or cost < best[0]:
+                best = (cost, idx, y, x)
         if best is None:
             return None
-        _, y, x = best
-        span = (x, x + width, inst)
-        self.busy[y].append(span)
-        self.owner[inst] = (y, span)
+        _, idx, y, x = best
+        self.intervals[idx][4] -= width + self.spacing
+        self.owner[inst] = (idx, width + self.spacing)
         return (x, y)
 
 
@@ -893,6 +908,9 @@ class Planner:
                 if len(picks) != len(bufs):
                     tried.append(f"{mode}@{member}: no buffer of the family fits")
                     continue
+                if sum(b.cap for b in picks) + fixed_pf + near * len(bufs) > REBALANCE_RELIEF * total:
+                    tried.append(f"{mode}@{member}: no relief (the buffers are next to the driver already)")
+                    continue
                 spend = {}
                 for (inst, it, old, load0, load1), b in zip(bufs, picks):
                     spend[it.name] = (b.delay_at(load1) + SLEW_SENSITIVITY * b.slew_at(load1)) - \
@@ -904,6 +922,9 @@ class Planner:
                     tried.append(f"{mode}@{member}: no root buffer fits")
                     continue
                 root = r[0]
+                if root.cap + fixed_pf + near > REBALANCE_RELIEF * total:
+                    tried.append(f"{mode}@{member}: no relief (a root next to the driver sees the same load)")
+                    continue
                 spend = {it.name: root.delay_at(root_load) + SLEW_SENSITIVITY * root.slew_at(root_load)
                          for _, it, _, _, _ in bufs}
             # Same rule as for new buffers: no extra delay in front of a sink
