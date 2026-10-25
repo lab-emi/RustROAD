@@ -101,6 +101,7 @@ enum HistoryRecords {
 pub(crate) struct History {
     records: HistoryRecords,
     limit: usize,
+    changed: bool,
 }
 impl History {
     pub fn new(nodes: usize, limit: usize) -> Result<Self> {
@@ -114,7 +115,14 @@ impl History {
         } else {
             HistoryRecords::Sparse(HashMap::new())
         };
-        Ok(Self { records, limit })
+        Ok(Self {
+            records,
+            limit,
+            changed: false,
+        })
+    }
+    pub fn is_zero(&self) -> bool {
+        !self.changed
     }
     pub fn get(&self, id: u32) -> u16 {
         match &self.records {
@@ -143,6 +151,7 @@ impl History {
                 *value = value.saturating_add(1);
             }
         }
+        self.changed = true;
         Ok(())
     }
 }
@@ -205,9 +214,11 @@ mod tests {
     fn dense_and_sparse_history_obey_the_same_saturation_rule() {
         for nodes in [16, 3_000_000_000] {
             let mut history = History::new(nodes, 1).expect("bounded history");
+            assert!(history.is_zero());
             for _ in 0..70_000 {
                 history.increment(3).expect("one entry only");
             }
+            assert!(!history.is_zero());
             assert_eq!(history.get(3), u16::MAX);
             assert_eq!(history.get(4), 0);
             if nodes > DENSE_NODES {

@@ -105,6 +105,11 @@ pub(crate) struct TreeDistance {
     fallback: bool,
 }
 impl TreeDistance {
+    pub fn bounds_distance(&self, point: [i64; 2]) -> u64 {
+        point[0]
+            .abs_diff(point[0].clamp(self.bounds.lx, self.bounds.ux))
+            .saturating_add(point[1].abs_diff(point[1].clamp(self.bounds.ly, self.bounds.uy)))
+    }
     pub fn new(layer: usize, point: [i64; 2]) -> Self {
         let r = Rect {
             lx: point[0],

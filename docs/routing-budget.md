@@ -171,6 +171,11 @@ against geometry, and every intermediate point must obey the guide and tree
 constraints; congestion history is included along the whole span. Ordinary
 single-step moves remain available. Chosen spans are expanded into unit edges
 before topology/output limits and final geometry validation.
+Only spans that approach the tree's bounding region are proposed. Empty
+history and single-root cases avoid unnecessary per-point lookup work; guide
+coverage is checked over the complete crossed GCell interval.
+Minimum-area checks accept a component as soon as one of its rectangles is
+large enough; exact union area is retained for every reported area violation.
 
 Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
 remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared

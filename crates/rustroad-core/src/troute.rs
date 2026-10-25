@@ -2110,6 +2110,7 @@ impl<'a> Router<'a> {
                 let (l, t_, s_) = self.graph.locate(id);
                 let layer = self.graph.layers[l].layer;
                 let p = self.graph.xy(l, t_, s_);
+                let target_distance = target.bounds_distance(p);
                 self.graph.neighbors(id, &mut nbuf);
                 // On a layer whose single via pads are below AREA, a via may
                 // leave only after a wire run of at least AREA / width since
@@ -2150,6 +2151,12 @@ impl<'a> Router<'a> {
                         continue;
                     }
                     let (nl, q) = self.graph.point(next);
+                    if matches!(mv, Move::Along)
+                        && id.abs_diff(next) > 1
+                        && target.bounds_distance(q) >= target_distance
+                    {
+                        continue;
+                    }
                     let joins = tree.contains(&next);
                     if self.gmark[self.cells.of(q) as usize] != self.gepoch && !joins {
                         continue;
@@ -2179,28 +2186,49 @@ impl<'a> Router<'a> {
                         1
                     };
                     if jump > 1 {
+                        let from_cell = self.cells.of(p);
+                        let to_cell = self.cells.of(q);
+                        let stride = if p[0] == q[0] { self.cells.nx } else { 1 };
+                        let cell_count = from_cell.abs_diff(to_cell) as usize / stride + 1;
+                        let inspect_nodes = tree.len() > 1 || !self.history.is_zero();
                         self.spatial.work = self
                             .spatial
                             .work
-                            .checked_add(jump)
+                            .checked_add(cell_count + if inspect_nodes { jump } else { 0 })
                             .filter(|&n| n <= self.limits.max_comparisons)
                             .ok_or_else(|| budget("routing macro-move work"))?;
+                        let before_end = if next > id { next - 1 } else { next + 1 };
+                        let only_end_in_cell =
+                            self.cells.of(self.graph.point(before_end).1) != to_cell;
                         let mut usable = true;
-                        for node in id.min(next)..=id.max(next) {
-                            if node == id {
-                                continue;
-                            }
-                            if (node != next && tree.contains(&node))
-                                || (self.gmark[self.cells.of(self.graph.point(node).1) as usize]
-                                    != self.gepoch
-                                    && !(node == next && joins))
+                        for cell in
+                            (from_cell.min(to_cell)..=from_cell.max(to_cell)).step_by(stride)
+                        {
+                            if self.gmark[cell as usize] != self.gepoch
+                                && !(cell == to_cell && joins && only_end_in_cell)
                             {
                                 usable = false;
                                 break;
                             }
-                            step = step.saturating_add(
-                                u64::from(self.history.get(node)).saturating_mul(hist_unit),
-                            );
+                        }
+                        if tree.len() == 1 && id.min(next) < root && root < id.max(next) {
+                            usable = false;
+                        }
+                        if usable && inspect_nodes {
+                            for node in id.min(next)..=id.max(next) {
+                                if node == id {
+                                    continue;
+                                }
+                                if node != next && tree.contains(&node) {
+                                    usable = false;
+                                    break;
+                                }
+                                if !self.history.is_zero() {
+                                    step = step.saturating_add(
+                                        u64::from(self.history.get(node)).saturating_mul(hist_unit),
+                                    );
+                                }
+                            }
                         }
                         if !usable {
                             continue;
