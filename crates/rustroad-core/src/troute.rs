@@ -1697,9 +1697,9 @@ impl<'a> Router<'a> {
                     cost[sink as usize] = 0;
                     parent[sink as usize] = NONE;
                     tag[sink as usize] = epoch;
-                    heap.push(Reverse((h(sink), 0u64, sink)));
+                    heap.push(Reverse((h(sink), Reverse(0u64), sink)));
                     let mut found = None;
-                    while let Some(Reverse((_, c, id))) = heap.pop() {
+                    while let Some(Reverse((_, Reverse(c), id))) = heap.pop() {
                         if tag[id as usize] != epoch || cost[id as usize] != c {
                             continue;
                         }
@@ -1711,7 +1711,7 @@ impl<'a> Router<'a> {
                         if work.is_multiple_of(1 << 16) {
                             self.guard("global search")?;
                         }
-                        if work > self.limits.max_expansions {
+                        if self.expansions.saturating_add(work) > self.limits.max_expansions {
                             return Err(budget("global routing expansion limit"));
                         }
                         self.cells.neighbors(id, &mut buf);
@@ -1730,7 +1730,7 @@ impl<'a> Router<'a> {
                             if heap.len() >= self.limits.max_heap {
                                 return Err(budget("global routing frontier"));
                             }
-                            heap.push(Reverse((nc + h(nb), nc, nb)));
+                            heap.push(Reverse((nc + h(nb), Reverse(nc), nb)));
                         }
                     }
                     let mut cur = found.ok_or_else(|| invalid("global routing disconnected"))?;
@@ -3041,6 +3041,31 @@ mod tests {
     }
     fn limits() -> RouteLimits {
         RouteLimits::default()
+    }
+
+    #[test]
+    fn open_global_plateau_reaches_the_target_within_the_linear_work_budget() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(10, 10, 30, 30)),
+                terminal(1, 0, false, rect(9970, 9970, 9990, 9990)),
+            ],
+            Vec::new(),
+        );
+        design.die = rect(0, 0, 10000, 10000);
+        let plan = design.tracks.as_mut().unwrap();
+        plan.gcell = 40;
+        plan.capacity_percent = 100;
+        plan.memory_mib = 256;
+        let bounded = RouteLimits {
+            max_expansions: 10_000,
+            ..limits()
+        };
+        let result = route_cpu_ref(&design, &bounded).unwrap();
+        validate(&design, &result, &bounded).unwrap();
+        assert!(result.stats.expansions <= 10_000);
+        assert_eq!(result.nets, [0]);
+        assert_eq!(result.access.len(), 2);
     }
 
     #[test]
