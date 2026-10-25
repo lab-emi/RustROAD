@@ -19,7 +19,7 @@ const LEGACY_MAGIC: &[u8; 8] = b"RROADB01";
 const MAX_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 1024 * 1024;
 /// Absolute physical-instance ceiling, including fillers, taps and clock cells.
-pub(crate) const MAX_CELLS: usize = 16_000_000;
+pub(crate) const MAX_CELLS: usize = 32_000_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -297,11 +297,15 @@ pub(crate) fn restore(metadata: &mut Metadata, directory: &Path, limits: &Limits
         .tables
         .as_ref()
         .ok_or_else(|| invalid("schema 7 has no physical side table"))?;
+    if limits.max_cells > MAX_CELLS {
+        return Err(budget(
+            "physical instance capacity exceeds the format ceiling",
+        ));
+    }
     if table.file != FILE
         || table.bytes < MAGIC.len() as u64
         || table.bytes > MAX_BYTES
         || !(1..=6).contains(&table.logical_version)
-        || limits.max_cells > MAX_CELLS
     {
         return Err(invalid("physical side-table descriptor"));
     }
@@ -501,6 +505,33 @@ mod tests {
         );
         std::fs::remove_dir_all(dir).expect("remove test directory");
     }
+    #[test]
+    fn capacity_above_sixteen_million_does_not_allocate_unused_rows() {
+        let (dir, mut metadata) = fixture();
+        let count = metadata.design.cells.len();
+        let json = spill(&mut metadata, &dir).expect("write tiny side table");
+        let mut decoded: Metadata = serde_json::from_slice(&json).expect("small metadata");
+        let limits = Limits {
+            max_cells: 18_000_000,
+            ..Limits::default()
+        };
+        restore(&mut decoded, &dir, &limits)
+            .expect("larger capacity admits existing small workspace");
+        assert_eq!(decoded.design.cells.len(), count);
+        assert!(decoded.design.cells.capacity() < 1024);
+        let mut decoded: Metadata = serde_json::from_slice(&json).expect("small metadata");
+        let limits = Limits {
+            max_cells: MAX_CELLS + 1,
+            ..Limits::default()
+        };
+        assert!(matches!(
+            restore(&mut decoded, &dir, &limits),
+            Err(Error::Budget(_))
+        ));
+        assert!(decoded.design.cells.is_empty());
+        std::fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
     #[test]
     fn corrupted_table_is_rejected_before_decoding() {
         let (dir, mut metadata) = fixture();

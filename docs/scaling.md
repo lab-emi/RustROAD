@@ -672,3 +672,5 @@ DEF (XOR 0) everywhere. All 16 rows pass every gating item.
   of very long runs are not split out).
 * **Escaped names.** RustSys' `\p_q[0]` next to port `p_q` is renamed by the
   harness, not by RustROAD's importer, which still refuses the ambiguity.
+
+The physical side-table format admits up to 32 million instances, including fillers, taps and clock buffers. Commands still require an explicit sufficient cell capacity and obey the 16 GiB table and 1 MiB record limits; raising a capacity never allocates absent rows.
