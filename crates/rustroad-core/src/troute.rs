@@ -90,6 +90,42 @@ fn access_key(class: u32, origin: [i64; 2], points: &[(u32, [i64; 2])]) -> Resul
     ))
 }
 
+/// A driver at a remote port need not be the geometric root of an undirected
+/// wire tree. During repair, join the central terminals first and the outliers
+/// last. Reuse the existing group storage and charge all three bounded sorts.
+fn repair_terminal_order(
+    group: &mut [&Terminal],
+    point: impl Fn(&Terminal) -> [i64; 2],
+    work: &mut usize,
+    cap: usize,
+) -> Result<()> {
+    if group.len() < 2 {
+        return Ok(());
+    }
+    let cost = group
+        .len()
+        .checked_mul(group.len().ilog2() as usize + 1)
+        .and_then(|n| n.checked_mul(3))
+        .ok_or_else(|| budget("repair terminal-order work"))?;
+    *work = work
+        .checked_add(cost)
+        .filter(|&n| n <= cap)
+        .ok_or_else(|| budget("repair terminal-order work"))?;
+    group.sort_unstable_by_key(|t| (point(t)[0], t.pin));
+    let x = point(group[group.len() / 2])[0];
+    group.sort_unstable_by_key(|t| (point(t)[1], t.pin));
+    let y = point(group[group.len() / 2])[1];
+    group.sort_unstable_by_key(|t| {
+        let p = point(t);
+        (
+            p[0].abs_diff(x).saturating_add(p[1].abs_diff(y)),
+            !t.driver,
+            t.pin,
+        )
+    });
+    Ok(())
+}
+
 /// Immutable x-interval index for pin-access repair. A query scans only
 /// lower bounds in [query.lx - widest_window, query.ux], then checks y and
 /// exact overlap. Every candidate and the one-time build are work charged.
@@ -2109,6 +2145,18 @@ impl<'a> Router<'a> {
                     }
                     break;
                 }
+                if search == self.limits.max_search_expansions
+                    && std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some()
+                {
+                    eprintln!(
+                        "[troute] search cap net {net} pin {} soft {soft} start {:?} root {:?} current {:?} tree_nodes {} cost {cost}",
+                        t.pin,
+                        self.graph.point(start),
+                        (root_layer, root_point),
+                        self.graph.point(id),
+                        tree.len(),
+                    );
+                }
                 self.tick(&mut search, "detailed", t.pin, net)?;
                 let (l, t_, s_) = self.graph.locate(id);
                 let layer = self.graph.layers[l].layer;
@@ -2813,6 +2861,16 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
     );
     let mut rips: BTreeMap<u32, usize> = BTreeMap::new();
     let mut strict: BTreeSet<u32> = BTreeSet::new();
+    if !queue.is_empty() {
+        for group in groups.values_mut() {
+            repair_terminal_order(
+                group,
+                |t| r.graph.point(plans[&t.pin].top).1,
+                &mut r.spatial.work,
+                limits.max_comparisons,
+            )?;
+        }
+    }
     let mut round = 0usize;
     let via_layers: Vec<(u32, u32)> = input.vias.iter().map(|v| (v.lower, v.upper)).collect();
     for pass in 0..=4usize {
@@ -3325,6 +3383,38 @@ mod tests {
             design.tracks.as_mut().unwrap().heuristic_weight = invalid_weight;
             assert!(check_plan(&design, design.tracks.as_ref().unwrap()).is_err());
         }
+    }
+
+    #[test]
+    fn repair_order_starts_in_the_cluster_and_is_permutation_independent() {
+        let pins = [
+            [0, 0],
+            [1000, 1000],
+            [1000, 1040],
+            [1040, 1000],
+            [1040, 1040],
+        ];
+        let terminals: Vec<_> = pins
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| terminal(i as u32, 0, i == 0, rect(p[0], p[1], p[0] + 1, p[1] + 1)))
+            .collect();
+        let mut ordered: Vec<_> = terminals.iter().collect();
+        let original = ordered.clone();
+        assert!(repair_terminal_order(&mut ordered, |t| pins[t.pin as usize], &mut 0, 1).is_err());
+        assert_eq!(
+            ordered.iter().map(|t| t.pin).collect::<Vec<_>>(),
+            [0, 1, 2, 3, 4]
+        );
+        repair_terminal_order(&mut ordered, |t| pins[t.pin as usize], &mut 0, 100).unwrap();
+        assert_eq!(ordered[0].pin, 1);
+        assert_eq!(ordered.last().unwrap().pin, 0);
+        let mut permuted = original.into_iter().rev().collect::<Vec<_>>();
+        repair_terminal_order(&mut permuted, |t| pins[t.pin as usize], &mut 0, 100).unwrap();
+        assert_eq!(
+            ordered.iter().map(|t| t.pin).collect::<Vec<_>>(),
+            permuted.iter().map(|t| t.pin).collect::<Vec<_>>()
+        );
     }
 
     #[test]

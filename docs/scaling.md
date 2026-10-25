@@ -704,3 +704,9 @@ values favor progress toward the target and may produce a longer route; they
 do not change wire/via costs, collision checks, expansion limits or final
 validation. Priority arithmetic saturates at `u64::MAX`. Qualify the chosen
 weight on both PDKs and report measured routed quality along with run time.
+
+Congestion repair orders terminal escapes from their coordinate median
+outward. A remote I/O driver therefore need not be the first geometric root
+of the undirected route tree. Logical driver identities are unchanged. The
+ordering reuses each net's terminal slice, takes bounded `O(N log N)` work,
+and is charged to the comparison budget before sorting.
