@@ -26,9 +26,16 @@ pub struct RouteLimits {
     pub max_segments: usize,
     pub max_expansions: usize,
     pub max_search_expansions: usize,
+    /// Nodes or raw edges retained for one detailed net, independently of the design output size.
+    #[serde(default = "default_active_nodes")]
+    pub max_active_nodes: usize,
     pub max_comparisons: usize,
     pub max_heap: usize,
 }
+fn default_active_nodes() -> usize {
+    200_000
+}
+
 impl Default for RouteLimits {
     fn default() -> Self {
         Self {
@@ -39,6 +46,7 @@ impl Default for RouteLimits {
             max_segments: 100_000,
             max_expansions: 2_000_000,
             max_search_expansions: 200_000,
+            max_active_nodes: default_active_nodes(),
             max_comparisons: 200_000_000,
             max_heap: 500_000,
         }
@@ -57,6 +65,7 @@ impl RouteLimits {
             max_segments: 128_000_000,
             max_expansions: 2_000_000_000,
             max_search_expansions: 50_000_000,
+            max_active_nodes: 50_000_000,
             max_comparisons: 1usize << 40,
             max_heap: 64_000_000,
         }
@@ -77,6 +86,7 @@ impl RouteLimits {
             (self.max_segments, hard.max_segments),
             (self.max_expansions, hard.max_expansions),
             (self.max_search_expansions, hard.max_search_expansions),
+            (self.max_active_nodes, hard.max_active_nodes),
             (self.max_comparisons, hard.max_comparisons),
             (self.max_heap, hard.max_heap),
         ] {

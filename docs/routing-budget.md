@@ -89,6 +89,12 @@ retained obstacle records, 512M bin entries, 128M segments, 2e9 expansions,
 5e7 per search, 2^40 comparisons and 64M heap entries). These are independent
 ceilings, not a promise that all maxima fit in memory at once.
 
+`max_active_nodes` separately bounds the raw edges and nodes of one detailed
+net (default 200,000; hard ceiling 50 million). It is checked before insertion
+and charged at 160 bytes per admitted node/edge, independently of the design's
+output segment budget. A large design can permit many completed routes without
+reserving the entire output budget for one live search tree.
+
 `route` checks a whole-process estimate against `track_router.memory_mib`
 (default 2048, at most 65536). Before loading it uses the process baseline plus
 3x the revision's serialized size. Once the complete routing input is decoded,
@@ -103,6 +109,9 @@ Spatial bins use dense grids for small extents and 32x32 pages for populated
 large extents. Completed routes retain collinear runs. Access memoization is
 capped at 64 MiB, and `max_history_entries` separately bounds congestion history.
 Local pin-repair interval queries charge candidate scans to the work budget.
+Wire normalization retains line maps and junction sets for one net at a time;
+assembly emits normalized runs directly, without a second full raw-wire copy.
+The work counter covers all nets and the output cap is checked before appending.
 While routing, the process' peak RSS is checked at phase boundaries and during
 search and access reservation. Every search, queue, repair round and rip-up
 count remains bounded. Reaching a limit returns `BUDGET_EXCEEDED` or `NO_ROUTE`

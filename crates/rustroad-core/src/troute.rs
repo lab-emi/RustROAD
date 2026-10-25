@@ -592,7 +592,8 @@ fn memory_estimate_limited(
             .saturating_add(t.saturating_mul(WINDOW_INDEX_BYTES))
             .saturating_add(records.saturating_mul(96))
             .saturating_add(
-                (nodes.min(limits.max_segments) as u64).saturating_mul(ACTIVE_TOPOLOGY_BYTES),
+                (nodes.min(limits.max_segments).min(limits.max_active_nodes) as u64)
+                    .saturating_mul(ACTIVE_TOPOLOGY_BYTES),
             )
             .saturating_add(access_cache_limit(
                 input.tracks.as_ref().expect("track plan"),
@@ -2217,6 +2218,12 @@ impl<'a> Router<'a> {
                 if edges.len() >= self.limits.max_segments {
                     return Err(budget("detailed routing net size"));
                 }
+                let new_nodes = usize::from(!tree.contains(&a)) + usize::from(!tree.contains(&b));
+                if edges.len() >= self.limits.max_active_nodes
+                    || tree.len().saturating_add(new_nodes) > self.limits.max_active_nodes
+                {
+                    return Err(budget("active detailed routing topology"));
+                }
                 edges.insert(key, kind);
                 tree.insert(a);
                 tree.insert(b);
@@ -2495,6 +2502,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
             r.expansions
         ),
     );
+    drop(all);
     // Global routing over the escape tops.
     let nets: Vec<(u32, Vec<u32>)> = groups
         .iter()
@@ -2523,6 +2531,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
             r.expansions
         ),
     );
+    drop(nets);
     // Detailed routing: small nets first.
     let mut order: Vec<(usize, u32)> = guides.iter().map(|(n, g)| (g.len(), *n)).collect();
     order.sort_unstable();
@@ -3420,6 +3429,16 @@ mod tests {
         assert_eq!(routed.nets, vec![0]);
         assert_eq!(routed.access.len(), 4);
         assert!(routed.stats.expansions < 100_000);
+        let bounded = RouteLimits {
+            max_active_nodes: 100,
+            ..limits
+        };
+        assert!(
+            route_cpu_ref(&design, &bounded)
+                .unwrap_err()
+                .to_string()
+                .contains("active detailed routing topology")
+        );
     }
     #[test]
     fn diagonal_route_bounds_equal_cost_frontiers() {

@@ -333,6 +333,27 @@ fn lattice_profile_keeps_schema_5_and_track_budgets_fail_explicitly() {
         fs::read_to_string(ws.join("HEAD")).unwrap().trim(),
         placed.revision
     );
+    let mut active = routing(true);
+    active["limits"] =
+        serde_json::to_value(rustroad_core::routing::RouteLimits::default()).unwrap();
+    active["limits"]["max_active_nodes"] = serde_json::json!(1);
+    fs::write(f.path("active.json"), serde_json::to_vec(&active).unwrap()).unwrap();
+    let err = route(
+        &ws,
+        &placed.revision,
+        &f.path("active.json"),
+        RouteScope::All,
+        &limits(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("active detailed routing topology"),
+        "{err}"
+    );
+    assert_eq!(
+        fs::read_to_string(ws.join("HEAD")).unwrap().trim(),
+        placed.revision
+    );
     // Lattice caps stay hard: a lattice profile above its defaults is refused.
     let mut v = routing(false);
     v["limits"] = serde_json::json!({"max_axis":4096,"max_grid_nodes":2000000,"max_obstacles":200000,
@@ -614,4 +635,15 @@ fn net_weights_are_stored_applied_and_validated() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn old_route_limits_default_the_independent_active_topology_bound() {
+    let mut value = serde_json::to_value(rustroad_core::routing::RouteLimits::default()).unwrap();
+    value.as_object_mut().unwrap().remove("max_active_nodes");
+    let mut limits: rustroad_core::routing::RouteLimits = serde_json::from_value(value).unwrap();
+    assert_eq!(limits.max_active_nodes, 200_000);
+    limits.validate_track().unwrap();
+    limits.max_active_nodes = 0;
+    assert!(limits.validate_track().is_err());
 }
