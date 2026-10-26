@@ -13,6 +13,7 @@ use crate::route_rules;
 pub(crate) use crate::route_rules::Violation;
 use crate::{Error, Rect, Result};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
 
@@ -1390,7 +1391,7 @@ pub(crate) struct Spatial<'a> {
     bin: i64,
     fixed: Fixed<'a>,
     /// Added geometry only; immutable fixed shapes remain in `input.obstacles`.
-    shapes: Vec<Blockage>,
+    added: AddedShapes<'a>,
     /// Added shapes only (ids from `input.obstacles.len()`).
     bins: BinGrid,
     /// Query marks of the added shapes.
@@ -1398,13 +1399,119 @@ pub(crate) struct Spatial<'a> {
     generation: u64,
     entries: usize,
     pub(crate) work: usize,
+    /// Supply ties by router net: (supply net, rail zone).
+    ties: HashMap<u32, (u32, LayerRect)>,
+}
+/// Shapes a [`Spatial`] adds: owned rectangles with rip-up state (router and
+/// cleanup), or the shapes of stored routes indexed in their canonical order
+/// and computed on demand (validation, which would otherwise copy every route
+/// shape of a whole design).
+struct AddedShapes<'a> {
+    owned: Vec<Blockage>,
     /// False once removed by rip-up (track router); ids stay in their bins.
     alive: Vec<bool>,
     /// True for rip-up-able routed shapes (track router); obstacles, pins and
     /// reserved pin access are fixed.
     routed: Vec<bool>,
-    /// Supply ties by router net: (supply net, rail zone).
-    ties: HashMap<u32, (u32, LayerRect)>,
+    routes: Option<RouteShapes<'a>>,
+}
+/// The wires, then every via's shapes, then the patches of `routes`, as far
+/// as they have been added.
+struct RouteShapes<'a> {
+    routes: &'a Routes,
+    /// Via and shape index (within its kind) of every added via shape.
+    vias: Vec<u32>,
+    subs: Vec<u8>,
+    len: usize,
+    /// Via and shape index of the next via shape to add.
+    next: (usize, usize),
+}
+impl AddedShapes<'_> {
+    fn len(&self) -> usize {
+        self.routes.as_ref().map_or(self.owned.len(), |r| r.len)
+    }
+    fn alive(&self, i: usize) -> bool {
+        self.routes.is_some() || self.alive[i]
+    }
+    fn routed(&self, i: usize) -> bool {
+        self.routes.is_none() && self.routed[i]
+    }
+    /// Added shape `i` (ids from `input.obstacles.len()`).
+    fn get(&self, input: &RouteInput, i: usize) -> Result<Cow<'_, Blockage>> {
+        match &self.routes {
+            None => Ok(Cow::Borrowed(&self.owned[i])),
+            Some(r) => r.shape(input, i).map(Cow::Owned),
+        }
+    }
+}
+impl RouteShapes<'_> {
+    fn shape(&self, input: &RouteInput, i: usize) -> Result<Blockage> {
+        let wires = &self.routes.wires;
+        if let Some(w) = wires.get(i) {
+            let width = input
+                .layers
+                .get(w.layer as usize)
+                .ok_or_else(|| invalid("stored wire layer"))?
+                .width;
+            return Ok(Blockage {
+                layer: w.layer,
+                rect: wire_rect(w, width)?,
+                net: Some(w.net),
+            });
+        }
+        let j = i - wires.len();
+        if let Some(&v) = self.vias.get(j) {
+            let via = &self.routes.vias[v as usize];
+            let s = &input.vias[via.kind as usize].shapes[self.subs[j] as usize];
+            return Ok(Blockage {
+                layer: s.layer,
+                rect: shifted(s.rect, via.at)?,
+                net: Some(via.net),
+            });
+        }
+        let p = self
+            .routes
+            .patches
+            .get(j - self.vias.len())
+            .ok_or_else(|| invalid("route shape id"))?;
+        Ok(Blockage {
+            layer: p.layer,
+            rect: p.rect,
+            net: Some(p.net),
+        })
+    }
+    /// Take the next shape in canonical order; returns its added index.
+    fn advance(&mut self, input: &RouteInput) -> Result<usize> {
+        let i = self.len;
+        if i >= self.routes.wires.len() {
+            let (mut v, mut k) = self.next;
+            while let Some(via) = self.routes.vias.get(v) {
+                let shapes = input
+                    .vias
+                    .get(via.kind as usize)
+                    .ok_or_else(|| invalid("stored via kind"))?
+                    .shapes
+                    .len();
+                if k < shapes {
+                    break;
+                }
+                (v, k) = (v + 1, 0);
+            }
+            if v < self.routes.vias.len() {
+                self.vias
+                    .push(u32::try_from(v).map_err(|_| budget("routing obstacle count"))?);
+                self.subs
+                    .push(u8::try_from(k).map_err(|_| invalid("via kind shape count"))?);
+                self.next = (v, k + 1);
+            } else if i - self.routes.wires.len() - self.vias.len() >= self.routes.patches.len() {
+                return Err(invalid("all route shapes are added"));
+            } else {
+                self.next = (v, 0);
+            }
+        }
+        self.len += 1;
+        Ok(i)
+    }
 }
 /// Result of a soft probe: fixed blockage, or clear except for routed shapes
 /// of the listed other nets (sorted, deduplicated).
@@ -1469,14 +1576,17 @@ impl<'a> Spatial<'a> {
             limits,
             bin,
             fixed,
-            shapes: Vec::new(),
+            added: AddedShapes {
+                owned: Vec::new(),
+                alive: Vec::new(),
+                routed: Vec::new(),
+                routes: None,
+            },
             bins: BinGrid::added(input, bin, expected),
             marks: Vec::new(),
             generation: 0,
             entries,
             work: 0,
-            alive: Vec::new(),
-            routed: Vec::new(),
             ties: input
                 .ties
                 .iter()
@@ -1524,10 +1634,10 @@ impl<'a> Spatial<'a> {
     }
     /// Add a rip-up-able routed shape; returns its id.
     pub(crate) fn add_routed(&mut self, b: Blockage) -> Result<usize> {
-        let added = self.shapes.len();
+        let added = self.added.len();
         self.add(b)?;
         let id = self.len() - 1;
-        self.routed[added] = true;
+        self.added.routed[added] = true;
         Ok(id)
     }
     /// Add a fixed shape; returns its id.
@@ -1536,13 +1646,14 @@ impl<'a> Spatial<'a> {
         Ok(self.len() - 1)
     }
     pub(crate) fn remove(&mut self, id: usize) {
-        self.alive[id - self.input.obstacles.len()] = false;
+        self.added.alive[id - self.input.obstacles.len()] = false;
     }
     pub(crate) fn restore(&mut self, id: usize) -> Result<()> {
         let offset = id
             .checked_sub(self.input.obstacles.len())
             .ok_or_else(|| invalid("cannot restore an input obstacle"))?;
         let alive = self
+            .added
             .alive
             .get_mut(offset)
             .ok_or_else(|| invalid("invalid restored obstacle"))?;
@@ -1591,6 +1702,9 @@ impl<'a> Spatial<'a> {
         {
             return Err(budget("routing obstacle count"));
         }
+        if self.added.routes.is_some() {
+            return Err(invalid("owned shape added to a route-backed index"));
+        }
         let id = self.len();
         index_shape(
             &mut self.bins,
@@ -1601,14 +1715,61 @@ impl<'a> Spatial<'a> {
             id,
             &b,
         )?;
-        self.shapes.push(b);
+        self.added.owned.push(b);
         self.marks.push(0);
-        self.alive.push(true);
-        self.routed.push(false);
+        self.added.alive.push(true);
+        self.added.routed.push(false);
+        Ok(())
+    }
+    /// Back the added shapes by `routes`: they are then added only by
+    /// [`Self::add_next_route_shape`], wires first, then every via's shapes,
+    /// then patches, and computed from the records on demand.
+    pub(crate) fn attach_routes(&mut self, routes: &'a Routes) -> Result<()> {
+        if self.added.len() != 0 || self.added.routes.is_some() {
+            return Err(invalid("routes attach to an index without added shapes"));
+        }
+        self.added.routes = Some(RouteShapes {
+            routes,
+            vias: Vec::new(),
+            subs: Vec::new(),
+            len: 0,
+            next: (0, 0),
+        });
+        Ok(())
+    }
+    /// Index the next shape of the attached routes (same limits as `add`).
+    pub(crate) fn add_next_route_shape(&mut self) -> Result<()> {
+        if self.len().saturating_add(
+            self.input
+                .instances
+                .as_ref()
+                .map_or(0, InstanceObstacles::len),
+        ) >= self.limits.max_obstacles
+        {
+            return Err(budget("routing obstacle count"));
+        }
+        let base = self.input.obstacles.len();
+        let routes = self
+            .added
+            .routes
+            .as_mut()
+            .ok_or_else(|| invalid("no routes attached"))?;
+        let i = routes.advance(self.input)?;
+        let b = routes.shape(self.input, i)?;
+        index_shape(
+            &mut self.bins,
+            &mut self.entries,
+            self.input,
+            self.bin,
+            self.limits,
+            base + i,
+            &b,
+        )?;
+        self.marks.push(0);
         Ok(())
     }
     fn len(&self) -> usize {
-        self.input.obstacles.len() + self.shapes.len()
+        self.input.obstacles.len() + self.added.len()
     }
     /// Reserve exactly `shapes` more added shapes and `entries` more bin
     /// entries (a validation adds a known set of routes), unless they exceed
@@ -1628,10 +1789,19 @@ impl<'a> Spatial<'a> {
             return Ok(());
         }
         let fail = |_| budget("routing shape allocation");
-        self.shapes.try_reserve_exact(shapes).map_err(fail)?;
         self.marks.try_reserve_exact(shapes).map_err(fail)?;
-        self.alive.try_reserve_exact(shapes).map_err(fail)?;
-        self.routed.try_reserve_exact(shapes).map_err(fail)?;
+        if let Some(r) = &mut self.added.routes {
+            // Only via shapes keep a record reference.
+            let vias = shapes
+                .saturating_sub(r.routes.wires.len())
+                .saturating_sub(r.routes.patches.len());
+            r.vias.try_reserve_exact(vias).map_err(fail)?;
+            r.subs.try_reserve_exact(vias).map_err(fail)?;
+        } else {
+            self.added.owned.try_reserve_exact(shapes).map_err(fail)?;
+            self.added.alive.try_reserve_exact(shapes).map_err(fail)?;
+            self.added.routed.try_reserve_exact(shapes).map_err(fail)?;
+        }
         if self.bins.mode != BinMode::Sparse {
             self.bins
                 .entries
@@ -1640,15 +1810,15 @@ impl<'a> Spatial<'a> {
         }
         Ok(())
     }
-    fn shape(&self, id: usize) -> &Blockage {
+    fn shape(&self, id: usize) -> Result<Cow<'_, Blockage>> {
         if id < self.input.obstacles.len() {
-            &self.input.obstacles[id]
+            Ok(Cow::Borrowed(&self.input.obstacles[id]))
         } else {
-            &self.shapes[id - self.input.obstacles.len()]
+            self.added.get(self.input, id - self.input.obstacles.len())
         }
     }
     fn alive(&self, id: usize) -> bool {
-        id < self.input.obstacles.len() || self.alive[id - self.input.obstacles.len()]
+        id < self.input.obstacles.len() || self.added.alive(id - self.input.obstacles.len())
     }
     pub(crate) fn clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
         Ok(self.probe(layer, rect, net)?.is_some())
@@ -1700,14 +1870,15 @@ impl<'a> Spatial<'a> {
                         if self.work > self.limits.max_comparisons {
                             return Err(budget("routing comparison limit"));
                         }
-                        if id >= base && !self.alive[id - base] {
+                        if id >= base && !self.added.alive(id - base) {
                             continue;
                         }
                         let b = if id < base {
-                            &self.input.obstacles[id]
+                            Cow::Borrowed(&self.input.obstacles[id])
                         } else {
-                            &self.shapes[id - base]
+                            self.added.get(self.input, id - base)?
                         };
+                        let b: &Blockage = &b;
                         if !overlap(query, b.rect) {
                             continue;
                         }
@@ -1716,7 +1887,9 @@ impl<'a> Spatial<'a> {
                         if !shared {
                             match b.net {
                                 Some(other)
-                                    if id >= base && self.routed[id - base] && other != net =>
+                                    if id >= base
+                                        && self.added.routed(id - base)
+                                        && other != net =>
                                 {
                                     victims.push(other)
                                 }
@@ -1810,14 +1983,15 @@ impl<'a> Spatial<'a> {
                         if self.work > self.limits.max_comparisons {
                             return Err(budget("routing comparison limit"));
                         }
-                        if id >= base && !self.alive[id - base] {
+                        if id >= base && !self.added.alive(id - base) {
                             continue;
                         }
                         let b = if id < base {
-                            &self.input.obstacles[id]
+                            Cow::Borrowed(&self.input.obstacles[id])
                         } else {
-                            &self.shapes[id - base]
+                            self.added.get(self.input, id - base)?
                         };
+                        let b: &Blockage = &b;
                         let routing = self.input.layers[layer as usize].vertical.is_some();
                         if !overlap(query, b.rect) {
                             continue;
@@ -1885,9 +2059,9 @@ impl<'a> Spatial<'a> {
                     if !self.alive(id) {
                         continue;
                     }
-                    let b = self.shape(id);
+                    let b = self.shape(id)?;
                     if overlap(query, b.rect)
-                        && !(self.same_net(net, layer, rect, b) && (routing || rect == b.rect))
+                        && !(self.same_net(net, layer, rect, &b) && (routing || rect == b.rect))
                     {
                         let source = if id < self.input.obstacles.len() {
                             "input obstacle"
@@ -1969,17 +2143,21 @@ impl<'a> Spatial<'a> {
                         .filter(|&n| n <= self.limits.max_comparisons)
                         .ok_or_else(|| budget("shape diagnostic work"))?;
                     let b = if id < base {
-                        &self.input.obstacles[id]
+                        Cow::Borrowed(&self.input.obstacles[id])
                     } else {
-                        &self.shapes[id - base]
+                        self.added.get(self.input, id - base)?
                     };
-                    if (id >= base && !self.alive[id - base]) || !overlap(rect, b.rect) {
+                    if (id >= base && !self.added.alive(id - base)) || !overlap(rect, b.rect) {
                         continue;
                     }
                     if found.len() == cap {
                         return Ok(found);
                     }
-                    found.push((Some(id), b.clone(), id >= base && self.routed[id - base]));
+                    found.push((
+                        Some(id),
+                        b.into_owned(),
+                        id >= base && self.added.routed(id - base),
+                    ));
                 }
             }
         }
@@ -3502,6 +3680,9 @@ fn validate_with(
         .checked_add(counted)
         .filter(|&n| n <= limits.max_comparisons)
         .ok_or_else(|| budget("routing comparison limit"))?;
+    // The added shapes are the routes' own records, indexed in canonical
+    // order (wires, via shapes, patches) without copies.
+    spatial.attach_routes(routes)?;
     spatial.reserve_added(route_shapes(input, routes)?, expected)?;
     let mut selected: Vec<u32> = input.terminals.iter().map(|t| t.net).collect();
     selected.sort_unstable();
@@ -3542,7 +3723,7 @@ fn validate_with(
                 "wire collides with blockage/other net: {w:?}, rect {rect:?}, {cause}"
             )));
         }
-        spatial.add_wire(w)?;
+        spatial.add_next_route_shape()?;
     }
     for v in &routes.vias {
         if selected.binary_search(&v.net).is_err()
@@ -3566,7 +3747,9 @@ fn validate_with(
                 "via collision not reproduced by bounded diagnostic",
             ));
         }
-        spatial.add_via(v)?;
+        for _ in &input.vias[v.kind as usize].shapes {
+            spatial.add_next_route_shape()?;
+        }
     }
     for p in &routes.patches {
         if selected.binary_search(&p.net).is_err()
@@ -3582,11 +3765,7 @@ fn validate_with(
         if !spatial.clear(p.layer, p.rect, p.net)? {
             return Err(invalid("patch collides with blockage/other net"));
         }
-        spatial.add(Blockage {
-            layer: p.layer,
-            rect: p.rect,
-            net: Some(p.net),
-        })?;
+        spatial.add_next_route_shape()?;
     }
     if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
         let [fixed_bins, fixed_entries, added_bins, added_entries] = spatial.index_footprint();
@@ -4012,7 +4191,7 @@ mod tests {
                 )
                 .unwrap()
         );
-        assert!(spatial.shapes.is_empty());
+        assert!(spatial.added.owned.is_empty());
     }
 
     #[test]
@@ -4062,8 +4241,11 @@ mod tests {
         let input = fixture();
         let limits = RouteLimits::default();
         let mut spatial = Spatial::new(&input, &limits).unwrap();
-        assert!(spatial.shapes.is_empty());
-        assert!(std::ptr::eq(spatial.shape(0), &input.obstacles[0]));
+        assert!(spatial.added.owned.is_empty());
+        assert!(matches!(
+            spatial.shape(0).unwrap(),
+            Cow::Borrowed(b) if std::ptr::eq(b, &input.obstacles[0])
+        ));
         let fixed = Rect {
             lx: 46,
             ly: 20,
@@ -4142,6 +4324,133 @@ mod tests {
         assert!(!spatial.clear(0, negative, 8).unwrap());
         spatial.remove(id);
         assert!(spatial.clear(0, negative, 8).unwrap());
+    }
+
+    #[test]
+    fn route_backed_shapes_answer_queries_like_owned_copies() {
+        let input = fixture();
+        let limits = RouteLimits::default();
+        let mut state = 0x6a09_e667_f3bc_c908u64;
+        let mut next = |m: i64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % m as u64) as i64
+        };
+        let mut routes = Routes {
+            wires: Vec::new(),
+            vias: Vec::new(),
+            access: Vec::new(),
+            patches: Vec::new(),
+            nets: Vec::new(),
+            stats: RouteStats::default(),
+        };
+        for i in 0..60u32 {
+            let (x, y, len) = (next(90), next(90), 1 + next(10));
+            routes.wires.push(Wire {
+                net: i % 5,
+                layer: i % 2,
+                start: [x, y],
+                end: if i % 2 == 0 {
+                    [x + len, y]
+                } else {
+                    [x, y + len]
+                },
+            });
+        }
+        for i in 0..25u32 {
+            routes.vias.push(Via {
+                net: i % 5,
+                kind: 0,
+                at: [2 + next(96), 2 + next(96)],
+            });
+        }
+        for i in 0..6u32 {
+            let (x, y) = (next(90), next(90));
+            routes.patches.push(Patch {
+                net: i % 5,
+                layer: 1,
+                rect: Rect {
+                    lx: x,
+                    ly: y,
+                    ux: x + 4,
+                    uy: y + 4,
+                },
+            });
+        }
+        let mut owned = Spatial::new(&input, &limits).unwrap();
+        for w in &routes.wires {
+            owned.add_wire(w).unwrap();
+        }
+        for v in &routes.vias {
+            owned.add_via(v).unwrap();
+        }
+        for p in &routes.patches {
+            owned
+                .add(Blockage {
+                    layer: p.layer,
+                    rect: p.rect,
+                    net: Some(p.net),
+                })
+                .unwrap();
+        }
+        let mut backed = Spatial::new(&input, &limits).unwrap();
+        backed.attach_routes(&routes).unwrap();
+        let shapes = route_shapes(&input, &routes).unwrap();
+        backed.reserve_added(shapes, 0).unwrap();
+        for _ in 0..shapes {
+            backed.add_next_route_shape().unwrap();
+        }
+        assert_eq!(owned.len(), backed.len());
+        for id in 0..owned.len() {
+            assert_eq!(
+                format!("{:?}", owned.shape(id).unwrap()),
+                format!("{:?}", backed.shape(id).unwrap())
+            );
+        }
+        for _ in 0..3000 {
+            let (layer, net) = (next(3) as u32, next(6) as u32);
+            let (x, y) = (next(96), next(96));
+            let rect = Rect {
+                lx: x,
+                ly: y,
+                ux: x + 1 + next(20),
+                uy: y + 1 + next(4),
+            };
+            let rect = Rect {
+                ux: rect.ux.min(100),
+                uy: rect.uy.min(100),
+                ..rect
+            };
+            assert_eq!(
+                owned.probe(layer, rect, net).unwrap(),
+                backed.probe(layer, rect, net).unwrap()
+            );
+            assert_eq!(
+                format!("{:?}", owned.shapes_in(layer, rect, 64).unwrap()),
+                format!("{:?}", backed.shapes_in(layer, rect, 64).unwrap())
+            );
+            assert_eq!(owned.work, backed.work);
+        }
+        // Negative controls: no shape past the routes, no owned shape.
+        assert!(backed.add_next_route_shape().is_err());
+        assert!(
+            backed
+                .add(Blockage {
+                    layer: 0,
+                    rect: Rect {
+                        lx: 1,
+                        ly: 1,
+                        ux: 2,
+                        uy: 2,
+                    },
+                    net: None,
+                })
+                .is_err()
+        );
+        let mut late = Spatial::new(&input, &limits).unwrap();
+        late.add_wire(&routes.wires[0]).unwrap();
+        assert!(late.attach_routes(&routes).is_err());
     }
 
     #[test]

@@ -49,6 +49,9 @@ const GCELL_BYTES: u64 = 48;
 /// Bytes per spatial shape: the blockage (48), query mark (8), alive and
 /// routed flags, rounded up.
 const SHAPE_BYTES: u64 = 64;
+/// One route-backed shape of a validation index: a u64 query mark and, for a
+/// via shape, a u32 via and u8 shape index, rounded up.
+const ROUTE_SHAPE_BYTES: u64 = 16;
 /// Bytes per spatial bin entry: 8, doubled for vector growth.
 const ENTRY_BYTES: u64 = 16;
 /// Bytes per grid bin of one layer (head and tail entry index).
@@ -916,8 +919,10 @@ pub(crate) fn estimate_for(
 /// Extra memory of a full-design validation once the completed output
 /// records are resident: its own fixed index; every route shape in the added
 /// index, from the exact shape and bin-entry counts of `out` (`validate`
-/// reserves exactly these) in the layout `routing::added_hashed` chooses; the
-/// rule grid; and the per-net connectivity and rule-check state.
+/// reserves exactly these) in the layout `routing::added_hashed` chooses,
+/// where a shape is computed from its record and keeps only a query mark and
+/// at most a via reference (`ROUTE_SHAPE_BYTES`); the rule grid; and the
+/// per-net connectivity and rule-check state.
 pub(crate) fn validation_working_bytes(
     input: &RouteInput,
     out: &Routes,
@@ -953,7 +958,7 @@ pub(crate) fn validation_working_bytes(
         (limits.max_rule_grid_cells as u64).min(rule_shapes.saturating_mul(2).saturating_pow(2));
     Ok(fixed
         .saturating_add(layout.added_grid(entries))
-        .saturating_add(shapes.saturating_mul(SHAPE_BYTES))
+        .saturating_add(shapes.saturating_mul(ROUTE_SHAPE_BYTES))
         .saturating_add(entries.saturating_mul(ENTRY_BYTES))
         .saturating_add(rule_grid_cells.saturating_mul(64))
         // Pin uniqueness, net counts and compact terminal coverage indices.
