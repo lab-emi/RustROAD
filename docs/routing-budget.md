@@ -237,6 +237,19 @@ scanned only on a pin-access failure, under the aggregate comparison budget.
 Failed searches consume the aggregate expansion and comparison limits too.
 No global all-pin escape-plan collection or path enumeration is introduced.
 
+When overlapping pin escapes are removed, the next reservation attempt prefers
+the seed after the previously selected one and rotates the legal via variants.
+This prevents a repair loop from choosing the same mutually blocking landings.
+All seeds remain available; the preference changes their bounded initial costs.
+The first attempt keeps the original costs. Starts are deduplicated in place,
+and ordering/identity work is charged to the comparison limit.
+
+The selected seed and generation use 16 bytes per live escape, plus 16 bytes per
+active terminal for its next preference. The memory estimate includes these
+32 bytes per terminal. No alternative paths are retained. Existing three-failure
+per-pin and `8 * terminals + 64` reservation-round bounds remain unchanged,
+along with aggregate search, geometry and memory limits.
+
 Before committing a detailed path, its via cuts are checked against one another.
 An edge can clear all existing geometry while colliding with another new edge
 on the same path. Cuts are sorted by layer and x coordinate, exact duplicates

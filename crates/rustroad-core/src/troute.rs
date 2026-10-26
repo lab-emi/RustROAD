@@ -772,6 +772,8 @@ fn memory_estimate_limited(
         spatial: index(added),
         routed: t
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
+            // Selected seed/generation in Plan plus one pending preference.
+            .saturating_add(t.saturating_mul(32))
             .saturating_add(
                 t.saturating_mul(portal_shapes.saturating_add(1))
                     .saturating_mul(8),
@@ -927,6 +929,8 @@ impl Cells {
 #[derive(Clone)]
 struct Plan {
     access: Access,
+    source_index: usize,
+    generation: usize,
     top: u32,
     /// The escape reaches `top` through a via (a further via would stack).
     top_via: bool,
@@ -935,6 +939,20 @@ struct Plan {
     wires: Box<[Wire]>,
     vias: Box<[Via]>,
     shapes: Box<[usize]>,
+}
+
+#[derive(Clone, Copy)]
+struct AccessPreference {
+    next_start: usize,
+    generation: usize,
+}
+impl Default for AccessPreference {
+    fn default() -> Self {
+        Self {
+            next_start: usize::MAX,
+            generation: 0,
+        }
+    }
 }
 
 /// Local search lattice for one terminal's escape.
@@ -1431,12 +1449,32 @@ impl<'a> Router<'a> {
     }
 
     /// One terminal escape search; None when no legal escape exists.
-    fn escape(&mut self, t: &Terminal, tables: &mut AccessTables) -> Result<Option<Plan>> {
+    fn escape(
+        &mut self,
+        t: &Terminal,
+        tables: &mut AccessTables,
+        preference: AccessPreference,
+    ) -> Result<Option<Plan>> {
         let input = self.input;
-        let starts = self.starts(t, tables, true)?;
+        let mut starts = self.starts(t, tables, true)?;
         if starts.is_empty() {
             return Ok(None);
         }
+        // Duplicate seeds otherwise make "next choice" retry the same point.
+        // Preserve the cheapest existing seed at each point. Initial search
+        // still uses its original costs and node-id tie breaking.
+        self.spatial.work = self
+            .spatial
+            .work
+            .checked_add(
+                starts
+                    .len()
+                    .saturating_mul(starts.len().ilog2() as usize + 2),
+            )
+            .filter(|&n| n <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("access seed ordering work"))?;
+        starts.sort_unstable_by_key(|s| (s.0, s.1, s.2));
+        starts.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
         let access_slot = self.graph.slot[&input.access_layer];
         let pin_slot = starts
             .iter()
@@ -1525,7 +1563,16 @@ impl<'a> Router<'a> {
             .collect();
         let mut heap = BinaryHeap::new();
         let mut visited = HashMap::<u32, (u64, u32, u32)>::new();
-        for (layer, at, cost, _) in &starts {
+        for (index, (layer, at, base_cost, _)) in starts.iter().enumerate() {
+            let rank = if preference.next_start == usize::MAX {
+                0
+            } else {
+                (index + starts.len() - preference.next_start % starts.len()) % starts.len()
+            };
+            let cost = (rank as u64)
+                .checked_mul(input.step as u64)
+                .and_then(|n| n.checked_add(*base_cost))
+                .ok_or_else(|| budget("access seed preference cost"))?;
             let Some(&gs) = self.graph.slot.get(layer) else {
                 continue;
             };
@@ -1541,11 +1588,11 @@ impl<'a> Router<'a> {
             };
             if self.spatial.clear(*layer, r, t.net)? {
                 let id = local.id(li, *at).unwrap();
-                if visited.get(&id).is_none_or(|v| v.0 > *cost) {
-                    visited.insert(id, (*cost, NONE, WIRE));
+                if visited.get(&id).is_none_or(|v| v.0 > cost) {
+                    visited.insert(id, (cost, NONE, WIRE));
                     heap.push(Reverse((
                         cost.saturating_add(potential.cost(id)?),
-                        *cost,
+                        cost,
                         id,
                     )));
                 }
@@ -1626,7 +1673,7 @@ impl<'a> Router<'a> {
                 }
                 let kind = if let Some(pi) = via {
                     let pair = &self.pairs[pi];
-                    let listed: Vec<usize> = match table_kinds.get(&(layer, at)) {
+                    let mut listed: Vec<usize> = match table_kinds.get(&(layer, at)) {
                         Some(ks) if pair.lower == layer => ks
                             .iter()
                             .copied()
@@ -1634,6 +1681,10 @@ impl<'a> Router<'a> {
                             .collect(),
                         _ => pair.kinds.clone(),
                     };
+                    if !listed.is_empty() && preference.generation != 0 {
+                        let shift = preference.generation % listed.len();
+                        listed.rotate_left(shift);
+                    }
                     let mut chosen = None;
                     'kinds: for k in listed {
                         for s in &input.vias[k].shapes {
@@ -1730,6 +1781,16 @@ impl<'a> Router<'a> {
         }
         let (li, mut at) = local.at(current);
         let access_layer = self.graph.layers[slots[li]].layer;
+        self.spatial.work = self
+            .spatial
+            .work
+            .checked_add(starts.len())
+            .filter(|&n| n <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("access seed identity work"))?;
+        let source_index = starts
+            .iter()
+            .position(|s| s.0 == access_layer && s.1 == at)
+            .ok_or_else(|| invalid("access traceback did not reach a seed"))?;
         // A leading escape wire that lies wholly inside the pin's own metal is
         // redundant (the pin already conducts there) and would connect the pin
         // twice (wire and the via at its end, both on the pin): start the
@@ -1791,6 +1852,8 @@ impl<'a> Router<'a> {
                 layer: access_layer,
                 at,
             },
+            source_index,
+            generation: preference.generation,
             top: top_node,
             top_via,
             portal_shapes,
@@ -1801,6 +1864,17 @@ impl<'a> Router<'a> {
     }
 
     fn access_failure(&self, blocked: Vec<crate::BlockedPin>) -> crate::Error {
+        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+            for pin in blocked.iter().take(8) {
+                eprintln!(
+                    "[troute] blocked access pin {} net {} region {:?} (first8 of {})",
+                    pin.pin,
+                    pin.net,
+                    pin.region,
+                    blocked.len()
+                );
+            }
+        }
         crate::Error::PinAccess(Box::new(crate::PinAccessFailure {
             blocked: blocked.into_boxed_slice(),
             comparisons: self.spatial.work,
@@ -1854,6 +1928,7 @@ impl<'a> Router<'a> {
         let mut plan_records = 0usize;
         let mut owner: BTreeMap<u32, usize> = BTreeMap::new();
         let mut attempts = vec![0usize; terminals.len()];
+        let mut preferences = vec![AccessPreference::default(); terminals.len()];
         let mut rounds = 0usize;
         let mut window_index = None;
         let mut blocked = Vec::new();
@@ -1874,7 +1949,7 @@ impl<'a> Router<'a> {
                     ),
                 );
             }
-            if let Some(plan) = self.escape(t, &mut tables)? {
+            if let Some(plan) = self.escape(t, &mut tables, preferences[i])? {
                 plan_records = plan_records
                     .checked_add(plan.wires.len())
                     .and_then(|n| n.checked_add(plan.vias.len()))
@@ -1942,11 +2017,22 @@ impl<'a> Router<'a> {
             let mut back = Vec::new();
             for p in victims {
                 let plan = plans.remove(&p).unwrap();
+                let j = owner.remove(&p).unwrap();
+                preferences[j] = AccessPreference {
+                    next_start: plan
+                        .source_index
+                        .checked_add(1)
+                        .ok_or_else(|| budget("access seed index"))?,
+                    generation: plan
+                        .generation
+                        .checked_add(1)
+                        .ok_or_else(|| budget("access repair generation"))?,
+                };
                 plan_records -= plan.wires.len() + plan.vias.len();
                 for id in plan.shapes {
                     self.spatial.remove(id);
                 }
-                back.push(owner.remove(&p).unwrap());
+                back.push(j);
             }
             // Rotate the victims so repeated repairs try different orders.
             let rot = attempts[i] % back.len().max(1);
@@ -4078,6 +4164,102 @@ mod tests {
         RouteLimits::default()
     }
 
+    #[test]
+    fn coupled_pin_landings_need_bounded_alternatives() {
+        let mut first = terminal(0, 0, true, rect(410, 290, 430, 310));
+        first.shapes.push(LayerRect {
+            layer: 0,
+            rect: rect(295, 290, 315, 310),
+        });
+        let mut second = terminal(1, 1, true, rect(570, 290, 590, 310));
+        second.shapes.push(LayerRect {
+            layer: 0,
+            rect: rect(695, 290, 715, 310),
+        });
+        let mut target_a = terminal(2, 0, false, rect(890, 90, 910, 110));
+        let mut target_b = terminal(3, 1, false, rect(890, 890, 910, 910));
+        target_a.shapes[0].layer = 2;
+        target_b.shapes[0].layer = 2;
+        let mut obstacles = Vec::new();
+        for x in [305, 420, 580, 705] {
+            for r in [
+                rect(x - 60, 240, x - 30, 360),
+                rect(x + 30, 240, x + 60, 360),
+                rect(x - 30, 240, x + 30, 270),
+                rect(x - 30, 330, x + 30, 360),
+            ] {
+                obstacles.push(Blockage {
+                    layer: 0,
+                    rect: r,
+                    net: None,
+                });
+            }
+        }
+        let mut design = input(vec![first, second, target_a, target_b], obstacles);
+        design.layers[3].spacing = 320;
+        let mut witness_input = input(design.terminals.clone(), design.obstacles.clone());
+        witness_input.layers[3].spacing = 320;
+        witness_input.terminals[0].shapes.remove(0);
+        witness_input.terminals[1].shapes.remove(0);
+        let witness =
+            route_cpu_ref(&witness_input, &limits()).expect("outer landings are feasible");
+        validate(&design, &witness, &limits()).expect("witness satisfies the full pin geometry");
+        let routed =
+            route_cpu_ref(&design, &limits()).expect("both pins can choose outer landings");
+        validate(&design, &routed, &limits()).unwrap();
+        let repeated = route_cpu_ref(&design, &limits()).unwrap();
+        assert_eq!(routed.wires, repeated.wires);
+        assert_eq!(routed.vias, repeated.vias);
+        assert_eq!(routed.access, repeated.access);
+
+        // Exercise the master-relative cache used by physical workspaces.
+        design.access_classes = design
+            .terminals
+            .iter()
+            .map(|t| {
+                let mut blockers: Vec<_> = design
+                    .obstacles
+                    .iter()
+                    .map(|b| LayerRect {
+                        layer: b.layer,
+                        rect: b.rect,
+                    })
+                    .collect();
+                blockers.extend(
+                    design
+                        .terminals
+                        .iter()
+                        .filter(|p| p.pin != t.pin)
+                        .flat_map(|p| p.shapes.iter().cloned()),
+                );
+                crate::routing::AccessClass {
+                    shapes: t.shapes.clone(),
+                    blockers,
+                }
+            })
+            .collect();
+        for (i, t) in design.terminals.iter_mut().enumerate() {
+            t.class = Some((i as u32, [0, 0]));
+        }
+        validate(&design, &witness, &limits()).unwrap();
+        let cached =
+            route_cpu_ref(&design, &limits()).expect("cached alternatives remain available");
+        validate(&design, &cached, &limits()).unwrap();
+
+        // Without the outer choices, fixed cut spacing makes this impossible.
+        let mut impossible = input(design.terminals.clone(), design.obstacles.clone());
+        impossible.layers[3].spacing = 320;
+        for t in &mut impossible.terminals {
+            t.class = None;
+        }
+        impossible.terminals[0].shapes.truncate(1);
+        impossible.terminals[1].shapes.truncate(1);
+        assert!(matches!(
+            route_cpu_ref(&impossible, &limits()),
+            Err(crate::Error::PinAccess(_))
+        ));
+    }
+
     fn narrow_cut_design() -> RouteInput {
         let mut design = input(
             vec![
@@ -4153,6 +4335,8 @@ mod tests {
                             layer: 1,
                             at,
                         },
+                        source_index: 0,
+                        generation: 0,
                         top: router.graph.find(1, at).unwrap(),
                         top_via: false,
                         portal_shapes: 0,
@@ -5086,6 +5270,8 @@ mod tests {
                     layer: 0,
                     at: [0, 0],
                 },
+                source_index: 0,
+                generation: 0,
                 top: net,
                 top_via: true,
                 portal_shapes: 0,
