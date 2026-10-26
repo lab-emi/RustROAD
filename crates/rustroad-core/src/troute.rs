@@ -51,10 +51,6 @@ const GCELL_BYTES: u64 = 48;
 const SHAPE_BYTES: u64 = 64;
 /// Bytes per spatial bin entry: 8, doubled for vector growth.
 const ENTRY_BYTES: u64 = 16;
-/// One occupied bin of a hashed (added-shape) grid: a 16-byte bucket (packed
-/// key, head/tail) and its control byte at the map's 7/16 minimum load,
-/// counted 1.5 times for the old and new tables of a resize, rounded up.
-const HASHED_BIN_BYTES: u64 = 64;
 /// Bytes per grid bin of one layer (head and tail entry index).
 const GRID_BYTES: u64 = 8;
 /// Shapes the router adds per terminal (escape, routed runs and vias,
@@ -657,6 +653,24 @@ pub(crate) fn graph_nodes(input: &RouteInput, limits: &RouteLimits) -> Result<us
 /// Upfront whole-route estimate for this input (graph `nodes`, `gcells`),
 /// computed without allocating router state: fixed bin entries are counted
 /// shape by shape, the bin grid from the die and obstacle extent.
+/// Expected bin entries of the router's added shapes: the escape, wire and
+/// via shapes `memory_estimate_limited` charges for its terminals.
+fn router_entries(input: &RouteInput, limits: &RouteLimits) -> u64 {
+    let fixed_records = input
+        .obstacles
+        .len()
+        .saturating_add(input.instances.as_ref().map_or(0, |i| i.len()));
+    let portal_shapes = input
+        .vias
+        .iter()
+        .map(|v| v.shapes.len() as u64)
+        .max()
+        .unwrap_or(0);
+    (input.terminals.len() as u64)
+        .saturating_mul(SHAPES_PER_TERMINAL.saturating_add(portal_shapes))
+        .min(limits.max_obstacles.saturating_sub(fixed_records) as u64)
+        .saturating_mul(ENTRIES_PER_SHAPE)
+}
 fn memory_estimate_limited(
     input: &RouteInput,
     nodes: usize,
@@ -701,20 +715,29 @@ fn memory_estimate_limited(
     let fixed = match mode {
         crate::routing::BinMode::Sparse => slots.min(fixed_entries).saturating_mul(96),
         crate::routing::BinMode::Dense => slots.saturating_mul(GRID_BYTES),
-        _ => pages.min(fixed_entries).saturating_mul(8320),
+        _ => pages
+            .min(fixed_entries)
+            .saturating_mul(crate::routing::PAGE_BYTES),
     }
     .saturating_add(instance_index)
     .saturating_add(fixed_entries.saturating_mul(ENTRY_BYTES));
     // Each Spatial bins its added geometry apart: densely on small inputs,
-    // otherwise per occupied bin (head/tail, key and map overhead).
+    // otherwise per occupied bin or in the fixed layout, whichever costs
+    // less for its expected entries (see `BinGrid::added`).
     let added = |shapes: u64| {
         // Both Spatial implementations enforce this before every insertion.
         // The checker cannot retain 2*max_segments shapes past this limit.
         let shapes = shapes.min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
         let entries = shapes.saturating_mul(ENTRIES_PER_SHAPE);
+        let hashed = entries.saturating_mul(crate::routing::HASHED_BIN_BYTES);
         let grid = match mode {
             crate::routing::BinMode::Dense => slots.saturating_mul(GRID_BYTES),
-            _ => entries.saturating_mul(HASHED_BIN_BYTES),
+            crate::routing::BinMode::Sparse => hashed.min(slots.min(entries).saturating_mul(96)),
+            _ => hashed.min(
+                pages
+                    .min(entries)
+                    .saturating_mul(crate::routing::PAGE_BYTES),
+            ),
         };
         grid.saturating_add(shapes.saturating_mul(SHAPE_BYTES))
             .saturating_add(entries.saturating_mul(ENTRY_BYTES))
@@ -3864,7 +3887,7 @@ pub(crate) fn route(
         input,
         plan,
         limits,
-        Spatial::shared(&fixed, limits),
+        Spatial::shared(&fixed, limits, router_entries(input, limits)),
         graph,
         cells,
     )?;

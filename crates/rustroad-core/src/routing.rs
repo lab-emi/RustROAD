@@ -554,6 +554,12 @@ struct BinGrid {
 }
 /// Grid-relative bin coordinates of a hashed key (28 bits each).
 const HASHED_AXIS_BITS: u32 = 28;
+/// One occupied bin of a hashed grid: a 16-byte bucket (packed key,
+/// head/tail) and its control byte at the map's 7/16 minimum load, counted
+/// 1.5 times for the old and new tables of a resize, rounded up.
+pub(crate) const HASHED_BIN_BYTES: u64 = 64;
+/// One allocated page of a paged grid with its map entry, rounded up.
+pub(crate) const PAGE_BYTES: u64 = 8320;
 enum BinIter<'g> {
     Chain { entries: &'g [[u32; 2]], at: u32 },
     List(std::slice::Iter<'g, usize>),
@@ -670,18 +676,29 @@ impl BinGrid {
             chains: HashMap::with_hasher(BuildFx),
         }
     }
-    /// Empty bins for the shapes a [`Spatial`] adds: dense like its fixed
-    /// index on small inputs, otherwise hashed per occupied bin (a grid too
-    /// large for packed keys keeps sparse lists).
-    fn added(input: &RouteInput, bin: i64) -> Self {
+    /// Empty bins for the shapes a [`Spatial`] adds, about `expected`
+    /// entries: dense like its fixed index on small inputs; hashed per
+    /// occupied bin while that costs less than every page of the grid (a
+    /// batch's routes); otherwise the fixed index's paged or sparse layout
+    /// (the routes of a whole design). Every layout visits a bin's shapes in
+    /// insertion order. A grid too large for packed keys is never hashed.
+    fn added(input: &RouteInput, bin: i64, expected: u64) -> Self {
         let mut grid = Self::new(input, bin);
         if grid.mode != BinMode::Dense {
             let axis = 1i64 << HASHED_AXIS_BITS;
-            grid.mode = if grid.nx <= axis && grid.ny <= axis && input.layers.len() <= 256 {
-                BinMode::Hashed
-            } else {
-                BinMode::Sparse
-            };
+            let packed = grid.nx <= axis && grid.ny <= axis && input.layers.len() <= 256;
+            let pages = grid_pages(
+                grid.bx0,
+                grid.bx0 + grid.nx - 1,
+                grid.by0,
+                grid.by0 + grid.ny - 1,
+            )
+            .saturating_mul(input.layers.len() as u64);
+            if packed
+                && expected.saturating_mul(HASHED_BIN_BYTES) < pages.saturating_mul(PAGE_BYTES)
+            {
+                grid.mode = BinMode::Hashed;
+            }
         }
         grid
     }
@@ -731,6 +748,54 @@ impl BinGrid {
             + self.chains.len()
             + self.page_store.len() * BIN_PAGE_CELLS
     }
+}
+/// Pages of one layer over bin range `[x0, x1] x [y0, y1]`.
+pub(crate) fn grid_pages(x0: i64, x1: i64, y0: i64, y1: i64) -> u64 {
+    let span = |lo: i64, hi: i64| {
+        (i128::from(hi.div_euclid(BIN_PAGE_SIDE)) - i128::from(lo.div_euclid(BIN_PAGE_SIDE)) + 1)
+            .max(0) as u64
+    };
+    span(x0, x1).saturating_mul(span(y0, y1))
+}
+/// Bin entries of `routes` (wires, via shapes and patches) at bin side
+/// `bin`, charged one comparison per record.
+pub(crate) fn route_entries(
+    input: &RouteInput,
+    routes: &Routes,
+    bin: i64,
+    work: &mut usize,
+    limits: &RouteLimits,
+) -> Result<u64> {
+    *work = work
+        .checked_add(routes.wires.len() + routes.vias.len() + routes.patches.len())
+        .filter(|&n| n <= limits.max_comparisons)
+        .ok_or_else(|| budget("route entry count work"))?;
+    let span = |r: Rect| {
+        let side = |lo: i64, hi: i64| (hi.div_euclid(bin) - lo.div_euclid(bin) + 1).max(0) as u64;
+        side(r.lx, r.ux).saturating_mul(side(r.ly, r.uy))
+    };
+    let mut entries = 0u64;
+    for w in &routes.wires {
+        let width = input
+            .layers
+            .get(w.layer as usize)
+            .ok_or_else(|| invalid("stored wire layer"))?
+            .width;
+        entries = entries.saturating_add(span(wire_rect(w, width)?));
+    }
+    for v in &routes.vias {
+        let via = input
+            .vias
+            .get(v.kind as usize)
+            .ok_or_else(|| invalid("stored via kind"))?;
+        for shape in &via.shapes {
+            entries = entries.saturating_add(span(shifted(shape.rect, v.at)?));
+        }
+    }
+    for p in &routes.patches {
+        entries = entries.saturating_add(span(p.rect));
+    }
+    Ok(entries)
 }
 /// Bin index range `[x0, x1] x [y0, y1]` covering the die and every fixed
 /// obstacle, and the bins one layer's grid holds.
@@ -1284,14 +1349,31 @@ fn same_net_shapes(
 impl<'a> Spatial<'a> {
     /// A spatial index with its own fixed index.
     pub(crate) fn new(input: &'a RouteInput, limits: &'a RouteLimits) -> Result<Self> {
+        Self::new_expecting(input, limits, 0)
+    }
+    /// [`Self::new`] for about `expected` added bin entries (see `BinGrid::added`).
+    pub(crate) fn new_expecting(
+        input: &'a RouteInput,
+        limits: &'a RouteLimits,
+        expected: u64,
+    ) -> Result<Self> {
         let fixed = FixedIndex::new(input, limits)?;
-        Ok(Self::with_fixed(Fixed::Owned(Box::new(fixed)), limits))
+        Ok(Self::with_fixed(
+            Fixed::Owned(Box::new(fixed)),
+            limits,
+            expected,
+        ))
     }
-    /// A spatial index over a fixed index shared by its route call.
-    pub(crate) fn shared(fixed: &'a FixedIndex<'a>, limits: &'a RouteLimits) -> Self {
-        Self::with_fixed(Fixed::Shared(fixed), limits)
+    /// A spatial index over a fixed index shared by its route call, for about
+    /// `expected` added bin entries.
+    pub(crate) fn shared(
+        fixed: &'a FixedIndex<'a>,
+        limits: &'a RouteLimits,
+        expected: u64,
+    ) -> Self {
+        Self::with_fixed(Fixed::Shared(fixed), limits, expected)
     }
-    fn with_fixed(fixed: Fixed<'a>, limits: &'a RouteLimits) -> Self {
+    fn with_fixed(fixed: Fixed<'a>, limits: &'a RouteLimits, expected: u64) -> Self {
         let (input, bin, entries) = {
             let f = fixed.get();
             (f.input, f.bin, f.entries)
@@ -1302,7 +1384,7 @@ impl<'a> Spatial<'a> {
             bin,
             fixed,
             shapes: Vec::new(),
-            bins: BinGrid::added(input, bin),
+            bins: BinGrid::added(input, bin, expected),
             marks: Vec::new(),
             generation: 0,
             entries,
@@ -2999,10 +3081,13 @@ fn cleanup_pruned(
     work: usize,
 ) -> Result<(usize, Vec<Violation>)> {
     let input = fixed.input;
-    let mut spatial = Spatial::shared(fixed, limits);
+    let mut counted = 0;
+    let expected = route_entries(input, out, fixed.bin, &mut counted, limits)?;
+    let mut spatial = Spatial::shared(fixed, limits, expected);
     spatial.work = spatial
         .work
         .checked_add(work)
+        .and_then(|n| n.checked_add(counted))
         .filter(|&n| n <= limits.max_comparisons)
         .ok_or_else(|| budget("cleanup comparison limit"))?;
     for w in &out.wires {
@@ -3284,10 +3369,17 @@ fn validate_with(
     if !input.rules && !routes.patches.is_empty() {
         return Err(invalid("routing patches require LEF-rule mode"));
     }
+    let mut counted = 0;
+    let expected = route_entries(input, routes, bin_side(input)?, &mut counted, limits)?;
     let mut spatial = match fixed {
-        Some(fixed) => Spatial::shared(fixed, limits),
-        None => Spatial::new(input, limits)?,
+        Some(fixed) => Spatial::shared(fixed, limits, expected),
+        None => Spatial::new_expecting(input, limits, expected)?,
     };
+    spatial.work = spatial
+        .work
+        .checked_add(counted)
+        .filter(|&n| n <= limits.max_comparisons)
+        .ok_or_else(|| budget("routing comparison limit"))?;
     let mut selected: Vec<u32> = input.terminals.iter().map(|t| t.net).collect();
     selected.sort_unstable();
     let (mut read, mut write) = (0, 0);
@@ -3925,6 +4017,76 @@ mod tests {
         assert!(!spatial.clear(0, negative, 8).unwrap());
         spatial.remove(id);
         assert!(spatial.clear(0, negative, 8).unwrap());
+    }
+
+    #[test]
+    fn hashed_and_paged_added_bins_answer_queries_identically() {
+        let mut input = fixture();
+        input.die = Rect {
+            lx: -100_000,
+            ly: -100_000,
+            ux: 100_000,
+            uy: 100_000,
+        };
+        input.obstacles = vec![input.obstacles[0].clone(); 1024];
+        let limits = RouteLimits::default();
+        let mut hashed = Spatial::new_expecting(&input, &limits, 0).unwrap();
+        let mut paged = Spatial::new_expecting(&input, &limits, u64::MAX / 2).unwrap();
+        assert!(hashed.bins.mode == BinMode::Hashed);
+        assert!(paged.bins.mode == BinMode::Paged);
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |m: i64| {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as i64 % m
+        };
+        let mut ids = Vec::new();
+        for i in 0..400u32 {
+            let (x, y) = (next(4000) - 2000, next(4000) - 2000);
+            let rect = Rect {
+                lx: x,
+                ly: y,
+                ux: x + 10 + next(600),
+                uy: y + 10 + next(30),
+            };
+            let b = Blockage {
+                layer: (i % 2) * 2,
+                rect,
+                net: Some(i % 7),
+            };
+            let a = hashed.add_routed(b.clone()).unwrap();
+            assert_eq!(a, paged.add_routed(b).unwrap());
+            ids.push(a);
+            if i % 5 == 0 {
+                let gone = ids[next(ids.len() as i64) as usize];
+                hashed.remove(gone);
+                paged.remove(gone);
+            }
+        }
+        for _ in 0..2000 {
+            let (x, y) = (next(4400) - 2200, next(4400) - 2200);
+            let rect = Rect {
+                lx: x,
+                ly: y,
+                ux: x + 1 + next(900),
+                uy: y + 1 + next(900),
+            };
+            let (layer, net) = ((next(2) * 2) as u32, next(8) as u32);
+            assert_eq!(
+                hashed.probe(layer, rect, net).unwrap(),
+                paged.probe(layer, rect, net).unwrap()
+            );
+            let soft = |s: Soft| match s {
+                Soft::Blocked => None,
+                Soft::Clear { near, victims } => Some((near, victims)),
+            };
+            assert_eq!(
+                soft(hashed.probe_soft(layer, rect, net).unwrap()),
+                soft(paged.probe_soft(layer, rect, net).unwrap())
+            );
+            assert_eq!(hashed.work, paged.work);
+        }
     }
 
     fn fixture() -> RouteInput {
