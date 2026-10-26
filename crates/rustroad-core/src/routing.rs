@@ -495,18 +495,26 @@ impl std::hash::Hasher for Fx {
     fn write_i64(&mut self, v: i64) {
         self.0 = (self.0.rotate_left(5) ^ v as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
     }
+    fn write_u64(&mut self, v: u64) {
+        self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
 }
 const NIL: u32 = u32::MAX;
 pub(crate) const BIN_PAGE_SIDE: i64 = 32;
 const BIN_PAGE_CELLS: usize = (BIN_PAGE_SIDE * BIN_PAGE_SIDE) as usize;
 type BinPageKey = (u32, i64, i64);
-type BinPage = Box<[[u32; 2]; BIN_PAGE_CELLS]>;
+type BinPage = [[u32; 2]; BIN_PAGE_CELLS];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BinMode {
     Dense,
     Paged,
     Sparse,
+    /// Head/tail per occupied bin in a hash map keyed by the packed layer and
+    /// grid-relative bin: the added shapes of a large design, whose cost is
+    /// bounded by their entries rather than by pages. Bins outside the grid
+    /// use the overflow map.
+    Hashed,
 }
 pub(crate) fn bin_mode(input: &RouteInput, cells: u64) -> BinMode {
     if cells.saturating_mul(input.layers.len() as u64) <= 1_000_000 {
@@ -534,9 +542,15 @@ struct BinGrid {
     cells: Vec<Vec<[u32; 2]>>,
     /// `[shape id, next entry]`.
     entries: Vec<[u32; 2]>,
-    pages: HashMap<BinPageKey, BinPage, BuildFx>,
+    /// Page index into `page_store`: one contiguous allocation, returned
+    /// whole when the grid is dropped.
+    pages: HashMap<BinPageKey, u32, BuildFx>,
+    page_store: Vec<BinPage>,
     overflow: HashMap<(u32, i64, i64), Vec<usize>, BuildFx>,
+    chains: HashMap<u64, [u32; 2], BuildFx>,
 }
+/// Grid-relative bin coordinates of a hashed key (28 bits each).
+const HASHED_AXIS_BITS: u32 = 28;
 enum BinIter<'g> {
     Chain { entries: &'g [[u32; 2]], at: u32 },
     List(std::slice::Iter<'g, usize>),
@@ -562,9 +576,18 @@ impl BinGrid {
         let (dx, dy) = (x - self.bx0, y - self.by0);
         (dx >= 0 && dy >= 0 && dx < self.nx && dy < self.ny).then(|| (dy * self.nx + dx) as usize)
     }
+    /// Hashed-mode key of an in-grid bin.
+    fn chain_key(&self, layer: u32, x: i64, y: i64) -> Option<u64> {
+        self.slot(x, y)?;
+        Some(
+            (u64::from(layer) << (2 * HASHED_AXIS_BITS))
+                | (((x - self.bx0) as u64) << HASHED_AXIS_BITS)
+                | (y - self.by0) as u64,
+        )
+    }
     fn push(&mut self, layer: u32, x: i64, y: i64, id: usize) -> Result<()> {
         if self.mode == BinMode::Sparse
-            || (self.mode == BinMode::Dense && self.slot(x, y).is_none())
+            || (matches!(self.mode, BinMode::Dense | BinMode::Hashed) && self.slot(x, y).is_none())
         {
             self.overflow
                 .try_reserve(1)
@@ -580,7 +603,15 @@ impl BinGrid {
             .filter(|&e| e != NIL)
             .ok_or_else(|| budget("routing spatial-bin count"))?;
         let id = u32::try_from(id).map_err(|_| budget("routing obstacle count"))?;
-        let cell = if self.mode == BinMode::Paged {
+        let cell = if self.mode == BinMode::Hashed {
+            let key = self
+                .chain_key(layer, x, y)
+                .expect("hashed bin is inside the grid");
+            self.chains
+                .try_reserve(1)
+                .map_err(|_| budget("routing bin-chain allocation"))?;
+            self.chains.entry(key).or_insert([NIL, NIL])
+        } else if self.mode == BinMode::Paged {
             let key = (
                 layer,
                 x.div_euclid(BIN_PAGE_SIDE),
@@ -589,10 +620,16 @@ impl BinGrid {
             self.pages
                 .try_reserve(1)
                 .map_err(|_| budget("routing bin-page allocation"))?;
-            let page = self
-                .pages
-                .entry(key)
-                .or_insert_with(|| Box::new([[NIL, NIL]; BIN_PAGE_CELLS]));
+            let next = u32::try_from(self.page_store.len())
+                .map_err(|_| budget("routing bin-page count"))?;
+            let index = *self.pages.entry(key).or_insert(next);
+            if index == next {
+                self.page_store
+                    .try_reserve(1)
+                    .map_err(|_| budget("routing bin-page allocation"))?;
+                self.page_store.push([[NIL, NIL]; BIN_PAGE_CELLS]);
+            }
+            let page = &mut self.page_store[index as usize];
             let slot = (y.rem_euclid(BIN_PAGE_SIDE) * BIN_PAGE_SIDE + x.rem_euclid(BIN_PAGE_SIDE))
                 as usize;
             &mut page[slot]
@@ -613,7 +650,47 @@ impl BinGrid {
         self.entries.push([id, NIL]);
         Ok(())
     }
+    /// Empty bins over the die and every fixed obstacle of `input`.
+    fn new(input: &RouteInput, bin: i64) -> Self {
+        let (x0, x1, y0, y1, cells) = bin_extent(input, bin);
+        BinGrid {
+            mode: bin_mode(input, cells),
+            bx0: x0,
+            by0: y0,
+            nx: x1 - x0 + 1,
+            ny: y1 - y0 + 1,
+            cells: vec![Vec::new(); input.layers.len()],
+            entries: Vec::new(),
+            pages: HashMap::with_hasher(BuildFx),
+            page_store: Vec::new(),
+            overflow: HashMap::with_hasher(BuildFx),
+            chains: HashMap::with_hasher(BuildFx),
+        }
+    }
+    /// Empty bins for the shapes a [`Spatial`] adds: dense like its fixed
+    /// index on small inputs, otherwise hashed per occupied bin (a grid too
+    /// large for packed keys keeps sparse lists).
+    fn added(input: &RouteInput, bin: i64) -> Self {
+        let mut grid = Self::new(input, bin);
+        if grid.mode != BinMode::Dense {
+            let axis = 1i64 << HASHED_AXIS_BITS;
+            grid.mode = if grid.nx <= axis && grid.ny <= axis && input.layers.len() <= 256 {
+                BinMode::Hashed
+            } else {
+                BinMode::Sparse
+            };
+        }
+        grid
+    }
     fn iter(&self, layer: u32, x: i64, y: i64) -> BinIter<'_> {
+        if self.mode == BinMode::Hashed
+            && let Some(key) = self.chain_key(layer, x, y)
+        {
+            return BinIter::Chain {
+                entries: &self.entries,
+                at: self.chains.get(&key).map_or(NIL, |c| c[0]),
+            };
+        }
         if self.mode == BinMode::Paged {
             let key = (
                 layer,
@@ -624,9 +701,14 @@ impl BinGrid {
                 as usize;
             return BinIter::Chain {
                 entries: &self.entries,
-                at: self.pages.get(&key).map_or(NIL, |p| p[slot][0]),
+                at: self
+                    .pages
+                    .get(&key)
+                    .map_or(NIL, |&p| self.page_store[p as usize][slot][0]),
             };
         }
+        // Dense in-grid bins chain; everything else (sparse mode, and dense
+        // or hashed bins outside the grid) is in the overflow lists.
         match self.slot(x, y).filter(|_| self.mode == BinMode::Dense) {
             Some(k) => BinIter::Chain {
                 entries: &self.entries,
@@ -643,7 +725,8 @@ impl BinGrid {
     fn allocated(&self) -> usize {
         self.cells.iter().map(Vec::len).sum::<usize>()
             + self.overflow.len()
-            + self.pages.len() * BIN_PAGE_CELLS
+            + self.chains.len()
+            + self.page_store.len() * BIN_PAGE_CELLS
     }
 }
 /// Bin index range `[x0, x1] x [y0, y1]` covering the die and every fixed
@@ -815,7 +898,9 @@ impl<'a> InstanceIndex<'a> {
             cells: vec![Vec::new()],
             entries: Vec::new(),
             pages: HashMap::with_hasher(BuildFx),
+            page_store: Vec::new(),
             overflow: HashMap::with_hasher(BuildFx),
+            chains: HashMap::with_hasher(BuildFx),
         };
         for i in 0..source.len() {
             if let Some(r) = source.bounds(i)? {
@@ -840,8 +925,10 @@ impl<'a> InstanceIndex<'a> {
             entries,
         })
     }
-    fn visit(
-        &mut self,
+    /// [`Self::visit`] without query marks, for an index shared by several
+    /// queriers (see [`Self::visit_cells_shared`]).
+    fn visit_shared(
+        &self,
         layer: u32,
         query: Rect,
         work: &mut usize,
@@ -849,7 +936,7 @@ impl<'a> InstanceIndex<'a> {
         mut visitor: impl FnMut(Blockage) -> Result<bool>,
     ) -> Result<bool> {
         let source = self.source;
-        self.visit_cells(layer, query, work, limits, |i, work| {
+        self.visit_cells_shared(layer, query, work, limits, |i, work| {
             source.visit_near(
                 i,
                 layer,
@@ -864,6 +951,64 @@ impl<'a> InstanceIndex<'a> {
                 |_, b, _| visitor(b),
             )
         })
+    }
+    /// [`Self::visit_cells`] without per-query marks: a cell spanning several
+    /// bins is visited only in the first of them in visiting order (x, then
+    /// y), exactly where the marked visit takes it, so the visiting order and
+    /// every work charge are the same.
+    fn visit_cells_shared(
+        &self,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        limits: &RouteLimits,
+        mut visitor: impl FnMut(usize, &mut usize) -> Result<bool>,
+    ) -> Result<bool> {
+        if !self.source.has_layer(layer) {
+            return Ok(true);
+        }
+        let (x0, x1, y0, y1) = (
+            query.lx.div_euclid(self.bin),
+            query.ux.div_euclid(self.bin),
+            query.ly.div_euclid(self.bin),
+            query.uy.div_euclid(self.bin),
+        );
+        let extent = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        if extent > limits.max_bin_entries as i128 {
+            return Err(budget("instance query extent"));
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                *work = work
+                    .checked_add(1)
+                    .filter(|&n| n <= limits.max_comparisons)
+                    .ok_or_else(|| budget("instance query work"))?;
+                for i in self.bins.iter(0, x, y) {
+                    let Some(bounds) = self.source.bounds(i)? else {
+                        continue;
+                    };
+                    if (
+                        bounds.lx.div_euclid(self.bin).max(x0),
+                        bounds.ly.div_euclid(self.bin).max(y0),
+                    ) != (x, y)
+                    {
+                        continue;
+                    }
+                    *work = work
+                        .checked_add(1)
+                        .filter(|&n| n <= limits.max_comparisons)
+                        .ok_or_else(|| budget("instance query work"))?;
+                    if !overlap(query, bounds) {
+                        continue;
+                    }
+                    let clear = visitor(i, work)?;
+                    if !clear {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
     }
     pub(crate) fn visit_cells(
         &mut self,
@@ -919,13 +1064,182 @@ impl<'a> InstanceIndex<'a> {
     }
 }
 
+/// Fixed geometry of one route call (`RouteInput::obstacles` and the
+/// instance obstacles), binned once and shared read-only by every [`Spatial`]
+/// of the call: the router, rule cleanup and validation. A query takes a
+/// shape that spans several bins only in the first of them it visits (x,
+/// then y), so these bins need no per-query marks, and a query visits shapes
+/// in the same order, with the same work charges, as one combined index whose
+/// fixed shapes were inserted first.
+pub(crate) struct FixedIndex<'a> {
+    input: &'a RouteInput,
+    bin: i64,
+    bins: BinGrid,
+    /// Bin entries of the obstacles and of the instance index.
+    entries: usize,
+    instances: Option<InstanceIndex<'a>>,
+}
+impl<'a> FixedIndex<'a> {
+    pub(crate) fn new(input: &'a RouteInput, limits: &RouteLimits) -> Result<Self> {
+        if input
+            .obstacles
+            .len()
+            .saturating_add(input.instances.as_ref().map_or(0, InstanceObstacles::len))
+            > limits.max_obstacles
+        {
+            return Err(budget("routing obstacle count"));
+        }
+        let instances = input
+            .instances
+            .as_ref()
+            .map(|s| InstanceIndex::new(input, s, limits))
+            .transpose()?;
+        let mut entries = instances.as_ref().map_or(0, |i| i.entries);
+        // The track router queries far more often with short edges; it
+        // uses bins of two access steps (the lattice router keeps eight).
+        let bin = bin_side(input)?;
+        let mut bins = BinGrid::new(input, bin);
+        // The entry count is known up front: reserve it exactly. Shapes over
+        // the budget fail below with the same error as when indexed one by one.
+        let mut total = 0usize;
+        for b in &input.obstacles {
+            let span =
+                |lo: i64, hi: i64| (hi.div_euclid(bin) - lo.div_euclid(bin) + 1).max(0) as u64;
+            total = total.saturating_add(
+                usize::try_from(
+                    span(b.rect.lx, b.rect.ux).saturating_mul(span(b.rect.ly, b.rect.uy)),
+                )
+                .unwrap_or(usize::MAX),
+            );
+        }
+        if total <= limits.max_bin_entries.saturating_sub(entries) {
+            bins.entries
+                .try_reserve_exact(total)
+                .map_err(|_| budget("routing spatial-bin allocation"))?;
+        }
+        for (id, b) in input.obstacles.iter().enumerate() {
+            index_shape(&mut bins, &mut entries, input, bin, limits, id, b)?;
+        }
+        Ok(Self {
+            input,
+            bin,
+            bins,
+            entries,
+            instances,
+        })
+    }
+}
+/// The fixed index of a [`Spatial`]: its own, or one shared by a route call.
+enum Fixed<'a> {
+    Owned(Box<FixedIndex<'a>>),
+    Shared(&'a FixedIndex<'a>),
+}
+impl<'a> Fixed<'a> {
+    fn get(&self) -> &FixedIndex<'a> {
+        match self {
+            Fixed::Owned(f) => f,
+            Fixed::Shared(f) => f,
+        }
+    }
+}
+/// Ids of one query bin in visiting order: fixed shapes first, each taken
+/// only in the first bin of the query (`origin`) it occupies, then added
+/// shapes this query has not seen yet (marks indexed from `obstacles.len()`).
+struct BinIds<'s> {
+    fixed: BinIter<'s>,
+    added: BinIter<'s>,
+    obstacles: &'s [Blockage],
+    bin: i64,
+    at: (i64, i64),
+    origin: (i64, i64),
+    marks: &'s mut [u64],
+    generation: u64,
+}
+impl Iterator for BinIds<'_> {
+    type Item = usize;
+    fn next(&mut self) -> Option<usize> {
+        for id in self.fixed.by_ref() {
+            let r = self.obstacles[id].rect;
+            if (
+                r.lx.div_euclid(self.bin).max(self.origin.0),
+                r.ly.div_euclid(self.bin).max(self.origin.1),
+            ) == self.at
+            {
+                return Some(id);
+            }
+        }
+        let base = self.obstacles.len();
+        for id in self.added.by_ref() {
+            let mark = &mut self.marks[id - base];
+            if *mark != self.generation {
+                *mark = self.generation;
+                return Some(id);
+            }
+        }
+        None
+    }
+}
+fn bin_ids<'s>(
+    fixed: &'s FixedIndex<'_>,
+    added: &'s BinGrid,
+    marks: &'s mut [u64],
+    generation: u64,
+    layer: u32,
+    at: (i64, i64),
+    origin: (i64, i64),
+) -> BinIds<'s> {
+    BinIds {
+        fixed: fixed.bins.iter(layer, at.0, at.1),
+        added: added.iter(layer, at.0, at.1),
+        obstacles: &fixed.input.obstacles,
+        bin: fixed.bin,
+        at,
+        origin,
+        marks,
+        generation,
+    }
+}
+fn index_shape(
+    bins: &mut BinGrid,
+    entries: &mut usize,
+    input: &RouteInput,
+    bin: i64,
+    limits: &RouteLimits,
+    id: usize,
+    b: &Blockage,
+) -> Result<()> {
+    if b.layer as usize >= input.layers.len() || !b.rect.valid() {
+        return Err(invalid("routing obstacle"));
+    }
+    let (x0, x1, y0, y1) = (
+        b.rect.lx.div_euclid(bin),
+        b.rect.ux.div_euclid(bin),
+        b.rect.ly.div_euclid(bin),
+        b.rect.uy.div_euclid(bin),
+    );
+    let n = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+    if n < 0 || n > limits.max_bin_entries.saturating_sub(*entries) as i128 {
+        return Err(budget("routing spatial-bin count"));
+    }
+    for x in x0..=x1 {
+        for y in y0..=y1 {
+            bins.push(b.layer, x, y, id)?;
+            *entries += 1;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) struct Spatial<'a> {
     pub(crate) input: &'a RouteInput,
     limits: &'a RouteLimits,
     bin: i64,
+    fixed: Fixed<'a>,
     /// Added geometry only; immutable fixed shapes remain in `input.obstacles`.
     shapes: Vec<Blockage>,
+    /// Added shapes only (ids from `input.obstacles.len()`).
     bins: BinGrid,
+    /// Query marks of the added shapes.
     marks: Vec<u64>,
     generation: u64,
     entries: usize,
@@ -935,7 +1249,6 @@ pub(crate) struct Spatial<'a> {
     /// True for rip-up-able routed shapes (track router); obstacles, pins and
     /// reserved pin access are fixed.
     routed: Vec<bool>,
-    instances: Option<InstanceIndex<'a>>,
     /// Supply ties by router net: (supply net, rail zone).
     ties: HashMap<u32, (u32, LayerRect)>,
 }
@@ -966,58 +1279,39 @@ fn same_net_shapes(
 }
 
 impl<'a> Spatial<'a> {
+    /// A spatial index with its own fixed index.
     pub(crate) fn new(input: &'a RouteInput, limits: &'a RouteLimits) -> Result<Self> {
-        if input
-            .obstacles
-            .len()
-            .saturating_add(input.instances.as_ref().map_or(0, InstanceObstacles::len))
-            > limits.max_obstacles
-        {
-            return Err(budget("routing obstacle count"));
-        }
-        let instances = input
-            .instances
-            .as_ref()
-            .map(|s| InstanceIndex::new(input, s, limits))
-            .transpose()?;
-        let instance_entries = instances.as_ref().map_or(0, |i| i.entries);
-        // The track router queries far more often with short edges; it
-        // uses bins of two access steps (the lattice router keeps eight).
-        let bin = bin_side(input)?;
-        let (x0, x1, y0, y1, cells) = bin_extent(input, bin);
-        let mut s = Self {
+        let fixed = FixedIndex::new(input, limits)?;
+        Ok(Self::with_fixed(Fixed::Owned(Box::new(fixed)), limits))
+    }
+    /// A spatial index over a fixed index shared by its route call.
+    pub(crate) fn shared(fixed: &'a FixedIndex<'a>, limits: &'a RouteLimits) -> Self {
+        Self::with_fixed(Fixed::Shared(fixed), limits)
+    }
+    fn with_fixed(fixed: Fixed<'a>, limits: &'a RouteLimits) -> Self {
+        let (input, bin, entries) = {
+            let f = fixed.get();
+            (f.input, f.bin, f.entries)
+        };
+        Self {
             input,
             limits,
             bin,
+            fixed,
             shapes: Vec::new(),
-            bins: BinGrid {
-                mode: bin_mode(input, cells),
-                bx0: x0,
-                by0: y0,
-                nx: x1 - x0 + 1,
-                ny: y1 - y0 + 1,
-                cells: vec![Vec::new(); input.layers.len()],
-                entries: Vec::new(),
-                pages: HashMap::with_hasher(BuildFx),
-                overflow: HashMap::with_hasher(BuildFx),
-            },
-            marks: vec![0; input.obstacles.len()],
+            bins: BinGrid::added(input, bin),
+            marks: Vec::new(),
             generation: 0,
-            entries: instance_entries,
+            entries,
             work: 0,
             alive: Vec::new(),
             routed: Vec::new(),
-            instances,
             ties: input
                 .ties
                 .iter()
                 .map(|t| (t.net, (t.supply, t.zone.clone())))
                 .collect(),
-        };
-        for (id, b) in input.obstacles.iter().enumerate() {
-            s.index(id, b)?;
         }
-        Ok(s)
     }
     /// Is stored shape `b` the query net's own metal? A supply tie also owns
     /// supply shapes that its query touches inside its rail zone.
@@ -1031,7 +1325,7 @@ impl<'a> Spatial<'a> {
         query: Rect,
         net: u32,
     ) -> Result<Option<bool>> {
-        let Some(instances) = &mut self.instances else {
+        let Some(instances) = &self.fixed.get().instances else {
             return Ok(Some(false));
         };
         let ties = &self.ties;
@@ -1039,7 +1333,7 @@ impl<'a> Spatial<'a> {
         let rules = self.input.rules;
         let spacing = self.input.layers[layer as usize].spacing;
         let mut near = false;
-        let clear = instances.visit(layer, query, &mut self.work, self.limits, |b| {
+        let clear = instances.visit_shared(layer, query, &mut self.work, self.limits, |b| {
             if !overlap(query, b.rect) {
                 return Ok(true);
             }
@@ -1085,9 +1379,27 @@ impl<'a> Spatial<'a> {
         Ok(())
     }
     /// (allocated grid bins, bin entries, shapes, bin side) for telemetry.
+    /// Allocated bins and entries of the fixed index (with instance bins)
+    /// and of this index's added shapes.
+    pub(crate) fn index_footprint(&self) -> [usize; 4] {
+        let fixed = self.fixed.get();
+        [
+            fixed.bins.allocated() + fixed.instances.as_ref().map_or(0, |i| i.bins.allocated()),
+            fixed.entries,
+            self.bins.allocated(),
+            self.bins.entries.len(),
+        ]
+    }
     pub(crate) fn footprint(&self) -> (usize, usize, usize, i64) {
         (
-            self.bins.allocated() + self.instances.as_ref().map_or(0, |i| i.bins.allocated()),
+            self.fixed.get().bins.allocated()
+                + self.bins.allocated()
+                + self
+                    .fixed
+                    .get()
+                    .instances
+                    .as_ref()
+                    .map_or(0, |i| i.bins.allocated()),
             self.entries,
             self.len()
                 + self
@@ -1108,7 +1420,16 @@ impl<'a> Spatial<'a> {
         {
             return Err(budget("routing obstacle count"));
         }
-        self.index(self.len(), &b)?;
+        let id = self.len();
+        index_shape(
+            &mut self.bins,
+            &mut self.entries,
+            self.input,
+            self.bin,
+            self.limits,
+            id,
+            &b,
+        )?;
         self.shapes.push(b);
         self.marks.push(0);
         self.alive.push(true);
@@ -1127,31 +1448,6 @@ impl<'a> Spatial<'a> {
     }
     fn alive(&self, id: usize) -> bool {
         id < self.input.obstacles.len() || self.alive[id - self.input.obstacles.len()]
-    }
-    fn routed(&self, id: usize) -> bool {
-        id >= self.input.obstacles.len() && self.routed[id - self.input.obstacles.len()]
-    }
-    fn index(&mut self, id: usize, b: &Blockage) -> Result<()> {
-        if b.layer as usize >= self.input.layers.len() || !b.rect.valid() {
-            return Err(invalid("routing obstacle"));
-        }
-        let (x0, x1, y0, y1) = (
-            b.rect.lx.div_euclid(self.bin),
-            b.rect.ux.div_euclid(self.bin),
-            b.rect.ly.div_euclid(self.bin),
-            b.rect.uy.div_euclid(self.bin),
-        );
-        let n = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
-        if n < 0 || n > self.limits.max_bin_entries.saturating_sub(self.entries) as i128 {
-            return Err(budget("routing spatial-bin count"));
-        }
-        for x in x0..=x1 {
-            for y in y0..=y1 {
-                self.bins.push(b.layer, x, y, id)?;
-                self.entries += 1;
-            }
-        }
-        Ok(())
     }
     pub(crate) fn clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
         Ok(self.probe(layer, rect, net)?.is_some())
@@ -1187,27 +1483,38 @@ impl<'a> Spatial<'a> {
                     return Err(budget("routing comparison limit"));
                 }
                 {
-                    for id in self.bins.iter(layer, x, y) {
-                        if self.marks[id] == self.generation {
-                            continue;
-                        }
-                        self.marks[id] = self.generation;
+                    let base = self.input.obstacles.len();
+                    for id in bin_ids(
+                        self.fixed.get(),
+                        &self.bins,
+                        &mut self.marks,
+                        self.generation,
+                        layer,
+                        (x, y),
+                        (x0, y0),
+                    ) {
                         self.work += 1;
                         if self.work > self.limits.max_comparisons {
                             return Err(budget("routing comparison limit"));
                         }
-                        if !self.alive(id) {
+                        if id >= base && !self.alive[id - base] {
                             continue;
                         }
-                        let b = self.shape(id);
+                        let b = if id < base {
+                            &self.input.obstacles[id]
+                        } else {
+                            &self.shapes[id - base]
+                        };
                         if !overlap(query, b.rect) {
                             continue;
                         }
-                        let shared =
-                            self.same_net(net, layer, rect, b) && (routing || rect == b.rect);
+                        let shared = same_net_shapes(&self.ties, net, layer, rect, b)
+                            && (routing || rect == b.rect);
                         if !shared {
                             match b.net {
-                                Some(other) if self.routed(id) && other != net => {
+                                Some(other)
+                                    if id >= base && self.routed[id - base] && other != net =>
+                                {
                                     victims.push(other)
                                 }
                                 _ => return Ok(Soft::Blocked),
@@ -1284,25 +1591,34 @@ impl<'a> Spatial<'a> {
                     return Err(budget("routing comparison limit"));
                 }
                 {
-                    for id in self.bins.iter(layer, x, y) {
-                        if self.marks[id] == self.generation {
-                            continue;
-                        }
-                        self.marks[id] = self.generation;
+                    let base = self.input.obstacles.len();
+                    for id in bin_ids(
+                        self.fixed.get(),
+                        &self.bins,
+                        &mut self.marks,
+                        self.generation,
+                        layer,
+                        (x, y),
+                        (x0, y0),
+                    ) {
                         self.work += 1;
                         if self.work > self.limits.max_comparisons {
                             return Err(budget("routing comparison limit"));
                         }
-                        if !self.alive(id) {
+                        if id >= base && !self.alive[id - base] {
                             continue;
                         }
-                        let b = self.shape(id);
+                        let b = if id < base {
+                            &self.input.obstacles[id]
+                        } else {
+                            &self.shapes[id - base]
+                        };
                         let routing = self.input.layers[layer as usize].vertical.is_some();
                         if !overlap(query, b.rect) {
                             continue;
                         }
-                        let shared =
-                            self.same_net(net, layer, rect, b) && (routing || rect == b.rect);
+                        let shared = same_net_shapes(&self.ties, net, layer, rect, b)
+                            && (routing || rect == b.rect);
                         if !shared {
                             return Ok(None);
                         }
@@ -1354,7 +1670,8 @@ impl<'a> Spatial<'a> {
                     .checked_add(1)
                     .filter(|&n| n <= self.limits.max_comparisons)
                     .ok_or_else(|| budget("collision diagnostic work"))?;
-                for id in self.bins.iter(layer, x, y) {
+                let fixed = self.fixed.get().bins.iter(layer, x, y);
+                for id in fixed.chain(self.bins.iter(layer, x, y)) {
                     self.work = self
                         .work
                         .checked_add(1)
@@ -1378,9 +1695,9 @@ impl<'a> Spatial<'a> {
             }
         }
         let mut culprit = None;
-        if let Some(instances) = &mut self.instances {
+        if let Some(instances) = &self.fixed.get().instances {
             let ties = &self.ties;
-            instances.visit(layer, query, &mut self.work, self.limits, |b| {
+            instances.visit_shared(layer, query, &mut self.work, self.limits, |b| {
                 if overlap(query, b.rect)
                     && !(same_net_shapes(ties, net, layer, rect, &b) && (routing || rect == b.rect))
                 {
@@ -1429,28 +1746,38 @@ impl<'a> Spatial<'a> {
                     .checked_add(1)
                     .filter(|&n| n <= self.limits.max_comparisons)
                     .ok_or_else(|| budget("shape diagnostic work"))?;
-                for id in self.bins.iter(layer, x, y) {
-                    if self.marks[id] == self.generation {
-                        continue;
-                    }
-                    self.marks[id] = self.generation;
+                let base = self.input.obstacles.len();
+                for id in bin_ids(
+                    self.fixed.get(),
+                    &self.bins,
+                    &mut self.marks,
+                    self.generation,
+                    layer,
+                    (x, y),
+                    (x0, y0),
+                ) {
                     self.work = self
                         .work
                         .checked_add(1)
                         .filter(|&n| n <= self.limits.max_comparisons)
                         .ok_or_else(|| budget("shape diagnostic work"))?;
-                    if !self.alive(id) || !overlap(rect, self.shape(id).rect) {
+                    let b = if id < base {
+                        &self.input.obstacles[id]
+                    } else {
+                        &self.shapes[id - base]
+                    };
+                    if (id >= base && !self.alive[id - base]) || !overlap(rect, b.rect) {
                         continue;
                     }
                     if found.len() == cap {
                         return Ok(found);
                     }
-                    found.push((Some(id), self.shape(id).clone(), self.routed(id)));
+                    found.push((Some(id), b.clone(), id >= base && self.routed[id - base]));
                 }
             }
         }
-        if let Some(instances) = &mut self.instances {
-            instances.visit(layer, rect, &mut self.work, self.limits, |b| {
+        if let Some(instances) = &self.fixed.get().instances {
+            instances.visit_shared(layer, rect, &mut self.work, self.limits, |b| {
                 if !overlap(rect, b.rect) {
                     return Ok(true);
                 }
@@ -2648,7 +2975,28 @@ pub(crate) fn cleanup_with_reservations(
     reservations: impl IntoIterator<Item = Blockage>,
 ) -> Result<(usize, Vec<Violation>)> {
     let work = prune(input, out, limits)?;
-    let mut spatial = Spatial::new(input, limits)?;
+    let fixed = FixedIndex::new(input, limits)?;
+    cleanup_pruned(&fixed, out, limits, reservations, work)
+}
+/// [`cleanup_with_reservations`] over the fixed index of the route call.
+pub(crate) fn cleanup_shared(
+    fixed: &FixedIndex<'_>,
+    out: &mut Routes,
+    limits: &RouteLimits,
+    reservations: impl IntoIterator<Item = Blockage>,
+) -> Result<(usize, Vec<Violation>)> {
+    let work = prune(fixed.input, out, limits)?;
+    cleanup_pruned(fixed, out, limits, reservations, work)
+}
+fn cleanup_pruned(
+    fixed: &FixedIndex<'_>,
+    out: &mut Routes,
+    limits: &RouteLimits,
+    reservations: impl IntoIterator<Item = Blockage>,
+    work: usize,
+) -> Result<(usize, Vec<Violation>)> {
+    let input = fixed.input;
+    let mut spatial = Spatial::shared(fixed, limits);
     spatial.work = spatial
         .work
         .checked_add(work)
@@ -2892,6 +3240,22 @@ fn area_stub(
 /// Independent of search history: check geometry against blockages and bounded
 /// endpoint-graph connectivity. External OpenDB/KLayout are the physical oracle.
 pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Result<()> {
+    validate_with(input, None, routes, limits)
+}
+/// [`validate`] over the fixed index of the route call.
+pub(crate) fn validate_shared(
+    fixed: &FixedIndex<'_>,
+    routes: &Routes,
+    limits: &RouteLimits,
+) -> Result<()> {
+    validate_with(fixed.input, Some(fixed), routes, limits)
+}
+fn validate_with(
+    input: &RouteInput,
+    fixed: Option<&FixedIndex<'_>>,
+    routes: &Routes,
+    limits: &RouteLimits,
+) -> Result<()> {
     preflight(input, limits)?;
     let length = routes.wires.iter().try_fold(0u64, |n, w| {
         n.checked_add(distance(w.start, w.end)?)
@@ -2917,7 +3281,10 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
     if !input.rules && !routes.patches.is_empty() {
         return Err(invalid("routing patches require LEF-rule mode"));
     }
-    let mut spatial = Spatial::new(input, limits)?;
+    let mut spatial = match fixed {
+        Some(fixed) => Spatial::shared(fixed, limits),
+        None => Spatial::new(input, limits)?,
+    };
     let mut selected: Vec<u32> = input.terminals.iter().map(|t| t.net).collect();
     selected.sort_unstable();
     let (mut read, mut write) = (0, 0);
@@ -3002,6 +3369,14 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             rect: p.rect,
             net: Some(p.net),
         })?;
+    }
+    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+        let [fixed_bins, fixed_entries, added_bins, added_entries] = spatial.index_footprint();
+        eprintln!(
+            "[route] validation index fixed_bins {fixed_bins} fixed_entries {fixed_entries} \
+             added_bins {added_bins} added_entries {added_entries} shared {}",
+            fixed.is_some()
+        );
     }
     let mut work = 0;
     let terminals = crate::rule_index::order(
@@ -3433,7 +3808,12 @@ mod tests {
             sequence.push((layer, x, y, id));
             reference.entry((layer, x, y)).or_default().push(id);
         }
-        for mode in [BinMode::Dense, BinMode::Sparse, BinMode::Paged] {
+        for mode in [
+            BinMode::Dense,
+            BinMode::Sparse,
+            BinMode::Paged,
+            BinMode::Hashed,
+        ] {
             let mut grid = BinGrid {
                 mode,
                 bx0: -64,
@@ -3443,7 +3823,9 @@ mod tests {
                 cells: vec![Vec::new(); 2],
                 entries: Vec::new(),
                 pages: HashMap::with_hasher(BuildFx),
+                page_store: Vec::new(),
                 overflow: HashMap::with_hasher(BuildFx),
+                chains: HashMap::with_hasher(BuildFx),
             };
             for &(layer, x, y, id) in &sequence {
                 grid.push(layer, x, y, id).unwrap();
@@ -3503,8 +3885,12 @@ mod tests {
         input.obstacles = vec![input.obstacles[0].clone(); 1024];
         let limits = RouteLimits::default();
         let mut spatial = Spatial::new(&input, &limits).unwrap();
-        assert!(spatial.bins.mode == BinMode::Paged);
-        assert_eq!(spatial.bins.pages.len(), 1);
+        // Fixed shapes live in the (shareable) fixed index; added shapes in
+        // their own grid, hashed per occupied bin.
+        assert!(spatial.fixed.get().bins.mode == BinMode::Paged);
+        assert_eq!(spatial.fixed.get().bins.pages.len(), 1);
+        assert!(spatial.bins.mode == BinMode::Hashed);
+        assert_eq!(spatial.bins.allocated(), 0);
         let fixed = Rect {
             lx: 46,
             ly: 20,
@@ -3525,7 +3911,14 @@ mod tests {
                 net: Some(7),
             })
             .unwrap();
-        assert_eq!(spatial.bins.pages.len(), 2);
+        assert_eq!(spatial.fixed.get().bins.pages.len(), 1);
+        assert_eq!(spatial.bins.pages.len(), 0);
+        let bin = spatial.bin;
+        let touched = ((negative.ux.div_euclid(bin) - negative.lx.div_euclid(bin) + 1)
+            * (negative.uy.div_euclid(bin) - negative.ly.div_euclid(bin) + 1))
+            as usize;
+        assert_eq!(spatial.bins.chains.len(), touched);
+        assert_eq!(spatial.bins.allocated(), touched);
         assert!(!spatial.clear(0, negative, 8).unwrap());
         spatial.remove(id);
         assert!(spatial.clear(0, negative, 8).unwrap());

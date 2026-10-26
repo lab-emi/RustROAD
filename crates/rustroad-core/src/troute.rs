@@ -34,8 +34,7 @@ use crate::route_search::{History, Search, State};
 use crate::routing::{
     Access, AccessEntry, Blockage, LayerRect, RouteInput, RouteLimits, RouteStats, Routes, Soft,
     Spatial, Terminal, TrackPlan, Via, ViaPair, WIRE, Wire, access_table_at, budget, contains,
-    distance, expand, int, invalid, no_route, quartile_points, shifted, validate, via_pairs,
-    wire_rect,
+    distance, expand, int, invalid, no_route, quartile_points, shifted, via_pairs, wire_rect,
 };
 use crate::{Rect, Result};
 use std::cmp::Reverse;
@@ -52,6 +51,10 @@ const GCELL_BYTES: u64 = 48;
 const SHAPE_BYTES: u64 = 64;
 /// Bytes per spatial bin entry: 8, doubled for vector growth.
 const ENTRY_BYTES: u64 = 16;
+/// One occupied bin of a hashed (added-shape) grid: a 16-byte bucket (packed
+/// key, head/tail) and its control byte at the map's 7/16 minimum load,
+/// counted 1.5 times for the old and new tables of a resize, rounded up.
+const HASHED_BIN_BYTES: u64 = 64;
 /// Bytes per grid bin of one layer (head and tail entry index).
 const GRID_BYTES: u64 = 8;
 /// Shapes the router adds per terminal (escape, routed runs and vias,
@@ -689,29 +692,32 @@ fn memory_estimate_limited(
         .map(|v| v.shapes.len() as u64)
         .max()
         .unwrap_or(0);
-    let added = t
+    let router_shapes = t
         .saturating_mul(SHAPES_PER_TERMINAL.saturating_add(portal_shapes))
         .min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
-    let index = |shapes: u64| {
+    // One fixed index (obstacles and instances) serves every Spatial of the
+    // route call; fixed rectangles are shared with RouteInput and need no
+    // query marks.
+    let fixed = match mode {
+        crate::routing::BinMode::Sparse => slots.min(fixed_entries).saturating_mul(96),
+        crate::routing::BinMode::Dense => slots.saturating_mul(GRID_BYTES),
+        _ => pages.min(fixed_entries).saturating_mul(8320),
+    }
+    .saturating_add(instance_index)
+    .saturating_add(fixed_entries.saturating_mul(ENTRY_BYTES));
+    // Each Spatial bins its added geometry apart: densely on small inputs,
+    // otherwise per occupied bin (head/tail, key and map overhead).
+    let added = |shapes: u64| {
         // Both Spatial implementations enforce this before every insertion.
         // The checker cannot retain 2*max_segments shapes past this limit.
         let shapes = shapes.min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
-        let entries = fixed_entries.saturating_add(shapes.saturating_mul(ENTRIES_PER_SHAPE));
+        let entries = shapes.saturating_mul(ENTRIES_PER_SHAPE);
         let grid = match mode {
-            crate::routing::BinMode::Sparse => slots.min(entries).saturating_mul(96),
-            crate::routing::BinMode::Paged => pages.min(entries).saturating_mul(8320),
             crate::routing::BinMode::Dense => slots.saturating_mul(GRID_BYTES),
+            _ => entries.saturating_mul(HASHED_BIN_BYTES),
         };
-        // Fixed rectangles are shared with RouteInput; only their query marks
-        // are additional. Added geometry retains its full state allowance.
-        grid.saturating_add(instance_index)
-            .saturating_add(o.saturating_mul(16))
-            .saturating_add(shapes.saturating_mul(SHAPE_BYTES))
-            .saturating_add(
-                fixed_entries
-                    .saturating_add(shapes.saturating_mul(ENTRIES_PER_SHAPE))
-                    .saturating_mul(ENTRY_BYTES),
-            )
+        grid.saturating_add(shapes.saturating_mul(SHAPE_BYTES))
+            .saturating_add(entries.saturating_mul(ENTRY_BYTES))
     };
     let records = t
         .saturating_mul(RECORDS_PER_TERMINAL)
@@ -784,7 +790,7 @@ fn memory_estimate_limited(
                 .saturating_mul(std::mem::size_of::<TraceCut>() as u64),
         )
         .saturating_add((limits.max_batch_blocked_pins as u64).saturating_mul(128)),
-        spatial: index(added),
+        spatial: fixed.saturating_add(added(router_shapes)),
         routed: t
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
             // Selected seed/generation in Plan plus one pending preference.
@@ -817,7 +823,7 @@ fn memory_estimate_limited(
                     as u64)
                     .saturating_mul(32)
             }),
-        check: index(
+        check: added(
             records
                 .saturating_mul(2)
                 .saturating_add(t.saturating_mul(2).min(limits.max_segments as u64)),
@@ -1343,6 +1349,7 @@ impl<'a> Router<'a> {
         input: &'a RouteInput,
         plan: &'a TrackPlan,
         limits: &'a RouteLimits,
+        spatial: Spatial<'a>,
         graph: Graph,
         cells: Cells,
     ) -> Result<Self> {
@@ -1376,7 +1383,7 @@ impl<'a> Router<'a> {
             access_hops,
             target_costs,
             cells,
-            spatial: Spatial::new(input, limits)?,
+            spatial,
             pairs,
             slots,
             expansions: 0,
@@ -3851,7 +3858,16 @@ pub(crate) fn route(
             return Err(invalid("routed net needs one driver"));
         }
     }
-    let mut r = Router::new(input, plan, limits, graph, cells)?;
+    // One fixed index serves the router, every cleanup pass and validation.
+    let fixed = crate::routing::FixedIndex::new(input, limits)?;
+    let mut r = Router::new(
+        input,
+        plan,
+        limits,
+        Spatial::shared(&fixed, limits),
+        graph,
+        cells,
+    )?;
     trace("spatial index", t0, format_args!("work {}", r.spatial.work));
     let all: Vec<&Terminal> = groups.values().flatten().copied().collect();
     let plans = r.reserve(&all, access_alternatives)?;
@@ -4144,7 +4160,7 @@ pub(crate) fn route(
                 rect: Rect { lx, ly, ux, uy },
             });
         let (work, remaining) =
-            crate::routing::cleanup_with_reservations(input, &mut out, &cleanup_limits, protected)?;
+            crate::routing::cleanup_shared(&fixed, &mut out, &cleanup_limits, protected)?;
         r.spatial.work = r
             .spatial
             .work
@@ -4170,14 +4186,16 @@ pub(crate) fn route(
                 n.checked_add(distance(w.start, w.end)?)
                     .ok_or_else(|| budget("total wire length"))
             })?;
-            validate(input, &out, limits)?;
+            crate::routing::validate_shared(&fixed, &out, limits)?;
             r.guard("validation")?;
             let fp = r.spatial.footprint();
+            let [fixed_bins, fixed_entries, added_bins, added_entries] =
+                r.spatial.index_footprint();
             trace(
                 "validated",
                 t0,
                 format_args!(
-                    "records {} wires {} vias {} access {} patches {} bins {} entries {} shapes {} bin {} obstacles {} terminals {} die {:?} layers {}",
+                    "records {} wires {} vias {} access {} patches {} bins {} entries {} shapes {} bin {} obstacles {} terminals {} die {:?} layers {} fixed_bins {fixed_bins} fixed_entries {fixed_entries} added_bins {added_bins} added_entries {added_entries}",
                     out.wires.len() + out.vias.len(),
                     out.wires.len(),
                     out.vias.len(),
@@ -4470,6 +4488,7 @@ fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::routing::validate;
 
     #[test]
     fn retained_edge_limit_is_transactional_and_released_on_ripup() {
@@ -4770,7 +4789,8 @@ mod tests {
         let plan = design.tracks.as_ref().unwrap();
         let graph = Graph::new(design, plan, &limits).unwrap();
         let cells = Cells::new(design.die, plan.gcell).unwrap();
-        let mut r = Router::new(design, plan, &limits, graph, cells).unwrap();
+        let spatial = Spatial::new(design, &limits).unwrap();
+        let mut r = Router::new(design, plan, &limits, spatial, graph, cells).unwrap();
         let mut tables = AccessTables::new();
         let (first, second) = (&design.terminals[0], &design.terminals[1]);
         let (zone, layer) = r.landing_zone(first, &mut tables).unwrap().unwrap();
@@ -4817,7 +4837,8 @@ mod tests {
         let plan = above.tracks.as_ref().unwrap();
         let graph = Graph::new(&above, plan, &limits).unwrap();
         let cells = Cells::new(above.die, plan.gcell).unwrap();
-        let mut r = Router::new(&above, plan, &limits, graph, cells).unwrap();
+        let spatial = Spatial::new(&above, &limits).unwrap();
+        let mut r = Router::new(&above, plan, &limits, spatial, graph, cells).unwrap();
         let first = above.terminals[0].clone();
         assert!(
             r.landing_zone(&first, &mut AccessTables::new())
