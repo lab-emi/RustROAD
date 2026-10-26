@@ -262,6 +262,33 @@ impl Batch<'_> {
         if victims.is_empty() {
             return Ok(0);
         }
+        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+            // Bounded by `max_batch_displaced_nets`; listed nets also print
+            // the completed geometry that reopening removes.
+            eprintln!("[batch] reopen victims {victims:?}");
+            let traced: BTreeSet<u32> = std::env::var("RUSTROAD_TRACE_NETS")
+                .unwrap_or_default()
+                .split(',')
+                .filter_map(|n| n.trim().parse().ok())
+                .take(64)
+                .collect();
+            if traced.iter().any(|n| victims.contains(n)) {
+                for b in view.obstacles[base..].iter().filter(|b| {
+                    b.net
+                        .is_some_and(|n| traced.contains(&n) && victims.contains(&n))
+                }) {
+                    eprintln!(
+                        "[batch] reopen net {} shape layer {} rect [{}, {}, {}, {}]",
+                        b.net.unwrap_or(u32::MAX),
+                        b.layer,
+                        b.rect.lx,
+                        b.rect.ly,
+                        b.rect.ux,
+                        b.rect.uy
+                    );
+                }
+            }
+        }
         let prior = &self.order[..self.begin];
         let mut ranges = Vec::new();
         let mut added = 0usize;

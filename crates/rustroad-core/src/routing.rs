@@ -1395,6 +1395,74 @@ impl<'a> Spatial<'a> {
             None => "no blocking shape found in repeated bounded probe".into(),
         })
     }
+    /// Alive shapes on `layer` overlapping `rect`, at most `cap` (diagnostics
+    /// only): stored shapes as `(Some(id), shape, routed)`, instance shapes as
+    /// `(None, shape, false)`. Every bin and shape visit is charged.
+    pub(crate) fn shapes_in(
+        &mut self,
+        layer: u32,
+        rect: Rect,
+        cap: usize,
+    ) -> Result<Vec<(Option<usize>, Blockage, bool)>> {
+        let mut found = Vec::new();
+        if cap == 0 {
+            return Ok(found);
+        }
+        let (x0, x1, y0, y1) = (
+            rect.lx.div_euclid(self.bin),
+            rect.ux.div_euclid(self.bin),
+            rect.ly.div_euclid(self.bin),
+            rect.uy.div_euclid(self.bin),
+        );
+        let bins = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        if bins > self.limits.max_bin_entries as i128 {
+            return Err(budget("shape diagnostic query extent"));
+        }
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| budget("routing query generation"))?;
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                self.work = self
+                    .work
+                    .checked_add(1)
+                    .filter(|&n| n <= self.limits.max_comparisons)
+                    .ok_or_else(|| budget("shape diagnostic work"))?;
+                for id in self.bins.iter(layer, x, y) {
+                    if self.marks[id] == self.generation {
+                        continue;
+                    }
+                    self.marks[id] = self.generation;
+                    self.work = self
+                        .work
+                        .checked_add(1)
+                        .filter(|&n| n <= self.limits.max_comparisons)
+                        .ok_or_else(|| budget("shape diagnostic work"))?;
+                    if !self.alive(id) || !overlap(rect, self.shape(id).rect) {
+                        continue;
+                    }
+                    if found.len() == cap {
+                        return Ok(found);
+                    }
+                    found.push((Some(id), self.shape(id).clone(), self.routed(id)));
+                }
+            }
+        }
+        if let Some(instances) = &mut self.instances {
+            instances.visit(layer, rect, &mut self.work, self.limits, |b| {
+                if !overlap(rect, b.rect) {
+                    return Ok(true);
+                }
+                if found.len() == cap {
+                    return Ok(false);
+                }
+                found.push((None, b, false));
+                Ok(true)
+            })?;
+        }
+        Ok(found)
+    }
     pub(crate) fn via_probe(
         &mut self,
         kind: usize,

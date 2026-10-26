@@ -81,6 +81,12 @@ const LANDING_BYTES: u64 = 256;
 /// radius): a free escape up to that much longer wins, and an escape that
 /// can only encroach is still taken.
 const LANDING_PENALTY_STEPS: u64 = 4;
+/// No-path diagnostics (trace mode only): shapes within this many access
+/// steps of the failing sink's start, at most `DUMP_SHAPES` of them, and at
+/// most `DUMP_GUIDE` guide cells.
+const DUMP_RADIUS_STEPS: i64 = 24;
+const DUMP_SHAPES: usize = 20_000;
+const DUMP_GUIDE: usize = 1024;
 type AccessKey = (u32, Vec<(u32, [i64; 2])>);
 type AccessTables = BTreeMap<AccessKey, Vec<AccessEntry>>;
 
@@ -1136,6 +1142,9 @@ struct Router<'a> {
     access_cache_bytes: u64,
     /// Escape searches that found no legal escape (telemetry and tests).
     access_failures: usize,
+    /// Last detailed sink search that ended without reaching its tree
+    /// (diagnostics): pin, expanded nodes, extent of the expanded points.
+    last_unreached: Option<(u32, usize, [i64; 4])>,
 }
 
 /// Completed net geometry; the active search alone retains raw grid edges.
@@ -1391,6 +1400,7 @@ impl<'a> Router<'a> {
             access_entries: 0,
             access_cache_bytes: 0,
             access_failures: 0,
+            last_unreached: None,
         };
         for (i, l) in input.layers.iter().enumerate() {
             let Some(min) = l.min_area else {
@@ -1469,6 +1479,97 @@ impl<'a> Router<'a> {
             _ => Ok(()),
         }
     }
+    /// Bounded no-path diagnostic (trace mode only): the repair region, every
+    /// terminal's access plan, the extent of the last unreached sink search
+    /// and the stored and instance shapes near the failing sink's start.
+    /// Every visited bin and shape is charged.
+    fn dump_no_path(
+        &mut self,
+        net: u32,
+        pin: u32,
+        group: &[&Terminal],
+        plans: &HashMap<u32, Plan>,
+        guide: &[u32],
+        margin: usize,
+    ) -> Result<()> {
+        let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+        for &c in guide {
+            let (x, y) = self.cells.xy(c);
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        }
+        let (x0, y0) = (x0.saturating_sub(margin), y0.saturating_sub(margin));
+        let (x1, y1) = (
+            (x1 + margin).min(self.cells.nx - 1),
+            (y1 + margin).min(self.cells.ny - 1),
+        );
+        let g = self.cells.g;
+        let at = |i: usize, origin: i64| origin + i as i64 * g;
+        eprintln!(
+            "[troute-dump] net {net} pin {pin} region gcells [{x0}, {y0}, {x1}, {y1}] dbu [{}, {}, {}, {}] margin {margin} guide {}",
+            at(x0, self.cells.lx),
+            at(y0, self.cells.ly),
+            at(x1 + 1, self.cells.lx),
+            at(y1 + 1, self.cells.ly),
+            guide.len()
+        );
+        let cells: Vec<_> = guide
+            .iter()
+            .take(DUMP_GUIDE)
+            .map(|&c| self.cells.xy(c))
+            .collect();
+        eprintln!("[troute-dump] guide {cells:?}");
+        for t in group.iter().take(64) {
+            let plan = &plans[&t.pin];
+            eprintln!(
+                "[troute-dump] terminal pin {} driver {} top {:?} top_via {} shapes {:?} escape wires {:?} vias {:?}",
+                t.pin,
+                t.driver,
+                self.graph.point(plan.top),
+                plan.top_via,
+                &t.shapes[..t.shapes.len().min(16)],
+                plan.wires,
+                plan.vias
+            );
+        }
+        if let Some((sink, expanded, extent)) = self.last_unreached {
+            eprintln!(
+                "[troute-dump] last unreached pin {sink} expanded {expanded} extent {extent:?}"
+            );
+        }
+        let (_, start) = self.graph.point(plans[&pin].top);
+        let radius = self.input.step.saturating_mul(DUMP_RADIUS_STEPS);
+        let window = Rect {
+            lx: start[0].saturating_sub(radius),
+            ly: start[1].saturating_sub(radius),
+            ux: start[0].saturating_add(radius),
+            uy: start[1].saturating_add(radius),
+        };
+        let mut left = DUMP_SHAPES;
+        for layer in 0..self.input.layers.len() as u32 {
+            for (id, b, routed) in self.spatial.shapes_in(layer, window, left)? {
+                left -= 1;
+                let kind = match id {
+                    None => "instance",
+                    Some(id) if id < self.input.obstacles.len() => "input",
+                    Some(_) if routed => "routed",
+                    Some(_) => "fixed",
+                };
+                eprintln!(
+                    "[troute-dump] shape layer {layer} {kind} id {id:?} net {:?} rect [{}, {}, {}, {}]",
+                    b.net, b.rect.lx, b.rect.ly, b.rect.ux, b.rect.uy
+                );
+            }
+            if left == 0 {
+                eprintln!("[troute-dump] shape cap {DUMP_SHAPES} reached");
+                break;
+            }
+        }
+        Ok(())
+    }
+
     fn tick(&mut self, search: &mut usize, what: &str, pin: u32, net: u32) -> Result<()> {
         *search += 1;
         self.expansions += 1;
@@ -2961,6 +3062,7 @@ impl<'a> Router<'a> {
                 let mut limited = false;
                 let mut projection_attempts = 0;
                 let mut search = 0usize;
+                let mut extent = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
                 while let Some((priority, Reverse(cost), id)) = heap.pop() {
                     if self.search.get(id).is_none_or(|s| s.cost != cost) {
                         continue;
@@ -3008,6 +3110,12 @@ impl<'a> Router<'a> {
                     let (l, t_, s_) = self.graph.locate(id);
                     let layer = self.graph.layers[l].layer;
                     let p = self.graph.xy(l, t_, s_);
+                    extent = [
+                        extent[0].min(p[0]),
+                        extent[1].min(p[1]),
+                        extent[2].max(p[0]),
+                        extent[3].max(p[1]),
+                    ];
                     let target_distance = target.bounds_distance(p);
                     let interior_distance = if target_distance == 0 {
                         // During this search the tree is fixed. A non-saturated
@@ -3361,6 +3469,7 @@ impl<'a> Router<'a> {
                     for id in out.shapes.drain(..) {
                         self.spatial.remove(id);
                     }
+                    self.last_unreached = Some((t.pin, search, extent));
                     return Ok(if limited {
                         Outcome::Limited(t.pin)
                     } else {
@@ -3915,6 +4024,7 @@ pub(crate) fn route(
                         {
                             eprintln!("[troute] no-path nearby reservation {key:?}");
                         }
+                        r.dump_no_path(net, pin, group, &plans, g, wide)?;
                     }
                     return Err(no_route(&format!(
                         "pin {pin} net {net}: no path even with rip-up (fixed geometry blocks)"
@@ -4727,6 +4837,7 @@ mod tests {
             access_entries: 0,
             access_cache_bytes: 0,
             access_failures: 0,
+            last_unreached: None,
         };
         // Fixed, already legal escape tops isolate the detailed traceback;
         // automatic pin-access selection can avoid the narrow path beforehand.
@@ -4887,6 +4998,7 @@ mod tests {
                 access_entries: 0,
                 access_cache_bytes: 0,
                 access_failures: 0,
+                last_unreached: None,
             };
             let terminals: Vec<_> = design.terminals.iter().collect();
             let plans = r.reserve(&terminals, true).unwrap();
