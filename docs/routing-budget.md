@@ -288,3 +288,10 @@ work limits remain unchanged. Tests translated from the observed full-core
 rectangle dimensions verify that a routed blocker cannot return to its old path,
 fixed blockers are never moved, a zero reservation budget refuses, and subsequent
 area cleanup respects protected clearance.
+
+
+The single alternate-root retry applies both when a detailed search exhausts its
+budget and when it exhausts the currently reachable search graph. Root direction
+can change an admissible tree-growth order. The retry reuses the same storage and
+consumes the same per-search and aggregate work budgets; an actual blockage still
+fails. Failure traces retain at most64 terminal points and16 nearby reservations.

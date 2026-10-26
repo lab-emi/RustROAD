@@ -3328,7 +3328,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 .saturating_add(rips.get(&net).copied().unwrap_or(0).min(16));
             r.mark_region(g, Some(wide));
             let mut outcome = r.route_net(net, &groups[&net], &plans, true, tight, &rips, round)?;
-            if matches!(outcome, Outcome::Limited(_))
+            if matches!(outcome, Outcome::Limited(_) | Outcome::Failed(_))
                 && alternate_repair_root(
                     groups.get_mut(&net).unwrap(),
                     |t| r.graph.point(plans[&t.pin].top).1,
@@ -3348,6 +3348,39 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                     )));
                 }
                 Outcome::Failed(pin) => {
+                    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                        let group = &groups[&net];
+                        r.spatial.work = r
+                            .spatial
+                            .work
+                            .checked_add(group.len().min(64))
+                            .and_then(|n| n.checked_add(rule_reservations.len()))
+                            .filter(|&n| n <= limits.max_comparisons)
+                            .ok_or_else(|| budget("failed-route diagnostic work"))?;
+                        let points: Vec<_> = group
+                            .iter()
+                            .take(64)
+                            .map(|t| (t.pin, t.driver, r.graph.point(plans[&t.pin].top)))
+                            .collect();
+                        eprintln!(
+                            "[troute] no-path context net {net} pin {pin} strict {tight} terminals {} first64 {points:?}",
+                            group.len()
+                        );
+                        let (_, start) = r.graph.point(plans[&pin].top);
+                        let radius = input.step.saturating_mul(8);
+                        for key in rule_reservations
+                            .iter()
+                            .filter(|&&(_, _, lx, ly, ux, uy)| {
+                                lx <= start[0].saturating_add(radius)
+                                    && ux >= start[0].saturating_sub(radius)
+                                    && ly <= start[1].saturating_add(radius)
+                                    && uy >= start[1].saturating_sub(radius)
+                            })
+                            .take(16)
+                        {
+                            eprintln!("[troute] no-path nearby reservation {key:?}");
+                        }
+                    }
                     return Err(no_route(&format!(
                         "pin {pin} net {net}: no path even with rip-up (fixed geometry blocks)"
                     )));
