@@ -1502,6 +1502,7 @@ pub fn route_with_options(
                         "checkpoint write failed".into(),
                     ));
                 }
+                release_free_heap();
                 Ok(())
             },
         );
@@ -1783,4 +1784,28 @@ pub(crate) fn write_paths(
         first = false;
     }
     Ok(())
+}
+
+/// Return the heap pages a finished routing batch freed to the kernel, so the
+/// next batch's admission measures the live process rather than freed pages
+/// that glibc keeps in its arenas. Routing results do not depend on it.
+fn release_free_heap() {
+    let before = rustroad_core::memory::rss_bytes();
+    let started = std::time::Instant::now();
+    // SAFETY: malloc_trim only returns free heap memory to the kernel; live
+    // allocations are untouched.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    #[allow(unsafe_code)]
+    unsafe {
+        libc::malloc_trim(0);
+    }
+    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+        let mib = |b: Option<u64>| b.map_or_else(|| "-".into(), |b| format!("{}", b >> 20));
+        eprintln!(
+            "[batch] heap trim rss {} -> {} MiB in {:.3}s",
+            mib(before),
+            mib(rustroad_core::memory::rss_bytes()),
+            started.elapsed().as_secs_f64()
+        );
+    }
 }

@@ -697,6 +697,45 @@ pub fn route_resumable(
         extend(&mut out.access, &mut done.access, cap)?;
         extend(&mut out.nets, &mut done.nets, cap)?;
         guard(cap, 0, "batch completion")?;
+        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+            let held = |len: usize, capacity: usize, size: usize| {
+                format!("{len}/{capacity} ({} MiB)", (capacity * size) >> 20)
+            };
+            eprintln!(
+                "[batch] {} complete obstacles {} wires {} vias {} patches {} access {} terminals {}",
+                report.batches - 1,
+                held(
+                    view.obstacles.len(),
+                    view.obstacles.capacity(),
+                    size_of::<Blockage>()
+                ),
+                held(
+                    out.wires.len(),
+                    out.wires.capacity(),
+                    size_of::<routing::Wire>()
+                ),
+                held(
+                    out.vias.len(),
+                    out.vias.capacity(),
+                    size_of::<routing::Via>()
+                ),
+                held(
+                    out.patches.len(),
+                    out.patches.capacity(),
+                    size_of::<routing::Patch>()
+                ),
+                held(
+                    out.access.len(),
+                    out.access.capacity(),
+                    size_of::<routing::Access>()
+                ),
+                held(
+                    view.terminals.len(),
+                    view.terminals.capacity(),
+                    size_of::<routing::Terminal>()
+                ),
+            );
+        }
         progress(BatchProgress {
             begin: end,
             routes: &out,
