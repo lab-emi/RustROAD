@@ -6,7 +6,7 @@
 use rustroad_core::Limits;
 use rustroad_core::connectivity::ConnectivityLimits;
 use rustroad_core::extract::ExtractLimits;
-use rustroad_workspace::extract::{ExtractRequest, extract};
+use rustroad_workspace::extract::{ExtractRequest, StripeRequest, extract};
 use rustroad_workspace::pdk::{ImportSources, import_pdk_with_config};
 use rustroad_workspace::physical::{PhysicalConfig, TieCell};
 use rustroad_workspace::{Error, place, read};
@@ -265,6 +265,8 @@ fn request(profile: PathBuf, corner: &str, out: PathBuf, cap: u64) -> ExtractReq
         out,
         max_spef_bytes: cap,
         limits: ExtractLimits::default(),
+        passive_strip_um: None,
+        stripes: None,
     }
 }
 
@@ -332,6 +334,95 @@ fn extraction_is_read_only_deterministic_and_complete() {
             .to_string_lossy()
             .contains(".tmp-"))
     );
+}
+
+#[test]
+fn stripe_extraction_writes_the_whole_design_spef() {
+    let f = routed();
+    let tech = read(&f.workspace, &limits())
+        .unwrap()
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .sources
+        .iter()
+        .find(|s| s.role == "technology_lef")
+        .unwrap()
+        .sha256
+        .clone();
+    let p = profile(&f, "nom", &tech, None);
+    let pieces = |out: &str, stripes: Option<StripeRequest>| ExtractRequest {
+        passive_strip_um: Some(2.0),
+        stripes,
+        ..request(p.clone(), "nom", f.root.join(out), 1 << 20)
+    };
+    let whole = extract(&f.workspace, &pieces("whole.spef", None), &limits()).unwrap();
+    for (count, name) in [(1, "one.spef"), (3, "three.spef"), (7, "seven.spef")] {
+        let part = extract(
+            &f.workspace,
+            &pieces(
+                name,
+                Some(StripeRequest {
+                    count,
+                    halo_um: None,
+                }),
+            ),
+            &limits(),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(f.root.join("whole.spef")).unwrap(),
+            fs::read(f.root.join(name)).unwrap(),
+            "{count} stripes"
+        );
+        let stripes = part.stats.partition.as_ref().unwrap();
+        assert_eq!(stripes.stripes.len(), count);
+        assert_eq!(
+            (
+                part.stats.nets,
+                part.stats.couplings,
+                part.stats.passive_strips
+            ),
+            (
+                whole.stats.nets,
+                whole.stats.couplings,
+                whole.stats.passive_strips
+            )
+        );
+    }
+    assert!(whole.stats.partition.is_none());
+    // Stripes need passive pieces and a halo of at least the minimum.
+    let e = extract(
+        &f.workspace,
+        &ExtractRequest {
+            passive_strip_um: None,
+            ..pieces(
+                "none.spef",
+                Some(StripeRequest {
+                    count: 3,
+                    halo_um: None,
+                }),
+            )
+        },
+        &limits(),
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("--passive-strip-um"), "{e}");
+    let e = extract(
+        &f.workspace,
+        &pieces(
+            "thin.spef",
+            Some(StripeRequest {
+                count: 3,
+                halo_um: Some(0.5),
+            }),
+        ),
+        &limits(),
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("below the minimum"), "{e}");
+    assert!(!f.root.join("none.spef").exists() && !f.root.join("thin.spef").exists());
 }
 
 #[test]

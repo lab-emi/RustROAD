@@ -30,7 +30,8 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   [--max-coupling-caps 1000000] [--max-extract-work 200000000] \
   [--max-rc-elements 1000000] [--max-extract-candidates 4096] \
   [--extract-memory-mib 2048] [--max-extract-shapes 2000000] \
-  [--max-extract-bin-entries 8000000]
+  [--max-extract-bin-entries 8000000] [--passive-strip-um L] \
+  [--extract-stripes N [--extract-halo-um H]]
 ```
 
 * The workspace is opened under its shared lock and never written. `--out`
@@ -358,6 +359,71 @@ Measured (`docs/evidence/extraction-oracles-*.json`, round 3):
 No run exceeds 4 GiB, so no scale lock is needed. Builds and tests used
 `CARGO_BUILD_JOBS=4`, `RUST_TEST_THREADS=4` and
 `systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G`.
+
+## Stripes (full-chip scale)
+
+The whole-design extraction holds every conductor shape, bin entry and
+coupling of the design at once, and the strips of supply rails and straps run
+across the die. A full core (OpenC910 `ct_core`: 10.6 mm die, about 6 M routed
+nets) exceeds its shape, bin and candidate ceilings. `--extract-stripes N`
+computes the same network stripe by stripe (`extract_partitioned`):
+
+* **Passive pieces.** `--passive-strip-um L` evaluates every passive strip in
+  equal pieces of at most `L` along its axis, at exact integer coordinates. A
+  passive strip only counts its plate shares toward routed conductors, and
+  each piece sees exactly the candidates of the whole strip over its extent,
+  so the pieces split interval sums. A plate share attaches to the partner's
+  nearer end measured from the interval middle, so the values are unchanged
+  when the plate crosses the strip. Only a routed plate parallel to the passive
+  strip may then attach on its other end. With pieces, two
+  exact rules drop strips: a piece that no routed conductor on another layer
+  overlaps (it has no routed plate), and a strip whose cross-section `W`
+  satisfies `3 W >` the extent of all metal along that axis (`metal_extent`;
+  no plate can cover `W` plus `W` beyond each side): the far ends of rails and
+  the sides of straps. Pieces need no partition and work in a single
+  extraction too (`passive_pieces_keep_perpendicular_crossing_values`).
+* **Partition.** The routing die is cut along x into `N` equal stripes; the
+  outer ones extend to infinity. A strip belongs to the stripe that holds its
+  anchor, the low end of its centre line (half-open, so exactly one). Each
+  stripe's input holds, whole, every routed net whose metal (wire rectangles
+  with their end extensions, via shapes, patches, access points) meets its
+  core widened by the halo. It also holds every net with a pin access point
+  within one cell extent of that region, every net owning a retained pin shape
+  in it, and every passive shape in it (plus all pin shapes of held nets).
+  Cell geometry is shared. A tree is built from its whole net, so every stripe
+  holding a net builds the same tree; the merge checks this bit for bit. Each
+  stripe computes ground and coupling only for its own strips. Ground is added
+  per node in stripe order, and couplings are merged by endpoint pair. The
+  result equals the whole extraction with the same pieces, up to the order of
+  floating-point sums. Statistics count a net in the stripe that holds its
+  driver access point, and a strip in the stripe that evaluates it. Work
+  includes each stripe's own preparation; `shapes` and `max_run_candidates`
+  are the largest stripe's. `stats.partition` lists per stripe the nets held
+  and counted, retained passive shapes, shapes, couplings, work and the
+  memory estimate, plus `repeated_trees`.
+* **Halo.** The default halo is `minimum_halo`: the longest routed or
+  cell strip (`--max-segment-um`, `L`, the largest cell, patch or via shape)
+  plus the widest routing layer and the widest calibration window. A smaller
+  `--extract-halo-um` is refused. Three checks turn a gap into an error, never
+  a silent difference: a contributing strip whose neighbourhood leaves the
+  halo, a retained passive piece anchored in the core that leaves it (checked
+  before the crossing test), and a pin partner whose routed net the stripe
+  lacks (checked against the pins of all routed nets). A passive shape whose
+  side strip is wider than the halo but not dropped by the `3 W` rule needs a
+  wider halo.
+* **Budgets and memory.** Each stripe obeys every per-call limit
+  (`--max-extract-shapes`, `--extract-memory-mib`, ...); its memory estimate
+  includes the live process (input plus the network merged so far). The
+  merged network may hold `N` times the per-call node, element and coupling
+  caps. Peak memory is one stripe's working set plus the merged network
+  (about 16 B per node, 16 B per resistor and 24-48 B per coupling).
+
+Tests: `stripes_reproduce_the_whole_extraction` (a 300 um block with 160
+nets, patches, rails, straps, retained and per-cell pins: one stripe is bit
+identical, 2/3/7 stripes agree to 1e-12 with every counter equal),
+`stripe_halo_and_missing_nets_fail_explicitly` (negative controls for each
+check) and `stripe_extraction_writes_the_whole_design_spef` (workspace SPEF
+byte-identical for 1/3/7 stripes).
 
 ## Verification
 

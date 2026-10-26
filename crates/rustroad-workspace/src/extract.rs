@@ -114,6 +114,20 @@ pub struct ExtractRequest {
     pub out: PathBuf,
     pub max_spef_bytes: u64,
     pub limits: ExtractLimits,
+    /// Evaluate passive conductor strips in pieces of at most this length
+    /// (um); whole strips when absent. Needed by `stripes`.
+    pub passive_strip_um: Option<f64>,
+    /// Stripe-partitioned extraction (`extract_partitioned`).
+    pub stripes: Option<StripeRequest>,
+}
+
+/// Equal-width stripes along x over the routing die. Each stripe obeys the
+/// request limits; the merged network may be `count` times as large.
+#[derive(Clone, Debug)]
+pub struct StripeRequest {
+    pub count: usize,
+    /// Halo beyond each stripe core (um); the minimum when absent.
+    pub halo_um: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -348,6 +362,27 @@ fn extract_impl(
         effective.limits.max_segment_length =
             (um * f64::from(design.units_per_micron)).round() as i64;
     }
+    if let Some(um) = request.passive_strip_um {
+        if !(um.is_finite() && (0.1..=10_000.0).contains(&um)) {
+            return Err(fail("passive strip length must be within 0.1..=10000 um"));
+        }
+        effective.limits.max_passive_strip_length =
+            (um * f64::from(design.units_per_micron)).round() as i64;
+    }
+    if let Some(stripes) = &request.stripes {
+        if !(1..=4096).contains(&stripes.count) {
+            return Err(fail("stripe count must be within 1..=4096"));
+        }
+        if stripes
+            .halo_um
+            .is_some_and(|um| !(um.is_finite() && (0.1..=10_000.0).contains(&um)))
+        {
+            return Err(fail("stripe halo must be within 0.1..=10000 um"));
+        }
+        if request.passive_strip_um.is_none() {
+            return Err(fail("stripe extraction needs --passive-strip-um"));
+        }
+    }
     let request = &effective;
     let bundle = metadata
         .physical
@@ -523,31 +558,46 @@ fn extract_impl(
     } else {
         (&state.routes, Vec::new())
     };
-    let network = extract::extract_cpu_ref(
-        &extract::ExtractInput {
-            held_bytes: rustroad_core::memory::live_bytes().unwrap_or(
-                crate::routing::revision_bytes(workspace, &metadata.revision)?.saturating_mul(3),
-            ),
-            instances: input
-                .instances
-                .as_ref()
-                .map(|geometry| extract::InstancedPassive {
-                    geometry,
-                    signal_nets: &signal_nets,
-                }),
-            layers: &input.layers,
-            vias: &input.vias,
-            routes,
-            terminals: if has_ties {
-                &terminals
-            } else {
-                &input.terminals
-            },
-            passive: &passive,
-            tech: &tech,
+    let extract_input = extract::ExtractInput {
+        held_bytes: rustroad_core::memory::live_bytes().unwrap_or(
+            crate::routing::revision_bytes(workspace, &metadata.revision)?.saturating_mul(3),
+        ),
+        instances: input
+            .instances
+            .as_ref()
+            .map(|geometry| extract::InstancedPassive {
+                geometry,
+                signal_nets: &signal_nets,
+            }),
+        layers: &input.layers,
+        vias: &input.vias,
+        routes,
+        terminals: if has_ties {
+            &terminals
+        } else {
+            &input.terminals
         },
-        &request.limits,
-    )?;
+        passive: &passive,
+        tech: &tech,
+    };
+    let network = match &request.stripes {
+        None => extract::extract_cpu_ref(&extract_input, &request.limits)?,
+        Some(stripes) => {
+            let minimum = extract::minimum_halo(&extract_input, &request.limits)?;
+            let halo = stripes
+                .halo_um
+                .map_or(minimum, |um| (um * dbu).round() as i64);
+            let count = stripes.count;
+            let plan = extract::StripePlan {
+                cuts: extract::even_cuts(input.die.lx, input.die.ux, count)?,
+                halo,
+                max_nodes: request.limits.max_nodes.saturating_mul(count),
+                max_elements: request.limits.max_elements.saturating_mul(count),
+                max_couplings: request.limits.max_couplings.saturating_mul(count),
+            };
+            extract::extract_partitioned(&extract_input, &request.limits, &plan)?
+        }
+    };
     // Names: nets by connectivity name, pins as instance/pin, ports by bit.
     let pin_label = |pin: u32| -> Result<(spef::Node, spef::Direction, Option<String>)> {
         let c = model

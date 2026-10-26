@@ -11,7 +11,11 @@ use crate::{Error, Rect, Result};
 use std::collections::{BTreeMap, HashMap};
 mod bins;
 mod geometry;
+mod stripes;
 use geometry::{InstanceGeometry, Shapes};
+pub use stripes::{
+    PartitionStats, StripePlan, StripeStats, even_cuts, extract_partitioned, minimum_halo,
+};
 
 /// One vertical context of a calibration table.
 #[derive(Clone, Debug)]
@@ -107,6 +111,13 @@ pub struct ExtractLimits {
     pub max_bin_entries: usize,
     /// Straight runs longer than this are split at existing lattice nodes (DBU).
     pub max_segment_length: i64,
+    /// Strips of passive conductors (supply rails and straps, pins,
+    /// obstructions) longer than this are evaluated in equal pieces (DBU);
+    /// `i64::MAX` keeps whole strips. A passive strip only counts plate
+    /// shares toward routed conductors, so pieces change no extracted value
+    /// beyond floating-point summation order; with pieces, a strip whose
+    /// cross-section is too wide for any plate is skipped.
+    pub max_passive_strip_length: i64,
 }
 impl Default for ExtractLimits {
     fn default() -> Self {
@@ -122,6 +133,7 @@ impl Default for ExtractLimits {
             max_candidates: 4096,
             max_bin_entries: 8_000_000,
             max_segment_length: 25_000,
+            max_passive_strip_length: i64::MAX,
         }
     }
 }
@@ -159,7 +171,7 @@ impl ExtractLimits {
         if self.memory_mib == 0 || self.memory_mib > 65_536 {
             return Err(budget("extraction memory allowance"));
         }
-        if self.max_segment_length <= 0 {
+        if self.max_segment_length <= 0 || self.max_passive_strip_length <= 0 {
             return Err(invalid("extraction segment length must be positive"));
         }
         Ok(())
@@ -252,6 +264,10 @@ pub struct ExtractStats {
     /// Each coupling capacitor counted once.
     pub coupling_pf: f64,
     pub resistance_ohm: f64,
+    /// Stripes of `extract_partitioned` (absent for a single extraction);
+    /// `shapes` and `max_run_candidates` are then the largest stripe's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partition: Option<PartitionStats>,
 }
 #[derive(Clone, Debug)]
 pub struct RcNetwork {
@@ -501,6 +517,9 @@ fn body_rect(r: &Run) -> Rect {
 
 struct Built {
     nets: Vec<RcNet>,
+    /// Per net: its driver access point is in the region's core (always
+    /// outside a region). Only home nets count in the net statistics.
+    home: Vec<bool>,
     runs: Vec<Run>,
     pads: Vec<Pad>,
     /// Pin index -> (net, local node).
@@ -577,10 +596,17 @@ fn um(tech: &RcTech, dbu: i64) -> f64 {
     dbu as f64 / tech.dbu_per_um
 }
 
-/// Build per-net graphs, straight runs, the tree order and resistors.
-fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Built, ExtractStats)> {
+/// Build per-net graphs, straight runs, the tree order and resistors. In a
+/// region, the statistics count only nets whose driver access point lies in
+/// its core; the budgets count every net.
+fn build_trees(
+    input: &ExtractInput<'_>,
+    limits: &ExtractLimits,
+    region: Option<&ExtractRegion<'_>>,
+) -> Result<(Built, ExtractStats)> {
     let routes = input.routes;
     let mut stats = ExtractStats::default();
+    let mut all_nodes = 0usize;
     let terminals: HashMap<u32, &Terminal> = input.terminals.iter().map(|t| (t.pin, t)).collect();
     let mut wires = BTreeMap::<u32, Vec<usize>>::new();
     let mut vias = BTreeMap::<u32, Vec<usize>>::new();
@@ -599,6 +625,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
     }
     let mut out = Built {
         nets: Vec::new(),
+        home: Vec::new(),
         runs: Vec::new(),
         pads: Vec::new(),
         pin_nodes: HashMap::new(),
@@ -607,6 +634,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         if net_index.is_multiple_of(4096) {
             guard_memory(limits)?;
         }
+        let snapshot = region.map(|_| stats.clone());
         let net_wires = wires.get(&net).map(Vec::as_slice).unwrap_or(&[]);
         let net_vias = vias.get(&net).map(Vec::as_slice).unwrap_or(&[]);
         let net_access = access
@@ -635,7 +663,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         }
         keys.sort_unstable();
         keys.dedup();
-        if stats.nodes + keys.len() > limits.max_nodes.saturating_mul(4) {
+        if all_nodes + keys.len() > limits.max_nodes.saturating_mul(4) {
             return Err(budget("extraction graph nodes"));
         }
         let id = |k: &Key| keys.binary_search(k).map(|i| i as u32);
@@ -714,6 +742,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         // Pins: first pin (lowest index) names a node; others get links.
         let mut pins: Vec<(u32, u32)> = Vec::new();
         let mut driver = None;
+        let mut driver_at = [0, 0];
         for &i in net_access {
             let a = &routes.access[i];
             let t = terminals
@@ -728,6 +757,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
                     return Err(invalid("routed net has more than one driver"));
                 }
                 driver = Some(a.pin);
+                driver_at = a.at;
             }
         }
         pins.sort_unstable();
@@ -996,10 +1026,11 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
                 out.pin_nodes.insert(*pin, (net, i as u32));
             }
         }
-        stats.nodes += nodes.len();
-        if stats.nodes > limits.max_nodes {
+        all_nodes += nodes.len();
+        if all_nodes > limits.max_nodes {
             return Err(budget("extraction RC nodes"));
         }
+        stats.nodes += nodes.len();
         stats.resistors += resistors.len();
         stats.resistance_ohm += resistors.iter().map(|r| r.2).sum::<f64>();
         // Straight runs with tree-order end nodes.
@@ -1045,6 +1076,11 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         }
         stats.lattice_wires += net_wires.len();
         stats.vias += net_vias.len();
+        let home = region.is_none_or(|g| contains_point(&g.core, driver_at));
+        if !home && let Some(before) = snapshot {
+            stats = before;
+        }
+        out.home.push(home);
         out.nets.push(RcNet {
             net,
             ground: vec![0.0; nodes.len()],
@@ -1052,8 +1088,7 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
             resistors,
         });
     }
-    stats.nets = out.nets.len();
-    stats.wire_runs = out.runs.len();
+    stats.nets = out.home.iter().filter(|&&h| h).count();
     Ok((out, stats))
 }
 
@@ -1265,6 +1300,7 @@ fn add_metal_pieces(
     shapes: &mut Shapes<'_>,
     bins: &mut Bins<'_>,
     entries: &mut usize,
+    net_index: &HashMap<u32, usize>,
     stats: &mut ExtractStats,
 ) -> Result<()> {
     // (net, layer, rect, node, is_pad) in a fixed order.
@@ -1316,10 +1352,12 @@ fn add_metal_pieces(
     for (net, layer, rect, node, is_pad) in candidates {
         let covering = same_net_near(rect, net, layer, built, shapes, bins, limits, stats)?;
         let pieces = uncovered(rect, &covering, shapes)?;
-        if is_pad {
-            stats.pad_pieces += pieces.len();
-        } else {
-            stats.end_pieces += pieces.len();
+        if built.home[net_index[&net]] {
+            if is_pad {
+                stats.pad_pieces += pieces.len();
+            } else {
+                stats.end_pieces += pieces.len();
+            }
         }
         for piece in pieces {
             add_piece(
@@ -1409,8 +1447,10 @@ fn add_patches(
         };
         // Uncovered pieces: subtract every same-net conductor overlapping it.
         let pieces = uncovered(r, &touching, shapes)?;
-        stats.patches += 1;
-        stats.patch_pieces += pieces.len();
+        if built.home[net_index[&patch.net]] {
+            stats.patches += 1;
+            stats.patch_pieces += pieces.len();
+        }
         for piece in pieces {
             add_piece(
                 piece,
@@ -1511,11 +1551,140 @@ fn face_portions(
     out
 }
 
+/// Whether a routed conductor on another routing layer overlaps `r`.
+fn crossed_by_route(
+    routing: &[u32],
+    layer: u32,
+    r: Rect,
+    shapes: &Shapes<'_>,
+    bins: &Bins<'_>,
+    stats: &mut ExtractStats,
+    limits: &ExtractLimits,
+) -> Result<bool> {
+    let (x0, x1) = bins.range(r.lx, r.ux);
+    let (y0, y1) = bins.range(r.ly, r.uy);
+    for &other in routing.iter().filter(|&&l| l != layer) {
+        for bx in x0..=x1 {
+            for by in y0..=y1 {
+                let list = bins.map.iter((other, bx, by));
+                if list.len() == 0 {
+                    continue;
+                }
+                stats.work = stats
+                    .work
+                    .checked_add(list.len())
+                    .ok_or_else(|| budget("extraction work"))?;
+                if stats.work > limits.max_work {
+                    return Err(budget("extraction work"));
+                }
+                for o in list {
+                    let q = &shapes.get(o);
+                    if matches!(q.owner, Owner::Run(_))
+                        && q.rect.lx < r.ux
+                        && r.lx < q.rect.ux
+                        && q.rect.ly < r.uy
+                        && r.ly < q.rect.uy
+                    {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Appends `whole` (a passive conductor strip) cut into equal pieces of at
+/// most `piece` DBU along its axis, at exact integer coordinates. With
+/// `span` (the extent of all metal along x and y), a strip whose
+/// cross-section cannot have a plate is dropped: a plate covers the strip
+/// and one strip width beyond both side edges (`plate`), three widths that
+/// no metal spans. A passive strip only counts plate shares, so neither the
+/// pieces nor the drop change an extracted value beyond summation order.
+fn passive_pieces(whole: Run, piece: i64, span: Option<[i64; 2]>, out: &mut Vec<Run>) {
+    if let Some(span) = span {
+        let across = if whole.vertical { span[0] } else { span[1] };
+        if (whole.plus - whole.minus).saturating_mul(3) > across {
+            return;
+        }
+    }
+    let length = whole.hi - whole.lo;
+    let count = if length > piece {
+        (length - 1) / piece + 1
+    } else {
+        1
+    };
+    let at = |i: i64| whole.lo + (i128::from(length) * i128::from(i) / i128::from(count)) as i64;
+    for i in 0..count {
+        out.push(Run {
+            lo: at(i),
+            hi: at(i + 1),
+            ..whole
+        });
+    }
+}
+
+/// Extent along x and y of all conductor metal of an input: routed wires
+/// (with their end extensions), via shapes, patches, passive shapes and the
+/// instance geometry. No plate is wider.
+pub fn metal_extent(input: &ExtractInput<'_>) -> Result<[i64; 2]> {
+    let mut bounds: Option<Rect> = None;
+    let mut include = |r: Rect| {
+        bounds = Some(bounds.map_or(r, |b| Rect {
+            lx: b.lx.min(r.lx),
+            ly: b.ly.min(r.ly),
+            ux: b.ux.max(r.ux),
+            uy: b.uy.max(r.uy),
+        }));
+    };
+    for w in &input.routes.wires {
+        let layer = input
+            .layers
+            .get(w.layer as usize)
+            .ok_or_else(|| invalid("extraction wire layer"))?;
+        include(crate::routing::wire_rect(w, layer.width)?);
+    }
+    for v in &input.routes.vias {
+        let kind = input
+            .vias
+            .get(v.kind as usize)
+            .ok_or_else(|| invalid("extraction via kind"))?;
+        for shape in &kind.shapes {
+            include(crate::routing::shifted(shape.rect, v.at)?);
+        }
+    }
+    for p in &input.routes.patches {
+        include(p.rect);
+    }
+    for p in input.passive {
+        include(p.rect);
+    }
+    if let Some(instances) = input.instances {
+        for i in 0..instances.geometry.len() {
+            if let Some(r) = instances.geometry.bounds(i)? {
+                include(r);
+            }
+        }
+    }
+    let Some(b) = bounds else {
+        return Ok([0, 0]);
+    };
+    let extent = |lo: i64, hi: i64| {
+        hi.checked_sub(lo)
+            .ok_or_else(|| budget("extraction metal extent"))
+    };
+    Ok([extent(b.lx, b.ux)?, extent(b.ly, b.uy)?])
+}
+
 /// Passive conductors (pins, obstructions, supply metal) that a routed
 /// conductor on another routing layer overlaps get two strips (along x and
 /// along y, like a piece) so that their own cross-section is counted where a
 /// routed conductor is their calibration plate: a crossing is counted from
-/// both conductors' cross-sections whoever owns them.
+/// both conductors' cross-sections whoever owns them. With a passive piece
+/// length, each strip is cut into pieces (`passive_pieces`) and only pieces
+/// that a routed conductor overlaps are kept; in a region, only pieces
+/// anchored in its core.
+#[allow(clippy::too_many_arguments)]
 fn add_passive_strips(
     input: &ExtractInput<'_>,
     limits: &ExtractLimits,
@@ -1523,61 +1692,31 @@ fn add_passive_strips(
     shapes: &Shapes<'_>,
     bins: &mut Bins<'_>,
     stats: &mut ExtractStats,
+    region: Option<&ExtractRegion<'_>>,
+    span: Option<[i64; 2]>,
 ) -> Result<()> {
     let routing: Vec<u32> = (0..input.layers.len() as u32)
         .filter(|&l| input.tech.layers[l as usize].is_some())
         .collect();
+    let piece = limits.max_passive_strip_length;
+    let mut strips = Vec::new();
     for (si, sh) in shapes.owned() {
         let Owner::Passive(owner) = sh.owner else {
             continue;
         };
         let r = sh.rect;
-        let (x0, x1) = bins.range(r.lx, r.ux);
-        let (y0, y1) = bins.range(r.ly, r.uy);
-        let mut crossed = false;
-        'search: for &layer in routing.iter().filter(|&&l| l != sh.layer) {
-            for bx in x0..=x1 {
-                for by in y0..=y1 {
-                    let list = bins.map.iter((layer, bx, by));
-                    if list.len() == 0 {
-                        continue;
-                    }
-                    stats.work = stats
-                        .work
-                        .checked_add(list.len())
-                        .ok_or_else(|| budget("extraction work"))?;
-                    if stats.work > limits.max_work {
-                        return Err(budget("extraction work"));
-                    }
-                    for o in list {
-                        let q = &shapes.get(o);
-                        if matches!(q.owner, Owner::Run(_))
-                            && q.rect.lx < r.ux
-                            && r.lx < q.rect.ux
-                            && q.rect.ly < r.uy
-                            && r.ly < q.rect.uy
-                        {
-                            crossed = true;
-                            break 'search;
-                        }
-                    }
-                }
-            }
-        }
-        if !crossed {
-            continue;
-        }
         let net = match owner {
             PassiveOwner::Pin { net, .. } => net,
             PassiveOwner::Ground => u32::MAX,
         };
+        strips.clear();
         for vertical in [false, true] {
             let (lo, hi, minus, plus) = if vertical {
                 (r.ly, r.uy, r.lx, r.ux)
             } else {
                 (r.lx, r.ux, r.ly, r.uy)
             };
-            built.runs.push(Run {
+            let whole = Run {
                 net,
                 layer: sh.layer,
                 vertical,
@@ -1591,11 +1730,36 @@ fn add_passive_strips(
                 passive: Some(owner),
                 node_lo: 0,
                 node_hi: 0,
-            });
+            };
+            passive_pieces(whole, piece, span, &mut strips);
         }
-        stats.passive_strips += 2;
-        if built.runs.len() > limits.max_shapes.saturating_mul(2) {
-            return Err(budget("extraction strips"));
+        // Both whole strips of a shape share its rectangle: one test.
+        let mut last: Option<(Rect, bool)> = None;
+        for strip in strips.drain(..) {
+            let body = body_rect(&strip);
+            if let Some(g) = region {
+                if !contains_point(&g.core, strip_anchor(&strip)) {
+                    continue;
+                }
+                // A routed conductor crossing this piece must be in the input.
+                if !contains_rect(&g.complete, &body) {
+                    return Err(invalid(
+                        "extraction stripe halo does not cover a passive conductor piece",
+                    ));
+                }
+            }
+            let crossed = match last {
+                Some((rect, crossed)) if rect == body => crossed,
+                _ => crossed_by_route(&routing, sh.layer, body, shapes, bins, stats, limits)?,
+            };
+            last = Some((body, crossed));
+            if !crossed {
+                continue;
+            }
+            built.runs.push(strip);
+            if built.runs.len() > limits.max_shapes.saturating_mul(2) {
+                return Err(budget("extraction strips"));
+            }
         }
     }
     Ok(())
@@ -1628,16 +1792,6 @@ fn virtual_crossings(
             })?;
         }
     }
-    stats.passive_strips = stats
-        .passive_strips
-        .checked_add(
-            marked
-                .iter()
-                .map(|w| w.count_ones() as usize)
-                .sum::<usize>()
-                .saturating_mul(2),
-        )
-        .ok_or_else(|| budget("virtual passive strips"))?;
     Ok(marked)
 }
 
@@ -1742,11 +1896,68 @@ fn sample(rows: &[[f64; 3]], spacing: Option<f64>) -> (f64, f64) {
     (a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2]))
 }
 
+/// One stripe of a partitioned extraction (`extract_partitioned`).
+#[derive(Clone, Copy, Debug)]
+pub struct ExtractRegion<'a> {
+    /// Strips anchored in this half-open rectangle (the low end of their
+    /// centre line) contribute capacitance; every other strip is only a
+    /// neighbour. Nets whose driver access point lies here are counted in
+    /// the tree statistics.
+    pub core: Rect,
+    /// The input holds, whole, every routed net and passive conductor that
+    /// meets this rectangle. A contributing strip's neighbourhood must lie
+    /// inside it, otherwise extraction stops (`RC_EXTRACT` halo error).
+    pub complete: Rect,
+    /// `metal_extent` of the whole design (the plate-impossibility rule).
+    pub span: [i64; 2],
+    /// Bit per pin of a routed net of the whole design: a pin partner of a
+    /// contributing strip must have its tree in this stripe.
+    pub routed_pins: &'a [u64],
+}
+/// A pin partner without a tree here is an error in a stripe whose whole
+/// design routes the pin's net: that tree belongs in the stripe's input.
+fn missing_partner(region: Option<&ExtractRegion<'_>>, pin: u32) -> Result<()> {
+    if let Some(g) = region
+        && g.routed_pins
+            .get(pin as usize / 64)
+            .is_some_and(|w| w & (1 << (pin % 64)) != 0)
+    {
+        return Err(invalid(&format!(
+            "extraction stripe lacks the routed net of pin {pin}"
+        )));
+    }
+    Ok(())
+}
+fn strip_anchor(run: &Run) -> [i64; 2] {
+    if run.vertical {
+        [run.cross, run.lo]
+    } else {
+        [run.lo, run.cross]
+    }
+}
+fn contains_point(r: &Rect, p: [i64; 2]) -> bool {
+    r.lx <= p[0] && p[0] < r.ux && r.ly <= p[1] && p[1] < r.uy
+}
+fn contains_rect(outer: &Rect, r: &Rect) -> bool {
+    outer.lx <= r.lx && r.ux <= outer.ux && outer.ly <= r.ly && r.uy <= outer.uy
+}
+
 /// Compute an RC tree for every routed net plus grounded and coupling caps.
 pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<RcNetwork> {
+    extract_region(input, limits, None)
+}
+
+/// `extract_cpu_ref` restricted to the strips anchored in `region.core`
+/// (whole design when `None`). Trees cover every input net; ground and
+/// coupling capacitance come only from the region's strips.
+pub fn extract_region(
+    input: &ExtractInput<'_>,
+    limits: &ExtractLimits,
+    region: Option<&ExtractRegion<'_>>,
+) -> Result<RcNetwork> {
     preflight(input, limits)?;
     let memory = memory_estimate(input, limits)?;
-    let (mut built, mut stats) = build_trees(input, limits)?;
+    let (mut built, mut stats) = build_trees(input, limits, region)?;
     stats.memory = Some(memory);
     let tech = input.tech;
     // Conductor shapes: wire-run bodies and passive shapes; the end
@@ -1817,6 +2028,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         &mut shapes,
         &mut bins,
         &mut entries,
+        &net_index,
         &mut stats,
     )?;
     add_patches(
@@ -1830,9 +2042,24 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         &mut stats,
     )?;
     let routed_runs = built.runs.len();
-    add_passive_strips(input, limits, &mut built, &shapes, &mut bins, &mut stats)?;
+    // With passive pieces, the extent of all metal bounds any plate's extent.
+    let span = if limits.max_passive_strip_length < i64::MAX {
+        Some(match region {
+            Some(g) => g.span,
+            None => metal_extent(input)?,
+        })
+    } else {
+        None
+    };
+    add_passive_strips(
+        input, limits, &mut built, &shapes, &mut bins, &mut stats, region, span,
+    )?;
     let crossed = virtual_crossings(&shapes, &mut bins, &routing_layers, &mut stats)?;
-    stats.wire_runs = built.runs.iter().filter(|r| !r.piece).count();
+    stats.wire_runs = built
+        .runs
+        .iter()
+        .filter(|r| !r.piece && built.home[net_index[&r.net]])
+        .count();
     stats.shapes = shapes.len();
     if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
@@ -1862,15 +2089,18 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             })
         })
         .collect();
+    let piece = limits.max_passive_strip_length;
     let extra = (0..shapes.virtual_count())
         .filter(|&i| crossed[i / 64] & (1 << (i % 64)) != 0)
         .flat_map(|i| {
             let id = (shapes.virtual_offset() + i) as u32;
             let shape = shapes.get(id);
-            [
-                virtual_strip(id, shape, false),
-                virtual_strip(id, shape, true),
-            ]
+            let mut strips = Vec::new();
+            for vertical in [false, true] {
+                let whole = virtual_strip(id, shape, vertical);
+                passive_pieces(whole, piece, span, &mut strips);
+            }
+            strips
         });
     for (run_index, run) in built.runs[..routed_runs]
         .iter()
@@ -1908,6 +2138,19 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                 uy: c1,
             }
         };
+        if let Some(region) = region {
+            if !contains_point(&region.core, strip_anchor(&run)) {
+                continue;
+            }
+            if !contains_rect(&region.complete, &query) {
+                return Err(invalid(
+                    "extraction stripe halo does not cover a strip neighbourhood",
+                ));
+            }
+        }
+        if run.passive.is_some() {
+            stats.passive_strips += 1;
+        }
         candidates.clear();
         seen.clear();
         for &layer in &routing_layers {
@@ -2239,7 +2482,13 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                     let pnode = nearer_end(other, mid_point);
                     let li = net_index[&other.net];
                     let pin_node = match run.passive {
-                        Some(PassiveOwner::Pin { pin, .. }) => built.pin_nodes.get(&pin).copied(),
+                        Some(PassiveOwner::Pin { pin, .. }) => {
+                            let node = built.pin_nodes.get(&pin).copied();
+                            if node.is_none() {
+                                missing_partner(region, pin)?;
+                            }
+                            node
+                        }
                         _ => None,
                     };
                     match pin_node {
@@ -2285,6 +2534,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
                         } else if let Some(&(n, node)) = built.pin_nodes.get(&pin) {
                             Some(Some((n, node, 1.0)))
                         } else {
+                            missing_partner(region, pin)?;
                             stats.unrouted_pin_partners += 1;
                             Some(None)
                         }
@@ -4021,5 +4271,490 @@ mod tests {
             extract_cpu_ref(&reserved, &ExtractLimits::default()),
             Err(Error::Budget(_))
         ));
+    }
+
+    /// A 300 x 300 um block: `count` random L-shaped nets (M1, a via, M2),
+    /// some with a third pin or a patch, over M1 supply rails and M2 straps;
+    /// retained pin shapes, unrouted pin shapes, a grid of cells (an M1
+    /// obstruction and an unrouted pin each) and per-cell driver pins.
+    struct Block {
+        routes: Routes,
+        terminals: Vec<Terminal>,
+        passive: Vec<PassiveShape>,
+        cells: crate::instance_obstacles::InstanceObstacles,
+        signal: Vec<bool>,
+    }
+    fn block(count: u32, seed: u64) -> Block {
+        use crate::instance_obstacles::{
+            InstanceObstacles, ObstacleInstance, ObstacleTemplate, TemplateObstacle,
+        };
+        let mut state = seed;
+        let mut next = |n: i64| -> i64 {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((state >> 33) % n as u64) as i64
+        };
+        let um = 1000;
+        let (mut wires, mut vias, mut access, mut patches) = (vec![], vec![], vec![], vec![]);
+        let (mut terminals, mut passive) = (vec![], vec![]);
+        let mut cells = vec![];
+        let (mut pin_nets, mut pin_ids) = (vec![], vec![]);
+        let mut pin = 0u32;
+        for net in 0..count {
+            let x0 = (5 + next(240)) * um;
+            let x1 = x0 + (3 + next(45)) * um;
+            let y = (5 + next(290)) * um;
+            let rise = (3 + next(40)) * um;
+            let y2 = if (next(2) == 0 && y + rise < 297 * um) || y < rise + 3 * um {
+                y + rise
+            } else {
+                y - rise
+            };
+            for x in (x0..x1).step_by(um as usize) {
+                wires.push(Wire {
+                    net,
+                    layer: 0,
+                    start: [x, y],
+                    end: [x + um, y],
+                });
+            }
+            vias.push(Via {
+                net,
+                kind: 0,
+                at: [x1, y],
+            });
+            for yy in (y.min(y2)..y.max(y2)).step_by(um as usize) {
+                wires.push(Wire {
+                    net,
+                    layer: 1,
+                    start: [x1, yy],
+                    end: [x1, yy + um],
+                });
+            }
+            access.push(Access {
+                pin,
+                net,
+                layer: 0,
+                at: [x0, y],
+            });
+            terminals.push(terminal(pin, net, true));
+            if net % 2 == 0 {
+                passive.push(PassiveShape {
+                    layer: 0,
+                    rect: Rect {
+                        lx: x0 - 150,
+                        ly: y - 150,
+                        ux: x0 + 150,
+                        uy: y + 150,
+                    },
+                    owner: PassiveOwner::Pin { net, pin },
+                });
+            } else {
+                // The driver pin as a cell shape (one pin, no obstruction).
+                cells.push(ObstacleInstance {
+                    template: 1,
+                    pin_start: pin_nets.len() as u32,
+                    at: [x0 - 100, y - 100],
+                    orientation: crate::Orientation::N,
+                });
+                pin_nets.push(net);
+                pin_ids.push(pin);
+            }
+            access.push(Access {
+                pin: pin + 1,
+                net,
+                layer: 1,
+                at: [x1, y2],
+            });
+            terminals.push(terminal(pin + 1, net, false));
+            pin += 2;
+            let xm = x0 + (x1 - x0) / um / 2 * um;
+            if net % 3 == 0 && xm > x0 {
+                access.push(Access {
+                    pin,
+                    net,
+                    layer: 0,
+                    at: [xm, y],
+                });
+                terminals.push(terminal(pin, net, false));
+                pin += 1;
+            }
+            if net % 4 == 1 {
+                patches.push(Patch {
+                    net,
+                    layer: 0,
+                    rect: Rect {
+                        lx: x0 - 300,
+                        ly: y - 50,
+                        ux: x0 + 300,
+                        uy: y + 400,
+                    },
+                });
+            }
+        }
+        for y in (10..300).step_by(20) {
+            passive.push(PassiveShape {
+                layer: 0,
+                rect: Rect {
+                    lx: -5 * um,
+                    ly: y * um - 240,
+                    ux: 305 * um,
+                    uy: y * um + 240,
+                },
+                owner: PassiveOwner::Ground,
+            });
+        }
+        for x in [60, 160, 260] {
+            passive.push(PassiveShape {
+                layer: 1,
+                rect: Rect {
+                    lx: x * um - 800,
+                    ly: -5 * um,
+                    ux: x * um + 800,
+                    uy: 305 * um,
+                },
+                owner: PassiveOwner::Ground,
+            });
+        }
+        // Pin shapes of a net that is not routed.
+        for k in 0..20 {
+            let (x, y) = ((5 + next(290)) * um, (5 + next(290)) * um);
+            passive.push(PassiveShape {
+                layer: 0,
+                rect: Rect {
+                    lx: x,
+                    ly: y,
+                    ux: x + 400,
+                    uy: y + 400,
+                },
+                owner: PassiveOwner::Pin {
+                    net: count,
+                    pin: 1_000_000 + k,
+                },
+            });
+        }
+        // A grid of cells: an obstruction and a pin no route reaches.
+        for i in 0..12 {
+            for j in 0..17 {
+                cells.push(ObstacleInstance {
+                    template: 0,
+                    pin_start: pin_nets.len() as u32,
+                    at: [7 * um + 23 * um * i, 3 * um + 17 * um * j],
+                    orientation: crate::Orientation::N,
+                });
+                pin_nets.push(((i * 17 + j) % i64::from(count)) as u32);
+                pin_ids.push(2_000_000 + (i * 17 + j) as u32);
+            }
+        }
+        let templates = vec![
+            ObstacleTemplate::new(
+                2720,
+                1,
+                vec![
+                    TemplateObstacle {
+                        layer: 0,
+                        rect: Rect {
+                            lx: 0,
+                            ly: 0,
+                            ux: 1500,
+                            uy: 300,
+                        },
+                        pin: None,
+                    },
+                    TemplateObstacle {
+                        layer: 0,
+                        rect: Rect {
+                            lx: 1700,
+                            ly: 0,
+                            ux: 1900,
+                            uy: 600,
+                        },
+                        pin: Some(0),
+                    },
+                ],
+            )
+            .unwrap(),
+            ObstacleTemplate::new(
+                200,
+                1,
+                vec![TemplateObstacle {
+                    layer: 0,
+                    rect: Rect {
+                        lx: 0,
+                        ly: 0,
+                        ux: 200,
+                        uy: 200,
+                    },
+                    pin: Some(0),
+                }],
+            )
+            .unwrap(),
+        ];
+        let cells = InstanceObstacles::new(templates, cells, pin_nets)
+            .unwrap()
+            .with_pin_ids(pin_ids)
+            .unwrap();
+        let mut r = routes(wires, vias, access, (0..count).collect());
+        r.patches = patches;
+        Block {
+            routes: r,
+            terminals,
+            passive,
+            cells,
+            signal: vec![true; count as usize + 1],
+        }
+    }
+    fn same_network(a: &RcNetwork, b: &RcNetwork, tolerance: f64) {
+        let close = |p: f64, q: f64| (p - q).abs() <= tolerance * p.abs().max(q.abs());
+        assert_eq!(a.nets.len(), b.nets.len());
+        for (x, y) in a.nets.iter().zip(&b.nets) {
+            assert_eq!(
+                (x.net, &x.nodes, &x.resistors),
+                (y.net, &y.nodes, &y.resistors)
+            );
+            for (p, q) in x.ground.iter().zip(&y.ground) {
+                assert!(close(*p, *q), "net {} ground {p} vs {q}", x.net);
+            }
+        }
+        assert_eq!(a.couplings.len(), b.couplings.len());
+        for (x, y) in a.couplings.iter().zip(&b.couplings) {
+            assert_eq!((x.a, x.b), (y.a, y.b));
+            assert!(close(x.pf, y.pf), "{x:?} vs {y:?}");
+        }
+        let counts = |s: &ExtractStats| {
+            [
+                s.nets,
+                s.lattice_wires,
+                s.wire_runs,
+                s.vias,
+                s.nodes,
+                s.resistors,
+                s.opened_loop_resistors,
+                s.coincident_pin_links,
+                s.duplicate_wire_edges,
+                s.segment_cut_nodes,
+                s.couplings,
+                s.intervals,
+                s.max_run_candidates,
+                s.context_fallback_intervals,
+                s.foreign_overlaps,
+                s.unrouted_pin_partners,
+                s.patches,
+                s.patch_pieces,
+                s.end_pieces,
+                s.pad_pieces,
+                s.covered_side_intervals,
+                s.nonspanning_plane_intervals,
+                s.passive_strips,
+                s.passive_intervals,
+                s.overlap_pairs_without_data,
+                s.wire_length_dbu as usize,
+            ]
+        };
+        assert_eq!(counts(&a.stats), counts(&b.stats));
+        for (p, q) in [
+            (a.stats.ground_pf, b.stats.ground_pf),
+            (a.stats.coupling_pf, b.stats.coupling_pf),
+            (a.stats.resistance_ohm, b.stats.resistance_ohm),
+            (a.stats.overlap_area_um2, b.stats.overlap_area_um2),
+        ] {
+            assert!(close(p, q), "{p} vs {q}");
+        }
+    }
+    fn block_input<'a>(
+        b: &'a Block,
+        passive: &'a [PassiveShape],
+        l: &'a [RouteLayer],
+        v: &'a [RouteVia],
+        tech: &'a RcTech,
+    ) -> ExtractInput<'a> {
+        ExtractInput {
+            layers: l,
+            vias: v,
+            routes: &b.routes,
+            terminals: &b.terminals,
+            passive,
+            held_bytes: 0,
+            instances: Some(InstancedPassive {
+                geometry: &b.cells,
+                signal_nets: &b.signal,
+            }),
+            tech,
+        }
+    }
+    fn plan(count: usize, halo: i64) -> StripePlan {
+        StripePlan {
+            cuts: even_cuts(0, 300_000, count).unwrap(),
+            halo,
+            max_nodes: 1 << 20,
+            max_elements: 1 << 22,
+            max_couplings: 1 << 20,
+        }
+    }
+    #[test]
+    fn stripes_reproduce_the_whole_extraction() {
+        let b = block(160, 7);
+        let (l, v, tech) = (layers(), vias(), tech(true));
+        let input = block_input(&b, &b.passive, &l, &v, &tech);
+        let limits = ExtractLimits {
+            max_passive_strip_length: 10_000,
+            ..Default::default()
+        };
+        let whole = extract_cpu_ref(&input, &limits).unwrap();
+        let s = &whole.stats;
+        // The block exercises what a partition must preserve.
+        assert!(s.patches > 10 && s.unrouted_pin_partners > 0 && s.foreign_overlaps > 0);
+        assert!(
+            s.passive_strips > 200 && whole.couplings.len() > 400,
+            "{s:?}"
+        );
+        let halo = minimum_halo(&input, &limits).unwrap();
+        assert_eq!(halo, 25_000 + 200 + 1000 + 1);
+        for count in [1, 2, 3, 7] {
+            let part = extract_partitioned(&input, &limits, &plan(count, halo)).unwrap();
+            // One stripe repeats the whole extraction bit for bit.
+            same_network(&whole, &part, if count == 1 { 0.0 } else { 1e-12 });
+            let stripes = &part.stats.partition.as_ref().unwrap();
+            assert_eq!(stripes.stripes.len(), count);
+            assert_eq!(stripes.repeated_trees > 0, count > 1);
+            let homes: usize = stripes.stripes.iter().map(|s| s.home_nets).sum();
+            assert_eq!(homes, 160);
+        }
+    }
+    #[test]
+    fn passive_pieces_keep_perpendicular_crossing_values() {
+        let b = block(160, 11);
+        let (l, v, tech) = (layers(), vias(), tech(true));
+        let input = block_input(&b, &b.passive, &l, &v, &tech);
+        let whole = extract_cpu_ref(&input, &ExtractLimits::default()).unwrap();
+        let limits = ExtractLimits {
+            max_passive_strip_length: 10_000,
+            ..Default::default()
+        };
+        let pieces = extract_cpu_ref(&input, &limits).unwrap();
+        // Every plate here crosses its strip, so a piece boundary inside an
+        // interval only splits its sum; rail ends and strap sides, which no
+        // metal can plate, are dropped.
+        assert_eq!(whole.nets.len(), pieces.nets.len());
+        for (x, y) in whole.nets.iter().zip(&pieces.nets) {
+            assert_eq!(x.resistors, y.resistors);
+            for (p, q) in x.ground.iter().zip(&y.ground) {
+                assert!((p - q).abs() <= 1e-12 * p.abs().max(q.abs()), "{p} {q}");
+            }
+        }
+        assert_eq!(whole.couplings.len(), pieces.couplings.len());
+        for (x, y) in whole.couplings.iter().zip(&pieces.couplings) {
+            assert_eq!((x.a, x.b), (y.a, y.b));
+            assert!((x.pf - y.pf).abs() <= 1e-12 * x.pf.max(y.pf));
+        }
+        assert!(pieces.stats.passive_strips > whole.stats.passive_strips);
+        assert!(pieces.stats.max_run_candidates < whole.stats.max_run_candidates);
+    }
+    #[test]
+    fn stripe_halo_and_missing_nets_fail_explicitly() {
+        let b = block(160, 7);
+        let (l, v, tech) = (layers(), vias(), tech(true));
+        let input = block_input(&b, &b.passive, &l, &v, &tech);
+        let limits = ExtractLimits {
+            max_passive_strip_length: 10_000,
+            ..Default::default()
+        };
+        let halo = minimum_halo(&input, &limits).unwrap();
+        let refused = |r: Result<RcNetwork>, text: &str| match r {
+            Err(Error::Invalid(m)) => assert!(m.contains(text), "{m}"),
+            other => panic!("expected {text}, got {:?}", other.map(|n| n.stats)),
+        };
+        refused(
+            extract_partitioned(&input, &limits, &plan(3, halo - 1)),
+            "below the minimum",
+        );
+        refused(
+            extract_partitioned(
+                &input,
+                &ExtractLimits {
+                    max_passive_strip_length: i64::MAX,
+                    ..limits.clone()
+                },
+                &plan(3, halo),
+            ),
+            "finite passive strip length",
+        );
+        // An 80 um wide obstruction anchored just inside the middle stripe:
+        // its side strip reaches beyond the minimum halo and is refused, a
+        // wider halo extracts it like the whole design.
+        let mut passive = b.passive.clone();
+        passive.push(PassiveShape {
+            layer: 0,
+            rect: Rect {
+                lx: 62_000,
+                ly: 150_600,
+                ux: 142_000,
+                uy: 151_000,
+            },
+            owner: PassiveOwner::Ground,
+        });
+        let wide = block_input(&b, &passive, &l, &v, &tech);
+        refused(
+            extract_partitioned(&wide, &limits, &plan(3, halo)),
+            "halo does not cover",
+        );
+        let whole = extract_cpu_ref(&wide, &limits).unwrap();
+        let part = extract_partitioned(&wide, &limits, &plan(3, 50_000)).unwrap();
+        same_network(&whole, &part, 1e-12);
+        // A region whose input misses a routed net that owns a pin shape in
+        // its core: refused wherever that pin is a partner of a core strip.
+        let core = Rect {
+            lx: 100_000,
+            ly: i64::MIN,
+            ux: 200_000,
+            uy: i64::MAX,
+        };
+        let mut pins = vec![0u64; 64];
+        for a in &b.routes.access {
+            pins[a.pin as usize / 64] |= 1 << (a.pin % 64);
+        }
+        let span = metal_extent(&input).unwrap();
+        let region = |pins| ExtractRegion {
+            core,
+            complete: Rect {
+                lx: core.lx - halo,
+                ux: core.ux + halo,
+                ..core
+            },
+            span,
+            routed_pins: pins,
+        };
+        let mut refusals = 0;
+        for net in b.passive.iter().filter_map(|s| match s.owner {
+            PassiveOwner::Pin { net, .. }
+                if net < 160 && s.rect.lx >= core.lx && s.rect.ux < core.ux =>
+            {
+                Some(net)
+            }
+            _ => None,
+        }) {
+            let mut sub = b.routes.clone();
+            sub.wires.retain(|w| w.net != net);
+            sub.vias.retain(|w| w.net != net);
+            sub.access.retain(|w| w.net != net);
+            sub.patches.retain(|w| w.net != net);
+            sub.nets.retain(|&n| n != net);
+            let lacking = ExtractInput {
+                routes: &sub,
+                ..block_input(&b, &b.passive, &l, &v, &tech)
+            };
+            match extract_region(&lacking, &limits, Some(&region(&pins))) {
+                Err(Error::Invalid(m)) if m.contains("lacks the routed net of pin") => {
+                    refusals += 1;
+                    // Without the routed-pin record the same input passes
+                    // silently: the check turns a partition gap into an error.
+                    assert!(extract_region(&lacking, &limits, Some(&region(&[]))).is_ok());
+                }
+                Ok(_) => {}
+                Err(e) => panic!("{e}"),
+            }
+        }
+        assert!(refusals > 0);
     }
 }

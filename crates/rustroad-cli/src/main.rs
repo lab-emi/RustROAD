@@ -187,6 +187,18 @@ enum Command {
         /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 48 MiB of scratch).
         #[arg(long, default_value_t = 4096)]
         max_extract_candidates: usize,
+        /// Evaluate passive conductor strips (rails, straps, pins) in pieces
+        /// of at most this length; whole strips when absent.
+        #[arg(long)]
+        passive_strip_um: Option<f64>,
+        /// Extract in this many equal-width stripes along x, each under the
+        /// limits above (the merged network may be that many times larger);
+        /// needs --passive-strip-um.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=4096))]
+        extract_stripes: Option<u64>,
+        /// Halo beyond each stripe (default: the minimum the limits need).
+        #[arg(long, requires = "extract_stripes")]
+        extract_halo_um: Option<f64>,
     },
     /// Write the linked connectivity/LEF geometry snapshot as JSON.
     ExportConnectivity,
@@ -773,6 +785,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             max_rc_elements,
             max_extract_work,
             max_extract_candidates,
+            passive_strip_um,
+            extract_stripes,
+            extract_halo_um,
         } => {
             if !(max_segment_um.is_finite() && (0.1..=10_000.0).contains(&max_segment_um)) {
                 return Err("INVALID_ARGUMENT: --max-segment-um must be within 0.1..=10000".into());
@@ -788,7 +803,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 max_elements: max_rc_elements,
                 max_work: max_extract_work,
                 max_candidates: max_extract_candidates,
-                max_segment_length: 1, // converted after loading the locked snapshot
+                // Both converted after loading the locked snapshot.
+                max_segment_length: 1,
+                max_passive_strip_length: i64::MAX,
             };
             emit(&rustroad_workspace::extract::extract_with_segment_um(
                 &workspace,
@@ -798,6 +815,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     out,
                     max_spef_bytes: max_spef_mib * 1024 * 1024,
                     limits: extract_limits,
+                    passive_strip_um,
+                    stripes: extract_stripes.map(|count| {
+                        rustroad_workspace::extract::StripeRequest {
+                            count: count as usize,
+                            halo_um: extract_halo_um,
+                        }
+                    }),
                 },
                 &limits,
                 max_segment_um,
