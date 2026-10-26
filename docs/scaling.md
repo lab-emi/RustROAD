@@ -192,8 +192,10 @@ on stdout.
    Along a track the nodes are the tracks of the via-paired perpendicular
    layers ("stops"), so every via lands on a node of both layers. Moves:
    along a track (cost = length), to a neighbouring track at the same stop
-   (cost = length x `wrong_way_factor`, 4) and vias (`via_cost`). Node ids are
-   dense per layer; no per-edge storage.
+   (cost = length x `wrong_way_factor`, 4) and vias (`via_cost`). Profile
+   `layer_costs` (`{"layer", "wire_percent"}`, 100..=1000, default 100)
+   scale both wire costs per layer. Node ids are dense per layer; no
+   per-edge storage.
    * Sky130: li1/met1/met2/met3/met4 from the LEF (met3 and met4 are offset
      by half a pitch from met1/met2, which is why one shared lattice cannot
      work).
@@ -717,6 +719,16 @@ values favor progress toward the target and may produce a longer route; they
 do not change wire/via costs, collision checks, expansion limits or final
 validation. Priority arithmetic saturates at `u64::MAX`. Qualify the chosen
 weight on both PDKs and report measured routed quality along with run time.
+
+Without `layer_costs` every wire costs its length on every layer, so a long
+route stays on the layer it starts from: the pin-access layer and the layer
+below it. Its metal then covers the access points of every later batch's
+pins along its path (an OpenC910 north-edge port net held a 3.39 mm met2
+wire). Costs above 100 percent on the layers up to the access layer move
+runs longer than about `4 x via_cost / (percent / 100 - 1)` to the layers
+above; they never lower a cost, so the distance estimate stays a lower
+bound. Qualify a cost table on both PDKs (`rtl2gds.py
+--route-access-layer-cost`).
 
 Congestion repair starts from an internal driver when present, orders the
 other internal escapes from their coordinate median outward, and attaches

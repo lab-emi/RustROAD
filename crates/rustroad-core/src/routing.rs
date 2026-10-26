@@ -267,6 +267,11 @@ pub struct TrackPlan {
     pub via_cost: u64,
     /// Cost multiplier of non-preferred-direction wire edges.
     pub wrong_way_factor: u64,
+    /// Indexed like `RouteInput::layers`, or empty for uniform costs: percent
+    /// of a wire edge's length charged on that layer (100..=1000). Above 100
+    /// on the pin-access layers moves long runs to upper layers; no factor is
+    /// below 100, so the geometric target distance stays a lower bound.
+    pub wire_cost_percent: Vec<u32>,
     /// Integer multiplier of the detailed-search lower bound (1..=16).
     /// Values above one favor progress over shortest-path optimality.
     pub heuristic_weight: u64,

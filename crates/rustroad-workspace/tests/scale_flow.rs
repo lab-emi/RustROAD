@@ -494,6 +494,43 @@ fn floorplan_place_and_track_route_round_trip_through_schema_6() {
 }
 
 #[test]
+fn layer_wire_costs_are_validated_before_routing() {
+    let f = Fixture::new();
+    for (tag, costs, error) in [
+        (
+            "unknown",
+            serde_json::json!([{"layer":"M9","wire_percent":200}]),
+            Some("names no routing layer"),
+        ),
+        (
+            "twice",
+            serde_json::json!([{"layer":"M1","wire_percent":200},{"layer":"M1","wire_percent":300}]),
+            Some("twice"),
+        ),
+        (
+            "low",
+            serde_json::json!([{"layer":"M1","wire_percent":99}]),
+            Some("100..=1000"),
+        ),
+        (
+            "costs",
+            serde_json::json!([{"layer":"M1","wire_percent":200},{"layer":"M2","wire_percent":150}]),
+            None,
+        ),
+    ] {
+        let mut v = routing(true);
+        v["track_router"]["layer_costs"] = costs;
+        let name = format!("{tag}.json");
+        fs::write(f.path(&name), serde_json::to_vec(&v).unwrap()).unwrap();
+        match (f.flow(tag, &name), error) {
+            (Ok(ws), None) => assert!(head_dir(&ws).join("routes.rbin").is_file()),
+            (Err(e), Some(text)) => assert!(e.to_string().contains(text), "{tag}: {e}"),
+            (result, expected) => panic!("{tag}: {:?}, expected {expected:?}", result.map(|_| ())),
+        }
+    }
+}
+
+#[test]
 fn lattice_profile_keeps_schema_5_and_track_budgets_fail_explicitly() {
     let f = Fixture::new();
     let ws = f.flow("a", "lattice.json").unwrap();

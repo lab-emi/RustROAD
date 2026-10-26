@@ -35,6 +35,14 @@ pub struct TrackOverride {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<i64>,
 }
+/// Percent of a wire edge's length that the detailed search charges on one
+/// routing layer (100..=1000; unlisted layers 100).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayerCost {
+    pub layer: String,
+    pub wire_percent: u32,
+}
 fn default_global_iterations() -> usize {
     20
 }
@@ -97,6 +105,9 @@ pub struct TrackRouterConfig {
     pub max_repair_rounds: usize,
     #[serde(default = "default_wrong_way")]
     pub wrong_way_factor: u64,
+    /// Per-layer wire costs; absent keeps every layer at 100 percent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layer_costs: Vec<LayerCost>,
     /// Detailed-search priority weight (1..=16); above one favors progress.
     #[serde(
         default = "default_heuristic_weight",
@@ -1204,6 +1215,34 @@ pub(crate) fn track_plan(
             return Err(fail("track override names no routing layer"));
         }
     }
+    for (i, c) in config.layer_costs.iter().enumerate() {
+        if !layers
+            .iter()
+            .any(|l| l.name == c.layer && l.vertical.is_some())
+        {
+            return Err(fail("layer cost names no routing layer"));
+        }
+        if config.layer_costs[..i].iter().any(|o| o.layer == c.layer) {
+            return Err(fail("layer cost names a routing layer twice"));
+        }
+        if !(100..=1000).contains(&c.wire_percent) {
+            return Err(fail("layer wire cost outside 100..=1000 percent"));
+        }
+    }
+    let wire_cost_percent = if config.layer_costs.is_empty() {
+        Vec::new()
+    } else {
+        layers
+            .iter()
+            .map(|l| {
+                config
+                    .layer_costs
+                    .iter()
+                    .find(|c| c.layer == l.name)
+                    .map_or(100, |c| c.wire_percent)
+            })
+            .collect()
+    };
     let mut tracks = Vec::with_capacity(layers.len());
     for l in layers {
         let Some(vertical) = l.vertical else {
@@ -1239,6 +1278,7 @@ pub(crate) fn track_plan(
         max_repair_rounds: config.max_repair_rounds,
         via_cost: config.via_cost,
         wrong_way_factor: config.wrong_way_factor,
+        wire_cost_percent,
         heuristic_weight: config.heuristic_weight,
         memory_mib: config.memory_mib,
         max_history_entries: config.max_history_entries,

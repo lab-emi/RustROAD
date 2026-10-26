@@ -194,7 +194,8 @@ class PdkGate:
         batch = getattr(ctx.args, "route_batch_terminals", None)
         hard_search = getattr(ctx.args, "route_hard_search_expansions", None)
         weight = getattr(ctx.args, "route_heuristic_weight", None)
-        if batch is not None or hard_search is not None or weight is not None:
+        access_cost = getattr(ctx.args, "route_access_layer_cost", None)
+        if batch is not None or hard_search is not None or weight is not None or access_cost is not None:
             original = Path(p["routing_config"])
             source = original.read_bytes()
             source_hash = hashlib.sha256(source).hexdigest()
@@ -211,6 +212,15 @@ class PdkGate:
                 if "track_router" not in routing:
                     raise GateError("heuristic override requires a track-router profile")
                 routing["track_router"]["heuristic_weight"] = weight
+            if access_cost is not None:
+                # Every routing layer from the bottom of the stack to the access layer.
+                if "track_router" not in routing:
+                    raise GateError("layer-cost override requires a track-router profile")
+                names = [layer["name"] for layer in routing["layers"]]
+                if routing["access_layer"] not in names:
+                    raise GateError("layer-cost override: access layer is not a routing layer")
+                below = names[:names.index(routing["access_layer"]) + 1]
+                routing["track_router"]["layer_costs"] = [dict(layer=n, wire_percent=access_cost) for n in below]
             derived = ctx.h.root / f"{tag}_batch_routing.json"
             encoded = (json.dumps(routing, indent=2) + "\n").encode()
             expected_hash = hashlib.sha256(encoded).hexdigest()
@@ -220,7 +230,8 @@ class PdkGate:
             self.details["batch_routing_config"] = dict(path=str(derived), sha256=expected_hash,
                                                         source_sha256=source_hash, terminals=batch,
                                                         hard_search_expansions=hard_search,
-                                                        heuristic_weight=weight)
+                                                        heuristic_weight=weight,
+                                                        access_layer_cost_percent=access_cost)
         self.container_peaks: list = []  # peak RSS of every signoff container run (steps)
         want = [(c["name"], c["liberty"], c["rc"]) for c in self.spec["corners"]]
         if want != CORNERS[tag]:
@@ -643,6 +654,8 @@ def main(argv=None) -> int:
     ap.add_argument("--route-batch-terminals", type=int, help="opt-in bounded routing batches of whole nets (2..1000000 terminals)")
     ap.add_argument("--route-hard-search-expansions", type=int, help="bounded hard search before repair; at most the profile's full search limit")
     ap.add_argument("--route-heuristic-weight", type=int, help="detailed track-search priority weight (1..16)")
+    ap.add_argument("--route-access-layer-cost", type=int,
+                    help="track-router wire cost percent (100..1000) of every routing layer up to the access layer")
     ap.add_argument("--input-buffer-fanout", type=int,
                     help="explicit input-tree policy on the frozen floorplan (2..128); clocks remain under CTS")
     ap.add_argument("--small-extraction-budgets", action="store_true",
@@ -657,6 +670,8 @@ def main(argv=None) -> int:
         ap.error("--route-hard-search-expansions must be in 1..50000000")
     if args.route_heuristic_weight is not None and not 1 <= args.route_heuristic_weight <= 16:
         ap.error("--route-heuristic-weight must be in 1..16")
+    if args.route_access_layer_cost is not None and not 100 <= args.route_access_layer_cost <= 1000:
+        ap.error("--route-access-layer-cost must be in 100..1000")
     if args.input_buffer_fanout is not None and not 2 <= args.input_buffer_fanout <= 128:
         ap.error("--input-buffer-fanout must be in 2..128")
     if args.evidence_from:
@@ -688,6 +703,8 @@ def main(argv=None) -> int:
         summary["routing_hard_search_expansions"] = args.route_hard_search_expansions
     if args.route_heuristic_weight is not None:
         summary["routing_heuristic_weight"] = args.route_heuristic_weight
+    if args.route_access_layer_cost is not None:
+        summary["routing_access_layer_cost_percent"] = args.route_access_layer_cost
     if args.small_extraction_budgets:
         summary["extraction_budgets"] = "default small-design caps"
     if args.input_buffer_fanout is not None:

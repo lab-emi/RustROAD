@@ -597,6 +597,13 @@ fn bounded_points(
     Ok(out)
 }
 
+/// Per input layer: percent of a wire edge's length that the detailed search
+/// charges (`TrackPlan::wire_cost_percent`, 100 when the plan is uniform).
+fn wire_costs(input: &RouteInput, plan: &TrackPlan) -> Vec<u64> {
+    (0..input.layers.len())
+        .map(|l| plan.wire_cost_percent.get(l).map_or(100, |&p| u64::from(p)))
+        .collect()
+}
 /// Validate the plan against the input (called from `routing::preflight`).
 pub(crate) fn check_plan(input: &RouteInput, plan: &TrackPlan) -> Result<()> {
     if !input.rules {
@@ -618,6 +625,12 @@ pub(crate) fn check_plan(input: &RouteInput, plan: &TrackPlan) -> Result<()> {
         || plan.via_cost > 1 << 40
         || plan.wrong_way_factor == 0
         || plan.wrong_way_factor > 1000
+        || (!plan.wire_cost_percent.is_empty()
+            && plan.wire_cost_percent.len() != input.layers.len())
+        || plan
+            .wire_cost_percent
+            .iter()
+            .any(|p| !(100..=1000).contains(p))
         || !(1..=16).contains(&plan.heuristic_weight)
         || plan.memory_mib == 0
         || plan.memory_mib > 65_536
@@ -1220,6 +1233,8 @@ struct Router<'a> {
     graph: Graph,
     access_hops: Vec<Vec<u16>>,
     target_costs: crate::routing_target::CostModel,
+    /// Per input layer: percent of a wire edge's length charged (100 if uniform).
+    wire_cost: Vec<u64>,
     cells: Cells,
     spatial: Spatial<'a>,
     pairs: Vec<ViaPair>,
@@ -1477,6 +1492,7 @@ impl<'a> Router<'a> {
             graph,
             access_hops,
             target_costs,
+            wire_cost: wire_costs(input, plan),
             cells,
             spatial,
             pairs,
@@ -3263,6 +3279,7 @@ impl<'a> Router<'a> {
                     self.tick(&mut search, "detailed", t.pin, net)?;
                     let (l, t_, s_) = self.graph.locate(id);
                     let layer = self.graph.layers[l].layer;
+                    let wire_cost = self.wire_cost[layer as usize];
                     let p = self.graph.xy(l, t_, s_);
                     extent = [
                         extent[0].min(p[0]),
@@ -3363,8 +3380,13 @@ impl<'a> Router<'a> {
                             continue;
                         }
                         let mut step = match mv {
-                            Move::Along => distance(p, q)?,
-                            Move::Wrong => distance(p, q)?.saturating_mul(wrong),
+                            Move::Along => distance(p, q)?.saturating_mul(wire_cost) / 100,
+                            Move::Wrong => {
+                                distance(p, q)?
+                                    .saturating_mul(wrong)
+                                    .saturating_mul(wire_cost)
+                                    / 100
+                            }
                             Move::Via(_) => via_cost,
                         };
                         if self
@@ -4667,6 +4689,7 @@ mod tests {
             max_repair_rounds: 1000,
             via_cost: 80,
             wrong_way_factor: 4,
+            wire_cost_percent: Vec::new(),
             heuristic_weight: 1,
             memory_mib: 64,
             max_history_entries: crate::routing::DEFAULT_MAX_HISTORY_ENTRIES,
@@ -4708,6 +4731,43 @@ mod tests {
     }
     fn limits() -> RouteLimits {
         RouteLimits::default()
+    }
+
+    #[test]
+    fn layer_wire_costs_move_long_runs_to_cheaper_layers() {
+        let run = |percent: Vec<u32>| {
+            let mut i = input(
+                vec![
+                    terminal(0, 0, true, rect(90, 490, 110, 510)),
+                    terminal(1, 0, false, rect(890, 490, 910, 510)),
+                ],
+                Vec::new(),
+            );
+            i.tracks.as_mut().unwrap().wire_cost_percent = percent;
+            let routes = route_cpu_ref(&i, &limits())?;
+            let mut length = [0i64; 3];
+            for w in &routes.wires {
+                length[w.layer as usize] +=
+                    (w.end[0] - w.start[0]).abs() + (w.end[1] - w.start[1]).abs();
+            }
+            Ok::<_, crate::Error>((length, format!("{:?} {:?}", routes.wires, routes.vias)))
+        };
+        let (uniform, geometry) = run(Vec::new()).unwrap();
+        assert!(uniform[0] + uniform[2] >= 700, "{uniform:?}");
+        // An explicit all-100 table is the uniform plan, record for record.
+        assert_eq!(run(vec![100; 5]).unwrap().1, geometry);
+        let (m1, _) = run(vec![300, 100, 100, 100, 100]).unwrap();
+        assert!(m1[0] < 100 && m1[2] >= 700, "M1 at 300%: {m1:?}");
+        let (m3, _) = run(vec![100, 100, 300, 100, 100]).unwrap();
+        assert!(m3[2] < 100 && m3[0] >= 700, "M3 at 300%: {m3:?}");
+        // Factors below 100 would break the lower bound; tables must be complete.
+        for bad in [
+            vec![99, 100, 100, 100, 100],
+            vec![1001, 100, 100, 100, 100],
+            vec![200; 4],
+        ] {
+            assert!(run(bad).is_err());
+        }
     }
 
     #[test]
@@ -4986,6 +5046,7 @@ mod tests {
                 plan.via_cost,
                 plan.wrong_way_factor,
             )?,
+            wire_cost: wire_costs(design, plan),
             graph,
             cells,
             spatial: Spatial::new(design, limits)?,
@@ -5142,6 +5203,7 @@ mod tests {
                     plan.wrong_way_factor,
                 )
                 .unwrap(),
+                wire_cost: wire_costs(&design, plan),
                 graph,
                 cells,
                 spatial: Spatial::new(&design, &limits).unwrap(),
