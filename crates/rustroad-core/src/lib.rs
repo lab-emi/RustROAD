@@ -71,19 +71,46 @@ pub fn transform_rect(
 
 new_key_type! { pub struct InstId; }
 
+/// One terminal whose escape cannot clear the current fixed geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlockedPin {
+    pub pin: u32,
+    pub net: u32,
+    pub region: Rect,
+}
+
+/// Bounded pin-access diagnostics with all work consumed by the failed pass.
+#[derive(Debug)]
+pub struct PinAccessFailure {
+    pub blocked: Box<[BlockedPin]>,
+    pub comparisons: usize,
+    pub expansions: usize,
+}
+
+impl std::fmt::Display for PinAccessFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(first) = self.blocked.first() {
+            write!(
+                f,
+                "NO_ROUTE: pin {} net {} has no legal access ({} blocked pins)",
+                first.pin,
+                first.net,
+                self.blocked.len()
+            )
+        } else {
+            write!(f, "NO_ROUTE: empty pin-access failure")
+        }
+    }
+}
+impl std::error::Error for PinAccessFailure {}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("INVALID_DESIGN: {0}")]
     Invalid(String),
     /// A pin cannot escape the current fixed geometry; includes consumed search work.
-    #[error("INVALID_DESIGN: NO_ROUTE: pin {pin} net {net} has no legal access")]
-    PinAccess {
-        pin: u32,
-        net: u32,
-        region: Rect,
-        comparisons: usize,
-        expansions: usize,
-    },
+    #[error("INVALID_DESIGN: {0}")]
+    PinAccess(#[source] Box<PinAccessFailure>),
     #[error("BUDGET_EXCEEDED: {0}")]
     Budget(String),
     #[error("PLACEMENT_CAPACITY: no legal row remains for instance {0}")]

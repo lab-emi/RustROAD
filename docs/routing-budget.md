@@ -219,6 +219,7 @@ Repair has explicit `RouteLimits` bounds:
 | Limit | Default | Hard ceiling |
 | --- | ---: | ---: |
 | `max_batch_retries` |16 |128 |
+| `max_batch_blocked_pins` |64 |4,096 |
 | `max_batch_displaced_nets` |1,024 |4,096 |
 | `max_batch_repair_terminals` |1,000,000 |1,000,000 |
 
@@ -236,3 +237,21 @@ wire blocks its only escape; joint routing provides a legal witness. Bounded
 repair must produce a deterministic, fully connected route, and insufficient
 retry, terminal or aggregate search budgets must fail. Real-PDK independent
 physical gates remain necessary before full-design qualification.
+
+
+A failed pin-reservation pass collects up to `max_batch_blocked_pins` independent
+blocked regions before returning. It never sends partial plans to detailed
+routing. Reopening all nearby completed nets together avoids rebuilding the
+routing index for each failed pin. The bounded error payload is boxed; its
+collection allowance is128bytes per configured record. The caller reserves
+256bytes per record for region expansion and an ordered interval index, then
+scans completed obstacles once. Every query and the bounded index sort consume
+the existing comparison budget. One-at-a-time diagnostics remain selectable
+with a limit of1.
+
+The grouped regression has two independent enclosed pins and two earlier nets.
+Their joint legal route is retained as the witness. One allowed batch retry
+must recover both blockers, produce deterministic complete geometry, and still
+refuse the same case when only one failure may be collected per pass. The
+rectangle-query index is checked against exhaustive overlap independently of
+its ordering, including exhaustion of its work limit.

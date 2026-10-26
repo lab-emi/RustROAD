@@ -179,14 +179,18 @@ fn alternate_repair_root(
 /// Immutable x-interval index for pin-access repair. A query scans only
 /// lower bounds in [query.lx - widest_window, query.ux], then checks y and
 /// exact overlap. Every candidate and the one-time build are work charged.
-struct WindowIndex {
+pub(crate) struct WindowIndex {
     order: Vec<(i64, usize)>,
     width: i64,
 }
 impl WindowIndex {
-    fn new(windows: &[Rect], work: &mut usize, cap: usize) -> Result<Self> {
+    pub(crate) fn new(windows: &[Rect], work: &mut usize, cap: usize) -> Result<Self> {
         *work = work
-            .checked_add(windows.len())
+            .checked_add(
+                windows
+                    .len()
+                    .saturating_mul(windows.len().checked_ilog2().unwrap_or(0) as usize + 1),
+            )
             .filter(|&n| n <= cap)
             .ok_or_else(|| budget("pin access window-index work"))?;
         let mut order = Vec::new();
@@ -203,6 +207,26 @@ impl WindowIndex {
         }
         order.sort_unstable();
         Ok(Self { order, width })
+    }
+    pub(crate) fn touches_any(
+        &self,
+        windows: &[Rect],
+        query: Rect,
+        work: &mut usize,
+        cap: usize,
+    ) -> Result<bool> {
+        let lo = query.lx.saturating_sub(self.width);
+        let begin = self.order.partition_point(|&(x, _)| x < lo);
+        let end = self.order.partition_point(|&(x, _)| x <= query.ux);
+        let search_work = 2 * (self.order.len().checked_ilog2().unwrap_or(0) as usize + 1);
+        *work = work
+            .checked_add(search_work.saturating_add(end - begin))
+            .filter(|&n| n <= cap)
+            .ok_or_else(|| budget("batch access window-query work"))?;
+        Ok(self.order[begin..end].iter().any(|&(_, i)| {
+            let r = windows[i];
+            r.lx <= query.ux && query.lx <= r.ux && r.ly <= query.uy && query.ly <= r.uy
+        }))
     }
     fn overlapping(
         &self,
@@ -737,7 +761,8 @@ fn memory_estimate_limited(
         .saturating_add(layers.saturating_mul(input.vias.len() as u64 + 32))
         .saturating_add(crate::routing_target::memory_bytes(
             limits.max_target_segments,
-        )),
+        ))
+        .saturating_add((limits.max_batch_blocked_pins as u64).saturating_mul(128)),
         spatial: index(added),
         routed: t
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
@@ -1617,6 +1642,14 @@ impl<'a> Router<'a> {
         }))
     }
 
+    fn access_failure(&self, blocked: Vec<crate::BlockedPin>) -> crate::Error {
+        crate::Error::PinAccess(Box::new(crate::PinAccessFailure {
+            blocked: blocked.into_boxed_slice(),
+            comparisons: self.spatial.work,
+            expansions: self.expansions,
+        }))
+    }
+
     /// Conflict-aware escapes for every terminal of a routed net.
     fn reserve(&mut self, terminals: &[&'a Terminal]) -> Result<HashMap<u32, Plan>> {
         let started = std::time::Instant::now();
@@ -1665,6 +1698,7 @@ impl<'a> Router<'a> {
         let mut attempts = vec![0usize; terminals.len()];
         let mut rounds = 0usize;
         let mut window_index = None;
+        let mut blocked = Vec::new();
         while let Some(i) = queue.pop_front() {
             rounds += 1;
             if rounds > terminals.len().saturating_mul(8) + 64 {
@@ -1697,13 +1731,18 @@ impl<'a> Router<'a> {
             }
             attempts[i] += 1;
             if attempts[i] > 3 {
-                return Err(crate::Error::PinAccess {
+                blocked
+                    .try_reserve(1)
+                    .map_err(|_| budget("blocked pin records"))?;
+                blocked.push(crate::BlockedPin {
                     pin: t.pin,
                     net: t.net,
                     region: windows[i],
-                    comparisons: self.spatial.work,
-                    expansions: self.expansions,
                 });
+                if blocked.len() >= self.limits.max_batch_blocked_pins {
+                    return Err(self.access_failure(blocked));
+                }
+                continue;
             }
             // Rip up escapes of terminals whose windows overlap this one.
             if window_index.is_none() {
@@ -1729,13 +1768,18 @@ impl<'a> Router<'a> {
             // Match the original ascending-pin repair order exactly.
             victims.sort_unstable();
             if victims.is_empty() {
-                return Err(crate::Error::PinAccess {
+                blocked
+                    .try_reserve(1)
+                    .map_err(|_| budget("blocked pin records"))?;
+                blocked.push(crate::BlockedPin {
                     pin: t.pin,
                     net: t.net,
                     region: windows[i],
-                    comparisons: self.spatial.work,
-                    expansions: self.expansions,
                 });
+                if blocked.len() >= self.limits.max_batch_blocked_pins {
+                    return Err(self.access_failure(blocked));
+                }
+                continue;
             }
             let mut back = Vec::new();
             for p in victims {
@@ -1754,7 +1798,11 @@ impl<'a> Router<'a> {
             }
             queue.push_front(i);
         }
-        Ok(plans)
+        if blocked.is_empty() {
+            Ok(plans)
+        } else {
+            Err(self.access_failure(blocked))
+        }
     }
 
     // ---------------------------------------------------------------- global
@@ -4111,6 +4159,80 @@ mod tests {
     }
 
     #[test]
+    fn grouped_access_failures_recover_with_one_batch_retry() {
+        let mut terms = Vec::new();
+        let mut fixed = Vec::new();
+        for i in 0..2u32 {
+            let x = i64::from(i) * 1000;
+            let mut a = terminal(i * 2, i, true, rect(x + 490, 90, x + 510, 110));
+            let mut b = terminal(i * 2 + 1, i, false, rect(x + 490, 890, x + 510, 910));
+            a.shapes[0].layer = 1;
+            b.shapes[0].layer = 1;
+            terms.extend([a, b]);
+            terms.push(terminal(
+                4 + i * 2,
+                2 + i,
+                true,
+                rect(x + 490, 490, x + 510, 510),
+            ));
+            terms.push(terminal(
+                5 + i * 2,
+                2 + i,
+                false,
+                rect(x + 90, 690, x + 110, 710),
+            ));
+            fixed.push(Blockage {
+                layer: 0,
+                rect: rect(x + 490, 490, x + 510, 510),
+                net: Some(2 + i),
+            });
+            for r in [
+                rect(420, 420, 470, 580),
+                rect(530, 420, 580, 580),
+                rect(470, 420, 530, 470),
+                rect(470, 530, 530, 580),
+            ] {
+                fixed.push(Blockage {
+                    layer: 0,
+                    rect: shifted(r, [x, 0]).unwrap(),
+                    net: None,
+                });
+            }
+        }
+        let mut design = input(terms, fixed);
+        design.die = rect(0, 0, 2000, 1000);
+        design.tracks.as_mut().unwrap().memory_mib = 256;
+        let limits = RouteLimits {
+            max_batch_retries: 1,
+            ..limits()
+        };
+        let witness = route_cpu_ref(&design, &limits).unwrap();
+        validate(&design, &witness, &limits).unwrap();
+        let (routed, report) = crate::route_batches::route(&design, &limits, 4).unwrap();
+        validate(&design, &routed, &limits).unwrap();
+        assert_eq!(routed.nets, [0, 1, 2, 3]);
+        assert_eq!(routed.access.len(), 8);
+        assert_eq!(report.repair_attempts, 1);
+        assert_eq!(report.displaced_nets, 2);
+        let single = RouteLimits {
+            max_batch_blocked_pins: 1,
+            ..limits.clone()
+        };
+        assert!(matches!(
+            crate::route_batches::route(&design, &single, 4),
+            Err(crate::Error::Budget(_))
+        ));
+        let exact = RouteLimits {
+            max_batch_blocked_pins: 2,
+            ..limits
+        };
+        let (again, _) = crate::route_batches::route(&design, &exact, 4).unwrap();
+        assert_eq!(routed.wires, again.wires);
+        assert_eq!(routed.vias, again.vias);
+        assert_eq!(routed.access, again.access);
+    }
+
+    #[test]
     fn an_earlier_batch_must_not_seal_a_later_pins_only_escape() {
         // A lower-layer pin is enclosed by fixed cell metal. Its only escape
         // is upward at (500,500), where the earlier net prefers a straight wire.
@@ -4872,7 +4994,8 @@ mod tests {
             })
             .collect();
         let mut work = 0;
-        let index = WindowIndex::new(&windows, &mut work, 20_000).unwrap();
+        let index = WindowIndex::new(&windows, &mut work, 200_000).unwrap();
+        let build_work = work;
         for query in [
             Rect {
                 lx: -502,
@@ -4900,7 +5023,7 @@ mod tests {
             },
         ] {
             let mut actual = index
-                .overlapping(&windows, query, &mut work, 20_000)
+                .overlapping(&windows, query, &mut work, 200_000)
                 .unwrap();
             actual.sort_unstable();
             let expected: Vec<_> = windows
@@ -4912,10 +5035,20 @@ mod tests {
                 })
                 .collect();
             assert_eq!(actual, expected);
+            assert_eq!(
+                index
+                    .touches_any(&windows, query, &mut work, 200_000)
+                    .unwrap(),
+                !expected.is_empty()
+            );
         }
-        assert!(work < 11_000, "queries must avoid whole-design rescans");
+        assert!(
+            work - build_work < 2_000,
+            "queries must avoid whole-design rescans"
+        );
         assert!(WindowIndex::new(&windows, &mut 0, 9999).is_err());
         assert!(index.overlapping(&windows, windows[0], &mut 0, 99).is_err());
+        assert!(index.touches_any(&windows, windows[0], &mut 0, 0).is_err());
     }
     #[test]
     fn access_keys_share_exact_geometry_across_unrelated_track_phases() {

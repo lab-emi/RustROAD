@@ -38,6 +38,9 @@ pub struct RouteLimits {
     /// Retries that may reopen earlier nets after a later pin loses access.
     #[serde(default = "default_batch_retries")]
     pub max_batch_retries: usize,
+    /// Blocked pin regions collected before returning one failed reservation pass.
+    #[serde(default = "default_batch_blocked_pins")]
+    pub max_batch_blocked_pins: usize,
     /// Distinct completed nets reopened during one batch.
     #[serde(default = "default_batch_displaced_nets")]
     pub max_batch_displaced_nets: usize,
@@ -70,6 +73,9 @@ fn default_target_segments() -> usize {
 fn default_batch_retries() -> usize {
     16
 }
+fn default_batch_blocked_pins() -> usize {
+    64
+}
 fn default_batch_displaced_nets() -> usize {
     1024
 }
@@ -91,6 +97,7 @@ impl Default for RouteLimits {
             max_active_nodes: default_active_nodes(),
             max_target_segments: default_target_segments(),
             max_batch_retries: default_batch_retries(),
+            max_batch_blocked_pins: default_batch_blocked_pins(),
             max_batch_displaced_nets: default_batch_displaced_nets(),
             max_batch_repair_terminals: default_batch_repair_terminals(),
             max_rule_violations: default_rule_violations(),
@@ -117,6 +124,7 @@ impl RouteLimits {
             max_active_nodes: 50_000_000,
             max_target_segments: 1_000_000,
             max_batch_retries: 128,
+            max_batch_blocked_pins: 4096,
             max_batch_displaced_nets: 4096,
             max_batch_repair_terminals: 1_000_000,
             max_rule_violations: 1_000_000,
@@ -152,6 +160,7 @@ impl RouteLimits {
             (self.max_search_expansions, hard.max_search_expansions),
             (self.max_active_nodes, hard.max_active_nodes),
             (self.max_target_segments, hard.max_target_segments),
+            (self.max_batch_blocked_pins, hard.max_batch_blocked_pins),
             (self.max_batch_displaced_nets, hard.max_batch_displaced_nets),
             (
                 self.max_batch_repair_terminals,

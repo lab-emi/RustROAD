@@ -117,30 +117,24 @@ impl Batch<'_> {
             match routing::route_cpu_ref(view, &local) {
                 Ok(done) => return Ok(done),
                 Err(error) => {
-                    let crate::Error::PinAccess {
-                        region,
-                        comparisons,
-                        expansions,
-                        ..
-                    } = &error
-                    else {
+                    let crate::Error::PinAccess(failure) = &error else {
                         return Err(error);
                     };
                     // Failed attempts consume the same aggregate allowance as successful ones.
                     charge(
                         &mut out.stats.comparisons,
-                        *comparisons,
+                        failure.comparisons,
                         self.limits.max_comparisons,
                     )?;
                     charge(
                         &mut out.stats.expansions,
-                        *expansions,
+                        failure.expansions,
                         self.limits.max_expansions,
                     )?;
                     if retries >= self.limits.max_batch_retries {
                         return Err(budget("batch pin-access retry limit"));
                     }
-                    let reopened = self.reopen(view, out, *region, displaced)?;
+                    let reopened = self.reopen(view, out, &failure.blocked, displaced)?;
                     if reopened == 0 {
                         return Err(error);
                     }
@@ -160,12 +154,12 @@ impl Batch<'_> {
         &self,
         view: &mut RouteInput,
         out: &mut Routes,
-        region: crate::Rect,
+        blocked: &[crate::BlockedPin],
         displaced: usize,
     ) -> Result<usize> {
         guard(
             self.cap,
-            (self.limits.max_batch_displaced_nets as u64) * 192,
+            (self.limits.max_batch_displaced_nets as u64) * 192 + (blocked.len() as u64) * 256,
             "batch repair owners",
         )?;
         let halo = self
@@ -176,7 +170,18 @@ impl Batch<'_> {
             .max()
             .unwrap_or(0)
             .max(self.input.step.saturating_mul(2));
-        let region = routing::expand(region, halo)?;
+        let mut windows = Vec::new();
+        windows
+            .try_reserve_exact(blocked.len())
+            .map_err(|_| budget("batch blocked-pin windows"))?;
+        for pin in blocked {
+            windows.push(routing::expand(pin.region, halo)?);
+        }
+        let window_index = crate::troute::WindowIndex::new(
+            &windows,
+            &mut out.stats.comparisons,
+            self.limits.max_comparisons,
+        )?;
         let base = self.input.obstacles.len();
         charge(
             &mut out.stats.comparisons,
@@ -186,13 +191,14 @@ impl Batch<'_> {
         let mut victims = BTreeSet::new();
         // Only completed routing is eligible. Imported cell and supply geometry stays fixed.
         for obstacle in &view.obstacles[base..] {
-            let r = obstacle.rect;
-            if r.lx <= region.ux
-                && region.lx <= r.ux
-                && r.ly <= region.uy
-                && region.ly <= r.uy
-                && let Some(net) = obstacle.net
+            if let Some(net) = obstacle.net
                 && !victims.contains(&net)
+                && window_index.touches_any(
+                    &windows,
+                    obstacle.rect,
+                    &mut out.stats.comparisons,
+                    self.limits.max_comparisons,
+                )?
             {
                 if displaced + victims.len() >= self.limits.max_batch_displaced_nets {
                     return Err(budget("batch displaced-net limit"));
