@@ -123,11 +123,12 @@ impl RouteLimits {
             max_axis: 1 << 20,
             max_grid_nodes: u32::MAX as usize - 1,
             // Completed routes of a batched full-core route are fixed records:
-            // OpenC910 needs ~245M with instance shapes and ~600M bin entries.
-            // Entry and record ids stay below u32::MAX.
+            // OpenC910 needs ~270M with instance shapes, ~0.5G bin entries and
+            // ~125M stored wires, vias and patches. Entry and record ids stay
+            // below u32::MAX.
             max_obstacles: 512_000_000,
             max_bin_entries: 2_000_000_000,
-            max_segments: 128_000_000,
+            max_segments: 256_000_000,
             max_expansions: 2_000_000_000,
             max_search_expansions: 50_000_000,
             max_hard_search_expansions: None,

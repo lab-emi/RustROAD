@@ -215,8 +215,10 @@ pub struct RoutesTable {
     pub patches: usize,
     pub nets: usize,
 }
-/// Byte cap of the streamed authoritative route table.
-pub const MAX_ROUTE_TABLE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+/// Byte cap of the streamed authoritative route table: 256M records, e.g.
+/// OpenC910's ~125M wires, vias and patches plus ~20M access and ~5M net
+/// records (~9.6 GB) with room to spare.
+pub const MAX_ROUTE_TABLE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 pub(crate) const ROUTE_TABLE: &str = "routes.rbin";
 /// Schema 6 route table: the schema-5 records followed by one net record each.
 pub(crate) fn write_route_table(routes: &Routes, path: &Path) -> Result<RoutesTable> {

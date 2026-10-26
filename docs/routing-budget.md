@@ -85,7 +85,7 @@ Written before implementing the track router (stream W14-W16); details in
 `docs/scaling.md`. The lattice caps above stay hard caps for the lattice
 router. A profile with `track_router` may raise every `RouteLimits` field up
 to `RouteLimits::ceiling()` (4,294,967,294 implicit graph nodes, 512M
-retained obstacle records, 2e9 bin entries, 128M segments, 2e9 expansions,
+retained obstacle records, 2e9 bin entries, 256M segments, 2e9 expansions,
 5e7 per search, 2^40 comparisons and 64M heap entries). These are independent
 ceilings, not a promise that all maxima fit in memory at once.
 
@@ -197,7 +197,7 @@ coverage is checked over the complete crossed GCell interval.
 Minimum-area checks accept a component as soon as one of its rectangles is
 large enough; exact union area is retained for every reported area violation.
 
-Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
+Route records are streamed to `routes.rbin` (at most 16 GiB); the JSON envelope
 remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared
 state into framed, hash-checked `model.rbin` records (16 GiB file bound,
 1 MiB per frame) and fixed-width `physical.rbin` (2 GiB). These storage limits
