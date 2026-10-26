@@ -1318,6 +1318,72 @@ impl<'a> Spatial<'a> {
     pub(crate) fn via_clear(&mut self, kind: usize, at: [i64; 2], net: u32) -> Result<bool> {
         Ok(self.via_probe(kind, at, net)?.is_some())
     }
+    /// Explain one rejected shape without collecting its neighborhood. This is
+    /// only called after validation fails; every repeated probe remains charged.
+    fn explain_collision(&mut self, layer: u32, rect: Rect, net: u32) -> Result<String> {
+        if !self.input.die.contains(rect) {
+            return Ok(format!("outside die {:?}", self.input.die));
+        }
+        let query = expand(rect, self.input.layers[layer as usize].spacing)?;
+        let routing = self.input.layers[layer as usize].vertical.is_some();
+        let (x0, x1, y0, y1) = (
+            query.lx.div_euclid(self.bin),
+            query.ux.div_euclid(self.bin),
+            query.ly.div_euclid(self.bin),
+            query.uy.div_euclid(self.bin),
+        );
+        let bins = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        if bins > self.limits.max_bin_entries as i128 {
+            return Err(budget("collision diagnostic query extent"));
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                self.work = self
+                    .work
+                    .checked_add(1)
+                    .filter(|&n| n <= self.limits.max_comparisons)
+                    .ok_or_else(|| budget("collision diagnostic work"))?;
+                for id in self.bins.iter(layer, x, y) {
+                    self.work = self
+                        .work
+                        .checked_add(1)
+                        .filter(|&n| n <= self.limits.max_comparisons)
+                        .ok_or_else(|| budget("collision diagnostic work"))?;
+                    if !self.alive(id) {
+                        continue;
+                    }
+                    let b = self.shape(id);
+                    if overlap(query, b.rect)
+                        && !(self.same_net(net, layer, rect, b) && (routing || rect == b.rect))
+                    {
+                        let source = if id < self.input.obstacles.len() {
+                            "input obstacle"
+                        } else {
+                            "added shape"
+                        };
+                        return Ok(format!("{source} {id}: {b:?}"));
+                    }
+                }
+            }
+        }
+        let mut culprit = None;
+        if let Some(instances) = &mut self.instances {
+            let ties = &self.ties;
+            instances.visit(layer, query, &mut self.work, self.limits, |b| {
+                if overlap(query, b.rect)
+                    && !(same_net_shapes(ties, net, layer, rect, &b) && (routing || rect == b.rect))
+                {
+                    culprit = Some(b);
+                    return Ok(false);
+                }
+                Ok(true)
+            })?;
+        }
+        Ok(match culprit {
+            Some(b) => format!("instance shape: {b:?}"),
+            None => "no blocking shape found in repeated bounded probe".into(),
+        })
+    }
     pub(crate) fn via_probe(
         &mut self,
         kind: usize,
@@ -2799,7 +2865,10 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
         }
         let rect = wire_rect(w, input.layers[w.layer as usize].width)?;
         if !spatial.clear(w.layer, rect, w.net)? {
-            return Err(invalid("wire collides with blockage/other net"));
+            let cause = spatial.explain_collision(w.layer, rect, w.net)?;
+            return Err(invalid(&format!(
+                "wire collides with blockage/other net: {w:?}, rect {rect:?}, {cause}"
+            )));
         }
         spatial.add_wire(w)?;
     }
@@ -2811,7 +2880,19 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             return Err(invalid("stored via identity/grid"));
         }
         if !spatial.via_clear(v.kind as usize, v.at, v.net)? {
-            return Err(invalid("via collides with blockage/other net"));
+            for shape in &input.vias[v.kind as usize].shapes {
+                let rect = shifted(shape.rect, v.at)?;
+                if !spatial.clear(shape.layer, rect, v.net)? {
+                    let cause = spatial.explain_collision(shape.layer, rect, v.net)?;
+                    return Err(invalid(&format!(
+                        "via collides with blockage/other net: {v:?}, layer {}, rect {rect:?}, {cause}",
+                        shape.layer
+                    )));
+                }
+            }
+            return Err(invalid(
+                "via collision not reproduced by bounded diagnostic",
+            ));
         }
         spatial.add_via(v)?;
     }
