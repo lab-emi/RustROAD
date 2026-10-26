@@ -571,6 +571,24 @@ enum BinIter<'g> {
     Chain { entries: &'g [[u32; 2]], at: u32 },
     List(std::slice::Iter<'g, usize>),
 }
+/// The page of a paged grid that one query looked up last. A query's
+/// consecutive bins mostly share a page (32 x 32 bins), so their page-map
+/// lookups are skipped. Valid only while the grid is not modified, i.e.
+/// within one query.
+#[derive(Clone, Copy)]
+pub(crate) struct PageCursor {
+    key: BinPageKey,
+    page: u32,
+}
+impl Default for PageCursor {
+    fn default() -> Self {
+        // No layer reaches u32::MAX: the first lookup always misses.
+        Self {
+            key: (u32::MAX, 0, 0),
+            page: NIL,
+        }
+    }
+}
 impl Iterator for BinIter<'_> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
@@ -684,32 +702,35 @@ impl BinGrid {
         }
     }
     /// Empty bins for the shapes a [`Spatial`] adds, about `expected`
-    /// entries: dense like its fixed index on small inputs; hashed per
-    /// occupied bin while that costs less than every page of the grid (a
-    /// batch's routes); otherwise the fixed index's paged or sparse layout
-    /// (the routes of a whole design). Every layout visits a bin's shapes in
-    /// insertion order. A grid too large for packed keys is never hashed.
+    /// entries: the fixed index's layout, or hashed per occupied bin where
+    /// [`added_hashed`] chooses it. Every layout visits a bin's shapes in
+    /// insertion order.
     fn added(input: &RouteInput, bin: i64, expected: u64) -> Self {
         let mut grid = Self::new(input, bin);
-        if grid.mode != BinMode::Dense {
-            let axis = 1i64 << HASHED_AXIS_BITS;
-            let packed = grid.nx <= axis && grid.ny <= axis && input.layers.len() <= 256;
-            let pages = grid_pages(
-                grid.bx0,
-                grid.bx0 + grid.nx - 1,
-                grid.by0,
-                grid.by0 + grid.ny - 1,
-            )
-            .saturating_mul(input.layers.len() as u64);
-            if packed
-                && expected.saturating_mul(HASHED_BIN_BYTES) < pages.saturating_mul(PAGE_BYTES)
-            {
-                grid.mode = BinMode::Hashed;
-            }
+        let pages = grid_pages(
+            grid.bx0,
+            grid.bx0 + grid.nx - 1,
+            grid.by0,
+            grid.by0 + grid.ny - 1,
+        )
+        .saturating_mul(input.layers.len() as u64);
+        if added_hashed(
+            grid.mode,
+            grid.nx,
+            grid.ny,
+            input.layers.len(),
+            pages,
+            expected,
+        ) {
+            grid.mode = BinMode::Hashed;
         }
         grid
     }
     fn iter(&self, layer: u32, x: i64, y: i64) -> BinIter<'_> {
+        self.iter_with(&mut PageCursor::default(), layer, x, y)
+    }
+    /// [`Self::iter`] reusing the page `cursor` found last in this query.
+    fn iter_with(&self, cursor: &mut PageCursor, layer: u32, x: i64, y: i64) -> BinIter<'_> {
         if self.mode == BinMode::Hashed
             && let Some(key) = self.chain_key(layer, x, y)
         {
@@ -726,12 +747,17 @@ impl BinGrid {
             );
             let slot = (y.rem_euclid(BIN_PAGE_SIDE) * BIN_PAGE_SIDE + x.rem_euclid(BIN_PAGE_SIDE))
                 as usize;
+            if cursor.key != key {
+                cursor.key = key;
+                cursor.page = self.pages.get(&key).copied().unwrap_or(NIL);
+            }
             return BinIter::Chain {
                 entries: &self.entries,
-                at: self
-                    .pages
-                    .get(&key)
-                    .map_or(NIL, |&p| self.page_store[p as usize][slot][0]),
+                at: if cursor.page == NIL {
+                    NIL
+                } else {
+                    self.page_store[cursor.page as usize][slot][0]
+                },
             };
         }
         // Dense in-grid bins chain; everything else (sparse mode, and dense
@@ -755,6 +781,29 @@ impl BinGrid {
             + self.chains.len()
             + self.page_store.len() * BIN_PAGE_CELLS
     }
+}
+/// Does a [`Spatial`] over a fixed `mode` grid of `nx` x `ny` bins, `layers`
+/// layers and `pages` pages hash its about `expected` added bin entries
+/// instead of using the fixed layout? A query's consecutive bins share pages,
+/// so a page lookup serves many bins, while every hashed bin is a separate
+/// lookup that mostly misses the cache: hashing is chosen only where it saves
+/// at least three quarters of the pages' memory (a cleanup pass over one
+/// batch's routes), never on dense grids or grids too large for packed keys.
+pub(crate) fn added_hashed(
+    mode: BinMode,
+    nx: i64,
+    ny: i64,
+    layers: usize,
+    pages: u64,
+    expected: u64,
+) -> bool {
+    let axis = 1i64 << HASHED_AXIS_BITS;
+    mode != BinMode::Dense
+        && nx <= axis
+        && ny <= axis
+        && layers <= 256
+        && expected.saturating_mul(HASHED_BIN_BYTES).saturating_mul(4)
+            < pages.saturating_mul(PAGE_BYTES)
 }
 /// Pages of one layer over bin range `[x0, x1] x [y0, y1]`.
 pub(crate) fn grid_pages(x0: i64, x1: i64, y0: i64, y1: i64) -> u64 {
@@ -1052,21 +1101,19 @@ impl<'a> InstanceIndex<'a> {
         if extent > limits.max_bin_entries as i128 {
             return Err(budget("instance query extent"));
         }
+        let mut cursor = PageCursor::default();
         for x in x0..=x1 {
             for y in y0..=y1 {
                 *work = work
                     .checked_add(1)
                     .filter(|&n| n <= limits.max_comparisons)
                     .ok_or_else(|| budget("instance query work"))?;
-                for i in self.bins.iter(0, x, y) {
+                let first = FirstBin::new(self.bin, (x, y), (x0, y0));
+                for i in self.bins.iter_with(&mut cursor, 0, x, y) {
                     let Some(bounds) = self.source.bounds(i)? else {
                         continue;
                     };
-                    if (
-                        bounds.lx.div_euclid(self.bin).max(x0),
-                        bounds.ly.div_euclid(self.bin).max(y0),
-                    ) != (x, y)
-                    {
+                    if !first.holds(bounds) {
                         continue;
                     }
                     *work = work
@@ -1110,13 +1157,14 @@ impl<'a> InstanceIndex<'a> {
         if extent > limits.max_bin_entries as i128 {
             return Err(budget("instance query extent"));
         }
+        let mut cursor = PageCursor::default();
         for x in x0..=x1 {
             for y in y0..=y1 {
                 *work = work
                     .checked_add(1)
                     .filter(|&n| n <= limits.max_comparisons)
                     .ok_or_else(|| budget("instance query work"))?;
-                for i in self.bins.iter(0, x, y) {
+                for i in self.bins.iter_with(&mut cursor, 0, x, y) {
                     if self.marks[i] == self.generation {
                         continue;
                     }
@@ -1217,16 +1265,37 @@ impl<'a> Fixed<'a> {
         }
     }
 }
+/// Is query bin `at` the first bin of the query (starting at bin `origin`)
+/// that a binned rectangle occupies? A rectangle is listed in every bin from
+/// `lx.div_euclid(bin)` to `ux.div_euclid(bin)` (likewise in y), so in a bin
+/// that lists it, `max(lx.div_euclid(bin), origin.0) == at.0` holds exactly
+/// when `at.0` is the query's first column or `lx >= at.0 * bin`: the same
+/// test without a division per visited entry.
+#[derive(Clone, Copy)]
+struct FirstBin {
+    lo: (i64, i64),
+    edge: (bool, bool),
+}
+impl FirstBin {
+    fn new(bin: i64, at: (i64, i64), origin: (i64, i64)) -> Self {
+        Self {
+            lo: (at.0 * bin, at.1 * bin),
+            edge: (at.0 == origin.0, at.1 == origin.1),
+        }
+    }
+    #[inline]
+    fn holds(self, r: Rect) -> bool {
+        (self.edge.0 || r.lx >= self.lo.0) && (self.edge.1 || r.ly >= self.lo.1)
+    }
+}
 /// Ids of one query bin in visiting order: fixed shapes first, each taken
-/// only in the first bin of the query (`origin`) it occupies, then added
-/// shapes this query has not seen yet (marks indexed from `obstacles.len()`).
+/// only in the first bin of the query it occupies, then added shapes this
+/// query has not seen yet (marks indexed from `obstacles.len()`).
 struct BinIds<'s> {
     fixed: BinIter<'s>,
     added: BinIter<'s>,
     obstacles: &'s [Blockage],
-    bin: i64,
-    at: (i64, i64),
-    origin: (i64, i64),
+    first: FirstBin,
     marks: &'s mut [u64],
     generation: u64,
 }
@@ -1234,12 +1303,7 @@ impl Iterator for BinIds<'_> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
         for id in self.fixed.by_ref() {
-            let r = self.obstacles[id].rect;
-            if (
-                r.lx.div_euclid(self.bin).max(self.origin.0),
-                r.ly.div_euclid(self.bin).max(self.origin.1),
-            ) == self.at
-            {
+            if self.first.holds(self.obstacles[id].rect) {
                 return Some(id);
             }
         }
@@ -1254,9 +1318,11 @@ impl Iterator for BinIds<'_> {
         None
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn bin_ids<'s>(
     fixed: &'s FixedIndex<'_>,
     added: &'s BinGrid,
+    cursors: &mut [PageCursor; 2],
     marks: &'s mut [u64],
     generation: u64,
     layer: u32,
@@ -1264,12 +1330,10 @@ fn bin_ids<'s>(
     origin: (i64, i64),
 ) -> BinIds<'s> {
     BinIds {
-        fixed: fixed.bins.iter(layer, at.0, at.1),
-        added: added.iter(layer, at.0, at.1),
+        fixed: fixed.bins.iter_with(&mut cursors[0], layer, at.0, at.1),
+        added: added.iter_with(&mut cursors[1], layer, at.0, at.1),
         obstacles: &fixed.input.obstacles,
-        bin: fixed.bin,
-        at,
-        origin,
+        first: FirstBin::new(fixed.bin, at, origin),
         marks,
         generation,
     }
@@ -1568,6 +1632,7 @@ impl<'a> Spatial<'a> {
             return Err(budget("routing query extent"));
         }
         let routing = self.input.layers[layer as usize].vertical.is_some();
+        let mut cursors = [PageCursor::default(); 2];
         for x in x0..=x1 {
             for y in y0..=y1 {
                 self.work += 1;
@@ -1579,6 +1644,7 @@ impl<'a> Spatial<'a> {
                     for id in bin_ids(
                         self.fixed.get(),
                         &self.bins,
+                        &mut cursors,
                         &mut self.marks,
                         self.generation,
                         layer,
@@ -1676,6 +1742,7 @@ impl<'a> Spatial<'a> {
         if bins > self.limits.max_bin_entries as i128 {
             return Err(budget("routing query extent"));
         }
+        let mut cursors = [PageCursor::default(); 2];
         for x in x0..=x1 {
             for y in y0..=y1 {
                 self.work += 1;
@@ -1687,6 +1754,7 @@ impl<'a> Spatial<'a> {
                     for id in bin_ids(
                         self.fixed.get(),
                         &self.bins,
+                        &mut cursors,
                         &mut self.marks,
                         self.generation,
                         layer,
@@ -1831,6 +1899,7 @@ impl<'a> Spatial<'a> {
             .generation
             .checked_add(1)
             .ok_or_else(|| budget("routing query generation"))?;
+        let mut cursors = [PageCursor::default(); 2];
         for x in x0..=x1 {
             for y in y0..=y1 {
                 self.work = self
@@ -1842,6 +1911,7 @@ impl<'a> Spatial<'a> {
                 for id in bin_ids(
                     self.fixed.get(),
                     &self.bins,
+                    &mut cursors,
                     &mut self.marks,
                     self.generation,
                     layer,
@@ -4027,6 +4097,44 @@ mod tests {
     }
 
     #[test]
+    fn first_bin_test_matches_the_division_form() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |m: i64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % m as u64) as i64
+        };
+        let mut checked = 0;
+        for _ in 0..2000 {
+            let bin = 1 + next(5000);
+            let (lx, ly) = (next(200_000) - 100_000, next(200_000) - 100_000);
+            let r = Rect {
+                lx,
+                ly,
+                ux: lx + next(4 * bin),
+                uy: ly + next(4 * bin),
+            };
+            let origin = (
+                r.lx.div_euclid(bin) - next(3) + next(3),
+                r.ly.div_euclid(bin) - next(3) + next(3),
+            );
+            // Every bin of the query that lists the rectangle.
+            for x in r.lx.div_euclid(bin).max(origin.0)..=r.ux.div_euclid(bin) {
+                for y in r.ly.div_euclid(bin).max(origin.1)..=r.uy.div_euclid(bin) {
+                    let division = (
+                        r.lx.div_euclid(bin).max(origin.0),
+                        r.ly.div_euclid(bin).max(origin.1),
+                    ) == (x, y);
+                    assert_eq!(FirstBin::new(bin, (x, y), origin).holds(r), division);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 10_000);
+    }
+
+    #[test]
     fn packed_bin_keys_spread_over_map_buckets() {
         use std::hash::{BuildHasher, Hasher};
         // 4 layers x 256 x 256 bins: a single multiply would map every bin
@@ -4121,6 +4229,92 @@ mod tests {
                 soft(paged.probe_soft(layer, rect, net).unwrap())
             );
             assert_eq!(hashed.work, paged.work);
+        }
+    }
+
+    /// Probe throughput over a paged fixed grid with routed shapes in a
+    /// hashed or paged added grid (wire-like rectangles). Reports wall time
+    /// per layout; the result digest must match across layouts and builds.
+    #[test]
+    #[ignore = "throughput benchmark; run pinned to one core under an OS guard"]
+    fn probe_throughput_benchmark() {
+        let mut input = fixture();
+        let side = 320_000;
+        input.die = Rect {
+            lx: 0,
+            ly: 0,
+            ux: side,
+            uy: side,
+        };
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |m: i64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % m as u64) as i64
+        };
+        let wire = |next: &mut dyn FnMut(i64) -> i64, layer: u32| {
+            let span = if next(10) < 7 { 4 } else { 128 };
+            let long = 80 * (1 + next(span));
+            let (x, y) = (next(side - long - 10), next(side - long - 10));
+            if layer == 0 {
+                Rect {
+                    lx: x,
+                    ly: y,
+                    ux: x + long,
+                    uy: y + 2,
+                }
+            } else {
+                Rect {
+                    lx: x,
+                    ly: y,
+                    ux: x + 2,
+                    uy: y + long,
+                }
+            }
+        };
+        input.obstacles = (0..1_000_000u32)
+            .map(|i| Blockage {
+                layer: i % 2,
+                rect: wire(&mut next, i % 2),
+                net: Some(1_000 + i % 50_000),
+            })
+            .collect();
+        let added: Vec<_> = (0..500_000u32)
+            .map(|i| Blockage {
+                layer: i % 2,
+                rect: wire(&mut next, i % 2),
+                net: Some(i % 50_000),
+            })
+            .collect();
+        let queries: Vec<_> = (0..1_000_000u32)
+            .map(|i| (i % 2, wire(&mut next, i % 2), (i % 60_000)))
+            .collect();
+        let limits = RouteLimits {
+            max_comparisons: usize::MAX / 2,
+            max_bin_entries: usize::MAX / 2,
+            max_obstacles: usize::MAX / 2,
+            ..RouteLimits::default()
+        };
+        for (name, expected) in [("hashed", 0u64), ("paged", u64::MAX / 2)] {
+            let mut spatial = Spatial::new_expecting(&input, &limits, expected).unwrap();
+            for b in &added {
+                spatial.add_routed(b.clone()).unwrap();
+            }
+            let started = std::time::Instant::now();
+            let (mut blocked, mut victims) = (0u64, 0u64);
+            for &(layer, rect, net) in &queries {
+                match spatial.probe_soft(layer, rect, net).unwrap() {
+                    Soft::Blocked => blocked += 1,
+                    Soft::Clear { victims: v, .. } => victims += v.len() as u64,
+                }
+            }
+            eprintln!(
+                "[bench] {name} probes {} in {:.3}s blocked {blocked} victims {victims} work {}",
+                queries.len(),
+                started.elapsed().as_secs_f64(),
+                spatial.work
+            );
         }
     }
 

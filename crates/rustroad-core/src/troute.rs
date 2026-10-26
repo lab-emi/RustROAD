@@ -721,23 +721,29 @@ fn memory_estimate_limited(
     }
     .saturating_add(instance_index)
     .saturating_add(fixed_entries.saturating_mul(ENTRY_BYTES));
-    // Each Spatial bins its added geometry apart: densely on small inputs,
-    // otherwise per occupied bin or in the fixed layout, whichever costs
-    // less for its expected entries (see `BinGrid::added`).
+    // Each Spatial bins its added geometry apart, in the fixed layout or
+    // hashed per occupied bin as `routing::added_hashed` chooses for its
+    // expected entries.
     let added = |shapes: u64| {
         // Both Spatial implementations enforce this before every insertion.
         // The checker cannot retain 2*max_segments shapes past this limit.
         let shapes = shapes.min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
         let entries = shapes.saturating_mul(ENTRIES_PER_SHAPE);
-        let hashed = entries.saturating_mul(crate::routing::HASHED_BIN_BYTES);
+        let hashed = crate::routing::added_hashed(
+            mode,
+            x1 - x0 + 1,
+            y1 - y0 + 1,
+            input.layers.len(),
+            pages,
+            entries,
+        );
         let grid = match mode {
+            _ if hashed => entries.saturating_mul(crate::routing::HASHED_BIN_BYTES),
             crate::routing::BinMode::Dense => slots.saturating_mul(GRID_BYTES),
-            crate::routing::BinMode::Sparse => hashed.min(slots.min(entries).saturating_mul(96)),
-            _ => hashed.min(
-                pages
-                    .min(entries)
-                    .saturating_mul(crate::routing::PAGE_BYTES),
-            ),
+            crate::routing::BinMode::Sparse => slots.min(entries).saturating_mul(96),
+            _ => pages
+                .min(entries)
+                .saturating_mul(crate::routing::PAGE_BYTES),
         };
         grid.saturating_add(shapes.saturating_mul(SHAPE_BYTES))
             .saturating_add(entries.saturating_mul(ENTRY_BYTES))
