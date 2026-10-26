@@ -295,3 +295,12 @@ budget and when it exhausts the currently reachable search graph. Root direction
 can change an admissible tree-growth order. The retry reuses the same storage and
 consumes the same per-search and aggregate work budgets; an actual blockage still
 fails. Failure traces retain at most64 terminal points and16 nearby reservations.
+
+
+If conservative same-net/min-area pruning reports no path even after the alternate
+root, one final bounded search may defer that heuristic to exact cleanup. Fixed
+geometry stays immutable, and all area, spacing, connectivity and output checks
+remain mandatory. Search storage is reused; partial geometry is removed from the
+live search and still charged to the existing obstacle/bin budgets. A runtime
+memory check precedes this attempt. Global work, per-search expansion, rip-up,
+round and cleanup-pass limits do not change.

@@ -3328,6 +3328,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 .saturating_add(rips.get(&net).copied().unwrap_or(0).min(16));
             r.mark_region(g, Some(wide));
             let mut outcome = r.route_net(net, &groups[&net], &plans, true, tight, &rips, round)?;
+            let mut conservative = tight;
             if matches!(outcome, Outcome::Limited(_) | Outcome::Failed(_))
                 && alternate_repair_root(
                     groups.get_mut(&net).unwrap(),
@@ -3340,6 +3341,17 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                     eprintln!("[troute] bounded alternate-root retry net {net}");
                 }
                 outcome = r.route_net(net, &groups[&net], &plans, true, tight, &rips, round)?;
+            }
+            // Strict min-area/near-miss pruning is path-dependent and can hide
+            // a route in this one-cost-per-node search. Exact cleanup remains
+            // mandatory for a route found by the final bounded attempt.
+            if tight && matches!(outcome, Outcome::Failed(_)) {
+                r.guard("cleanup-validated retry")?;
+                if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                    eprintln!("[troute] bounded cleanup-validated retry net {net}");
+                }
+                conservative = false;
+                outcome = r.route_net(net, &groups[&net], &plans, true, false, &rips, round)?;
             }
             match outcome {
                 Outcome::Limited(pin) => {
@@ -3363,7 +3375,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                             .map(|t| (t.pin, t.driver, r.graph.point(plans[&t.pin].top)))
                             .collect();
                         eprintln!(
-                            "[troute] no-path context net {net} pin {pin} strict {tight} terminals {} first64 {points:?}",
+                            "[troute] no-path context net {net} pin {pin} strict {conservative} terminals {} first64 {points:?}",
                             group.len()
                         );
                         let (_, start) = r.graph.point(plans[&pin].top);
