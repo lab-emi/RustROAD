@@ -2189,10 +2189,18 @@ pub fn track_memory_estimate(
     crate::troute::estimate_for(input, limits)
 }
 
+pub(crate) fn route_greedy_access(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> {
+    preflight(input, limits)?;
+    if input.tracks.is_none() {
+        return Err(invalid("deferred access repair requires track routing"));
+    }
+    crate::troute::route(input, limits, false)
+}
+
 pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> {
     preflight(input, limits)?;
     if input.tracks.is_some() {
-        return crate::troute::route(input, limits);
+        return crate::troute::route(input, limits, true);
     }
     let grid = Lattice::new(input, limits)?;
     let mut spatial = Spatial::new(input, limits)?;

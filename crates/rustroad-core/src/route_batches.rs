@@ -79,6 +79,7 @@ impl Batch<'_> {
     ) -> Result<Routes> {
         let mut retries = 0;
         let mut displaced = 0;
+        let mut access_alternatives = false;
         loop {
             view.held_bytes = routing::loaded_held_estimate(0, view, crate::memory::live_bytes());
             let mut local = self.limits.clone();
@@ -114,7 +115,12 @@ impl Batch<'_> {
                     estimate.total() >> 20
                 );
             }
-            match routing::route_cpu_ref(view, &local) {
+            let result = if access_alternatives {
+                routing::route_cpu_ref(view, &local)
+            } else {
+                routing::route_greedy_access(view, &local)
+            };
+            match result {
                 Ok(done) => return Ok(done),
                 Err(error) => {
                     let Some(regions) = self.recovery_regions(&error, out)? else {
@@ -125,6 +131,18 @@ impl Batch<'_> {
                     }
                     let reopened = self.reopen(view, out, &regions, displaced)?;
                     if reopened == 0 {
+                        // Preserve established choices while completed-net
+                        // recovery can clear the access window. Only a remaining
+                        // pin-access failure needs the alternate local policy.
+                        if !access_alternatives && matches!(error, crate::Error::PinAccess(_)) {
+                            access_alternatives = true;
+                            retries += 1;
+                            report.repair_attempts += 1;
+                            if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                                eprintln!("[batch] bounded alternate access after {error}");
+                            }
+                            continue;
+                        }
                         if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
                             eprintln!(
                                 "[batch] no completed net overlaps the recovery regions: {error}"

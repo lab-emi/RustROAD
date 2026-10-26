@@ -250,6 +250,12 @@ active terminal for its next preference. The memory estimate includes these
 per-pin and `8 * terminals + 64` reservation-round bounds remain unchanged,
 along with aggregate search, geometry and memory limits.
 
+Batched routing defers alternate preferences until a pin-access failure has no
+remaining completed route to reopen in its recovery windows. That retry uses
+the existing batch-retry allowance, and the failed phase's work and expansions
+are charged before starting it. Earlier successful batches retain their original
+access policy. A second failure remains bounded by the same recovery limits.
+
 Before committing a detailed path, its via cuts are checked against one another.
 An edge can clear all existing geometry while colliding with another new edge
 on the same path. Cuts are sorted by layer and x coordinate, exact duplicates

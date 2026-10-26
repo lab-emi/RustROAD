@@ -1883,7 +1883,11 @@ impl<'a> Router<'a> {
     }
 
     /// Conflict-aware escapes for every terminal of a routed net.
-    fn reserve(&mut self, terminals: &[&'a Terminal]) -> Result<HashMap<u32, Plan>> {
+    fn reserve(
+        &mut self,
+        terminals: &[&'a Terminal],
+        alternatives: bool,
+    ) -> Result<HashMap<u32, Plan>> {
         let started = std::time::Instant::now();
         let mut tables = BTreeMap::new();
         // Most constrained first: fewest start candidates, then pin index.
@@ -2018,16 +2022,18 @@ impl<'a> Router<'a> {
             for p in victims {
                 let plan = plans.remove(&p).unwrap();
                 let j = owner.remove(&p).unwrap();
-                preferences[j] = AccessPreference {
-                    next_start: plan
-                        .source_index
-                        .checked_add(1)
-                        .ok_or_else(|| budget("access seed index"))?,
-                    generation: plan
-                        .generation
-                        .checked_add(1)
-                        .ok_or_else(|| budget("access repair generation"))?,
-                };
+                if alternatives {
+                    preferences[j] = AccessPreference {
+                        next_start: plan
+                            .source_index
+                            .checked_add(1)
+                            .ok_or_else(|| budget("access seed index"))?,
+                        generation: plan
+                            .generation
+                            .checked_add(1)
+                            .ok_or_else(|| budget("access repair generation"))?,
+                    };
+                }
                 plan_records -= plan.wires.len() + plan.vias.len();
                 for id in plan.shapes {
                     self.spatial.remove(id);
@@ -3298,7 +3304,11 @@ fn trace(what: &str, start: std::time::Instant, extra: std::fmt::Arguments<'_>) 
 }
 
 /// Track-router entry point (called by `routing::route_cpu_ref`).
-pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> {
+pub(crate) fn route(
+    input: &RouteInput,
+    limits: &RouteLimits,
+    access_alternatives: bool,
+) -> Result<Routes> {
     let t0 = std::time::Instant::now();
     let plan = input
         .tracks
@@ -3422,7 +3432,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
     r.guard("setup")?;
     trace("spatial index", t0, format_args!("work {}", r.spatial.work));
     let all: Vec<&Terminal> = groups.values().flatten().copied().collect();
-    let plans = r.reserve(&all)?;
+    let plans = r.reserve(&all, access_alternatives)?;
     r.guard("pin access")?;
     trace(
         "access",
@@ -4212,6 +4222,36 @@ mod tests {
         assert_eq!(routed.vias, repeated.vias);
         assert_eq!(routed.access, repeated.access);
 
+        let batch_limits = RouteLimits {
+            max_active_nodes: 2000,
+            max_rule_violations: 256,
+            ..limits()
+        };
+        let (batched, report) = crate::route_batches::route(&design, &batch_limits, 4)
+            .expect("alternate access repairs a batch with no completed blockers");
+        validate(&design, &batched, &batch_limits).unwrap();
+        assert_eq!(report.repair_attempts, 1);
+        assert_eq!(report.displaced_nets, 0);
+        assert_eq!(batched.wires, routed.wires);
+        assert_eq!(batched.vias, routed.vias);
+        assert!(batched.stats.expansions > routed.stats.expansions);
+        let no_retry = RouteLimits {
+            max_batch_retries: 0,
+            ..batch_limits.clone()
+        };
+        assert!(matches!(
+            crate::route_batches::route(&design, &no_retry, 4),
+            Err(crate::Error::Budget(_))
+        ));
+        let no_extra_work = RouteLimits {
+            max_expansions: routed.stats.expansions,
+            ..batch_limits
+        };
+        assert!(matches!(
+            crate::route_batches::route(&design, &no_extra_work, 4),
+            Err(crate::Error::Budget(_))
+        ));
+
         // Exercise the master-relative cache used by physical workspaces.
         design.access_classes = design
             .terminals
@@ -4481,7 +4521,7 @@ mod tests {
                 access_cache_bytes: 0,
             };
             let terminals: Vec<_> = design.terminals.iter().collect();
-            let plans = r.reserve(&terminals).unwrap();
+            let plans = r.reserve(&terminals, true).unwrap();
             // Three previously routed wires form a cut across all routing layers.
             // The original input is clear once their owning net has been ripped up.
             for layer in 0..3 {
