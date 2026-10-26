@@ -1479,6 +1479,58 @@ impl<'a> Router<'a> {
             _ => Ok(()),
         }
     }
+    /// The no-path failure of `pin`: its pin metal, joined with the extent of
+    /// its exhausted search when that lies within eight access steps of the
+    /// metal (a sealed pocket). A batched route reopens the completed nets
+    /// there (see `route_batches`); a wider search keeps only the pin metal.
+    fn no_path_failure(&mut self, net: u32, pin: u32, group: &[&Terminal]) -> Result<crate::Error> {
+        self.spatial.work = self
+            .spatial
+            .work
+            .checked_add(group.len())
+            .filter(|&n| n <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("no-path region work"))?;
+        let terminal = group
+            .iter()
+            .find(|t| t.pin == pin)
+            .ok_or_else(|| invalid("failed pin is not a terminal of its net"))?;
+        self.spatial.work = self
+            .spatial
+            .work
+            .checked_add(terminal.shapes.len())
+            .filter(|&n| n <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("no-path region work"))?;
+        let union = |a: Rect, b: Rect| Rect {
+            lx: a.lx.min(b.lx),
+            ly: a.ly.min(b.ly),
+            ux: a.ux.max(b.ux),
+            uy: a.uy.max(b.uy),
+        };
+        let metal = terminal
+            .shapes
+            .iter()
+            .map(|s| s.rect)
+            .reduce(union)
+            .ok_or_else(|| invalid("failed pin has no shapes"))?;
+        let mut region = metal;
+        if let Some((sink, _, [lx, ly, ux, uy])) = self.last_unreached
+            && sink == pin
+            && lx <= ux
+            && ly <= uy
+        {
+            let near = expand(metal, self.input.step.saturating_mul(8))?;
+            if contains(near, [lx, ly]) && contains(near, [ux, uy]) {
+                region = union(region, Rect { lx, ly, ux, uy });
+            }
+        }
+        Ok(crate::Error::NoPath(Box::new(crate::NoPathFailure {
+            pin,
+            net,
+            region,
+            comparisons: self.spatial.work,
+            expansions: self.expansions,
+        })))
+    }
     /// Bounded no-path diagnostic (trace mode only): the repair region, every
     /// terminal's access plan, the extent of the last unreached sink search
     /// and the stored and instance shapes near the failing sink's start.
@@ -4026,9 +4078,7 @@ pub(crate) fn route(
                         }
                         r.dump_no_path(net, pin, group, &plans, g, wide)?;
                     }
-                    return Err(no_route(&format!(
-                        "pin {pin} net {net}: no path even with rip-up (fixed geometry blocks)"
-                    )));
+                    return Err(r.no_path_failure(net, pin, &groups[&net])?);
                 }
                 Outcome::Routed(route, victims) => {
                     if std::env::var("RUSTROAD_ROUTE_TRACE").is_ok_and(|v| v == "2") {
@@ -5678,6 +5728,139 @@ mod tests {
                 crate::route_batches::route(&design, &limited, 2),
                 Err(crate::Error::Budget(_))
             ));
+        }
+    }
+
+    /// Net 1's port on M2 sits in a ring of fixed cell metal over fixed M1,
+    /// so its only exit is V23 at its top (500,500). Net 0, routed first by
+    /// the batches, runs straight along M3 over that top: the next batch's
+    /// search from the port exhausts its frontier at once (net 3611 of the
+    /// full OpenC910 route, sealed by net 1307's completed bridge).
+    fn sealed_port_design(seal_is_completed_route: bool) -> RouteInput {
+        let mut terms = vec![
+            terminal(0, 0, true, rect(90, 490, 110, 510)),
+            terminal(1, 0, false, rect(890, 490, 910, 510)),
+            terminal(2, 1, true, rect(470, 470, 530, 530)),
+            terminal(3, 1, false, rect(90, 90, 110, 110)),
+        ];
+        terms[0].shapes[0].layer = 2;
+        terms[1].shapes[0].layer = 2;
+        terms[2].shapes[0].layer = 1;
+        let mut fixed = vec![
+            Blockage {
+                layer: 1,
+                rect: terms[2].shapes[0].rect,
+                net: Some(1),
+            },
+            Blockage {
+                layer: 0,
+                rect: rect(450, 450, 550, 550),
+                net: None,
+            },
+        ];
+        for r in [
+            rect(420, 420, 450, 580),
+            rect(550, 420, 580, 580),
+            rect(450, 420, 550, 450),
+            rect(450, 550, 550, 580),
+        ] {
+            fixed.push(Blockage {
+                layer: 1,
+                rect: r,
+                net: None,
+            });
+        }
+        if !seal_is_completed_route {
+            // The same seal as immovable geometry: nothing can reopen it.
+            terms.truncate(2);
+            terms[0].net = 1;
+            terms[1].net = 1;
+            terms[0].pin = 2;
+            terms[1].pin = 3;
+            terms[0].shapes[0] = LayerRect {
+                layer: 1,
+                rect: rect(470, 470, 530, 530),
+            };
+            terms[1].shapes[0] = LayerRect {
+                layer: 0,
+                rect: rect(90, 90, 110, 110),
+            };
+            fixed.push(Blockage {
+                layer: 2,
+                rect: rect(300, 490, 700, 510),
+                net: None,
+            });
+        }
+        let mut design = input(terms, fixed);
+        design.tracks.as_mut().unwrap().memory_mib = 256;
+        design
+    }
+
+    #[test]
+    fn a_completed_route_sealing_a_later_port_is_reopened() {
+        let design = sealed_port_design(true);
+        let limits = RouteLimits {
+            max_active_nodes: 4_000,
+            ..limits()
+        };
+        // Independent witness: routing both nets together succeeds.
+        let together = route_cpu_ref(&design, &limits).unwrap();
+        validate(&design, &together, &limits).unwrap();
+        let (batched, report) = crate::route_batches::route(&design, &limits, 2).unwrap();
+        validate(&design, &batched, &limits).unwrap();
+        assert_eq!(batched.nets, [0, 1]);
+        assert_eq!(batched.access.len(), 4);
+        assert_eq!(report.repair_attempts, 1);
+        assert_eq!(report.displaced_nets, 1);
+        // The port now leaves through V23 at its top.
+        assert!(
+            batched.vias.iter().any(|v| v.net == 1
+                && v.at == [500, 500]
+                && design.vias[v.kind as usize].upper == 2)
+        );
+        let (again, _) = crate::route_batches::route(&design, &limits, 2).unwrap();
+        assert_eq!(batched.wires, again.wires);
+        assert_eq!(batched.vias, again.vias);
+        assert_eq!(batched.access, again.access);
+        for limited in [
+            RouteLimits {
+                max_batch_retries: 0,
+                ..limits.clone()
+            },
+            RouteLimits {
+                max_batch_displaced_nets: 0,
+                ..limits.clone()
+            },
+        ] {
+            assert!(matches!(
+                crate::route_batches::route(&design, &limited, 2),
+                Err(crate::Error::Budget(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn a_port_sealed_by_fixed_geometry_reports_its_pocket() {
+        let design = sealed_port_design(false);
+        let limits = RouteLimits {
+            max_active_nodes: 4_000,
+            ..limits()
+        };
+        for result in [
+            route_cpu_ref(&design, &limits),
+            crate::route_batches::route(&design, &limits, 2).map(|(routes, _)| routes),
+        ] {
+            let Err(crate::Error::NoPath(failure)) = result else {
+                panic!("expected a structured no-path failure, got {result:?}");
+            };
+            assert_eq!((failure.pin, failure.net), (2, 1));
+            assert_eq!(
+                failure.to_string(),
+                "NO_ROUTE: pin 2 net 1: no path even with rip-up (fixed geometry blocks)"
+            );
+            // The pocket: the port metal and the one node its search expanded.
+            assert_eq!(failure.region, rect(470, 470, 530, 530));
+            assert!(failure.expansions > 0 && failure.comparisons > 0);
         }
     }
 

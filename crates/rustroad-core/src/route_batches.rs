@@ -225,6 +225,7 @@ impl Batch<'_> {
         let (count, comparisons, expansions) = match error {
             crate::Error::PinAccess(f) => (f.blocked.len(), f.comparisons, f.expansions),
             crate::Error::RoutingRule(f) => (f.regions.len(), f.comparisons, f.expansions),
+            crate::Error::NoPath(f) => (1, f.comparisons, f.expansions),
             _ => return Ok(None),
         };
         if count == 0 || count > self.limits.max_batch_blocked_pins {
@@ -253,6 +254,7 @@ impl Batch<'_> {
         match error {
             crate::Error::PinAccess(f) => regions.extend(f.blocked.iter().map(|p| p.region)),
             crate::Error::RoutingRule(f) => regions.extend_from_slice(&f.regions),
+            crate::Error::NoPath(f) => regions.push(f.region),
             _ => unreachable!("recovery error kind was checked"),
         }
         Ok(Some(regions))
@@ -446,7 +448,8 @@ impl Batch<'_> {
 /// Route whole nets in bounded groups; previously completed metal is fixed geometry.
 ///
 /// The final validator sees every original terminal and every completed route.
-/// Bounded repair may reopen nearby completed nets to preserve a later pin's access.
+/// Bounded repair may reopen nearby completed nets to preserve a later pin's access
+/// or to open a later net's pocket that their metal seals.
 /// Repair growth is separately capped by `RouteLimits::max_batch_repair_terminals`.
 pub fn route(
     input: &RouteInput,

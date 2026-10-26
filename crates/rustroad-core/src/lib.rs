@@ -114,6 +114,19 @@ pub struct RoutingRuleFailure {
     pub expansions: usize,
 }
 
+/// A terminal whose search found no path even with rip-up: its pin metal
+/// joined with the extent the search explored when that stays near the
+/// metal (a sealed pocket), and all work consumed by the failed pass.
+#[derive(Debug, thiserror::Error)]
+#[error("NO_ROUTE: pin {pin} net {net}: no path even with rip-up (fixed geometry blocks)")]
+pub struct NoPathFailure {
+    pub pin: u32,
+    pub net: u32,
+    pub region: Rect,
+    pub comparisons: usize,
+    pub expansions: usize,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("INVALID_DESIGN: {0}")]
@@ -121,6 +134,9 @@ pub enum Error {
     /// A pin cannot escape the current fixed geometry; includes consumed search work.
     #[error("INVALID_DESIGN: {0}")]
     PinAccess(#[source] Box<PinAccessFailure>),
+    /// A routed terminal's search was exhausted by fixed geometry.
+    #[error("INVALID_DESIGN: {0}")]
+    NoPath(#[source] Box<NoPathFailure>),
     #[error("INVALID_DESIGN: NO_ROUTE: ROUTING_RULE {0}")]
     RoutingRule(#[source] Box<RoutingRuleFailure>),
     #[error("BUDGET_EXCEEDED: {0}")]
