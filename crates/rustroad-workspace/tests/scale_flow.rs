@@ -344,26 +344,26 @@ fn batched_routing_can_route_long_nets_last() {
     let (plain_ws, plain) = route_with("plain", &batch);
     let (routed, plain) = report(plain.unwrap());
     assert_eq!(plain.deferred, None);
-    // Deferring every net (including unrouted single-pin nets) or none keeps
-    // the net-id order and the route.
-    for (tag, um, all) in [("all", 0.001, true), ("none", 100_000.0, false)] {
-        let (copy, summary) = route_with(tag, &deferring(um));
-        let (again, report) = report(summary.unwrap());
-        assert_eq!(again, routed);
-        assert_eq!(report.batches, plain.batches);
-        let deferred = report.deferred.unwrap();
-        assert_eq!(deferred.hpwl_dbu, (um * 1000.0).round() as i64);
-        if all {
-            assert!(deferred.nets >= routed);
-            assert_eq!(deferred.batches, report.batches);
-        } else {
-            assert_eq!(
-                (deferred.nets, deferred.terminals, deferred.batches),
-                (0, 0, 0)
-            );
-        }
-        assert_eq!(def(&copy), def(&plain_ws));
-    }
+    // Deferring no net keeps the net-id order and the route.
+    let (copy, summary) = route_with("none", &deferring(100_000.0));
+    let (again, none) = report(summary.unwrap());
+    assert_eq!(again, routed);
+    assert_eq!(none.batches, plain.batches);
+    let deferred = none.deferred.unwrap();
+    assert_eq!(deferred.hpwl_dbu, 100_000_000);
+    assert_eq!(
+        (deferred.nets, deferred.terminals, deferred.batches),
+        (0, 0, 0)
+    );
+    assert_eq!(def(&copy), def(&plain_ws));
+    // Deferring every net (single-pin ones included) orders all by length.
+    let (_, summary) = route_with("all", &deferring(0.001));
+    let (again, all) = report(summary.unwrap());
+    assert_eq!(again, routed);
+    let deferred = all.deferred.unwrap();
+    assert!(deferred.nets >= routed);
+    assert_eq!(deferred.batches, all.batches);
+    assert!(deferred.median_hpwl_dbu <= deferred.max_hpwl_dbu);
     // An intermediate threshold moves part of the nets into later batches;
     // the committed route passed the full-design validation.
     let mut partial = None;

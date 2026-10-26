@@ -6452,6 +6452,8 @@ mod tests {
                 nets: 1,
                 terminals: 2,
                 batches: 1,
+                median_hpwl_dbu: 840,
+                max_hpwl_dbu: 840,
             })
         );
         // Each pocket net leaves through V23 at its centre.
@@ -6484,30 +6486,58 @@ mod tests {
     }
 
     #[test]
-    fn recovery_reopens_a_deferred_net_after_later_numbered_nets() {
+    fn deferred_nets_route_shortest_first_under_their_order_key() {
         use crate::route_batches::route_resumable;
-        // Both sealed-port nets are long; net 2 is short. Order: 2 | 0, 1. The
-        // batch of net 1 reopens net 0, which follows net 2 in the order.
-        let mut design = sealed_port_design(true);
-        design
-            .terminals
-            .push(terminal(4, 2, true, rect(690, 890, 710, 910)));
-        design
-            .terminals
-            .push(terminal(5, 2, false, rect(790, 890, 810, 910)));
         let limits = RouteLimits {
             max_active_nodes: 4_000,
             ..limits()
         };
-        let (routes, report) =
-            route_resumable(&design, &limits, 2, Some(600), None, &mut |_| Ok(())).unwrap();
+        let run = |design: &RouteInput, defer: Option<i64>| {
+            route_resumable(design, &limits, 2, defer, None, &mut |_| Ok(())).unwrap()
+        };
+        // Shortest first: the pocket net (span 480) routes before the seal
+        // (840), which then detours; in net order the seal comes first.
+        let mut design = sealed_port_design(true);
+        design.terminals[3].shapes[0].rect = rect(290, 290, 310, 310);
+        let (_, ordered) = run(&design, None);
+        assert_eq!((ordered.repair_attempts, ordered.displaced_nets), (1, 1));
+        let (routes, report) = run(&design, Some(400));
         validate(&design, &routes, &limits).unwrap();
-        assert_eq!(routes.nets, [0, 1, 2]);
+        assert_eq!((report.repair_attempts, report.displaced_nets), (0, 0));
+        let deferred = report.deferred.unwrap();
+        assert_eq!(
+            (
+                deferred.nets,
+                deferred.median_hpwl_dbu,
+                deferred.max_hpwl_dbu
+            ),
+            (2, 840, 840)
+        );
+        // Recovery inside the deferred part: seal net 2 (840), pocket net 1
+        // (880), net 3 along the top edge (820) and short net 0. Order:
+        // 0 | 3, 2, 1. The pocket batch reopens net 2, which sits behind the
+        // higher-numbered net 3, so the search needs the half-perimeter key.
+        let mut design = sealed_port_design(true);
+        design.terminals[0].net = 2;
+        design.terminals[1].net = 2;
+        design.terminals.extend([
+            terminal(4, 0, true, rect(690, 190, 710, 210)),
+            terminal(5, 0, false, rect(790, 190, 810, 210)),
+            terminal(6, 3, true, rect(90, 890, 110, 910)),
+            terminal(7, 3, false, rect(870, 890, 890, 910)),
+        ]);
+        let (routes, report) = run(&design, Some(600));
+        validate(&design, &routes, &limits).unwrap();
+        assert_eq!(routes.nets, [0, 1, 2, 3]);
         assert_eq!((report.repair_attempts, report.displaced_nets), (1, 1));
         let deferred = report.deferred.unwrap();
         assert_eq!(
             (deferred.nets, deferred.terminals, deferred.batches),
-            (2, 4, 2)
+            (3, 6, 3)
+        );
+        assert_eq!(
+            (deferred.median_hpwl_dbu, deferred.max_hpwl_dbu),
+            (840, 880)
         );
     }
 

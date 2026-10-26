@@ -158,15 +158,19 @@ with `--route-batch-terminals N` on both PDKs.
 
 Groups follow net ids, so early groups route over an almost empty die. With
 `batch_defer_hpwl_um`, every net whose terminal shapes span a bounding box
-with a larger half-perimeter (microns) moves behind all other nets; both parts
-keep net order and never share a group. A long net routed early crosses the
-pins of many later groups, and recovering their access reopens and reroutes the
-whole net (the OpenC910 full-core route: 4,667 port nets, median 5.9 mm,
-carried 67% of the first 13 groups' wire and most reopened nets). Routed last,
-it detours over short nets, and recovery reopens only those. The route report
-gives the threshold in DBU, deferred nets and terminals, and their group count.
-Deferring every net or none reproduces the net-id order exactly. The harness
-option is `--route-defer-hpwl-um X`.
+with a larger half-perimeter (microns) moves behind all other nets, which keep
+net order. The deferred nets follow by ascending half-perimeter (then net), so
+the longest route last, and the two parts never share a group. A long net routed
+early crosses the pins of many later groups, and recovering their access
+reopens and reroutes the whole net (the OpenC910 full-core route: 4,667 port
+nets, median 5.9 mm, carried 67% of the first 13 groups' wire and most reopened
+nets). Routed after everything shorter, it detours over shorter nets, and
+recovery reopens only those. At 200 um the full core defers 568,880 nets with
+5.4 million terminals (27% of the terminals), so their own order matters as
+much. The route report gives the threshold in DBU, the deferred nets,
+terminals and groups, and their median and largest half-perimeter. Deferring no
+net reproduces the net-id order exactly. The harness option is
+`--route-defer-hpwl-um X`.
 
 Same-net pin-metal queries use a bounded index by layer and x interval; exact
 overlap and escape-point exceptions are preserved. Global A* prefers greater
