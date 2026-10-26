@@ -271,3 +271,20 @@ Repeated unsuccessful cleanup passes cannot reset either resource budget. A tiny
 area-repair fixture verifies refusal at both the measured work boundary and a
 full output-record budget. The actual large-core spacing case still requires a
 fresh guarded run and independent physical validation.
+
+
+A routed net can block a necessary same-net cleanup fill even though it clears
+both original shapes. When a fill has no fixed blocker and would introduce no
+new same-net near miss, the track router reserves its clearance and rips up the
+active blocking nets under the ordinary per-net rip-up and global-round limits.
+Both later routing and cleanup preserve that clearance. Cleanup still decides
+and validates the actual output metal; no reservation alone establishes legality.
+Fixed geometry remains immutable.
+
+Reservations are capped at `min(max_segments, 2 * active_terminals)`. Memory
+admission includes two extra spatial shapes per terminal,80bytes per reservation
+set entry, and the corresponding cleanup index. The output-record and aggregate
+work limits remain unchanged. Tests translated from the observed full-core
+rectangle dimensions verify that a routed blocker cannot return to its old path,
+fixed blockers are never moved, a zero reservation budget refuses, and subsequent
+area cleanup respects protected clearance.

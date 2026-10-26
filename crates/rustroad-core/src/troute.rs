@@ -56,8 +56,9 @@ const ENTRY_BYTES: u64 = 16;
 const GRID_BYTES: u64 = 8;
 /// Shapes the router adds per terminal (escape, routed runs and vias,
 /// ripped-up shapes that stay indexed; measured 13-16), and bin entries per
-/// added shape (measured 2.4-4 over all shapes).
-const SHAPES_PER_TERMINAL: u64 = 20;
+/// added shape (measured 2.4-4 over all shapes). Two further shapes per
+/// terminal bound negotiated rule-fill reservations.
+const SHAPES_PER_TERMINAL: u64 = 22;
 const ENTRIES_PER_SHAPE: u64 = 4;
 /// Output records per terminal (wires, vias, patches, access; measured
 /// 5.2-7.0) and bytes per record across the output and the same-net groups.
@@ -771,6 +772,11 @@ fn memory_estimate_limited(
                     .saturating_mul(8),
             )
             .saturating_add(t.saturating_mul(WINDOW_INDEX_BYTES))
+            .saturating_add(
+                t.saturating_mul(2)
+                    .min(limits.max_segments as u64)
+                    .saturating_mul(80),
+            )
             .saturating_add(records.saturating_mul(96))
             .saturating_add(
                 (nodes.min(limits.max_segments).min(limits.max_active_nodes) as u64)
@@ -788,9 +794,13 @@ fn memory_estimate_limited(
                     as u64)
                     .saturating_mul(32)
             }),
-        check: index(records.saturating_mul(2))
-            .saturating_add(records.saturating_mul(RECORD_BYTES))
-            .saturating_add(rule_grid_cells.saturating_mul(64)),
+        check: index(
+            records
+                .saturating_mul(2)
+                .saturating_add(t.saturating_mul(2).min(limits.max_segments as u64)),
+        )
+        .saturating_add(records.saturating_mul(RECORD_BYTES))
+        .saturating_add(rule_grid_cells.saturating_mul(64)),
     })
 }
 
@@ -1038,6 +1048,59 @@ fn remove_route(
     let route = routes.remove(&net)?;
     *retained_edges -= route.segments();
     Some(route)
+}
+
+type RuleReservation = (u32, u32, i64, i64, i64, i64);
+
+/// Protect a legal fill from the active routes that currently block it.
+fn reserve_rule_clearance(
+    input: &RouteInput,
+    limits: &RouteLimits,
+    spatial: &mut Spatial<'_>,
+    violations: &[route_rules::Violation],
+    reservations: &mut BTreeSet<RuleReservation>,
+    maximum: usize,
+) -> Result<BTreeSet<u32>> {
+    let mut victims = BTreeSet::new();
+    for violation in violations {
+        spatial.work = spatial
+            .work
+            .checked_add(1)
+            .filter(|&n| n <= limits.max_comparisons)
+            .ok_or_else(|| budget("rule-clearance work"))?;
+        let route_rules::Violation::Spacing { net, layer, a, b } = violation else {
+            continue;
+        };
+        let fill =
+            route_rules::fill_for_robust(*a, *b, input.layers[*layer as usize].width, input.grid);
+        let key = (*net, *layer, fill.lx, fill.ly, fill.ux, fill.uy);
+        if reservations.contains(&key) {
+            continue;
+        }
+        if let Soft::Clear {
+            near: false,
+            victims: blocked,
+        } = spatial.probe_soft(*layer, fill, *net)?
+            && !blocked.is_empty()
+        {
+            if reservations.len() >= maximum {
+                return Err(budget("rule-clearance reservation limit"));
+            }
+            for victim in blocked {
+                if !victims.contains(&victim) && victims.len() >= input.terminals.len().max(1) {
+                    return Err(budget("rule-clearance victim limit"));
+                }
+                victims.insert(victim);
+            }
+            spatial.add_fixed(Blockage {
+                layer: *layer,
+                rect: fill,
+                net: Some(*net),
+            })?;
+            reservations.insert(key);
+        }
+    }
+    Ok(victims)
 }
 
 enum Outcome {
@@ -3216,6 +3279,10 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         }
     }
     let mut round = 0usize;
+    let mut rule_reservations = BTreeSet::new();
+    let reservation_limit = limits
+        .max_segments
+        .min(input.terminals.len().saturating_mul(2));
     let via_layers: Vec<(u32, u32)> = input.vias.iter().map(|v| (v.lower, v.upper)).collect();
     for pass in 0..=4usize {
         // Repair: negotiated rip-up and reroute.
@@ -3341,7 +3408,15 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
             .checked_sub(r.spatial.work)
             .filter(|&n| n > 0)
             .ok_or_else(|| budget("routing comparison limit before cleanup"))?;
-        let (work, remaining) = crate::routing::cleanup_report(input, &mut out, &cleanup_limits)?;
+        let protected = rule_reservations
+            .iter()
+            .map(|&(net, layer, lx, ly, ux, uy)| Blockage {
+                net: Some(net),
+                layer,
+                rect: Rect { lx, ly, ux, uy },
+            });
+        let (work, remaining) =
+            crate::routing::cleanup_with_reservations(input, &mut out, &cleanup_limits, protected)?;
         r.spatial.work = r
             .spatial
             .work
@@ -3455,6 +3530,42 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
             }
             return Err(no_route(&format!("ROUTING_RULE {detail}")));
         }
+        // A nearby active route can block a legal same-net fill. Protect that
+        // fill before rerouting its blockers, otherwise they choose it again.
+        let reserved_before = rule_reservations.len();
+        let victims = reserve_rule_clearance(
+            input,
+            limits,
+            &mut r.spatial,
+            &remaining,
+            &mut rule_reservations,
+            reservation_limit,
+        )?;
+        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() && !victims.is_empty() {
+            eprintln!(
+                "[troute] rule clearance reserved {} fills; reroute {} blocking nets",
+                rule_reservations.len() - reserved_before,
+                victims.len()
+            );
+        }
+        for net in victims {
+            let count = rips.entry(net).or_default();
+            *count += 1;
+            if *count > r.plan.max_ripups_per_net {
+                return Err(no_route(&format!(
+                    "net {net} exceeded the rip-up limit during rule repair"
+                )));
+            }
+            let old = remove_route(&mut routed, &mut retained_edges, net)
+                .ok_or_else(|| invalid("rule blocker has no retained route"))?;
+            for id in old.shapes {
+                r.spatial.remove(id);
+            }
+            if !queue.contains(&net) {
+                queue.push_back(net);
+            }
+        }
+        r.guard("rule-clearance reservations")?;
         // Re-route the offending nets in strict mode (no near misses).
         let bad: BTreeSet<u32> = remaining.iter().map(|v| v.net()).collect();
         for net in bad {
@@ -3464,7 +3575,9 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 }
             }
             strict.insert(net);
-            queue.push_back(net);
+            if !queue.contains(&net) {
+                queue.push_back(net);
+            }
         }
     }
     unreachable!("bounded repair passes return")
@@ -4230,6 +4343,103 @@ mod tests {
         let mut unpatched = out;
         unpatched.wires.retain(|w| w.layer != 1);
         assert!(validate(&design, &unpatched, &limits()).is_err());
+    }
+
+    #[test]
+    fn rule_fill_reservation_moves_only_routed_blockers_and_honors_its_cap() {
+        // Dimensions from the full-core failure, translated near the origin.
+        let a = rect(305, 535, 595, 765);
+        let b = rect(690, 340, 1010, 600);
+        let blocker = rect(210, 200, 390, 340);
+        let mut design = input(
+            Vec::new(),
+            vec![
+                Blockage {
+                    layer: 0,
+                    rect: a,
+                    net: Some(0),
+                },
+                Blockage {
+                    layer: 0,
+                    rect: b,
+                    net: Some(0),
+                },
+            ],
+        );
+        design.die = rect(0, 0, 2000, 2000);
+        design.grid = 5;
+        design.layers[0].width = 140;
+        design.layers[0].spacing = 140;
+        let limits = limits();
+        let violation = route_rules::Violation::Spacing {
+            net: 0,
+            layer: 0,
+            a,
+            b,
+        };
+        let fill = route_rules::fill_for_robust(a, b, 140, 5);
+        let obstruction = || Blockage {
+            layer: 0,
+            rect: blocker,
+            net: Some(1),
+        };
+        let mut spatial = Spatial::new(&design, &limits).unwrap();
+        let id = spatial.add_routed(obstruction()).unwrap();
+        assert!(spatial.clear(0, a, 0).unwrap());
+        assert!(spatial.clear(0, b, 0).unwrap());
+        assert!(!spatial.clear(0, fill, 0).unwrap());
+        let mut reservations = BTreeSet::new();
+        let victims = reserve_rule_clearance(
+            &design,
+            &limits,
+            &mut spatial,
+            std::slice::from_ref(&violation),
+            &mut reservations,
+            4,
+        )
+        .unwrap();
+        assert_eq!(victims, BTreeSet::from([1]));
+        assert_eq!(reservations.len(), 1);
+        spatial.remove(id);
+        assert!(spatial.clear(0, fill, 0).unwrap());
+        assert!(
+            !spatial.clear(0, blocker, 1).unwrap(),
+            "the blocking route cannot choose its old path again"
+        );
+
+        let mut fixed = Spatial::new(&design, &limits).unwrap();
+        fixed.add_fixed(obstruction()).unwrap();
+        let mut untouched = BTreeSet::new();
+        assert!(
+            reserve_rule_clearance(
+                &design,
+                &limits,
+                &mut fixed,
+                std::slice::from_ref(&violation),
+                &mut untouched,
+                4
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert!(untouched.is_empty());
+        let mut limited = Spatial::new(&design, &limits).unwrap();
+        limited.add_routed(obstruction()).unwrap();
+        assert!(matches!(
+            reserve_rule_clearance(
+                &design,
+                &limits,
+                &mut limited,
+                &[violation],
+                &mut BTreeSet::new(),
+                0
+            ),
+            Err(crate::Error::Budget(_))
+        ));
+        assert!(
+            limited.clear(0, blocker, 1).unwrap(),
+            "refusal must not add a reservation"
+        );
     }
 
     #[test]

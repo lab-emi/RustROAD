@@ -2484,6 +2484,16 @@ pub(crate) fn cleanup_report(
     out: &mut Routes,
     limits: &RouteLimits,
 ) -> Result<(usize, Vec<Violation>)> {
+    cleanup_with_reservations(input, out, limits, std::iter::empty())
+}
+
+/// Keep negotiated clearance regions protected while other nets receive patches.
+pub(crate) fn cleanup_with_reservations(
+    input: &RouteInput,
+    out: &mut Routes,
+    limits: &RouteLimits,
+    reservations: impl IntoIterator<Item = Blockage>,
+) -> Result<(usize, Vec<Violation>)> {
     let work = prune(input, out, limits)?;
     let mut spatial = Spatial::new(input, limits)?;
     spatial.work = spatial
@@ -2496,6 +2506,9 @@ pub(crate) fn cleanup_report(
     }
     for v in &out.vias {
         spatial.add_via(v)?;
+    }
+    for reservation in reservations {
+        spatial.add_fixed(reservation)?;
     }
     let mut tried = BTreeSet::new();
     for _ in 0..8 {
@@ -3629,6 +3642,74 @@ mod tests {
         input.rules = false;
         assert!(validate(&input, &floating, &RouteLimits::default()).is_err());
     }
+    #[test]
+    fn cleanup_preserves_reserved_clearance_when_choosing_area_stubs() {
+        let mut input = rules_input();
+        input.layers[1].min_area = Some(50);
+        let original = manual(
+            &input,
+            &[([10, 10], [10, 12], 1), ([10, 12], [10, 25], 0)],
+            &[[10, 10], [10, 12]],
+        );
+        let limits = RouteLimits::default();
+        let mut first = original.clone();
+        assert!(
+            cleanup_report(&input, &mut first, &limits)
+                .unwrap()
+                .1
+                .is_empty()
+        );
+        let added = first
+            .wires
+            .iter()
+            .find(|w| !original.wires.contains(w))
+            .unwrap();
+        let reservation = Blockage {
+            layer: added.layer,
+            rect: rect(
+                added.end[0] - 1,
+                added.end[1] - 1,
+                added.end[0] + 1,
+                added.end[1] + 1,
+            ),
+            net: Some(99),
+        };
+        let mut check = Spatial::new(&input, &limits).unwrap();
+        for wire in &original.wires {
+            check.add_wire(wire).unwrap();
+        }
+        for via in &original.vias {
+            check.add_via(via).unwrap();
+        }
+        assert!(
+            check
+                .clear(reservation.layer, reservation.rect, 99)
+                .unwrap(),
+            "reservation must clear the original route"
+        );
+        let mut changed = original.clone();
+        assert!(
+            cleanup_with_reservations(&input, &mut changed, &limits, [reservation.clone()])
+                .unwrap()
+                .1
+                .is_empty()
+        );
+        assert_ne!(first.wires, changed.wires);
+        let mut clearance = Spatial::new(&input, &limits).unwrap();
+        clearance.add_fixed(reservation).unwrap();
+        for wire in &changed.wires {
+            assert!(
+                clearance
+                    .clear(
+                        wire.layer,
+                        wire_rect(wire, input.layers[wire.layer as usize].width).unwrap(),
+                        wire.net
+                    )
+                    .unwrap()
+            );
+        }
+    }
+
     #[test]
     fn cleanup_charges_joint_rule_work_and_refuses_extra_output_records() {
         let mut input = rules_input();
