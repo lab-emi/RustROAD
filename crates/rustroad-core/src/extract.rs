@@ -4590,6 +4590,7 @@ mod tests {
             max_nodes: 1 << 20,
             max_elements: 1 << 22,
             max_couplings: 1 << 20,
+            parallel: 1,
         }
     }
     #[test]
@@ -4597,8 +4598,15 @@ mod tests {
         let b = block(160, 7);
         let (l, v, tech) = (layers(), vias(), tech(true));
         let input = block_input(&b, &b.passive, &l, &v, &tech);
+        // Per-call caps sized to the block, so four stripe working sets fit
+        // the default allowance at once.
         let limits = ExtractLimits {
             max_passive_strip_length: 10_000,
+            max_shapes: 100_000,
+            max_bin_entries: 1_000_000,
+            max_nodes: 50_000,
+            max_elements: 200_000,
+            max_couplings: 100_000,
             ..Default::default()
         };
         let whole = extract_cpu_ref(&input, &limits).unwrap();
@@ -4611,8 +4619,16 @@ mod tests {
         );
         let halo = minimum_halo(&input, &limits).unwrap();
         assert_eq!(halo, 25_000 + 200 + 1000 + 1);
-        for count in [1, 2, 3, 7] {
-            let part = extract_partitioned(&input, &limits, &plan(count, halo)).unwrap();
+        for (count, parallel) in [(1, 1), (2, 1), (3, 2), (7, 4)] {
+            let part = extract_partitioned(
+                &input,
+                &limits,
+                &StripePlan {
+                    parallel,
+                    ..plan(count, halo)
+                },
+            )
+            .unwrap();
             // One stripe repeats the whole extraction bit for bit.
             same_network(&whole, &part, if count == 1 { 0.0 } else { 1e-12 });
             let stripes = &part.stats.partition.as_ref().unwrap();
@@ -4669,6 +4685,15 @@ mod tests {
             extract_partitioned(&input, &limits, &plan(3, halo - 1)),
             "below the minimum",
         );
+        // Four default-cap stripe working sets (about 1 GiB each) do not fit
+        // the 2 GiB allowance: refused before any stripe runs.
+        assert!(matches!(
+            extract_partitioned(&input, &limits, &StripePlan {
+                parallel: 4,
+                ..plan(3, halo)
+            }),
+            Err(Error::Budget(m)) if m.contains("4 concurrent extraction stripes")
+        ));
         refused(
             extract_partitioned(
                 &input,

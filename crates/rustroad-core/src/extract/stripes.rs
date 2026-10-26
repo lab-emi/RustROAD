@@ -9,12 +9,13 @@
 //! plus the merged network.
 use super::{
     ExtractInput, ExtractLimits, ExtractMemory, ExtractRegion, ExtractStats, PassiveOwner,
-    PassiveShape, RcCoupling, RcNet, RcNetwork, budget, extract_region, invalid, metal_extent,
-    preflight,
+    PassiveShape, RcCoupling, RcNet, RcNetwork, budget, extract_region, invalid, memory_estimate,
+    metal_extent, preflight,
 };
 use crate::Rect;
 use crate::Result;
 use crate::routing::{Routes, Terminal};
+use rayon::prelude::*;
 
 /// How `extract_partitioned` cuts the design.
 #[derive(Clone, Debug)]
@@ -29,6 +30,10 @@ pub struct StripePlan {
     pub max_nodes: usize,
     pub max_elements: usize,
     pub max_couplings: usize,
+    /// Stripes extracted at once (each serial; merged in stripe order, so
+    /// the result does not depend on it). Memory is checked upfront for
+    /// this many stripe working sets.
+    pub parallel: usize,
 }
 /// Cuts of `count` stripes of equal width over `lo..hi` (the outer stripes
 /// also cover everything beyond).
@@ -59,6 +64,8 @@ pub struct StripeStats {
     pub couplings: usize,
     pub work: usize,
     pub estimate_bytes: u64,
+    /// Wall time of this stripe (input selection and extraction).
+    pub seconds: f64,
 }
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct PartitionStats {
@@ -147,6 +154,26 @@ pub fn extract_partitioned(
     }
     if plan.max_nodes == 0 || plan.max_elements == 0 || plan.max_couplings == 0 {
         return Err(budget("merged extraction caps must be positive"));
+    }
+    if !(1..=256).contains(&plan.parallel) {
+        return Err(budget(
+            "concurrent extraction stripes must be within 1..=256",
+        ));
+    }
+    // Each concurrent stripe may reach the per-call working estimate (the
+    // whole design's bin bound is an upper bound for a stripe's).
+    let whole = memory_estimate(input, limits)?;
+    let stripe = whole.working_bytes.saturating_add(whole.geometry_bytes);
+    let need = whole
+        .held_bytes
+        .saturating_add(stripe.saturating_mul(plan.parallel as u64) / 4 * 5);
+    if need > whole.limit_bytes {
+        return Err(budget(&format!(
+            "{} concurrent extraction stripes estimate {} MiB exceeds memory_mib {}",
+            plan.parallel,
+            need.div_ceil(1 << 20),
+            limits.memory_mib
+        )));
     }
     let need = minimum_halo(input, limits)?;
     if plan.halo < need {
@@ -245,7 +272,8 @@ pub fn extract_partitioned(
         passive_strip_dbu: limits.max_passive_strip_length,
         ..Default::default()
     };
-    for &(lo, hi) in &cores {
+    let one = |lo: i64, hi: i64| -> Result<(RcNetwork, StripeStats)> {
+        let started = std::time::Instant::now();
         let complete = Rect {
             lx: lo.saturating_sub(plan.halo),
             ux: hi.saturating_add(plan.halo),
@@ -341,51 +369,62 @@ pub fn extract_partitioned(
             routed_pins: &routed_pins,
         };
         let network = extract_region(&sub, limits, Some(&region))?;
-        let passive_shapes = sub_passive.len();
-        drop(sub_routes);
-        drop(sub_terminals);
-        drop(sub_passive);
         let s = &network.stats;
-        partition.stripes.push(StripeStats {
+        let stripe = StripeStats {
             core: [lo, hi],
             nets: network.nets.len(),
             home_nets: s.nets,
-            passive_shapes,
+            passive_shapes: sub_passive.len(),
             shapes: s.shapes,
             couplings: s.couplings,
             work: s.work,
             estimate_bytes: s.memory.map_or(0, |m| m.estimate_bytes),
-        });
-        if let Some(m) = s.memory
-            && memory.is_none_or(|old| m.estimate_bytes > old.estimate_bytes)
-        {
-            memory = Some(m);
-        }
-        add_stats(&mut stats, s)?;
-        for rc in network.nets {
-            let p = at(rc.net).ok_or_else(|| invalid("stripe net outside the input"))?;
-            match &mut trees[p] {
-                slot @ None => *slot = Some(rc),
-                Some(tree) => {
-                    if tree.nodes != rc.nodes || tree.resistors != rc.resistors {
-                        return Err(invalid(&format!(
-                            "stripes built different trees for net {}",
-                            rc.net
-                        )));
+            seconds: started.elapsed().as_secs_f64(),
+        };
+        Ok((network, stripe))
+    };
+    for chunk in cores.chunks(plan.parallel) {
+        let done: Vec<Result<(RcNetwork, StripeStats)>> = if chunk.len() == 1 {
+            vec![one(chunk[0].0, chunk[0].1)]
+        } else {
+            chunk.par_iter().map(|&(lo, hi)| one(lo, hi)).collect()
+        };
+        // Merged in stripe order; the first failing stripe's error.
+        for result in done {
+            let (network, stripe) = result?;
+            let s = &network.stats;
+            if let Some(m) = s.memory
+                && memory.is_none_or(|old| m.estimate_bytes > old.estimate_bytes)
+            {
+                memory = Some(m);
+            }
+            add_stats(&mut stats, s)?;
+            partition.stripes.push(stripe);
+            for rc in network.nets {
+                let p = at(rc.net).ok_or_else(|| invalid("stripe net outside the input"))?;
+                match &mut trees[p] {
+                    slot @ None => *slot = Some(rc),
+                    Some(tree) => {
+                        if tree.nodes != rc.nodes || tree.resistors != rc.resistors {
+                            return Err(invalid(&format!(
+                                "stripes built different trees for net {}",
+                                rc.net
+                            )));
+                        }
+                        for (g, add) in tree.ground.iter_mut().zip(&rc.ground) {
+                            *g += add;
+                        }
+                        partition.repeated_trees += 1;
                     }
-                    for (g, add) in tree.ground.iter_mut().zip(&rc.ground) {
-                        *g += add;
-                    }
-                    partition.repeated_trees += 1;
                 }
             }
-        }
-        couplings
-            .try_reserve(network.couplings.len())
-            .map_err(|_| budget("merged coupling capacitors"))?;
-        couplings.extend(network.couplings);
-        if couplings.len() > plan.max_couplings.saturating_mul(2) {
-            return Err(budget("merged extraction coupling capacitors"));
+            couplings
+                .try_reserve(network.couplings.len())
+                .map_err(|_| budget("merged coupling capacitors"))?;
+            couplings.extend(network.couplings);
+            if couplings.len() > plan.max_couplings.saturating_mul(2) {
+                return Err(budget("merged extraction coupling capacitors"));
+            }
         }
     }
     let mut nets = Vec::with_capacity(n);

@@ -199,6 +199,10 @@ enum Command {
         /// Halo beyond each stripe (default: the minimum the limits need).
         #[arg(long, requires = "extract_stripes")]
         extract_halo_um: Option<f64>,
+        /// Stripes extracted at once; the memory allowance must hold that
+        /// many stripe working sets. The result does not depend on it.
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..=256))]
+        extract_parallel: u64,
     },
     /// Write the linked connectivity/LEF geometry snapshot as JSON.
     ExportConnectivity,
@@ -788,6 +792,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             passive_strip_um,
             extract_stripes,
             extract_halo_um,
+            extract_parallel,
         } => {
             if !(max_segment_um.is_finite() && (0.1..=10_000.0).contains(&max_segment_um)) {
                 return Err("INVALID_ARGUMENT: --max-segment-um must be within 0.1..=10000".into());
@@ -820,6 +825,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         rustroad_workspace::extract::StripeRequest {
                             count: count as usize,
                             halo_um: extract_halo_um,
+                            parallel: extract_parallel as usize,
                         }
                     }),
                 },

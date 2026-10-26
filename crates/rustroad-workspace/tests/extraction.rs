@@ -352,9 +352,18 @@ fn stripe_extraction_writes_the_whole_design_spef() {
         .sha256
         .clone();
     let p = profile(&f, "nom", &tech, None);
+    // Per-call caps sized to the fixture, so two stripes fit at once.
     let pieces = |out: &str, stripes: Option<StripeRequest>| ExtractRequest {
         passive_strip_um: Some(2.0),
         stripes,
+        limits: ExtractLimits {
+            max_shapes: 100_000,
+            max_bin_entries: 1_000_000,
+            max_nodes: 50_000,
+            max_elements: 200_000,
+            max_couplings: 100_000,
+            ..ExtractLimits::default()
+        },
         ..request(p.clone(), "nom", f.root.join(out), 1 << 20)
     };
     let whole = extract(&f.workspace, &pieces("whole.spef", None), &limits()).unwrap();
@@ -366,6 +375,7 @@ fn stripe_extraction_writes_the_whole_design_spef() {
                 Some(StripeRequest {
                     count,
                     halo_um: None,
+                    parallel: 2,
                 }),
             ),
             &limits(),
@@ -402,6 +412,7 @@ fn stripe_extraction_writes_the_whole_design_spef() {
                 Some(StripeRequest {
                     count: 3,
                     halo_um: None,
+                    parallel: 1,
                 }),
             )
         },
@@ -416,6 +427,7 @@ fn stripe_extraction_writes_the_whole_design_spef() {
             Some(StripeRequest {
                 count: 3,
                 halo_um: Some(0.5),
+                parallel: 1,
             }),
         ),
         &limits(),

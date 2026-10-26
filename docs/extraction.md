@@ -31,7 +31,7 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   [--max-rc-elements 1000000] [--max-extract-candidates 4096] \
   [--extract-memory-mib 2048] [--max-extract-shapes 2000000] \
   [--max-extract-bin-entries 8000000] [--passive-strip-um L] \
-  [--extract-stripes N [--extract-halo-um H]]
+  [--extract-stripes N [--extract-halo-um H] [--extract-parallel P]]
 ```
 
 * The workspace is opened under its shared lock and never written. `--out`
@@ -415,8 +415,12 @@ computes the same network stripe by stripe (`extract_partitioned`):
   (`--max-extract-shapes`, `--extract-memory-mib`, ...); its memory estimate
   includes the live process (input plus the network merged so far). The
   merged network may hold `N` times the per-call node, element and coupling
-  caps. Peak memory is one stripe's working set plus the merged network
-  (about 16 B per node, 16 B per resistor and 24-48 B per coupling).
+  caps. `--extract-parallel P` extracts `P` stripes at once (each serial),
+  then merges them in stripe order, so the result does not depend on `P`.
+  Before any stripe runs, the held process plus `P` per-call working
+  estimates (with 25% headroom) must fit `--extract-memory-mib`. Peak memory
+  is `P` stripe working sets plus the merged network (about 16 B per node,
+  16 B per resistor and 24-48 B per coupling).
 
 Tests: `stripes_reproduce_the_whole_extraction` (a 300 um block with 160
 nets, patches, rails, straps, retained and per-cell pins: one stripe is bit

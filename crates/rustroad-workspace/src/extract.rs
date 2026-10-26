@@ -128,6 +128,8 @@ pub struct StripeRequest {
     pub count: usize,
     /// Halo beyond each stripe core (um); the minimum when absent.
     pub halo_um: Option<f64>,
+    /// Stripes extracted at once (the result does not depend on it).
+    pub parallel: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -594,6 +596,7 @@ fn extract_impl(
                 max_nodes: request.limits.max_nodes.saturating_mul(count),
                 max_elements: request.limits.max_elements.saturating_mul(count),
                 max_couplings: request.limits.max_couplings.saturating_mul(count),
+                parallel: stripes.parallel,
             };
             extract::extract_partitioned(&extract_input, &request.limits, &plan)?
         }
