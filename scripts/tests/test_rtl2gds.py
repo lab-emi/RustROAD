@@ -757,3 +757,28 @@ class HoldMutationControls(unittest.TestCase):
         missing = self.evaluate(dict(detected=None, mutation_is_fault=False))
         self.assertEqual(missing["status"], "unverified")
         self.assertNotIn("planted_hold_uncertainty", missing["controls"])
+        disagreeing = self.evaluate(dict(detected=False, mutation_is_fault=True, within_parity_of_margin=False))
+        self.assertEqual(disagreeing["status"], "failed")
+        self.assertNotIn("planted_hold_uncertainty", disagreeing["controls"])
+
+    def test_margin_crossings_within_parity_need_a_detected_replacement(self):
+        # Measured on the batch16 GF180 stress gate (dual-pdk-66): removing the
+        # hold chain leaves r3/D 1.8 fs below the 0.05 ns margin in RustSTA and
+        # 3.9 fs above it in OpenSTA; the engines agree within 6.5 fs everywhere.
+        rust = dict(tt=0.08458406244300615, ss=0.04999818461901506, ff=0.09771538824833198)
+        ref = dict(tt=0.084590502083, ss=0.050003945827, ff=0.097721777856)
+        self.assertTrue(C.within_parity_of_margin(rust, ref, 0.05, 0.001))
+        self.assertFalse(C.within_parity_of_margin(rust, ref, 0.05, 0.000001))
+        self.assertFalse(C.within_parity_of_margin(dict(rust, ss=0.0489), ref, 0.05, 0.001))
+        self.assertFalse(C.within_parity_of_margin(dict(rust, tt=0.0866), ref, 0.05, 0.001))
+        self.assertFalse(C.within_parity_of_margin(rust, dict(ref, ss=0.0499999), 0.05, 0.001))
+        self.assertFalse(C.within_parity_of_margin(dict(tt=0.1), ref, 0.05, 0.001))
+        undecided = dict(detected=False, mutation_is_fault=True, within_parity_of_margin=True)
+        good = self.evaluate(undecided)
+        self.assertEqual(good["status"], "passed")
+        self.assertEqual(good["controls"]["removed_hold_cell"]["detected"], "not_applicable")
+        self.assertIn("parity", good["controls"]["removed_hold_cell"]["reason"])
+        self.assertIs(good["controls"]["removed_hold_cell"]["experiment"]["detected"], False)
+        self.assertEqual(self.evaluate(undecided, False)["status"], "failed")
+        self.assertEqual(self.evaluate(undecided, None)["status"], "unverified")
+        self.assertEqual(self.evaluate(dict(undecided, detected=None))["status"], "unverified")

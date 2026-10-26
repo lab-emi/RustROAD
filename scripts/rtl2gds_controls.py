@@ -21,6 +21,10 @@ bound artifact) and runs the oracle that must catch it; the control is
                     (recorded as `escalated`). If both engines still prove hold
                     met after removal, this is a non-faulty mutation; retain its
                     measured result and require planted_hold_uncertainty instead.
+                    The same holds when both engines agree within the timing
+                    parity at every corner and their worst hold lies within that
+                    parity of the margin without both being below it (the side
+                    of the margin is then numerical, not a detection result).
   planted_hold_uncertainty
                     when no hold cell was inserted, or removal is proved to
                     remain hold-clean in both engines: a copy of the SDC with
@@ -341,13 +345,28 @@ def removed_hold_cell(ctx, gate, b, work: Path) -> dict:
         first = plant("all_insertions", text2)
         removed = removed2
     rust, corner, ref_worst = first["rust"], first["corner"], first["ref_worst"]
+    parity = ctx.budgets["parity_ns"]
     return control("RustSTA and OpenSTA hold gate on a fresh layout", rust[corner] < margin and ref_worst < margin,
                    removed=removed, sink=worst[2], iteration0_hold_ns=worst[0], worst_corner=corner,
                    ruststa_worst_hold_ns=rust, opensta_worst_hold_ns=ref_worst, margin_ns=margin,
                    opensta_worst_hold_by_corner_ns=first["ref_hold"],
                    mutation_is_fault=not (all(v >= margin for v in rust.values())
                                           and all(v >= margin for v in first["ref_hold"].values())),
-                   escalated=escalated, processes=first["processes"], peak_rss_kib=first["peak"])
+                   within_parity_of_margin=within_parity_of_margin(rust, first["ref_hold"], margin, parity),
+                   parity_ns=parity, escalated=escalated, processes=first["processes"], peak_rss_kib=first["peak"])
+
+
+def within_parity_of_margin(rust: dict, ref: dict, margin: float, parity: float) -> bool:
+    """The engines agree within `parity` at every corner and both worst hold
+    slacks lie within `parity` of the margin, yet not both below it: which
+    side of the margin such a mutation lands on is numerical (e.g. OpenSTA's
+    single-precision SDC and table values), not a detection result."""
+    if not rust or set(rust) != set(ref) or not parity >= 0:
+        return False
+    if any(abs(rust[c] - ref[c]) > parity for c in rust):
+        return False
+    r, o = min(rust.values()), min(ref.values())
+    return abs(r - margin) <= parity and abs(o - margin) <= parity and not (r < margin and o < margin)
 
 
 def eco_buffer_pins(b) -> dict:
@@ -737,14 +756,18 @@ def run_all(ctx, gate, b, record) -> dict:
         except Exception as error:  # noqa: BLE001 - a control that could not run proves nothing
             results[name] = dict(detected=None, error=repr(error)[:600])
     removal = results.get("removed_hold_cell", {})
-    if removal.get("detected") is False and removal.get("mutation_is_fault") is False:
-        # A timing oracle must not reject a layout both engines prove meets hold.
-        # Keep the non-fault experiment visible, and require a genuine planted
-        # violation. A failed or incomplete removal experiment never gets this path.
+    undecidable = removal.get("within_parity_of_margin") is True
+    if removal.get("detected") is False and (removal.get("mutation_is_fault") is False or undecidable):
+        # A timing oracle must not reject a layout both engines prove meets hold,
+        # nor decide a margin crossing smaller than their agreed parity. Keep the
+        # experiment visible, and require a genuine planted violation. A failed
+        # or incomplete removal experiment never gets this path.
+        why = ("removal leaves both engines' worst hold within the parity tolerance of the margin, and they "
+               "agree within it at every corner" if undecidable and removal.get("mutation_is_fault") is not False
+               else "removal still meets hold in both engines at every corner")
         results["removed_hold_cell"] = dict(
             detected="not_applicable", experiment=removal,
-            reason="removal still meets hold in both engines at every corner; "
-                   "a separate planted_hold_uncertainty must be detected")
+            reason=why + "; a separate planted_hold_uncertainty must be detected")
         try:
             results["planted_hold_uncertainty"] = planted_hold_uncertainty(
                 ctx, gate, b, root/"planted_hold_uncertainty")
