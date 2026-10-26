@@ -29,6 +29,9 @@ pub struct RouteLimits {
     /// Optional earlier handoff from hard search to bounded routing repair.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_hard_search_expansions: Option<usize>,
+    /// Bounded retries after two vias on a newly traced path conflict.
+    #[serde(default = "default_path_retries")]
+    pub max_path_retries: usize,
     /// Nodes or raw edges retained for one detailed net, independently of the design output size.
     #[serde(default = "default_active_nodes")]
     pub max_active_nodes: usize,
@@ -67,6 +70,9 @@ fn default_rule_violations() -> usize {
 fn default_active_nodes() -> usize {
     200_000
 }
+fn default_path_retries() -> usize {
+    64
+}
 fn default_target_segments() -> usize {
     8192
 }
@@ -94,6 +100,7 @@ impl Default for RouteLimits {
             max_expansions: 2_000_000,
             max_search_expansions: 200_000,
             max_hard_search_expansions: None,
+            max_path_retries: default_path_retries(),
             max_active_nodes: default_active_nodes(),
             max_target_segments: default_target_segments(),
             max_batch_retries: default_batch_retries(),
@@ -121,6 +128,7 @@ impl RouteLimits {
             max_expansions: 2_000_000_000,
             max_search_expansions: 50_000_000,
             max_hard_search_expansions: None,
+            max_path_retries: 4096,
             max_active_nodes: 50_000_000,
             max_target_segments: 1_000_000,
             max_batch_retries: 128,
@@ -143,6 +151,9 @@ impl RouteLimits {
     fn validate_against(&self, hard: &Self) -> Result<()> {
         if self.max_batch_retries > hard.max_batch_retries {
             return Err(budget("batch retry limit outside hard bounds"));
+        }
+        if self.max_path_retries > hard.max_path_retries {
+            return Err(budget("path retry limit outside hard bounds"));
         }
         if self
             .max_hard_search_expansions

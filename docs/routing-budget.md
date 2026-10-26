@@ -232,6 +232,21 @@ scanned only on a pin-access failure, under the aggregate comparison budget.
 Failed searches consume the aggregate expansion and comparison limits too.
 No global all-pin escape-plan collection or path enumeration is introduced.
 
+Before committing a detailed path, its via cuts are checked against one another.
+An edge can clear all existing geometry while colliding with another new edge
+on the same path. Cuts are sorted by layer and x coordinate, exact duplicates
+collapse, and a charged interval sweep finds the first spacing conflict. The
+router excludes that via choice and retries the current sink. Earlier sinks
+remain intact; rejected paths add no shapes or stale spatial-index entries.
+
+`max_path_retries` defaults to 64, has a hard ceiling of 4,096, and may be zero
+to disable these retries. The sorted exclusion list uses 12 bytes per entry.
+The one live cut list is capped by `max_active_nodes`, with 48 bytes per entry
+included in the upfront memory estimate. Expansion and comparison counters are
+cumulative across attempts; dense sweeps fail at the same work limit. Exhausted
+retry/state budgets produce explicit diagnostics. Final geometry validation and
+independent physical checks remain required.
+
 The regression encloses a lower-layer pin in fixed geometry. A prior upper-layer
 wire blocks its only escape; joint routing provides a legal witness. Bounded
 repair must produce a deterministic, fully connected route, and insufficient

@@ -763,6 +763,11 @@ fn memory_estimate_limited(
         .saturating_add(crate::routing_target::memory_bytes(
             limits.max_target_segments,
         ))
+        .saturating_add((limits.max_path_retries as u64).saturating_mul(12))
+        .saturating_add(
+            (trace_cut_capacity(input, nodes, limits) as u64)
+                .saturating_mul(std::mem::size_of::<TraceCut>() as u64),
+        )
         .saturating_add((limits.max_batch_blocked_pins as u64).saturating_mul(128)),
         spatial: index(added),
         routed: t
@@ -1107,6 +1112,96 @@ enum Outcome {
     Routed(NetRoute, Vec<u32>),
     Failed(u32),
     Limited(u32),
+}
+
+type ForbiddenVia = (u32, u32, u32);
+struct TraceCut {
+    layer: u32,
+    rect: Rect,
+    edge: ForbiddenVia,
+}
+
+fn trace_cut_capacity(input: &RouteInput, nodes: usize, limits: &RouteLimits) -> usize {
+    // Count all via shapes as an inexpensive upper bound on cut shapes.
+    let per_via = input.vias.iter().map(|v| v.shapes.len()).max().unwrap_or(0);
+    nodes
+        .min(limits.max_search_expansions)
+        .saturating_mul(per_via)
+        .min(limits.max_active_nodes)
+}
+
+/// Check only the new path's cuts before inserting any of its geometry. Existing
+/// metal was checked during search. Exact duplicate cuts are legal and collapse
+/// before the sweep; a bounded x-order sweep catches every remaining near pair.
+fn trace_cut_conflict(
+    input: &RouteInput,
+    graph: &Graph,
+    path: &[(u32, u32, u32)],
+    work: &mut usize,
+    limits: &RouteLimits,
+) -> Result<Option<ForbiddenVia>> {
+    let charge = |work: &mut usize, count: usize| -> Result<()> {
+        *work = work
+            .checked_add(count)
+            .filter(|&n| n <= limits.max_comparisons)
+            .ok_or_else(|| budget("trace cut comparison work"))?;
+        Ok(())
+    };
+    let mut count = 0usize;
+    let capacity = trace_cut_capacity(input, graph.len, limits);
+    for &(_, _, kind) in path {
+        charge(work, 1)?;
+        if kind == WIRE {
+            continue;
+        }
+        for shape in &input.vias[kind as usize].shapes {
+            charge(work, 1)?;
+            if input.layers[shape.layer as usize].vertical.is_none() {
+                count = count
+                    .checked_add(1)
+                    .filter(|&n| n <= capacity)
+                    .ok_or_else(|| budget("trace cut state limit"))?;
+            }
+        }
+    }
+    let mut cuts = Vec::new();
+    cuts.try_reserve_exact(count)
+        .map_err(|_| budget("trace cut allocation"))?;
+    for &(a, b, kind) in path {
+        if kind == WIRE {
+            continue;
+        }
+        let at = graph.point(a).1;
+        for shape in &input.vias[kind as usize].shapes {
+            charge(work, 1)?;
+            if input.layers[shape.layer as usize].vertical.is_none() {
+                cuts.push(TraceCut {
+                    layer: shape.layer,
+                    rect: shifted(shape.rect, at)?,
+                    edge: (a.min(b), a.max(b), kind),
+                });
+            }
+        }
+    }
+    charge(
+        work,
+        count.saturating_mul(count.max(1).ilog2() as usize + 2),
+    )?;
+    cuts.sort_unstable_by_key(|c| (c.layer, c.rect.lx, c.rect.ly, c.rect.ux, c.rect.uy, c.edge));
+    cuts.dedup_by(|a, b| a.layer == b.layer && a.rect == b.rect);
+    for (i, a) in cuts.iter().enumerate() {
+        let query = crate::routing::expand(a.rect, input.layers[a.layer as usize].spacing)?;
+        for b in &cuts[i + 1..] {
+            charge(work, 1)?;
+            if a.layer != b.layer || b.rect.lx >= query.ux {
+                break;
+            }
+            if crate::routing::overlap(query, b.rect) {
+                return Ok(Some(b.edge));
+            }
+        }
+    }
+    Ok(None)
 }
 
 impl<'a> Router<'a> {
@@ -2337,6 +2432,7 @@ impl<'a> Router<'a> {
             );
         }
         let mut out = NetRoute::default();
+        let mut forbidden: Vec<ForbiddenVia> = Vec::new();
         let mut edges = BTreeMap::new();
         let root = plans[&terminals[0].pin].top;
         let (root_layer, root_point) = self.graph.point(root);
@@ -2402,599 +2498,668 @@ impl<'a> Router<'a> {
             if tree.contains(&start) {
                 continue;
             }
-            self.epoch = self
-                .epoch
-                .checked_add(1)
-                .ok_or_else(|| budget("routing search count"))?;
-            let epoch = self.epoch;
-            // Prefer greater progress when priority costs tie. Taking
-            // the smallest g first floods every equally short interior path.
-            // Node id remains the final deterministic tie-break.
-            let mut heap = crate::route_queue::Pending::new(self.limits.max_heap);
-            self.search.begin(epoch);
-            self.search.set(
-                start,
-                State {
-                    cost: 0,
-                    parent: NONE,
-                    kind: WIRE,
-                },
-            )?;
-            heap.offer((
-                target
-                    .distance(
-                        self.graph.slot[&self.graph.point(start).0],
-                        self.graph.point(start).1,
-                        &self.target_costs,
-                        &mut self.spatial.work,
-                        self.limits.max_comparisons,
-                    )?
-                    .saturating_mul(self.plan.heuristic_weight),
-                Reverse(0u64),
-                start,
-            ))?;
-            let mut found = None;
-            let mut limited = false;
-            let mut projection_attempts = 0;
-            let mut search = 0usize;
-            while let Some((priority, Reverse(cost), id)) = heap.pop() {
-                if self.search.get(id).is_none_or(|s| s.cost != cost) {
-                    continue;
-                }
-                if tree.contains(&id) {
-                    found = Some(id);
-                    break;
-                }
-                // A bounded hard search may defer to the existing wider-guide
-                // and rip-up attempts. Partial metal is removed by the same
-                // failed-attempt cleanup as an exhausted frontier. Soft-search
-                // and aggregate budgets still stop the command explicitly.
-                if !soft
-                    && search
-                        >= self
-                            .limits
-                            .max_hard_search_expansions
-                            .unwrap_or(self.limits.max_search_expansions)
-                {
-                    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
-                        eprintln!(
-                            "[troute] deferred hard search net {net} pin {} expansions {search}",
-                            t.pin
-                        );
-                    }
-                    break;
-                }
-                if search == self.limits.max_search_expansions {
-                    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
-                        eprintln!(
-                            "[troute] search cap net {net} pin {} soft {soft} repair_step {round} ripups {} start {:?} root {:?} current {:?} tree_nodes {} targets {} cost {cost}",
-                            t.pin,
-                            rips.get(&net).copied().unwrap_or(0),
-                            self.graph.point(start),
-                            (root_layer, root_point),
-                            self.graph.point(id),
-                            tree.len(),
-                            target.len(),
-                        );
-                    }
-                    limited = true;
-                    break;
-                }
-                self.tick(&mut search, "detailed", t.pin, net)?;
-                let (l, t_, s_) = self.graph.locate(id);
-                let layer = self.graph.layers[l].layer;
-                let p = self.graph.xy(l, t_, s_);
-                let target_distance = target.bounds_distance(p);
-                let interior_distance = if target_distance == 0 {
-                    // During this search the tree is fixed. A non-saturated
-                    // queue score retains exactly g + weight*h, so reuse h.
-                    Some(if priority != u64::MAX {
-                        (priority - cost) / self.plan.heuristic_weight
-                    } else {
-                        target.distance(
-                            l,
-                            p,
+            loop {
+                self.epoch = self
+                    .epoch
+                    .checked_add(1)
+                    .ok_or_else(|| budget("routing search count"))?;
+                let epoch = self.epoch;
+                // Prefer greater progress when priority costs tie. Taking
+                // the smallest g first floods every equally short interior path.
+                // Node id remains the final deterministic tie-break.
+                let mut heap = crate::route_queue::Pending::new(self.limits.max_heap);
+                self.search.begin(epoch);
+                self.search.set(
+                    start,
+                    State {
+                        cost: 0,
+                        parent: NONE,
+                        kind: WIRE,
+                    },
+                )?;
+                heap.offer((
+                    target
+                        .distance(
+                            self.graph.slot[&self.graph.point(start).0],
+                            self.graph.point(start).1,
                             &self.target_costs,
                             &mut self.spatial.work,
                             self.limits.max_comparisons,
                         )?
-                    })
-                } else {
-                    None
-                };
-                self.graph.neighbors(id, &mut nbuf);
-                // Dense channels otherwise retry nearly identical long-span
-                // probes at every unit stop. These optional edges are sampled;
-                // ordinary edges still cover every legal local detour.
-                if projection_attempts < MAX_TARGET_PROJECTIONS_PER_SINK
-                    && (search <= 16 || s_.is_multiple_of(64))
-                {
-                    projection_attempts += 1;
-                    let work = self.graph.target_neighbors(id, root_point, &mut nbuf);
-                    self.spatial.work = self
-                        .spatial
-                        .work
-                        .checked_add(work)
-                        .filter(|&n| n <= self.limits.max_comparisons)
-                        .ok_or_else(|| budget("target projection work"))?;
-                }
-                // Minimum area depends on the incoming path, so it cannot be
-                // a general edge restriction in a one-cost-per-node search.
-                // Initial routes use bounded geometric cleanup; a net whose
-                // cleanup fails is retried with conservative strict rules.
-                let no_stack = strict && !self.stack_ok[layer as usize] && {
-                    let need = self.min_run[layer as usize];
-                    let mut run = 0u64;
-                    let mut cur = id;
-                    let mut steps = 0usize;
-                    loop {
-                        if cur == start {
-                            break start_via && !start_pad_ok && run < need;
-                        }
-                        let previous = self
-                            .search
-                            .get(cur)
-                            .ok_or_else(|| invalid("missing routing parent state"))?;
-                        if previous.kind != WIRE {
-                            let kind = previous.kind as usize;
-                            break !self.via_pad_ok[layer as usize][kind] && run < need;
-                        }
-                        let prev = self
-                            .search
-                            .get(cur)
-                            .ok_or_else(|| invalid("missing routing parent state"))?
-                            .parent;
-                        run += distance(self.graph.point(cur).1, self.graph.point(prev).1)?;
-                        cur = prev;
-                        steps += 1;
-                        if run >= need || steps > 64 {
-                            break false;
-                        }
+                        .saturating_mul(self.plan.heuristic_weight),
+                    Reverse(0u64),
+                    start,
+                ))?;
+                let mut found = None;
+                let mut limited = false;
+                let mut projection_attempts = 0;
+                let mut search = 0usize;
+                while let Some((priority, Reverse(cost), id)) = heap.pop() {
+                    if self.search.get(id).is_none_or(|s| s.cost != cost) {
+                        continue;
                     }
-                };
-                for &(next, mv) in nbuf.iter() {
-                    let (nl, q) = self.graph.point(next);
-                    let mut next_distance = None;
-                    if matches!(mv, Move::Along) && id.abs_diff(next) > 1 {
-                        if let Some(current) = interior_distance {
-                            let remaining = target.distance(
+                    if tree.contains(&id) {
+                        found = Some(id);
+                        break;
+                    }
+                    // A bounded hard search may defer to the existing wider-guide
+                    // and rip-up attempts. Partial metal is removed by the same
+                    // failed-attempt cleanup as an exhausted frontier. Soft-search
+                    // and aggregate budgets still stop the command explicitly.
+                    if !soft
+                        && search
+                            >= self
+                                .limits
+                                .max_hard_search_expansions
+                                .unwrap_or(self.limits.max_search_expansions)
+                    {
+                        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                            eprintln!(
+                                "[troute] deferred hard search net {net} pin {} expansions {search}",
+                                t.pin
+                            );
+                        }
+                        break;
+                    }
+                    if search == self.limits.max_search_expansions {
+                        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                            eprintln!(
+                                "[troute] search cap net {net} pin {} soft {soft} repair_step {round} ripups {} start {:?} root {:?} current {:?} tree_nodes {} targets {} cost {cost}",
+                                t.pin,
+                                rips.get(&net).copied().unwrap_or(0),
+                                self.graph.point(start),
+                                (root_layer, root_point),
+                                self.graph.point(id),
+                                tree.len(),
+                                target.len(),
+                            );
+                        }
+                        limited = true;
+                        break;
+                    }
+                    self.tick(&mut search, "detailed", t.pin, net)?;
+                    let (l, t_, s_) = self.graph.locate(id);
+                    let layer = self.graph.layers[l].layer;
+                    let p = self.graph.xy(l, t_, s_);
+                    let target_distance = target.bounds_distance(p);
+                    let interior_distance = if target_distance == 0 {
+                        // During this search the tree is fixed. A non-saturated
+                        // queue score retains exactly g + weight*h, so reuse h.
+                        Some(if priority != u64::MAX {
+                            (priority - cost) / self.plan.heuristic_weight
+                        } else {
+                            target.distance(
+                                l,
+                                p,
+                                &self.target_costs,
+                                &mut self.spatial.work,
+                                self.limits.max_comparisons,
+                            )?
+                        })
+                    } else {
+                        None
+                    };
+                    self.graph.neighbors(id, &mut nbuf);
+                    // Dense channels otherwise retry nearly identical long-span
+                    // probes at every unit stop. These optional edges are sampled;
+                    // ordinary edges still cover every legal local detour.
+                    if projection_attempts < MAX_TARGET_PROJECTIONS_PER_SINK
+                        && (search <= 16 || s_.is_multiple_of(64))
+                    {
+                        projection_attempts += 1;
+                        let work = self.graph.target_neighbors(id, root_point, &mut nbuf);
+                        self.spatial.work = self
+                            .spatial
+                            .work
+                            .checked_add(work)
+                            .filter(|&n| n <= self.limits.max_comparisons)
+                            .ok_or_else(|| budget("target projection work"))?;
+                    }
+                    // Minimum area depends on the incoming path, so it cannot be
+                    // a general edge restriction in a one-cost-per-node search.
+                    // Initial routes use bounded geometric cleanup; a net whose
+                    // cleanup fails is retried with conservative strict rules.
+                    let no_stack = strict && !self.stack_ok[layer as usize] && {
+                        let need = self.min_run[layer as usize];
+                        let mut run = 0u64;
+                        let mut cur = id;
+                        let mut steps = 0usize;
+                        loop {
+                            if cur == start {
+                                break start_via && !start_pad_ok && run < need;
+                            }
+                            let previous = self
+                                .search
+                                .get(cur)
+                                .ok_or_else(|| invalid("missing routing parent state"))?;
+                            if previous.kind != WIRE {
+                                let kind = previous.kind as usize;
+                                break !self.via_pad_ok[layer as usize][kind] && run < need;
+                            }
+                            let prev = self
+                                .search
+                                .get(cur)
+                                .ok_or_else(|| invalid("missing routing parent state"))?
+                                .parent;
+                            run += distance(self.graph.point(cur).1, self.graph.point(prev).1)?;
+                            cur = prev;
+                            steps += 1;
+                            if run >= need || steps > 64 {
+                                break false;
+                            }
+                        }
+                    };
+                    for &(next, mv) in nbuf.iter() {
+                        let (nl, q) = self.graph.point(next);
+                        let mut next_distance = None;
+                        if matches!(mv, Move::Along) && id.abs_diff(next) > 1 {
+                            if let Some(current) = interior_distance {
+                                let remaining = target.distance(
+                                    self.graph.slot[&nl],
+                                    q,
+                                    &self.target_costs,
+                                    &mut self.spatial.work,
+                                    self.limits.max_comparisons,
+                                )?;
+                                if remaining >= current {
+                                    continue;
+                                }
+                                next_distance = Some(remaining);
+                            } else if target.bounds_distance(q) >= target_distance {
+                                continue;
+                            }
+                        }
+                        let joins = tree.contains(&next);
+                        if self.gmark[self.cells.of(q) as usize] != self.gepoch && !joins {
+                            continue;
+                        }
+                        let mut step = match mv {
+                            Move::Along => distance(p, q)?,
+                            Move::Wrong => distance(p, q)?.saturating_mul(wrong),
+                            Move::Via(_) => via_cost,
+                        };
+                        if self
+                            .search
+                            .get(next)
+                            .is_some_and(|s| s.cost <= cost.saturating_add(step))
+                        {
+                            continue;
+                        }
+                        let jump = if matches!(mv, Move::Along) {
+                            id.abs_diff(next) as usize
+                        } else {
+                            1
+                        };
+                        if jump > 1 {
+                            let from_cell = self.cells.of(p);
+                            let to_cell = self.cells.of(q);
+                            let stride = if p[0] == q[0] { self.cells.nx } else { 1 };
+                            let cell_count = from_cell.abs_diff(to_cell) as usize / stride + 1;
+                            let inspect_nodes = tree.len() > 1 || !self.history.is_zero();
+                            self.spatial.work = self
+                                .spatial
+                                .work
+                                .checked_add(cell_count + if inspect_nodes { jump } else { 0 })
+                                .filter(|&n| n <= self.limits.max_comparisons)
+                                .ok_or_else(|| budget("routing macro-move work"))?;
+                            let before_end = if next > id { next - 1 } else { next + 1 };
+                            let only_end_in_cell =
+                                self.cells.of(self.graph.point(before_end).1) != to_cell;
+                            let mut usable = true;
+                            for cell in
+                                (from_cell.min(to_cell)..=from_cell.max(to_cell)).step_by(stride)
+                            {
+                                if self.gmark[cell as usize] != self.gepoch
+                                    && !(cell == to_cell && joins && only_end_in_cell)
+                                {
+                                    usable = false;
+                                    break;
+                                }
+                            }
+                            if tree.len() == 1 && id.min(next) < root && root < id.max(next) {
+                                usable = false;
+                            }
+                            if usable && inspect_nodes {
+                                for node in id.min(next)..=id.max(next) {
+                                    if node == id {
+                                        continue;
+                                    }
+                                    if node != next && tree.contains(&node) {
+                                        usable = false;
+                                        break;
+                                    }
+                                    if !self.history.is_zero() {
+                                        step = step.saturating_add(
+                                            u64::from(self.history.get(node))
+                                                .saturating_mul(hist_unit),
+                                        );
+                                    }
+                                }
+                            }
+                            if !usable {
+                                continue;
+                            }
+                        } else {
+                            step = step.saturating_add(
+                                u64::from(self.history.get(next)).saturating_mul(hist_unit),
+                            );
+                        }
+                        let base = cost.saturating_add(step);
+                        if self.search.get(next).is_some_and(|s| s.cost <= base) {
+                            continue;
+                        }
+                        let (kind, extra) = match mv {
+                            Move::Via(pi) => {
+                                // A wire that ends here on this layer wants the
+                                // pad elongated along it (end-of-line enclosure).
+                                let original = self.graph.pairs[pi].kinds.clone();
+                                let mut kinds = Vec::with_capacity(original.len());
+                                for kind in original {
+                                    if !forbidden.is_empty() {
+                                        self.spatial.work = self
+                                            .spatial
+                                            .work
+                                            .checked_add(forbidden.len().ilog2() as usize + 1)
+                                            .filter(|&n| n <= self.limits.max_comparisons)
+                                            .ok_or_else(|| {
+                                                budget("path via-conflict lookup work")
+                                            })?;
+                                        if forbidden
+                                            .binary_search(&(
+                                                id.min(next),
+                                                id.max(next),
+                                                kind as u32,
+                                            ))
+                                            .is_ok()
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                    if no_stack && !self.via_pad_ok[layer as usize][kind] {
+                                        continue;
+                                    }
+                                    if strict
+                                        && joins
+                                        && via_nodes.get(&next) == Some(&false)
+                                        && !self.via_pad_ok[nl as usize][kind]
+                                    {
+                                        continue;
+                                    }
+                                    if !self.via_on_own_pin(kind, p, &own)? {
+                                        kinds.push(kind);
+                                    }
+                                }
+                                if kinds.is_empty() {
+                                    continue;
+                                }
+                                if id != start
+                                    && self
+                                        .search
+                                        .get(id)
+                                        .ok_or_else(|| invalid("missing routing parent state"))?
+                                        .kind
+                                        == WIRE
+                                {
+                                    let prev = self
+                                        .graph
+                                        .point(
+                                            self.search
+                                                .get(id)
+                                                .ok_or_else(|| {
+                                                    invalid("missing routing parent state")
+                                                })?
+                                                .parent,
+                                        )
+                                        .1;
+                                    let vertical = prev[0] == p[0];
+                                    kinds.sort_by_key(|k| !self.pad_along(*k, layer, vertical));
+                                }
+                                if soft {
+                                    let mut best: Option<(u64, usize)> = None;
+                                    for k in kinds {
+                                        if let Soft::Clear { near, victims } =
+                                            self.spatial.via_probe_soft(k, p, net)?
+                                        {
+                                            let c = victims
+                                                .iter()
+                                                .map(|v| {
+                                                    conflict
+                                                        * (1 + rips.get(v).copied().unwrap_or(0)
+                                                            as u64)
+                                                })
+                                                .sum::<u64>()
+                                                + if near { near_cost } else { 0 };
+                                            if strict && near {
+                                                continue;
+                                            }
+                                            if best.is_none_or(|b| c < b.0) {
+                                                best = Some((c, k));
+                                            }
+                                            if c == 0 {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    match best {
+                                        Some((c, k)) => (k as u32, c),
+                                        None => continue,
+                                    }
+                                } else if strict {
+                                    let mut chosen = None;
+                                    for k in kinds {
+                                        if self.spatial.via_probe(k, p, net)? == Some(false) {
+                                            chosen = Some(k);
+                                            break;
+                                        }
+                                    }
+                                    match chosen {
+                                        Some(k) => (k as u32, 0),
+                                        None => continue,
+                                    }
+                                } else {
+                                    match self.spatial.choose(&kinds, p, net)? {
+                                        Some(k) => (k as u32, 0),
+                                        None => continue,
+                                    }
+                                }
+                            }
+                            _ => {
+                                let rect = self.edge_rect(layer, p, q, net)?;
+                                if own.blocks(
+                                    layer,
+                                    rect,
+                                    &[p, q],
+                                    &mut self.spatial.work,
+                                    self.limits.max_comparisons,
+                                )? {
+                                    continue;
+                                }
+                                if soft {
+                                    match self.spatial.probe_soft(layer, rect, net)? {
+                                        Soft::Blocked => continue,
+                                        Soft::Clear { near: true, .. } if strict => continue,
+                                        Soft::Clear { near, victims } => (
+                                            WIRE,
+                                            victims
+                                                .iter()
+                                                .map(|v| {
+                                                    conflict
+                                                        * (1 + rips.get(v).copied().unwrap_or(0)
+                                                            as u64)
+                                                })
+                                                .sum::<u64>()
+                                                + if near { near_cost } else { 0 },
+                                        ),
+                                    }
+                                } else {
+                                    match self.spatial.probe(layer, rect, net)? {
+                                        None => continue,
+                                        Some(true) if strict => continue,
+                                        Some(near) => (WIRE, if near { near_cost } else { 0 }),
+                                    }
+                                }
+                            }
+                        };
+                        let nc = base.saturating_add(extra);
+                        if self.search.get(next).is_some_and(|s| s.cost <= nc) {
+                            continue;
+                        }
+                        self.search.set(
+                            next,
+                            State {
+                                cost: nc,
+                                parent: id,
+                                kind,
+                            },
+                        )?;
+                        let remaining = match next_distance {
+                            Some(value) => value,
+                            None => target.distance(
                                 self.graph.slot[&nl],
                                 q,
                                 &self.target_costs,
                                 &mut self.spatial.work,
                                 self.limits.max_comparisons,
-                            )?;
-                            if remaining >= current {
-                                continue;
-                            }
-                            next_distance = Some(remaining);
-                        } else if target.bounds_distance(q) >= target_distance {
-                            continue;
-                        }
+                            )?,
+                        };
+                        heap.offer((
+                            nc.saturating_add(remaining.saturating_mul(self.plan.heuristic_weight)),
+                            Reverse(nc),
+                            next,
+                        ))
+                        .map_err(|e| budget(&format!("{e}; pin {} net {net}", t.pin)))?;
                     }
-                    let joins = tree.contains(&next);
-                    if self.gmark[self.cells.of(q) as usize] != self.gepoch && !joins {
-                        continue;
+                }
+                let Some(mut current) = found else {
+                    for id in out.shapes.drain(..) {
+                        self.spatial.remove(id);
                     }
-                    let mut step = match mv {
-                        Move::Along => distance(p, q)?,
-                        Move::Wrong => distance(p, q)?.saturating_mul(wrong),
-                        Move::Via(_) => via_cost,
-                    };
-                    if self
+                    return Ok(if limited {
+                        Outcome::Limited(t.pin)
+                    } else {
+                        Outcome::Failed(t.pin)
+                    });
+                };
+                // Trace back, commit shapes so later sinks see this net's metal.
+                let mut path = Vec::new();
+                loop {
+                    let state = self
                         .search
-                        .get(next)
-                        .is_some_and(|s| s.cost <= cost.saturating_add(step))
-                    {
-                        continue;
+                        .get(current)
+                        .ok_or_else(|| invalid("missing routing trace state"))?;
+                    if state.parent == NONE {
+                        break;
                     }
-                    let jump = if matches!(mv, Move::Along) {
-                        id.abs_diff(next) as usize
-                    } else {
-                        1
-                    };
-                    if jump > 1 {
-                        let from_cell = self.cells.of(p);
-                        let to_cell = self.cells.of(q);
-                        let stride = if p[0] == q[0] { self.cells.nx } else { 1 };
-                        let cell_count = from_cell.abs_diff(to_cell) as usize / stride + 1;
-                        let inspect_nodes = tree.len() > 1 || !self.history.is_zero();
-                        self.spatial.work = self
-                            .spatial
-                            .work
-                            .checked_add(cell_count + if inspect_nodes { jump } else { 0 })
-                            .filter(|&n| n <= self.limits.max_comparisons)
-                            .ok_or_else(|| budget("routing macro-move work"))?;
-                        let before_end = if next > id { next - 1 } else { next + 1 };
-                        let only_end_in_cell =
-                            self.cells.of(self.graph.point(before_end).1) != to_cell;
-                        let mut usable = true;
-                        for cell in
-                            (from_cell.min(to_cell)..=from_cell.max(to_cell)).step_by(stride)
-                        {
-                            if self.gmark[cell as usize] != self.gepoch
-                                && !(cell == to_cell && joins && only_end_in_cell)
-                            {
-                                usable = false;
-                                break;
+                    let prev = state.parent;
+                    let a = self.graph.locate(prev);
+                    let b = self.graph.locate(current);
+                    if state.kind == WIRE && a.0 == b.0 && a.1 == b.1 && prev.abs_diff(current) > 1
+                    {
+                        let mut at = current;
+                        while at != prev {
+                            if path.len() >= self.limits.max_search_expansions {
+                                return Err(budget("routing macro trace limit"));
                             }
-                        }
-                        if tree.len() == 1 && id.min(next) < root && root < id.max(next) {
-                            usable = false;
-                        }
-                        if usable && inspect_nodes {
-                            for node in id.min(next)..=id.max(next) {
-                                if node == id {
-                                    continue;
-                                }
-                                if node != next && tree.contains(&node) {
-                                    usable = false;
-                                    break;
-                                }
-                                if !self.history.is_zero() {
-                                    step = step.saturating_add(
-                                        u64::from(self.history.get(node)).saturating_mul(hist_unit),
-                                    );
-                                }
-                            }
-                        }
-                        if !usable {
-                            continue;
+                            let before = if at < prev { at + 1 } else { at - 1 };
+                            path.push((before, at, state.kind));
+                            at = before;
                         }
                     } else {
-                        step = step.saturating_add(
-                            u64::from(self.history.get(next)).saturating_mul(hist_unit),
+                        path.push((prev, current, state.kind));
+                    }
+                    current = prev;
+                    if path.len() > self.limits.max_search_expansions {
+                        return Err(budget("routing trace limit"));
+                    }
+                }
+                if let Some(edge) = trace_cut_conflict(
+                    self.input,
+                    &self.graph,
+                    &path,
+                    &mut self.spatial.work,
+                    self.limits,
+                )? {
+                    if forbidden.len() >= self.limits.max_path_retries {
+                        return Err(budget(&format!(
+                            "path via-conflict retry limit: pin {} net {net}",
+                            t.pin
+                        )));
+                    }
+                    self.guard("path via-conflict retry")?;
+                    if forbidden.is_empty() {
+                        forbidden
+                            .try_reserve_exact(self.limits.max_path_retries)
+                            .map_err(|_| budget("path retry allocation"))?;
+                    }
+                    self.spatial.work = self
+                        .spatial
+                        .work
+                        .checked_add(forbidden.len().saturating_mul(2).saturating_add(1))
+                        .filter(|&n| n <= self.limits.max_comparisons)
+                        .ok_or_else(|| budget("path via-conflict insertion work"))?;
+                    let at = forbidden
+                        .binary_search(&edge)
+                        .err()
+                        .ok_or_else(|| invalid("forbidden via reappeared in traceback"))?;
+                    forbidden.insert(at, edge);
+                    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                        eprintln!(
+                            "[troute] bounded via-conflict retry net {net} pin {} edge {edge:?} attempt {}",
+                            t.pin,
+                            forbidden.len()
                         );
                     }
-                    let base = cost.saturating_add(step);
-                    if self.search.get(next).is_some_and(|s| s.cost <= base) {
-                        continue;
-                    }
-                    let (kind, extra) = match mv {
-                        Move::Via(pi) => {
-                            // A wire that ends here on this layer wants the
-                            // pad elongated along it (end-of-line enclosure).
-                            let original = self.graph.pairs[pi].kinds.clone();
-                            let mut kinds = Vec::with_capacity(original.len());
-                            for kind in original {
-                                if no_stack && !self.via_pad_ok[layer as usize][kind] {
-                                    continue;
-                                }
-                                if strict
-                                    && joins
-                                    && via_nodes.get(&next) == Some(&false)
-                                    && !self.via_pad_ok[nl as usize][kind]
-                                {
-                                    continue;
-                                }
-                                if !self.via_on_own_pin(kind, p, &own)? {
-                                    kinds.push(kind);
-                                }
-                            }
-                            if kinds.is_empty() {
-                                continue;
-                            }
-                            if id != start
-                                && self
-                                    .search
-                                    .get(id)
-                                    .ok_or_else(|| invalid("missing routing parent state"))?
-                                    .kind
-                                    == WIRE
-                            {
-                                let prev = self
-                                    .graph
-                                    .point(
-                                        self.search
-                                            .get(id)
-                                            .ok_or_else(|| invalid("missing routing parent state"))?
-                                            .parent,
-                                    )
-                                    .1;
-                                let vertical = prev[0] == p[0];
-                                kinds.sort_by_key(|k| !self.pad_along(*k, layer, vertical));
-                            }
-                            if soft {
-                                let mut best: Option<(u64, usize)> = None;
-                                for k in kinds {
-                                    if let Soft::Clear { near, victims } =
-                                        self.spatial.via_probe_soft(k, p, net)?
-                                    {
-                                        let c = victims
-                                            .iter()
-                                            .map(|v| {
-                                                conflict
-                                                    * (1 + rips.get(v).copied().unwrap_or(0) as u64)
-                                            })
-                                            .sum::<u64>()
-                                            + if near { near_cost } else { 0 };
-                                        if strict && near {
-                                            continue;
-                                        }
-                                        if best.is_none_or(|b| c < b.0) {
-                                            best = Some((c, k));
-                                        }
-                                        if c == 0 {
-                                            break;
-                                        }
-                                    }
-                                }
-                                match best {
-                                    Some((c, k)) => (k as u32, c),
-                                    None => continue,
-                                }
-                            } else if strict {
-                                let mut chosen = None;
-                                for k in kinds {
-                                    if self.spatial.via_probe(k, p, net)? == Some(false) {
-                                        chosen = Some(k);
-                                        break;
-                                    }
-                                }
-                                match chosen {
-                                    Some(k) => (k as u32, 0),
-                                    None => continue,
-                                }
-                            } else {
-                                match self.spatial.choose(&kinds, p, net)? {
-                                    Some(k) => (k as u32, 0),
-                                    None => continue,
-                                }
-                            }
-                        }
-                        _ => {
-                            let rect = self.edge_rect(layer, p, q, net)?;
-                            if own.blocks(
-                                layer,
-                                rect,
-                                &[p, q],
-                                &mut self.spatial.work,
-                                self.limits.max_comparisons,
-                            )? {
-                                continue;
-                            }
-                            if soft {
-                                match self.spatial.probe_soft(layer, rect, net)? {
-                                    Soft::Blocked => continue,
-                                    Soft::Clear { near: true, .. } if strict => continue,
-                                    Soft::Clear { near, victims } => (
-                                        WIRE,
-                                        victims
-                                            .iter()
-                                            .map(|v| {
-                                                conflict
-                                                    * (1 + rips.get(v).copied().unwrap_or(0) as u64)
-                                            })
-                                            .sum::<u64>()
-                                            + if near { near_cost } else { 0 },
-                                    ),
-                                }
-                            } else {
-                                match self.spatial.probe(layer, rect, net)? {
-                                    None => continue,
-                                    Some(true) if strict => continue,
-                                    Some(near) => (WIRE, if near { near_cost } else { 0 }),
-                                }
-                            }
-                        }
-                    };
-                    let nc = base.saturating_add(extra);
-                    if self.search.get(next).is_some_and(|s| s.cost <= nc) {
-                        continue;
-                    }
-                    self.search.set(
-                        next,
-                        State {
-                            cost: nc,
-                            parent: id,
-                            kind,
-                        },
-                    )?;
-                    let remaining = match next_distance {
-                        Some(value) => value,
-                        None => target.distance(
-                            self.graph.slot[&nl],
-                            q,
-                            &self.target_costs,
-                            &mut self.spatial.work,
-                            self.limits.max_comparisons,
-                        )?,
-                    };
-                    heap.offer((
-                        nc.saturating_add(remaining.saturating_mul(self.plan.heuristic_weight)),
-                        Reverse(nc),
-                        next,
-                    ))
-                    .map_err(|e| budget(&format!("{e}; pin {} net {net}", t.pin)))?;
-                }
-            }
-            let Some(mut current) = found else {
-                for id in out.shapes.drain(..) {
-                    self.spatial.remove(id);
-                }
-                return Ok(if limited {
-                    Outcome::Limited(t.pin)
-                } else {
-                    Outcome::Failed(t.pin)
-                });
-            };
-            // Trace back, commit shapes so later sinks see this net's metal.
-            let mut path = Vec::new();
-            loop {
-                let state = self
-                    .search
-                    .get(current)
-                    .ok_or_else(|| invalid("missing routing trace state"))?;
-                if state.parent == NONE {
-                    break;
-                }
-                let prev = state.parent;
-                let a = self.graph.locate(prev);
-                let b = self.graph.locate(current);
-                if state.kind == WIRE && a.0 == b.0 && a.1 == b.1 && prev.abs_diff(current) > 1 {
-                    let mut at = current;
-                    while at != prev {
-                        if path.len() >= self.limits.max_search_expansions {
-                            return Err(budget("routing macro trace limit"));
-                        }
-                        let before = if at < prev { at + 1 } else { at - 1 };
-                        path.push((before, at, state.kind));
-                        at = before;
-                    }
-                } else {
-                    path.push((prev, current, state.kind));
-                }
-                current = prev;
-                if path.len() > self.limits.max_search_expansions {
-                    return Err(budget("routing trace limit"));
-                }
-            }
-            // Collinear new wire edges of one track line become one shape.
-            type Line = (u32, bool, i64);
-            type Span = (i64, i64, u32, u32);
-            let mut lines: BTreeMap<Line, Vec<Span>> = BTreeMap::new();
-            for &(a, b, kind) in &path {
-                let (la, pa) = self.graph.point(a);
-                let (lb, pb) = self.graph.point(b);
-                let key = (a.min(b), a.max(b));
-                if edges.contains_key(&key) {
                     continue;
                 }
-                if edges.len() >= self.limits.max_segments {
-                    return Err(budget("detailed routing net size"));
-                }
-                let new_nodes = usize::from(!tree.contains(&a)) + usize::from(!tree.contains(&b));
-                if edges.len() >= self.limits.max_active_nodes
-                    || tree.len().saturating_add(new_nodes) > self.limits.max_active_nodes
-                {
-                    return Err(budget("active detailed routing topology"));
-                }
-                edges.insert(key, kind);
-                tree.insert(a);
-                tree.insert(b);
-                if la == lb {
-                    let vertical = pa[0] == pb[0];
-                    let (cross, lo, hi) = if vertical {
-                        (pa[0], pa[1].min(pb[1]), pa[1].max(pb[1]))
-                    } else {
-                        (pa[1], pa[0].min(pb[0]), pa[0].max(pb[0]))
-                    };
-                    lines
-                        .entry((la, vertical, cross))
-                        .or_default()
-                        .push((lo, hi, a, b));
-                } else {
-                    target.add(
-                        self.graph.slot[&la],
-                        pa,
-                        pa,
-                        &mut self.spatial.work,
-                        self.limits.max_comparisons,
-                    )?;
-                    target.add(
-                        self.graph.slot[&lb],
-                        pb,
-                        pb,
-                        &mut self.spatial.work,
-                        self.limits.max_comparisons,
-                    )?;
-                    for (node, layer) in [(a, la), (b, lb)] {
-                        let enough = self.via_pad_ok[layer as usize][kind as usize];
-                        via_nodes
-                            .entry(node)
-                            .and_modify(|value| *value |= enough)
-                            .or_insert(enough);
+                // Collinear new wire edges of one track line become one shape.
+                type Line = (u32, bool, i64);
+                type Span = (i64, i64, u32, u32);
+                let mut lines: BTreeMap<Line, Vec<Span>> = BTreeMap::new();
+                for &(a, b, kind) in &path {
+                    let (la, pa) = self.graph.point(a);
+                    let (lb, pb) = self.graph.point(b);
+                    let key = (a.min(b), a.max(b));
+                    if edges.contains_key(&key) {
+                        continue;
                     }
-                    if soft
-                        && let Soft::Clear { victims, .. } =
-                            self.spatial.via_probe_soft(kind as usize, pa, net)?
-                        && !victims.is_empty()
+                    if edges.len() >= self.limits.max_segments {
+                        return Err(budget("detailed routing net size"));
+                    }
+                    let new_nodes =
+                        usize::from(!tree.contains(&a)) + usize::from(!tree.contains(&b));
+                    if edges.len() >= self.limits.max_active_nodes
+                        || tree.len().saturating_add(new_nodes) > self.limits.max_active_nodes
                     {
-                        victims_all.extend(victims);
-                        self.history.increment(b)?;
+                        return Err(budget("active detailed routing topology"));
                     }
-                    for s in &self.input.vias[kind as usize].shapes {
-                        out.shapes.push(self.spatial.add_routed(Blockage {
-                            layer: s.layer,
-                            rect: shifted(s.rect, pa)?,
-                            net: Some(net),
-                        })?);
+                    edges.insert(key, kind);
+                    tree.insert(a);
+                    tree.insert(b);
+                    if la == lb {
+                        let vertical = pa[0] == pb[0];
+                        let (cross, lo, hi) = if vertical {
+                            (pa[0], pa[1].min(pb[1]), pa[1].max(pb[1]))
+                        } else {
+                            (pa[1], pa[0].min(pb[0]), pa[0].max(pb[0]))
+                        };
+                        lines
+                            .entry((la, vertical, cross))
+                            .or_default()
+                            .push((lo, hi, a, b));
+                    } else {
+                        target.add(
+                            self.graph.slot[&la],
+                            pa,
+                            pa,
+                            &mut self.spatial.work,
+                            self.limits.max_comparisons,
+                        )?;
+                        target.add(
+                            self.graph.slot[&lb],
+                            pb,
+                            pb,
+                            &mut self.spatial.work,
+                            self.limits.max_comparisons,
+                        )?;
+                        for (node, layer) in [(a, la), (b, lb)] {
+                            let enough = self.via_pad_ok[layer as usize][kind as usize];
+                            via_nodes
+                                .entry(node)
+                                .and_modify(|value| *value |= enough)
+                                .or_insert(enough);
+                        }
+                        if soft
+                            && let Soft::Clear { victims, .. } =
+                                self.spatial.via_probe_soft(kind as usize, pa, net)?
+                            && !victims.is_empty()
+                        {
+                            victims_all.extend(victims);
+                            self.history.increment(b)?;
+                        }
+                        for s in &self.input.vias[kind as usize].shapes {
+                            out.shapes.push(self.spatial.add_routed(Blockage {
+                                layer: s.layer,
+                                rect: shifted(s.rect, pa)?,
+                                net: Some(net),
+                            })?);
+                        }
                     }
                 }
-            }
-            for ((layer, vertical, cross), mut spans) in lines {
-                spans.sort_unstable();
-                let mut first = 0;
-                while first < spans.len() {
-                    let (lo, mut hi, _, _) = spans[first];
-                    let mut end = first + 1;
-                    while end < spans.len() && spans[end].0 <= hi {
-                        hi = hi.max(spans[end].1);
-                        end += 1;
-                    }
-                    let (pa, pb) = if vertical {
-                        ([cross, lo], [cross, hi])
-                    } else {
-                        ([lo, cross], [hi, cross])
-                    };
-                    target.add(
-                        self.graph.slot[&layer],
-                        pa,
-                        pb,
-                        &mut self.spatial.work,
-                        self.limits.max_comparisons,
-                    )?;
-                    let rect = self.edge_rect(layer, pa, pb, net)?;
-                    if soft
-                        && let Soft::Clear { victims, .. } =
-                            self.spatial.probe_soft(layer, rect, net)?
-                        && !victims.is_empty()
-                    {
-                        victims_all.extend(victims);
-                        // A crossing is local to its conflicting unit edges.
-                        // Marking the entire run also penalizes clear space and
-                        // can exhaust sparse history on a single long wire.
-                        for &(_, _, a, b) in &spans[first..end] {
-                            let unit = self.edge_rect(
-                                layer,
-                                self.graph.point(a).1,
-                                self.graph.point(b).1,
-                                net,
-                            )?;
-                            match self.spatial.probe_soft(layer, unit, net)? {
-                                Soft::Clear { victims, .. } if !victims.is_empty() => {
-                                    self.history.increment(b)?;
-                                }
-                                Soft::Clear { .. } => {}
-                                Soft::Blocked => {
-                                    return Err(invalid(
-                                        "merged routing span contains blocked unit geometry",
-                                    ));
+                for ((layer, vertical, cross), mut spans) in lines {
+                    spans.sort_unstable();
+                    let mut first = 0;
+                    while first < spans.len() {
+                        let (lo, mut hi, _, _) = spans[first];
+                        let mut end = first + 1;
+                        while end < spans.len() && spans[end].0 <= hi {
+                            hi = hi.max(spans[end].1);
+                            end += 1;
+                        }
+                        let (pa, pb) = if vertical {
+                            ([cross, lo], [cross, hi])
+                        } else {
+                            ([lo, cross], [hi, cross])
+                        };
+                        target.add(
+                            self.graph.slot[&layer],
+                            pa,
+                            pb,
+                            &mut self.spatial.work,
+                            self.limits.max_comparisons,
+                        )?;
+                        let rect = self.edge_rect(layer, pa, pb, net)?;
+                        if soft
+                            && let Soft::Clear { victims, .. } =
+                                self.spatial.probe_soft(layer, rect, net)?
+                            && !victims.is_empty()
+                        {
+                            victims_all.extend(victims);
+                            // A crossing is local to its conflicting unit edges.
+                            // Marking the entire run also penalizes clear space and
+                            // can exhaust sparse history on a single long wire.
+                            for &(_, _, a, b) in &spans[first..end] {
+                                let unit = self.edge_rect(
+                                    layer,
+                                    self.graph.point(a).1,
+                                    self.graph.point(b).1,
+                                    net,
+                                )?;
+                                match self.spatial.probe_soft(layer, unit, net)? {
+                                    Soft::Clear { victims, .. } if !victims.is_empty() => {
+                                        self.history.increment(b)?;
+                                    }
+                                    Soft::Clear { .. } => {}
+                                    Soft::Blocked => {
+                                        return Err(invalid(
+                                            "merged routing span contains blocked unit geometry",
+                                        ));
+                                    }
                                 }
                             }
                         }
+                        out.shapes.push(self.spatial.add_routed(Blockage {
+                            layer,
+                            rect,
+                            net: Some(net),
+                        })?);
+                        first = end;
                     }
-                    out.shapes.push(self.spatial.add_routed(Blockage {
-                        layer,
-                        rect,
-                        net: Some(net),
-                    })?);
-                    first = end;
                 }
-            }
-            target.add(
-                self.graph.slot[&self.graph.point(start).0],
-                self.graph.point(start).1,
-                self.graph.point(start).1,
-                &mut self.spatial.work,
-                self.limits.max_comparisons,
-            )?;
-            tree.insert(start);
-            if start_via {
-                via_nodes
-                    .entry(start)
-                    .and_modify(|value| *value |= start_pad_ok)
-                    .or_insert(start_pad_ok);
+                target.add(
+                    self.graph.slot[&self.graph.point(start).0],
+                    self.graph.point(start).1,
+                    self.graph.point(start).1,
+                    &mut self.spatial.work,
+                    self.limits.max_comparisons,
+                )?;
+                tree.insert(start);
+                if start_via {
+                    via_nodes
+                        .entry(start)
+                        .and_modify(|value| *value |= start_pad_ok)
+                        .or_insert(start_pad_ok);
+                }
+                break;
             }
         }
         victims_all.remove(&net);
@@ -3883,6 +4048,162 @@ mod tests {
     }
     fn limits() -> RouteLimits {
         RouteLimits::default()
+    }
+
+    fn narrow_cut_design() -> RouteInput {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(90, 170, 110, 190)),
+            ],
+            vec![
+                Blockage {
+                    layer: 0,
+                    rect: rect(0, 0, 1000, 1000),
+                    net: None,
+                },
+                Blockage {
+                    layer: 1,
+                    rect: rect(0, 130, 1000, 150),
+                    net: None,
+                },
+            ],
+        );
+        for terminal in &mut design.terminals {
+            terminal.shapes[0].layer = 1;
+        }
+        design.layers[4].spacing = 80;
+        design.vias[1].shapes[1].rect = rect(-40, -40, 40, 40);
+        design
+    }
+
+    fn route_cut_fixture(design: &RouteInput, limits: &RouteLimits, soft: bool) -> Result<Routes> {
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(design, plan, limits)?;
+        let nodes = graph.len;
+        let cells = Cells::new(design.die, plan.gcell)?;
+        let cell_count = cells.len();
+        let mut router = Router {
+            input: design,
+            plan,
+            limits,
+            access_hops: graph.hop_distances()?,
+            target_costs: crate::routing_target::CostModel::new(
+                &[false, true, false],
+                &[(0, 1), (1, 2)],
+                plan.via_cost,
+                plan.wrong_way_factor,
+            )?,
+            graph,
+            cells,
+            spatial: Spatial::new(design, limits)?,
+            pairs: via_pairs(design),
+            slots: HashMap::from([(0, 0), (1, 1), (2, 2)]),
+            expansions: 0,
+            search: Search::new(nodes, nodes)?,
+            epoch: 0,
+            history: History::new(nodes, nodes)?,
+            gmark: vec![1; cell_count],
+            gepoch: 1,
+            stack_ok: vec![true; design.layers.len()],
+            via_pad_ok: vec![vec![true; design.vias.len()]; design.layers.len()],
+            min_run: vec![0; design.layers.len()],
+            access_entries: 0,
+            access_cache_bytes: 0,
+        };
+        // Fixed, already legal escape tops isolate the detailed traceback;
+        // automatic pin-access selection can avoid the narrow path beforehand.
+        let plans: HashMap<_, _> = [(0, [100, 100]), (1, [100, 180])]
+            .into_iter()
+            .map(|(pin, at)| {
+                (
+                    pin,
+                    Plan {
+                        access: Access {
+                            pin,
+                            net: 0,
+                            layer: 1,
+                            at,
+                        },
+                        top: router.graph.find(1, at).unwrap(),
+                        top_via: false,
+                        portal_shapes: 0,
+                        wires: Box::new([]),
+                        vias: Box::new([]),
+                        shapes: Box::new([]),
+                    },
+                )
+            })
+            .collect();
+        let terminals: Vec<_> = design.terminals.iter().collect();
+        let outcome = router.route_net(0, &terminals, &plans, soft, false, &BTreeMap::new(), 0);
+        if outcome.is_err() {
+            // A refused retry must remove every partially committed cut.
+            assert!(router.spatial.via_clear(1, [100, 100], 0)?);
+            assert!(router.spatial.via_clear(1, [100, 180], 0)?);
+        }
+        let Outcome::Routed(route, victims) = outcome? else {
+            panic!("fixture has a legal cut-separated detour");
+        };
+        assert!(victims.is_empty());
+        let pairs: Vec<_> = design.vias.iter().map(|v| (v.lower, v.upper)).collect();
+        let mut result = assemble(
+            &router,
+            &BTreeMap::from([(0, terminals)]),
+            &plans,
+            &BTreeMap::from([(0, route)]),
+            design,
+            limits,
+            &pairs,
+        )?;
+        result.stats.wire_length_dbu = result
+            .wires
+            .iter()
+            .map(|w| distance(w.start, w.end).unwrap())
+            .sum();
+        Ok(result)
+    }
+
+    #[test]
+    fn a_trace_cannot_put_two_via_cuts_too_close() {
+        let design = narrow_cut_design();
+        for soft in [false, true] {
+            let routed = route_cut_fixture(&design, &limits(), soft).unwrap();
+            validate(&design, &routed, &limits()).unwrap();
+            // Independent rectangle distance: distinct 80-DBU cuts require
+            // another 80 DBU of clearance in at least one coordinate direction.
+            let cuts: Vec<_> = routed.vias.iter().filter(|v| v.kind == 1).collect();
+            assert!(cuts.len() >= 2);
+            for (i, a) in cuts.iter().enumerate() {
+                for b in &cuts[i + 1..] {
+                    assert!(a.at[0].abs_diff(b.at[0]) >= 160 || a.at[1].abs_diff(b.at[1]) >= 160);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cut_conflict_retries_refuse_at_the_declared_budget() {
+        let design = narrow_cut_design();
+        for soft in [false, true] {
+            let limit = RouteLimits {
+                max_path_retries: 0,
+                ..limits()
+            };
+            let error = route_cut_fixture(&design, &limit, soft).unwrap_err();
+            assert!(
+                error.to_string().contains("path via-conflict retry limit"),
+                "{error}"
+            );
+        }
+        assert!(
+            RouteLimits {
+                max_path_retries: 4097,
+                ..limits()
+            }
+            .validate_track()
+            .is_err()
+        );
     }
 
     #[test]
