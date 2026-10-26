@@ -5742,30 +5742,37 @@ mod tests {
         }
         let mut design = input(terms, fixed);
         design.tracks.as_mut().unwrap().memory_mib = 256;
-        let together = route_cpu_ref(&design, &limits()).unwrap();
-        validate(&design, &together, &limits()).unwrap();
-        let (batched, report) = crate::route_batches::route(&design, &limits(), 2).unwrap();
-        validate(&design, &batched, &limits()).unwrap();
+        // The fixture needs a few hundred active nodes; the default cap would
+        // reserve ~190 MiB of validation scratch near the 256 MiB admission
+        // edge, where concurrently running tests' live heap decides the result.
+        let limits = RouteLimits {
+            max_active_nodes: 4_000,
+            ..limits()
+        };
+        let together = route_cpu_ref(&design, &limits).unwrap();
+        validate(&design, &together, &limits).unwrap();
+        let (batched, report) = crate::route_batches::route(&design, &limits, 2).unwrap();
+        validate(&design, &batched, &limits).unwrap();
         assert_eq!(batched.nets, [0, 1]);
         assert_eq!(batched.access.len(), 4);
         assert_eq!(report.repair_attempts, 1);
         assert_eq!(report.displaced_nets, 1);
-        let (again, _) = crate::route_batches::route(&design, &limits(), 2).unwrap();
+        let (again, _) = crate::route_batches::route(&design, &limits, 2).unwrap();
         assert_eq!(batched.wires, again.wires);
         assert_eq!(batched.vias, again.vias);
         assert_eq!(batched.access, again.access);
         for limited in [
             RouteLimits {
                 max_batch_retries: 0,
-                ..limits()
+                ..limits.clone()
             },
             RouteLimits {
                 max_batch_repair_terminals: 3,
-                ..limits()
+                ..limits.clone()
             },
             RouteLimits {
                 max_expansions: batched.stats.expansions - 1,
-                ..limits()
+                ..limits.clone()
             },
         ] {
             assert!(matches!(
@@ -5939,8 +5946,15 @@ mod tests {
         }
         let mut design = input(terms, fixed);
         design.tracks.as_mut().unwrap().memory_mib = 256;
+        // The fixture needs a few hundred active nodes; the default cap would
+        // reserve ~190 MiB of validation scratch near the 256 MiB admission
+        // edge, where concurrently running tests' live heap decides the result.
+        let limits = RouteLimits {
+            max_active_nodes: 4_000,
+            ..limits()
+        };
         let mut saved = Vec::new();
-        let (full, report) = route_resumable(&design, &limits(), 2, None, &mut |p| {
+        let (full, report) = route_resumable(&design, &limits, 2, None, &mut |p| {
             saved.push(BatchCheckpoint {
                 begin: p.begin,
                 routes: p.routes.clone(),
@@ -5968,7 +5982,7 @@ mod tests {
         for state in &saved {
             let mut later = Vec::new();
             let (again, again_report) =
-                route_resumable(&design, &limits(), 2, Some(state.clone()), &mut |p| {
+                route_resumable(&design, &limits, 2, Some(state.clone()), &mut |p| {
                     later.push(p.begin);
                     Ok(())
                 })
@@ -5997,13 +6011,13 @@ mod tests {
         ownerless.completed[0].net = None;
         for bad in [off, miscounted, missing, ownerless] {
             assert!(matches!(
-                route_resumable(&design, &limits(), 2, Some(bad), &mut |_| Ok(())),
+                route_resumable(&design, &limits, 2, Some(bad), &mut |_| Ok(())),
                 Err(crate::Error::Invalid(_))
             ));
         }
         // A failing sink stops the route with its own error.
         assert!(matches!(
-            route_resumable(&design, &limits(), 2, None, &mut |_| Err(budget("sink"))),
+            route_resumable(&design, &limits, 2, None, &mut |_| Err(budget("sink"))),
             Err(crate::Error::Budget(m)) if m == "sink"
         ));
     }
