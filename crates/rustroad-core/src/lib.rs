@@ -75,6 +75,15 @@ new_key_type! { pub struct InstId; }
 pub enum Error {
     #[error("INVALID_DESIGN: {0}")]
     Invalid(String),
+    /// A pin cannot escape the current fixed geometry; includes consumed search work.
+    #[error("INVALID_DESIGN: NO_ROUTE: pin {pin} net {net} has no legal access")]
+    PinAccess {
+        pin: u32,
+        net: u32,
+        region: Rect,
+        comparisons: usize,
+        expansions: usize,
+    },
     #[error("BUDGET_EXCEEDED: {0}")]
     Budget(String),
     #[error("PLACEMENT_CAPACITY: no legal row remains for instance {0}")]

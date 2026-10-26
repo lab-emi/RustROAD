@@ -2,9 +2,10 @@
 use crate::Result;
 use crate::routing::{self, Blockage, RouteInput, RouteLimits, Routes, budget, invalid};
 use crate::troute::MemoryEstimate;
+use std::collections::BTreeSet;
 use std::mem::size_of;
 
-/// Maximum terminals admitted by one routing batch.
+/// Maximum terminals selected by one primary routing batch.
 pub const MAX_BATCH_TERMINALS: usize = 1_000_000;
 const MAX_BATCHES: usize = 8192;
 
@@ -12,6 +13,8 @@ const MAX_BATCHES: usize = 8192;
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct BatchReport {
     pub batches: usize,
+    pub repair_attempts: usize,
+    pub displaced_nets: usize,
     pub peak_estimate: MemoryEstimate,
     pub final_validation_bytes: u64,
 }
@@ -59,10 +62,251 @@ fn charge(work: &mut usize, count: usize, cap: usize) -> Result<()> {
     Ok(())
 }
 
+struct Batch<'a> {
+    input: &'a RouteInput,
+    limits: &'a RouteLimits,
+    order: &'a [u32],
+    begin: usize,
+    cap: u64,
+}
+
+impl Batch<'_> {
+    fn route(
+        &self,
+        view: &mut RouteInput,
+        out: &mut Routes,
+        report: &mut BatchReport,
+    ) -> Result<Routes> {
+        let mut retries = 0;
+        let mut displaced = 0;
+        loop {
+            view.held_bytes = routing::loaded_held_estimate(0, view, crate::memory::live_bytes());
+            let mut local = self.limits.clone();
+            let stored = out.wires.len() + out.vias.len() + out.patches.len();
+            local.max_segments = self
+                .limits
+                .max_segments
+                .checked_sub(stored)
+                .filter(|&n| n > 0)
+                .ok_or_else(|| budget("batched routing output segments"))?;
+            local.max_expansions = self
+                .limits
+                .max_expansions
+                .checked_sub(out.stats.expansions)
+                .filter(|&n| n > 0)
+                .ok_or_else(|| budget("batched routing total expansions"))?;
+            local.max_comparisons = self
+                .limits
+                .max_comparisons
+                .checked_sub(out.stats.comparisons)
+                .filter(|&n| n > 0)
+                .ok_or_else(|| budget("batched routing total work"))?;
+            let estimate =
+                routing::track_memory_estimate(view, &local)?.expect("checked track plan");
+            if estimate.total() > report.peak_estimate.total() {
+                report.peak_estimate = estimate;
+            }
+            if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                eprintln!(
+                    "[batch] {} active terminals {} retry {retries} estimate {} MiB",
+                    report.batches,
+                    view.terminals.len(),
+                    estimate.total() >> 20
+                );
+            }
+            match routing::route_cpu_ref(view, &local) {
+                Ok(done) => return Ok(done),
+                Err(error) => {
+                    let crate::Error::PinAccess {
+                        region,
+                        comparisons,
+                        expansions,
+                        ..
+                    } = &error
+                    else {
+                        return Err(error);
+                    };
+                    // Failed attempts consume the same aggregate allowance as successful ones.
+                    charge(
+                        &mut out.stats.comparisons,
+                        *comparisons,
+                        self.limits.max_comparisons,
+                    )?;
+                    charge(
+                        &mut out.stats.expansions,
+                        *expansions,
+                        self.limits.max_expansions,
+                    )?;
+                    if retries >= self.limits.max_batch_retries {
+                        return Err(budget("batch pin-access retry limit"));
+                    }
+                    let reopened = self.reopen(view, out, *region, displaced)?;
+                    if reopened == 0 {
+                        return Err(error);
+                    }
+                    retries += 1;
+                    displaced += reopened;
+                    report.repair_attempts += 1;
+                    report.displaced_nets += reopened;
+                    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                        eprintln!("[batch] reopened {reopened} completed nets after {error}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn reopen(
+        &self,
+        view: &mut RouteInput,
+        out: &mut Routes,
+        region: crate::Rect,
+        displaced: usize,
+    ) -> Result<usize> {
+        guard(
+            self.cap,
+            (self.limits.max_batch_displaced_nets as u64) * 192,
+            "batch repair owners",
+        )?;
+        let halo = self
+            .input
+            .layers
+            .iter()
+            .map(|l| l.spacing.saturating_add(l.width))
+            .max()
+            .unwrap_or(0)
+            .max(self.input.step.saturating_mul(2));
+        let region = routing::expand(region, halo)?;
+        let base = self.input.obstacles.len();
+        charge(
+            &mut out.stats.comparisons,
+            view.obstacles.len().saturating_sub(base),
+            self.limits.max_comparisons,
+        )?;
+        let mut victims = BTreeSet::new();
+        // Only completed routing is eligible. Imported cell and supply geometry stays fixed.
+        for obstacle in &view.obstacles[base..] {
+            let r = obstacle.rect;
+            if r.lx <= region.ux
+                && region.lx <= r.ux
+                && r.ly <= region.uy
+                && region.ly <= r.uy
+                && let Some(net) = obstacle.net
+                && !victims.contains(&net)
+            {
+                if displaced + victims.len() >= self.limits.max_batch_displaced_nets {
+                    return Err(budget("batch displaced-net limit"));
+                }
+                victims.insert(net);
+            }
+        }
+        if victims.is_empty() {
+            return Ok(0);
+        }
+        let prior = &self.order[..self.begin];
+        let mut ranges = Vec::new();
+        let mut added = 0usize;
+        for &net in &victims {
+            charge(
+                &mut out.stats.comparisons,
+                2 * usize::BITS as usize,
+                self.limits.max_comparisons,
+            )?;
+            let lo = prior.partition_point(|&i| self.input.terminals[i as usize].net < net);
+            let hi = prior.partition_point(|&i| self.input.terminals[i as usize].net <= net);
+            if hi - lo < 2 {
+                return Err(invalid("completed route is missing its original terminals"));
+            }
+            added = added
+                .checked_add(hi - lo)
+                .ok_or_else(|| budget("batch repair terminal count"))?;
+            if view.terminals.len().saturating_add(added) > self.limits.max_batch_repair_terminals {
+                return Err(budget("batch repair terminal limit"));
+            }
+            ranges.push(lo..hi);
+        }
+        charge(
+            &mut out.stats.comparisons,
+            added,
+            self.limits.max_comparisons,
+        )?;
+        let shape_bytes = ranges
+            .iter()
+            .flat_map(|r| &prior[r.clone()])
+            .map(|&i| {
+                (self.input.terminals[i as usize].shapes.len() * size_of::<routing::LayerRect>())
+                    as u64
+            })
+            .sum::<u64>();
+        let total = view.terminals.len().saturating_add(added);
+        let growth = if total > view.terminals.capacity() {
+            (total as u64).saturating_mul(size_of::<routing::Terminal>() as u64)
+        } else {
+            0
+        };
+        guard(
+            self.cap,
+            shape_bytes.saturating_add(growth),
+            "batch repair terminal shapes",
+        )?;
+        reserve(&mut view.terminals, added, self.cap)?;
+        for range in ranges {
+            view.terminals.extend(
+                prior[range]
+                    .iter()
+                    .map(|&i| self.input.terminals[i as usize].clone()),
+            );
+        }
+        let scans = out
+            .wires
+            .len()
+            .saturating_mul(2)
+            .saturating_add(out.vias.len())
+            .saturating_add(out.patches.len())
+            .saturating_add(out.access.len())
+            .saturating_add(out.nets.len())
+            .saturating_add(view.obstacles.len())
+            .saturating_add(self.input.ties.len().saturating_mul(2));
+        charge(
+            &mut out.stats.comparisons,
+            scans,
+            self.limits.max_comparisons,
+        )?;
+        let mut removed_length = 0u64;
+        for wire in out.wires.iter().filter(|w| victims.contains(&w.net)) {
+            removed_length = removed_length
+                .checked_add(wire.start[0].abs_diff(wire.end[0]))
+                .and_then(|v| v.checked_add(wire.start[1].abs_diff(wire.end[1])))
+                .ok_or_else(|| budget("batch repair wire length"))?;
+        }
+        out.stats.wire_length_dbu = out
+            .stats
+            .wire_length_dbu
+            .checked_sub(removed_length)
+            .ok_or_else(|| invalid("completed route wire length mismatch"))?;
+        out.wires.retain(|w| !victims.contains(&w.net));
+        out.vias.retain(|v| !victims.contains(&v.net));
+        out.patches.retain(|p| !victims.contains(&p.net));
+        out.access.retain(|a| !victims.contains(&a.net));
+        out.nets.retain(|n| !victims.contains(n));
+        let mut index = 0;
+        view.obstacles.retain(|b| {
+            let keep = index < base || b.net.is_none_or(|n| !victims.contains(&n));
+            index += 1;
+            keep
+        });
+        let ties = self.input.ties.iter().filter(|t| victims.contains(&t.net));
+        reserve(&mut view.ties, ties.clone().count(), self.cap)?;
+        view.ties.extend(ties.cloned());
+        Ok(victims.len())
+    }
+}
+
 /// Route whole nets in bounded groups; previously completed metal is fixed geometry.
 ///
 /// The final validator sees every original terminal and every completed route.
-/// A congested batch fails rather than moving or omitting an earlier net.
+/// Bounded repair may reopen nearby completed nets to preserve a later pin's access.
+/// Repair growth is separately capped by `RouteLimits::max_batch_repair_terminals`.
 pub fn route(
     input: &RouteInput,
     limits: &RouteLimits,
@@ -139,6 +383,8 @@ pub fn route(
     out.stats.comparisons = work;
     let mut report = BatchReport {
         batches: 0,
+        repair_attempts: 0,
+        displaced_nets: 0,
         peak_estimate: MemoryEstimate::default(),
         final_validation_bytes: 0,
     };
@@ -195,43 +441,14 @@ pub fn route(
             .filter(|tie| selected.binary_search(&tie.net).is_ok());
         reserve(&mut view.ties, ties.clone().count(), cap)?;
         view.ties.extend(ties.cloned());
-        view.held_bytes = routing::loaded_held_estimate(0, &view, crate::memory::live_bytes());
-        let mut local = limits.clone();
-        let stored = out
-            .wires
-            .len()
-            .saturating_add(out.vias.len())
-            .saturating_add(out.patches.len());
-        local.max_segments = limits
-            .max_segments
-            .checked_sub(stored)
-            .filter(|&n| n > 0)
-            .ok_or_else(|| budget("batched routing output segments"))?;
-        local.max_expansions = limits
-            .max_expansions
-            .checked_sub(out.stats.expansions)
-            .filter(|&n| n > 0)
-            .ok_or_else(|| budget("batched routing total expansions"))?;
-        local.max_comparisons = limits
-            .max_comparisons
-            .checked_sub(out.stats.comparisons)
-            .filter(|&n| n > 0)
-            .ok_or_else(|| budget("batched routing total work"))?;
-        let estimate = routing::track_memory_estimate(&view, &local)?.expect("checked track plan");
-        if estimate.total() > report.peak_estimate.total() {
-            report.peak_estimate = estimate;
+        let mut done = Batch {
+            input,
+            limits,
+            order: &order,
+            begin,
+            cap,
         }
-        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
-            eprintln!(
-                "[batch] {} terminals {}..{end}/{} nets {} estimate {} MiB",
-                report.batches,
-                begin,
-                order.len(),
-                selected.len(),
-                estimate.total() >> 20
-            );
-        }
-        let mut done = routing::route_cpu_ref(&view, &local)?;
+        .route(&mut view, &mut out, &mut report)?;
         report.batches += 1;
         out.stats.grid_nodes = done.stats.grid_nodes;
         out.stats.expansions = out

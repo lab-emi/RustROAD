@@ -1697,10 +1697,13 @@ impl<'a> Router<'a> {
             }
             attempts[i] += 1;
             if attempts[i] > 3 {
-                return Err(no_route(&format!(
-                    "pin {} net {} has no legal access after local repair",
-                    t.pin, t.net
-                )));
+                return Err(crate::Error::PinAccess {
+                    pin: t.pin,
+                    net: t.net,
+                    region: windows[i],
+                    comparisons: self.spatial.work,
+                    expansions: self.expansions,
+                });
             }
             // Rip up escapes of terminals whose windows overlap this one.
             if window_index.is_none() {
@@ -1726,10 +1729,13 @@ impl<'a> Router<'a> {
             // Match the original ascending-pin repair order exactly.
             victims.sort_unstable();
             if victims.is_empty() {
-                return Err(no_route(&format!(
-                    "pin {} net {} has no legal access",
-                    t.pin, t.net
-                )));
+                return Err(crate::Error::PinAccess {
+                    pin: t.pin,
+                    net: t.net,
+                    region: windows[i],
+                    comparisons: self.spatial.work,
+                    expansions: self.expansions,
+                });
             }
             let mut back = Vec::new();
             for p in victims {
@@ -4102,6 +4108,70 @@ mod tests {
         let mut unpatched = out;
         unpatched.wires.retain(|w| w.layer != 1);
         assert!(validate(&design, &unpatched, &limits()).is_err());
+    }
+
+    #[test]
+    fn an_earlier_batch_must_not_seal_a_later_pins_only_escape() {
+        // A lower-layer pin is enclosed by fixed cell metal. Its only escape
+        // is upward at (500,500), where the earlier net prefers a straight wire.
+        let mut terms = vec![
+            terminal(0, 0, true, rect(490, 90, 510, 110)),
+            terminal(1, 0, false, rect(490, 890, 510, 910)),
+            terminal(2, 1, true, rect(490, 490, 510, 510)),
+            terminal(3, 1, false, rect(90, 690, 110, 710)),
+        ];
+        terms[0].shapes[0].layer = 1;
+        terms[1].shapes[0].layer = 1;
+        let mut fixed = vec![Blockage {
+            layer: 0,
+            rect: terms[2].shapes[0].rect,
+            net: Some(1),
+        }];
+        for rect in [
+            rect(420, 420, 470, 580),
+            rect(530, 420, 580, 580),
+            rect(470, 420, 530, 470),
+            rect(470, 530, 530, 580),
+        ] {
+            fixed.push(Blockage {
+                layer: 0,
+                rect,
+                net: None,
+            });
+        }
+        let mut design = input(terms, fixed);
+        design.tracks.as_mut().unwrap().memory_mib = 256;
+        let together = route_cpu_ref(&design, &limits()).unwrap();
+        validate(&design, &together, &limits()).unwrap();
+        let (batched, report) = crate::route_batches::route(&design, &limits(), 2).unwrap();
+        validate(&design, &batched, &limits()).unwrap();
+        assert_eq!(batched.nets, [0, 1]);
+        assert_eq!(batched.access.len(), 4);
+        assert_eq!(report.repair_attempts, 1);
+        assert_eq!(report.displaced_nets, 1);
+        let (again, _) = crate::route_batches::route(&design, &limits(), 2).unwrap();
+        assert_eq!(batched.wires, again.wires);
+        assert_eq!(batched.vias, again.vias);
+        assert_eq!(batched.access, again.access);
+        for limited in [
+            RouteLimits {
+                max_batch_retries: 0,
+                ..limits()
+            },
+            RouteLimits {
+                max_batch_repair_terminals: 3,
+                ..limits()
+            },
+            RouteLimits {
+                max_expansions: batched.stats.expansions - 1,
+                ..limits()
+            },
+        ] {
+            assert!(matches!(
+                crate::route_batches::route(&design, &limited, 2),
+                Err(crate::Error::Budget(_))
+            ));
+        }
     }
 
     #[test]

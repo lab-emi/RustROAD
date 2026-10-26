@@ -203,3 +203,36 @@ state into framed, hash-checked `model.rbin` records (16 GiB file bound,
 1 MiB per frame) and fixed-width `physical.rbin` (2 GiB). These storage limits
 do not certify completion or quality of a full-chip flow. Full OpenC910
 RTL-to-GDS qualification remains in progress; see [scaling](scaling.md).
+
+
+## Preserving pin access across batches
+
+A completed route can cover the only legal upper-layer escape of a later pin,
+even when it clears that pin's original lower-layer metal. Batched routing now
+returns a typed pin-access failure with its bounded search region and consumed
+work. The caller may reopen completed nets overlapping that region, retain the
+original cell and supply obstacles, and route those nets with the current batch.
+Every original terminal remains in the final full-design validation.
+
+Repair has explicit `RouteLimits` bounds:
+
+| Limit | Default | Hard ceiling |
+| --- | ---: | ---: |
+| `max_batch_retries` |16 |128 |
+| `max_batch_displaced_nets` |1,024 |4,096 |
+| `max_batch_repair_terminals` |1,000,000 |1,000,000 |
+
+Zero retries disables recovery. `batch_terminals` still limits the primary
+selection; the separate repair-terminal limit caps growth when whole earlier
+nets must join it. Every retry recomputes process-memory admission before search.
+Victim selection costs at most192bytes per configured displaced net, plus exactly
+counted terminal clones and temporary vector reallocation. Completed geometry is
+scanned only on a pin-access failure, under the aggregate comparison budget.
+Failed searches consume the aggregate expansion and comparison limits too.
+No global all-pin escape-plan collection or path enumeration is introduced.
+
+The regression encloses a lower-layer pin in fixed geometry. A prior upper-layer
+wire blocks its only escape; joint routing provides a legal witness. Bounded
+repair must produce a deterministic, fully connected route, and insufficient
+retry, terminal or aggregate search budgets must fail. Real-PDK independent
+physical gates remain necessary before full-design qualification.

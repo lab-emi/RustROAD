@@ -35,6 +35,15 @@ pub struct RouteLimits {
     /// Exact routing-tree segments retained by the bounded distance index.
     #[serde(default = "default_target_segments")]
     pub max_target_segments: usize,
+    /// Retries that may reopen earlier nets after a later pin loses access.
+    #[serde(default = "default_batch_retries")]
+    pub max_batch_retries: usize,
+    /// Distinct completed nets reopened during one batch.
+    #[serde(default = "default_batch_displaced_nets")]
+    pub max_batch_displaced_nets: usize,
+    /// Total terminals, including reopened nets, admitted to a repair batch.
+    #[serde(default = "default_batch_repair_terminals")]
+    pub max_batch_repair_terminals: usize,
     /// Retained same-net violations per check; exceeding the limit is an error.
     #[serde(default = "default_rule_violations")]
     pub max_rule_violations: usize,
@@ -58,6 +67,15 @@ fn default_active_nodes() -> usize {
 fn default_target_segments() -> usize {
     8192
 }
+fn default_batch_retries() -> usize {
+    16
+}
+fn default_batch_displaced_nets() -> usize {
+    1024
+}
+fn default_batch_repair_terminals() -> usize {
+    1_000_000
+}
 
 impl Default for RouteLimits {
     fn default() -> Self {
@@ -72,6 +90,9 @@ impl Default for RouteLimits {
             max_hard_search_expansions: None,
             max_active_nodes: default_active_nodes(),
             max_target_segments: default_target_segments(),
+            max_batch_retries: default_batch_retries(),
+            max_batch_displaced_nets: default_batch_displaced_nets(),
+            max_batch_repair_terminals: default_batch_repair_terminals(),
             max_rule_violations: default_rule_violations(),
             max_rule_grid_cells: default_rule_grid_cells(),
             max_comparisons: 200_000_000,
@@ -95,6 +116,9 @@ impl RouteLimits {
             max_hard_search_expansions: None,
             max_active_nodes: 50_000_000,
             max_target_segments: 1_000_000,
+            max_batch_retries: 128,
+            max_batch_displaced_nets: 4096,
+            max_batch_repair_terminals: 1_000_000,
             max_rule_violations: 1_000_000,
             max_rule_grid_cells: 4_000_000,
             max_comparisons: 1usize << 40,
@@ -109,6 +133,9 @@ impl RouteLimits {
         self.validate_against(&Self::ceiling())
     }
     fn validate_against(&self, hard: &Self) -> Result<()> {
+        if self.max_batch_retries > hard.max_batch_retries {
+            return Err(budget("batch retry limit outside hard bounds"));
+        }
         if self
             .max_hard_search_expansions
             .is_some_and(|n| n == 0 || n > self.max_search_expansions)
@@ -125,6 +152,11 @@ impl RouteLimits {
             (self.max_search_expansions, hard.max_search_expansions),
             (self.max_active_nodes, hard.max_active_nodes),
             (self.max_target_segments, hard.max_target_segments),
+            (self.max_batch_displaced_nets, hard.max_batch_displaced_nets),
+            (
+                self.max_batch_repair_terminals,
+                hard.max_batch_repair_terminals,
+            ),
             (self.max_rule_violations, hard.max_rule_violations),
             (self.max_rule_grid_cells, hard.max_rule_grid_cells),
             (self.max_comparisons, hard.max_comparisons),
