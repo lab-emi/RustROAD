@@ -104,6 +104,16 @@ impl std::fmt::Display for PinAccessFailure {
 }
 impl std::error::Error for PinAccessFailure {}
 
+/// Bounded locations and consumed work for unresolved routed-spacing checks.
+#[derive(Debug, thiserror::Error)]
+#[error("{detail}")]
+pub struct RoutingRuleFailure {
+    pub detail: String,
+    pub regions: Box<[Rect]>,
+    pub comparisons: usize,
+    pub expansions: usize,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("INVALID_DESIGN: {0}")]
@@ -111,6 +121,8 @@ pub enum Error {
     /// A pin cannot escape the current fixed geometry; includes consumed search work.
     #[error("INVALID_DESIGN: {0}")]
     PinAccess(#[source] Box<PinAccessFailure>),
+    #[error("INVALID_DESIGN: NO_ROUTE: ROUTING_RULE {0}")]
+    RoutingRule(#[source] Box<RoutingRuleFailure>),
     #[error("BUDGET_EXCEEDED: {0}")]
     Budget(String),
     #[error("PLACEMENT_CAPACITY: no legal row remains for instance {0}")]

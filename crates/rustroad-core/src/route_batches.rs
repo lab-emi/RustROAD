@@ -117,25 +117,19 @@ impl Batch<'_> {
             match routing::route_cpu_ref(view, &local) {
                 Ok(done) => return Ok(done),
                 Err(error) => {
-                    let crate::Error::PinAccess(failure) = &error else {
+                    let Some(regions) = self.recovery_regions(&error, out)? else {
                         return Err(error);
                     };
-                    // Failed attempts consume the same aggregate allowance as successful ones.
-                    charge(
-                        &mut out.stats.comparisons,
-                        failure.comparisons,
-                        self.limits.max_comparisons,
-                    )?;
-                    charge(
-                        &mut out.stats.expansions,
-                        failure.expansions,
-                        self.limits.max_expansions,
-                    )?;
                     if retries >= self.limits.max_batch_retries {
-                        return Err(budget("batch pin-access retry limit"));
+                        return Err(budget("batch recovery retry limit"));
                     }
-                    let reopened = self.reopen(view, out, &failure.blocked, displaced)?;
+                    let reopened = self.reopen(view, out, &regions, displaced)?;
                     if reopened == 0 {
+                        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                            eprintln!(
+                                "[batch] no completed net overlaps the recovery regions: {error}"
+                            );
+                        }
                         return Err(error);
                     }
                     retries += 1;
@@ -150,16 +144,57 @@ impl Batch<'_> {
         }
     }
 
+    fn recovery_regions(
+        &self,
+        error: &crate::Error,
+        out: &mut Routes,
+    ) -> Result<Option<Vec<crate::Rect>>> {
+        let (count, comparisons, expansions) = match error {
+            crate::Error::PinAccess(f) => (f.blocked.len(), f.comparisons, f.expansions),
+            crate::Error::RoutingRule(f) => (f.regions.len(), f.comparisons, f.expansions),
+            _ => return Ok(None),
+        };
+        if count == 0 || count > self.limits.max_batch_blocked_pins {
+            return Err(budget("batch recovery region count"));
+        }
+        // Every failed attempt consumes the aggregate allowance before a retry.
+        charge(
+            &mut out.stats.comparisons,
+            comparisons,
+            self.limits.max_comparisons,
+        )?;
+        charge(
+            &mut out.stats.expansions,
+            expansions,
+            self.limits.max_expansions,
+        )?;
+        guard(
+            self.cap,
+            (count * size_of::<crate::Rect>()) as u64,
+            "batch recovery regions",
+        )?;
+        let mut regions = Vec::new();
+        regions
+            .try_reserve_exact(count)
+            .map_err(|_| budget("batch recovery region allocation"))?;
+        match error {
+            crate::Error::PinAccess(f) => regions.extend(f.blocked.iter().map(|p| p.region)),
+            crate::Error::RoutingRule(f) => regions.extend_from_slice(&f.regions),
+            _ => unreachable!("recovery error kind was checked"),
+        }
+        Ok(Some(regions))
+    }
+
     fn reopen(
         &self,
         view: &mut RouteInput,
         out: &mut Routes,
-        blocked: &[crate::BlockedPin],
+        regions: &[crate::Rect],
         displaced: usize,
     ) -> Result<usize> {
         guard(
             self.cap,
-            (self.limits.max_batch_displaced_nets as u64) * 192 + (blocked.len() as u64) * 256,
+            (self.limits.max_batch_displaced_nets as u64) * 192 + (regions.len() as u64) * 256,
             "batch repair owners",
         )?;
         let halo = self
@@ -172,10 +207,10 @@ impl Batch<'_> {
             .max(self.input.step.saturating_mul(2));
         let mut windows = Vec::new();
         windows
-            .try_reserve_exact(blocked.len())
+            .try_reserve_exact(regions.len())
             .map_err(|_| budget("batch blocked-pin windows"))?;
-        for pin in blocked {
-            windows.push(routing::expand(pin.region, halo)?);
+        for region in regions {
+            windows.push(routing::expand(*region, halo)?);
         }
         let window_index = crate::troute::WindowIndex::new(
             &windows,

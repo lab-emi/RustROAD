@@ -255,3 +255,19 @@ must recover both blockers, produce deterministic complete geometry, and still
 refuse the same case when only one failure may be collected per pass. The
 rectangle-query index is checked against exhaustive overlap independently of
 its ordering, including exhaustion of its work limit.
+
+
+Unresolved same-net spacing pairs can also request bounded cross-batch recovery.
+Their original rule descriptions remain errors; at most the existing recovery
+region limit is retained. The caller may reopen nearby completed nets, then must
+pass every ordinary rule and whole-design check. Non-spacing failures keep their
+ordinary error path. A region without a completed net to reopen fails immediately.
+Retries share the same cap as blocked-pin recovery.
+
+Every assembly and cleanup pass now consumes the remaining comparison allowance.
+Rule checks, geometry queries and area-stub searches share one cleanup work
+counter. Patch and stub insertion checks the output-record limit before appending.
+Repeated unsuccessful cleanup passes cannot reset either resource budget. A tiny
+area-repair fixture verifies refusal at both the measured work boundary and a
+full output-record budget. The actual large-core spacing case still requires a
+fresh guarded run and independent physical validation.

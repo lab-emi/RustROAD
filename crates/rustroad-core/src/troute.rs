@@ -3334,7 +3334,20 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         let oriented = r.orient_vias(&mut routed)?;
         trace("orient", t0, format_args!("vias re-picked {oriented}"));
         let mut out = assemble(&r, &groups, &plans, &routed, input, limits, &via_layers)?;
-        let (work, remaining) = crate::routing::cleanup_report(input, &mut out, limits)?;
+        r.spatial.work = out.stats.comparisons;
+        let mut cleanup_limits = limits.clone();
+        cleanup_limits.max_comparisons = limits
+            .max_comparisons
+            .checked_sub(r.spatial.work)
+            .filter(|&n| n > 0)
+            .ok_or_else(|| budget("routing comparison limit before cleanup"))?;
+        let (work, remaining) = crate::routing::cleanup_report(input, &mut out, &cleanup_limits)?;
+        r.spatial.work = r
+            .spatial
+            .work
+            .checked_add(work)
+            .filter(|&n| n <= limits.max_comparisons)
+            .ok_or_else(|| budget("routing comparison limit"))?;
         r.guard("rule repair")?;
         trace(
             "cleanup",
@@ -3345,11 +3358,7 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 out.patches.len()
             ),
         );
-        out.stats.comparisons = out
-            .stats
-            .comparisons
-            .checked_add(work)
-            .ok_or_else(|| budget("routing comparison limit"))?;
+        out.stats.comparisons = r.spatial.work;
         if remaining.is_empty() {
             if out.stats.comparisons > limits.max_comparisons {
                 return Err(budget("routing comparison limit"));
@@ -3385,11 +3394,66 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
         }
         if pass == 4 {
             let v = &remaining[0];
-            return Err(no_route(&format!(
-                "ROUTING_RULE unresolved {} ({} total)",
-                v.describe(),
-                remaining.len()
-            )));
+            let detail = format!("unresolved {} ({} total)", v.describe(), remaining.len());
+            r.spatial.work = r
+                .spatial
+                .work
+                .checked_add(remaining.len())
+                .filter(|&n| n <= limits.max_comparisons)
+                .ok_or_else(|| budget("routing conflict diagnostic work"))?;
+            if remaining
+                .iter()
+                .all(|v| matches!(v, route_rules::Violation::Spacing { .. }))
+            {
+                if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                    for conflict in remaining.iter().take(8) {
+                        if let route_rules::Violation::Spacing { net, layer, a, b } = conflict {
+                            let fill = route_rules::fill_for_robust(
+                                *a,
+                                *b,
+                                input.layers[*layer as usize].width,
+                                input.grid,
+                            );
+                            match r.spatial.probe_soft(*layer, fill, *net)? {
+                                Soft::Blocked => eprintln!(
+                                    "[troute] rule search context {} fill {fill:?} fixed blocker",
+                                    conflict.describe()
+                                ),
+                                Soft::Clear { near, victims } => eprintln!(
+                                    "[troute] rule search context {} fill {fill:?} near {near} routed blockers {:?} ({} total)",
+                                    conflict.describe(),
+                                    &victims[..victims.len().min(8)],
+                                    victims.len()
+                                ),
+                            }
+                        }
+                    }
+                }
+                let count = remaining.len().min(limits.max_batch_blocked_pins);
+                let mut regions = Vec::new();
+                regions
+                    .try_reserve_exact(count)
+                    .map_err(|_| budget("routing conflict regions"))?;
+                for v in remaining.iter().take(count) {
+                    if let route_rules::Violation::Spacing { a, b, .. } = v {
+                        regions.push(Rect {
+                            lx: a.lx.min(b.lx),
+                            ly: a.ly.min(b.ly),
+                            ux: a.ux.max(b.ux),
+                            uy: a.uy.max(b.uy),
+                        });
+                    }
+                }
+                return Err(crate::Error::RoutingRule(Box::new(
+                    crate::RoutingRuleFailure {
+                        detail,
+                        regions: regions.into_boxed_slice(),
+                        comparisons: r.spatial.work,
+                        expansions: r.expansions,
+                    },
+                )));
+            }
+            return Err(no_route(&format!("ROUTING_RULE {detail}")));
         }
         // Re-route the offending nets in strict mode (no near misses).
         let bad: BTreeSet<u32> = remaining.iter().map(|v| v.net()).collect();
@@ -3467,6 +3531,11 @@ fn assemble(
     let mut via_refs = Vec::new();
     let mut access_refs = Vec::new();
     let mut work = 0;
+    let work_cap = limits
+        .max_comparisons
+        .checked_sub(r.spatial.work)
+        .filter(|&n| n > 0)
+        .ok_or_else(|| budget("routing assembly work"))?;
     for (&net, terminals) in groups {
         nets_out.push(net);
         wire_refs.clear();
@@ -3491,7 +3560,7 @@ fn assemble(
             via_layers,
             &access_refs,
             &mut work,
-            limits.max_comparisons,
+            work_cap,
             limits
                 .max_segments
                 .saturating_sub(runs.len())
@@ -3518,7 +3587,12 @@ fn assemble(
         stats: RouteStats {
             grid_nodes: r.graph.len,
             expansions: r.expansions,
-            comparisons: r.spatial.work,
+            comparisons: r
+                .spatial
+                .work
+                .checked_add(work)
+                .filter(|&n| n <= limits.max_comparisons)
+                .ok_or_else(|| budget("routing assembly work"))?,
             wire_length_dbu: 0,
         },
     })

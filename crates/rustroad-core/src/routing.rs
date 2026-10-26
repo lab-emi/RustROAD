@@ -2339,7 +2339,13 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
     }
     out.stats.comparisons = spatial.work;
     if input.rules {
-        let work = cleanup(input, &mut out, limits)?;
+        let mut cleanup_limits = limits.clone();
+        cleanup_limits.max_comparisons = limits
+            .max_comparisons
+            .checked_sub(out.stats.comparisons)
+            .filter(|&n| n > 0)
+            .ok_or_else(|| budget("routing comparison limit before cleanup"))?;
+        let work = cleanup(input, &mut out, &cleanup_limits)?;
         out.stats.comparisons = out
             .stats
             .comparisons
@@ -2478,8 +2484,13 @@ pub(crate) fn cleanup_report(
     out: &mut Routes,
     limits: &RouteLimits,
 ) -> Result<(usize, Vec<Violation>)> {
-    let mut work = prune(input, out, limits)?;
+    let work = prune(input, out, limits)?;
     let mut spatial = Spatial::new(input, limits)?;
+    spatial.work = spatial
+        .work
+        .checked_add(work)
+        .filter(|&n| n <= limits.max_comparisons)
+        .ok_or_else(|| budget("cleanup comparison limit"))?;
     for w in &out.wires {
         spatial.add_wire(w)?;
     }
@@ -2488,7 +2499,7 @@ pub(crate) fn cleanup_report(
     }
     let mut tried = BTreeSet::new();
     for _ in 0..8 {
-        let violations = route_rules::check(input, out, limits, &mut work)?;
+        let violations = route_rules::check(input, out, limits, &mut spatial.work)?;
         if violations.is_empty() {
             break;
         }
@@ -2501,7 +2512,7 @@ pub(crate) fn cleanup_report(
             Some(crate::rule_index::RuleIndex::new(
                 input,
                 out,
-                &mut work,
+                &mut spatial.work,
                 limits.max_comparisons,
             )?)
         } else {
@@ -2519,6 +2530,7 @@ pub(crate) fn cleanup_report(
                     if tried.insert((*net, *layer, fill.lx, fill.ly, fill.ux, fill.uy))
                         && spatial.clear(*layer, fill, *net)?
                     {
+                        check_cleanup_record_room(out, limits)?;
                         spatial.add(Blockage {
                             layer: *layer,
                             rect: fill,
@@ -2543,9 +2555,9 @@ pub(crate) fn cleanup_report(
                         *layer,
                         shapes,
                         limits,
-                        &mut work,
                         cache.as_ref(),
                     )? {
+                        check_cleanup_record_room(out, limits)?;
                         spatial.add_wire(&w)?;
                         out.wires.push(w);
                         changed = true;
@@ -2561,6 +2573,7 @@ pub(crate) fn cleanup_report(
                     if tried.insert((*net, *layer, fill.lx, fill.ly, fill.ux, fill.uy))
                         && spatial.clear(*layer, fill, *net)?
                     {
+                        check_cleanup_record_room(out, limits)?;
                         spatial.add(Blockage {
                             layer: *layer,
                             rect: fill,
@@ -2581,11 +2594,21 @@ pub(crate) fn cleanup_report(
             break;
         }
     }
-    let remaining = route_rules::check(input, out, limits, &mut work)?;
-    let work = work
-        .checked_add(spatial.work)
-        .ok_or_else(|| budget("routing comparison limit"))?;
-    Ok((work, remaining))
+    let remaining = route_rules::check(input, out, limits, &mut spatial.work)?;
+    Ok((spatial.work, remaining))
+}
+
+fn check_cleanup_record_room(out: &Routes, limits: &RouteLimits) -> Result<()> {
+    if out
+        .wires
+        .len()
+        .saturating_add(out.vias.len())
+        .saturating_add(out.patches.len())
+        >= limits.max_segments
+    {
+        return Err(budget("cleanup output record limit"));
+    }
+    Ok(())
 }
 
 /// Shortest default-width stub from a via/wire node of the component that
@@ -2599,7 +2622,6 @@ fn area_stub(
     layer: u32,
     shapes: &[Rect],
     limits: &RouteLimits,
-    work: &mut usize,
     cache: Option<&crate::rule_index::RuleIndex>,
 ) -> Result<Option<Wire>> {
     let rule = &input.layers[layer as usize];
@@ -2611,7 +2633,7 @@ fn area_stub(
     let index = if let Some(index) = cache {
         index
     } else {
-        owned = crate::rule_index::RuleIndex::new(input, out, work, cap)?;
+        owned = crate::rule_index::RuleIndex::new(input, out, &mut spatial.work, cap)?;
         &owned
     };
     let inside = |p: [i64; 2]| shapes.iter().any(|s| contains(*s, p));
@@ -2637,7 +2659,7 @@ fn area_stub(
         .collect();
     anchors.extend(ends.into_iter().filter(|p| !vias.contains(p)));
     let others: Vec<Rect> = index
-        .collect(input, out, net, limits, work)?
+        .collect(input, out, net, limits, &mut spatial.work)?
         .remove(&(net, layer))
         .unwrap_or_default()
         .into_iter()
@@ -2677,13 +2699,13 @@ fn area_stub(
                 all.push(r);
                 route_rules::union_area(&all, work, cap)
             };
-            if area(steps, work)? < i128::from(min) {
+            if area(steps, &mut spatial.work)? < i128::from(min) {
                 continue;
             }
             let (mut lo, mut hi) = (1i64, steps);
             while lo < hi {
                 let mid = lo + (hi - lo) / 2;
-                if area(mid, work)? >= i128::from(min) {
+                if area(mid, &mut spatial.work)? >= i128::from(min) {
                     hi = mid;
                 } else {
                     lo = mid + 1;
@@ -2691,7 +2713,7 @@ fn area_stub(
             }
             let (w, r) = stub(a, d, lo)?;
             if !spatial.clear(layer, r, net)?
-                || !route_rules::local_ok(r, &others, rule.spacing, work, cap)?
+                || !route_rules::local_ok(r, &others, rule.spacing, &mut spatial.work, cap)?
             {
                 continue;
             }
@@ -3607,6 +3629,37 @@ mod tests {
         input.rules = false;
         assert!(validate(&input, &floating, &RouteLimits::default()).is_err());
     }
+    #[test]
+    fn cleanup_charges_joint_rule_work_and_refuses_extra_output_records() {
+        let mut input = rules_input();
+        input.layers[1].min_area = Some(50);
+        let original = manual(
+            &input,
+            &[([10, 10], [10, 12], 1), ([10, 12], [10, 25], 0)],
+            &[[10, 10], [10, 12]],
+        );
+        let (work, remaining) =
+            cleanup_report(&input, &mut original.clone(), &RouteLimits::default()).unwrap();
+        assert!(remaining.is_empty());
+        assert!(work > 1);
+        let too_little_work = RouteLimits {
+            max_comparisons: work - 1,
+            ..Default::default()
+        };
+        assert!(matches!(
+            cleanup_report(&input, &mut original.clone(), &too_little_work),
+            Err(Error::Budget(_))
+        ));
+        let full_output = RouteLimits {
+            max_segments: original.wires.len() + original.vias.len(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            cleanup_report(&input, &mut original.clone(), &full_output),
+            Err(Error::Budget(_))
+        ));
+    }
+
     #[test]
     fn rules_mode_adds_min_area_stub_and_is_deterministic() {
         // A full-height M1 wall forces an M2 hop that is below its area rule.
