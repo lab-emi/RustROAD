@@ -1401,13 +1401,20 @@ pub fn route_with_options(
     }
     rustroad_core::memory::trace("loaded");
     let placed: Vec<_> = snapshot.records().collect();
-    let (_lock, mut metadata) = snapshot.into_metadata();
+    let (lock, metadata) = snapshot.into_metadata();
     rustroad_core::memory::trace("metadata owned");
     let bundle = metadata
         .physical
-        .as_mut()
+        .as_ref()
         .ok_or_else(|| fail("physical design required"))?;
     let mut input = build_input(&metadata.design, bundle, &placed, &config, scope)?;
+    // Routing needs only its input. Release the design while routing; the
+    // exclusive lock keeps this immutable revision as HEAD, and a commit
+    // reloads it under the same lock.
+    drop(placed);
+    drop(metadata);
+    release_free_heap();
+    rustroad_core::memory::trace("design released");
     let live_process_bytes = rustroad_core::memory::live_bytes();
     input.held_bytes = routing::loaded_held_estimate(workspace_bytes, &input, live_process_bytes);
     rustroad_core::memory::trace("input");
@@ -1553,7 +1560,7 @@ pub fn route_with_options(
             route_memory: memory,
         })));
     }
-    bundle.routing = Some(RoutingState {
+    let state = RoutingState {
         source,
         config,
         scope,
@@ -1562,9 +1569,21 @@ pub fn route_with_options(
         via_lower_layers: input.vias.iter().map(|v| v.lower).collect(),
         routes,
         table: None,
-    });
+    };
     // The commit re-validates from its own input; free this one first.
     drop(input);
+    let snapshot = crate::load(path, lock, limits)?;
+    if snapshot.metadata().revision != current || snapshot.metadata().stage != Stage::Placed {
+        return Err(fail("routed revision changed under the workspace lock"));
+    }
+    let placed: Vec<_> = snapshot.records().collect();
+    let (_lock, mut metadata) = snapshot.into_metadata();
+    rustroad_core::memory::trace("design reloaded");
+    metadata
+        .physical
+        .as_mut()
+        .ok_or_else(|| fail("physical design required"))?
+        .routing = Some(state);
     metadata.format_version = 5;
     metadata.parent_revision = current;
     let mut summary = crate::commit(path, metadata, &placed)?;
