@@ -1,0 +1,21 @@
+module replay38(input p838057, input p838042, input p838055, input p838056, input p838058, output p838059, input p838302, input p838303, input p838304, input p838305);
+wire n838041;
+wire fut;
+wire d13090_Y;
+wire d13091_Y;
+wire d13095_Y;
+wire d13098_Y;
+wire d13101_Y;
+wire d1169718_Y;
+wire d1169719_X;
+sky130_fd_sc_hd__nor2b_1 i13089(.A(p838059), .B_N(fut), .Y(fut));
+sky130_fd_sc_hd__nor2_1 i13090(.A(fut), .B(p838059), .Y(d13090_Y));
+sky130_fd_sc_hd__a222oi_1 i13091(.A1(p838042), .A2(fut), .B1(p838059), .B2(p838058), .C1(p838305), .C2(fut), .Y(d13091_Y));
+sky130_fd_sc_hd__a222oi_1 i13095(.A1(n838041), .A2(fut), .B1(p838059), .B2(p838057), .C1(p838304), .C2(fut), .Y(d13095_Y));
+sky130_fd_sc_hd__a222oi_1 i13098(.A1(fut), .A2(fut), .B1(p838059), .B2(p838056), .C1(p838303), .C2(fut), .Y(d13098_Y));
+sky130_fd_sc_hd__a222oi_1 i13101(.A1(fut), .A2(fut), .B1(p838059), .B2(p838055), .C1(p838302), .C2(fut), .Y(d13101_Y));
+sky130_fd_sc_hd__o2111ai_1 i1169718(.A1(fut), .A2(fut), .B1(fut), .C1(fut), .D1(fut), .Y(d1169718_Y));
+sky130_fd_sc_hd__o32a_1 i1169719(.A1(fut), .A2(fut), .A3(fut), .B1(fut), .B2(n838041), .X(d1169719_X));
+sky130_fd_sc_hd__dfrtp_1 i3311173(.CLK(fut), .D(fut), .RESET_B(fut), .Q(n838041));
+sky130_fd_sc_hd__dfrtp_1 i3311191(.CLK(fut), .D(fut), .RESET_B(fut), .Q(p838059));
+endmodule

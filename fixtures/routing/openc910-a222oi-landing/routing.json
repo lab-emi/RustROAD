@@ -1,0 +1,82 @@
+{
+  "grid_step": 680,
+  "access_layer": "met2",
+  "layers": [
+    {
+      "name": "li1",
+      "spacing": 170
+    },
+    {
+      "name": "met1",
+      "spacing": 140
+    },
+    {
+      "name": "met2",
+      "spacing": 140
+    },
+    {
+      "name": "met3",
+      "spacing": 300
+    },
+    {
+      "name": "met4",
+      "spacing": 300
+    },
+    {
+      "name": "met5",
+      "spacing": 1600
+    }
+  ],
+  "vias": [
+    {
+      "name": "L1M1_PR",
+      "cut_spacing": 190
+    },
+    {
+      "name": "M1M2_PR",
+      "cut_spacing": 170
+    },
+    {
+      "name": "M2M3_PR",
+      "cut_spacing": 200
+    },
+    {
+      "name": "M3M4_PR",
+      "cut_spacing": 200
+    },
+    {
+      "name": "M4M5_PR",
+      "cut_spacing": 800
+    }
+  ],
+  "lef_rules": true,
+  "max_skew_ns": 0.5,
+  "limits": {
+    "max_axis": 1048576,
+    "max_grid_nodes": 50000000,
+    "max_obstacles": 128000000,
+    "max_bin_entries": 512000000,
+    "max_segments": 100000,
+    "max_expansions": 2000000,
+    "max_search_expansions": 200000,
+    "max_comparisons": 200000000,
+    "max_heap": 500000,
+    "max_active_nodes": 10000,
+    "max_rule_violations": 2048,
+    "max_rule_grid_cells": 10000,
+    "max_hard_search_expansions": 10000,
+    "max_target_segments": 8192,
+    "max_batch_retries": 16,
+    "max_batch_displaced_nets": 4096,
+    "max_batch_repair_terminals": 250000,
+    "max_batch_blocked_pins": 64
+  },
+  "track_router": {
+    "gcell": 43520,
+    "via_cost": 1360,
+    "memory_mib": 1024,
+    "max_history_entries": 4000000,
+    "heuristic_weight": 8
+  },
+  "batch_terminals": 29
+}

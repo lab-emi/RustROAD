@@ -72,6 +72,15 @@ const MAX_VIA_PAD_ENTRIES: usize = 1_000_000;
 const MAX_TARGET_PROJECTIONS_PER_SINK: usize = 1024;
 /// Sorted window index plus construction headroom (one entry per terminal).
 const WINDOW_INDEX_BYTES: u64 = 32;
+/// Alternate access: at most one landing zone per terminal: a 56-byte zone
+/// record, its x-index (B-tree) and terminal-map entries, with growth
+/// headroom (~200 bytes worst case), rounded up.
+const LANDING_BYTES: u64 = 256;
+/// Alternate access: extra cost, in access steps, of an escape move whose
+/// metal comes within spacing of a protected landing zone (one escape-window
+/// radius): a free escape up to that much longer wins, and an escape that
+/// can only encroach is still taken.
+const LANDING_PENALTY_STEPS: u64 = 4;
 type AccessKey = (u32, Vec<(u32, [i64; 2])>);
 type AccessTables = BTreeMap<AccessKey, Vec<AccessEntry>>;
 
@@ -774,6 +783,7 @@ fn memory_estimate_limited(
             .saturating_mul(ROUTED_BYTES_PER_TERMINAL)
             // Selected seed/generation in Plan plus one pending preference.
             .saturating_add(t.saturating_mul(32))
+            .saturating_add(t.saturating_mul(LANDING_BYTES))
             .saturating_add(
                 t.saturating_mul(portal_shapes.saturating_add(1))
                     .saturating_mul(8),
@@ -955,6 +965,99 @@ impl Default for AccessPreference {
     }
 }
 
+/// Landing zones of terminals whose escape search failed (alternate access
+/// only). A zone bounds every first-via pad, on the via's upper layer, at the
+/// terminal's start points. In a dense pin row a neighbour's cheapest escape
+/// can cover all landings of a pin; repair then re-plans that neighbour
+/// first and seals the pin again until its attempt limit blocks it. While a
+/// failed terminal has no escape, other nets' escape moves that come within
+/// spacing of its zone cost `LANDING_PENALTY_STEPS` more; nothing is
+/// forbidden.
+#[derive(Default)]
+struct Landings {
+    /// (zone, terminal, net, layer, terminal currently has no escape).
+    zones: Vec<(Rect, usize, u32, u32, bool)>,
+    by_terminal: HashMap<usize, usize>,
+    /// (zone.lx, zone index); `width` bounds every zone's x extent.
+    by_x: BTreeSet<(i64, usize)>,
+    width: i64,
+    open: usize,
+}
+impl Landings {
+    fn insert(&mut self, terminal: usize, net: u32, layer: u32, zone: Rect) -> Result<()> {
+        if self.by_terminal.contains_key(&terminal) {
+            return Ok(());
+        }
+        self.zones
+            .try_reserve(1)
+            .and_then(|()| self.by_terminal.try_reserve(1))
+            .map_err(|_| budget("landing-zone records"))?;
+        self.width = self.width.max(
+            zone.ux
+                .checked_sub(zone.lx)
+                .ok_or_else(|| budget("landing-zone span"))?,
+        );
+        let z = self.zones.len();
+        self.zones.push((zone, terminal, net, layer, false));
+        self.by_terminal.insert(terminal, z);
+        self.by_x.insert((zone.lx, z));
+        Ok(())
+    }
+    /// Track whether `terminal` (if it has a zone) currently lacks an escape.
+    fn set_open(&mut self, terminal: usize, open: bool) {
+        let Some(&z) = self.by_terminal.get(&terminal) else {
+            return;
+        };
+        if self.zones[z].4 != open {
+            self.zones[z].4 = open;
+            if open {
+                self.open += 1;
+            } else {
+                self.open -= 1;
+            }
+        }
+    }
+    /// Is metal `rect` on `layer` of terminal `me` (net `net`) closer than
+    /// `spacing` to the open zone of another net's terminal?
+    #[allow(clippy::too_many_arguments)]
+    fn encroached(
+        &self,
+        me: usize,
+        net: u32,
+        layer: u32,
+        rect: Rect,
+        spacing: i64,
+        work: &mut usize,
+        cap: usize,
+    ) -> Result<bool> {
+        if self.open == 0 {
+            return Ok(false);
+        }
+        let query = expand(rect, spacing)?;
+        let lo = query.lx.saturating_sub(self.width);
+        let mut scanned = self.by_x.len().checked_ilog2().unwrap_or(0) as usize + 1;
+        let mut hit = false;
+        for &(_, z) in self.by_x.range((lo, 0)..=(query.ux, usize::MAX)) {
+            scanned += 1;
+            let (zone, terminal, zone_net, zone_layer, open) = self.zones[z];
+            if open
+                && terminal != me
+                && zone_net != net
+                && zone_layer == layer
+                && crate::routing::overlap(zone, query)
+            {
+                hit = true;
+                break;
+            }
+        }
+        *work = work
+            .checked_add(scanned)
+            .filter(|&n| n <= cap)
+            .ok_or_else(|| budget("landing-zone query work"))?;
+        Ok(hit)
+    }
+}
+
 /// Local search lattice for one terminal's escape.
 struct Local {
     xs: Vec<i64>,
@@ -1031,6 +1134,8 @@ struct Router<'a> {
     min_run: Vec<u64>,
     access_entries: usize,
     access_cache_bytes: u64,
+    /// Escape searches that found no legal escape (telemetry and tests).
+    access_failures: usize,
 }
 
 /// Completed net geometry; the active search alone retains raw grid edges.
@@ -1223,6 +1328,93 @@ fn trace_cut_conflict(
 }
 
 impl<'a> Router<'a> {
+    /// Search state, spatial index and via-pad certificates for `input`
+    /// (the caller has already checked the upfront memory estimate).
+    fn new(
+        input: &'a RouteInput,
+        plan: &'a TrackPlan,
+        limits: &'a RouteLimits,
+        graph: Graph,
+        cells: Cells,
+    ) -> Result<Self> {
+        let pairs = via_pairs(input);
+        let mut slots = HashMap::new();
+        let mut k = 0usize;
+        for (i, l) in input.layers.iter().enumerate() {
+            if l.vertical.is_some() {
+                slots.insert(i as u32, k);
+                k += 1;
+            }
+        }
+        let n = graph.len;
+        let gl = cells.len();
+        let access_hops = graph.hop_distances()?;
+        let target_costs = crate::routing_target::CostModel::new(
+            &graph.layers.iter().map(|l| l.vertical).collect::<Vec<_>>(),
+            &graph
+                .pairs
+                .iter()
+                .map(|p| (p.lower, p.upper))
+                .collect::<Vec<_>>(),
+            plan.via_cost,
+            plan.wrong_way_factor,
+        )?;
+        let mut r = Router {
+            input,
+            plan,
+            limits,
+            graph,
+            access_hops,
+            target_costs,
+            cells,
+            spatial: Spatial::new(input, limits)?,
+            pairs,
+            slots,
+            expansions: 0,
+            search: Search::new(
+                n,
+                limits
+                    .max_search_expansions
+                    .saturating_add(limits.max_heap)
+                    .min(n),
+            )?,
+            epoch: 0,
+            history: History::new(
+                n,
+                limits.max_expansions.min(n).min(plan.max_history_entries),
+            )?,
+            gmark: vec![0; gl],
+            gepoch: 0,
+            stack_ok: vec![true; input.layers.len()],
+            via_pad_ok: vec![vec![true; input.vias.len()]; input.layers.len()],
+            min_run: vec![0; input.layers.len()],
+            access_entries: 0,
+            access_cache_bytes: 0,
+            access_failures: 0,
+        };
+        for (i, l) in input.layers.iter().enumerate() {
+            let Some(min) = l.min_area else {
+                continue;
+            };
+            r.min_run[i] = u64::try_from(min)
+                .unwrap_or(0)
+                .div_ceil(l.width.max(1) as u64);
+            for (kind, via) in input.vias.iter().enumerate() {
+                let pads: Vec<_> = via
+                    .shapes
+                    .iter()
+                    .filter(|s| s.layer == i as u32)
+                    .map(|s| s.rect)
+                    .collect();
+                r.via_pad_ok[i][kind] = pads.is_empty()
+                    || route_rules::union_area(&pads, &mut r.spatial.work, limits.max_comparisons)?
+                        >= i128::from(min);
+            }
+            r.stack_ok[i] = r.via_pad_ok[i].iter().all(|&enough| enough);
+        }
+        r.guard("setup")?;
+        Ok(r)
+    }
     fn width(&self, layer: u32) -> i64 {
         self.input.layers[layer as usize].width
     }
@@ -1448,12 +1640,61 @@ impl<'a> Router<'a> {
         Ok(starts)
     }
 
+    /// Does a legal escape move of terminal `me` encroach on an open landing
+    /// zone of another terminal (`Landings`)?
+    #[allow(clippy::too_many_arguments)]
+    fn encroaches(
+        &mut self,
+        landings: &Landings,
+        me: usize,
+        net: u32,
+        kind: u32,
+        layer: u32,
+        from: [i64; 2],
+        to: [i64; 2],
+    ) -> Result<bool> {
+        let cap = self.limits.max_comparisons;
+        if kind == WIRE {
+            let rect = wire_rect(
+                &Wire {
+                    net,
+                    layer,
+                    start: from,
+                    end: to,
+                },
+                self.width(layer),
+            )?;
+            let spacing = self.input.layers[layer as usize].spacing;
+            return landings.encroached(me, net, layer, rect, spacing, &mut self.spatial.work, cap);
+        }
+        for shape in &self.input.vias[kind as usize].shapes {
+            let rule = &self.input.layers[shape.layer as usize];
+            if rule.vertical.is_some()
+                && landings.encroached(
+                    me,
+                    net,
+                    shape.layer,
+                    shifted(shape.rect, from)?,
+                    rule.spacing,
+                    &mut self.spatial.work,
+                    cap,
+                )?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// One terminal escape search; None when no legal escape exists.
+    /// `landings` (alternate access only) prices moves that encroach on the
+    /// landing zones of terminals that have no escape yet.
     fn escape(
         &mut self,
         t: &Terminal,
         tables: &mut AccessTables,
         preference: AccessPreference,
+        landings: Option<(&Landings, usize)>,
     ) -> Result<Option<Plan>> {
         let input = self.input;
         let mut starts = self.starts(t, tables, true)?;
@@ -1739,6 +1980,21 @@ impl<'a> Router<'a> {
                     }
                     WIRE
                 };
+                let nc = match landings {
+                    Some((zones, me))
+                        if self.encroaches(zones, me, t.net, kind, layer, at, q)? =>
+                    {
+                        let nc = (input.step as u64)
+                            .checked_mul(LANDING_PENALTY_STEPS)
+                            .and_then(|p| nc.checked_add(p))
+                            .ok_or_else(|| budget("access landing cost overflow"))?;
+                        if visited.get(&nid).is_some_and(|v| v.0 <= nc) {
+                            continue;
+                        }
+                        nc
+                    }
+                    _ => nc,
+                };
                 if heap.len() >= self.limits.max_heap || visited.len() >= self.limits.max_grid_nodes
                 {
                     return Err(budget("pin access frontier"));
@@ -1882,6 +2138,70 @@ impl<'a> Router<'a> {
         }))
     }
 
+    /// Landing zone (see `Landings`) and its layer for a terminal below the
+    /// access layer: every first-via kind the escape may try at a start on
+    /// the lowest pin layer (table kinds, else the pair's kinds), unfiltered
+    /// by current clearance so it covers the landings a later retry can use.
+    fn landing_zone(
+        &mut self,
+        t: &Terminal,
+        tables: &mut AccessTables,
+    ) -> Result<Option<(Rect, u32)>> {
+        let access_slot = self.graph.slot[&self.input.access_layer];
+        let starts = self.starts(t, tables, true)?;
+        let Some(slot) = starts
+            .iter()
+            .filter_map(|s| self.graph.slot.get(&s.0).copied())
+            .min()
+            .filter(|&s| s < access_slot)
+        else {
+            return Ok(None);
+        };
+        let pin_layer = self.graph.layers[slot].layer;
+        let Some(pair) = self.pairs.iter().find(|p| {
+            p.lower == pin_layer
+                && self
+                    .graph
+                    .slot
+                    .get(&p.upper)
+                    .is_some_and(|&s| s <= access_slot)
+        }) else {
+            return Ok(None);
+        };
+        let mut zone: Option<Rect> = None;
+        let mut work = 0usize;
+        for (layer, at, _, kinds) in &starts {
+            if *layer != pin_layer {
+                continue;
+            }
+            for &k in kinds.as_deref().unwrap_or(&pair.kinds) {
+                if !pair.kinds.contains(&k) {
+                    continue;
+                }
+                for shape in &self.input.vias[k].shapes {
+                    work += 1;
+                    if shape.layer != pair.upper {
+                        continue;
+                    }
+                    let r = shifted(shape.rect, *at)?;
+                    zone = Some(zone.map_or(r, |z| Rect {
+                        lx: z.lx.min(r.lx),
+                        ly: z.ly.min(r.ly),
+                        ux: z.ux.max(r.ux),
+                        uy: z.uy.max(r.uy),
+                    }));
+                }
+            }
+        }
+        self.spatial.work = self
+            .spatial
+            .work
+            .checked_add(work.saturating_add(starts.len()))
+            .filter(|&n| n <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("landing-zone work"))?;
+        Ok(zone.map(|z| (z, pair.upper)))
+    }
+
     /// Conflict-aware escapes for every terminal of a routed net.
     fn reserve(
         &mut self,
@@ -1927,6 +2247,7 @@ impl<'a> Router<'a> {
                 expand(r, self.input.step.saturating_mul(4))
             })
             .collect::<Result<_>>()?;
+        let mut landings = alternatives.then(Landings::default);
         let mut queue: VecDeque<usize> = order.into_iter().map(|o| o.2).collect();
         let mut plans: HashMap<u32, Plan> = HashMap::new();
         let mut plan_records = 0usize;
@@ -1953,7 +2274,8 @@ impl<'a> Router<'a> {
                     ),
                 );
             }
-            if let Some(plan) = self.escape(t, &mut tables, preferences[i])? {
+            let zones = landings.as_ref().filter(|l| l.open > 0).map(|l| (l, i));
+            if let Some(plan) = self.escape(t, &mut tables, preferences[i], zones)? {
                 plan_records = plan_records
                     .checked_add(plan.wires.len())
                     .and_then(|n| n.checked_add(plan.vias.len()))
@@ -1961,12 +2283,22 @@ impl<'a> Router<'a> {
                     .ok_or_else(|| budget("pin access retained-record limit"))?;
                 plans.insert(t.pin, plan);
                 owner.insert(t.pin, i);
+                if let Some(l) = landings.as_mut() {
+                    l.set_open(i, false);
+                }
                 if plans.len().is_multiple_of(4096) {
                     self.guard("pin access")?;
                 }
                 continue;
             }
+            self.access_failures += 1;
             attempts[i] += 1;
+            if let Some(l) = landings.as_mut() {
+                if let Some((zone, layer)) = self.landing_zone(t, &mut tables)? {
+                    l.insert(i, t.net, layer, zone)?;
+                }
+                l.set_open(i, true);
+            }
             if attempts[i] > 3 {
                 blocked
                     .try_reserve(1)
@@ -2022,6 +2354,9 @@ impl<'a> Router<'a> {
             for p in victims {
                 let plan = plans.remove(&p).unwrap();
                 let j = owner.remove(&p).unwrap();
+                if let Some(l) = landings.as_mut() {
+                    l.set_open(j, true);
+                }
                 if alternatives {
                     preferences[j] = AccessPreference {
                         next_start: plan
@@ -3355,81 +3690,7 @@ pub(crate) fn route(
             return Err(invalid("routed net needs one driver"));
         }
     }
-    let pairs = via_pairs(input);
-    let mut slots = HashMap::new();
-    let mut k = 0usize;
-    for (i, l) in input.layers.iter().enumerate() {
-        if l.vertical.is_some() {
-            slots.insert(i as u32, k);
-            k += 1;
-        }
-    }
-    let n = graph.len;
-    let gl = cells.len();
-    let access_hops = graph.hop_distances()?;
-    let target_costs = crate::routing_target::CostModel::new(
-        &graph.layers.iter().map(|l| l.vertical).collect::<Vec<_>>(),
-        &graph
-            .pairs
-            .iter()
-            .map(|p| (p.lower, p.upper))
-            .collect::<Vec<_>>(),
-        plan.via_cost,
-        plan.wrong_way_factor,
-    )?;
-    let mut r = Router {
-        input,
-        plan,
-        limits,
-        graph,
-        access_hops,
-        target_costs,
-        cells,
-        spatial: Spatial::new(input, limits)?,
-        pairs,
-        slots,
-        expansions: 0,
-        search: Search::new(
-            n,
-            limits
-                .max_search_expansions
-                .saturating_add(limits.max_heap)
-                .min(n),
-        )?,
-        epoch: 0,
-        history: History::new(
-            n,
-            limits.max_expansions.min(n).min(plan.max_history_entries),
-        )?,
-        gmark: vec![0; gl],
-        gepoch: 0,
-        stack_ok: vec![true; input.layers.len()],
-        via_pad_ok: vec![vec![true; input.vias.len()]; input.layers.len()],
-        min_run: vec![0; input.layers.len()],
-        access_entries: 0,
-        access_cache_bytes: 0,
-    };
-    for (i, l) in input.layers.iter().enumerate() {
-        let Some(min) = l.min_area else {
-            continue;
-        };
-        r.min_run[i] = u64::try_from(min)
-            .unwrap_or(0)
-            .div_ceil(l.width.max(1) as u64);
-        for (kind, via) in input.vias.iter().enumerate() {
-            let pads: Vec<_> = via
-                .shapes
-                .iter()
-                .filter(|s| s.layer == i as u32)
-                .map(|s| s.rect)
-                .collect();
-            r.via_pad_ok[i][kind] = pads.is_empty()
-                || route_rules::union_area(&pads, &mut r.spatial.work, limits.max_comparisons)?
-                    >= i128::from(min);
-        }
-        r.stack_ok[i] = r.via_pad_ok[i].iter().all(|&enough| enough);
-    }
-    r.guard("setup")?;
+    let mut r = Router::new(input, plan, limits, graph, cells)?;
     trace("spatial index", t0, format_args!("work {}", r.spatial.work));
     let all: Vec<&Terminal> = groups.values().flatten().copied().collect();
     let plans = r.reserve(&all, access_alternatives)?;
@@ -3438,10 +3699,11 @@ pub(crate) fn route(
         "access",
         t0,
         format_args!(
-            "terminals {} work {} exp {}",
+            "terminals {} work {} exp {} failed {}",
             all.len(),
             r.spatial.work,
-            r.expansions
+            r.expansions,
+            r.access_failures
         ),
     );
     drop(all);
@@ -4300,6 +4562,110 @@ mod tests {
         ));
     }
 
+    /// Two M1 pins in one row on the 40-DBU pitch. V12 lands on M2 with a
+    /// 30-DBU pad, so V12s on adjacent tracks are closer than M2 spacing.
+    /// M1/M2 walls leave `first` (net 0) its own landing at x = 300 only;
+    /// `second` lands at x = 340 (its cheapest choice, beside `first`) or
+    /// further right unless `walled`.
+    fn landing_row(second_net: u32, walled: bool) -> RouteInput {
+        let pins = [
+            terminal(0, 0, true, rect(290, 290, 310, 310)),
+            terminal(1, second_net, true, rect(330, 290, 430, 310)),
+        ];
+        let mut obstacles: Vec<Blockage> = pins
+            .iter()
+            .map(|t| Blockage {
+                layer: 0,
+                rect: t.shapes[0].rect,
+                net: Some(t.net),
+            })
+            .collect();
+        let mut walls = vec![
+            (0, rect(0, 0, 1000, 270)),
+            (0, rect(0, 330, 1000, 1000)),
+            (0, rect(0, 270, 270, 330)),
+            (1, rect(0, 0, 1000, 265)),
+            (1, rect(0, 335, 1000, 1000)),
+            (1, rect(0, 265, 265, 335)),
+        ];
+        if walled {
+            walls.push((1, rect(375, 265, 1000, 335)));
+        }
+        obstacles.extend(walls.into_iter().map(|(layer, rect)| Blockage {
+            layer,
+            rect,
+            net: None,
+        }));
+        let mut design = input(pins.into(), obstacles);
+        design.vias[0].shapes[2].rect = rect(-15, -15, 15, 15);
+        design
+    }
+
+    /// Escape `second` while `first` has failed before; `first_open` says
+    /// whether `first` still lacks an escape (None: no landing zones, the
+    /// greedy policy). Returns `second`'s V12 site and whether `first` can
+    /// still escape afterwards.
+    fn second_beside_first(design: &RouteInput, first_open: Option<bool>) -> ([i64; 2], bool) {
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let mut r = Router::new(design, plan, &limits, graph, cells).unwrap();
+        let mut tables = AccessTables::new();
+        let (first, second) = (&design.terminals[0], &design.terminals[1]);
+        let (zone, layer) = r.landing_zone(first, &mut tables).unwrap().unwrap();
+        assert_eq!(layer, 1, "V12 lands on M2");
+        assert!(zone.lx <= 285 && zone.ux >= 315 && zone.ly <= 285 && zone.uy >= 315);
+        let mut landings = Landings::default();
+        landings.insert(0, first.net, layer, zone).unwrap();
+        landings.set_open(0, first_open.unwrap_or(false));
+        let guard = first_open.map(|_| (&landings, 1));
+        let plan = r
+            .escape(second, &mut tables, AccessPreference::default(), guard)
+            .unwrap()
+            .expect("second escapes");
+        let site = plan.vias.iter().find(|v| v.kind == 0).unwrap().at;
+        let first_free = r
+            .escape(first, &mut tables, AccessPreference::default(), None)
+            .unwrap()
+            .is_some();
+        (site, first_free)
+    }
+
+    #[test]
+    fn failed_pin_landing_zones_steer_neighbour_escapes() {
+        let row = landing_row(1, false);
+        // Hazard: the cheapest escape seals a pin that has no other landing.
+        assert_eq!(second_beside_first(&row, None), ([340, 300], false));
+        // A failed, unplanned neighbour's landing steers the escape aside.
+        assert_eq!(second_beside_first(&row, Some(true)), ([380, 300], true));
+        // Planned zones and same-net zones are not protected.
+        assert_eq!(second_beside_first(&row, Some(false)), ([340, 300], false));
+        let same_net = landing_row(0, false);
+        assert_eq!(second_beside_first(&same_net, Some(true)).0, [340, 300]);
+        // Protection prices, never forbids: the only escape still encroaches.
+        let walled = landing_row(1, true);
+        assert_eq!(second_beside_first(&walled, None), ([340, 300], false));
+        assert_eq!(
+            second_beside_first(&walled, Some(true)),
+            ([340, 300], false)
+        );
+        // Landing zones only exist below the access layer.
+        let mut above = landing_row(1, false);
+        above.terminals[0].shapes[0].layer = 1;
+        let limits = limits();
+        let plan = above.tracks.as_ref().unwrap();
+        let graph = Graph::new(&above, plan, &limits).unwrap();
+        let cells = Cells::new(above.die, plan.gcell).unwrap();
+        let mut r = Router::new(&above, plan, &limits, graph, cells).unwrap();
+        let first = above.terminals[0].clone();
+        assert!(
+            r.landing_zone(&first, &mut AccessTables::new())
+                .unwrap()
+                .is_none()
+        );
+    }
+
     fn narrow_cut_design() -> RouteInput {
         let mut design = input(
             vec![
@@ -4360,6 +4726,7 @@ mod tests {
             min_run: vec![0; design.layers.len()],
             access_entries: 0,
             access_cache_bytes: 0,
+            access_failures: 0,
         };
         // Fixed, already legal escape tops isolate the detailed traceback;
         // automatic pin-access selection can avoid the narrow path beforehand.
@@ -4519,6 +4886,7 @@ mod tests {
                 min_run: vec![0; design.layers.len()],
                 access_entries: 0,
                 access_cache_bytes: 0,
+                access_failures: 0,
             };
             let terminals: Vec<_> = design.terminals.iter().collect();
             let plans = r.reserve(&terminals, true).unwrap();
