@@ -159,7 +159,7 @@ enum Command {
         /// SPEF output path, written atomically outside the workspace.
         #[arg(long)]
         out: PathBuf,
-        #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u64).range(1..=16384))]
+        #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u64).range(1..=65536))]
         max_spef_mib: u64,
         #[arg(long, default_value_t = 2048, value_parser = clap::value_parser!(u64).range(1..=65536))]
         extract_memory_mib: u64,

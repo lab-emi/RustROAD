@@ -43,7 +43,7 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   technology LEF. Every routing and cut layer the router used must be in the
   profile. A routed width different from the calibrated width is an explicit
   error (non-default widths are unsupported).
-* The byte cap (`--max-spef-mib`, at most 16,384) is enforced while writing.
+* The byte cap (`--max-spef-mib`, at most 65,536) is enforced while writing.
   Shape, node, element, coupling, candidate, bin and work budgets fail with
   `BUDGET_EXCEEDED`. Errors use the existing `{status, code, message}` stderr
   envelope and exit code 2.
@@ -415,7 +415,10 @@ computes the same network stripe by stripe (`extract_partitioned`):
   (`--max-extract-shapes`, `--extract-memory-mib`, ...); its memory estimate
   includes the live process (input plus the network merged so far). The
   merged network may hold `N` times the per-call node, element and coupling
-  caps. `--extract-parallel P` extracts `P` stripes at once (each serial),
+  caps, and the SPEF stage checks the merged network against those caps.
+  `RUSTROAD_EXTRACT_TRACE=1` prints one line per merged stripe (nets held and
+  counted, shapes, couplings, work, seconds, peak RSS).
+  `--extract-parallel P` extracts `P` stripes at once (each serial),
   then merges them in stripe order, so the result does not depend on `P`.
   Before any stripe runs, the held process plus `P` per-call working
   estimates (with 25% headroom) must fit `--extract-memory-mib`. Peak memory

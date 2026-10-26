@@ -402,6 +402,60 @@ fn stripe_extraction_writes_the_whole_design_spef() {
         );
     }
     assert!(whole.stats.partition.is_none());
+    // The SPEF stage bounds the merged network by the stripes' merged caps:
+    // a per-call coupling cap every stripe meets but the whole design
+    // exceeds still writes the same SPEF.
+    let seven = extract(
+        &f.workspace,
+        &pieces(
+            "seven-again.spef",
+            Some(StripeRequest {
+                count: 7,
+                halo_um: None,
+                parallel: 1,
+            }),
+        ),
+        &limits(),
+    )
+    .unwrap();
+    let largest = seven
+        .stats
+        .partition
+        .as_ref()
+        .unwrap()
+        .stripes
+        .iter()
+        .map(|s| s.couplings)
+        .max()
+        .unwrap();
+    assert!(
+        0 < largest && largest < whole.stats.couplings,
+        "{largest} of {}",
+        whole.stats.couplings
+    );
+    let capped = |out: &str, stripes: Option<StripeRequest>| {
+        let mut r = pieces(out, stripes);
+        r.limits.max_couplings = largest;
+        r
+    };
+    assert!(extract(&f.workspace, &capped("capped.spef", None), &limits()).is_err());
+    extract(
+        &f.workspace,
+        &capped(
+            "capped-seven.spef",
+            Some(StripeRequest {
+                count: 7,
+                halo_um: None,
+                parallel: 1,
+            }),
+        ),
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(f.root.join("whole.spef")).unwrap(),
+        fs::read(f.root.join("capped-seven.spef")).unwrap()
+    );
     // Stripes need passive pieces and a halo of at least the minimum.
     let e = extract(
         &f.workspace,

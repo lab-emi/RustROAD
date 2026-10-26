@@ -23,7 +23,8 @@ use std::path::{Path, PathBuf};
 pub const RC_PROFILE_SCHEMA: &str = "rustroad.rc-profile.v1";
 const MAX_PROFILE_BYTES: u64 = 4 * 1024 * 1024;
 pub const DEFAULT_MAX_SPEF_BYTES: u64 = 32 * 1024 * 1024;
-const HARD_MAX_SPEF_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+/// A full-core SPEF (millions of nets, three corners) stays well below this.
+const HARD_MAX_SPEF_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -582,6 +583,9 @@ fn extract_impl(
         passive: &passive,
         tech: &tech,
     };
+    // The SPEF stage bounds the merged network: N stripes may hold N times
+    // the per-call node and coupling caps.
+    let mut merged_limits = request.limits.clone();
     let network = match &request.stripes {
         None => extract::extract_cpu_ref(&extract_input, &request.limits)?,
         Some(stripes) => {
@@ -598,6 +602,8 @@ fn extract_impl(
                 max_couplings: request.limits.max_couplings.saturating_mul(count),
                 parallel: stripes.parallel,
             };
+            merged_limits.max_nodes = plan.max_nodes;
+            merged_limits.max_couplings = plan.max_couplings;
             extract::extract_partitioned(&extract_input, &request.limits, &plan)?
         }
     };
@@ -638,7 +644,7 @@ fn extract_impl(
             }
         })
     };
-    let coupling_index = CouplingIndex::new(&network, model.nets.len(), &request.limits)?;
+    let coupling_index = CouplingIndex::new(&network, model.nets.len(), &merged_limits)?;
     let mut ports = BTreeMap::<u32, (String, spef::Direction)>::new();
     for rc in &network.nets {
         for node in &rc.nodes {

@@ -392,6 +392,22 @@ pub fn extract_partitioned(
         // Merged in stripe order; the first failing stripe's error.
         for result in done {
             let (network, stripe) = result?;
+            if std::env::var_os("RUSTROAD_EXTRACT_TRACE").is_some() {
+                eprintln!(
+                    "[extract] stripe {}/{} core {:?} nets {} home {} shapes {} couplings {} \
+                     work {} {:.1}s peak {} MiB",
+                    partition.stripes.len() + 1,
+                    cores.len(),
+                    stripe.core,
+                    stripe.nets,
+                    stripe.home_nets,
+                    stripe.shapes,
+                    stripe.couplings,
+                    stripe.work,
+                    stripe.seconds,
+                    crate::memory::peak_rss_bytes().unwrap_or(0) >> 20
+                );
+            }
             let s = &network.stats;
             if let Some(m) = s.memory
                 && memory.is_none_or(|old| m.estimate_bytes > old.estimate_bytes)
