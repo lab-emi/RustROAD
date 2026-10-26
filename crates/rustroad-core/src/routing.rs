@@ -498,8 +498,15 @@ impl std::hash::Hasher for Fx {
     fn write_i64(&mut self, v: i64) {
         self.0 = (self.0.rotate_left(5) ^ v as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
     }
+    /// A packed bin key holds one coordinate in its low bits, and a single
+    /// multiply keeps the hash's low bits (the map bucket) a function of
+    /// those bits alone: every bin of a grid row would share one probe
+    /// cluster. Mix all key bits into the whole hash (SplitMix64 finalizer).
     fn write_u64(&mut self, v: u64) {
-        self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+        let mut z = (self.0.rotate_left(5) ^ v).wrapping_add(0x9e37_79b9_7f4a_7c15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        self.0 = z ^ (z >> 31);
     }
 }
 const NIL: u32 = u32::MAX;
@@ -4017,6 +4024,34 @@ mod tests {
         assert!(!spatial.clear(0, negative, 8).unwrap());
         spatial.remove(id);
         assert!(spatial.clear(0, negative, 8).unwrap());
+    }
+
+    #[test]
+    fn packed_bin_keys_spread_over_map_buckets() {
+        use std::hash::{BuildHasher, Hasher};
+        // 4 layers x 256 x 256 bins: a single multiply would map every bin
+        // of a row to one of 256 buckets (load 1024 each).
+        let mask = (1u64 << 18) - 1;
+        let mut load = vec![0u32; 1 << 18];
+        for layer in 0..4u64 {
+            for dx in 0..256u64 {
+                for dy in 0..256u64 {
+                    let mut h = BuildFx.build_hasher();
+                    h.write_u64((layer << (2 * HASHED_AXIS_BITS)) | (dx << HASHED_AXIS_BITS) | dy);
+                    load[(h.finish() & mask) as usize] += 1;
+                }
+            }
+        }
+        // Uniform hashing of 2^18 keys into 2^18 buckets: max load ~ 9.
+        assert!(load.iter().copied().max().unwrap() <= 16);
+        // The top seven bits (the map's control tag) vary as well.
+        let mut tags = std::collections::BTreeSet::new();
+        for dy in 0..1024u64 {
+            let mut h = BuildFx.build_hasher();
+            h.write_u64(dy);
+            tags.insert(h.finish() >> 57);
+        }
+        assert_eq!(tags.len(), 128);
     }
 
     #[test]
