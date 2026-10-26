@@ -84,8 +84,8 @@ the DRC oracle (see router-drc.md).
 Written before implementing the track router (stream W14-W16); details in
 `docs/scaling.md`. The lattice caps above stay hard caps for the lattice
 router. A profile with `track_router` may raise every `RouteLimits` field up
-to `RouteLimits::ceiling()` (4,294,967,294 implicit graph nodes, 256M
-retained obstacle records, 512M bin entries, 128M segments, 2e9 expansions,
+to `RouteLimits::ceiling()` (4,294,967,294 implicit graph nodes, 512M
+retained obstacle records, 2e9 bin entries, 128M segments, 2e9 expansions,
 5e7 per search, 2^40 comparisons and 64M heap entries). These are independent
 ceilings, not a promise that all maxima fit in memory at once.
 
