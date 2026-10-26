@@ -813,6 +813,20 @@ pub(crate) fn grid_pages(x0: i64, x1: i64, y0: i64, y1: i64) -> u64 {
     };
     span(x0, x1).saturating_mul(span(y0, y1))
 }
+/// Shapes of `routes` in a spatial index: one per wire and patch, one per
+/// shape of each via's kind.
+pub(crate) fn route_shapes(input: &RouteInput, routes: &Routes) -> Result<u64> {
+    routes.vias.iter().try_fold(
+        (routes.wires.len() as u64).saturating_add(routes.patches.len() as u64),
+        |n, v| {
+            input
+                .vias
+                .get(v.kind as usize)
+                .map(|via| n.saturating_add(via.shapes.len() as u64))
+                .ok_or_else(|| invalid("stored via kind"))
+        },
+    )
+}
 /// Bin entries of `routes` (wires, via shapes and patches) at bin side
 /// `bin`, charged one comparison per record.
 pub(crate) fn route_entries(
@@ -1594,6 +1608,36 @@ impl<'a> Spatial<'a> {
     }
     fn len(&self) -> usize {
         self.input.obstacles.len() + self.shapes.len()
+    }
+    /// Reserve exactly `shapes` more added shapes and `entries` more bin
+    /// entries (a validation adds a known set of routes), unless they exceed
+    /// the limits that `add` enforces: then `add` reports the budget.
+    pub(crate) fn reserve_added(&mut self, shapes: u64, entries: u64) -> Result<()> {
+        let instances = self
+            .input
+            .instances
+            .as_ref()
+            .map_or(0, InstanceObstacles::len);
+        let (Ok(shapes), Ok(entries)) = (usize::try_from(shapes), usize::try_from(entries)) else {
+            return Ok(());
+        };
+        if self.len().saturating_add(instances).saturating_add(shapes) > self.limits.max_obstacles
+            || self.entries.saturating_add(entries) > self.limits.max_bin_entries
+        {
+            return Ok(());
+        }
+        let fail = |_| budget("routing shape allocation");
+        self.shapes.try_reserve_exact(shapes).map_err(fail)?;
+        self.marks.try_reserve_exact(shapes).map_err(fail)?;
+        self.alive.try_reserve_exact(shapes).map_err(fail)?;
+        self.routed.try_reserve_exact(shapes).map_err(fail)?;
+        if self.bins.mode != BinMode::Sparse {
+            self.bins
+                .entries
+                .try_reserve_exact(entries)
+                .map_err(|_| budget("routing spatial-bin allocation"))?;
+        }
+        Ok(())
     }
     fn shape(&self, id: usize) -> &Blockage {
         if id < self.input.obstacles.len() {
@@ -3457,6 +3501,7 @@ fn validate_with(
         .checked_add(counted)
         .filter(|&n| n <= limits.max_comparisons)
         .ok_or_else(|| budget("routing comparison limit"))?;
+    spatial.reserve_added(route_shapes(input, routes)?, expected)?;
     let mut selected: Vec<u32> = input.terminals.iter().map(|t| t.net).collect();
     selected.sort_unstable();
     let (mut read, mut write) = (0, 0);
@@ -3550,6 +3595,8 @@ fn validate_with(
             fixed.is_some()
         );
     }
+    // The geometry checks are done: free the index before the per-net checks.
+    drop(spatial);
     let mut work = 0;
     let terminals = crate::rule_index::order(
         input.terminals.len(),

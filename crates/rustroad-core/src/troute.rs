@@ -671,6 +671,79 @@ fn router_entries(input: &RouteInput, limits: &RouteLimits) -> u64 {
         .min(limits.max_obstacles.saturating_sub(fixed_records) as u64)
         .saturating_mul(ENTRIES_PER_SHAPE)
 }
+/// Bin layout of a track route's spatial indexes (`routing::BinGrid`).
+struct BinLayout {
+    mode: crate::routing::BinMode,
+    nx: i64,
+    ny: i64,
+    layers: usize,
+    slots: u64,
+    pages: u64,
+}
+impl BinLayout {
+    fn new(input: &RouteInput, bin: i64) -> Self {
+        let (x0, x1, y0, y1, cells) = crate::routing::bin_extent(input, bin);
+        let layers = input.layers.len();
+        Self {
+            mode: crate::routing::bin_mode(input, cells),
+            nx: x1 - x0 + 1,
+            ny: y1 - y0 + 1,
+            layers,
+            slots: cells.saturating_mul(layers as u64),
+            pages: crate::routing::grid_pages(x0, x1, y0, y1).saturating_mul(layers as u64),
+        }
+    }
+    /// Grid bytes of a fixed-layout index holding `entries` bin entries.
+    fn fixed_grid(&self, entries: u64) -> u64 {
+        match self.mode {
+            crate::routing::BinMode::Sparse => self.slots.min(entries).saturating_mul(96),
+            crate::routing::BinMode::Dense => self.slots.saturating_mul(GRID_BYTES),
+            _ => self
+                .pages
+                .min(entries)
+                .saturating_mul(crate::routing::PAGE_BYTES),
+        }
+    }
+    /// Grid bytes of a Spatial's added index holding `entries` bin entries,
+    /// in the layout `routing::added_hashed` chooses.
+    fn added_grid(&self, entries: u64) -> u64 {
+        if crate::routing::added_hashed(
+            self.mode,
+            self.nx,
+            self.ny,
+            self.layers,
+            self.pages,
+            entries,
+        ) {
+            entries.saturating_mul(crate::routing::HASHED_BIN_BYTES)
+        } else {
+            self.fixed_grid(entries)
+        }
+    }
+    /// Bytes of the fixed index (obstacles and instances) of a route call.
+    /// Fixed rectangles are shared with RouteInput and need no query marks.
+    fn fixed_index(
+        &self,
+        input: &RouteInput,
+        bin: i64,
+        limits: &RouteLimits,
+    ) -> Result<(u64, u64)> {
+        let mut entries = 0u64;
+        for b in &input.obstacles {
+            let span =
+                |lo: i64, hi: i64| (hi.div_euclid(bin) - lo.div_euclid(bin) + 1).max(0) as u64;
+            entries = entries.saturating_add(
+                span(b.rect.lx, b.rect.ux).saturating_mul(span(b.rect.ly, b.rect.uy)),
+            );
+        }
+        let bytes = self
+            .fixed_grid(entries)
+            .saturating_add(crate::routing::instance_index_bytes(input, limits)?)
+            .saturating_add(entries.saturating_mul(ENTRY_BYTES));
+        Ok((bytes, entries))
+    }
+}
+
 fn memory_estimate_limited(
     input: &RouteInput,
     nodes: usize,
@@ -678,22 +751,10 @@ fn memory_estimate_limited(
     limits: &RouteLimits,
 ) -> Result<MemoryEstimate> {
     let bin = crate::routing::bin_side(input)?;
-    let (x0, x1, y0, y1, cells) = crate::routing::bin_extent(input, bin);
-    let layers = input.layers.len() as u64;
-    let slots = cells.saturating_mul(layers);
-    let mode = crate::routing::bin_mode(input, cells);
-    let page_side = crate::routing::BIN_PAGE_SIDE;
-    let page_x = (x1.div_euclid(page_side) - x0.div_euclid(page_side) + 1) as u64;
-    let page_y = (y1.div_euclid(page_side) - y0.div_euclid(page_side) + 1) as u64;
-    let pages = page_x.saturating_mul(page_y).saturating_mul(layers);
-
-    let mut fixed_entries = 0u64;
-    for b in &input.obstacles {
-        let span = |lo: i64, hi: i64| (hi.div_euclid(bin) - lo.div_euclid(bin) + 1).max(0) as u64;
-        fixed_entries = fixed_entries
-            .saturating_add(span(b.rect.lx, b.rect.ux).saturating_mul(span(b.rect.ly, b.rect.uy)));
-    }
-    let instance_index = crate::routing::instance_index_bytes(input, limits)?;
+    let layout = BinLayout::new(input, bin);
+    let layers = layout.layers as u64;
+    let (fixed, fixed_entries) = layout.fixed_index(input, bin, limits)?;
+    let cells = layout.slots / layers.max(1);
     let o = input.obstacles.len() as u64;
     let t = input.terminals.len() as u64;
     let fixed_records = input
@@ -710,17 +771,7 @@ fn memory_estimate_limited(
         .saturating_mul(SHAPES_PER_TERMINAL.saturating_add(portal_shapes))
         .min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
     // One fixed index (obstacles and instances) serves every Spatial of the
-    // route call; fixed rectangles are shared with RouteInput and need no
-    // query marks.
-    let fixed = match mode {
-        crate::routing::BinMode::Sparse => slots.min(fixed_entries).saturating_mul(96),
-        crate::routing::BinMode::Dense => slots.saturating_mul(GRID_BYTES),
-        _ => pages
-            .min(fixed_entries)
-            .saturating_mul(crate::routing::PAGE_BYTES),
-    }
-    .saturating_add(instance_index)
-    .saturating_add(fixed_entries.saturating_mul(ENTRY_BYTES));
+    // route call.
     // Each Spatial bins its added geometry apart, in the fixed layout or
     // hashed per occupied bin as `routing::added_hashed` chooses for its
     // expected entries.
@@ -729,23 +780,9 @@ fn memory_estimate_limited(
         // The checker cannot retain 2*max_segments shapes past this limit.
         let shapes = shapes.min(limits.max_obstacles.saturating_sub(fixed_records) as u64);
         let entries = shapes.saturating_mul(ENTRIES_PER_SHAPE);
-        let hashed = crate::routing::added_hashed(
-            mode,
-            x1 - x0 + 1,
-            y1 - y0 + 1,
-            input.layers.len(),
-            pages,
-            entries,
-        );
-        let grid = match mode {
-            _ if hashed => entries.saturating_mul(crate::routing::HASHED_BIN_BYTES),
-            crate::routing::BinMode::Dense => slots.saturating_mul(GRID_BYTES),
-            crate::routing::BinMode::Sparse => slots.min(entries).saturating_mul(96),
-            _ => pages
-                .min(entries)
-                .saturating_mul(crate::routing::PAGE_BYTES),
-        };
-        grid.saturating_add(shapes.saturating_mul(SHAPE_BYTES))
+        layout
+            .added_grid(entries)
+            .saturating_add(shapes.saturating_mul(SHAPE_BYTES))
             .saturating_add(entries.saturating_mul(ENTRY_BYTES))
     };
     let records = t
@@ -876,25 +913,49 @@ pub(crate) fn estimate_for(
     memory_estimate_limited(input, graph.len, cells.len(), limits).map(Some)
 }
 
-/// Extra validation storage once completed output records are already resident.
+/// Extra memory of a full-design validation once the completed output
+/// records are resident: its own fixed index; every route shape in the added
+/// index, from the exact shape and bin-entry counts of `out` (`validate`
+/// reserves exactly these) in the layout `routing::added_hashed` chooses; the
+/// rule grid; and the per-net connectivity and rule-check state.
 pub(crate) fn validation_working_bytes(
     input: &RouteInput,
     out: &Routes,
     limits: &RouteLimits,
 ) -> Result<u64> {
-    let estimate = estimate_for(input, limits)?.ok_or_else(|| invalid("track plan absent"))?;
-    let assumed_records = (input.terminals.len() as u64)
-        .saturating_mul(RECORDS_PER_TERMINAL)
-        .min(limits.max_segments as u64);
+    let bin = crate::routing::bin_side(input)?;
+    let layout = BinLayout::new(input, bin);
+    let (fixed, _) = layout.fixed_index(input, bin, limits)?;
+    let mut work = 0;
+    let entries = crate::routing::route_entries(input, out, bin, &mut work, limits)?;
+    let shapes = crate::routing::route_shapes(input, out)?;
     let records = out
         .wires
         .len()
         .saturating_add(out.vias.len())
         .saturating_add(out.patches.len())
         .saturating_add(out.access.len()) as u64;
-    Ok(estimate
-        .check
-        .saturating_sub(assumed_records.saturating_mul(RECORD_BYTES))
+    let shapes_per_record = input
+        .vias
+        .iter()
+        .map(|v| v.shapes.len() as u64)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let rule_shapes = records.saturating_mul(shapes_per_record).saturating_add(
+        input
+            .terminals
+            .iter()
+            .map(|t| t.shapes.len() as u64)
+            .sum::<u64>(),
+    );
+    let rule_grid_cells =
+        (limits.max_rule_grid_cells as u64).min(rule_shapes.saturating_mul(2).saturating_pow(2));
+    Ok(fixed
+        .saturating_add(layout.added_grid(entries))
+        .saturating_add(shapes.saturating_mul(SHAPE_BYTES))
+        .saturating_add(entries.saturating_mul(ENTRY_BYTES))
+        .saturating_add(rule_grid_cells.saturating_mul(64))
         // Pin uniqueness, net counts and compact terminal coverage indices.
         .saturating_add((input.terminals.len() as u64).saturating_mul(32))
         .saturating_add(records.saturating_mul(24))
