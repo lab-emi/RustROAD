@@ -597,6 +597,59 @@ fn bounded_points(
     Ok(out)
 }
 
+/// Layers whose geometry can block a pin-access escape, as a mask over
+/// `RouteInput::layers`: every routing layer from the bottom of the via stack
+/// to the access layer, the layers one via above it (an escape may end in a
+/// via there) and the shapes of the vias between them. Every bit when the
+/// layers do not fit the mask.
+pub(crate) fn access_stack(input: &RouteInput) -> u64 {
+    let fits = input.layers.len() <= 64
+        && input
+            .vias
+            .iter()
+            .flat_map(|v| v.shapes.iter().map(|s| s.layer).chain([v.lower, v.upper]))
+            .chain([input.access_layer])
+            .all(|l| (l as usize) < input.layers.len());
+    if !fits {
+        return u64::MAX;
+    }
+    let mut metal = 1u64 << input.access_layer;
+    loop {
+        let below = input
+            .vias
+            .iter()
+            .filter(|v| metal & (1 << v.upper) != 0)
+            .fold(metal, |m, v| m | 1 << v.lower);
+        if below == metal {
+            break;
+        }
+        metal = below;
+    }
+    metal |= input
+        .vias
+        .iter()
+        .filter(|v| v.lower == input.access_layer)
+        .fold(0, |m, v| m | 1 << v.upper);
+    input
+        .vias
+        .iter()
+        .filter(|v| metal & (1 << v.lower) != 0 && metal & (1 << v.upper) != 0)
+        .flat_map(|v| &v.shapes)
+        .fold(metal, |m, s| m | 1 << s.layer)
+}
+
+/// `access_stack` for one terminal; every layer when a pin shape lies outside it.
+fn escape_layers(stack: u64, t: &Terminal) -> u64 {
+    if t.shapes
+        .iter()
+        .all(|s| s.layer < 64 && stack & (1 << s.layer) != 0)
+    {
+        stack
+    } else {
+        u64::MAX
+    }
+}
+
 /// Per input layer: percent of a wire edge's length that the detailed search
 /// charges (`TrackPlan::wire_cost_percent`, 100 when the plan is uniform).
 fn wire_costs(input: &RouteInput, plan: &TrackPlan) -> Vec<u64> {
@@ -2528,6 +2581,7 @@ impl<'a> Router<'a> {
         let mut rounds = 0usize;
         let mut window_index = None;
         let mut blocked = Vec::new();
+        let stack = access_stack(self.input);
         while let Some(i) = queue.pop_front() {
             rounds += 1;
             if rounds > terminals.len().saturating_mul(8) + 64 {
@@ -2578,6 +2632,7 @@ impl<'a> Router<'a> {
                     pin: t.pin,
                     net: t.net,
                     region: windows[i],
+                    layers: escape_layers(stack, t),
                 });
                 if blocked.len() >= self.limits.max_batch_blocked_pins {
                     return Err(self.access_failure(blocked));
@@ -2615,6 +2670,7 @@ impl<'a> Router<'a> {
                     pin: t.pin,
                     net: t.net,
                     region: windows[i],
+                    layers: escape_layers(stack, t),
                 });
                 if blocked.len() >= self.limits.max_batch_blocked_pins {
                     return Err(self.access_failure(blocked));
@@ -4768,6 +4824,101 @@ mod tests {
         ] {
             assert!(run(bad).is_err());
         }
+    }
+
+    /// The track fixture plus M4 (vertical) and its V34 cut above M3.
+    fn four_metal(terminals: Vec<Terminal>, obstacles: Vec<Blockage>) -> RouteInput {
+        let mut design = input(terminals, obstacles);
+        design.layers.push(layer("M4", Some(true)));
+        design.layers.push(layer("V3", None));
+        design.vias.push(via("V34", 2, 6, 5));
+        let plan = design.tracks.as_mut().unwrap();
+        plan.tracks.push(Some((40, 20)));
+        plan.tracks.push(None);
+        design
+    }
+
+    #[test]
+    fn access_stack_holds_layers_up_to_one_via_above_the_access_layer() {
+        // M1 M2 M3 V1 V2: every layer can meet an escape that may end in V23.
+        assert_eq!(access_stack(&input(Vec::new(), Vec::new())), 0b11111);
+        let mut design = four_metal(Vec::new(), Vec::new());
+        // M1 M2, the portal M3 and the V12/V23 cuts; not M4 (5) or V34 (6).
+        assert_eq!(access_stack(&design), 0b0011111);
+        design.access_layer = 0;
+        assert_eq!(access_stack(&design), 0b0001011);
+        design.access_layer = 2;
+        assert_eq!(access_stack(&design), 0b1111111);
+        design.access_layer = 1;
+        let stack = access_stack(&design);
+        let low = terminal(0, 0, true, rect(90, 90, 110, 110));
+        assert_eq!(escape_layers(stack, &low), stack);
+        let mut high = low.clone();
+        high.shapes[0].layer = 5;
+        assert_eq!(escape_layers(stack, &high), u64::MAX);
+        design.vias[2].upper = 9;
+        assert_eq!(access_stack(&design), u64::MAX, "invalid via layer");
+    }
+
+    #[test]
+    fn pin_access_recovery_reopens_only_nets_on_escape_layers() {
+        let terms = vec![
+            terminal(0, 7, true, rect(490, 90, 510, 110)),
+            terminal(1, 7, false, rect(490, 890, 510, 910)),
+            terminal(2, 8, true, rect(450, 90, 470, 110)),
+            terminal(3, 8, false, rect(450, 890, 470, 910)),
+        ];
+        let design = four_metal(terms, Vec::new());
+        let limits = limits();
+        let order = [0, 1, 2, 3];
+        let batch = crate::route_batches::Batch {
+            input: &design,
+            limits: &limits,
+            order: &order,
+            begin: 4,
+            cap: 1 << 40,
+        };
+        // Net 7 completed on M4 and net 8 on M2, both across the window of a
+        // later pin whose escape is blocked.
+        let window = rect(400, 400, 600, 600);
+        let reopen = |layers: u64| {
+            let mut view = four_metal(Vec::new(), Vec::new());
+            let mut out = Routes {
+                wires: Vec::new(),
+                vias: Vec::new(),
+                access: Vec::new(),
+                patches: Vec::new(),
+                nets: vec![7, 8],
+                stats: RouteStats::default(),
+            };
+            for (net, layer, x) in [(7, 5, 500), (8, 1, 460)] {
+                out.wires.push(Wire {
+                    net,
+                    layer,
+                    start: [x, 100],
+                    end: [x, 900],
+                });
+                view.obstacles.push(Blockage {
+                    layer,
+                    rect: rect(x - 10, 100, x + 10, 900),
+                    net: Some(net),
+                });
+            }
+            out.stats.wire_length_dbu = 1600;
+            let reopened = batch.reopen(&mut view, &mut out, &[window], layers, 0)?;
+            let kept: Vec<_> = view.obstacles.iter().map(|b| b.net).collect();
+            let active: Vec<_> = view.terminals.iter().map(|t| t.net).collect();
+            Ok::<_, crate::Error>((reopened, out.nets, kept, active))
+        };
+        assert_eq!(
+            reopen(access_stack(&design)).unwrap(),
+            (1, vec![7], vec![Some(7)], vec![8, 8])
+        );
+        // Negative control: the former any-layer reopen also displaces net 7.
+        assert_eq!(
+            reopen(u64::MAX).unwrap(),
+            (2, Vec::new(), Vec::new(), vec![7, 7, 8, 8])
+        );
     }
 
     #[test]

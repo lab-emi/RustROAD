@@ -117,12 +117,12 @@ fn select(
     Ok((end, selected))
 }
 
-struct Batch<'a> {
-    input: &'a RouteInput,
-    limits: &'a RouteLimits,
-    order: &'a [u32],
-    begin: usize,
-    cap: u64,
+pub(crate) struct Batch<'a> {
+    pub(crate) input: &'a RouteInput,
+    pub(crate) limits: &'a RouteLimits,
+    pub(crate) order: &'a [u32],
+    pub(crate) begin: usize,
+    pub(crate) cap: u64,
 }
 
 impl Batch<'_> {
@@ -178,13 +178,13 @@ impl Batch<'_> {
             match result {
                 Ok(done) => return Ok(done),
                 Err(error) => {
-                    let Some(regions) = self.recovery_regions(&error, out)? else {
+                    let Some((regions, layers)) = self.recovery_regions(&error, out)? else {
                         return Err(error);
                     };
                     if retries >= self.limits.max_batch_retries {
                         return Err(budget("batch recovery retry limit"));
                     }
-                    let reopened = self.reopen(view, out, &regions, displaced)?;
+                    let reopened = self.reopen(view, out, &regions, layers, displaced)?;
                     if reopened == 0 {
                         // Preserve established choices while completed-net
                         // recovery can clear the access window. Only a remaining
@@ -217,11 +217,14 @@ impl Batch<'_> {
         }
     }
 
+    /// Regions to reopen after a recoverable failure, and the layers whose
+    /// completed geometry there can cause it (a pin escape uses only the
+    /// layers up to the access layer; other failures may involve any layer).
     fn recovery_regions(
         &self,
         error: &crate::Error,
         out: &mut Routes,
-    ) -> Result<Option<Vec<crate::Rect>>> {
+    ) -> Result<Option<(Vec<crate::Rect>, u64)>> {
         let (count, comparisons, expansions) = match error {
             crate::Error::PinAccess(f) => (f.blocked.len(), f.comparisons, f.expansions),
             crate::Error::RoutingRule(f) => (f.regions.len(), f.comparisons, f.expansions),
@@ -251,20 +254,32 @@ impl Batch<'_> {
         regions
             .try_reserve_exact(count)
             .map_err(|_| budget("batch recovery region allocation"))?;
-        match error {
-            crate::Error::PinAccess(f) => regions.extend(f.blocked.iter().map(|p| p.region)),
-            crate::Error::RoutingRule(f) => regions.extend_from_slice(&f.regions),
-            crate::Error::NoPath(f) => regions.push(f.region),
+        let layers = match error {
+            crate::Error::PinAccess(f) => {
+                regions.extend(f.blocked.iter().map(|p| p.region));
+                f.blocked.iter().fold(0, |m, p| m | p.layers)
+            }
+            crate::Error::RoutingRule(f) => {
+                regions.extend_from_slice(&f.regions);
+                u64::MAX
+            }
+            crate::Error::NoPath(f) => {
+                regions.push(f.region);
+                u64::MAX
+            }
             _ => unreachable!("recovery error kind was checked"),
-        }
-        Ok(Some(regions))
+        };
+        Ok(Some((regions, layers)))
     }
 
-    fn reopen(
+    /// Reopen every completed net with geometry on `layers` (a mask over
+    /// `RouteInput::layers`; layers past 64 always count) near `regions`.
+    pub(crate) fn reopen(
         &self,
         view: &mut RouteInput,
         out: &mut Routes,
         regions: &[crate::Rect],
+        layers: u64,
         displaced: usize,
     ) -> Result<usize> {
         guard(
@@ -303,6 +318,7 @@ impl Batch<'_> {
         for obstacle in &view.obstacles[base..] {
             if let Some(net) = obstacle.net
                 && !victims.contains(&net)
+                && (obstacle.layer >= 64 || layers & (1 << obstacle.layer) != 0)
                 && window_index.touches_any(
                     &windows,
                     obstacle.rect,

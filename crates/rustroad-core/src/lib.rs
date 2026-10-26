@@ -77,6 +77,9 @@ pub struct BlockedPin {
     pub pin: u32,
     pub net: u32,
     pub region: Rect,
+    /// Bit `i`: geometry on route-input layer `i` can block this escape
+    /// (every bit when that is not known).
+    pub layers: u64,
 }
 
 /// Bounded pin-access diagnostics with all work consumed by the failed pass.
