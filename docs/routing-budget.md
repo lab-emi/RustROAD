@@ -214,6 +214,11 @@ work. The caller may reopen completed nets overlapping that region, retain the
 original cell and supply obstacles, and route those nets with the current batch.
 Every original terminal remains in the final full-design validation.
 
+Unresolved minimum-area islands and enclosed holes can also require clearance
+from completed nets. Their bounded shape/box regions use the same recovery path
+as spacing violations. Floating geometry remains an error; no rule is waived.
+Area-box construction charges each retained diagnostic shape to the work limit.
+
 Repair has explicit `RouteLimits` bounds:
 
 | Limit | Default | Hard ceiling |

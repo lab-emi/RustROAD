@@ -3686,10 +3686,14 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 .checked_add(remaining.len())
                 .filter(|&n| n <= limits.max_comparisons)
                 .ok_or_else(|| budget("routing conflict diagnostic work"))?;
-            if remaining
-                .iter()
-                .all(|v| matches!(v, route_rules::Violation::Spacing { .. }))
-            {
+            if remaining.iter().all(|v| {
+                matches!(
+                    v,
+                    route_rules::Violation::Spacing { .. }
+                        | route_rules::Violation::Area { .. }
+                        | route_rules::Violation::Hole { .. }
+                )
+            }) {
                 if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
                     for conflict in remaining.iter().take(8) {
                         if let route_rules::Violation::Spacing { net, layer, a, b } = conflict {
@@ -3711,6 +3715,8 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                                     victims.len()
                                 ),
                             }
+                        } else {
+                            eprintln!("[troute] rule search context {}", conflict.describe());
                         }
                     }
                 }
@@ -3720,14 +3726,36 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                     .try_reserve_exact(count)
                     .map_err(|_| budget("routing conflict regions"))?;
                 for v in remaining.iter().take(count) {
-                    if let route_rules::Violation::Spacing { a, b, .. } = v {
-                        regions.push(Rect {
+                    let region = match v {
+                        route_rules::Violation::Spacing { a, b, .. } => Rect {
                             lx: a.lx.min(b.lx),
                             ly: a.ly.min(b.ly),
                             ux: a.ux.max(b.ux),
                             uy: a.uy.max(b.uy),
-                        });
-                    }
+                        },
+                        route_rules::Violation::Area { shapes, .. } => {
+                            r.spatial.work = r
+                                .spatial
+                                .work
+                                .checked_add(shapes.len())
+                                .filter(|&n| n <= limits.max_comparisons)
+                                .ok_or_else(|| budget("area recovery region work"))?;
+                            let first = *shapes
+                                .first()
+                                .ok_or_else(|| invalid("empty area violation"))?;
+                            shapes[1..].iter().fold(first, |a, b| Rect {
+                                lx: a.lx.min(b.lx),
+                                ly: a.ly.min(b.ly),
+                                ux: a.ux.max(b.ux),
+                                uy: a.uy.max(b.uy),
+                            })
+                        }
+                        route_rules::Violation::Hole { rect, .. } => *rect,
+                        route_rules::Violation::Floating { .. } => {
+                            unreachable!("repairable violations checked above")
+                        }
+                    };
+                    regions.push(region);
                 }
                 return Err(crate::Error::RoutingRule(Box::new(
                     crate::RoutingRuleFailure {
@@ -4854,6 +4882,9 @@ mod tests {
         design.tracks.as_mut().unwrap().memory_mib = 256;
         let limits = RouteLimits {
             max_batch_retries: 1,
+            // The entire fixture has 3,750 graph nodes. A matching active
+            // bound avoids reserving 200k nodes of unrelated validation state.
+            max_active_nodes: 4_000,
             ..limits()
         };
         let witness = route_cpu_ref(&design, &limits).unwrap();
