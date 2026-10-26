@@ -1415,6 +1415,17 @@ enum Outcome {
     Limited(u32),
 }
 
+/// Outcome after an optional bounded retry. A retry that only reaches its
+/// search cap does not overrule an earlier exhausted search: that no-path
+/// result (a sealed pocket at its pin) stays, and batch recovery can reopen
+/// completed metal around it. Every other retry outcome replaces the first.
+fn settled(first: Outcome, retry: Outcome) -> Outcome {
+    match (first, retry) {
+        (Outcome::Failed(pin), Outcome::Limited(_)) => Outcome::Failed(pin),
+        (_, retry) => retry,
+    }
+}
+
 type ForbiddenVia = (u32, u32, u32);
 struct TraceCut {
     layer: u32,
@@ -4213,7 +4224,8 @@ pub(crate) fn route(
                 if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
                     eprintln!("[troute] bounded alternate-root retry net {net}");
                 }
-                outcome = r.route_net(net, &groups[&net], &plans, true, tight, &rips, round)?;
+                let retry = r.route_net(net, &groups[&net], &plans, true, tight, &rips, round)?;
+                outcome = settled(outcome, retry);
             }
             // Strict min-area/near-miss pruning is path-dependent and can hide
             // a route in this one-cost-per-node search. Exact cleanup remains
@@ -4224,7 +4236,8 @@ pub(crate) fn route(
                     eprintln!("[troute] bounded cleanup-validated retry net {net}");
                 }
                 conservative = false;
-                outcome = r.route_net(net, &groups[&net], &plans, true, false, &rips, round)?;
+                let retry = r.route_net(net, &groups[&net], &plans, true, false, &rips, round)?;
+                outcome = settled(outcome, retry);
             }
             match outcome {
                 Outcome::Limited(pin) => {
@@ -6198,6 +6211,49 @@ mod tests {
             assert_eq!(failure.region, rect(470, 470, 530, 530));
             assert!(failure.expansions > 0 && failure.comparisons > 0);
         }
+    }
+
+    #[test]
+    fn a_capped_alternate_root_keeps_the_sealed_pocket_failure() {
+        // The fixed-geometry pocket with the open pin at the median corner:
+        // repair roots there and searches from the port first, exhausting its
+        // pocket (full-route-44, net 140971); the alternate root then floods
+        // the die from the open pin until the per-search cap.
+        let mut design = sealed_port_design(false);
+        design.terminals[1].shapes[0].rect = rect(890, 890, 910, 910);
+        let limits = RouteLimits {
+            max_active_nodes: 4_000,
+            max_search_expansions: 300,
+            ..limits()
+        };
+        for result in [
+            route_cpu_ref(&design, &limits),
+            crate::route_batches::route(&design, &limits, 2).map(|(routes, _)| routes),
+        ] {
+            let Err(crate::Error::NoPath(failure)) = result else {
+                panic!("expected the pocket's no-path failure, got {result:?}");
+            };
+            assert_eq!((failure.pin, failure.net), (2, 1));
+            assert_eq!(failure.region, rect(470, 470, 530, 530));
+            // The capped flood ran: it alone spends the per-search cap.
+            assert!(failure.expansions >= limits.max_search_expansions);
+        }
+    }
+
+    #[test]
+    fn a_capped_flood_still_reopens_a_completed_seal() {
+        // As above, with the seal a completed route of the earlier batch.
+        let mut design = sealed_port_design(true);
+        design.terminals[3].shapes[0].rect = rect(890, 890, 910, 910);
+        let limits = RouteLimits {
+            max_active_nodes: 4_000,
+            max_search_expansions: 300,
+            ..limits()
+        };
+        let (batched, report) = crate::route_batches::route(&design, &limits, 2).unwrap();
+        validate(&design, &batched, &limits).unwrap();
+        assert_eq!(batched.nets, [0, 1]);
+        assert_eq!((report.repair_attempts, report.displaced_nets), (1, 1));
     }
 
     #[test]
