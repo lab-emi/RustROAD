@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 pub mod access_test;
 pub mod antenna;
+pub mod batch_checkpoint;
 pub mod clock;
 pub mod eco;
 pub mod extract;

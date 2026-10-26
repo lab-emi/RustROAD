@@ -109,6 +109,19 @@ enum Command {
         config: PathBuf,
         #[arg(long, value_parser=["clock", "all"], default_value="clock")]
         scope: String,
+        /// Diagnostic batched-route checkpoints into this new directory.
+        #[arg(long)]
+        checkpoint_dir: Option<PathBuf>,
+        /// Write a checkpoint after every N-th completed primary batch.
+        #[arg(long, default_value_t = 1)]
+        checkpoint_every: usize,
+        /// Keep only the N most recent checkpoints of this run.
+        #[arg(long, default_value_t = 2)]
+        checkpoint_keep: usize,
+        /// Continue a batched route from a checkpoint (diagnostic only:
+        /// the result is validated but never committed).
+        #[arg(long)]
+        resume: Option<PathBuf>,
     },
     /// Write checked routed geometry and scope as JSON.
     ExportRoutes,
@@ -641,7 +654,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             base_rev,
             config,
             scope,
-        } => emit(&rustroad_workspace::routing::route(
+            checkpoint_dir,
+            checkpoint_every,
+            checkpoint_keep,
+            resume,
+        } => emit(&rustroad_workspace::routing::route_with_options(
             &workspace,
             &base_rev,
             &config,
@@ -651,6 +668,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 rustroad_workspace::routing::RouteScope::All
             },
             &limits,
+            &rustroad_workspace::routing::RouteOptions {
+                checkpoint_dir,
+                checkpoint_every,
+                checkpoint_keep,
+                resume,
+            },
         )?),
         Command::ExportRoutes => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;

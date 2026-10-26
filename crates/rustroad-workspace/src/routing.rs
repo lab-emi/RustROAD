@@ -11,7 +11,7 @@ use rustroad_formats::lef::LefGeometry;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1307,6 +1307,45 @@ fn mib(bytes: u64) -> u64 {
     bytes.div_ceil(1 << 20)
 }
 
+/// Diagnostic batched-route checkpointing (`route --checkpoint-dir`,
+/// `--resume`; see [`crate::batch_checkpoint`]).
+#[derive(Clone, Debug, Default)]
+pub struct RouteOptions {
+    /// New directory for a checkpoint after every `checkpoint_every`-th
+    /// completed primary batch; the `checkpoint_keep` most recent are kept.
+    pub checkpoint_dir: Option<PathBuf>,
+    pub checkpoint_every: usize,
+    pub checkpoint_keep: usize,
+    /// Continue from this checkpoint. The result is never committed.
+    pub resume: Option<PathBuf>,
+}
+
+/// Result of [`route_with_options`]: a committed revision, or a resumed
+/// diagnostic route that left HEAD unchanged.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum Routed {
+    Committed(Box<Summary>),
+    Resumed(Box<ResumedSummary>),
+}
+
+/// A resumed route passed full-design validation but was not committed: its
+/// primary batches came from several executables (`lineage`), so it is
+/// diagnostic evidence only.
+#[derive(Debug, Serialize)]
+pub struct ResumedSummary {
+    pub status: &'static str,
+    pub revision: String,
+    pub checkpoint: PathBuf,
+    pub lineage: Vec<crate::batch_checkpoint::Segment>,
+    pub routed_nets: usize,
+    pub routing_segments: usize,
+    pub routing_expansions: usize,
+    pub drc_status: &'static str,
+    pub lvs_status: &'static str,
+    pub route_memory: Option<RouteMemory>,
+}
+
 pub fn route(
     path: &Path,
     base_rev: &str,
@@ -1314,6 +1353,27 @@ pub fn route(
     scope: RouteScope,
     limits: &Limits,
 ) -> Result<Summary> {
+    match route_with_options(
+        path,
+        base_rev,
+        config_path,
+        scope,
+        limits,
+        &RouteOptions::default(),
+    )? {
+        Routed::Committed(summary) => Ok(*summary),
+        Routed::Resumed(_) => Err(fail("route without a checkpoint resumed")),
+    }
+}
+
+pub fn route_with_options(
+    path: &Path,
+    base_rev: &str,
+    config_path: &Path,
+    scope: RouteScope,
+    limits: &Limits,
+    options: &RouteOptions,
+) -> Result<Routed> {
     let lock = crate::lock(path, false, true)?;
     let current = crate::head(path)?;
     crate::check_base(base_rev, &current)?;
@@ -1373,8 +1433,89 @@ pub fn route(
             _ => None,
         }
     };
+    let checkpointing = options.checkpoint_dir.is_some() || options.resume.is_some();
+    if checkpointing && config.batch_terminals.is_none() {
+        return Err(fail("route checkpoints require batched routing"));
+    }
+    let mut lineage = Vec::new();
     let routes = if let Some(batch) = config.batch_terminals {
-        let (routes, report) = rustroad_core::route_batches::route(&input, &config.limits, batch)?;
+        let cap = input
+            .tracks
+            .as_ref()
+            .expect("batch track plan checked")
+            .memory_mib
+            .saturating_mul(1 << 20);
+        let mut resume = None;
+        let mut writer = None;
+        let mut producer = String::new();
+        if checkpointing {
+            let metadata_bytes = crate::read_bounded(
+                &path.join("revisions").join(&current).join("design.json"),
+                64 << 20,
+            )?;
+            let binding = crate::batch_checkpoint::Binding {
+                workspace_revision: current.clone(),
+                metadata_sha256: format!(
+                    "{:x}",
+                    <sha2::Sha256 as sha2::Digest>::digest(&metadata_bytes)
+                ),
+                revision_bytes: workspace_bytes,
+                config_sha256: source.sha256.clone(),
+                scope: format!("{scope:?}"),
+                max_cells: limits.max_cells,
+                max_rows: limits.max_rows,
+                max_expansions: limits.max_expansions,
+            };
+            drop(metadata_bytes);
+            producer = crate::batch_checkpoint::producer_sha256()?;
+            if let Some(file) = &options.resume {
+                let (state, prior) =
+                    crate::batch_checkpoint::load(file, &binding, &config.limits, cap)?;
+                lineage = prior;
+                resume = Some(state);
+            }
+            if let Some(dir) = &options.checkpoint_dir {
+                writer = Some(crate::batch_checkpoint::Writer::create(
+                    dir,
+                    options.checkpoint_every,
+                    options.checkpoint_keep,
+                    binding,
+                    lineage.clone(),
+                    producer.clone(),
+                    resume.as_ref().map_or(0, |s| s.report.batches),
+                )?);
+            }
+        }
+        let first_batch = resume.as_ref().map_or(0, |s| s.report.batches);
+        let mut failed = None;
+        let result = rustroad_core::route_batches::route_resumable(
+            &input,
+            &config.limits,
+            batch,
+            resume,
+            &mut |progress| {
+                if let Some(w) = writer.as_mut()
+                    && let Err(e) = w.save(progress)
+                {
+                    failed = Some(e);
+                    return Err(rustroad_core::Error::Invalid(
+                        "checkpoint write failed".into(),
+                    ));
+                }
+                Ok(())
+            },
+        );
+        if let Some(e) = failed {
+            return Err(e);
+        }
+        let (routes, report) = result?;
+        if checkpointing {
+            lineage.push(crate::batch_checkpoint::Segment {
+                producer_sha256: producer,
+                first_batch,
+                last_batch: report.batches.saturating_sub(1),
+            });
+        }
         let estimate = report.peak_estimate;
         memory = Some(RouteMemory {
             estimate_mib: mib(estimate.total().max(report.final_validation_bytes)),
@@ -1397,6 +1538,20 @@ pub fn route(
         routing::route_cpu_ref(&input, &config.limits)?
     };
     rustroad_core::memory::trace("routed");
+    if let Some(checkpoint) = &options.resume {
+        return Ok(Routed::Resumed(Box::new(ResumedSummary {
+            status: "routed_uncommitted_diagnostic",
+            revision: current,
+            checkpoint: checkpoint.clone(),
+            lineage,
+            routed_nets: routes.nets.len(),
+            routing_segments: routes.wires.len() + routes.vias.len(),
+            routing_expansions: routes.stats.expansions,
+            drc_status: "unchecked",
+            lvs_status: "unchecked",
+            route_memory: memory,
+        })));
+    }
     bundle.routing = Some(RoutingState {
         source,
         config,
@@ -1414,7 +1569,7 @@ pub fn route(
     let mut summary = crate::commit(path, metadata, &placed)?;
     rustroad_core::memory::trace("committed");
     summary.route_memory = memory;
-    Ok(summary)
+    Ok(Routed::Committed(Box::new(summary)))
 }
 /// On-disk bytes of one workspace revision (metadata and binary tables).
 pub(crate) fn revision_bytes(path: &Path, revision: &str) -> Result<u64> {

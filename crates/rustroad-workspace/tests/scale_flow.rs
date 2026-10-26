@@ -9,7 +9,7 @@ use rustroad_core::connectivity::ConnectivityLimits;
 use rustroad_workspace::floorplan::{FloorplanRequest, floorplan};
 use rustroad_workspace::pdk::{ImportSources, import_pdk_with_config};
 use rustroad_workspace::physical::{PhysicalConfig, TieCell, TieRailInput};
-use rustroad_workspace::routing::{RouteScope, route};
+use rustroad_workspace::routing::{RouteOptions, RouteScope, Routed, route, route_with_options};
 use rustroad_workspace::{Error, place, place_weighted, read};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -278,6 +278,163 @@ fn batched_routing_persists_complete_coverage_and_failed_batches_keep_head() {
     let unchanged = read(&f.path("batch-small-ws"), &limits()).unwrap();
     assert_eq!(unchanged.summary().routed_nets, None);
     assert_eq!(unchanged.summary().revision, "rev2");
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn batched_route_checkpoints_resume_exactly_and_never_commit() {
+    let f = Fixture::new();
+    let mut batch = routing(true);
+    batch["batch_terminals"] = serde_json::json!(16);
+    fs::write(f.path("batch.json"), serde_json::to_vec(&batch).unwrap()).unwrap();
+    f.floorplan("ckpt").unwrap();
+    let ws = f.path("ckpt-ws");
+    let imported = import_pdk_with_config(
+        &ws,
+        "rev0",
+        &ImportSources {
+            technology_lef: f.path("tech.lef"),
+            cell_lef: f.path("cells.lef"),
+            netlist: f.path("mapped.v"),
+            floorplan: f.path("ckpt-floor.json"),
+        },
+        &limits(),
+        &ConnectivityLimits::default(),
+        Some(&f.path("ckpt-physical.json")),
+    )
+    .unwrap();
+    let placed = place(&ws, &imported.revision, &limits()).unwrap();
+    // A byte copy keeps the placed revision (and so the binding) for resumes.
+    let resumes = f.path("ckpt-resume-ws");
+    copy_tree(&ws, &resumes);
+    let options = |dir: Option<PathBuf>, resume: Option<PathBuf>| RouteOptions {
+        checkpoint_dir: dir,
+        checkpoint_every: 1,
+        checkpoint_keep: 64,
+        resume,
+    };
+    let run = |ws: &Path, config: &str, options: &RouteOptions| {
+        route_with_options(
+            ws,
+            &placed.revision,
+            &f.path(config),
+            RouteScope::All,
+            &limits(),
+            options,
+        )
+    };
+    let Routed::Committed(full) =
+        run(&ws, "batch.json", &options(Some(f.path("ckpt")), None)).unwrap()
+    else {
+        panic!("a fresh route commits")
+    };
+    let batches = full
+        .route_memory
+        .as_ref()
+        .unwrap()
+        .batches
+        .as_ref()
+        .unwrap()
+        .batches;
+    assert!(batches >= 2, "fixture needs several primary batches");
+    let mut saved: Vec<PathBuf> = fs::read_dir(f.path("ckpt"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    saved.sort();
+    assert_eq!(saved.len(), batches);
+    for (index, checkpoint) in saved.iter().enumerate() {
+        let Routed::Resumed(again) = run(
+            &resumes,
+            "batch.json",
+            &options(None, Some(checkpoint.clone())),
+        )
+        .unwrap() else {
+            panic!("a resumed route is never committed")
+        };
+        assert_eq!(again.status, "routed_uncommitted_diagnostic");
+        assert_eq!(Some(again.routed_nets), full.routed_nets);
+        assert_eq!(Some(again.routing_segments), full.routing_segments);
+        assert_eq!(Some(again.routing_expansions), full.routing_expansions);
+        assert_eq!(again.lineage.len(), 2);
+        assert_eq!(again.lineage[0].last_batch, index);
+        assert_eq!(again.lineage[1].first_batch, index + 1);
+        assert_eq!(
+            fs::read_to_string(resumes.join("HEAD")).unwrap().trim(),
+            placed.revision
+        );
+    }
+    // A resumed route may write further checkpoints with a two-step lineage.
+    let Routed::Resumed(chained) = run(
+        &resumes,
+        "batch.json",
+        &options(Some(f.path("ckpt-chain")), Some(saved[0].clone())),
+    )
+    .unwrap() else {
+        panic!("resumed")
+    };
+    assert_eq!(chained.routed_nets, full.routed_nets.unwrap());
+    assert_eq!(
+        fs::read_dir(f.path("ckpt-chain")).unwrap().count(),
+        batches - 1
+    );
+    // Negative controls: an existing directory, a changed configuration, a
+    // changed byte, and checkpoints without batched routing.
+    let existing = run(&resumes, "batch.json", &options(Some(f.path("ckpt")), None)).unwrap_err();
+    assert!(
+        existing.to_string().contains("CHECKPOINT_OUTPUT"),
+        "{existing}"
+    );
+    let mut other = batch.clone();
+    other["batch_terminals"] = serde_json::json!(17);
+    fs::write(f.path("other.json"), serde_json::to_vec(&other).unwrap()).unwrap();
+    let bound = run(
+        &resumes,
+        "other.json",
+        &options(None, Some(saved[0].clone())),
+    )
+    .unwrap_err();
+    assert!(bound.to_string().contains("CHECKPOINT_BINDING"), "{bound}");
+    let mut bytes = fs::read(&saved[0]).unwrap();
+    let last = bytes.len() - 40;
+    bytes[last] ^= 1;
+    fs::write(f.path("tampered.rrbckp"), &bytes).unwrap();
+    let tampered = run(
+        &resumes,
+        "batch.json",
+        &options(None, Some(f.path("tampered.rrbckp"))),
+    )
+    .unwrap_err();
+    assert!(
+        tampered.to_string().contains("digest mismatch"),
+        "{tampered}"
+    );
+    let unbatched = run(
+        &resumes,
+        "track.json",
+        &options(None, Some(saved[0].clone())),
+    )
+    .unwrap_err();
+    assert!(
+        unbatched.to_string().contains("batched routing"),
+        "{unbatched}"
+    );
+    assert_eq!(
+        fs::read_to_string(resumes.join("HEAD")).unwrap().trim(),
+        placed.revision
+    );
 }
 
 #[test]

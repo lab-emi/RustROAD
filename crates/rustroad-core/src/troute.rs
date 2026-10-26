@@ -5682,6 +5682,106 @@ mod tests {
     }
 
     #[test]
+    fn resumed_batches_repeat_the_uninterrupted_route() {
+        use crate::route_batches::{BatchCheckpoint, route_resumable};
+        // Same fixture as above: batch 1 reopens the completed net of batch 0.
+        let mut terms = vec![
+            terminal(0, 0, true, rect(490, 90, 510, 110)),
+            terminal(1, 0, false, rect(490, 890, 510, 910)),
+            terminal(2, 1, true, rect(490, 490, 510, 510)),
+            terminal(3, 1, false, rect(90, 690, 110, 710)),
+        ];
+        terms[0].shapes[0].layer = 1;
+        terms[1].shapes[0].layer = 1;
+        let mut fixed = vec![Blockage {
+            layer: 0,
+            rect: terms[2].shapes[0].rect,
+            net: Some(1),
+        }];
+        for rect in [
+            rect(420, 420, 470, 580),
+            rect(530, 420, 580, 580),
+            rect(470, 420, 530, 470),
+            rect(470, 530, 530, 580),
+        ] {
+            fixed.push(Blockage {
+                layer: 0,
+                rect,
+                net: None,
+            });
+        }
+        let mut design = input(terms, fixed);
+        design.tracks.as_mut().unwrap().memory_mib = 256;
+        let mut saved = Vec::new();
+        let (full, report) = route_resumable(&design, &limits(), 2, None, &mut |p| {
+            saved.push(BatchCheckpoint {
+                begin: p.begin,
+                routes: p.routes.clone(),
+                report: p.report.clone(),
+                completed: p.completed.to_vec(),
+            });
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(report.displaced_nets, 1);
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].begin, 2);
+        assert_eq!(saved[0].report.batches, 1);
+        let same = |a: &Routes, b: &Routes| {
+            assert_eq!(a.wires, b.wires);
+            assert_eq!(a.vias, b.vias);
+            assert_eq!(a.access, b.access);
+            assert_eq!(a.patches, b.patches);
+            assert_eq!(a.nets, b.nets);
+            assert_eq!(a.stats.expansions, b.stats.expansions);
+            assert_eq!(a.stats.comparisons, b.stats.comparisons);
+            assert_eq!(a.stats.wire_length_dbu, b.stats.wire_length_dbu);
+            assert_eq!(a.stats.grid_nodes, b.stats.grid_nodes);
+        };
+        for state in &saved {
+            let mut later = Vec::new();
+            let (again, again_report) =
+                route_resumable(&design, &limits(), 2, Some(state.clone()), &mut |p| {
+                    later.push(p.begin);
+                    Ok(())
+                })
+                .unwrap();
+            same(&full, &again);
+            assert_eq!(again_report.batches, report.batches);
+            assert_eq!(again_report.repair_attempts, report.repair_attempts);
+            assert_eq!(again_report.displaced_nets, report.displaced_nets);
+            let expected: Vec<_> = saved
+                .iter()
+                .map(|s| s.begin)
+                .filter(|&b| b > state.begin)
+                .collect();
+            assert_eq!(later, expected);
+        }
+        // Negative controls: a state off the primary batch boundaries, with a
+        // wrong batch count, or with geometry that does not match its routes.
+        let mut off = saved[0].clone();
+        off.begin = 1;
+        off.report.batches = 0;
+        let mut miscounted = saved[0].clone();
+        miscounted.report.batches = 2;
+        let mut missing = saved[0].clone();
+        missing.completed.pop();
+        let mut ownerless = saved[0].clone();
+        ownerless.completed[0].net = None;
+        for bad in [off, miscounted, missing, ownerless] {
+            assert!(matches!(
+                route_resumable(&design, &limits(), 2, Some(bad), &mut |_| Ok(())),
+                Err(crate::Error::Invalid(_))
+            ));
+        }
+        // A failing sink stops the route with its own error.
+        assert!(matches!(
+            route_resumable(&design, &limits(), 2, None, &mut |_| Err(budget("sink"))),
+            Err(crate::Error::Budget(m)) if m == "sink"
+        ));
+    }
+
+    #[test]
     fn bounded_batches_preserve_all_nets_and_validate_the_combined_geometry() {
         let mut design = input(
             vec![

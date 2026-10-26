@@ -19,6 +19,28 @@ pub struct BatchReport {
     pub final_validation_bytes: u64,
 }
 
+/// Everything a batched route carries from one primary batch to the next,
+/// for diagnostic resume. The caller binds the inputs and the stored payload;
+/// [`route_resumable`] checks that the state ends at a primary batch boundary
+/// of this input and that the completed geometry matches its routes.
+#[derive(Clone, Debug)]
+pub struct BatchCheckpoint {
+    /// Terminal-order position where the next primary batch starts.
+    pub begin: usize,
+    pub routes: Routes,
+    pub report: BatchReport,
+    /// Completed-route obstacles after the input obstacles, in route order.
+    pub completed: Vec<Blockage>,
+}
+
+/// State after a completed primary batch, borrowed for a checkpoint sink.
+pub struct BatchProgress<'a> {
+    pub begin: usize,
+    pub routes: &'a Routes,
+    pub report: &'a BatchReport,
+    pub completed: &'a [Blockage],
+}
+
 fn guard(cap: u64, extra: u64, stage: &str) -> Result<()> {
     let live = crate::memory::live_bytes()
         .ok_or_else(|| budget("batched routing needs a process memory probe"))?;
@@ -60,6 +82,39 @@ fn charge(work: &mut usize, count: usize, cap: usize) -> Result<()> {
         .filter(|&n| n <= cap)
         .ok_or_else(|| budget("batched routing total work"))?;
     Ok(())
+}
+
+/// One primary batch from `begin`: whole nets in terminal order up to
+/// `batch_terminals` terminals. Returns its end and its routable nets.
+fn select(
+    input: &RouteInput,
+    order: &[u32],
+    begin: usize,
+    batch_terminals: usize,
+) -> Result<(usize, Vec<u32>)> {
+    let mut end = begin;
+    let mut selected = Vec::new();
+    while end < order.len() {
+        let net = input.terminals[order[end] as usize].net;
+        let mut next = end + 1;
+        while next < order.len() && input.terminals[order[next] as usize].net == net {
+            next += 1;
+        }
+        if next - end > batch_terminals {
+            return Err(budget("one routed net exceeds batch terminal limit"));
+        }
+        if next - begin > batch_terminals {
+            break;
+        }
+        if next - end >= 2 {
+            selected.push(net);
+        }
+        end = next;
+    }
+    if end == begin {
+        return Err(budget("empty routing batch"));
+    }
+    Ok((end, selected))
 }
 
 struct Batch<'a> {
@@ -398,6 +453,20 @@ pub fn route(
     limits: &RouteLimits,
     batch_terminals: usize,
 ) -> Result<(Routes, BatchReport)> {
+    route_resumable(input, limits, batch_terminals, None, &mut |_| Ok(()))
+}
+
+/// [`route`] that may continue from a [`BatchCheckpoint`] and hands the
+/// state after every completed primary batch to `progress` (an error there
+/// stops the route). A resumed route repeats the remaining primary batches
+/// exactly as the uninterrupted route would; it is diagnostic evidence only.
+pub fn route_resumable(
+    input: &RouteInput,
+    limits: &RouteLimits,
+    batch_terminals: usize,
+    resume: Option<BatchCheckpoint>,
+    progress: &mut dyn FnMut(BatchProgress<'_>) -> Result<()>,
+) -> Result<(Routes, BatchReport)> {
     if !(2..=MAX_BATCH_TERMINALS).contains(&batch_terminals) || input.tracks.is_none() {
         return Err(invalid(
             "batched routing requires tracks and 2..1000000 terminals per batch",
@@ -474,30 +543,56 @@ pub fn route(
         peak_estimate: MemoryEstimate::default(),
         final_validation_bytes: 0,
     };
+    let base = input.obstacles.len();
     let mut begin = 0;
+    if let Some(state) = resume {
+        // The primary batch boundaries depend only on the terminal order.
+        let mut batches = 0;
+        while begin < state.begin && begin < order.len() {
+            if batches == MAX_BATCHES {
+                return Err(budget("routing batch count"));
+            }
+            begin = select(input, &order, begin, batch_terminals)?.0;
+            batches += 1;
+        }
+        if begin != state.begin || batches != state.report.batches {
+            return Err(invalid(
+                "checkpoint does not end at a primary batch boundary of this input",
+            ));
+        }
+        let shapes = state.routes.vias.iter().try_fold(
+            state
+                .routes
+                .wires
+                .len()
+                .saturating_add(state.routes.patches.len()),
+            |n, via| {
+                input
+                    .vias
+                    .get(via.kind as usize)
+                    .and_then(|v| n.checked_add(v.shapes.len()))
+                    .ok_or_else(|| invalid("checkpoint via kind"))
+            },
+        )?;
+        if shapes != state.completed.len() || state.completed.iter().any(|b| b.net.is_none()) {
+            return Err(invalid(
+                "checkpoint completed geometry does not match its routes",
+            ));
+        }
+        if base
+            .saturating_add(shapes)
+            .saturating_add(input.instances.as_ref().map_or(0, |v| v.len()))
+            > limits.max_obstacles
+        {
+            return Err(budget("completed routing obstacle count"));
+        }
+        let mut completed = state.completed;
+        extend(&mut view.obstacles, &mut completed, cap)?;
+        out = state.routes;
+        report = state.report;
+    }
     while begin < order.len() {
-        let mut end = begin;
-        let mut selected = Vec::new();
-        while end < order.len() {
-            let net = input.terminals[order[end] as usize].net;
-            let mut next = end + 1;
-            while next < order.len() && input.terminals[order[next] as usize].net == net {
-                next += 1;
-            }
-            if next - end > batch_terminals {
-                return Err(budget("one routed net exceeds batch terminal limit"));
-            }
-            if next - begin > batch_terminals {
-                break;
-            }
-            if next - end >= 2 {
-                selected.push(net);
-            }
-            end = next;
-        }
-        if end == begin {
-            return Err(budget("empty routing batch"));
-        }
+        let (end, selected) = select(input, &order, begin, batch_terminals)?;
         if report.batches == MAX_BATCHES {
             return Err(budget("routing batch count"));
         }
@@ -599,6 +694,12 @@ pub fn route(
         extend(&mut out.access, &mut done.access, cap)?;
         extend(&mut out.nets, &mut done.nets, cap)?;
         guard(cap, 0, "batch completion")?;
+        progress(BatchProgress {
+            begin: end,
+            routes: &out,
+            report: &report,
+            completed: &view.obstacles[base..],
+        })?;
         begin = end;
     }
     drop(view);
