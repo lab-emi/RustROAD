@@ -294,6 +294,110 @@ fn copy_tree(from: &Path, to: &Path) {
 }
 
 #[test]
+fn batched_routing_can_route_long_nets_last() {
+    let f = Fixture::new();
+    let mut batch = routing(true);
+    batch["batch_terminals"] = serde_json::json!(16);
+    f.floorplan("defer").unwrap();
+    let ws = f.path("defer-ws");
+    let imported = import_pdk_with_config(
+        &ws,
+        "rev0",
+        &ImportSources {
+            technology_lef: f.path("tech.lef"),
+            cell_lef: f.path("cells.lef"),
+            netlist: f.path("mapped.v"),
+            floorplan: f.path("defer-floor.json"),
+        },
+        &limits(),
+        &ConnectivityLimits::default(),
+        Some(&f.path("defer-physical.json")),
+    )
+    .unwrap();
+    let placed = place(&ws, &imported.revision, &limits()).unwrap();
+    let route_with = |tag: &str, config: &serde_json::Value| {
+        fs::write(
+            f.path(&format!("{tag}.json")),
+            serde_json::to_vec(config).unwrap(),
+        )
+        .unwrap();
+        let copy = f.path(&format!("{tag}-ws"));
+        copy_tree(&ws, &copy);
+        let summary = route(
+            &copy,
+            &placed.revision,
+            &f.path(&format!("{tag}.json")),
+            RouteScope::All,
+            &limits(),
+        );
+        (copy, summary)
+    };
+    let deferring = |um: f64| {
+        let mut config = batch.clone();
+        config["batch_defer_hpwl_um"] = serde_json::json!(um);
+        config
+    };
+    let report = |s: rustroad_workspace::Summary| {
+        let routed = s.routed_nets.unwrap();
+        (routed, s.route_memory.unwrap().batches.unwrap())
+    };
+    let (plain_ws, plain) = route_with("plain", &batch);
+    let (routed, plain) = report(plain.unwrap());
+    assert_eq!(plain.deferred, None);
+    // Deferring every net (including unrouted single-pin nets) or none keeps
+    // the net-id order and the route.
+    for (tag, um, all) in [("all", 0.001, true), ("none", 100_000.0, false)] {
+        let (copy, summary) = route_with(tag, &deferring(um));
+        let (again, report) = report(summary.unwrap());
+        assert_eq!(again, routed);
+        assert_eq!(report.batches, plain.batches);
+        let deferred = report.deferred.unwrap();
+        assert_eq!(deferred.hpwl_dbu, (um * 1000.0).round() as i64);
+        if all {
+            assert!(deferred.nets >= routed);
+            assert_eq!(deferred.batches, report.batches);
+        } else {
+            assert_eq!(
+                (deferred.nets, deferred.terminals, deferred.batches),
+                (0, 0, 0)
+            );
+        }
+        assert_eq!(def(&copy), def(&plain_ws));
+    }
+    // An intermediate threshold moves part of the nets into later batches;
+    // the committed route passed the full-design validation.
+    let mut partial = None;
+    for um in [5.0, 10.0, 20.0, 40.0] {
+        let (copy, summary) = route_with(&format!("part{um}"), &deferring(um));
+        let (again, report) = report(summary.unwrap());
+        assert_eq!(again, routed);
+        let deferred = report.deferred.unwrap();
+        assert!(deferred.nets <= routed);
+        if (1..routed).contains(&deferred.nets) {
+            assert!(deferred.batches >= 1 && deferred.batches < report.batches);
+            partial = Some(copy);
+            break;
+        }
+    }
+    let copy = partial.expect("a threshold defers part of the nets");
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&fs::read(head_dir(&copy).join("design.json")).unwrap()).unwrap();
+    assert!(metadata["physical"]["routing"]["config"]["batch_defer_hpwl_um"].is_number());
+    // Refusals: a non-positive threshold, and deferral without batches.
+    let mut unbatched = deferring(10.0);
+    unbatched.as_object_mut().unwrap().remove("batch_terminals");
+    for (tag, config) in [("zero", deferring(0.0)), ("unbatched", unbatched)] {
+        let (copy, summary) = route_with(tag, &config);
+        let error = summary.unwrap_err();
+        assert!(error.to_string().contains("batch_defer_hpwl_um"), "{error}");
+        assert_eq!(
+            fs::read_to_string(copy.join("HEAD")).unwrap().trim(),
+            placed.revision
+        );
+    }
+}
+
+#[test]
 fn batched_route_checkpoints_resume_exactly_and_never_commit() {
     let f = Fixture::new();
     let mut batch = routing(true);

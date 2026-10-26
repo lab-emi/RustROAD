@@ -4888,6 +4888,7 @@ mod tests {
             input: &design,
             limits: &limits,
             order: &order,
+            deferred: &[],
             begin: 4,
             cap: 1 << 40,
         };
@@ -6295,7 +6296,7 @@ mod tests {
             ..limits()
         };
         let mut saved = Vec::new();
-        let (full, report) = route_resumable(&design, &limits, 2, None, &mut |p| {
+        let (full, report) = route_resumable(&design, &limits, 2, None, None, &mut |p| {
             saved.push(BatchCheckpoint {
                 begin: p.begin,
                 routes: p.routes.clone(),
@@ -6323,7 +6324,7 @@ mod tests {
         for state in &saved {
             let mut later = Vec::new();
             let (again, again_report) =
-                route_resumable(&design, &limits, 2, Some(state.clone()), &mut |p| {
+                route_resumable(&design, &limits, 2, None, Some(state.clone()), &mut |p| {
                     later.push(p.begin);
                     Ok(())
                 })
@@ -6352,15 +6353,199 @@ mod tests {
         ownerless.completed[0].net = None;
         for bad in [off, miscounted, missing, ownerless] {
             assert!(matches!(
-                route_resumable(&design, &limits, 2, Some(bad), &mut |_| Ok(())),
+                route_resumable(&design, &limits, 2, None, Some(bad), &mut |_| Ok(())),
                 Err(crate::Error::Invalid(_))
             ));
         }
         // A failing sink stops the route with its own error.
         assert!(matches!(
-            route_resumable(&design, &limits, 2, None, &mut |_| Err(budget("sink"))),
+            route_resumable(&design, &limits, 2, None, None, &mut |_| Err(budget("sink"))),
             Err(crate::Error::Budget(m)) if m == "sink"
         ));
+    }
+
+    /// Net 0 joins M3 pins at both die edges (terminal half-perimeter 840)
+    /// straight across the M2 pocket pins of nets 1.. at `pockets` (each 500):
+    /// a pocket's only escape is V23 at its centre (see `sealed_port_design`),
+    /// and its other pin is on M1 near the bottom edge.
+    fn pocket_row_design(pockets: &[i64]) -> RouteInput {
+        let mut terms = vec![
+            terminal(0, 0, true, rect(90, 490, 110, 510)),
+            terminal(1, 0, false, rect(890, 490, 910, 510)),
+        ];
+        terms[0].shapes[0].layer = 2;
+        terms[1].shapes[0].layer = 2;
+        let mut fixed = Vec::new();
+        for (k, &x) in pockets.iter().enumerate() {
+            let net = k as u32 + 1;
+            let mut pocket = terminal(2 * net, net, true, rect(x - 30, 470, x + 30, 530));
+            pocket.shapes[0].layer = 1;
+            fixed.push(Blockage {
+                layer: 1,
+                rect: pocket.shapes[0].rect,
+                net: Some(net),
+            });
+            terms.push(pocket);
+            terms.push(terminal(
+                2 * net + 1,
+                net,
+                false,
+                rect(x - 10, 90, x + 10, 110),
+            ));
+            fixed.push(Blockage {
+                layer: 0,
+                rect: rect(x - 50, 450, x + 50, 550),
+                net: None,
+            });
+            for r in [
+                rect(x - 80, 420, x - 50, 580),
+                rect(x + 50, 420, x + 80, 580),
+                rect(x - 50, 420, x + 50, 450),
+                rect(x - 50, 550, x + 50, 580),
+            ] {
+                fixed.push(Blockage {
+                    layer: 1,
+                    rect: r,
+                    net: None,
+                });
+            }
+        }
+        let mut design = input(terms, fixed);
+        design.tracks.as_mut().unwrap().memory_mib = 256;
+        design
+    }
+
+    #[test]
+    fn long_nets_routed_last_leave_later_pockets_open() {
+        use crate::route_batches::{DeferredReport, route_resumable};
+        // full-route-45: in net-id order all port nets route in batch 0 over an
+        // empty die (median terminal half-perimeter 5.9 mm against 12 um for
+        // other nets) and seal the pins of later batches; every later batch
+        // reopened and rerouted them until one exceeded its rip-up limit.
+        let design = pocket_row_design(&[300, 500, 700]);
+        let limits = RouteLimits {
+            max_active_nodes: 4_000,
+            ..limits()
+        };
+        // Independent witness: all nets routed together.
+        let together = route_cpu_ref(&design, &limits).unwrap();
+        validate(&design, &together, &limits).unwrap();
+        let run = |defer: Option<i64>, limits: &RouteLimits| {
+            route_resumable(&design, limits, 2, defer, None, &mut |_| Ok(()))
+        };
+        // Net-id order: later pocket batches reopen the long net (one reroute
+        // happens to clear two pockets).
+        let (ordered, report) = run(None, &limits).unwrap();
+        validate(&design, &ordered, &limits).unwrap();
+        assert_eq!((report.repair_attempts, report.displaced_nets), (2, 2));
+        assert_eq!(report.deferred, None);
+        // Long net last: no repair at all.
+        let (deferred, report) = run(Some(600), &limits).unwrap();
+        validate(&design, &deferred, &limits).unwrap();
+        assert_eq!(deferred.nets, [0, 1, 2, 3]);
+        assert_eq!(report.batches, 4);
+        assert_eq!((report.repair_attempts, report.displaced_nets), (0, 0));
+        assert_eq!(
+            report.deferred,
+            Some(DeferredReport {
+                hpwl_dbu: 600,
+                nets: 1,
+                terminals: 2,
+                batches: 1,
+            })
+        );
+        // Each pocket net leaves through V23 at its centre.
+        for (net, x) in [(1, 300), (2, 500), (3, 700)] {
+            assert!(deferred.vias.iter().any(|v| v.net == net
+                && v.at == [x, 500]
+                && design.vias[v.kind as usize].upper == 2));
+        }
+        // Without recovery only the deferred order routes.
+        let strict = RouteLimits {
+            max_batch_retries: 0,
+            ..limits.clone()
+        };
+        assert!(matches!(run(None, &strict), Err(crate::Error::Budget(_))));
+        let (strict_routes, _) = run(Some(600), &strict).unwrap();
+        assert_eq!(strict_routes.wires, deferred.wires);
+        assert_eq!(strict_routes.vias, deferred.vias);
+        // Negative control: a threshold at the long net's half-perimeter defers
+        // nothing and repeats the net-id order exactly.
+        let (same, report) = run(Some(840), &limits).unwrap();
+        assert_eq!(same.wires, ordered.wires);
+        assert_eq!(same.vias, ordered.vias);
+        assert_eq!(same.access, ordered.access);
+        assert_eq!((report.repair_attempts, report.displaced_nets), (2, 2));
+        assert_eq!(report.deferred.map(|d| (d.nets, d.batches)), Some((0, 0)));
+        assert!(matches!(
+            run(Some(0), &limits),
+            Err(crate::Error::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn recovery_reopens_a_deferred_net_after_later_numbered_nets() {
+        use crate::route_batches::route_resumable;
+        // Both sealed-port nets are long; net 2 is short. Order: 2 | 0, 1. The
+        // batch of net 1 reopens net 0, which follows net 2 in the order.
+        let mut design = sealed_port_design(true);
+        design
+            .terminals
+            .push(terminal(4, 2, true, rect(690, 890, 710, 910)));
+        design
+            .terminals
+            .push(terminal(5, 2, false, rect(790, 890, 810, 910)));
+        let limits = RouteLimits {
+            max_active_nodes: 4_000,
+            ..limits()
+        };
+        let (routes, report) =
+            route_resumable(&design, &limits, 2, Some(600), None, &mut |_| Ok(())).unwrap();
+        validate(&design, &routes, &limits).unwrap();
+        assert_eq!(routes.nets, [0, 1, 2]);
+        assert_eq!((report.repair_attempts, report.displaced_nets), (1, 1));
+        let deferred = report.deferred.unwrap();
+        assert_eq!(
+            (deferred.nets, deferred.terminals, deferred.batches),
+            (2, 4, 2)
+        );
+    }
+
+    #[test]
+    fn resumed_deferred_batches_repeat_the_uninterrupted_route() {
+        use crate::route_batches::{BatchCheckpoint, route_resumable};
+        let design = pocket_row_design(&[300, 500, 700]);
+        let limits = RouteLimits {
+            max_active_nodes: 4_000,
+            ..limits()
+        };
+        let mut saved = Vec::new();
+        let (full, report) = route_resumable(&design, &limits, 2, Some(600), None, &mut |p| {
+            saved.push(BatchCheckpoint {
+                begin: p.begin,
+                routes: p.routes.clone(),
+                report: p.report.clone(),
+                completed: p.completed.to_vec(),
+            });
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            saved.iter().map(|s| s.begin).collect::<Vec<_>>(),
+            [2, 4, 6, 8]
+        );
+        for state in saved {
+            let (again, again_report) =
+                route_resumable(&design, &limits, 2, Some(600), Some(state), &mut |_| Ok(()))
+                    .unwrap();
+            assert_eq!(again.wires, full.wires);
+            assert_eq!(again.vias, full.vias);
+            assert_eq!(again.access, full.access);
+            assert_eq!(again.nets, full.nets);
+            assert_eq!(again.stats.comparisons, full.stats.comparisons);
+            assert_eq!(again_report.batches, report.batches);
+            assert_eq!(again_report.deferred, report.deferred);
+        }
     }
 
     #[test]

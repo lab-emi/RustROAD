@@ -525,6 +525,8 @@ pub(crate) fn load(
                     check: e.check,
                 },
                 final_validation_bytes: 0,
+                // Recomputed from the input when the route resumes.
+                deferred: None,
             },
             completed,
         },

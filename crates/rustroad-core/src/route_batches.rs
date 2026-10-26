@@ -17,6 +17,20 @@ pub struct BatchReport {
     pub displaced_nets: usize,
     pub peak_estimate: MemoryEstimate,
     pub final_validation_bytes: u64,
+    /// Long nets routed after all others, when requested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deferred: Option<DeferredReport>,
+}
+
+/// Nets whose terminal bounding-box half-perimeter exceeds `hpwl_dbu`; they
+/// form the last primary batches, after every other net.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct DeferredReport {
+    pub hpwl_dbu: i64,
+    pub nets: usize,
+    pub terminals: usize,
+    /// Primary batches that routed deferred nets.
+    pub batches: usize,
 }
 
 /// Everything a batched route carries from one primary batch to the next,
@@ -85,16 +99,18 @@ fn charge(work: &mut usize, count: usize, cap: usize) -> Result<()> {
 }
 
 /// One primary batch from `begin`: whole nets in terminal order up to
-/// `batch_terminals` terminals. Returns its end and its routable nets.
+/// `batch_terminals` terminals, ending at `limit` at the latest. Returns its
+/// end and its routable nets.
 fn select(
     input: &RouteInput,
     order: &[u32],
     begin: usize,
+    limit: usize,
     batch_terminals: usize,
 ) -> Result<(usize, Vec<u32>)> {
     let mut end = begin;
     let mut selected = Vec::new();
-    while end < order.len() {
+    while end < limit {
         let net = input.terminals[order[end] as usize].net;
         let mut next = end + 1;
         while next < order.len() && input.terminals[order[next] as usize].net == net {
@@ -117,10 +133,97 @@ fn select(
     Ok((end, selected))
 }
 
+/// Nets of a net-sorted terminal order whose terminal-shape bounding box has
+/// a half-perimeter above `span`.
+pub(crate) struct Deferral {
+    /// Ascending net ids.
+    pub(crate) nets: Vec<u32>,
+    pub(crate) terminals: usize,
+    /// Order position of the first deferred terminal.
+    pub(crate) boundary: usize,
+}
+
+/// Moves the terminals of long nets behind all others, keeping the net order
+/// inside both groups, so every net's terminals stay contiguous and each group
+/// stays sorted by net.
+fn defer_long_nets(
+    input: &RouteInput,
+    order: &mut [u32],
+    span: i64,
+    work: &mut usize,
+    max_work: usize,
+    cap: u64,
+) -> Result<Deferral> {
+    let shapes = order.iter().fold(0usize, |n, &i| {
+        n.saturating_add(input.terminals[i as usize].shapes.len())
+    });
+    // Two classification passes and one move.
+    charge(
+        work,
+        order
+            .len()
+            .saturating_add(shapes)
+            .saturating_mul(2)
+            .saturating_add(order.len()),
+        max_work,
+    )?;
+    // The net of the group starting at `begin`, its end, and whether it is long.
+    let group = |order: &[u32], begin: usize| {
+        let net = input.terminals[order[begin] as usize].net;
+        let mut end = begin;
+        let mut bounds = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
+        while end < order.len() && input.terminals[order[end] as usize].net == net {
+            for s in &input.terminals[order[end] as usize].shapes {
+                bounds[0] = bounds[0].min(s.rect.lx);
+                bounds[1] = bounds[1].min(s.rect.ly);
+                bounds[2] = bounds[2].max(s.rect.ux);
+                bounds[3] = bounds[3].max(s.rect.uy);
+            }
+            end += 1;
+        }
+        let long = bounds[0] <= bounds[2]
+            && (bounds[2] - bounds[0]).saturating_add(bounds[3] - bounds[1]) > span;
+        (net, end, long)
+    };
+    let (mut count, mut terminals, mut begin) = (0usize, 0usize, 0);
+    while begin < order.len() {
+        let (_, end, long) = group(order, begin);
+        if long {
+            count += 1;
+            terminals += end - begin;
+        }
+        begin = end;
+    }
+    let mut nets = Vec::new();
+    reserve(&mut nets, count, cap)?;
+    let mut tail = Vec::new();
+    reserve(&mut tail, terminals, cap)?;
+    let (mut read, mut write) = (0, 0);
+    while read < order.len() {
+        let (net, end, long) = group(order, read);
+        if long {
+            nets.push(net);
+            tail.extend_from_slice(&order[read..end]);
+        } else {
+            order.copy_within(read..end, write);
+            write += end - read;
+        }
+        read = end;
+    }
+    order[write..].copy_from_slice(&tail);
+    Ok(Deferral {
+        nets,
+        terminals,
+        boundary: write,
+    })
+}
+
 pub(crate) struct Batch<'a> {
     pub(crate) input: &'a RouteInput,
     pub(crate) limits: &'a RouteLimits,
     pub(crate) order: &'a [u32],
+    /// Ascending deferred nets; `order` is sorted by (deferred, net).
+    pub(crate) deferred: &'a [u32],
     pub(crate) begin: usize,
     pub(crate) cap: u64,
 }
@@ -363,16 +466,20 @@ impl Batch<'_> {
             }
         }
         let prior = &self.order[..self.begin];
+        // The order key: deferred nets follow all others, each group by net.
+        let key = |net: u32| (self.deferred.binary_search(&net).is_ok(), net);
+        let probes = 1 + (usize::BITS - self.deferred.len().leading_zeros()) as usize;
         let mut ranges = Vec::new();
         let mut added = 0usize;
         for &net in &victims {
             charge(
                 &mut out.stats.comparisons,
-                2 * usize::BITS as usize,
+                2 * usize::BITS as usize * probes,
                 self.limits.max_comparisons,
             )?;
-            let lo = prior.partition_point(|&i| self.input.terminals[i as usize].net < net);
-            let hi = prior.partition_point(|&i| self.input.terminals[i as usize].net <= net);
+            let at = key(net);
+            let lo = prior.partition_point(|&i| key(self.input.terminals[i as usize].net) < at);
+            let hi = prior.partition_point(|&i| key(self.input.terminals[i as usize].net) <= at);
             if hi - lo < 2 {
                 return Err(invalid("completed route is missing its original terminals"));
             }
@@ -472,17 +579,23 @@ pub fn route(
     limits: &RouteLimits,
     batch_terminals: usize,
 ) -> Result<(Routes, BatchReport)> {
-    route_resumable(input, limits, batch_terminals, None, &mut |_| Ok(()))
+    route_resumable(input, limits, batch_terminals, None, None, &mut |_| Ok(()))
 }
 
 /// [`route`] that may continue from a [`BatchCheckpoint`] and hands the
 /// state after every completed primary batch to `progress` (an error there
 /// stops the route). A resumed route repeats the remaining primary batches
 /// exactly as the uninterrupted route would; it is diagnostic evidence only.
+///
+/// With `defer_hpwl`, every net whose terminal bounding box has a larger
+/// half-perimeter (DBU) is routed after all other nets, in batches of its own.
+/// An early long route would otherwise cross the pins of many later batches,
+/// and recovering their access reopens and reroutes the whole long net.
 pub fn route_resumable(
     input: &RouteInput,
     limits: &RouteLimits,
     batch_terminals: usize,
+    defer_hpwl: Option<i64>,
     resume: Option<BatchCheckpoint>,
     progress: &mut dyn FnMut(BatchProgress<'_>) -> Result<()>,
 ) -> Result<(Routes, BatchReport)> {
@@ -490,6 +603,9 @@ pub fn route_resumable(
         return Err(invalid(
             "batched routing requires tracks and 2..1000000 terminals per batch",
         ));
+    }
+    if defer_hpwl.is_some_and(|span| span <= 0) {
+        return Err(invalid("deferred-net half-perimeter must be positive"));
     }
     let cap = input
         .tracks
@@ -510,12 +626,44 @@ pub fn route_resumable(
         "terminal order",
     )?;
     let mut work = 0;
-    let order = crate::rule_index::order(
+    let mut order = crate::rule_index::order(
         input.terminals.len(),
         |i| input.terminals[i].net,
         &mut work,
         limits.max_comparisons,
     )?;
+    let deferral = match defer_hpwl {
+        Some(span) => Some(defer_long_nets(
+            input,
+            &mut order,
+            span,
+            &mut work,
+            limits.max_comparisons,
+            cap,
+        )?),
+        None => None,
+    };
+    let boundary = deferral.as_ref().map_or(order.len(), |d| d.boundary);
+    let deferred: &[u32] = deferral.as_ref().map_or(&[], |d| &d.nets);
+    // Primary batches never mix deferred and other nets.
+    let limit = |begin: usize| {
+        if begin < boundary {
+            boundary
+        } else {
+            order.len()
+        }
+    };
+    if let Some(d) = &deferral
+        && std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some()
+    {
+        eprintln!(
+            "[batch] deferring {} nets ({} terminals) with terminal half-perimeter above {} DBU to order position {}",
+            d.nets.len(),
+            d.terminals,
+            defer_hpwl.unwrap_or_default(),
+            d.boundary
+        );
+    }
     let geometry_bytes = input
         .access_classes
         .iter()
@@ -561,7 +709,9 @@ pub fn route_resumable(
         displaced_nets: 0,
         peak_estimate: MemoryEstimate::default(),
         final_validation_bytes: 0,
+        deferred: None,
     };
+    let mut deferred_batches = 0;
     let base = input.obstacles.len();
     let mut begin = 0;
     if let Some(state) = resume {
@@ -571,7 +721,10 @@ pub fn route_resumable(
             if batches == MAX_BATCHES {
                 return Err(budget("routing batch count"));
             }
-            begin = select(input, &order, begin, batch_terminals)?.0;
+            if begin >= boundary {
+                deferred_batches += 1;
+            }
+            begin = select(input, &order, begin, limit(begin), batch_terminals)?.0;
             batches += 1;
         }
         if begin != state.begin || batches != state.report.batches {
@@ -611,9 +764,12 @@ pub fn route_resumable(
         report = state.report;
     }
     while begin < order.len() {
-        let (end, selected) = select(input, &order, begin, batch_terminals)?;
+        let (end, selected) = select(input, &order, begin, limit(begin), batch_terminals)?;
         if report.batches == MAX_BATCHES {
             return Err(budget("routing batch count"));
+        }
+        if begin >= boundary {
+            deferred_batches += 1;
         }
         view.terminals.clear();
         let shape_bytes = order[begin..end]
@@ -645,6 +801,7 @@ pub fn route_resumable(
             input,
             limits,
             order: &order,
+            deferred,
             begin,
             cap,
         }
@@ -762,6 +919,12 @@ pub fn route_resumable(
     }
     drop(view);
     drop(order);
+    report.deferred = deferral.map(|d| DeferredReport {
+        hpwl_dbu: defer_hpwl.unwrap_or_default(),
+        nets: d.nets.len(),
+        terminals: d.terminals,
+        batches: deferred_batches,
+    });
     out.nets.sort_unstable();
     let extra = crate::troute::validation_working_bytes(input, &out, limits)?;
     let live = crate::memory::live_bytes().ok_or_else(|| budget("final route memory probe"))?;

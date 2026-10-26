@@ -142,6 +142,10 @@ pub struct RoutingConfig {
     /// Opt-in whole-net batches; completed metal stays fixed for later batches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batch_terminals: Option<usize>,
+    /// Batched routing only: nets whose terminal bounding box has a larger
+    /// half-perimeter (microns) are routed after all other nets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_defer_hpwl_um: Option<f64>,
 }
 impl RoutingConfig {
     fn validate(&self) -> Result<()> {
@@ -151,6 +155,13 @@ impl RoutingConfig {
         }) {
             return Err(Error::Invalid(
                 "invalid routing batch terminal limit".into(),
+            ));
+        }
+        if self.batch_defer_hpwl_um.is_some_and(|um| {
+            self.batch_terminals.is_none() || !um.is_finite() || !(0.001..=100_000.0).contains(&um)
+        }) {
+            return Err(Error::Invalid(
+                "batch_defer_hpwl_um needs batch_terminals and 0.001..100000 microns".into(),
             ));
         }
         if let Some(t) = &self.track_router {
@@ -1450,6 +1461,9 @@ pub fn route_with_options(
         .as_ref()
         .ok_or_else(|| fail("physical design required"))?;
     let mut input = build_input(&metadata.design, bundle, &placed, &config, scope)?;
+    let defer_hpwl = config
+        .batch_defer_hpwl_um
+        .map(|um| (um * f64::from(bundle.technology.dbu_per_micron)).round() as i64);
     // Routing needs only its input. Release the design while routing; the
     // exclusive lock keeps this immutable revision as HEAD, and a commit
     // reloads it under the same lock.
@@ -1541,6 +1555,7 @@ pub fn route_with_options(
             &input,
             &config.limits,
             batch,
+            defer_hpwl,
             resume,
             &mut |progress| {
                 if let Some(w) = writer.as_mut()

@@ -63,6 +63,28 @@ class Statuses(unittest.TestCase):
                 R.PdkGate(ctx, 'sky130', {'tag': 'sky130'})
             self.assertEqual(Path(gate.p['config']).read_bytes(), actual)
 
+    def test_long_net_deferral_is_bound_into_the_batch_profile(self):
+        manifest = json.loads((SCRIPTS.parent / 'fixtures/designs/pipeline_track.json').read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(route_batch_terminals=32, route_defer_hpwl_um=12.5)
+            ctx = SimpleNamespace(manifest=manifest, clock=manifest['clock'], args=args,
+                                  h=SimpleNamespace(root=Path(directory)))
+            for tag in ('sky130', 'gf180'):
+                gate = R.PdkGate(ctx, tag, {'tag': tag})
+                actual = Path(gate.p['routing_config']).read_bytes()
+                routing = json.loads(actual)
+                self.assertEqual((routing['batch_terminals'], routing['batch_defer_hpwl_um']), (32, 12.5))
+                self.assertEqual(gate.spec['frozen']['routing_profile'], hashlib.sha256(actual).hexdigest())
+                self.assertEqual(gate.details['batch_routing_config']['defer_hpwl_um'], 12.5)
+            # Without batches there is no order to change.
+            args.route_batch_terminals = None
+            with self.assertRaisesRegex(D.GateError, 'requires batched routing'):
+                R.PdkGate(ctx, 'sky130', {'tag': 'sky130'})
+        for argv in (['--route-defer-hpwl-um', '10'],
+                     ['--route-batch-terminals', '32', '--route-defer-hpwl-um', '0']):
+            with self.assertRaises(SystemExit):
+                R.main(argv)
+
     def test_fixed_floorplan_override_rejects_unrelated_configuration_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
