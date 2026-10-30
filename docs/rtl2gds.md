@@ -1,6 +1,8 @@
 # RTL-to-GDS on SKY130 and GF180 (`scripts/rtl2gds.py`)
 
-Current closeout results: [2026-10-25 qualification](closeout-2026-10-25.md). The historical measurements below are preserved separately.
+Current small-block qualification verdicts: [2026-10-25 closeout](closeout-2026-10-25.md).
+Receipts of earlier rounds (`docs/evidence/rtl2gds-*.json`) are historical
+evidence kept for reproducibility, not current benchmarks.
 
 One command takes a design manifest from RTL to GDS on SKY130
 (`sky130_fd_sc_hd`) and GF180 (`gf180mcu_fd_sc_mcu7t5v0`) and checks the
@@ -11,121 +13,27 @@ extraction, three-corner timing in RustSTA and OpenSTA on both SPEF sources,
 foundry DRC/LVS/antenna on the native GDS, equivalence and co-simulation
 against the RTL, artifact binding, a full determinism rebuild and eleven
 negative controls. Third-party tools run only as pinned black-box
-executables. This page is the final report of the joint RustROAD / RustSys /
+executables. This page describes the flow of the joint RustROAD / RustSys /
 RustSTA integration; the detailed engine pages are `docs/closure.md`,
 `docs/hold-closure.md`, `docs/scaling.md`, `docs/signoff.md` and
 `docs/extraction.md`.
 
-## Historical integration result
-
-Final runs `E-<design>` (worktree `.work/wt/final2`, RustROAD `aafcbaa`,
-clean tree, release binary `36a47edb`; RustSTA 0.4.3 `26bd6eb`, ruststa
-`472de8e8`, rusteda `c39dbde4`; RustSys policy producer `3de13b3a`; signoff
-image `4c48415d8bd0`; both PDKs, controls and the determinism rebuild
-included). Evidence: `docs/evidence/rtl2gds-final2.json`.
-
-| | SKY130 | GF180 |
-|---|---|---|
-| every gating item passed | pipeline, dense, counter, uart_tx, alu | pipeline, dense, counter, uart_tx, fifo |
-| only `timing_accuracy` failed (RustSTA vs OpenSTA min-pulse-width parity, 1.28-1.86 ps) | fifo, regfile, mult | - |
-| only `drv` failed (3-12 nets above 1.0 ns at ss) | - | alu, regfile, mult |
-
-10 of 16 design x PDK rows pass every gating status (the original headline incorrectly said 11). On all 16 rows setup
-(tt, ss) and hold (tt, ss, ff) close on native and OpenRCX SPEF in both
-engines, the native GDS has 0 XOR, 0 Magic and 0 KLayout DRC items, 0
-antenna-deck violations, Netgen and KLayout LVS match, RTL equivalence
-(pre-layout, final, powered netlist) and the 4096-cycle co-simulation pass,
-all 11 controls are rejected by their oracles, the second full build is byte
-identical, and every bound artifact re-verifies. An independent re-run of
-counter and fifo from a `git archive` build in a separate directory gives
-identical verdicts and identical artifacts (below).
-
-### Per design x PDK (RustSTA, native SPEF, worst over all endpoints; ns)
-
-| Design | PDK | Period ns (pre-layout d) | Gate | Failed items | Setup tt / ss | Hold tt / ss / ff | DRV ss (nets, worst slew) | Max parity native / OpenRCX ps | Cells logic / ECO buf / hold | Die um2 | Layouts (sel.) | Wall s | Peak RSS MiB |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| pipeline | sky130 | 10 (1.12) | passed | - | +9.087 / +8.491 | +0.081 / +0.064 / +0.115 | 0 | 0.06 / 0.42 | 10 / 0 / 4 | 2815 | 3 (2) | 57 | 464 |
-| pipeline | gf180 | 10 (3.60) | passed | - | +7.461 / +4.844 | +0.242 / +0.362 / +0.194 | 0 | 0.03 / 0.03 | 10 / 0 / 4 | 4939 | 2 (1) | 71 | 434 |
-| dense | sky130 | 10 (0.97) | passed | - | +9.172 / +8.664 | +0.141 / +0.185 / +0.125 | 0 | 0.03 / 0.03 | 18 / 0 / 0 | 3827 | 1 (0) | 58 | 464 |
-| dense | gf180 | 10 (2.66) | passed | - | +8.192 / +6.633 | +0.150 / +0.192 / +0.130 | 0 | 0.02 / 0.03 | 22 / 1 / 1 | 9165 | 3 (2) | 78 | 439 |
-| counter | sky130 | 10 (3.20) | passed | - | +8.124 / +6.407 | +0.080 / +0.081 / +0.098 | 0 | 0.61 / 0.59 | 43 / 0 / 13 | 3827 | 2 (1) | 81 | 491 |
-| counter | gf180 | 13 (9.62) | passed | - | +7.241 / +1.260 | +0.127 / +0.142 / +0.123 | 0 | 0.07 / 0.08 | 47 / 14 / 15 | 14291 | 4 (3) | 99 | 442 |
-| uart_tx | sky130 | 10 (2.59) | passed | - | +8.474 / +6.950 | +0.098 / +0.095 / +0.107 | 0 | 0.60 / 0.62 | 89 / 0 / 32 | 6644 | 2 (1) | 107 | 494 |
-| uart_tx | gf180 | 12 (8.99) | passed | - | +7.254 / +2.433 | +0.261 / +0.457 / +0.171 | 0 | 0.16 / 0.20 | 106 / 36 / 17 | 20549 | 4 (3) | 131 | 443 |
-| fifo | sky130 | 10 (2.86) | failed | timing_accuracy | +8.145 / +6.503 | +0.138 / +0.218 / +0.127 | 0 | 1.28 / 0.60 | 81 / 0 / 34 | 6644 | 2 (1) | 115 | 489 |
-| fifo | gf180 | 12 (9.57) | passed | - | +6.747 / +1.238 | +0.160 / +0.290 / +0.110 | 0 | 0.26 / 0.34 | 115 / 36 / 16 | 27941 | 4 (3) | 137 | 449 |
-| alu | sky130 | 10 (3.87) | passed | - | +7.546 / +5.728 | +0.631 / +0.884 / +0.524 | 0 | 0.84 / 0.60 | 253 / 1 / 0 | 10508 | 2 (1) | 195 | 517 |
-| alu | gf180 | 18 (13.96) | failed | drv | +9.294 / +0.766 | +1.319 / +2.244 / +0.923 | 3 nets, 1.67 ns | 0.29 / 0.44 | 244 / 146 / 0 | 27941 | 8 (7) | 314 | 449 |
-| regfile | sky130 | 10 (1.98) | failed | timing_accuracy | +8.304 / +6.895 | +0.100 / +0.110 / +0.114 | 0 | 1.86 / 0.80 | 372 / 19 / 53 | 14921 | 5 (4) | 371 | 496 |
-| regfile | gf180 | 12 (8.90) | failed | drv | +6.767 / +1.656 | +0.262 / +0.404 / +0.201 | 8 nets, 2.03 ns | 0.60 / 0.76 | 341 / 173 / 65 | 57844 | 8 (4) | 511 | 473 |
-| mult | sky130 | 10 (5.84) | failed | timing_accuracy | +6.866 / +4.221 | +0.101 / +0.113 / +0.130 | 0 | 1.28 / 0.58 | 418 / 0 / 3 | 14921 | 2 (1) | 248 | 520 |
-| mult | gf180 | 30 (23.41) | failed | drv | +16.885 / +3.566 | +0.178 / +0.253 / +0.146 | 12 nets, 1.37 ns | 0.22 / 0.21 | 367 / 137 / 2 | 46121 | 8 (7) | 568 | 462 |
-
-Period: the owner rule's period and, in parentheses, the pre-layout ss
-critical-path delay it came from. Setup/hold: RustSTA on the native SPEF of
-the selected layout (OpenSTA and the OpenRCX SPEF agree within the parity
-column; both are gated). DRV: nets with a violating pin at ss on the
-selected layout (both SPEFs, both engines). Parity: largest RustSTA-OpenSTA
-difference over endpoints, min-pulse-width and DRV rows at any corner. Cells:
-logic instances of the final netlist, ECO buffers, hold delay cells. Layouts:
-closure layouts built and the selected one. Wall time and peak RSS per PDK
-row (the peak is a signoff container).
-
-### Failing items and root causes
-
-1. **SKY130 `timing_accuracy` (fifo, regfile, mult): RustSTA vs OpenSTA
-   min-pulse-width required time at ss on the native SPEF.** Endpoint setup
-   and hold parity is <= 0.89 ps on every row and both SPEFs; the pulse-width check of the
-   flops' CLK pins differs by up to 1.279 ps (fifo `r6/CLK` high: required
-   0.69166 vs 0.69040 ns), 1.864 ps (regfile `r29/CLK`) and 1.284 ps (mult
-   `r7/CLK` low). The Liberty `min_pulse_width` of `sky130_fd_sc_hd` flops is
-   a table of the clock-pin transition, so a sub-picosecond clock-slew
-   difference on the routed CTS nets shows up here (OpenSTA: `r6/CLK` 0.23 /
-   0.18 ns rise/fall). Same residual class as the effective-capacitance one
-   the RustSTA stream declared; 0.4.3 did not change it. Owner: RustSTA. The
-   1 ps gate and the harness were not changed. The same three designs pass
-   parity on GF180 and on OpenRCX SPEF.
-2. **GF180 `drv` (alu 3 nets, regfile 8, mult 12; transitions 1.01-2.03 ns
-   at ss against `set_max_transition 1.0`).** Setup and hold are closed on
-   these rows. Remaining nets on the selected layouts: alu `oai21_2` into one
-   ECO buffer (1.67 ns); regfile a `nor2_4` (largest member) into four ECO
-   buffers (2.03 ns) and seven `dlyb_1` hold cells into `buf_8` ECO buffers
-   (1.08-1.65 ns); mult `aoi22_2`/`aoi22_4` into one ECO buffer (1.01-1.37 ns;
-   aoi22's best member reaches only 0.80 ns at the smallest sink with a 0.2
-   ns input, more with the real input slew). The closure loop reached its
-   8-layout bound on all three while still improving (alu 522 -> 6 violating
-   pins). Owner: closure stream (driver/buffer co-sizing; the loop resizes
-   one family step per layout and never resizes delay cells). An extra
-   buffer level in front of ECO buffers was tried and made alu and mult
-   worse; it is not in the final code.
-
-No SDC value beyond the period rule, no Liberty, deck, RC profile,
-threshold or status rule was changed for any of these.
-
-### What changed in this round (and why)
+## Recipe notes
 
 - **Owner decisions applied before any physical step** (next section):
-  per-PDK clock periods (GF180 counter 13, uart_tx 12, fifo 12, alu 18,
-  regfile 12, mult 30 ns; every SKY130 design and GF180 pipeline/dense
-  10 ns) and the GF180 DRV dont_use. Before them (E6, 10 ns everywhere,
-  RustSTA 06b1c9f) only pipeline and dense passed on both PDKs and GF180
-  counter alone among the track designs; alu and mult were setup-infeasible
-  at 10 ns with ideal wires.
+  per-PDK clock periods and the GF180 DRV dont_use.
 - **RustSTA 0.4.3** solves resistor loops and joins disconnected RC
-  components, so OpenRCX SPEF with routed loops is timed (two rows were
-  `unverified` in E6); 0.4.2's one-step effective capacitance brought
-  endpoint parity under 1 ps on every row.
+  components, so OpenRCX SPEF with routed loops is timed.
 - **GF180 floorplan headroom** (`pdks.gf180.floorplan_recipe`, utilization
-  0.35; SKY130 keeps 0.5 and its floorplans are unchanged): at 0.5 the GF180
-  closure ECOs filled the rows (regfile: a 0.76 netlist failed CTS packing,
-  `baseline packing ran out of intervals`; alu: resizes refused at the 0.70
-  cap with 116-128 violating pins left). From 0.35 the alu, regfile and mult
-  loops end at 0.49-0.63.
+  0.35; SKY130 keeps 0.5 and its floorplans are unchanged) leaves row room
+  for the GF180 closure ECOs.
 - **Closure loop** (`docs/closure.md`): bulk DRV upsizing decided by one
   `whatif` call, violating drivers may also step down, one 0.74 utilization
-  cap for buffers and resizes, larger `whatif` count budgets (128 per layout,
-  640 per loop, scaled as before). Dev runs: mult GF180 DRV 180 -> 18
-  violating pins at 0.5 utilization from the bulk step alone.
+  cap for buffers and resizes, and `whatif` count budgets of 128 per layout
+  and 640 per loop, scaled as described there.
+
+No SDC value beyond the period rule, no Liberty, deck, RC profile,
+threshold or status rule is changed by the flow.
 
 ## Owner decisions (2026-10-24) and their derivations
 
@@ -143,8 +51,7 @@ applied uniformly to every design and PDK before any physical step.
 3. pinned RustSTA, ss Liberty only, no SPEF, `--require-wire-model`: GF180
    `ideal` (its Liberty has no wire-load table), SKY130 `wireload_lumped`
    (its Liberty `default_wire_load`; RustSTA cannot force ideal wires there,
-   so SKY130 delays are an upper bound of ideal; no SKY130 period is near
-   the 10 ns floor's 8 ns threshold, the largest is mult at 5.84 ns);
+   so SKY130 delays are an upper bound of ideal);
 4. critical-path delay `d = 10 ns - worst ss setup slack` (the period at
    which the worst path has zero slack with the same setup time, 50 ps
    uncertainty, 0.2 ns I/O delays and ideal clock);
@@ -153,43 +60,30 @@ applied uniformly to every design and PDK before any physical step.
    (`fixtures/designs/<d>/<pdk>-cts.sdc`), and the record
    (`fixtures/designs/<d>/clock-period.json`) keeps every input hash, the
    netlist sha256, the measured path and the arithmetic;
-6. self-check: RustSTA re-run with the derived SDC reports worst slack
-   `period - d` within 1 ps (passed on every row).
+6. self-check: RustSTA re-run with the derived SDC must report worst slack
+   `period - d` within 1 ps.
 
 The manifest freezes the clock SDC and the record by sha256; the gate's
 global `clock_period` status re-checks the arithmetic, that each clock SDC
 carries the record's period and differs from the reference only in
 `-period`/`-waveform`, and that the record was made with the pinned RustSys,
 RustSTA and the manifest's cell policy. `--check` re-runs the timing and
-requires identical files. RustSTA 0.4.2 and 0.4.3 give identical delays (to
-1e-6 ns).
+requires identical files.
 
-| Design | PDK | Wire model | Worst pre-layout path | Slack at 10 ns | d | 1.25 d | Period |
-|---|---|---|---|---|---|---|---|
-| pipeline | sky130 | wireload_lumped | r0/CLK -> r2/D | +8.877 | 1.123 | 1.404 | 10 |
-| pipeline | gf180 | ideal | r0/CLK -> r2/D | +6.396 | 3.604 | 4.504 | 10 |
-| dense | sky130 | wireload_lumped | r5/CLK -> y[3] | +9.035 | 0.965 | 1.207 | 10 |
-| dense | gf180 | ideal | b[0] -> r2/D | +7.338 | 2.662 | 3.327 | 10 |
-| counter | sky130 | wireload_lumped | r1/CLK -> r4/D | +6.804 | 3.196 | 3.995 | 10 |
-| counter | gf180 | ideal | r0/CLK -> r7/D | +0.376 | 9.624 | 12.030 | **13** |
-| uart_tx | sky130 | wireload_lumped | r1/CLK -> r5/D | +7.406 | 2.594 | 3.243 | 10 |
-| uart_tx | gf180 | ideal | r1/CLK -> r6/D | +1.009 | 8.991 | 11.239 | **12** |
-| fifo | sky130 | wireload_lumped | r4/CLK -> r4/D | +7.144 | 2.856 | 3.570 | 10 |
-| fifo | gf180 | ideal | r6/CLK -> r6/D | +0.430 | 9.570 | 11.963 | **12** |
-| alu | sky130 | wireload_lumped | a_i[3] -> zero_o | +6.125 | 3.875 | 4.844 | 10 |
-| alu | gf180 | ideal | b_i[1] -> zero_o | -3.958 | 13.958 | 17.448 | **18** |
-| regfile | sky130 | wireload_lumped | r47/CLK -> rdata_a[7] | +8.020 | 1.980 | 2.475 | 10 |
-| regfile | gf180 | ideal | raddr_b[2] -> rdata_b[7] | +1.098 | 8.902 | 11.127 | **12** |
-| mult | sky130 | wireload_lumped | b[4] -> r11/D | +4.161 | 5.839 | 7.299 | 10 |
-| mult | gf180 | ideal | b[0] -> r10/D | -13.407 | 23.407 | 29.259 | **30** |
-| serv (stretch) | sky130 | wireload_lumped | r9/CLK -> r1171/D | -0.850 | 10.850 | 13.562 | **14** |
-| serv (stretch) | gf180 | ideal | r1192/CLK -> r1171/D | -23.549 | 33.549 | 41.936 | **42** |
-| rv_core (stretch, not run) | sky130 / gf180 | | | | 22.505 / 73.939 | | 29 / 93 |
+The frozen periods (ns):
 
-As expected, most rows stay at 10 ns; the GF180 track designs do not (their
-ss critical paths are 9-23 ns after the dont_use). The dont_use made the
-GF180 netlists slower than before (alu 13.07 -> 13.96 ns, mult 22.05 ->
-23.41, regfile 6.96 -> 8.90).
+| Design | SKY130 (`wireload_lumped`) | GF180 (`ideal`) |
+|---|---|---|
+| pipeline | 10 | 10 |
+| dense | 10 | 10 |
+| counter | 10 | 13 |
+| uart_tx | 10 | 12 |
+| fifo | 10 | 12 |
+| alu | 10 | 18 |
+| regfile | 10 | 12 |
+| mult | 10 | 30 |
+| serv (stretch) | 14 | 42 |
+| rv_core (stretch, not run) | 29 | 93 |
 
 ### GF180 DRV dont_use
 
@@ -230,9 +124,7 @@ derivation (a stale file is refused) and adds the globs
 independently, fails any such instance in a synthesized netlist and reports
 a policy whose derived list or Liberty hash differs as inconsistent. The
 sizing profiles (`fixtures/pdk/<pdk>-sizing.json`) were rebuilt from the new
-policy (GF180: those 10 families removed). Before the rule RustSys mapped 10
-such instances into uart_tx, 2 into fifo, 14 into alu, 1 into regfile and 8
-into mult (E6 netlists); now none.
+policy (GF180: those 10 families removed).
 
 ## How to run
 
@@ -275,19 +167,16 @@ NAME=PATH`, `--no-controls`, `--no-determinism` (both then `unverified`),
 
 ### Independent re-run
 
-`git archive aafcbaa` into `.work/indep-final2/src` (outside every
-worktree), `git init` + commit there (tree `28ce4f8d`, identical to
-`aafcbaa^{tree}`, so manifest provenance holds), its own `CARGO_TARGET_DIR`
-release build (binary `28e80364`, differs from `36a47edb` only by embedded
-paths), the RustSTA pair copied again from the shared directory and checked
-against `SHA256SUMS` and the pin file; counter and fifo re-run on both PDKs
-with controls and determinism. `scripts/compare_runs.py`: identical verdicts
-(counter passed, fifo failed on `sky130:timing_accuracy` only), identical
-global and per-PDK statuses, and of 55 (SKY130) / 57 (GF180) bound artifacts
-50 / 52 byte-identical; the rest are identical after the documented
-normalizations: the RustROAD binary, the three OpenRCX SPEFs (`*DATE` line)
-and `routes.json` (records the routing-profile path of its checkout).
-Result in `independent_check` of the evidence.
+`git archive <rev>` into a directory outside every worktree, `git init` and
+commit there (the tree must equal `<rev>^{tree}`, so manifest provenance
+holds), a release build with its own `CARGO_TARGET_DIR`, the RustSTA pair
+copied again from the shared directory and checked against `SHA256SUMS` and
+the pin file, then the selected designs re-run on both PDKs with controls and
+determinism. `scripts/compare_runs.py` compares verdicts, global and per-PDK
+statuses and every bound artifact byte for byte. The documented
+normalizations are the RustROAD binary (embedded paths), the OpenRCX SPEFs
+(`*DATE` line) and `routes.json` (records the routing-profile path of its
+checkout). The comparison is stored in `independent_check` of the evidence.
 
 ## Design set
 
@@ -383,12 +272,11 @@ virtual clock (zero physical clock domains required).
 ## Logic oracles
 
 - **Powered netlist.** Instances whose master matches the cell policy's
-  `physical_only` globs and has no LEF `OUTPUT` pin are removed and listed
-  (sky130: 123 = 32 `tapvpwrvgnd_1` + 91 fillers; gf180: 119 = 32 `filltie` +
-  87 fillers). A policy glob matching a cell with an output pin is refused,
-  not filtered. RustSys keeps the supply connections and gets the supply
-  ports; Yosys gets an unpowered view (68 supply-pin connections and the two
-  supply ports removed, listed).
+  `physical_only` globs and has no LEF `OUTPUT` pin (taps and fillers) are
+  removed and listed. A policy glob matching a cell with an output pin is
+  refused, not filtered. RustSys keeps the supply connections and gets the
+  supply ports; Yosys gets an unpowered view (supply-pin connections and the
+  two supply ports removed, listed).
 - **Co-simulation.** The testbench is generated from the RTL port list: all
   non-clock inputs come from a fixed-seed xorshift64, the clock port toggles,
   and every output is compared with `!==` before and after each edge (4096
@@ -451,22 +339,16 @@ reference that raises the hold target when it is short. Track recipe, at
 most 8 layouts: (1) DRV/setup ECO - buffer insertion with a setup guard,
 bulk and single `whatif`-verified resizes, timing-driven seeded placement;
 (2) path-aware hold ECO; (3) antenna repair by layer jumpers (diode-free).
-The loop keeps its best complete layout. Details, bounds and measurements:
+The loop keeps its best complete layout. Details and bounds:
 `docs/closure.md` and `docs/hold-closure.md`.
 
 ## Stretch designs
 
-**SERV GF180** at the derived 42 ns did not get through implementation in
-this round: on the regenerated 0.35-utilization GF180 floorplan the track
-router stops at once with `BUDGET_EXCEEDED: routing grid node count`
-(`gf180-scale-routing.json` allows 8 M track-graph nodes). No profile was
-changed for it. The earlier round (0.5 floorplan, 10 ns,
-`docs/evidence/rtl2gds-antenna-serv.json`) completed the GF180 gate with
-LVS failing only on its 35 unused input ports (Netgen disconnected nodes in
-both netlists, KLayout unnamed pins; owner decision on unused ports needed),
-`cec_*` unverified because Yosys aborts on SERV, and timing not closed.
-**SERV SKY130** did not route with buffered ports (router budget; scale
-stream). **rv_core** was not run (its periods are derived: 29 / 93 ns).
+SERV and rv_core have manifests and derived periods but are not claimed on
+either PDK. The GF180 scale routing profile (`gf180-scale-routing.json`)
+allows 8 M track-graph nodes; a larger graph fails with `BUDGET_EXCEEDED`.
+SERV LVS needs an owner decision on unused input ports, and Yosys aborts on
+SERV, so it has no second CEC oracle.
 
 ## Scope: what is and is not claimed
 
@@ -497,43 +379,30 @@ Not claimed:
 
 Estimate before the runs: about 2,000 instances at most (regfile/mult with
 fillers); one tool process at a time inside a gate, so a gate's peak is its
-largest step: a signoff container (capped at 4 GiB, measured about 0.5 GiB),
-then RustSTA/Verilator/whatif (< 0.4 GiB); eight gates in parallel are about
-4 GiB of 42 GiB available. Each gate ran under `systemd-run` MemoryMax=8G,
-each tool under a 2 GiB address-space limit and a 600 s timeout.
-
-Measured (E runs, eight gates in parallel, both PDKs, controls and the
-determinism rebuild included): 14 min 43 s from the first start to the last
-finish (regfile 883 s of gate wall time, mult 817 s, alu 510 s, the others
-129-254 s); largest step peak 532,872 KiB (a signoff container, mult); the
-largest host-side process tree under `/usr/bin/time` 366,476 KiB (regfile).
-`ruststa whatif` dominates the GF180 closure loops (counts, not time, bound
-it). Derivations: `derive_clock_period.py` 10 s / 120 MiB for all 11
-designs; `derive_drv_dont_use.py` 1 s. Independent re-run: counter 3:00,
-fifo 4:11; release build 22 s, 850 MiB.
+largest step: a signoff container (capped at 4 GiB), then
+RustSTA/Verilator/whatif (< 0.4 GiB); eight gates in parallel are about
+4 GiB of 42 GiB available. Each gate runs under `systemd-run`
+MemoryMax=8G, each tool under a 2 GiB address-space limit and a 600 s
+timeout. `ruststa whatif` work is bounded by candidate counts, not time.
 
 ## Open issues
 
-- RustSTA vs OpenSTA min-pulse-width parity on SKY130 CTS clock pins at ss
-  (1.1-1.9 ps): owner RustSTA.
-- GF180 DRV on alu, regfile, mult (3-12 nets): driver/buffer co-sizing, a
-  smarter treatment of hold delay cells that feed ECO buffers, and the
-  8-layout bound (closure stream).
-- SERV GF180 exceeds the track router's 8 M grid-node budget on the 0.35
-  floorplan; SERV LVS needs an owner decision on unused input ports; Yosys
-  aborts on SERV (no second CEC oracle).
-- Antenna violations on the top routing layer cannot take a jumper (none on
-  the required designs).
+- The SKY130 min-pulse-width parity and GF180 DRV items of earlier rounds
+  are handled by the [2026-10-25 closeout](closeout-2026-10-25.md) (MPW
+  declaration policy, driver/buffer co-sizing).
+- SERV and rv_core are not claimed (see "Stretch designs").
+- Antenna violations on the top routing layer cannot take a jumper.
 - The period rule's SKY130 pre-layout delays use the Liberty wire load
-  (RustSTA has no switch to force ideal wires); stated per row.
+  (RustSTA has no switch to force ideal wires).
 
 ## Earlier rounds
 
 E3 (`docs/evidence/rtl2gds-final.json`), the antenna round
 (`docs/evidence/rtl2gds-antenna.json`, `rtl2gds-antenna-serv.json`), E6
 closure (`docs/evidence/rtl2gds-closure.json`, critical paths in
-`docs/evidence/critical-path.json`) and the first gate round
-(`docs/evidence/rtl2gds.json`) ran at 10 ns everywhere with older RustSTA
-pins; their tables are in the git history of this file. The hold-ECO and
-antenna-ECO hardening (report binding, sink-pin checks, safety margins) is
-documented in `docs/hold-closure.md`.
+`docs/evidence/critical-path.json`), final2 (`docs/evidence/rtl2gds-final2.json`)
+and the first gate round (`docs/evidence/rtl2gds.json`) used older RustSTA
+pins. Their receipts are historical evidence kept for reproducibility, not
+current benchmarks; their tables are in the git history of this file. The
+hold-ECO and antenna-ECO hardening (report binding, sink-pin checks, safety
+margins) is documented in `docs/hold-closure.md`.

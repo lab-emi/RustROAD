@@ -6,13 +6,13 @@ check with diode repair, and a bounded closure loop. Everything was checked on
 `fixtures/flow/pipeline.v` for SKY130 (`sky130_fd_sc_hd`) and GF180
 (`gf180mcu_fd_sc_mcu7t5v0`). Timing decisions use native SPEF only.
 
-**Result.** On both PDKs the loop closes hold at every corner with
-hold >= +0.05 ns and setup >= 0. RustSTA and OpenSTA 3.1.0 agree within 1 ps on
-the same native SPEF. The final post-ECO, post-CTS netlist passes RustSys
-`check synth`, Yosys CEC and 512-vector simulation. Native-GDS foundry DRC is
-no worse than before the ECO, and the planted antenna controls are flagged by
-both the native check and the deck and are then repaired. This is
-block-level evidence; the scope limits are listed below.
+**Gates.** The loop's final gates (below) require hold >= +0.05 ns and
+setup >= 0 at every corner, RustSTA and OpenSTA 3.1.0 within 1 ps on the
+same native SPEF, RustSys `check synth`, Yosys CEC and 512-vector simulation
+of the final post-ECO, post-CTS netlist, native-GDS foundry DRC no worse than
+before the ECO, and planted antenna controls that both the native check and
+the deck flag and that are then repaired. This is block-level evidence; the
+scope limits are listed below.
 
 ## Commands
 
@@ -261,46 +261,15 @@ its output net is a port, appears in an `assign`, or is used through a
 bit/part-select or concatenation. Connection work is capped at 4M. The
 regrouped names are listed in the clock report as `regrouped`.
 
-On Ibex/IHP (run05 frontend replay) total signal HPWL fell from 1288 mm to
-1158 mm (Hilbert) and 1050 mm (Hilbert plus regroup); clock leaf HPWL fell
-from 154 mm to 28 mm. Initial unrouted nets fell from 468 to 393 and 305.
+### CTS drive evaluation (`scripts/cts_drive_eval.py`)
 
-### Evaluation (`scripts/cts_drive_eval.py`, iteration 0, RustSTA, ss+max)
-
-The tables give the iteration-0 values at ss+max: clock-sink latency, clock
-slew and worst hold slack.
-
-**GF180**
-
-| Variant (sinks, root) | Latency (ns) | Slew (ns) | Worst hold (ns) | Outcome |
-|---|---|---|---|---|
-| clkbuf_1 (tracked default) | 1.458 | 0.699 | -0.899 | closed in 2 iterations; 4 x dlya_1, 96.6 um2 |
-| clkbuf_2 / clkbuf_4 | 1.339 | 0.413 | -0.675 | first plan 74.6 um2; ECO layout routing fails (per-sink search budget, net z[0]) |
-| clkbuf_4 / clkbuf_8 | 1.279 | 0.311 | -0.554 | first plan 4 x buf_1, 52.7 um2; ECO layout routing fails (same) |
-| clkbuf_4 | 1.352 | 0.311 | -0.653 | first plan 63.7 um2; ECO layout routing fails (same) |
-| clkbuf_8 / 16, clkbuf_12 / 20 | — | — | — | CTS fails with PLACEMENT_CAPACITY between taps |
-
-**SKY130**
-
-| Variant (sinks, root) | Latency (ns) | Slew (ns) | Worst hold (ns) | Outcome |
-|---|---|---|---|---|
-| clkbuf_1 (tracked default) | 0.448 | 0.199 | -0.100 | closed in 3 iterations; 4 x buf_1, 15.0 um2 |
-| clkbuf_2 / clkbuf_4 | 0.488 | 0.106 | -0.112 | closed in 2 iterations; 4 x buf_1, 15.0 um2 |
-| clkbuf_4 / clkbuf_8 | 0.498 | 0.077 | -0.088 | closed in 2 iterations; 4 x buf_1, 15.0 um2 |
-| clkbuf_4 | 0.525 | 0.081 | -0.134 | ECO layout routing fails (routing comparison limit) |
-| clkbuf_8 / clkbuf_16 | — | — | — | clock routing fails (pin access candidates budget) |
-
-**What the evaluation shows**
-
-- On GF180, stronger clock buffers cut the ss clock slew by 55 % and the
-  insertion delay by 12 %, and halve the hold-cell area in the first plan.
-- Buffer upsizing alone does not close GF180: worst ss hold is still -0.554 ns.
-- For every GF180 variant, the ECO layout hits the lattice router's per-sink
-  search budget, which is already at its hard maximum.
-- On SKY130, larger buffers add input load. Latency rises, the slew gain does
-  not change the hold-cell count, and closure takes one iteration fewer.
-- The tracked profiles keep `clkbuf_1`. The router budget item is handed to
-  the router owner.
+The script builds iteration 0 with alternative per-level clock-buffer
+masters and reports, at ss+max in RustSTA, each variant's clock-sink
+latency, clock slew and worst hold slack, and whether the closure loop then
+closes. Its receipt is folded into `docs/evidence/hold-closure.json`, kept as
+historical evidence. The tracked profiles keep `clkbuf_1`; the stronger
+GF180 variants are limited by the lattice router's per-sink search budget
+(router owner).
 
 ## Native antenna check (`rustroad check-antenna`)
 
@@ -342,11 +311,9 @@ ports carry no gate or diffusion area. Cell-internal metal beyond the pin
 shapes is not modeled.
 
 **Safety margin (hardening, stream gate).** The native ratio reads low against
-the deck: 445.6 vs Magic 470.866 on the natural sky130 clk/met3 violation
-(-5.4 %), and the phase-B1 length sweep put the deck threshold between native
-366.6 (Magic passes) and 379.5 (Magic fails), i.e. an under-read of 5.1-8.4 %.
-A row is therefore `violated` when `ratio > (1 - m) x limit` with
-`m = --safety-margin` (default 0.10, above the measured bound);
+the deck (Magic) on the measured sky130 met3 cases. A row is therefore
+`violated` when `ratio > (1 - m) x limit` with `m = --safety-margin`
+(default 0.10, above the measured under-read);
 `exceeds_lef_limit` keeps the raw comparison, `effective_limit` the
 threshold, and the report carries `safety_margin` and `lef_violations`.
 `antenna-eco` sizes diodes against the same effective limit and carries a
@@ -356,29 +323,19 @@ the signoff gate; scripts/rtl2gds.py re-measures the margin on a planted wire
 in every run (native/(1-m) vs the Magic ratio, docs/rtl2gds.md).
 
 **Budgets.** `max_shapes_per_net`, `max_pair_checks` and `max_union_cells`
-bound the work. One run takes 0.03 s and about 13 MiB.
+bound the work.
 
-### Agreement with the foundry decks
+### Planted controls
 
-- **Natural violation.** The iteration-0 sky130 layout has one antenna
-  violation, the clock input `clk` on met3.
-  - Native: 445.6 > 400.
-  - Magic `antennacheck`: "Effective antenna ratio 470.866 > limit 400" on
-    plane metal3.
-  - After the hold ECO re-layout, both report 0.
-  - On GF180, both report 0 on every layout.
-- **Planted controls.** Each control is a wire of minimum I/O-layer width
-  attached to input port `a[1]` and leaving the die. It is drawn in the
-  native check through `--extra-shapes`, and in the native GDS through
-  `kl_plant.py rect` on the layer map's net layer.
-
-| PDK | Planted wire | Native check | Deck on planted GDS | Repair | After repair: native / deck |
-|---|---|---|---|---|---|
-| SKY130 | 600 um met3 | a[1] met3 793.2 > 400 | Magic: metal3 x 1 | 1 x diode_2 | 587.0 < 2773.9 (PWL at 0.43 um2 diffusion) / Magic 0 |
-| GF180 | 2000 um Metal3 | a[1] Metal3 866.7 > 400 | KLayout: ANT.16_ii_ANT.4 x 8 | 1 x antenna | 254.5 < 400 / KLayout 0 |
-
-The repair runs `antenna-eco`, then a fresh import, place, CTS and route, and
-then the same plant. The repaired layouts still meet timing at every corner.
+Each control is a wire of minimum I/O-layer width attached to input port
+`a[1]` and leaving the die: 600 um of met3 on SKY130, 2000 um of Metal3 on
+GF180. It is drawn in the native check through `--extra-shapes`, and in the
+native GDS through `kl_plant.py rect` on the layer map's net layer. Both the
+native check and the deck (SKY130 Magic `antennacheck`, GF180 KLayout antenna
+deck) must flag it. The repair runs `antenna-eco` (a `diode_2` on SKY130, an
+`antenna` cell on GF180), then a fresh import, place, CTS and route, and then
+the same plant; both checks must then be clean, and the repaired layout is
+re-timed at every corner.
 
 ## Layer jumpers (`rustroad repair-antenna`)
 
@@ -448,10 +405,6 @@ net's routes change.
 `scripts/hold_closure.py` runs `repair-antenna` right after routing on every
 layout of the closure loop (legacy and track recipes), so the antenna check,
 extraction, timing and signoff of that iteration see the jumpered routes.
-Results (gate runs `.work/runs/A1-*`, `A2-*`): uart_tx sky130 `data_i[7]`
-met3 361.2 -> 18.7, alu sky130 `a_i[3]` met3 396.4 -> 53.8, regfile sky130
-`raddr_a[0]` met3 396.6 -> 205.1 (one jumper each); Magic antenna, Magic and
-KLayout DRC, XOR and both LVS checks pass on those layouts.
 
 Tests: `rustroad-core` `jumper::tests` (gate-side cut on a routed lattice
 fixture that re-validates with unchanged wire length; other-net metal on the
@@ -474,8 +427,8 @@ committed revision re-validates, check-antenna agrees, netlist unchanged).
 6. `hold-eco` while timing is open; `antenna-eco` only on a timing-closed layout
 
 Repairing antenna on a layout that the next hold ECO will replace was tried
-first. On sky130 that perturbed the layout into the router budget failure
-described above.
+first and dropped: the perturbed sky130 layout hit the lattice router's
+budget.
 
 **Corners.** The corners are fixed by the owner decision:
 
@@ -505,61 +458,18 @@ appends. The Liberty files are the unmodified PDK files.
   routing and physical profiles, the technology/cell LEF, the cell GDS and
   the GDS layer map.
 
-### Results (`docs/evidence/hold-closure.json`)
+### Receipts and determinism
 
-The table gives the final iteration: worst setup and hold slack in RustSTA on
-native SPEF, in ns.
+`docs/evidence/hold-closure.json` holds the per-iteration slacks, inserted
+cells, parity, signoff counts and resource receipts of this stream's runs.
+It is historical evidence kept for reproducibility, not a current benchmark.
+The determinism check repeats the full run in a different directory and
+compares netlists, exported/powered Verilog, DEF, routes and min/nom/max
+SPEF of every iteration byte for byte. The harness fails any process above
+2 GiB.
 
-| | SKY130 | GF180 |
-|---|---|---|
-| Iterations | 3 | 2 |
-| Inserted cells | 4 x buf_1 (15.0 um2) | 4 x dlya_1 (96.6 um2) |
-| Iteration 0 worst hold, tt / ss / ff | -0.0045 / -0.0998 / +0.0574 | -0.394 / -0.899 / -0.180 |
-| Final tt+nom setup / hold | 9.093 / +0.0817 | 7.464 / +0.2445 |
-| Final ss+max setup / hold | 8.502 / +0.0667 | 4.853 / +0.3707 |
-| Final ff+min setup / hold | 9.331 / +0.1148 | 8.549 / +0.1962 |
-| OpenSTA 3.1.0 worst hold tt / ss / ff | 0.0817 / 0.0665 / 0.1147 | 0.2445 / 0.3705 / 0.1962 |
-| RustSTA vs OpenSTA parity (48 slacks) | 0.305 ps | 0.455 ps |
-| RustSys / Yosys CEC, 512-vector simulation | equivalent / passed / passed | equivalent / passed / passed |
-| Native-GDS Magic / KLayout DRC, before -> after | 15 -> 7 / 11 -> 7 | 2 -> 2 / 2 -> 2 |
-| Deck antenna, before -> after | 1 -> 0 | 0 -> 0 |
-| LVS (Netgen, KLayout) | pass, pass | pass, pass |
-| Routing (nets, wires, vias, patches) | 23 nets, 6157 / 109 / 5 | 23 nets, 5622 / 83 / 1 |
-
-**Reported, not gating: OpenRCX on the collinear-merged DEF.** The DEF's RECT
-patch lines are dropped first; OpenRCX ignores them anyway (5 lines sky130,
-1 gf180). Both tools still close at every corner:
-
-- sky130 OpenSTA worst hold tt / ss / ff: 0.0758 / 0.0557 / 0.1115 ns; parity
-  0.44 ps.
-- gf180 OpenSTA worst hold tt / ss / ff: 0.2406 / 0.3615 / 0.1938 ns; parity
-  2.72 ps.
-
-The b0 stream owns DEF merging and patch export.
-
-**Runs**
-
-- Full run: 282 receipts, 2:26 wall time, rustroad sha256
-  `a8e57fc64fa4c2925e13f839f12edd85899ab768bb2b92a39ab3df2ec655ba98`. The
-  largest host process peaked at 290,084 KiB RSS (the Verilator build); the largest RustSTA import used
-  231,844 KiB. The largest signoff container peaked at 475,460 KiB (sky130
-  Netgen LVS). The harness fails any process above 2 GiB.
-- A second full run in a different directory gave byte-identical netlists,
-  exported/powered Verilog, DEF, routes and min/nom/max SPEF at every
-  iteration.
-- `cts_drive_eval.py`: 1:09 wall time, 290 MiB.
-- Rust: 137 tests (8.2 s, 536 MiB), strict Clippy (4.9 s), release build
-  (17.9 s, 642 MiB).
-- Python: 45 unit tests.
-
-### Why DRC is not clean
-
-The native GDS writer and the native extractor predate `Routes.patches` and do
-not emit them. That is a known integration gap owned by the b0 stream. The
-remaining Magic/KLayout items are the same-net notch and min-area defects that
-the patches fix: sky130 m1.2 / m2.2, gf180 M2.2a. The ECO does not add new
-rule types. sky130 drops from 15/11 to 7/7, and the m3.2 item and the antenna
-item disappear.
+OpenRCX timing on the collinear-merged DEF (its RECT patch lines are dropped
+first; OpenRCX ignores them anyway) is reported, not gating.
 
 ## Scope and limitations
 
@@ -577,9 +487,7 @@ item disappear.
   - cell-internal metal beyond the pin shapes is not modeled;
   - the diode is assumed to join the violating partial net, and the re-layout
     plus both checks confirm it.
-- Native extraction and native GDS still omit `Routes.patches` (b0 stream).
-  The OpenRCX reference parity on GF180 is 2.7 ps on the merged DEF, which is
-  reported only.
+- OpenRCX reference timing on the merged DEF is reported only, not gated.
 - The lattice router's hard per-sink search budget blocks the stronger GF180
   clock-buffer profiles and some layout perturbations (router owner, W15).
 - No reference tool source was read. OpenSTA, Yosys, Verilator, Magic,

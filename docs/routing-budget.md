@@ -179,9 +179,6 @@ cleanup changes. All caps above are unchanged and still cannot be raised.
   coverage subtraction (<=64 pieces), area slabs (O(k^2) per component) and stub
   searches (binary search, <=65,536 steps) are all charged to one counter that
   is capped by `max_comparisons`; patches count against `max_segments`.
-- Measured on the dual-PDK pipeline fixture: route step 0.58 s / 15.9 MiB RSS
-  (sky130) and 0.57 s / 14.3 MiB (gf180) versus 0.45 s / 14.8 MiB and
-  0.41 s / 12.7 MiB before; 59.4M / 33.4M comparisons of the 200M cap.
 
 Unresolvable same-net violations fail the command with `ROUTING_RULE` and HEAD
 stays unchanged. The native same-net check is a self-check; foundry decks are
@@ -523,4 +520,4 @@ These are the livelocks seen on Ibex and the rung that removes each one:
 | n199/n7552 | a foreign wide pair at fixed pin escapes, widened identically on every pass | failed-pin-first strict retry, wide-pair halos (`wide_metal_partial_width_tongue_keeps_the_facing_run`) |
 | net 15647 | a same-net notch on a relaxed long net, identical for 8 passes | notch zone (`notch_zone_forbids_same_net_near_misses_only_inside_it`) |
 | fe18c 15954/7015 | cleanup merged a same-net notch into wide metal facing a fixed escape (235 nm < 240 nm) | notch zone |
-| fe22b 14972/13203 | two nets ripped each other 256 times in pass 1 | yield (`yielding_net_never_rips_its_protected_partner`); the full replay converges in 395 s |
+| fe22b 14972/13203 | two nets ripped each other 256 times in pass 1 | yield (`yielding_net_never_rips_its_protected_partner`); the full replay converges |

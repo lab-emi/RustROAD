@@ -1,8 +1,8 @@
 # GDSII streamout resource contract
 
 Written before implementing `rustroad export-gds`, its record codec and its
-verification harness (AGENTS.md Rule 9). Measured values are appended in
-`docs/gds-export.md` after the first runs.
+verification harness (AGENTS.md Rule 9). Run receipts are kept as historical
+evidence in `docs/evidence/gds-verification.json`.
 
 ## Record codec (`rustroad-formats::gds`)
 
@@ -28,8 +28,7 @@ of lookahead. No graph, path, cut or clause is materialized.
 
 ## `export-gds`
 
-Per call: one workspace snapshot (existing loader, metadata cap 16 MiB; the
-measured end-to-end flow peaked at 404 MiB host RSS including external tools),
+Per call: one workspace snapshot (existing loader, metadata cap 16 MiB),
 the cell GDS buffer (cap 256 MiB, actual 4.2 MB), the cell LEF re-read for the
 FOREIGN binding check (cap 64 MiB, actual 1.4 MB; LEF reader AST budget 256 MiB,
 expected < 64 MiB for real PDKs), the layer map (cap 1 MiB) and a streaming
@@ -55,9 +54,8 @@ single linear pass, O(elements). Expected peak RSS for the fixture < 128 MiB.
 ## Verification harness (`scripts/verify_gds.py`)
 
 External tools run one at a time inside the pinned iic-osic-tools image with
-`--memory=4g`: KLayout DEF reference streamout / strmxor / DRC / LVS (measured
-420-454 MB each by the signoff scout), Magic DRC/extraction (70-111 MB) and
-Netgen (257-475 MB). Native exports run on the host under the cgroup cap above.
+`--memory=4g`: KLayout DEF reference streamout / strmxor / DRC / LVS, Magic
+DRC/extraction and Netgen. Native exports run on the host under the cgroup cap above.
 Workspaces are copies under `.work/` (never RAM-backed `/tmp`); the read-only
 `.work/rc-timing/ready` run is never mutated.
 

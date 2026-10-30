@@ -6,9 +6,10 @@ layouts: every iteration is import, place, CTS, route, native extraction
 and RustSTA (pinned 0.4.3, 26bd6eb) at tt+nom / ss+max / ff+min. This page
 describes the ECOs added for the larger designs (buffer insertion,
 `whatif`-verified sizing, path-aware hold fixing, seeded timing-driven
-placement) and the loop order; results are in `docs/rtl2gds.md` (final2
-table; evidence `docs/evidence/rtl2gds-final2.json`; earlier rounds
-`docs/evidence/rtl2gds-closure.json`, `docs/evidence/critical-path.json`).
+placement) and the loop order. Receipts of earlier rounds
+(`docs/evidence/rtl2gds-final2.json`, `docs/evidence/rtl2gds-closure.json`,
+`docs/evidence/critical-path.json`) are historical evidence kept for
+reproducibility, not current benchmarks.
 
 Nothing here changes an SDC, Liberty, RC profile, threshold, deck or status
 rule. Every ECO is a typed `rustroad.eco-plan.v1` applied by
@@ -74,9 +75,8 @@ Liberty drive data (below).
   slew, against today's driver delay + 0.35 x slew) stays >= 0.15 ns. The
   estimated cost of each moved sink is charged to every pin downstream of
   it through combinational cells (max over paths, bounded walk), so two
-  buffers of one plan cannot spend the same path's slack twice. Measured
-  on the GF180 designs: without these rules every stage of uart_tx's
-  critical path got a buffer (0.7-1.0 ns each at ss).
+  buffers of one plan cannot spend the same path's slack twice. Without
+  these rules every stage of a critical path could get its own buffer.
 * **Input ports** are buffered the same way (port nets cannot be resized).
 * **Critical-sink isolation:** on a net with failing setup, sinks well
   above the net's worst slack move behind one buffer (same guard) so the
@@ -105,9 +105,9 @@ the fastest edge at a light load, GF180 aoi22_4 vs aoi22_2), ECO buffers
 loading such a net (one size down), and the cells on the worst setup paths
 of up to 48 failing endpoints (one down, one and two up), within the tap gap
 and a 74 % standard-cell utilization of the rows that also bounds buffer
-insertion (a GF180 regfile netlist at 76 % failed CTS packing). Each round
-evaluates every candidate on top of the resizes accepted so far and accepts
-up to 12 improving ones on distinct instances: fewer DRV violations without
+insertion. Each round evaluates every candidate on top of the resizes
+accepted so far and accepts up to 12 improving ones on distinct instances:
+fewer DRV violations without
 losing worst setup (or keeping it >= 0), a better worst setup slack, or an
 equal worst and a better total; a resize may lower hold below the ECO target
 by at most 0.5 ns (the hold ECO repairs it next). The next round's base
@@ -116,12 +116,10 @@ a round that made it worse. Bounds: 6 rounds, 48 candidates per round, 128
 candidates per layout and 640 per closure loop, both scaled by 200 / logic
 instances within 0.5x..4x (counter 512 per layout, mult 64): counts, never
 measured time, so the determinism rebuild evaluates exactly the same
-candidates (measured cost per candidate on this host: 0.13 s on counter,
-1.1 s on regfile, 1.9 s on mult).
+candidates.
 
 The earlier sizing step (one size up on every setup-path cell, model-free)
-is gone: on counter GF180 it took the netlist from +0.38 to -0.77 ns of
-ideal-wire setup slack.
+is gone: it could make the ideal-wire setup slack worse.
 
 ## Path-aware hold fixing (`rustroad hold-eco --pins-report ...`)
 
@@ -142,8 +140,8 @@ worst hold path instead of in front of the endpoint:
 * **Choice:** endpoints largest need first; among the feasible points the
   one on the most violating paths, then the most downstream (a point after
   a reconvergence delays every parallel branch at once; branch pins of a
-  multi-input gate fixed one by one cost one layout each on regfile
-  sky130), then the smallest chain (same multiset search as before). The
+  multi-input gate fixed one by one cost one layout each), then the
+  smallest chain (same multiset search as before). The
   loop plans with 0.03 ns above its ECO target (estimates at one
   representative load under-deliver). Delay planned on a
   shared point is credited to every later endpoint whose path crosses it.
@@ -206,21 +204,9 @@ tt, the implied minimum period `period - worst slack`, and the worst path's
 end points. GF180 without SPEF is `ideal` (no wire-load table), SKY130 is
 `wireload_lumped` (Liberty default wire load, an upper bound of ideal).
 
-## What limits GF180 now (final2, `docs/rtl2gds.md`)
-
-With the owner rules (per-PDK clock period, GF180 DRV dont_use) and the GF180
-floorplan at 0.35 utilization, counter, uart_tx and fifo close every GF180
-gating item; alu, regfile and mult close setup and hold on both SPEFs and
-keep only `drv` (3, 8 and 12 nets above 1.0 ns at ss on the selected
-layout). What is left there, from the final layouts:
-
-| Design | Remaining GF180 transition violations at ss | Why the loop did not remove them |
-|---|---|---|
-| alu | 3 nets (worst oai21_2 into one buf_2, 1.67 ns) | 8-layout bound reached while still improving (DRV 522 -> 6 pins) |
-| regfile | 8 nets: nor2_4 into four ECO buffers (2.03 ns), seven dlyb_1 hold cells into buf_8 ECO buffers (1.08-1.65 ns) | the driver cannot grow (largest member, or a delay cell), the ECO buffers behind it shrink only one size per layout; an extra buffer level was tried and made alu/mult worse (reverted) |
-| mult | 12 nets, aoi22_2/aoi22_4 into one ECO buffer (1.01-1.37 ns) | aoi22 is close to the limit at ss (best member 0.80 ns at the smallest sink with a 0.2 ns input, more with the real input slew); 8-layout bound |
+## GF180 DRV dont_use
 
 The ten GF180 families that cannot reach 1.0 ns at all are excluded from
 synthesis by the owner's dont_use rule (`scripts/derive_drv_dont_use.py`,
-`fixtures/flow/gf180-drv-dont-use.json`). Earlier rounds (E6, 10 ns on every
-design and no dont_use) are in `docs/evidence/rtl2gds-closure.json`.
+`fixtures/flow/gf180-drv-dont-use.json`; derivation in `docs/rtl2gds.md`).
+Remaining transition violations are left to the closure loop above.

@@ -315,13 +315,13 @@ tool's own findings.
  "identity": {"status": "verified", "manifest": "...", "manifest_sha256": "...", "mismatches": []},
  "tools": {"klayout": {"version": "KLayout 0.30.9", "files": {"/foss/tools/klayout/klayout": "sha256"}}},
  "options": {"decks": [{"deck": "/foss/pdks/...", "options": {"variant": "gf180mcuD"}}]},
- "counts": {"total": 7, "by_rule": {"M1.2a": 4, "M2.3": 3}, "by_cell": {"lane_smoke": 6,
-            "gf180mcu_fd_sc_mcu7t5v0__clkbuf_1": 1}, "unit": "lyrdb items, all cells"},
+ "counts": {"total": 1, "by_rule": {"M1.2a": 1}, "by_cell": {"lane_smoke": 1},
+            "unit": "lyrdb items, all cells"},
  "result": {}, "reports": {"drc.lyrdb": "/abs/.../drc.lyrdb", "drc.lyrdb.log": "/abs/..."},
- "runs": [{"label": "drc_klayout_klayout_0", "exit_code": 0, "wall_seconds": 2.8, "peak_rss_kib": 445596,
+ "runs": [{"label": "drc_klayout_klayout_0", "exit_code": 0, "wall_seconds": 1.0, "peak_rss_kib": 1,
            "receipt": "/abs/.../receipt.json"}],
  "scope": {"level": "block/macro", "density": "reported separately ...", "ir_drop": "unchecked"},
- "resources": {"wall_seconds": 3.0, "tool_wall_seconds": 2.9, "peak_rss_kib": 445596}}
+ "resources": {"wall_seconds": 1.0, "tool_wall_seconds": 1.0, "peak_rss_kib": 1}}
 ```
 
 Check-specific `result` fields:
@@ -374,9 +374,9 @@ This runs KLayout's LEF/DEF reader in the pinned image with:
 - dbu 0.001 µm;
 - no GDS timestamps, so repeated runs are byte-identical.
 
-For gf180, the 2000 DBU/µm DEF is first checked for odd coordinates (none in
-20,562 checked values). Odd coordinates cannot be represented exactly and
-would be rounded silently. After the run, the script checks that:
+For gf180, the 2000 DBU/µm DEF is first checked for odd coordinates, which
+cannot be represented exactly and would be rounded silently. After the run,
+the script checks that:
 
 - the top cell equals DEF `DESIGN`;
 - the dbu is 0.001;
@@ -386,25 +386,18 @@ would be rounded silently. After the run, the script checks that:
 The output is XOR-identical to the earlier host-KLayout 0.30.0 streamout. It
 is the XOR oracle for the native writer.
 
-## Baseline (copies of `.work/rc-timing/ready`)
+## Baseline
 
-The recon baseline was reproduced exactly.
+The harness was first run on copies of the `.work/rc-timing/ready` recon
+layouts and reproduced the recon baseline exactly. Those counts, with every
+other run of this stream, are in `docs/evidence/signoff-results.json`, kept
+as historical evidence for reproducibility, not as a current benchmark.
 
-| | Sky130 | GF180 |
-|---|---|---|
-| KLayout DRC | 9 items: m1.2 ×5, m2.2 ×4 (all in `lane_smoke`) | 7 items: M1.2a ×4 (1 in `clkbuf_1`), M2.3 ×3 |
-| Magic DRC (`drc(full)`) | 26 errors (hierarchical = flattened); boxes met1.2 25, met2.2 16 | 13 errors (hierarchical = flattened); boxes M2.3 10, M1.2a 6 |
-| Antenna | Magic 0 (KLayout: no sky130 rules) | KLayout 0 (Magic secondary 0) |
-| Density (separate) | `unverified`: max-density deck 0 items, finite (li1 0.94, m1 0.91, m2 0.98); 700 µm window check not runnable | `failed`: 8 global items (DCF.1b, PL.8, M1.4, M2.4, M3.4, M4.4, M5.4, MT.3) |
-| Netgen LVS | `Circuits match uniquely.` (13 logic cells, 21 nets) | match |
-| KLayout LVS | all circuit pairs Match, 12/12 top pins | Match, `Congratulations! Netlists match.` |
-
-Magic's "26" and "13" are its error-tile totals. The per-rule numbers are
-error boxes, so they add up to more than the total. Each child cell checked
-on its own also shows standalone errors: sky130 LU.2, LU.3 and nwell.4 (the
-cells have no taps), and min-area on the via cells. The flattened recheck
-gives the same 26/13 with the same rules, which shows these standalone errors
-are satisfied in context.
+Magic's totals are its error-tile counts; its per-rule numbers are error
+boxes, so they add up to more than the total. Each child cell checked on its
+own can show standalone errors (for example sky130 LU.2, LU.3 and nwell.4,
+because the cells have no taps, and min-area on the via cells); the flattened
+recheck shows whether they are satisfied in context.
 
 ## Planted controls
 
@@ -509,15 +502,14 @@ pre-existing notch item and did not discriminate.)
   analysing it (D0021), so its zero counts are not evidence. OpenSTA's TT
   limit report is attached.
 - `mpw_min_period` is `unchecked` while RustSTA reports unanalyzed
-  `min_pulse_width`/`minimum_period` arcs: 4 on Sky130, 8 + 8 on GF180.
+  `min_pulse_width`/`minimum_period` arcs.
 - ss/ff timing items stay `missing` until the multi-corner extraction and
   timing stream supplies them.
 
 `python3 scripts/flow_status.py SUMMARY.json --assume-timing-passed` replays
-the gate with every timing item forced to `passed`. On the frozen-producer
-summary (no signoff run) it still gives `partial`/exit 3, because the signoff
-items are missing. The runs that do sign off the reference streamout give
-`failed`/exit 1, because DRC really fails.
+the gate with every timing item forced to `passed`. Without a signoff run it
+still gives `partial`/exit 3, because the signoff items are missing; a
+definitive DRC failure still gives `failed`/exit 1.
 
 ## Producer and cell policy (W4)
 
@@ -529,8 +521,8 @@ items are missing. The runs that do sign off the reference streamout give
 CARGO_TARGET_DIR=/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target cargo build --locked --offline --release -p rustsys-cli
 ```
 
-The build ran under `systemd-run MemoryMax=8G`, with 4 jobs, in 53 s, with a
-peak of 702 MiB. Neither the RustSys tree nor its targets were touched.
+The build ran under `systemd-run MemoryMax=8G` with 4 jobs. Neither the
+RustSys tree nor its targets were touched.
 
 **Producer pin.** The binary is
 `/mnt/data2/cgao/git/RustROAD/.work/tools/rustsys-target/release/rustsys`,
@@ -607,45 +599,10 @@ As a control on the sys scout's `probe.v` with `--timing-period 2`:
 uses the pinned producer with `--dont-use`. `--producer frozen` reproduces the
 historical 9c83124e run, and that rerun is byte-identical.
 
-### Flow re-run, frozen producer vs pinned producer + policy
-
-Both runs use the same RustROAD binary (`07788f84…`) and RustSTA 0.3.
-
-| | Sky130 frozen | Sky130 policy | GF180 frozen | GF180 policy |
-|---|---|---|---|---|
-| mapped cells | and2_2×4, xor2_4×2, dfxtp_1×4 (area 165.16) | and2_0×2, and2_4×2, xor2_2×2, dfxtp_1×4 (142.64) | and2_2×4, xor2_2×2, dffq_1×4 (412.70) | same cells; and2 pin order swapped |
-| placed cells | 131 | 134 | 134 | 134 |
-| routed nets / terminals | 19 / 46 | 19 / 46 | 19 / 46 | 19 / 46 |
-| wires / vias | 4964 / 101 | 4885 / 99 | 4982 / 77 | 4997 / 77 |
-| TT worst setup / hold (ns) | 8.946 / +0.000247 | 8.956 / **−0.113** (2 endpoints) | 7.316 / −0.636 (4) | 7.314 / −0.616 (4) |
-| RustSTA–OpenSTA max difference | 0.55 ps | 0.48 ps | 0.30 ps | 0.30 ps |
-| Yosys CEC / RustSys CEC / 512-vector simulation | pass / equivalent / pass | pass / equivalent / pass | pass / equivalent / pass | pass / equivalent / pass |
-| cell policy (mapped, physical) | clean (unchecked: no policy) | passed | clean (unchecked) | passed |
-| reference-GDS DRC: KLayout / Magic | 9 / 26 | 9 (m1.2 4, m2.2 4, **m3.2 1**) / 25 | 7 / 13 | 7 / 13 |
-| antenna | 0 | **Magic metal3 ratio 469.5 > 400** | 0 | 0 |
-| LVS Netgen / KLayout | match / match | match / match | match / match | match / match |
-| top-level status (frozen: no signoff run; policy: reference signoff) | partial (exit 3) | failed (exit 1): DRC + antenna | | failed (exit 1): DRC |
-
-On `pipeline.v` the policy changes nothing: the mapped netlists are
-byte-identical with and without `--dont-use`. Every difference comes from the
-newer producer's default load-aware cleanup. It picks smaller sky130 cells,
-which:
-
-- moves Sky130 TT hold from +0.25 ps to −0.113 ns;
-- adds a met3 spacing violation and a sky130 metal3 antenna violation.
-
-These are real regressions for the routing and hold streams to close. They
-are not hidden.
-
-The fix-round reruns (`.work/final2`, `.work/final3`) used the worktree's own
-RustROAD build (`fb910e71…`). Their DEF, mapped and powered netlists are
-byte-identical to the earlier run with the main-tree binary, and every timing
-and signoff number is unchanged; only the sky130 density count is now `null`
-instead of 0. In `.work/final3` every flow artifact and timing number is
-byte-identical to `.work/final2`. The policy-run netlists pass both LVS tools
-under the property, pin-name, named-net, reference-port, extraction and
-port-label checks. A fourth flow variant feeds the planted spacing GDS as the
-"native" GDS: XOR fails, `gds` is `failed`, and the run is `failed` (exit 1).
+A further flow variant feeds the planted spacing GDS as the "native" GDS: the
+XOR must fail, `gds` is then `failed` and the run is `failed` (exit 1). The
+policy-run netlists go through both LVS tools under the property, pin-name,
+named-net, reference-port, extraction and port-label checks.
 
 ## Reproduction and resources
 
@@ -665,32 +622,12 @@ The script covers:
 - the unit tests (`python3 -m unittest discover -s scripts/tests`, 42 tests);
 - `docs/evidence/signoff-results.json`, written by `evidence.py`.
 
-Measured on this host:
-
-| Step (container wall incl. podman start) | Sky130 | GF180 |
-|---|---|---|
-| Preflight probe (incl. label lists: 12 top labels; 677 / 1056 flattened) | 1.6 s, 402 MiB | 1.7 s, 401 MiB |
-| Magic DRC (hierarchical + flattened recheck) | 1.0 s, 87 MiB | 0.9 s, 82 MiB |
-| KLayout DRC deck | 3.3 s, 427 MiB | 9.3 s, 435 MiB |
-| Antenna (Magic; gf180 + KLayout deck) | 0.7 s, 71 MiB | 0.6 s + 2.3 s, 416 MiB |
-| Density decks | 1.8 s + 0.7 s, 403 MiB | 2.1 s, 413 MiB |
-| Magic extraction + Netgen | 1.7 s + 0.5 s, 462 MiB | 0.9 s + 0.5 s, 251 MiB |
-| KLayout LVS + xref/pin-pair/named-net dump | 3.0 s + 1.7 s, 424 MiB | 8.5 s + 1.6 s, 419 MiB |
-| reference streamout | 2.5 s (host step) | 2.5 s (host step) |
-| `signoff.py all` (incl. identity + preflight) | 16.7 s | 29.2 s |
-| `controls.py` (23 controls) | 200 s, 136 tool runs | 313 s, 136 tool runs |
-| `verify_routing.py` frozen / policy + reference signoff / native path / bad native | 28 s / 82 s / 87 s / 86 s, 405,696 KiB host process | (both PDKs per run) |
-| `gap_crosscheck.py` (planted + baseline deck runs) | | 26 s |
-
-The fix-round-2 `reproduce.sh` run (`.work/final3`) took 14:37 wall with a
-host peak of 405,696 KiB. It made 754 container tool runs; the largest peak
-RSS was 474,844 KiB (Netgen reading the full sky130 cell SPICE) and none
-exceeded 1 GiB. All container runs used a 4 GiB cap (2 GiB for probes; the
-OOM control deliberately uses 24 MiB). The largest host process was
-`verify_routing.py` at 405,696 KiB. The Rust worktree checks (`cargo build --release`, `cargo clippy
---workspace --all-targets -- -D warnings`, `cargo test --workspace`) run with
-`PATH=/home/cgao/.cargo/bin` first (the host `/usr/bin/rustc` 1.93.1 fails
-with E0514) under `systemd-run MemoryMax=8G`, see `.work/build-check.sh`.
+All container runs use a 4 GiB cap (2 GiB for probes; the OOM control
+deliberately uses 24 MiB). The Rust worktree checks (`cargo build --release`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test
+--workspace`) run with `PATH=/home/cgao/.cargo/bin` first (the host
+`/usr/bin/rustc` 1.93.1 fails with E0514) under `systemd-run MemoryMax=8G`,
+see `.work/build-check.sh`.
 
 ## Traps handled
 
