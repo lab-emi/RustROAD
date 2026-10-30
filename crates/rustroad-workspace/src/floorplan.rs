@@ -438,6 +438,7 @@ pub fn floorplan_with_limits(
         north: Vec::new(),
         x_track: Some(x_track),
         y_track: Some(y_track),
+        targets: Default::default(),
     };
     let margin = (req.margin_um * f64::from(dbu)).round() as i64;
     let (mx, my) = (round_up(margin.max(sw), sw), round_up(margin.max(sh), sh));
@@ -732,6 +733,7 @@ fn io_plan(
         north: Vec::new(),
         x_track: Some(x_track),
         y_track: Some(y_track),
+        targets: Default::default(),
     };
     let caps = rustroad_core::io::planned_capacity(constraints, &probe, &IoLimits::default())
         .map_err(|e| invalid(e.to_string()))?;
@@ -775,5 +777,6 @@ fn io_plan(
         north: lists.remove(&3).unwrap_or_default(),
         x_track: Some(x_track),
         y_track: Some(y_track),
+        targets: Default::default(),
     })
 }

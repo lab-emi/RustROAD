@@ -102,7 +102,7 @@ below describe the earlier small-block release.
 |---|---|---|
 | Floorplan | hand-written JSON | `rustroad floorplan` (utilization, aspect, margin; I/O plan) |
 | Placement | fixed netlist-order packing | `placer` config: analytic global placement, legalization, detailed placement (fixed order stays the default) |
-| I/O | round-robin W/E/S/N in port order | optional `io_plan`: connectivity-aware sides and order, track-snapped centres |
+| I/O | round-robin W/E/S/N in port order | optional `io_plan`: connectivity-aware sides and order, track-snapped centres, optional along-side targets |
 | Router | one lattice with pin coordinates, greedy access, no rip-up, caps = defaults | `track_router` profile: per-layer tracks, conflict-aware access, GCell global routing with negotiated congestion, guide-restricted detailed routing with rip-up and reroute (lattice router unchanged and byte-identical) |
 | Route storage | every lattice edge in design.json + mirror `routing.rbin` | schema 6: maximal runs in the authoritative `routes.rbin`, its sha256 and counts in design.json |
 | Caps | lattice defaults are hard caps | track mode: configurable up to absolute ceilings, checked against an upfront whole-process memory estimate and a runtime RSS guard |
@@ -142,6 +142,15 @@ on stdout.
    `place_planned_io` spreads them over a slot lattice whose centres are on
    the side's track (`x_track`: the I/O layer's perpendicular neighbour,
    `y_track`: the I/O layer).
+7. An `io_plan` may also carry `targets`: a pin-centre coordinate along the
+   side (y on west/east, x on south/north) per pin. A targeted pin takes the
+   lattice slot nearest its target. A forward pass keeps plan order and one
+   pin per slot; a backward pass leaves room for the pins after it. Untargeted
+   pins keep their evenly spread slot, so a plan without targets places
+   exactly as before. An even spread puts a side's first pin at its corner,
+   however far its loads are. The Ibex recipe derives targets from a
+   pin-planning placement: run14's corner `clk_i` and `rst_ni` nets broke the
+   1 ps timing parity gate and the reset input's max capacitance.
 
 ## Placement (`placer` in the physical configuration)
 
