@@ -1,0 +1,415 @@
+{
+  "schema": "rustroad.parallel-candidate-experiment.v1",
+  "status": "functional_gates_passed",
+  "module_code_commit": "054133bfef780b42a0fc3b619e684740ef68b701",
+  "branch": "codex/ibex-perf-parallel",
+  "base_commit": "d00e379fa242227fd6eea4980f69819ac790aa29",
+  "source_files": 566,
+  "source_manifest": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/SOURCE_PREPARED.json",
+    "sha256": "5403229e4c86e9877291497085d599ef29ae427bfdc8f09a84e57a805363a3b8",
+    "bytes": 88427
+  },
+  "binary": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/bin/e03f972366ce9b4f3b1f0ab98ae2c4edd365367da247376cbd697f48a04152c7/rustroad",
+    "sha256": "e03f972366ce9b4f3b1f0ab98ae2c4edd365367da247376cbd697f48a04152c7",
+    "bytes": 58613032
+  },
+  "candidate_ready": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/CANDIDATE_READY.json",
+    "sha256": "4c3589cd2f93ae8e35d7d730e1f2a20dc1d210b267ec5e663d3706599f167eb8",
+    "bytes": 1822
+  },
+  "exact_gates": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/GATES_PASSED.json",
+    "sha256": "21b7b96c81ba70774ec474321a66924732048b2d54dc96527a8403a9db175f83",
+    "bytes": 5093
+  },
+  "numeric_source_order": {
+    "schema": "rustroad.ordered-numeric-source-proof.v1",
+    "base_commit": "d00e379fa242227fd6eea4980f69819ac790aa29",
+    "candidate_source": "/home/cgao/git/RustEDA/modules/RustROAD-perf-parallel/crates/rustroad-core/src/extract.rs",
+    "range": "points.clear through last individual ground/coupling addition inside each run",
+    "normalization": "Wrap baseline loop in one outer block and rustfmt (same indentation as candidate); strip indentation; omit only PhaseProfile calls",
+    "equal": true,
+    "canonical_body_sha256": "514d4eee06bce395ab63129b234d867d0c7314972b501420b965eff25ab5462b",
+    "lines": 398,
+    "finalization_equal": true,
+    "finalization_body_sha256": "c8257f596b806b64f630d1f264e31431d56ea217fad08e2c3405b1e3cf2b8d36",
+    "finalization_lines": 34
+  },
+  "tests": {
+    "all_feature_passed": 436,
+    "extraction_tests_passed": 35,
+    "serial_parallel_variants": "2/4 workers; batches 3/8/64; work/candidate/coupling/element budgets; thread/scratch serial fallbacks; shared virtual shapes and hand-computed fixtures"
+  },
+  "rev4": {
+    "status": "passed",
+    "result": {
+      "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev4/result.json",
+      "sha256": "b30627a82a0bd0f076fb8dd58776a7d757b17542c8eb1c1671f07b59704c62e0",
+      "bytes": 5672
+    },
+    "extract_wall_seconds": 125.54978908400517,
+    "spef": {
+      "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev4/native.nom.spef",
+      "sha256": "622f36c70f75f9c84e6375425b980e8cd01650bf0513f69cedc0e83d6d1795d3",
+      "bytes": 60981904
+    },
+    "work": 11037275845,
+    "max_candidates": 15881,
+    "queries": {
+      "requested_workers": 16,
+      "admitted_workers": 4,
+      "batch_runs": 8,
+      "scratch_bytes": 32110976,
+      "baseline_estimate_bytes": 3720117356,
+      "parallel_tiles": 587726,
+      "serial_tiles": 0
+    }
+  },
+  "dual_pdk": {
+    "geometry_commands": 36,
+    "extraction_commands": 12,
+    "corner_pairs": 6,
+    "geometry_result": {
+      "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/dual-geometry/result.json",
+      "sha256": "24feac3a96bfa28fe0f31e15baa091d22169e2574953b550b9c166fa98a81e99",
+      "bytes": 34826
+    },
+    "extraction_result": {
+      "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/dual-extraction/result.json",
+      "sha256": "d406dd13faeee4f0897834fcf71067b0564bdbface45c31d7b6ba2403c850f94",
+      "bytes": 37689
+    },
+    "complete_receipts_equal_except": [
+      "output.path",
+      "stats.memory",
+      "stats.parallel_queries"
+    ],
+    "integer_work_exact": true,
+    "PDKs": [
+      "sky130",
+      "gf180"
+    ],
+    "corners": [
+      "min",
+      "nom",
+      "max"
+    ]
+  },
+  "performance": {
+    "selected_config": "batch 8; admitted workers 4",
+    "default_workers": 1,
+    "baseline": {
+      "result": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/profile-final01/result.json",
+        "sha256": "f54fe25f668885eabd06a997b54582b67bbca4680e736c1f4ce063f1579af454",
+        "bytes": 465
+      },
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/profile-final01/stdout.json",
+        "sha256": "b65c683a48ede7acae9a699cb03fc4d3cf10ffe9cf8d0b03521cd01a45fd26f9",
+        "bytes": 4972
+      },
+      "command": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/profile-final01/command.json",
+        "sha256": "d40340c86a5e00b1c0f7fa059a825d8217bf57bb3808a1d48d88f87f6ebd8a19",
+        "bytes": 2627
+      },
+      "wall_seconds": 135.49662196694408,
+      "copy_hash_seconds": 3.0461152819916606,
+      "inclusive_seconds": 138.54273724893574,
+      "resources": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/profile-final01/resource.time",
+        "maximum_rss_kib": 828440,
+        "user_seconds": 134.79,
+        "system_seconds": 0.36
+      },
+      "memory": {
+        "held_bytes": 334371840,
+        "working_bytes": 3380234752,
+        "geometry_bytes": 5869164,
+        "estimate_bytes": 3720475756,
+        "limit_bytes": 3758096384,
+        "instance_query_bin_dbu": 4320
+      },
+      "queries": null,
+      "work": 11019547398,
+      "max_candidates": 15884,
+      "spef": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/profile-final01/native.nom.spef",
+        "sha256": "cd835ce76826f6575cc84fe69602ca7089f5c007565ed2b4de5e98a1cf74d9e8",
+        "bytes": 61007657
+      }
+    },
+    "batch8": {
+      "result": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56/result.json",
+        "sha256": "14ed603e480c89cee08b46b402406ad840ba4f8e0adc85c92a131471544b0cf5",
+        "bytes": 454
+      },
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56/stdout.json",
+        "sha256": "3dc38737687e291604a8597c577356263355e78187371ede5ce5b2727b064fdf",
+        "bytes": 5202
+      },
+      "command": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56/command.json",
+        "sha256": "d111af2a06d0888c76471730d12b4c0ede6d546c350dc615b05246410a9b7359",
+        "bytes": 2715
+      },
+      "wall_seconds": 125.98709444107953,
+      "copy_hash_seconds": 6.904814970912412,
+      "inclusive_seconds": 132.89190941199195,
+      "resources": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56/resource.time",
+        "maximum_rss_kib": 834904,
+        "user_seconds": 192.11,
+        "system_seconds": 10.68
+      },
+      "memory": {
+        "held_bytes": 334725120,
+        "working_bytes": 3412345728,
+        "geometry_bytes": 5869164,
+        "estimate_bytes": 3752940012,
+        "limit_bytes": 3758096384,
+        "instance_query_bin_dbu": 4320
+      },
+      "queries": {
+        "requested_workers": 16,
+        "admitted_workers": 4,
+        "batch_runs": 8,
+        "scratch_bytes": 32110976,
+        "baseline_estimate_bytes": 3720829036,
+        "parallel_tiles": 588058,
+        "serial_tiles": 0
+      },
+      "work": 11019547398,
+      "max_candidates": 15884,
+      "spef": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56/native.nom.spef",
+        "sha256": "cd835ce76826f6575cc84fe69602ca7089f5c007565ed2b4de5e98a1cf74d9e8",
+        "bytes": 61007657
+      }
+    },
+    "batch32": {
+      "result": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56-batch32/result.json",
+        "sha256": "70cbfa2e54b6f6ae254f0f33238d37b6db11cbccc1b0607c6388788255406ea9",
+        "bytes": 461
+      },
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56-batch32/stdout.json",
+        "sha256": "bd22f246e64531b2b9ca158d7960b780c0c99bccbff1df01f5fa4572a0f72adb",
+        "bytes": 5219
+      },
+      "command": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56-batch32/command.json",
+        "sha256": "c04a2d597e8565cd405670069e6924c49fe240bab0a1dfb92ba857fb88d1fb1d",
+        "bytes": 2747
+      },
+      "wall_seconds": 140.59628064208664,
+      "copy_hash_seconds": 4.31187213701196,
+      "inclusive_seconds": 144.9081527790986,
+      "resources": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56-batch32/resource.time",
+        "maximum_rss_kib": 826788,
+        "user_seconds": 139.59,
+        "system_seconds": 0.51
+      },
+      "memory": {
+        "held_bytes": 332487680,
+        "working_bytes": 3410972352,
+        "geometry_bytes": 5869164,
+        "estimate_bytes": 3749329196,
+        "limit_bytes": 3758096384,
+        "instance_query_bin_dbu": 4320
+      },
+      "queries": {
+        "requested_workers": 16,
+        "admitted_workers": 2,
+        "batch_runs": 32,
+        "scratch_bytes": 30737600,
+        "baseline_estimate_bytes": 3718591596,
+        "parallel_tiles": 1,
+        "serial_tiles": 147014
+      },
+      "work": 11019547398,
+      "max_candidates": 15884,
+      "spef": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev56-batch32/native.nom.spef",
+        "sha256": "cd835ce76826f6575cc84fe69602ca7089f5c007565ed2b4de5e98a1cf74d9e8",
+        "bytes": 61007657
+      }
+    },
+    "wall_improvement_fraction": 0.07018276461670381,
+    "inclusive_improvement_fraction": 0.040787615064875604,
+    "query_phase_baseline_seconds": 39.103827073,
+    "query_phase_batch8_seconds": 26.491938559,
+    "ideal_four_worker_query_only_saving_seconds": 29.32787030475,
+    "batch32_rejected_reason": "The bound for a full 32-run tile exceeds the unchanged 100B work cap; 147,014 full tiles ran serially, only one 10-run final partial tile ran in parallel. Inclusive wall is worse.",
+    "measurements": "One accepted timing-only baseline and one fresh run per candidate configuration; no repeated baseline or tuning sweep."
+  },
+  "resources": {
+    "fmt-final": {
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/fmt-final/resource.json",
+        "sha256": "2a0d40318d4c1ee61e439ed1ab9d98c25c8f74f90e1a89993544b92dd22e236e",
+        "bytes": 1278
+      },
+      "launcher_exit": 0,
+      "cleanup_verified": true,
+      "wall_seconds": 1.0154377029975876,
+      "cgroup_memory_peak_bytes": null,
+      "gnu_time": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/fmt-final/time.txt",
+        "maximum_rss_kib": 77160,
+        "user_seconds": 0.89,
+        "system_seconds": 0.03
+      }
+    },
+    "tests-final": {
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/tests-final/resource.json",
+        "sha256": "fb1ab60006dfa873dd38f757b1fd2738e2b47229c3c1f575e5a6c78537e60a63",
+        "bytes": 1287
+      },
+      "launcher_exit": 0,
+      "cleanup_verified": true,
+      "wall_seconds": 62.321983085013926,
+      "cgroup_memory_peak_bytes": 2945810432,
+      "gnu_time": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/tests-final/time.txt",
+        "maximum_rss_kib": 666436,
+        "user_seconds": 34.12,
+        "system_seconds": 4.0
+      }
+    },
+    "clippy-final": {
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/clippy-final/resource.json",
+        "sha256": "7eef9427a089a9f4815af41518cbae325cd2f32b8b4e31fd5b623ccfd06189be",
+        "bytes": 1346
+      },
+      "launcher_exit": 0,
+      "cleanup_verified": true,
+      "wall_seconds": 16.091632521012798,
+      "cgroup_memory_peak_bytes": 493486080,
+      "gnu_time": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/clippy-final/time.txt",
+        "maximum_rss_kib": 435520,
+        "user_seconds": 14.68,
+        "system_seconds": 0.66
+      }
+    },
+    "rustdoc-final": {
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rustdoc-final/resource.json",
+        "sha256": "e04f0dba12845b80f03497b6d2eccb48c2e36be58234d3be6ec9a89c2a3d3b92",
+        "bytes": 1304
+      },
+      "launcher_exit": 0,
+      "cleanup_verified": true,
+      "wall_seconds": 14.084941286942922,
+      "cgroup_memory_peak_bytes": 541233152,
+      "gnu_time": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rustdoc-final/time.txt",
+        "maximum_rss_kib": 531484,
+        "user_seconds": 12.79,
+        "system_seconds": 0.71
+      }
+    },
+    "build-final": {
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/build-final/resource.json",
+        "sha256": "87717724c0d92574162bd479404d685159212ede036510279ec79438bc2afe1a",
+        "bytes": 1313
+      },
+      "launcher_exit": 0,
+      "cleanup_verified": true,
+      "wall_seconds": 157.84176884801127,
+      "cgroup_memory_peak_bytes": 1062285312,
+      "gnu_time": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/build-final/time.txt",
+        "maximum_rss_kib": 1014496,
+        "user_seconds": 155.43,
+        "system_seconds": 1.56
+      }
+    },
+    "rev4-resource": {
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev4-resource/resource.json",
+        "sha256": "4a6a74a68b83c66171f73a82f23a52b7352f314402264c3a0661a179fce3f135",
+        "bytes": 1546
+      },
+      "launcher_exit": 0,
+      "cleanup_verified": true,
+      "wall_seconds": 129.71853628591634,
+      "cgroup_memory_peak_bytes": 1112608768,
+      "gnu_time": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/rev4-resource/time.txt",
+        "maximum_rss_kib": 822824,
+        "user_seconds": 194.83,
+        "system_seconds": 11.19
+      }
+    },
+    "dual-geometry-resource": {
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/dual-geometry-resource/resource.json",
+        "sha256": "2f51d76c4a67aeba7c21337bdbc21d34c449d3ae11c0631dc98fa8a9266c9a30",
+        "bytes": 1558
+      },
+      "launcher_exit": 0,
+      "cleanup_verified": true,
+      "wall_seconds": 2.0224977760808542,
+      "cgroup_memory_peak_bytes": 61931520,
+      "gnu_time": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/dual-geometry-resource/time.txt",
+        "maximum_rss_kib": 80008,
+        "user_seconds": 0.36,
+        "system_seconds": 0.12
+      }
+    },
+    "dual-extraction-resource": {
+      "receipt": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/dual-extraction-resource/resource.json",
+        "sha256": "29e993b1182c7ae5bd6442ea568c1b4428f4f2bfdca331b3fbdbd3143f369958",
+        "bytes": 1771
+      },
+      "launcher_exit": 0,
+      "cleanup_verified": true,
+      "wall_seconds": 1.0154438910540193,
+      "cgroup_memory_peak_bytes": null,
+      "gnu_time": {
+        "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/dual-extraction-resource/time.txt",
+        "maximum_rss_kib": 22320,
+        "user_seconds": 0.4,
+        "system_seconds": 0.09
+      }
+    }
+  },
+  "pitfalls": [
+    "Initial planning used an 18k logical-cell approximation; the runtime geometry has 85,836 physical instances including physical cells/fillers. Runtime admission always used the exact count. The original preflight is retained unchanged.",
+    "All accepted other-layer IDs matter even without direct capacitance because they split intervals and affect f64 order.",
+    "Candidate-only batching has scheduling CPU overhead: compare recorded user+system time as well as wall.",
+    "Memory-admitted workers do not guarantee parallel execution when original work-budget admission fails."
+  ],
+  "firstparty_harness_derivation": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/replay-derivation.json",
+    "sha256": "64ce83f41356bcc4fa7c730f2042b958555b923a2ce87ed99b7f2a8511bb0b54",
+    "bytes": 2201
+  },
+  "extra_config_derivation": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/batch32-derivation.json",
+    "sha256": "d2fe438c35f62c01271bc88a64ed1a52288636f7923c45e2002d90de8e556aeb",
+    "bytes": 463
+  },
+  "b2_audit": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/parallel/B2-audit.md",
+    "sha256": "56f18632afc281c39558688702777faae7502ced3f042b9614bc102c325b24af",
+    "bytes": 2571
+  },
+  "scope": "Private candidate-only extraction experiment. No new full flow, integration, physical signoff, external RC-accuracy or QoR claim. No push/publication.",
+  "upfront_preflight_path": ".work/perf-20261030/parallel/query-preflight.json"
+}
