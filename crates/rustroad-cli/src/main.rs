@@ -243,6 +243,15 @@ enum Command {
         /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 48 MiB of scratch).
         #[arg(long, default_value_t = 4096)]
         max_extract_candidates: usize,
+        /// Opt-in candidate-query workers, bounded by --threads and extraction memory.
+        #[arg(long, default_value_t = 1)]
+        extract_query_workers: usize,
+        /// Candidate queries held per tile (1..=64); interval arithmetic stays serial.
+        #[arg(long, default_value_t = 8)]
+        extract_query_batch_runs: usize,
+        /// Additional query scratch cap within --extract-memory-mib (1..=64 MiB).
+        #[arg(long, default_value_t = 32)]
+        extract_query_scratch_mib: u64,
         /// Couplings below this value (fF) become ground capacitance at both
         /// nodes; 0 keeps every coupling capacitor.
         #[arg(long, default_value_t = 0.0)]
@@ -994,6 +1003,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             max_rc_elements,
             max_extract_work,
             max_extract_candidates,
+            extract_query_workers,
+            extract_query_batch_runs,
+            extract_query_scratch_mib,
             min_coupling_ff,
         } => {
             if !(max_segment_um.is_finite() && (0.1..=10_000.0).contains(&max_segment_um)) {
@@ -1011,6 +1023,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 max_work: max_extract_work,
                 max_candidates: max_extract_candidates,
                 max_segment_length: 1, // converted after loading the locked snapshot
+                query_workers: extract_query_workers,
+                query_batch_runs: extract_query_batch_runs,
+                query_scratch_mib: extract_query_scratch_mib,
                 min_coupling_pf: min_coupling_ff / 1000.0,
             };
             emit(&rustroad_workspace::extract::extract_with_segment_um(

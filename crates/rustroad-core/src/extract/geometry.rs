@@ -1,7 +1,7 @@
 //! Shared, indexed passive cell geometry for extraction. The numeric route
 //! shapes stay owned; the far larger cell shape universe stays virtual.
 use super::{ExtractLimits, InstancedPassive, Owner, PassiveOwner, Shape};
-use crate::routing::{InstanceIndex, RouteLimits};
+use crate::routing::{InstanceIndex, InstanceQueryScratch, RouteLimits};
 use crate::{Rect, Result};
 
 pub(super) struct Shapes<'a> {
@@ -200,24 +200,7 @@ impl<'a> InstanceGeometry<'a> {
         mut visitor: impl FnMut(u32, Shape) -> Result<bool>,
     ) -> Result<bool> {
         let input = shapes.source.expect("indexed geometry has a source");
-        let query = Rect {
-            lx: query
-                .lx
-                .checked_sub(1)
-                .ok_or_else(|| super::budget("instance query coordinate"))?,
-            ly: query
-                .ly
-                .checked_sub(1)
-                .ok_or_else(|| super::budget("instance query coordinate"))?,
-            ux: query
-                .ux
-                .checked_add(1)
-                .ok_or_else(|| super::budget("instance query coordinate"))?,
-            uy: query
-                .uy
-                .checked_add(1)
-                .ok_or_else(|| super::budget("instance query coordinate"))?,
-        };
+        let query = Self::expanded_query(query)?;
         self.index
             .visit_cells(layer, query, work, &self.limits, |instance, work| {
                 input.geometry.visit_near(
@@ -239,5 +222,76 @@ impl<'a> InstanceGeometry<'a> {
                     },
                 )
             })
+    }
+    fn expanded_query(query: Rect) -> Result<Rect> {
+        Ok(Rect {
+            lx: query
+                .lx
+                .checked_sub(1)
+                .ok_or_else(|| super::budget("instance query coordinate"))?,
+            ly: query
+                .ly
+                .checked_sub(1)
+                .ok_or_else(|| super::budget("instance query coordinate"))?,
+            ux: query
+                .ux
+                .checked_add(1)
+                .ok_or_else(|| super::budget("instance query coordinate"))?,
+            uy: query
+                .uy
+                .checked_add(1)
+                .ok_or_else(|| super::budget("instance query coordinate"))?,
+        })
+    }
+    pub(super) fn query_work_bound(
+        &self,
+        shapes: &Shapes<'_>,
+        layer: u32,
+        query: Rect,
+    ) -> Option<usize> {
+        self.index.query_work_bound(
+            layer,
+            Self::expanded_query(query).ok()?,
+            shapes.virtual_count(),
+        )
+    }
+    pub(super) fn visit_shared(
+        &self,
+        scratch: &mut InstanceQueryScratch,
+        shapes: &Shapes<'_>,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        mut visitor: impl FnMut(u32, Shape) -> Result<bool>,
+    ) -> Result<bool> {
+        let input = shapes.source.expect("indexed geometry has a source");
+        let query = Self::expanded_query(query)?;
+        self.index.visit_cells_with_scratch(
+            scratch,
+            layer,
+            query,
+            work,
+            &self.limits,
+            |instance, work| {
+                input.geometry.visit_near(
+                    instance,
+                    layer,
+                    query,
+                    || {
+                        *work = work
+                            .checked_add(1)
+                            .filter(|&n| n <= self.limits.max_comparisons)
+                            .ok_or_else(|| super::budget("instance extraction work"))?;
+                        Ok(())
+                    },
+                    |ordinal, blockage, pin| {
+                        visitor(
+                            shapes.virtual_id(instance, ordinal),
+                            Shapes::passive_shape(input, blockage, pin),
+                        )
+                    },
+                )
+            },
+        )
     }
 }
