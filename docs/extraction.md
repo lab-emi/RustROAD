@@ -111,6 +111,14 @@ million retained shapes and 15 layers the BVH allowance is about 112 MiB,
 below the existing 192 MiB bin-entry allowance. Build/query probes consume the
 original work budget; candidate and electrical accumulation order stay fixed.
 
+The final virtual-cell query index uses twice the smallest per-layer calibration
+window when it fits. Construction keeps the original index order until all metal
+tiling and crossing discovery are complete. Admission checks the exact proposed
+index storage and a conservative bound covering every later query, including
+the largest window and one-DBU margin. A tiny window, excessive query extent or
+insufficient memory retains the coarse index. The report records the selected
+`stats.memory.instance_query_bin_dbu`; the process memory cap stays unchanged.
+
 ## RC profile (`rustroad.rc-profile.v1`)
 
 `scripts/build_rc_profile.py` writes `fixtures/pdk/{sky130,gf180}-rc-{min,nom,max}.json`.

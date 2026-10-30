@@ -278,6 +278,8 @@ pub struct ExtractMemory {
     pub geometry_bytes: u64,
     pub estimate_bytes: u64,
     pub limit_bytes: u64,
+    /// Actual cell-geometry query bin, DBU; coarse when refinement cannot fit.
+    pub instance_query_bin_dbu: i64,
 }
 
 fn extraction_bin(input: &ExtractInput<'_>) -> Result<i64> {
@@ -296,6 +298,28 @@ fn extraction_bin(input: &ExtractInput<'_>) -> Result<i64> {
     Ok((size as i64) * 2)
 }
 
+fn instance_query_bin(input: &ExtractInput<'_>) -> Result<i64> {
+    let window = input
+        .tech
+        .layers
+        .iter()
+        .flatten()
+        .map(|model| {
+            model
+                .contexts
+                .iter()
+                .map(|c| c.rows[c.rows.len() - 1][0])
+                .fold(0.0f64, f64::max)
+        })
+        .reduce(f64::min)
+        .unwrap_or(0.0);
+    let size = (window * input.tech.dbu_per_um).ceil().max(1.0);
+    if !size.is_finite() || size > (i64::MAX / 2) as f64 {
+        return Err(budget("extraction instance query bin size"));
+    }
+    Ok((size as i64) * 2)
+}
+
 fn bin_count(bounds: &[Option<Rect>], bin: i64, cap: usize) -> u64 {
     let cap = cap as u128;
     let mut total = 0u128;
@@ -309,7 +333,7 @@ fn bin_count(bounds: &[Option<Rect>], bin: i64, cap: usize) -> u64 {
     total as u64
 }
 
-fn populated_bin_bound(input: &ExtractInput<'_>, limits: &ExtractLimits, bin: i64) -> Result<u64> {
+fn conductor_bounds(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<Vec<Option<Rect>>> {
     let mut bounds = vec![None::<Rect>; input.layers.len()];
     let mut work = 0usize;
     let mut include = |layer: u32, rect: Rect| -> Result<()> {
@@ -359,7 +383,19 @@ fn populated_bin_bound(input: &ExtractInput<'_>, limits: &ExtractLimits, bin: i6
     for shape in input.passive {
         include(shape.layer, shape.rect)?;
     }
-    Ok(bin_count(&bounds, bin, limits.max_bin_entries))
+    Ok(bounds)
+}
+
+fn query_extent_fits(bounds: Rect, bin: i64, window: i64, cap: usize) -> bool {
+    let margin = i128::from(window) + 1;
+    let span = |lo: i64, hi: i64| {
+        (i128::from(hi) + margin).div_euclid(i128::from(bin))
+            - (i128::from(lo) - margin).div_euclid(i128::from(bin))
+            + 1
+    };
+    span(bounds.lx, bounds.ux)
+        .checked_mul(span(bounds.ly, bounds.uy))
+        .is_some_and(|n| n <= cap as i128)
 }
 
 fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<ExtractMemory> {
@@ -367,7 +403,8 @@ fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<E
     let held = live.max(input.held_bytes);
     let held = held.saturating_add(held.div_ceil(4));
     let bin = extraction_bin(input)?;
-    let populated = populated_bin_bound(input, limits, bin)?;
+    let bounds = conductor_bounds(input, limits)?;
+    let populated = bin_count(&bounds, bin, limits.max_bin_entries);
     let working = (limits.max_nodes as u64)
         .saturating_mul(64)
         .saturating_add((limits.max_elements as u64).saturating_mul(16))
@@ -381,14 +418,56 @@ fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<E
         .saturating_add(populated.saturating_mul(96))
         .saturating_add((input.routes.nets.len() as u64).saturating_mul(192))
         .saturating_add(limits.candidate_scratch_bytes() as u64);
-    let geometry =
+    let mut geometry =
         InstanceGeometry::estimated_bytes(input.instances, bin, input.layers.len(), limits)?;
+    let mut selected_bin = bin;
+    let refined_bin = instance_query_bin(input)?;
+    let mut world = bounds.into_iter().flatten().reduce(|a, b| Rect {
+        lx: a.lx.min(b.lx),
+        ly: a.ly.min(b.ly),
+        ux: a.ux.max(b.ux),
+        uy: a.uy.max(b.uy),
+    });
+    if let Some(source) = input.instances {
+        for i in 0..source.geometry.len() {
+            if let Some(b) = source.geometry.bounds(i)? {
+                world = Some(world.map_or(b, |a| Rect {
+                    lx: a.lx.min(b.lx),
+                    ly: a.ly.min(b.ly),
+                    ux: a.ux.max(b.ux),
+                    uy: a.uy.max(b.uy),
+                }));
+            }
+        }
+    }
+    // The world bound covers every future strip query, including +/-1 DBU
+    // geometry margins and the largest lateral window. Tiny calibration
+    // windows must never turn a previously admissible macro into a huge index.
+    if refined_bin < bin
+        && world.is_none_or(|b| {
+            query_extent_fits(b, refined_bin, bin / 2, limits.max_instance_bin_entries)
+        })
+        && let Ok(refined) = InstanceGeometry::estimated_bytes(
+            input.instances,
+            refined_bin,
+            input.layers.len(),
+            limits,
+        )
+        && held
+            .saturating_add(working)
+            .saturating_add(geometry.max(refined))
+            <= limits.memory_mib.saturating_mul(1 << 20)
+    {
+        geometry = geometry.max(refined);
+        selected_bin = refined_bin;
+    }
     let memory = ExtractMemory {
         held_bytes: held,
         working_bytes: working,
         geometry_bytes: geometry,
         estimate_bytes: held.saturating_add(working).saturating_add(geometry),
         limit_bytes: limits.memory_mib.saturating_mul(1 << 20),
+        instance_query_bin_dbu: selected_bin,
     };
     if memory.estimate_bytes > memory.limit_bytes {
         return Err(budget(&format!(
@@ -1870,6 +1949,18 @@ fn extract_with_queries(
             limits,
             &mut stats.work,
         )?);
+        // The construction index's visitation order affects metal tiling.
+        // Only the final candidate phase sorts every accepted ID, so refresh
+        // virtual geometry here with bins suited to the smaller layer windows.
+        if memory.instance_query_bin_dbu != bin_size {
+            bins.instances = None;
+            bins.instances = InstanceGeometry::new(
+                &shapes,
+                memory.instance_query_bin_dbu,
+                input.layers.len(),
+                limits,
+            )?;
+        }
     }
     stats.wire_runs = built.runs.iter().filter(|r| !r.piece).count();
     stats.shapes = shapes.len();
@@ -2458,6 +2549,111 @@ mod tests {
         };
         assert_eq!(bin_count(&[Some(huge)], 1, 17), 17);
         assert_eq!(bin_count(&[None], 1, 17), 0);
+    }
+
+    #[test]
+    fn refined_query_extent_matches_an_independent_finite_grid_and_bounds_overflow() {
+        for bin in 1..9i64 {
+            for lo in -5..5i64 {
+                let bounds = Rect {
+                    lx: lo,
+                    ly: -3,
+                    ux: lo + 3,
+                    uy: 2,
+                };
+                // Enumerate finite cells with the index's inclusive upper
+                // boundary; this oracle uses no division or span products.
+                let count = (-32..32i64)
+                    .flat_map(|x| (-32..32i64).map(move |y| (x, y)))
+                    .filter(|&(x, y)| {
+                        x * bin <= bounds.ux + 3
+                            && (x + 1) * bin > bounds.lx - 3
+                            && y * bin <= bounds.uy + 3
+                            && (y + 1) * bin > bounds.ly - 3
+                    })
+                    .count();
+                assert!(query_extent_fits(bounds, bin, 2, count));
+                assert!(!query_extent_fits(bounds, bin, 2, count - 1));
+            }
+        }
+        assert!(!query_extent_fits(
+            Rect {
+                lx: i64::MIN,
+                ly: i64::MIN,
+                ux: i64::MAX,
+                uy: i64::MAX
+            },
+            1,
+            i64::MAX / 2,
+            usize::MAX
+        ));
+    }
+
+    #[test]
+    fn tiny_context_window_retains_coarse_geometry_index_when_refinement_cannot_fit() {
+        use crate::instance_obstacles::{
+            InstanceObstacles, ObstacleInstance, ObstacleTemplate, TemplateObstacle,
+        };
+        // One virtual macro rectangle; only arithmetic admission is exercised,
+        // so the millions of rejected fine bins are never allocated.
+        let source = InstanceObstacles::new(
+            vec![
+                ObstacleTemplate::new(
+                    5000,
+                    0,
+                    vec![TemplateObstacle {
+                        layer: 0,
+                        rect: Rect {
+                            lx: 0,
+                            ly: 0,
+                            ux: 10_000,
+                            uy: 5000,
+                        },
+                        pin: None,
+                    }],
+                )
+                .unwrap(),
+            ],
+            vec![ObstacleInstance {
+                template: 0,
+                pin_start: 0,
+                at: [0, 0],
+                orientation: crate::Orientation::N,
+            }],
+            vec![],
+        )
+        .unwrap()
+        .with_pin_ids(vec![])
+        .unwrap();
+        let r = routes(vec![], vec![], vec![], vec![]);
+        let (l, v) = (layers(), vias());
+        let mut tk = tech(false);
+        tk.layers[0].as_mut().unwrap().contexts[0].rows =
+            vec![[0.0, 1e-4, 1e-5], [0.001, 0.0, 4e-5]];
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            terminals: &[],
+            passive: &[],
+            instances: Some(InstancedPassive {
+                geometry: &source,
+                signal_nets: &[],
+            }),
+            held_bytes: 0,
+            tech: &tk,
+        };
+        let limits = ExtractLimits {
+            max_instance_bin_entries: 64,
+            ..Default::default()
+        };
+        let memory = memory_estimate(&input, &limits).unwrap();
+        assert_eq!(instance_query_bin(&input).unwrap(), 2);
+        assert_eq!(
+            memory.instance_query_bin_dbu,
+            extraction_bin(&input).unwrap()
+        );
+        assert!(memory.estimate_bytes <= memory.limit_bytes);
     }
 
     const DBU: f64 = 1000.0;
