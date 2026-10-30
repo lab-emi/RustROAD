@@ -103,6 +103,14 @@ per-run storage or worker concurrency: the run16 replay estimate is 3.46 GiB,
 including 16 MiB scratch (65,536 candidates at 256 bytes), one corner and one
 extraction worker. Builds and tests use two workers under a 4 GiB OS cap.
 
+After metal construction and crossing discovery, an immutable BVH indexes only
+the retained shape IDs. The mutable conductor bins are released first; virtual
+cell geometry stays separate. Admission takes the maximum of the old bin and
+new BVH allowances, including a bounded construction/query stack. For four
+million retained shapes and 15 layers the BVH allowance is about 112 MiB,
+below the existing 192 MiB bin-entry allowance. Build/query probes consume the
+original work budget; candidate and electrical accumulation order stay fixed.
+
 ## RC profile (`rustroad.rc-profile.v1`)
 
 `scripts/build_rc_profile.py` writes `fixtures/pdk/{sky130,gf180}-rc-{min,nom,max}.json`.

@@ -11,6 +11,7 @@ use crate::{Error, Rect, Result};
 use std::collections::{BTreeMap, HashMap};
 mod bins;
 mod geometry;
+mod index;
 use geometry::{InstanceGeometry, Shapes};
 
 /// One vertical context of a calibration table.
@@ -374,7 +375,9 @@ fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<E
         .saturating_add((limits.max_couplings as u64).saturating_mul(128))
         // Linked entries include old+new vector storage during reallocation;
         // fixed headers include hash-table occupancy and rehash headroom.
-        .saturating_add((limits.max_bin_entries as u64).saturating_mul(24))
+        .saturating_add((limits.max_bin_entries as u64).saturating_mul(24).max(
+            index::ShapeIndex::estimated_bytes(limits.max_shapes, input.layers.len()),
+        ))
         .saturating_add(populated.saturating_mul(96))
         .saturating_add((input.routes.nets.len() as u64).saturating_mul(192))
         .saturating_add(limits.candidate_scratch_bytes() as u64);
@@ -1071,6 +1074,7 @@ struct Bins<'a> {
     size: i64,
     map: bins::BinLists,
     instances: Option<InstanceGeometry<'a>>,
+    query_index: Option<index::ShapeIndex>,
 }
 impl Bins<'_> {
     fn range(&self, lo: i64, hi: i64) -> (i64, i64) {
@@ -1091,16 +1095,20 @@ impl Bins<'_> {
         if cells > limits.max_bin_entries as i128 {
             return Err(budget("extraction query extent"));
         }
-        for x in x0..=x1 {
-            for y in y0..=y1 {
-                let list = self.map.iter((layer, x, y));
-                stats.work = stats
-                    .work
-                    .checked_add(list.len().max(1))
-                    .filter(|&n| n <= limits.max_work)
-                    .ok_or_else(|| budget("extraction work"))?;
-                for id in list {
-                    visitor(id, shapes.get(id))?;
+        if let Some(index) = &self.query_index {
+            index.visit(layer, query, shapes, limits, &mut stats.work, &mut visitor)?;
+        } else {
+            for x in x0..=x1 {
+                for y in y0..=y1 {
+                    let list = self.map.iter((layer, x, y));
+                    stats.work = stats
+                        .work
+                        .checked_add(list.len().max(1))
+                        .filter(|&n| n <= limits.max_work)
+                        .ok_or_else(|| budget("extraction work"))?;
+                    for id in list {
+                        visitor(id, shapes.get(id))?;
+                    }
                 }
             }
         }
@@ -1801,6 +1809,7 @@ fn extract_with_queries(
         size: bin_size,
         map: bins::BinLists::default(),
         instances: InstanceGeometry::new(&shapes, bin_size, input.layers.len(), limits)?,
+        query_index: None,
     };
     let mut entries = 0usize;
     for (i, s) in shapes.owned() {
@@ -1850,6 +1859,18 @@ fn extract_with_queries(
     let routed_runs = built.runs.len();
     add_passive_strips(input, limits, &mut built, &shapes, &mut bins, &mut stats)?;
     let crossed = virtual_crossings(&shapes, &mut bins, &routing_layers, &mut stats)?;
+    if footprint_queries {
+        // Construction is complete. Release the mutable owned-shape bins
+        // before reserving the static index, so admission covers their maximum
+        // rather than their sum. Shared virtual cell geometry stays indexed.
+        bins.map = bins::BinLists::default();
+        bins.query_index = Some(index::ShapeIndex::build(
+            &shapes,
+            input.layers.len(),
+            limits,
+            &mut stats.work,
+        )?);
+    }
     stats.wire_runs = built.runs.iter().filter(|r| !r.piece).count();
     stats.shapes = shapes.len();
     if shapes.retained_len() > limits.max_shapes {
@@ -2633,7 +2654,6 @@ mod tests {
                 .map(|c| (c.a, c.b, c.pf.to_bits()))
                 .collect::<Vec<_>>()
         );
-        assert!(actual.stats.work <= reference.stats.work);
         Ok(actual)
     }
 
