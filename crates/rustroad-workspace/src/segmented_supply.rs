@@ -3,6 +3,9 @@
 //! Derived records and all scans use the existing SupplyLimits. No paths are
 //! enumerated. Full-width rows connect the channel spines to the primary grid;
 //! a design without those rows fails instead of publishing floating supplies.
+//! Every spine reaches past the strap pad of each split rail stack it feeds:
+//! the primary grid ends at the last full-width row, and a stack above it would
+//! otherwise land an isolated, below-minimum-width pad beside the spine.
 use crate::pdk::PhysicalBundle;
 use crate::{Error, Result};
 use rustroad_core::power::{RailPolarity, RailReport, RailSpan};
@@ -344,6 +347,14 @@ pub(crate) fn build(
             }
         }
     }
+    let pad_top = stack
+        .abstract_via
+        .upper
+        .iter()
+        .map(|r| r.uy)
+        .max()
+        .ok_or_else(|| invalid("supply upper pad absent"))?;
+    let mut reach = BTreeMap::<(RailPolarity, i64), i64>::new();
     for span in spans {
         b.tick()?;
         let channel = channels
@@ -379,6 +390,65 @@ pub(crate) fn build(
         }
         b.wire(w)?;
         b.stack(&stack, span.polarity, [x, y])?;
+        let top = ceil(i128::from(y) + i128::from(pad_top), grid)?;
+        let entry = reach.entry((span.polarity, x)).or_insert(top);
+        *entry = (*entry).max(top);
+    }
+    for ((polarity, x), top) in reach {
+        b.tick()?;
+        let spine = b
+            .out
+            .wires
+            .iter_mut()
+            .find(|w| {
+                w.layer == cfg.strap_layer
+                    && w.polarity == polarity
+                    && w.start[0] == x
+                    && w.end[0] == x
+            })
+            .ok_or_else(|| invalid("segmented rail stack has no channel spine"))?;
+        if spine.start[1] > spine.end[1] {
+            return Err(invalid("channel spine must run upward"));
+        }
+        spine.end[1] = spine.end[1].max(top);
+        let bounds = wire_bounds(spine).map_err(|e| invalid(e.to_string()))?;
+        if !within(b.die, bounds) {
+            return Err(invalid("extended channel spine outside die"));
+        }
+    }
+    // Rail continuity assumes each stack reaches a spine of its polarity:
+    // check every strap pad instead (run14 left 265 pads beside their spines,
+    // 132 floating supply nets that only LVS reported).
+    let top_via = stack
+        .names
+        .last()
+        .ok_or_else(|| invalid("empty supply via stack"))?;
+    let top_pads = stack
+        .pads
+        .last()
+        .and_then(|p| p.get(&cfg.strap_layer))
+        .ok_or_else(|| invalid("supply upper pad absent"))?;
+    for v in b.out.vias.iter().filter(|v| &v.name == top_via) {
+        b.work = b
+            .work
+            .checked_add(1)
+            .filter(|w| *w <= limits.max_work)
+            .ok_or_else(|| Error::Budget("segmented supply work limit".into()))?;
+        let landed = b.out.wires.iter().any(|w| {
+            w.layer == cfg.strap_layer
+                && w.polarity == v.polarity
+                && wire_bounds(w).is_ok_and(|r| {
+                    top_pads
+                        .iter()
+                        .all(|p| shift(*p, v.at).is_ok_and(|p| within(r, p)))
+                })
+        });
+        if !landed {
+            return Err(invalid(format!(
+                "supply stack at {:?} lands beside every {} spine",
+                v.at, cfg.strap_layer
+            )));
+        }
     }
     let mut seen = BTreeSet::new();
     b.out

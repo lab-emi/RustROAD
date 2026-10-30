@@ -288,6 +288,86 @@ fn supply_stack_keeps_original_vias_and_enclosed_intermediate_metal() {
 }
 
 #[test]
+fn split_rail_stacks_above_the_last_full_row_land_on_a_spine() {
+    // A fixed block on the upper row splits its rails above the last
+    // full-width row (as SRAMs on the Ibex floorplan do). The primary grid
+    // ends at that row, so every stack's strap pad must still sit on an
+    // extended spine of its polarity, never beside one. <1 MiB per test.
+    let mut cfg = config();
+    cfg.macro_supply = Some(rustroad_workspace::macro_supply::Config {
+        collection_layer: "M3".into(),
+        pin_layer: "M2".into(),
+        pin_via: "V23".into(),
+        via_stack: vec!["V23".into()],
+        wire_width: 200,
+    });
+    let f = Fixture::new(
+        "module chip(input a, output y, output h, output l);\n\
+         BUF b0 (.A(a), .Y(y)); BUF b1 (.A(1'b1), .Y(h)); BUF b2 (.A(1'b0), .Y(l));\n\
+         RAM m0 (.D(a));\nendmodule\n",
+        &cfg,
+    );
+    let via = "LAYER V2 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V2\nVIA V23 DEFAULT\nLAYER M2 ; RECT -0.05 -0.05 0.05 0.05 ;\nLAYER V2 ; RECT -0.03 -0.03 0.03 0.03 ;\nLAYER M3 ; RECT -0.05 -0.05 0.05 0.05 ; END V23\nEND LIBRARY";
+    fs::write(
+        &f.sources.technology_lef,
+        TECHNOLOGY.replace("END LIBRARY", via),
+    )
+    .unwrap();
+    let ram = "MACRO RAM\nCLASS BLOCK ; ORIGIN 0 0 ; SIZE 2 BY 2 ; SYMMETRY X Y ;\n\
+PIN D DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M2 ; RECT 0.9 0.9 1.1 1.1 ; END END D\n\
+PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M2 ; RECT 0.2 1.5 1.8 1.8 ; END END VDD\n\
+PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M2 ; RECT 0.2 0.2 1.8 0.5 ; END END VSS\n\
+OBS LAYER M1 ; RECT 0 0 2 2 ; END\nEND RAM\nEND LIBRARY";
+    fs::write(&f.sources.cell_lef, library().replace("END LIBRARY", ram)).unwrap();
+    let mut floorplan: serde_json::Value =
+        serde_json::from_slice(&fs::read(&f.sources.floorplan).unwrap()).unwrap();
+    floorplan["macro_placements"] =
+        serde_json::json!({"m0": {"x": 9000, "y": 7000, "orientation": "N", "halo": 0}});
+    fs::write(
+        &f.sources.floorplan,
+        serde_json::to_vec(&floorplan).unwrap(),
+    )
+    .unwrap();
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let supply = &snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .state
+        .as_ref()
+        .unwrap()
+        .supply;
+    let spines: Vec<_> = supply
+        .wires
+        .iter()
+        .filter(|w| w.layer == "M2" && w.start[0] == w.end[0])
+        .collect();
+    assert!(spines.len() >= 4, "primary and channel spines: {spines:?}");
+    let rail_stacks: Vec<_> = supply.vias.iter().filter(|v| v.name == "V12").collect();
+    assert!(
+        rail_stacks.iter().any(|v| v.at[1] >= 8900),
+        "the split upper rail has its own stack: {rail_stacks:?}"
+    );
+    for v in rail_stacks {
+        assert!(
+            spines.iter().any(|w| w.polarity == v.polarity && {
+                let r = rustroad_core::supply::wire_bounds(w).unwrap();
+                r.lx <= v.at[0] - 50
+                    && r.ly <= v.at[1] - 50
+                    && r.ux >= v.at[0] + 50
+                    && r.uy >= v.at[1] + 50
+            }),
+            "strap pad at {:?} lies beside every {:?} spine",
+            v.at,
+            v.polarity
+        );
+    }
+}
+
+#[test]
 fn internal_clock_tree_preserves_its_original_driver() {
     // Five cells, two rows and fewer than 32 inserted buffers: <1 MiB. The
     // externally selected root must not silently bypass the original gate.
