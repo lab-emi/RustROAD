@@ -286,6 +286,9 @@ pub struct SeedUse {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlacementReport {
+    /// Explicit numerical target outcome; absent on the legacy path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub electrostatic: Option<rustroad_core::place::ElectrostaticReport>,
     pub mode: String,
     pub hpwl_dbu: u64,
     /// Fixed-order packing of the same cells into the same intervals.
@@ -2145,6 +2148,9 @@ fn analytic(
             });
             rustroad_core::place::place_seeded(&problem, &seeds, pc, &place_limits)?
         }
+        None if pc.electrostatic.is_some() => {
+            rustroad_core::place::place_in_region(&problem, pc, &place_limits, design.core_area)?
+        }
         None => rustroad_core::place::place(&problem, pc, &place_limits)?,
     };
     if let Some(u) = &mut seed_use {
@@ -2182,9 +2188,16 @@ fn analytic(
     Ok(PlacementReport {
         mode: if seed_use.is_some() {
             "seeded_eco_legalize".into()
+        } else if result
+            .electrostatic
+            .as_ref()
+            .is_some_and(|r| r.status == "accepted_no_worse")
+        {
+            "analytic_electrostatic_p1".into()
         } else {
             "analytic_b2b_bisection".into()
         },
+        electrostatic: result.electrostatic.clone(),
         seed: seed_use,
         hpwl_dbu: result.hpwl,
         baseline_hpwl_dbu: rustroad_core::place::hpwl(&problem, &baseline),

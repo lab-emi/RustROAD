@@ -23,6 +23,11 @@
 //! See docs/scaling.md for the estimate.
 use crate::{Error, Result};
 use rayon::prelude::*;
+mod electrostatic;
+pub use electrostatic::{
+    Counters as ElectrostaticCounters, ElectrostaticConfig, ElectrostaticReport,
+    StageReport as ElectrostaticStageReport,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PinRef {
@@ -73,6 +78,9 @@ pub struct PlaceConfig {
     /// Nets with more pins are ignored by the wirelength model.
     #[serde(default = "default_max_net_pins")]
     pub max_net_pins: usize,
+    /// Unseeded numerical target prototype; omission preserves the legacy path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub electrostatic: Option<ElectrostaticConfig>,
     /// Legalize every cell whose modelled nets join it only to fixed pins
     /// (e.g. a tie cell driving one macro pin) at the site nearest the HPWL
     /// optimum of those pins before global placement, and keep it out of
@@ -129,6 +137,7 @@ impl Default for PlaceConfig {
             cg_iterations: default_cg(),
             detailed_passes: default_detailed(),
             max_net_pins: default_max_net_pins(),
+            electrostatic: None,
             anchor_isolated: false,
             retarget_isolated: false,
             new_cells_first: false,
@@ -153,6 +162,8 @@ impl Default for PlaceLimits {
 }
 #[derive(Clone, Debug)]
 pub struct PlaceResult {
+    /// Present only for the explicitly requested numerical prototype.
+    pub electrostatic: Option<ElectrostaticReport>,
     /// Lower-left corner of every cell (DBU).
     pub positions: Vec<[i64; 2]>,
     pub hpwl: u64,
@@ -176,10 +187,12 @@ struct Work {
 }
 impl Work {
     fn add(&mut self, n: u64) -> Result<()> {
-        self.used = self.used.saturating_add(n);
-        if self.used > self.max {
-            return Err(budget("work limit"));
-        }
+        let next = self
+            .used
+            .checked_add(n)
+            .filter(|v| *v <= self.max)
+            .ok_or_else(|| budget("work limit"))?;
+        self.used = next;
         Ok(())
     }
 }
@@ -1077,6 +1090,14 @@ fn check_legal(problem: &PlaceProblem, pos: &[[i64; 2]]) -> Result<()> {
 }
 
 fn validate(problem: &PlaceProblem, config: &PlaceConfig, limits: &PlaceLimits) -> Result<()> {
+    if let Some(mode) = &config.electrostatic {
+        mode.validate()?;
+        if config.anchor_isolated {
+            return Err(invalid(
+                "electrostatic is incompatible with anchor_isolated",
+            ));
+        }
+    }
     let n = problem.widths.len();
     if n > limits.max_cells || problem.nets.iter().map(Vec::len).sum::<usize>() > limits.max_pins {
         return Err(budget("problem size"));
@@ -1144,13 +1165,18 @@ pub fn place_seeded(
         max: limits.max_work,
     };
     if n == 0 {
-        return Ok(PlaceResult {
+        let mut result = PlaceResult {
+            electrostatic: None,
             positions: Vec::new(),
             hpwl: 0,
             global_hpwl: 0,
             work: 0,
             anchored: 0,
-        });
+        };
+        if let Some(mode) = &config.electrostatic {
+            result.electrostatic = Some(electrostatic::skipped_seeded(&result, mode));
+        }
+        return Ok(result);
     }
     let region = [
         problem.intervals.iter().map(|v| v.lx).min().unwrap() as f64,
@@ -1236,13 +1262,18 @@ pub fn place_seeded(
         &mut work,
     )?;
     check_legal(problem, &legal)?;
-    Ok(PlaceResult {
+    let mut result = PlaceResult {
+        electrostatic: None,
         hpwl: hpwl(problem, &legal),
         positions: legal,
         global_hpwl,
         work: work.used,
         anchored: 0,
-    })
+    };
+    if let Some(mode) = &config.electrostatic {
+        result.electrostatic = Some(electrostatic::skipped_seeded(&result, mode));
+    }
+    Ok(result)
 }
 
 /// HPWL-optimal centre of every cell whose modelled nets (2..=`max_net_pins`
@@ -1394,6 +1425,7 @@ fn place_anchored(
         positions[c] = *p;
     }
     let mut result = PlaceResult {
+        electrostatic: None,
         positions: Vec::new(),
         hpwl: 0,
         global_hpwl: 0,
@@ -1471,7 +1503,40 @@ fn place_anchored(
     Ok(result)
 }
 
+/// Place cells with the legacy backend or explicitly requested numerical targets.
 pub fn place(
+    problem: &PlaceProblem,
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
+) -> Result<PlaceResult> {
+    place_dispatch(problem, config, limits, None)
+}
+/// Use an explicit integer core rectangle for the numerical density domain.
+/// With no numerical mode, this calls the unchanged legacy backend.
+pub fn place_in_region(
+    problem: &PlaceProblem,
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
+    core: crate::Rect,
+) -> Result<PlaceResult> {
+    place_dispatch(problem, config, limits, Some(core))
+}
+fn place_dispatch(
+    problem: &PlaceProblem,
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
+    core: Option<crate::Rect>,
+) -> Result<PlaceResult> {
+    if config.electrostatic.is_none() {
+        return place_legacy(problem, config, limits);
+    }
+    validate(problem, config, limits)?;
+    let mut legacy = config.clone();
+    legacy.electrostatic = None;
+    let baseline = place_legacy(problem, &legacy, limits)?;
+    electrostatic::refine(problem, config, limits, baseline, core)
+}
+fn place_legacy(
     problem: &PlaceProblem,
     config: &PlaceConfig,
     limits: &PlaceLimits,
@@ -1493,6 +1558,7 @@ pub fn place(
     };
     if n == 0 {
         return Ok(PlaceResult {
+            electrostatic: None,
             positions: Vec::new(),
             hpwl: 0,
             global_hpwl: 0,
@@ -1599,6 +1665,7 @@ pub fn place(
     trace("detailed", 0, work.used);
     check_legal(problem, &legal)?;
     Ok(PlaceResult {
+        electrostatic: None,
         hpwl: hpwl(problem, &legal),
         positions: legal,
         global_hpwl,
@@ -1744,7 +1811,7 @@ mod tests {
         );
         let first = PlaceConfig {
             new_cells_first: true,
-            ..config
+            ..config.clone()
         };
         let r = place_seeded(&p, &seeds, &first, &PlaceLimits::default()).unwrap();
         check_legal(&p, &r.positions).unwrap();
@@ -2027,6 +2094,7 @@ mod tests {
             cg_iterations: 10,
             detailed_passes: 1,
             max_net_pins: 16,
+            electrostatic: None,
             anchor_isolated: false,
             retarget_isolated: false,
             new_cells_first: false,
