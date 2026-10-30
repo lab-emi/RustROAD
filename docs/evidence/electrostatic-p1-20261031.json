@@ -1,0 +1,61 @@
+{
+  "schema": "rustroad.p1-component-delivery.v1",
+  "status": "prototype_component_checks_passed_physical_unverified",
+  "source_head": "d90a4750bb68075105fdf30c24c8821542bf0d5a",
+  "base_head": "9578dc147052387c93f83918106482b4bb914612",
+  "binary": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1/bin/rustroad-p1",
+    "sha256": "5193f5b517e75eb7d7a99062174d689ea9ae746960819b391037c1a5cdfedb18",
+    "bytes": 59580968
+  },
+  "source_count": 574,
+  "engine_manifest": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1/engine-manifest.json",
+    "sha256": "8d290b5774a014588b59dfd5e5543c3627e72379c6e474e7988d809cacbed5d4",
+    "bytes": 91972
+  },
+  "component_checks": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1/P1_COMPONENT_CHECKS.json",
+    "sha256": "be1b1a5ad5b341eeb8c1f0a429368fb3223ca42348693fe7e79b6d95a2802983",
+    "bytes": 23703
+  },
+  "executors": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1/executor-identities.json",
+    "sha256": "b757cbd70548a20358aace7f83a4fbce00cf87668f99984428cc506d6e0edada",
+    "bytes": 1641
+  },
+  "local_handoff": {
+    "path": "/home/cgao/git/RustEDA/modules/RustROAD-place-p1/HANDOFF.md",
+    "sha256": "5e1c5664a67c19f2c83839f498b14c39018583934f9afcadbe2e3f32f99008a5",
+    "bytes": 4624
+  },
+  "review_status": "pending_root_review; supplemental child interrupted without completed report",
+  "remaining": [
+    "Independent actual-pin DEF/LEF physical acceptance",
+    "Fresh P1 Ibex whole-call metrics and full foundry/routing/timing gates after root review",
+    "No fullflow/replay/integration/push authorized by this evidence"
+  ],
+  "scope": "Authorized isolated P1 prototype implementation and component controls completed; no opt-in physical acceptance or fullflow pass claim",
+  "delivery": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1/READY.json",
+    "sha256": "489db098cf2b3ed08fd21466f0fc2a7a6dbbcc9e0ff088276113c8705c0d3b0c",
+    "bytes": 1818
+  },
+  "summary": {
+    "numerical_cases": 25,
+    "scalar_comparisons": 864,
+    "focused_tests": 9,
+    "workspace_passed": 452,
+    "workspace_ignored": 11,
+    "strict_clippy": true,
+    "strict_rustdoc": true,
+    "format": true,
+    "default_none_commands": 10,
+    "default_none_pdks": 2,
+    "default_none_snapshot_files": 12,
+    "unchanged_dual_pdk_commands": 36,
+    "unchanged_def_geometry_comparisons": 6,
+    "new_state_estimate_maximum_bytes": 129297152,
+    "numerical_suite_rss_kib": 12692
+  }
+}
