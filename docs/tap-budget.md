@@ -32,6 +32,17 @@ existence, electrical PG attachment, placement spacing, and complete DRC/LVS
 are separate claims. Missing tools, missing physical data, unknown layers or
 unsupported geometry produce unverified/error, never a pass.
 
+The opt-in staggered planner uses the same tap/work caps. It computes each
+segment's exact slot count (including any short-segment repair) before reserving
+memory, rejects work exhaustion before allocation and grows fallible slot
+capacity geometrically without exceeding `min(max_taps, max_work)`. Only one
+slot vector is retained; no Cartesian row/anchor set or neighbour graph is
+materialized. Coordinates, signed division, phase and count arithmetic use i128
+intermediates with checked i64 conversion. Its work is O(row segments + taps),
+apart from the existing bounded design/macro validation. No corner/thread copy
+is added. A new experiment must separately estimate its real-layout/checker
+input sizes; the small fixture contract above is not a full-design estimate.
+
 ## Bounded clock-tree topology milestone
 
 Before implementation: clock sinks <=1,000,000 but total instances <=250,000,

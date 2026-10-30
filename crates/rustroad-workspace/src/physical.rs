@@ -68,6 +68,10 @@ pub struct TapConfig {
     pub cell: String,
     /// Maximum clear horizontal interval between reserved tap-cell edges.
     pub max_gap: i64,
+    /// Opt-in spatial pattern. Absent preserves the original uniform policy.
+    /// Actual diffusion/body coverage requires independent GDS verification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<rustroad_core::tap::TapPattern>,
     pub well_layer: String,
     pub substrate_layer: String,
     /// Some abstract LEFs expose only metal supply pins. Body contacts then
@@ -368,6 +372,15 @@ impl PhysicalConfig {
                     .any(|n| !rustroad_core::valid_object_name(n)))
         {
             return Err(Error::Invalid("invalid tap policy".into()));
+        }
+        if let Some(TapConfig {
+            max_gap,
+            pattern: Some(rustroad_core::tap::TapPattern::Staggered { phase }),
+            ..
+        }) = &self.tap
+            && (*max_gap <= 0 || *phase < 0 || phase >= max_gap)
+        {
+            return Err(Error::Invalid("invalid staggered tap phase/pitch".into()));
         }
         if self.max_added_cells > crate::storage::MAX_CELLS
             || self.constant_cells.len() > 16
@@ -1397,11 +1410,12 @@ pub(super) fn prepare(
             .saturating_sub(bundle.ties.as_ref().map_or(0, |t| t.new_cells))
             .saturating_sub(bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len()))
             .min(limits.max_cells.saturating_sub(design.cells.len()));
-        let plan = rustroad_core::tap::place_with_spacing(
+        let plan = rustroad_core::tap::place_with_pattern(
             design,
             width,
             tap.max_gap,
             gap,
+            tap.pattern.as_ref(),
             &rustroad_core::tap::TapLimits {
                 max_taps: remaining,
                 max_work: limits.max_expansions,
@@ -1713,8 +1727,13 @@ pub(super) fn layout(
             .iter()
             .find(|m| m.name == tap.cell)
             .unwrap();
-        let report =
-            rustroad_core::tap::reserve(design, m.size[0], tap.max_gap, &tap_limits(design, cfg))?;
+        let report = rustroad_core::tap::reserve_with_pattern(
+            design,
+            m.size[0],
+            tap.max_gap,
+            tap.pattern.as_ref(),
+            &tap_limits(design, cfg),
+        )?;
         let indices: HashMap<_, _> = design
             .cells
             .iter()
@@ -1906,8 +1925,13 @@ fn tap_free_intervals(
             .iter()
             .find(|m| m.name == tap.cell)
             .ok_or_else(|| Error::Invalid("tap master absent".into()))?;
-        let report =
-            rustroad_core::tap::reserve(design, m.size[0], tap.max_gap, &tap_limits(design, cfg))?;
+        let report = rustroad_core::tap::reserve_with_pattern(
+            design,
+            m.size[0],
+            tap.max_gap,
+            tap.pattern.as_ref(),
+            &tap_limits(design, cfg),
+        )?;
         for pair in report.sites.windows(2) {
             if pair[0].row == pair[1].row {
                 let x = pair[0].x + pair[0].width;

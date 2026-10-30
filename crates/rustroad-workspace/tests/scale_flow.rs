@@ -612,6 +612,7 @@ END TAP\nEND LIBRARY\n";
     fs::write(f.path("cells.lef"), library().replace("END LIBRARY\n", tap)).unwrap();
     let mut cfg = config();
     cfg.tap = Some(rustroad_workspace::physical::TapConfig {
+        pattern: None,
         body_view: Default::default(),
         cell: "TAP".into(),
         max_gap: 500,
