@@ -147,7 +147,20 @@ pub fn antenna_inventory(
             inventory_bytes: bounds.memory_bytes as u64,
         }),
     )?;
-    let metadata = snapshot.metadata();
+    let placed: Vec<_> = snapshot.records().collect();
+    let mut report = from_prepared(snapshot.metadata(), &placed, bounds, None)?;
+    // Keep the original shared lock alive through serialization/caller flush.
+    report._lock = Some(snapshot._lock);
+    Ok(report)
+}
+
+pub(super) fn from_prepared(
+    metadata: &crate::Metadata,
+    placed: &[rustroad_core::Placed],
+    bounds: &InventoryBounds,
+    source: Option<&str>,
+) -> Result<InventoryReport> {
+    bounds.validate()?;
     let bundle = metadata
         .physical
         .as_ref()
@@ -243,8 +256,10 @@ pub fn antenna_inventory(
     for role in ["technology_lef", "cell_lef"] {
         sources.push(verified_lef(bundle, role)?.1);
     }
-    let placed: Vec<_> = snapshot.records().collect();
-    let source_sha256 = source_fingerprint(&metadata.design, model, &placed, state, &sources)?;
+    let source_sha256 = match source {
+        Some(value) => value.to_owned(),
+        None => source_fingerprint(&metadata.design, model, placed, state, &sources)?,
+    };
     let routing_scope = match state.scope {
         crate::routing::RouteScope::All => "all_signal_nets",
         crate::routing::RouteScope::Clock => "clock_nets_only",
@@ -252,7 +267,7 @@ pub fn antenna_inventory(
     .to_owned();
     let inventory_sha256 =
         report::fingerprint(&(&metadata.revision, &routing_scope, &source_sha256, &nets))?;
-    let mut report = InventoryReport {
+    let report = InventoryReport {
         schema: "rustroad.antenna-inventory.v1",
         workspace_revision: metadata.revision.clone(),
         design: metadata.design.name.clone(),
@@ -276,9 +291,6 @@ pub fn antenna_inventory(
         timing_status: "unchecked",
         _lock: None,
     };
-    // The result owns the shared lock through serialization and caller flush.
-    // Large snapshot buffers can be released without unlocking this revision.
-    report._lock = Some(snapshot._lock);
     serde_json::to_writer(
         &mut CountBytes {
             bytes: 0,

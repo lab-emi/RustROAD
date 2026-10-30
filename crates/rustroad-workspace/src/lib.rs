@@ -847,7 +847,11 @@ fn check_placed(snapshot: &Snapshot) -> Result<()> {
 }
 
 fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Summary> {
-    metadata.format_version = storage::logical_version(&metadata)?;
+    commit_in_place(path, &mut metadata, records)
+}
+
+fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> Result<Summary> {
+    metadata.format_version = storage::logical_version(metadata)?;
     if let Some(p) = &metadata.physical {
         metadata.format_version = if p
             .routing
@@ -916,7 +920,7 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
         };
         held = Some(std::mem::replace(&mut r.routes, empty));
     }
-    let bytes = storage::serialize(&mut metadata, &directory)?;
+    let bytes = storage::serialize(metadata, &directory)?;
     if let Some(routes) = held
         && let Some(r) = metadata.physical.as_mut().and_then(|p| p.routing.as_mut())
     {

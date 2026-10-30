@@ -405,6 +405,13 @@ enum Command {
         #[arg(long)]
         plan: PathBuf,
     },
+    /// Repair canonical antenna groups in one bounded, exclusively locked process.
+    RepairAntennaGroups {
+        #[arg(long)]
+        base_rev: String,
+        #[arg(long)]
+        plan: PathBuf,
+    },
     /// Diode-free antenna repair of HEAD: layer jumpers on the violating
     /// nets of the native check (new revision; netlist and placement kept).
     RepairAntenna {
@@ -1061,6 +1068,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 &mut stdout.lock(),
             )?;
             Ok(())
+        }
+        Command::RepairAntennaGroups { base_rev, plan } => {
+            let plan = rustroad_workspace::antenna::read_group_repair_plan(&plan)?;
+            emit(&rustroad_workspace::antenna::repair_antenna_groups(
+                &workspace, &base_rev, &plan, &limits,
+            )?)
         }
         Command::RepairAntenna {
             base_rev,
