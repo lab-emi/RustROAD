@@ -188,6 +188,7 @@ impl Drop for Fixture {
 fn tapped_fixture() -> Fixture {
     let mut cfg = config();
     cfg.tap = Some(TapConfig {
+        pattern: None,
         body_view: Default::default(),
         cell: "TAP".into(),
         max_gap: 3000,
@@ -1015,6 +1016,80 @@ fn tap_identity_and_spacing_fail_without_publishing() {
     f.import().unwrap();
     assert!(place(&f.workspace, "rev1", &limits()).is_err());
     assert_eq!(f.head(), "rev1\n");
+}
+
+#[test]
+fn staggered_taps_roundtrip_reopen_repeat_and_stale_revision_contract() {
+    let f = tapped_fixture();
+    let mut cfg: PhysicalConfig =
+        serde_json::from_slice(&fs::read(&f.config_path).unwrap()).unwrap();
+    let legacy_json = serde_json::to_value(&cfg).unwrap();
+    assert!(legacy_json["tap"].get("pattern").is_none());
+    cfg.tap.as_mut().unwrap().max_gap = 5000;
+    cfg.tap.as_mut().unwrap().pattern =
+        Some(rustroad_core::tap::TapPattern::Staggered { phase: 2000 });
+    fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+    f.import().unwrap();
+    let first = place(&f.workspace, "rev1", &limits()).unwrap();
+    let s = read(&f.workspace, &limits()).unwrap();
+    let tap = s
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .state
+        .as_ref()
+        .unwrap()
+        .tap
+        .as_ref()
+        .unwrap();
+    assert_eq!(tap.requested_max_gap, 5000);
+    assert!(tap.max_clear_gap <= 5000);
+    assert_eq!(
+        s.metadata()
+            .physical
+            .as_ref()
+            .unwrap()
+            .config
+            .as_ref()
+            .unwrap()
+            .tap
+            .as_ref()
+            .unwrap()
+            .pattern,
+        Some(rustroad_core::tap::TapPattern::Staggered { phase: 2000 })
+    );
+    let mut before = Vec::new();
+    s.export_def(&mut before).unwrap();
+    drop(s);
+    assert!(matches!(
+        place(&f.workspace, "rev1", &limits()),
+        Err(rustroad_workspace::Error::Conflict { .. })
+    ));
+    assert_eq!(f.head().trim(), first.revision);
+    place(&f.workspace, &first.revision, &limits()).unwrap();
+    let s = read(&f.workspace, &limits()).unwrap();
+    let mut after = Vec::new();
+    s.export_def(&mut after).unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn malformed_staggered_tap_policy_rejects_before_workspace_publication() {
+    for pattern in [
+        r#"{"kind":"checkerboard","phase":2000}"#,
+        r#"{"kind":"staggered","phase":3000}"#,
+        r#"{"kind":"staggered","phase":-1}"#,
+        r#"{"kind":"staggered","phase":1000,"pitch":5000}"#,
+    ] {
+        let f = tapped_fixture();
+        let mut cfg: serde_json::Value =
+            serde_json::from_slice(&fs::read(&f.config_path).unwrap()).unwrap();
+        cfg["tap"]["pattern"] = serde_json::from_str(pattern).unwrap();
+        fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+        assert!(f.import().is_err());
+        assert!(!f.workspace.join("HEAD").exists());
+    }
 }
 
 #[test]
@@ -1940,6 +2015,7 @@ fn placement_blockages_keep_every_placed_cell_out_and_need_the_analytic_placer()
     let f = tapped_fixture();
     let mut cfg = config();
     cfg.tap = Some(TapConfig {
+        pattern: None,
         body_view: Default::default(),
         cell: "TAP".into(),
         max_gap: 3000,
