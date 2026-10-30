@@ -1414,8 +1414,14 @@ pub(crate) fn wide_check(
         let Some(w) = rule(layer) else {
             return Ok(());
         };
+        let Some(&layer_reach) = reach.get(&layer) else {
+            // Only same-layer wide parts can own a spacing violation. An
+            // empty layer still consumes the base unit for a spatial query.
+            charge(work, 1, cap)?;
+            return Ok(());
+        };
         let s = w.spacing;
-        let from = rect.lx - s - reach[&layer];
+        let from = rect.lx - s - layer_reach;
         let lo = parts.partition_point(|p| (p.layer, p.rect.lx) < (layer, from));
         let hi = parts.partition_point(|p| (p.layer, p.rect.lx) < (layer, rect.ux + s));
         charge(work, hi.saturating_sub(lo) + 1, cap)?;
