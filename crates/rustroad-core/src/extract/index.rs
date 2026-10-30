@@ -93,6 +93,11 @@ impl ShapeIndex {
             )
     }
 
+    /// Each node and retained ID can be charged at most once per query.
+    pub(super) fn query_work_bound(&self) -> usize {
+        self.nodes.len().saturating_add(self.ids.len())
+    }
+
     pub(super) fn build(
         shapes: &Shapes<'_>,
         layer_count: usize,

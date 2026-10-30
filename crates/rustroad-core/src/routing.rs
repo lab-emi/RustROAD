@@ -1127,6 +1127,25 @@ pub(crate) struct InstanceIndex<'a> {
     mode: Option<InstanceIndexMode>,
 }
 
+/// Bounded worker-private deduplication state for immutable instance queries.
+pub(crate) struct InstanceQueryScratch {
+    marks: Vec<u64>,
+    generation: u64,
+}
+impl InstanceQueryScratch {
+    pub(crate) fn new(instances: usize) -> Result<Self> {
+        let mut marks = Vec::new();
+        marks
+            .try_reserve_exact(instances)
+            .map_err(|_| budget("instance query scratch allocation"))?;
+        marks.resize(instances, 0);
+        Ok(Self {
+            marks,
+            generation: 0,
+        })
+    }
+}
+
 fn instance_extent(
     die: Rect,
     bin: i64,
@@ -1401,20 +1420,96 @@ impl<'a> InstanceIndex<'a> {
         query: Rect,
         work: &mut usize,
         limits: &RouteLimits,
+        visitor: impl FnMut(usize, &mut usize) -> Result<bool>,
+    ) -> Result<bool> {
+        Self::visit_cells_inner(
+            self.source,
+            self.bin,
+            &self.bins,
+            self.mode,
+            &mut self.marks,
+            &mut self.generation,
+            layer,
+            query,
+            work,
+            limits,
+            visitor,
+        )
+    }
+    /// The spatial bins remain shared; each concurrent query owns its marks.
+    pub(crate) fn visit_cells_with_scratch(
+        &self,
+        scratch: &mut InstanceQueryScratch,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        limits: &RouteLimits,
+        visitor: impl FnMut(usize, &mut usize) -> Result<bool>,
+    ) -> Result<bool> {
+        if scratch.marks.len() != self.source.len() {
+            return Err(budget("instance query scratch extent"));
+        }
+        Self::visit_cells_inner(
+            self.source,
+            self.bin,
+            &self.bins,
+            self.mode,
+            &mut scratch.marks,
+            &mut scratch.generation,
+            layer,
+            query,
+            work,
+            limits,
+            visitor,
+        )
+    }
+    pub(crate) fn query_work_bound(
+        &self,
+        layer: u32,
+        query: Rect,
+        virtual_shapes: usize,
+    ) -> Option<usize> {
+        if !self.source.has_layer(layer) {
+            return Some(0);
+        }
+        let span = |lo: i64, hi: i64| {
+            i128::from(hi.div_euclid(self.bin)) - i128::from(lo.div_euclid(self.bin)) + 1
+        };
+        let extent = span(query.lx, query.ux).checked_mul(span(query.ly, query.uy))?;
+        // Each cell is visited once; each instance and template shape at most once.
+        usize::try_from(extent)
+            .ok()?
+            .checked_add(self.source.len())?
+            .checked_add(virtual_shapes)
+    }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "split immutable index fields from private query marks"
+    )]
+    fn visit_cells_inner(
+        source: &InstanceObstacles,
+        bin: i64,
+        bins: &BinGrid,
+        mode: Option<InstanceIndexMode>,
+        marks: &mut [u64],
+        generation: &mut u64,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        limits: &RouteLimits,
         mut visitor: impl FnMut(usize, &mut usize) -> Result<bool>,
     ) -> Result<bool> {
-        if !self.source.has_layer(layer) {
+        if !source.has_layer(layer) {
             return Ok(true);
         }
-        self.generation = self
-            .generation
+        *generation = generation
             .checked_add(1)
             .ok_or_else(|| budget("instance query generation"))?;
         let (x0, x1, y0, y1) = (
-            query.lx.div_euclid(self.bin),
-            query.ux.div_euclid(self.bin),
-            query.ly.div_euclid(self.bin),
-            query.uy.div_euclid(self.bin),
+            query.lx.div_euclid(bin),
+            query.ux.div_euclid(bin),
+            query.ly.div_euclid(bin),
+            query.uy.div_euclid(bin),
         );
         let extent = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
         if extent > limits.max_bin_entries as i128 {
@@ -1426,19 +1521,16 @@ impl<'a> InstanceIndex<'a> {
                     .checked_add(1)
                     .filter(|&n| n <= limits.max_comparisons)
                     .ok_or_else(|| budget("instance query work"))?;
-                for i in self
-                    .bins
-                    .iter(if self.mode.is_some() { layer } else { 0 }, x, y)
-                {
-                    if self.marks[i] == self.generation {
+                for i in bins.iter(if mode.is_some() { layer } else { 0 }, x, y) {
+                    if marks[i] == *generation {
                         continue;
                     }
-                    self.marks[i] = self.generation;
+                    marks[i] = *generation;
                     *work = work
                         .checked_add(1)
                         .filter(|&n| n <= limits.max_comparisons)
                         .ok_or_else(|| budget("instance query work"))?;
-                    if !self.source.bounds(i)?.is_some_and(|b| overlap(query, b)) {
+                    if !source.bounds(i)?.is_some_and(|b| overlap(query, b)) {
                         continue;
                     }
                     let clear = visitor(i, work)?;

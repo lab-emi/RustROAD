@@ -12,7 +12,9 @@ use std::collections::{BTreeMap, HashMap};
 mod bins;
 mod geometry;
 mod index;
+mod parallel;
 use geometry::{InstanceGeometry, Shapes};
+pub use parallel::QueryStats;
 
 /// One vertical context of a calibration table.
 #[derive(Clone, Debug)]
@@ -104,6 +106,12 @@ pub struct ExtractLimits {
     /// below `CANDIDATE_SCRATCH_CEILING_BYTES`. Work (including active intervals)
     /// is charged to `max_work`.
     pub max_candidates: usize,
+    /// Candidate-query workers; numerical intervals remain serial. Opt-in.
+    pub query_workers: usize,
+    /// Maximum retained run queries per tile (1..=64).
+    pub query_batch_runs: usize,
+    /// Additional query scratch hard cap, also bounded by memory_mib (1..=64).
+    pub query_scratch_mib: u64,
     /// Spatial-bin entries.
     pub max_bin_entries: usize,
     /// Straight runs longer than this are split at existing lattice nodes (DBU).
@@ -124,6 +132,9 @@ impl Default for ExtractLimits {
             max_couplings: 1_000_000,
             max_work: 200_000_000,
             max_candidates: 4096,
+            query_workers: 1,
+            query_batch_runs: 8,
+            query_scratch_mib: 32,
             max_bin_entries: 8_000_000,
             max_segment_length: 25_000,
             min_coupling_pf: 0.0,
@@ -154,11 +165,16 @@ impl ExtractLimits {
             // node, element and bin caps): SERV-size blocks need ~2-5e9.
             (self.max_work, 1usize << 40),
             (self.max_candidates, MAX_CANDIDATES_CEILING),
+            (self.query_workers, 16),
+            (self.query_batch_runs, 64),
             (self.max_bin_entries, 512_000_000),
         ] {
             if value == 0 || value > ceiling {
                 return Err(budget("extraction limit outside hard bounds"));
             }
+        }
+        if self.query_scratch_mib == 0 || self.query_scratch_mib > 64 {
+            return Err(budget("extraction query scratch allowance"));
         }
         if self.memory_mib == 0 || self.memory_mib > 65_536 {
             return Err(budget("extraction memory allowance"));
@@ -203,6 +219,8 @@ pub struct RcCoupling {
 pub struct ExtractStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<ExtractMemory>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_queries: Option<QueryStats>,
     pub nets: usize,
     pub lattice_wires: usize,
     pub wire_runs: usize,
@@ -498,6 +516,64 @@ fn invalid(s: &str) -> Error {
 type Key = (u32, i64, i64);
 /// Calibration context `(over, under)` to its index in `RcLayer::contexts`.
 type ContextIndex = HashMap<(u32, Option<u32>), usize>;
+
+/// Private phase-timing instrumentation: fixed state, no contribution records.
+/// Enabled only by RUSTROAD_EXTRACT_PROFILE; all numerical operations stay serial.
+struct PhaseProfile {
+    enabled: bool,
+    start: std::time::Instant,
+    mark: std::time::Instant,
+    ns: [u128; 8],
+    strips: usize,
+}
+impl PhaseProfile {
+    fn new() -> Self {
+        let now = std::time::Instant::now();
+        Self {
+            enabled: std::env::var_os("RUSTROAD_EXTRACT_PROFILE").is_some(),
+            start: now,
+            mark: now,
+            ns: [0; 8],
+            strips: 0,
+        }
+    }
+    fn phase(&mut self, at: usize) {
+        if self.enabled {
+            let now = std::time::Instant::now();
+            self.ns[at] = self.ns[at].saturating_add(now.duration_since(self.mark).as_nanos());
+            self.mark = now;
+        }
+    }
+    fn report(&self, stats: &ExtractStats) {
+        if self.enabled {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "schema": "rustroad.extract-phase-profile.v1",
+                    "scope": "extraction core; candidate queries may be parallel; electrical arithmetic remains serial",
+                    "elapsed_ns": self.start.elapsed().as_nanos(),
+                    "stage_ns": {
+                        "preflight_and_trees": self.ns[0],
+                        "geometry_pieces_passive_crossings": self.ns[1],
+                        "immutable_indexes": self.ns[2],
+                        "candidate_queries_and_sort": self.ns[3],
+                        "interval_events_setup": self.ns[4],
+                        "interval_geometry_numerics_and_ordered_additions": self.ns[5],
+                        "strip_iteration_and_metadata": self.ns[6],
+                        "finalization": self.ns[7],
+                    },
+                    "strips": self.strips,
+                    "intervals": stats.intervals,
+                    "passive_intervals": stats.passive_intervals,
+                    "work": stats.work,
+                    "max_run_candidates": stats.max_run_candidates,
+                    "profile_state_bytes": size_of::<Self>(),
+                    "floating_point_order": "unchanged individual serial additions",
+                })
+            );
+        }
+    }
+}
 #[derive(Clone, Copy, Debug)]
 enum EdgeKind {
     Wire(u32),
@@ -1849,9 +1925,11 @@ fn extract_with_queries(
     limits: &ExtractLimits,
     footprint_queries: bool,
 ) -> Result<RcNetwork> {
+    let mut profile = PhaseProfile::new();
     preflight(input, limits)?;
     let memory = memory_estimate(input, limits)?;
     let (mut built, mut stats) = build_trees(input, limits)?;
+    profile.phase(0);
     stats.memory = Some(memory);
     let tech = input.tech;
     // Conductor shapes: wire-run bodies and passive shapes; the end
@@ -1938,6 +2016,7 @@ fn extract_with_queries(
     let routed_runs = built.runs.len();
     add_passive_strips(input, limits, &mut built, &shapes, &mut bins, &mut stats)?;
     let crossed = virtual_crossings(&shapes, &mut bins, &routing_layers, &mut stats)?;
+    profile.phase(1);
     if footprint_queries {
         // Construction is complete. Release the mutable owned-shape bins
         // before reserving the static index, so admission covers their maximum
@@ -1963,6 +2042,7 @@ fn extract_with_queries(
         }
     }
     stats.wire_runs = built.runs.iter().filter(|r| !r.piece).count();
+    profile.phase(2);
     stats.shapes = shapes.len();
     if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
@@ -2004,492 +2084,530 @@ fn extract_with_queries(
                 virtual_strip(id, shape, true),
             ]
         });
-    for (run_index, run) in built.runs[..routed_runs]
+    let mut batch = parallel::Batch::new(input, limits, &memory, footprint_queries)?;
+    if let Some(estimate) = stats.memory.as_mut() {
+        estimate.working_bytes = estimate
+            .working_bytes
+            .saturating_add(batch.stats.scratch_bytes);
+        estimate.estimate_bytes = estimate
+            .estimate_bytes
+            .saturating_add(batch.stats.scratch_bytes);
+    }
+    let mut runs = built.runs[..routed_runs]
         .iter()
         .cloned()
         .chain(extra)
         .chain(built.runs[routed_runs..].iter().cloned())
-        .enumerate()
-    {
-        if run_index.is_multiple_of(4096) {
-            guard_memory(limits)?;
+        .enumerate();
+
+    loop {
+        let (count, prepared) = batch.prepare(
+            &mut runs,
+            input,
+            &shapes,
+            &bins,
+            &routing_layers,
+            limits,
+            stats.work,
+        )?;
+        profile.phase(3);
+        if count == 0 {
+            break;
         }
-        let model = layer_model(input, run.layer)?;
-        let ctx_map = contexts[run.layer as usize].as_ref().unwrap();
-        let window = model
-            .contexts
-            .iter()
-            .map(|c| c.rows[c.rows.len() - 1][0])
-            .fold(0.0f64, f64::max);
-        let window_dbu = (window * tech.dbu_per_um).ceil() as i64;
-        let (edge_minus, edge_plus) = (run.minus, run.plus);
-        // Query region: lateral window on the run layer, footprint elsewhere.
-        let (c0, c1) = (edge_minus - window_dbu, edge_plus + window_dbu);
-        let query = if run.vertical {
-            Rect {
-                lx: c0,
-                ly: run.lo,
-                ux: c1,
-                uy: run.hi,
+        for slot in &mut batch.slots[..count] {
+            let (run_index, run) = slot.run.take().expect("populated query slot");
+            profile.phase(6);
+            profile.strips += 1;
+            if run_index.is_multiple_of(4096) {
+                guard_memory(limits)?;
             }
-        } else {
-            Rect {
-                lx: run.lo,
-                ly: c0,
-                ux: run.hi,
-                uy: c1,
-            }
-        };
-        candidates.clear();
-        seen.clear();
-        for &layer in &routing_layers {
-            // Other-layer candidates must overlap the strip's face. Querying
-            // only that face preserves the exact event boundaries and shape-ID
-            // order while avoiding unrelated lateral bin/instance scans.
-            let layer_query = if footprint_queries && layer != run.layer {
-                body_rect(&run)
+            let model = layer_model(input, run.layer)?;
+            let ctx_map = contexts[run.layer as usize].as_ref().unwrap();
+            let window = model
+                .contexts
+                .iter()
+                .map(|c| c.rows[c.rows.len() - 1][0])
+                .fold(0.0f64, f64::max);
+            let window_dbu = (window * tech.dbu_per_um).ceil() as i64;
+            let (edge_minus, edge_plus) = (run.minus, run.plus);
+            // Query region: lateral window on the run layer, footprint elsewhere.
+            let (c0, c1) = (edge_minus - window_dbu, edge_plus + window_dbu);
+            let query = if run.vertical {
+                Rect {
+                    lx: c0,
+                    ly: run.lo,
+                    ux: c1,
+                    uy: run.hi,
+                }
             } else {
-                query
+                Rect {
+                    lx: run.lo,
+                    ly: c0,
+                    ux: run.hi,
+                    uy: c1,
+                }
             };
-            bins.visit(
-                layer,
-                layer_query,
-                &shapes,
-                &mut stats,
-                limits,
-                |id, shape| {
-                    if id == run.shape || seen.contains(&id) {
-                        return Ok(());
+            if prepared {
+                slot.result.take().expect("prepared query result")?;
+                stats.work = stats
+                    .work
+                    .checked_add(slot.work)
+                    .filter(|&n| n <= limits.max_work)
+                    .ok_or_else(|| budget("extraction query tile work"))?;
+                std::mem::swap(&mut candidates, &mut slot.candidates);
+            } else {
+                candidates.clear();
+                seen.clear();
+                for &layer in &routing_layers {
+                    // Other-layer candidates must overlap the strip's face. Querying
+                    // only that face preserves the exact event boundaries and shape-ID
+                    // order while avoiding unrelated lateral bin/instance scans.
+                    let layer_query = if footprint_queries && layer != run.layer {
+                        body_rect(&run)
+                    } else {
+                        query
+                    };
+                    bins.visit(
+                        layer,
+                        layer_query,
+                        &shapes,
+                        &mut stats,
+                        limits,
+                        |id, shape| {
+                            parallel::accept_candidate(
+                                run,
+                                layer,
+                                (c0, c1),
+                                id,
+                                shape,
+                                limits,
+                                &mut seen,
+                                &mut candidates,
+                            )
+                        },
+                    )?;
+                }
+            }
+            stats.max_run_candidates = stats.max_run_candidates.max(candidates.len());
+            if candidates.len() > limits.max_candidates {
+                return Err(budget(&format!(
+                    "extraction candidates per wire run ({} > max_candidates {}; raise \
+                 --max-extract-candidates up to {MAX_CANDIDATES_CEILING})",
+                    candidates.len(),
+                    limits.max_candidates
+                )));
+            }
+            candidates.sort_unstable();
+            profile.phase(3);
+            points.clear();
+            events.clear();
+            active.clear();
+            points.push(run.lo);
+            points.push(run.hi);
+            for &s in &candidates {
+                let r = shapes.get(s).rect;
+                let (a0, a1) = if run.vertical {
+                    (r.ly, r.uy)
+                } else {
+                    (r.lx, r.ux)
+                };
+                let (lo, hi) = (a0.max(run.lo), a1.min(run.hi));
+                points.push(lo);
+                points.push(hi);
+                events.push((lo, s, true));
+                events.push((hi, s, false));
+            }
+            points.sort_unstable();
+            points.dedup();
+            events.sort_unstable();
+            let index_work = events
+                .len()
+                .checked_mul(3 * events.len().max(1).ilog2() as usize + 4)
+                .ok_or_else(|| budget("extraction interval index work"))?;
+            stats.work = stats
+                .work
+                .checked_add(index_work)
+                .filter(|&n| n <= limits.max_work)
+                .ok_or_else(|| budget("extraction interval index work"))?;
+            let mut event_index = 0;
+            let span = (run.hi - run.lo) as f64;
+            // Passive strips attach to their routed partners only.
+            let net_local = match run.passive {
+                None => net_index[&run.net],
+                Some(_) => usize::MAX,
+            };
+            // Same metal as this strip: its own net, or for a passive conductor
+            // the same supply/ground class or the same pin net.
+            let same_metal = |sh: &Shape| -> bool {
+                match (sh.owner, run.passive) {
+                    (Owner::Run(o), _) => built.runs[o as usize].net == run.net,
+                    (Owner::Passive(p), None) => {
+                        matches!(p, PassiveOwner::Pin { net, .. } if net == run.net)
                     }
-                    let r = shape.rect;
+                    (Owner::Passive(p), Some(PassiveOwner::Ground)) => p == PassiveOwner::Ground,
+                    (Owner::Passive(p), Some(PassiveOwner::Pin { net, .. })) => {
+                        matches!(p, PassiveOwner::Pin { net: other, .. } if other == net)
+                    }
+                }
+            };
+            profile.phase(4);
+            for w in points.windows(2) {
+                let (t0, t1) = (w[0], w[1]);
+                if t1 <= t0 {
+                    continue;
+                }
+                while event_index < events.len() && events[event_index].0 <= t0 {
+                    let (_, shape, enter) = events[event_index];
+                    if enter {
+                        active.insert(shape);
+                    } else {
+                        active.remove(&shape);
+                    }
+                    event_index += 1;
+                }
+                if run.passive.is_some() {
+                    stats.passive_intervals += 1;
+                } else {
+                    stats.intervals += 1;
+                }
+                stats.work = stats
+                    .work
+                    .checked_add(active.len().max(1))
+                    .ok_or_else(|| budget("extraction work"))?;
+                if stats.work > limits.max_work {
+                    return Err(budget("extraction work"));
+                }
+                // Nearest lateral neighbour per side and nearest planes.
+                let mut plus: Option<(i64, u32)> = None;
+                let mut minus: Option<(i64, u32)> = None;
+                let (mut covered_plus, mut covered_minus) = (false, false);
+                layered.clear();
+                // Shape-ID order preserves the original floating-point accumulation
+                // and geometric ownership while skipping disjoint axis intervals.
+                for &s in &active {
+                    let sh = &shapes.get(s);
+                    let r = sh.rect;
                     let (a0, a1, x0, x1) = if run.vertical {
                         (r.ly, r.uy, r.lx, r.ux)
                     } else {
                         (r.lx, r.ux, r.ly, r.uy)
                     };
-                    if a1 <= run.lo || a0 >= run.hi {
-                        return Ok(());
-                    }
-                    let relevant = if layer == run.layer {
-                        x1 > c0 && x0 < c1
-                    } else {
-                        x1 > edge_minus && x0 < edge_plus
-                    };
-                    if relevant {
-                        if candidates.len() >= limits.max_candidates {
-                            return Err(budget("extraction candidates per wire run"));
-                        }
-                        seen.insert(id);
-                        candidates.push(id);
-                    }
-                    Ok(())
-                },
-            )?;
-        }
-        stats.max_run_candidates = stats.max_run_candidates.max(candidates.len());
-        if candidates.len() > limits.max_candidates {
-            return Err(budget(&format!(
-                "extraction candidates per wire run ({} > max_candidates {}; raise \
-                 --max-extract-candidates up to {MAX_CANDIDATES_CEILING})",
-                candidates.len(),
-                limits.max_candidates
-            )));
-        }
-        candidates.sort_unstable();
-        points.clear();
-        events.clear();
-        active.clear();
-        points.push(run.lo);
-        points.push(run.hi);
-        for &s in &candidates {
-            let r = shapes.get(s).rect;
-            let (a0, a1) = if run.vertical {
-                (r.ly, r.uy)
-            } else {
-                (r.lx, r.ux)
-            };
-            let (lo, hi) = (a0.max(run.lo), a1.min(run.hi));
-            points.push(lo);
-            points.push(hi);
-            events.push((lo, s, true));
-            events.push((hi, s, false));
-        }
-        points.sort_unstable();
-        points.dedup();
-        events.sort_unstable();
-        let index_work = events
-            .len()
-            .checked_mul(3 * events.len().max(1).ilog2() as usize + 4)
-            .ok_or_else(|| budget("extraction interval index work"))?;
-        stats.work = stats
-            .work
-            .checked_add(index_work)
-            .filter(|&n| n <= limits.max_work)
-            .ok_or_else(|| budget("extraction interval index work"))?;
-        let mut event_index = 0;
-        let span = (run.hi - run.lo) as f64;
-        // Passive strips attach to their routed partners only.
-        let net_local = match run.passive {
-            None => net_index[&run.net],
-            Some(_) => usize::MAX,
-        };
-        // Same metal as this strip: its own net, or for a passive conductor
-        // the same supply/ground class or the same pin net.
-        let same_metal = |sh: &Shape| -> bool {
-            match (sh.owner, run.passive) {
-                (Owner::Run(o), _) => built.runs[o as usize].net == run.net,
-                (Owner::Passive(p), None) => {
-                    matches!(p, PassiveOwner::Pin { net, .. } if net == run.net)
-                }
-                (Owner::Passive(p), Some(PassiveOwner::Ground)) => p == PassiveOwner::Ground,
-                (Owner::Passive(p), Some(PassiveOwner::Pin { net, .. })) => {
-                    matches!(p, PassiveOwner::Pin { net: other, .. } if other == net)
-                }
-            }
-        };
-        for w in points.windows(2) {
-            let (t0, t1) = (w[0], w[1]);
-            if t1 <= t0 {
-                continue;
-            }
-            while event_index < events.len() && events[event_index].0 <= t0 {
-                let (_, shape, enter) = events[event_index];
-                if enter {
-                    active.insert(shape);
-                } else {
-                    active.remove(&shape);
-                }
-                event_index += 1;
-            }
-            if run.passive.is_some() {
-                stats.passive_intervals += 1;
-            } else {
-                stats.intervals += 1;
-            }
-            stats.work = stats
-                .work
-                .checked_add(active.len().max(1))
-                .ok_or_else(|| budget("extraction work"))?;
-            if stats.work > limits.max_work {
-                return Err(budget("extraction work"));
-            }
-            // Nearest lateral neighbour per side and nearest planes.
-            let mut plus: Option<(i64, u32)> = None;
-            let mut minus: Option<(i64, u32)> = None;
-            let (mut covered_plus, mut covered_minus) = (false, false);
-            layered.clear();
-            // Shape-ID order preserves the original floating-point accumulation
-            // and geometric ownership while skipping disjoint axis intervals.
-            for &s in &active {
-                let sh = &shapes.get(s);
-                let r = sh.rect;
-                let (a0, a1, x0, x1) = if run.vertical {
-                    (r.ly, r.uy, r.lx, r.ux)
-                } else {
-                    (r.lx, r.ux, r.ly, r.uy)
-                };
-                if a0 > t0 || a1 < t1 {
-                    continue;
-                }
-                let same = same_metal(sh);
-                if sh.layer == run.layer {
-                    if x0 >= edge_plus {
-                        let gap = x0 - edge_plus;
-                        if gap < window_dbu && plus.is_none_or(|p| (gap, s) < p) {
-                            plus = Some((gap, s));
-                        }
-                    } else if x1 <= edge_minus {
-                        let gap = edge_minus - x1;
-                        if gap < window_dbu && minus.is_none_or(|p| (gap, s) < p) {
-                            minus = Some((gap, s));
-                        }
-                    } else if !same {
-                        if run.passive.is_none() {
-                            stats.foreign_overlaps += 1;
-                        }
-                    } else {
-                        // Same-net metal across a side edge: that side is
-                        // inside the net's metal union, not exposed.
-                        covered_plus |= x1 > edge_plus;
-                        covered_minus |= x0 < edge_minus;
-                    }
-                } else {
-                    let metal = layer_model(input, sh.layer)?.metal;
-                    let overlap = x1.min(edge_plus) - x0.max(edge_minus);
-                    if overlap <= 0 {
+                    if a0 > t0 || a1 < t1 {
                         continue;
                     }
-                    layered.push((metal, x0, x1, s));
-                }
-            }
-            // A conductor on another layer is a plate for this strip (the
-            // calibration OVER/UNDER contexts) only where its layer's metal
-            // spans the whole strip cross-section and reaches one strip width
-            // beyond both side edges: crossings and clearly wider shapes.
-            // Narrower, offset or barely wider parallel metal is not a plate;
-            // that overlap coupling is not modelled.
-            layered.sort_unstable();
-            let below = plate(&layered, model.metal, false, edge_minus, edge_plus);
-            let above = plate(&layered, model.metal, true, edge_minus, edge_plus);
-            let nearest_below = layered
-                .iter()
-                .filter(|e| e.0 < model.metal)
-                .map(|e| e.0)
-                .max();
-            let nearest_above = layered
-                .iter()
-                .filter(|e| e.0 > model.metal)
-                .map(|e| e.0)
-                .min();
-            if run.passive.is_none()
-                && (nearest_below != below.map(|b| b.0) || nearest_above != above.map(|a| a.0))
-            {
-                stats.nonspanning_plane_intervals += 1;
-            }
-            let over = below.map_or(0, |b| b.0);
-            let under = above.map(|a| a.0);
-            let exact = ctx_map.get(&(over, under));
-            let (ctx, plane_split) = match exact {
-                Some(&i) => (i, (below.is_some(), above.is_some())),
-                None => {
-                    if run.passive.is_none() {
-                        stats.context_fallback_intervals += 1;
-                    }
-                    if let Some(&i) = ctx_map.get(&(over, None)).filter(|_| over > 0) {
-                        (i, (true, false))
-                    } else if let Some(&i) = ctx_map.get(&(0, under)) {
-                        (i, (false, above.is_some()))
-                    } else {
-                        (ctx_map[&(0, None)], (false, false))
-                    }
-                }
-            };
-            let sub = &model.contexts[ctx_map[&(0, None)]].rows;
-            let rows = &model.contexts[ctx].rows;
-            let below_only = if plane_split.0 && plane_split.1 {
-                ctx_map.get(&(over, None)).map(|&i| &model.contexts[i].rows)
-            } else {
-                None
-            };
-            let length = um(tech, t1 - t0);
-            let mid = (t0 + t1) as f64 / 2.0;
-            let w_hi = if span > 0.0 {
-                (mid - run.lo as f64) / span
-            } else {
-                0.5
-            };
-            let mid_point = if run.vertical {
-                [run.cross as f64, mid]
-            } else {
-                [mid, run.cross as f64]
-            };
-            let mut ground = 0.0f64;
-            // (shape, pF, factor applied when the partner is another run).
-            let mut contributions: Vec<(u32, f64, f64)> = Vec::with_capacity(6);
-            for (k, side, covered) in [(0, plus, covered_plus), (1, minus, covered_minus)] {
-                if covered {
-                    if run.passive.is_none() {
-                        stats.covered_side_intervals += 1;
-                    }
-                    continue;
-                }
-                let spacing = side.map(|(g, _)| um(tech, g));
-                let touching_same = side.is_some_and(|(g, s)| g == 0 && same_metal(&shapes.get(s)));
-                if touching_same {
-                    continue;
-                }
-                let (cc, cg) = sample(rows, spacing);
-                let (_, cg_sub) = sample(sub, spacing);
-                // Split this side's context value between the substrate and
-                // the planes. A conductor below is the plate of an OVER
-                // context: it shields the substrate, so the whole OVER value
-                // goes to it. A plane above takes only the excess over what
-                // goes down (the substrate share, or the OVER value).
-                let cg = cg.max(0.0);
-                let (g, d_below, d_above) = match plane_split {
-                    (true, true) => {
-                        let down = below_only.map_or(cg_sub, |r| sample(r, spacing).1).min(cg);
-                        (0.0, down, cg - down)
-                    }
-                    (true, false) => (0.0, cg, 0.0),
-                    (false, true) => {
-                        let up = (cg - cg_sub).max(0.0);
-                        (cg - up, 0.0, up)
-                    }
-                    (false, false) => (cg, 0.0, 0.0),
-                };
-                let mut g = g;
-                // Each conductor's own cross-section is authoritative for its
-                // own field: a crossing is counted from both wires (the upper
-                // wire's OVER cut over the lower wire's width, the lower wire's
-                // UNDER cut over the upper wire's width).
-                for (d, plane) in [(d_below, below), (d_above, above)] {
-                    if d > 0.0 {
-                        match plane {
-                            Some((_, owners)) => contributions.push((owners[k], d * length, 1.0)),
-                            None => g += d,
+                    let same = same_metal(sh);
+                    if sh.layer == run.layer {
+                        if x0 >= edge_plus {
+                            let gap = x0 - edge_plus;
+                            if gap < window_dbu && plus.is_none_or(|p| (gap, s) < p) {
+                                plus = Some((gap, s));
+                            }
+                        } else if x1 <= edge_minus {
+                            let gap = edge_minus - x1;
+                            if gap < window_dbu && minus.is_none_or(|p| (gap, s) < p) {
+                                minus = Some((gap, s));
+                            }
+                        } else if !same {
+                            if run.passive.is_none() {
+                                stats.foreign_overlaps += 1;
+                            }
+                        } else {
+                            // Same-net metal across a side edge: that side is
+                            // inside the net's metal union, not exposed.
+                            covered_plus |= x1 > edge_plus;
+                            covered_minus |= x0 < edge_minus;
                         }
+                    } else {
+                        let metal = layer_model(input, sh.layer)?.metal;
+                        let overlap = x1.min(edge_plus) - x0.max(edge_minus);
+                        if overlap <= 0 {
+                            continue;
+                        }
+                        layered.push((metal, x0, x1, s));
                     }
                 }
-                ground += g.max(0.0) * length;
-                // Lateral coupling between two runs is computed from both sides.
-                if let Some((_, s)) = side
-                    && cc > 0.0
+                // A conductor on another layer is a plate for this strip (the
+                // calibration OVER/UNDER contexts) only where its layer's metal
+                // spans the whole strip cross-section and reaches one strip width
+                // beyond both side edges: crossings and clearly wider shapes.
+                // Narrower, offset or barely wider parallel metal is not a plate;
+                // that overlap coupling is not modelled.
+                layered.sort_unstable();
+                let below = plate(&layered, model.metal, false, edge_minus, edge_plus);
+                let above = plate(&layered, model.metal, true, edge_minus, edge_plus);
+                let nearest_below = layered
+                    .iter()
+                    .filter(|e| e.0 < model.metal)
+                    .map(|e| e.0)
+                    .max();
+                let nearest_above = layered
+                    .iter()
+                    .filter(|e| e.0 > model.metal)
+                    .map(|e| e.0)
+                    .min();
+                if run.passive.is_none()
+                    && (nearest_below != below.map(|b| b.0) || nearest_above != above.map(|a| a.0))
                 {
-                    contributions.push((s, cc * length, 0.5));
+                    stats.nonspanning_plane_intervals += 1;
                 }
-            }
-            // Overlap area of non-plate metal on other layers: a conductor
-            // that covers part of this strip's face (stacked, offset or barely
-            // wider metal) but is not a calibration plate couples over the
-            // covered width, counted once from the upper face; the covered
-            // face no longer sees the substrate. A piece counts its face on
-            // its x strip only.
-            if run.passive.is_none()
-                && !(run.piece && run.vertical)
-                && let Some(area_cap) = model.area_cap
-            {
-                let mut shielded = 0.0;
-                if below.is_none() {
-                    for (metal, covered, owners) in
-                        face_portions(&layered, model.metal, false, edge_minus, edge_plus)
-                    {
-                        let Some(&(_, ov)) = model.overlap.iter().find(|o| o.0 == metal) else {
-                            stats.overlap_pairs_without_data += 1;
-                            continue;
-                        };
-                        let area = um(tech, covered) * length;
-                        stats.overlap_area_um2 += area;
-                        shielded += area_cap * area;
-                        for (sh, w) in owners {
-                            contributions.push((sh, ov * um(tech, w) * length, 1.0));
+                let over = below.map_or(0, |b| b.0);
+                let under = above.map(|a| a.0);
+                let exact = ctx_map.get(&(over, under));
+                let (ctx, plane_split) = match exact {
+                    Some(&i) => (i, (below.is_some(), above.is_some())),
+                    None => {
+                        if run.passive.is_none() {
+                            stats.context_fallback_intervals += 1;
                         }
-                    }
-                }
-                if above.is_none() {
-                    // A routed conductor above counts the overlap from its
-                    // own face; passive metal does not model itself.
-                    for (metal, _, owners) in
-                        face_portions(&layered, model.metal, true, edge_minus, edge_plus)
-                    {
-                        let passive: Vec<(u32, i64)> = owners
-                            .into_iter()
-                            .filter(|o| matches!(shapes.get(o.0).owner, Owner::Passive(_)))
-                            .collect();
-                        if passive.is_empty() {
-                            continue;
-                        }
-                        let upper = metal_layer
-                            .get(&metal)
-                            .and_then(|&l| tech.layers[l].as_ref())
-                            .and_then(|u| u.overlap.iter().find(|o| o.0 == model.metal));
-                        let Some(&(_, ov)) = upper else {
-                            stats.overlap_pairs_without_data += 1;
-                            continue;
-                        };
-                        for (sh, w) in passive {
-                            stats.overlap_area_um2 += um(tech, w) * length;
-                            contributions.push((sh, ov * um(tech, w) * length, 1.0));
-                        }
-                    }
-                }
-                ground = (ground - shielded).max(0.0);
-            }
-            if run.passive.is_some() {
-                // Only this conductor's plate shares toward routed conductors
-                // of other nets: ground and lateral sides are counted from the
-                // routed side.
-                for (s, value, run_factor) in contributions {
-                    if run_factor < 1.0 {
-                        continue;
-                    }
-                    let Owner::Run(o) = shapes.get(s).owner else {
-                        continue;
-                    };
-                    let other = &built.runs[o as usize];
-                    if other.passive.is_some() || other.net == run.net {
-                        continue;
-                    }
-                    let pnode = nearer_end(other, mid_point);
-                    let li = net_index[&other.net];
-                    let pin_node = match run.passive {
-                        Some(PassiveOwner::Pin { pin, .. }) => built.pin_nodes.get(&pin).copied(),
-                        _ => None,
-                    };
-                    match pin_node {
-                        Some(a) => {
-                            let b = (other.net, pnode);
-                            let key = if a <= b { (a, b) } else { (b, a) };
-                            *coupling.entry(key).or_insert(0.0) += value;
-                            if coupling.len() > limits.max_couplings {
-                                return Err(budget("extraction coupling capacitors"));
-                            }
-                        }
-                        None => {
-                            if matches!(run.passive, Some(PassiveOwner::Pin { .. })) {
-                                stats.unrouted_pin_partners += 1;
-                            }
-                            built.nets[li].ground[pnode as usize] += value;
-                        }
-                    }
-                }
-                continue;
-            }
-            // Attach to this run's end nodes by position (pi split).
-            let rc = &mut built.nets[net_local];
-            rc.ground[run.node_lo as usize] += ground * (1.0 - w_hi);
-            rc.ground[run.node_hi as usize] += ground * w_hi;
-            for (s, value, run_factor) in contributions {
-                let sh = shapes.get(s);
-                let partner = match sh.owner {
-                    Owner::Run(o) => {
-                        // Every routed-net shape models its own exposed sides,
-                        // so a lateral pair is counted half from each side.
-                        let other = &built.runs[o as usize];
-                        if other.net == run.net {
-                            None
+                        if let Some(&i) = ctx_map.get(&(over, None)).filter(|_| over > 0) {
+                            (i, (true, false))
+                        } else if let Some(&i) = ctx_map.get(&(0, under)) {
+                            (i, (false, above.is_some()))
                         } else {
-                            Some(Some((other.net, nearer_end(other, mid_point), run_factor)))
-                        }
-                    }
-                    Owner::Passive(PassiveOwner::Ground) => Some(None),
-                    Owner::Passive(PassiveOwner::Pin { net, pin }) => {
-                        if net == run.net {
-                            None
-                        } else if let Some(&(n, node)) = built.pin_nodes.get(&pin) {
-                            Some(Some((n, node, 1.0)))
-                        } else {
-                            stats.unrouted_pin_partners += 1;
-                            Some(None)
+                            (ctx_map[&(0, None)], (false, false))
                         }
                     }
                 };
-                match partner {
-                    None => {}
-                    Some(None) => {
-                        let rc = &mut built.nets[net_local];
-                        rc.ground[run.node_lo as usize] += value * (1.0 - w_hi);
-                        rc.ground[run.node_hi as usize] += value * w_hi;
+                let sub = &model.contexts[ctx_map[&(0, None)]].rows;
+                let rows = &model.contexts[ctx].rows;
+                let below_only = if plane_split.0 && plane_split.1 {
+                    ctx_map.get(&(over, None)).map(|&i| &model.contexts[i].rows)
+                } else {
+                    None
+                };
+                let length = um(tech, t1 - t0);
+                let mid = (t0 + t1) as f64 / 2.0;
+                let w_hi = if span > 0.0 {
+                    (mid - run.lo as f64) / span
+                } else {
+                    0.5
+                };
+                let mid_point = if run.vertical {
+                    [run.cross as f64, mid]
+                } else {
+                    [mid, run.cross as f64]
+                };
+                let mut ground = 0.0f64;
+                // (shape, pF, factor applied when the partner is another run).
+                let mut contributions: Vec<(u32, f64, f64)> = Vec::with_capacity(6);
+                for (k, side, covered) in [(0, plus, covered_plus), (1, minus, covered_minus)] {
+                    if covered {
+                        if run.passive.is_none() {
+                            stats.covered_side_intervals += 1;
+                        }
+                        continue;
                     }
-                    Some(Some((pnet, pnode, factor))) => {
-                        for (node, weight) in [(run.node_lo, 1.0 - w_hi), (run.node_hi, w_hi)] {
-                            let v = value * factor * weight;
-                            if v <= 0.0 {
+                    let spacing = side.map(|(g, _)| um(tech, g));
+                    let touching_same =
+                        side.is_some_and(|(g, s)| g == 0 && same_metal(&shapes.get(s)));
+                    if touching_same {
+                        continue;
+                    }
+                    let (cc, cg) = sample(rows, spacing);
+                    let (_, cg_sub) = sample(sub, spacing);
+                    // Split this side's context value between the substrate and
+                    // the planes. A conductor below is the plate of an OVER
+                    // context: it shields the substrate, so the whole OVER value
+                    // goes to it. A plane above takes only the excess over what
+                    // goes down (the substrate share, or the OVER value).
+                    let cg = cg.max(0.0);
+                    let (g, d_below, d_above) = match plane_split {
+                        (true, true) => {
+                            let down = below_only.map_or(cg_sub, |r| sample(r, spacing).1).min(cg);
+                            (0.0, down, cg - down)
+                        }
+                        (true, false) => (0.0, cg, 0.0),
+                        (false, true) => {
+                            let up = (cg - cg_sub).max(0.0);
+                            (cg - up, 0.0, up)
+                        }
+                        (false, false) => (cg, 0.0, 0.0),
+                    };
+                    let mut g = g;
+                    // Each conductor's own cross-section is authoritative for its
+                    // own field: a crossing is counted from both wires (the upper
+                    // wire's OVER cut over the lower wire's width, the lower wire's
+                    // UNDER cut over the upper wire's width).
+                    for (d, plane) in [(d_below, below), (d_above, above)] {
+                        if d > 0.0 {
+                            match plane {
+                                Some((_, owners)) => {
+                                    contributions.push((owners[k], d * length, 1.0))
+                                }
+                                None => g += d,
+                            }
+                        }
+                    }
+                    ground += g.max(0.0) * length;
+                    // Lateral coupling between two runs is computed from both sides.
+                    if let Some((_, s)) = side
+                        && cc > 0.0
+                    {
+                        contributions.push((s, cc * length, 0.5));
+                    }
+                }
+                // Overlap area of non-plate metal on other layers: a conductor
+                // that covers part of this strip's face (stacked, offset or barely
+                // wider metal) but is not a calibration plate couples over the
+                // covered width, counted once from the upper face; the covered
+                // face no longer sees the substrate. A piece counts its face on
+                // its x strip only.
+                if run.passive.is_none()
+                    && !(run.piece && run.vertical)
+                    && let Some(area_cap) = model.area_cap
+                {
+                    let mut shielded = 0.0;
+                    if below.is_none() {
+                        for (metal, covered, owners) in
+                            face_portions(&layered, model.metal, false, edge_minus, edge_plus)
+                        {
+                            let Some(&(_, ov)) = model.overlap.iter().find(|o| o.0 == metal) else {
+                                stats.overlap_pairs_without_data += 1;
+                                continue;
+                            };
+                            let area = um(tech, covered) * length;
+                            stats.overlap_area_um2 += area;
+                            shielded += area_cap * area;
+                            for (sh, w) in owners {
+                                contributions.push((sh, ov * um(tech, w) * length, 1.0));
+                            }
+                        }
+                    }
+                    if above.is_none() {
+                        // A routed conductor above counts the overlap from its
+                        // own face; passive metal does not model itself.
+                        for (metal, _, owners) in
+                            face_portions(&layered, model.metal, true, edge_minus, edge_plus)
+                        {
+                            let passive: Vec<(u32, i64)> = owners
+                                .into_iter()
+                                .filter(|o| matches!(shapes.get(o.0).owner, Owner::Passive(_)))
+                                .collect();
+                            if passive.is_empty() {
                                 continue;
                             }
-                            let a = (run.net, node);
-                            let b = (pnet, pnode);
-                            let key = if a <= b { (a, b) } else { (b, a) };
-                            *coupling.entry(key).or_insert(0.0) += v;
-                            if coupling.len() > limits.max_couplings {
-                                return Err(budget("extraction coupling capacitors"));
+                            let upper = metal_layer
+                                .get(&metal)
+                                .and_then(|&l| tech.layers[l].as_ref())
+                                .and_then(|u| u.overlap.iter().find(|o| o.0 == model.metal));
+                            let Some(&(_, ov)) = upper else {
+                                stats.overlap_pairs_without_data += 1;
+                                continue;
+                            };
+                            for (sh, w) in passive {
+                                stats.overlap_area_um2 += um(tech, w) * length;
+                                contributions.push((sh, ov * um(tech, w) * length, 1.0));
+                            }
+                        }
+                    }
+                    ground = (ground - shielded).max(0.0);
+                }
+                if run.passive.is_some() {
+                    // Only this conductor's plate shares toward routed conductors
+                    // of other nets: ground and lateral sides are counted from the
+                    // routed side.
+                    for (s, value, run_factor) in contributions {
+                        if run_factor < 1.0 {
+                            continue;
+                        }
+                        let Owner::Run(o) = shapes.get(s).owner else {
+                            continue;
+                        };
+                        let other = &built.runs[o as usize];
+                        if other.passive.is_some() || other.net == run.net {
+                            continue;
+                        }
+                        let pnode = nearer_end(other, mid_point);
+                        let li = net_index[&other.net];
+                        let pin_node = match run.passive {
+                            Some(PassiveOwner::Pin { pin, .. }) => {
+                                built.pin_nodes.get(&pin).copied()
+                            }
+                            _ => None,
+                        };
+                        match pin_node {
+                            Some(a) => {
+                                let b = (other.net, pnode);
+                                let key = if a <= b { (a, b) } else { (b, a) };
+                                *coupling.entry(key).or_insert(0.0) += value;
+                                if coupling.len() > limits.max_couplings {
+                                    return Err(budget("extraction coupling capacitors"));
+                                }
+                            }
+                            None => {
+                                if matches!(run.passive, Some(PassiveOwner::Pin { .. })) {
+                                    stats.unrouted_pin_partners += 1;
+                                }
+                                built.nets[li].ground[pnode as usize] += value;
+                            }
+                        }
+                    }
+                    continue;
+                }
+                // Attach to this run's end nodes by position (pi split).
+                let rc = &mut built.nets[net_local];
+                rc.ground[run.node_lo as usize] += ground * (1.0 - w_hi);
+                rc.ground[run.node_hi as usize] += ground * w_hi;
+                for (s, value, run_factor) in contributions {
+                    let sh = shapes.get(s);
+                    let partner = match sh.owner {
+                        Owner::Run(o) => {
+                            // Every routed-net shape models its own exposed sides,
+                            // so a lateral pair is counted half from each side.
+                            let other = &built.runs[o as usize];
+                            if other.net == run.net {
+                                None
+                            } else {
+                                Some(Some((other.net, nearer_end(other, mid_point), run_factor)))
+                            }
+                        }
+                        Owner::Passive(PassiveOwner::Ground) => Some(None),
+                        Owner::Passive(PassiveOwner::Pin { net, pin }) => {
+                            if net == run.net {
+                                None
+                            } else if let Some(&(n, node)) = built.pin_nodes.get(&pin) {
+                                Some(Some((n, node, 1.0)))
+                            } else {
+                                stats.unrouted_pin_partners += 1;
+                                Some(None)
+                            }
+                        }
+                    };
+                    match partner {
+                        None => {}
+                        Some(None) => {
+                            let rc = &mut built.nets[net_local];
+                            rc.ground[run.node_lo as usize] += value * (1.0 - w_hi);
+                            rc.ground[run.node_hi as usize] += value * w_hi;
+                        }
+                        Some(Some((pnet, pnode, factor))) => {
+                            for (node, weight) in [(run.node_lo, 1.0 - w_hi), (run.node_hi, w_hi)] {
+                                let v = value * factor * weight;
+                                if v <= 0.0 {
+                                    continue;
+                                }
+                                let a = (run.net, node);
+                                let b = (pnet, pnode);
+                                let key = if a <= b { (a, b) } else { (b, a) };
+                                *coupling.entry(key).or_insert(0.0) += v;
+                                if coupling.len() > limits.max_couplings {
+                                    return Err(budget("extraction coupling capacitors"));
+                                }
                             }
                         }
                     }
                 }
+            }
+            profile.phase(5);
+            if prepared {
+                std::mem::swap(&mut candidates, &mut slot.candidates);
             }
         }
     }
+    if limits.query_workers > 1 {
+        stats.parallel_queries = Some(batch.stats);
+    }
+
     let mut couplings = Vec::new();
     for ((a, b), pf) in coupling {
         if pf <= 0.0 {
@@ -2518,6 +2636,8 @@ fn extract_with_queries(
         return Err(budget("extraction RC elements"));
     }
     guard_memory(limits)?;
+    profile.phase(7);
+    profile.report(&stats);
     Ok(RcNetwork {
         nets: built.nets,
         couplings,
@@ -2800,6 +2920,75 @@ mod tests {
             })
             .collect()
     }
+    fn assert_network_exact(a: &RcNetwork, b: &RcNetwork) {
+        assert_eq!(a.nets.len(), b.nets.len());
+        for (a, b) in a.nets.iter().zip(&b.nets) {
+            assert_eq!((a.net, &a.nodes), (b.net, &b.nodes));
+            assert_eq!(
+                a.ground.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                b.ground.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+            );
+            assert_eq!(
+                a.resistors
+                    .iter()
+                    .map(|&(x, y, v)| (x, y, v.to_bits()))
+                    .collect::<Vec<_>>(),
+                b.resistors
+                    .iter()
+                    .map(|&(x, y, v)| (x, y, v.to_bits()))
+                    .collect::<Vec<_>>()
+            );
+        }
+        assert_eq!(
+            a.couplings
+                .iter()
+                .map(|c| (c.a, c.b, c.pf.to_bits()))
+                .collect::<Vec<_>>(),
+            b.couplings
+                .iter()
+                .map(|c| (c.a, c.b, c.pf.to_bits()))
+                .collect::<Vec<_>>()
+        );
+        for (a, b) in [
+            (a.stats.overlap_area_um2, b.stats.overlap_area_um2),
+            (a.stats.ground_pf, b.stats.ground_pf),
+            (a.stats.coupling_pf, b.stats.coupling_pf),
+            (a.stats.resistance_ohm, b.stats.resistance_ohm),
+        ] {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        let clean = |s: &ExtractStats| {
+            let mut value = serde_json::to_value(s).unwrap();
+            value.as_object_mut().unwrap().remove("memory");
+            value.as_object_mut().unwrap().remove("parallel_queries");
+            value
+        };
+        assert_eq!(clean(&a.stats), clean(&b.stats));
+    }
+    fn check_parallel(input: &ExtractInput<'_>, limits: &ExtractLimits, serial: &RcNetwork) {
+        for (workers, batch) in [(2, 3), (4, 8), (4, 64)] {
+            let limits = ExtractLimits {
+                query_workers: workers,
+                query_batch_runs: batch,
+                ..limits.clone()
+            };
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .unwrap();
+            let parallel = pool.install(|| extract_cpu_ref(input, &limits)).unwrap();
+            assert_network_exact(serial, &parallel);
+            let memory = parallel.stats.memory.unwrap();
+            let stats = parallel.stats.parallel_queries.unwrap();
+            assert_eq!(
+                memory.estimate_bytes,
+                stats.baseline_estimate_bytes + stats.scratch_bytes
+            );
+            assert!(memory.estimate_bytes <= memory.limit_bytes);
+            assert!(stats.admitted_workers <= workers);
+            assert!(stats.scratch_bytes <= limits.query_scratch_mib * (1 << 20));
+        }
+    }
     fn run(
         r: &Routes,
         t: &[Terminal],
@@ -2850,6 +3039,7 @@ mod tests {
                 .map(|c| (c.a, c.b, c.pf.to_bits()))
                 .collect::<Vec<_>>()
         );
+        check_parallel(&input, &limits, &actual);
         Ok(actual)
     }
 
@@ -4125,6 +4315,147 @@ mod tests {
     }
 
     #[test]
+    fn parallel_query_budget_errors_and_serial_fallback_match() {
+        // Three close routed conductors produce distinct couplings; displaced
+        // passive edges also create interval boundaries without a direct cap.
+        let r = routes(
+            (0..3)
+                .flat_map(|n| straight(n, i64::from(n) * 400, 10))
+                .collect(),
+            vec![],
+            (0..3)
+                .flat_map(|n| {
+                    [
+                        Access {
+                            pin: 2 * n,
+                            net: n,
+                            layer: 0,
+                            at: [0, i64::from(n) * 400],
+                        },
+                        Access {
+                            pin: 2 * n + 1,
+                            net: n,
+                            layer: 0,
+                            at: [10_000, i64::from(n) * 400],
+                        },
+                    ]
+                })
+                .collect(),
+            vec![0, 1, 2],
+        );
+        let t: Vec<_> = (0..3)
+            .flat_map(|n| [terminal(2 * n, n, true), terminal(2 * n + 1, n, false)])
+            .collect();
+        let passive = [PassiveShape {
+            layer: 1,
+            rect: Rect {
+                lx: 1500,
+                ly: -200,
+                ux: 2300,
+                uy: 1200,
+            },
+            owner: PassiveOwner::Ground,
+        }];
+        let (l, v, tk) = (layers(), vias(), tech(true));
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            terminals: &t,
+            passive: &passive,
+            instances: None,
+            held_bytes: 0,
+            tech: &tk,
+        };
+        let limits = ExtractLimits::default();
+        let baseline = extract_cpu_ref(&input, &limits).unwrap();
+        assert!(baseline.couplings.len() > 1);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        for limits in [
+            limits.clone(),
+            ExtractLimits {
+                max_work: baseline.stats.work,
+                ..limits.clone()
+            },
+            ExtractLimits {
+                max_work: baseline.stats.work - 1,
+                ..limits.clone()
+            },
+            ExtractLimits {
+                max_work: 100,
+                ..limits.clone()
+            },
+            ExtractLimits {
+                max_candidates: 1,
+                ..limits.clone()
+            },
+            ExtractLimits {
+                max_couplings: 1,
+                ..limits.clone()
+            },
+            ExtractLimits {
+                max_elements: 1,
+                ..limits.clone()
+            },
+            ExtractLimits {
+                query_scratch_mib: 1,
+                ..limits.clone()
+            },
+            ExtractLimits {
+                query_batch_runs: 1,
+                ..limits.clone()
+            },
+        ] {
+            let a = extract_cpu_ref(&input, &limits);
+            let enabled = ExtractLimits {
+                query_workers: 16,
+                ..limits.clone()
+            };
+            let b = pool.install(|| extract_cpu_ref(&input, &enabled));
+            match (a, b) {
+                (Ok(a), Ok(b)) => {
+                    assert_network_exact(&a, &b);
+                    let stats = b.stats.parallel_queries.unwrap();
+                    assert!(stats.admitted_workers <= 4);
+                    if limits.query_scratch_mib == 1 || limits.query_batch_runs == 1 {
+                        assert_eq!(stats.admitted_workers, 1);
+                    }
+                    if limits.max_work == baseline.stats.work {
+                        assert!(stats.serial_tiles > 0);
+                    }
+                    if limits.max_work == ExtractLimits::default().max_work
+                        && limits.query_scratch_mib > 1
+                        && limits.query_batch_runs > 1
+                    {
+                        assert!(stats.parallel_tiles > 0);
+                    }
+                }
+                (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
+                (a, b) => panic!("serial/parallel outcome differs: {a:?} / {b:?}"),
+            }
+        }
+        let one = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap()
+            .install(|| {
+                extract_cpu_ref(
+                    &input,
+                    &ExtractLimits {
+                        query_workers: 16,
+                        ..limits
+                    },
+                )
+            })
+            .unwrap();
+        assert_network_exact(&baseline, &one);
+        assert_eq!(one.stats.parallel_queries.unwrap().admitted_workers, 1);
+    }
+
+    #[test]
     fn disjoint_neighbours_use_bounded_active_interval_work() {
         let r = routes(
             vec![Wire {
@@ -4286,6 +4617,23 @@ mod tests {
             &ExtractLimits::default(),
         )
         .unwrap();
+        check_parallel(
+            &ExtractInput {
+                layers: &l,
+                vias: &v,
+                routes: &r,
+                terminals: &t,
+                passive: &[],
+                held_bytes: 0,
+                instances: Some(InstancedPassive {
+                    geometry: &source,
+                    signal_nets: &[true, true],
+                }),
+                tech: &tech,
+            },
+            &ExtractLimits::default(),
+            &b,
+        );
         assert_eq!(a.nets.len(), b.nets.len());
         for (a, b) in a.nets.iter().zip(&b.nets) {
             assert_eq!(a.nodes, b.nodes);

@@ -727,4 +727,43 @@ with `feat/rtl2gds-scale`.
 * The field solver uses a homogeneous dielectric and idealised environments
   (infinite wires, periodic crossings); its factors are evidence, not model
   data.
-* Serial `cpu_ref` only. There is no GPU path and none is claimed.
+* Electrical arithmetic runs serially in `cpu_ref`; candidate queries can use bounded CPU workers. There is no GPU path.
+
+
+## Bounded CPU candidate queries
+
+`extract --extract-query-workers N` opts into candidate-only concurrency (`1`
+by default, ceiling `16`). The effective worker count cannot exceed `--threads`,
+`--extract-query-batch-runs` (default `8`, ceiling `64`), or the workers admitted
+under both `--extract-memory-mib` and `--extract-query-scratch-mib` (default `32`,
+ceiling `64` MiB). If fewer than two workers fit, extraction uses the serial path.
+The original memory admission and instance-query bin selection happen first.
+The extra scratch is added to the reported working and total memory estimates.
+
+Each worker has bounded candidate deduplication and one generation-mark vector
+with one `u64` per physical instance. All workers borrow the same immutable
+retained-shape BVH, instance bins, templates and shape IDs. A tile holds at most
+`batch_runs * max_candidates` IDs, with exact reserved capacities and checked
+candidate caps; it never retains electrical contribution transcripts. Conservative
+admission is `workers * (64 * max_candidates + 8 * instances + 2 MiB)` plus
+`8 * batch_runs * max_candidates + 4096` bytes. The stack term covers active
+query workers; pool resources already exist before the original live-memory probe.
+
+The original run iterator stays lazy. Query results are consumed in its original
+order, and each candidate list is sorted by the original shape ID. All routing
+layers, including shapes without a direct electrical contribution, remain in the
+query. Interval formation, passive strip effects, individual ground/coupling
+additions, final threshold handling and statistical floating-point additions all
+run in the original serial order. Integer work charges and maxima are unchanged.
+
+A tile runs concurrently only when a conservative bound on every query,
+interval-index operation and active-interval comparison fits the remaining
+original `max_work`. A query visits each retained BVH node/ID at most once and
+each instance/virtual shape at most once per layer. For `n` candidates, there are
+at most `2*n` events and `2*n+1` intervals with at most `n` active IDs. Overflow
+or insufficient remaining work selects the original serial path, preserving its
+budget rejection order. Results and errors are consumed in run order.
+
+Opt-in receipts expose `stats.parallel_queries` with requested/admitted workers,
+original memory estimate, admitted scratch, tile bound, and parallel/serial tile
+counts. Default serial receipts keep their original shape.
