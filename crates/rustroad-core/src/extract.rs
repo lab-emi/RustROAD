@@ -2737,7 +2737,11 @@ mod tests {
         value["elapsed_ns"] = u64::MAX.into();
         value["profile_state_bytes"] = u64::MAX.into();
         let record = format!("{value}\n");
-        assert!(record.len() < 4096, "profile record is {} bytes", record.len());
+        assert!(
+            record.len() < 4096,
+            "profile record is {} bytes",
+            record.len()
+        );
         assert_eq!(value["geometry"]["stage_ns"].as_object().unwrap().len(), 6);
         assert_eq!(
             value["geometry"]["legacy_work_snapshots"]
