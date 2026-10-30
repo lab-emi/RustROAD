@@ -394,8 +394,9 @@ pub(crate) fn build(
         let entry = reach.entry((span.polarity, x)).or_insert(top);
         *entry = (*entry).max(top);
     }
+    // `reach` has at most one entry per span, each already ticked above: no
+    // extra work, so a layout without extensions keeps its stored state.
     for ((polarity, x), top) in reach {
-        b.tick()?;
         let spine = b
             .out
             .wires
@@ -418,7 +419,9 @@ pub(crate) fn build(
     }
     // Rail continuity assumes each stack reaches a spine of its polarity:
     // check every strap pad instead (run14 left 265 pads beside their spines,
-    // 132 floating supply nets that only LVS reported).
+    // 132 floating supply nets that only LVS reported). This check is budgeted
+    // but kept out of `work_units`, which is part of the validated state:
+    // counting it made v23 reject geometry-identical workspaces.
     let top_via = stack
         .names
         .last()
@@ -428,9 +431,9 @@ pub(crate) fn build(
         .last()
         .and_then(|p| p.get(&cfg.strap_layer))
         .ok_or_else(|| invalid("supply upper pad absent"))?;
+    let mut checked = b.work;
     for v in b.out.vias.iter().filter(|v| &v.name == top_via) {
-        b.work = b
-            .work
+        checked = checked
             .checked_add(1)
             .filter(|w| *w <= limits.max_work)
             .ok_or_else(|| Error::Budget("segmented supply work limit".into()))?;
