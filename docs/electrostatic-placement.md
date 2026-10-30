@@ -116,6 +116,8 @@ Additional counters bound cumulative pin evaluations, density interactions,
 transform terms and capacity intersections. Admission checks the requested
 evaluation envelope against each remaining budget. Common retargeting,
 legalization and detailed-placement work shares the additional-work ceiling.
+The opt-in unseeded baseline and refinement also share a hard 20-billion
+total ceiling even when a core caller supplies a larger placement limit.
 Maximum-sized inputs are not promised the maximum horizon. In particular, the
 conservative worst-case support admission may reject a design whose actual
 deposition would use fewer bins; the report identifies this budget fallback.

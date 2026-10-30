@@ -6,6 +6,22 @@ mod optimizer;
 mod poisson;
 mod wire;
 
+const HARD_TOTAL_WORK: u64 = 20_000_000_000;
+
+/// Both the retained baseline and refinement share the P1 total ceiling.
+pub(super) fn bounded_limits(limits: &PlaceLimits) -> PlaceLimits {
+    PlaceLimits {
+        max_work: limits.max_work.min(HARD_TOTAL_WORK),
+        ..limits.clone()
+    }
+}
+
+fn refinement_work_limit(caller: u64, baseline: u64, additional: u64) -> u64 {
+    caller
+        .min(HARD_TOTAL_WORK)
+        .min(baseline.saturating_add(additional))
+}
+
 /// Budgets and integer-scaled parameters for the unseeded CPU prototype.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -761,9 +777,7 @@ pub(super) fn refine(
         used: baseline_work,
         // Common retarget/legalizer/detail helpers charge this same counter.
         // Their work must obey the configured additional cap as well.
-        max: limits
-            .max_work
-            .min(baseline_work.saturating_add(cfg.max_work)),
+        max: refinement_work_limit(limits.max_work, baseline_work, cfg.max_work),
     };
     let mut accepted = None;
     let attempt = (|| -> std::result::Result<(), Failure> {

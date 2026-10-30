@@ -1530,11 +1530,12 @@ fn place_dispatch(
     if config.electrostatic.is_none() {
         return place_legacy(problem, config, limits);
     }
-    validate(problem, config, limits)?;
+    let limits = electrostatic::bounded_limits(limits);
+    validate(problem, config, &limits)?;
     let mut legacy = config.clone();
     legacy.electrostatic = None;
-    let baseline = place_legacy(problem, &legacy, limits)?;
-    electrostatic::refine(problem, config, limits, baseline, core)
+    let baseline = place_legacy(problem, &legacy, &limits)?;
+    electrostatic::refine(problem, config, &limits, baseline, core)
 }
 fn place_legacy(
     problem: &PlaceProblem,

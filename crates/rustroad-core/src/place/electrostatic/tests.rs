@@ -21,6 +21,47 @@ fn run_meter<T>(config: &ElectrostaticConfig, f: impl FnOnce(&mut Meter<'_>) -> 
     };
     f(&mut meter)
 }
+
+#[test]
+fn total_and_additional_work_caps_compose_without_spending_the_budget() {
+    let hard = super::HARD_TOTAL_WORK;
+    for requested in [0, 11, hard - 1, hard, hard + 1, u64::MAX] {
+        let caller = PlaceLimits {
+            max_cells: 73,
+            max_pins: 311,
+            max_work: requested,
+        };
+        let capped = super::bounded_limits(&caller);
+        assert_eq!(capped.max_cells, caller.max_cells);
+        assert_eq!(capped.max_pins, caller.max_pins);
+        assert!(capped.max_work <= requested && capped.max_work <= hard);
+        assert_eq!(caller.max_work, requested);
+        if requested >= hard {
+            assert_eq!(capped.max_work, hard);
+        }
+    }
+    // Work charges are scalar counters, so boundary behavior needs no large
+    // fixture or billions of operations. Common candidate helpers use Work.
+    for (caller, baseline, additional, expected) in [
+        (u64::MAX, hard - 3, 100, hard),
+        (u64::MAX, hard - 10, 7, hard - 3),
+        (11, 3, 4, 7),
+        (11, 9, 8, 11),
+        (u64::MAX, hard, u64::MAX, hard),
+    ] {
+        let cap = super::refinement_work_limit(caller, baseline, additional);
+        assert_eq!(cap, expected);
+        let mut work = Work {
+            used: baseline,
+            max: cap,
+        };
+        work.add(cap - baseline).unwrap();
+        assert!(work.add(1).is_err());
+        assert_eq!(work.used, cap);
+        assert!(work.used <= hard && work.used <= caller);
+        assert!(work.used - baseline <= additional);
+    }
+}
 // This oracle assembles conservative edge fluxes directly, including the
 // zero-mean constraint, then solves an augmented dense matrix with pivoting.
 // It does not use cosine modes, eigenvalues, or the production transform.
