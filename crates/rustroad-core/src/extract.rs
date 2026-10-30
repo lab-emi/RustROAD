@@ -1754,6 +1754,14 @@ fn sample(rows: &[[f64; 3]], spacing: Option<f64>) -> (f64, f64) {
 
 /// Compute an RC tree for every routed net plus grounded and coupling caps.
 pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<RcNetwork> {
+    extract_with_queries(input, limits, true)
+}
+
+fn extract_with_queries(
+    input: &ExtractInput<'_>,
+    limits: &ExtractLimits,
+    footprint_queries: bool,
+) -> Result<RcNetwork> {
     preflight(input, limits)?;
     let memory = memory_estimate(input, limits)?;
     let (mut built, mut stats) = build_trees(input, limits)?;
@@ -1923,33 +1931,48 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         candidates.clear();
         seen.clear();
         for &layer in &routing_layers {
-            bins.visit(layer, query, &shapes, &mut stats, limits, |id, shape| {
-                if id == run.shape || seen.contains(&id) {
-                    return Ok(());
-                }
-                let r = shape.rect;
-                let (a0, a1, x0, x1) = if run.vertical {
-                    (r.ly, r.uy, r.lx, r.ux)
-                } else {
-                    (r.lx, r.ux, r.ly, r.uy)
-                };
-                if a1 <= run.lo || a0 >= run.hi {
-                    return Ok(());
-                }
-                let relevant = if layer == run.layer {
-                    x1 > c0 && x0 < c1
-                } else {
-                    x1 > edge_minus && x0 < edge_plus
-                };
-                if relevant {
-                    if candidates.len() >= limits.max_candidates {
-                        return Err(budget("extraction candidates per wire run"));
+            // Other-layer candidates must overlap the strip's face. Querying
+            // only that face preserves the exact event boundaries and shape-ID
+            // order while avoiding unrelated lateral bin/instance scans.
+            let layer_query = if footprint_queries && layer != run.layer {
+                body_rect(&run)
+            } else {
+                query
+            };
+            bins.visit(
+                layer,
+                layer_query,
+                &shapes,
+                &mut stats,
+                limits,
+                |id, shape| {
+                    if id == run.shape || seen.contains(&id) {
+                        return Ok(());
                     }
-                    seen.insert(id);
-                    candidates.push(id);
-                }
-                Ok(())
-            })?;
+                    let r = shape.rect;
+                    let (a0, a1, x0, x1) = if run.vertical {
+                        (r.ly, r.uy, r.lx, r.ux)
+                    } else {
+                        (r.lx, r.ux, r.ly, r.uy)
+                    };
+                    if a1 <= run.lo || a0 >= run.hi {
+                        return Ok(());
+                    }
+                    let relevant = if layer == run.layer {
+                        x1 > c0 && x0 < c1
+                    } else {
+                        x1 > edge_minus && x0 < edge_plus
+                    };
+                    if relevant {
+                        if candidates.len() >= limits.max_candidates {
+                            return Err(budget("extraction candidates per wire run"));
+                        }
+                        seen.insert(id);
+                        candidates.push(id);
+                    }
+                    Ok(())
+                },
+            )?;
         }
         stats.max_run_candidates = stats.max_run_candidates.max(candidates.len());
         if candidates.len() > limits.max_candidates {
@@ -2567,19 +2590,51 @@ mod tests {
         tech: &RcTech,
     ) -> Result<RcNetwork> {
         let (l, v) = (layers(), vias());
-        extract_cpu_ref(
-            &ExtractInput {
-                layers: &l,
-                vias: &v,
-                routes: r,
-                terminals: t,
-                passive,
-                held_bytes: 0,
-                instances: None,
-                tech,
-            },
-            &ExtractLimits::default(),
-        )
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: r,
+            terminals: t,
+            passive,
+            held_bytes: 0,
+            instances: None,
+            tech,
+        };
+        let limits = ExtractLimits::default();
+        let actual = extract_cpu_ref(&input, &limits)?;
+        let reference = extract_with_queries(&input, &limits, false)?;
+        assert_eq!(actual.nets.len(), reference.nets.len());
+        for (a, b) in actual.nets.iter().zip(&reference.nets) {
+            assert_eq!((a.net, &a.nodes), (b.net, &b.nodes));
+            assert_eq!(
+                a.ground.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                b.ground.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+            );
+            assert_eq!(
+                a.resistors
+                    .iter()
+                    .map(|&(x, y, v)| (x, y, v.to_bits()))
+                    .collect::<Vec<_>>(),
+                b.resistors
+                    .iter()
+                    .map(|&(x, y, v)| (x, y, v.to_bits()))
+                    .collect::<Vec<_>>()
+            );
+        }
+        assert_eq!(
+            actual
+                .couplings
+                .iter()
+                .map(|c| (c.a, c.b, c.pf.to_bits()))
+                .collect::<Vec<_>>(),
+            reference
+                .couplings
+                .iter()
+                .map(|c| (c.a, c.b, c.pf.to_bits()))
+                .collect::<Vec<_>>()
+        );
+        assert!(actual.stats.work <= reference.stats.work);
+        Ok(actual)
     }
 
     #[test]

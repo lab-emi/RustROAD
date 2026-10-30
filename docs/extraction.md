@@ -94,6 +94,15 @@ byte and graph budgets still apply.
 Repeated runs are byte-identical. The SPEF `*DATE` is a fixed string, and the
 JSON report carries provenance.
 
+Candidate queries use the lateral calibration window on the wire's own layer
+and its exact footprint on every other modelled layer. All accepted shape IDs
+and interval boundaries are retained, including shapes with no direct final
+capacitance contribution; removing such boundaries can change f64 rounding.
+Candidates are still processed in shape-ID order. The query change adds no
+per-run storage or worker concurrency: the run16 replay estimate is 3.46 GiB,
+including 16 MiB scratch (65,536 candidates at 256 bytes), one corner and one
+extraction worker. Builds and tests use two workers under a 4 GiB OS cap.
+
 ## RC profile (`rustroad.rc-profile.v1`)
 
 `scripts/build_rc_profile.py` writes `fixtures/pdk/{sky130,gf180}-rc-{min,nom,max}.json`.
