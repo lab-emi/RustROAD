@@ -556,11 +556,14 @@ pub(super) fn probe_boundary_owners(
     nodes: &[(u32, State)],
     net: u32,
 ) -> Result<Option<Vec<BoundaryOwner>>> {
-    let present: std::collections::BTreeSet<_> = nodes.iter().map(|n| n.0).collect();
+    let present: std::collections::BTreeSet<_> = nodes
+        .iter()
+        .map(|n| router.search.node(n.0))
+        .collect::<Result<_>>()?;
     let mut owners = BTreeMap::<u32, (usize, usize)>::new();
     let mut neighbors = Vec::with_capacity(8);
     let mut queries = 0usize;
-    for &(id, _) in nodes {
+    for &id in &present {
         let (node_layer, node_at) = router.graph.point(id);
         router.graph.neighbors(id, &mut neighbors);
         for &(next, movement) in &neighbors {

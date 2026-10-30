@@ -90,6 +90,12 @@ pub struct TrackRouterConfig {
     pub gcell: i64,
     /// Path cost of one via (DBU-equivalent).
     pub via_cost: u64,
+    /// Nonzero enables bounded heading labels. Zero retains legacy search.
+    #[serde(default, skip_serializing_if = "zero_bend_cost")]
+    pub bend_cost: u64,
+    /// Aggregate discovered-label cap, required only when bend_cost is nonzero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_labels: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracks: Vec<TrackOverride>,
     #[serde(default = "default_global_iterations")]
@@ -132,6 +138,27 @@ pub struct TrackRouterConfig {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub area_stacks: bool,
 }
+fn zero_bend_cost(value: &u64) -> bool {
+    *value == 0
+}
+
+#[cfg(test)]
+mod bend_config_tests {
+    use super::TrackRouterConfig;
+
+    #[test]
+    fn omitted_and_explicit_zero_bend_cost_keep_identical_config_encoding() {
+        let old: TrackRouterConfig =
+            serde_json::from_str(r#"{"gcell":200,"via_cost":80}"#).unwrap();
+        let zero: TrackRouterConfig =
+            serde_json::from_str(r#"{"gcell":200,"via_cost":80,"bend_cost":0}"#).unwrap();
+        assert_eq!(old, zero);
+        let old = serde_json::to_value(old).unwrap();
+        assert_eq!(old, serde_json::to_value(zero).unwrap());
+        assert!(old.get("bend_cost").is_none());
+        assert!(old.get("max_labels").is_none());
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoutingConfig {
@@ -165,6 +192,13 @@ impl RoutingConfig {
         }
         if let Some(t) = &self.track_router {
             self.limits.validate_track()?;
+            if t.bend_cost > 1 << 40
+                || (t.bend_cost != 0 && t.max_labels.is_none_or(|n| n == 0 || n > 64_000_000))
+            {
+                return Err(Error::Invalid(
+                    "bend_cost requires max_labels in 1..=64000000".into(),
+                ));
+            }
             if !self.lef_rules
                 || t.max_history_entries == 0
                 || t.max_history_entries > 64_000_000
@@ -1364,6 +1398,10 @@ pub(crate) fn track_plan(
         max_ripups_per_net: config.max_ripups_per_net,
         max_repair_rounds: config.max_repair_rounds,
         via_cost: config.via_cost,
+        bend_cost: config.bend_cost,
+        max_labels: (config.bend_cost != 0)
+            .then_some(config.max_labels)
+            .flatten(),
         wrong_way_factor: config.wrong_way_factor,
         heuristic_weight: config.heuristic_weight,
         repair_heuristic_weight: config.repair_heuristic_weight,

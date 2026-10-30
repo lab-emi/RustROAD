@@ -387,6 +387,13 @@ pub struct TrackPlan {
     pub max_repair_rounds: usize,
     /// Path cost of one via, DBU-equivalent.
     pub via_cost: u64,
+    /// Opt-in price of a change in last planar heading, carried across vias.
+    /// Zero retains the legacy point-only search and snapshot encoding.
+    #[serde(skip_serializing_if = "zero_bend_cost")]
+    pub bend_cost: u64,
+    /// Aggregate discovered direction labels; required for nonzero bend_cost.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_labels: Option<usize>,
     /// Cost multiplier of non-preferred-direction wire edges.
     pub wrong_way_factor: u64,
     /// Integer multiplier of the detailed-search lower bound (1..=16).
@@ -413,6 +420,10 @@ pub struct TrackPlan {
     /// layer in every search, not only in strict re-routes after cleanup.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub area_stacks: bool,
+}
+
+fn zero_bend_cost(value: &u64) -> bool {
+    *value == 0
 }
 
 /// Explicit bounds for one-owner trials. None in TrackPlan preserves legacy

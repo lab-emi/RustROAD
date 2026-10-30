@@ -202,6 +202,12 @@ pub struct SearchFrontierNode {
     pub cost: u64,
     pub parent: Option<u32>,
     pub incoming_kind: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_label: Option<u32>,
 }
 
 fn probe_terminals(
@@ -1067,18 +1073,29 @@ pub fn replay(
             .ok_or_else(|| budget("boundary owner report cap"))?;
         let records: Vec<_> = states
             .into_iter()
-            .map(|(node, state)| {
+            .map(|(label, state)| {
+                let node = router.search.node(label)?;
                 let (layer, at) = router.graph.point(node);
-                SearchFrontierNode {
+                Ok(SearchFrontierNode {
                     node,
                     layer,
                     at,
                     cost: state.cost,
-                    parent: (state.parent != u32::MAX).then_some(state.parent),
+                    parent: (state.parent != u32::MAX)
+                        .then(|| router.search.node(state.parent))
+                        .transpose()?,
                     incoming_kind: state.kind,
-                }
+                    label: router.search.labeled().then_some(label),
+                    heading: router
+                        .search
+                        .labeled()
+                        .then(|| router.search.heading(label).map(|h| h.name()))
+                        .transpose()?,
+                    parent_label: (router.search.labeled() && state.parent != u32::MAX)
+                        .then_some(state.parent),
+                })
             })
-            .collect();
+            .collect::<Result<_>>()?;
         let work = router.spatial.work - work_before;
         (Some(records), Some(work), Some(owners))
     } else {

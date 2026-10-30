@@ -4,6 +4,50 @@ use std::collections::HashMap;
 
 pub(crate) const DENSE_NODES: usize = 1_000_000;
 const NONE: u32 = u32::MAX;
+/// Label arena (24 B/record) and key index, including growth/hash-table slack.
+/// One aggregate cap counts all headings; no five-way grid allocation.
+pub(crate) const LABEL_BYTES: u64 = 128;
+/// Container headers and minimum Vec/hash allocation sizes for tiny caps.
+pub(crate) const LABEL_FIXED_BYTES: u64 = 4096;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) enum Heading {
+    #[default]
+    None,
+    East,
+    West,
+    North,
+    South,
+}
+impl Heading {
+    pub(crate) fn wire(from: [i64; 2], to: [i64; 2]) -> Self {
+        if to[0] > from[0] {
+            Self::East
+        } else if to[0] < from[0] {
+            Self::West
+        } else if to[1] > from[1] {
+            Self::North
+        } else {
+            Self::South
+        }
+    }
+    pub(crate) fn price(self, next: Self, cost: u64) -> u64 {
+        if self == Self::None || self == next {
+            0
+        } else {
+            cost
+        }
+    }
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::East => "east",
+            Self::West => "west",
+            Self::North => "north",
+            Self::South => "south",
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct State {
@@ -30,6 +74,16 @@ const EMPTY: Tagged = Tagged {
 enum Records {
     Dense(Vec<Tagged>),
     Sparse(HashMap<u32, (State, bool)>),
+    Labels {
+        arena: Vec<Label>,
+        ids: HashMap<(u32, Heading), u32>,
+    },
+}
+struct Label {
+    node: u32,
+    heading: Heading,
+    closed: bool,
+    state: State,
 }
 pub(crate) struct Search {
     records: Records,
@@ -41,6 +95,7 @@ impl Search {
         match &self.records {
             Records::Dense(records) => records.iter().filter(|r| r.epoch == self.epoch).count(),
             Records::Sparse(records) => records.len(),
+            Records::Labels { arena, .. } => arena.len(),
         }
     }
     /// Bounded diagnostic of current-epoch discovered states, never all paths.
@@ -54,6 +109,7 @@ impl Search {
                 records.len().saturating_mul(2),
             ),
             Records::Sparse(records) => (records.len(), records.len()),
+            Records::Labels { arena, .. } => (arena.len(), arena.len()),
         };
         if count > maximum {
             return Err(Error::Budget(
@@ -74,6 +130,14 @@ impl Search {
             }
             Records::Sparse(records) => {
                 result.extend(records.iter().map(|(&id, &(s, _))| (id, s)));
+            }
+            Records::Labels { arena, .. } => {
+                result.extend(
+                    arena
+                        .iter()
+                        .enumerate()
+                        .map(|(id, label)| (id as u32, label.state)),
+                );
             }
         }
         result.sort_unstable_by_key(|&(id, _)| id);
@@ -98,10 +162,92 @@ impl Search {
             limit,
         })
     }
+    pub(crate) fn with_labels(limit: usize) -> Result<Self> {
+        if limit == 0 || limit > 64_000_000 {
+            return Err(Error::Invalid("routing bend label limit".into()));
+        }
+        Ok(Self {
+            records: Records::Labels {
+                arena: Vec::new(),
+                ids: HashMap::new(),
+            },
+            epoch: 0,
+            limit,
+        })
+    }
+    pub(crate) fn labeled(&self) -> bool {
+        matches!(self.records, Records::Labels { .. })
+    }
+    pub(crate) fn add_cost(&self, base: u64, extra: u64) -> Result<u64> {
+        if self.labeled() {
+            base.checked_add(extra)
+                .ok_or_else(|| Error::Budget("routing bend path cost overflow".into()))
+        } else {
+            Ok(base.saturating_add(extra))
+        }
+    }
+    pub(crate) fn node(&self, id: u32) -> Result<u32> {
+        match &self.records {
+            Records::Labels { arena, .. } => arena
+                .get(id as usize)
+                .map(|label| label.node)
+                .ok_or_else(|| Error::Invalid("missing routing label".into())),
+            _ => Ok(id),
+        }
+    }
+    pub(crate) fn heading(&self, id: u32) -> Result<Heading> {
+        match &self.records {
+            Records::Labels { arena, .. } => arena
+                .get(id as usize)
+                .map(|label| label.heading)
+                .ok_or_else(|| Error::Invalid("missing routing label".into())),
+            _ => Ok(Heading::None),
+        }
+    }
+    pub(crate) fn find(&self, node: u32, heading: Heading) -> Option<u32> {
+        match &self.records {
+            Records::Labels { ids, .. } => ids.get(&(node, heading)).copied(),
+            _ => Some(node),
+        }
+    }
+    pub(crate) fn insert(&mut self, node: u32, heading: Heading, state: State) -> Result<u32> {
+        if let Records::Labels { arena, ids } = &mut self.records {
+            if let Some(&id) = ids.get(&(node, heading)) {
+                arena[id as usize].state = state;
+                arena[id as usize].closed = false;
+                return Ok(id);
+            }
+            // Refuse before either allocation/index insertion; all headings share it.
+            if arena.len() >= self.limit {
+                return Err(Error::Budget("routing bend discovered-label limit".into()));
+            }
+            let id = u32::try_from(arena.len())
+                .map_err(|_| Error::Budget("routing bend label ID".into()))?;
+            arena
+                .try_reserve(1)
+                .map_err(|_| Error::Budget("routing bend label allocation".into()))?;
+            ids.try_reserve(1)
+                .map_err(|_| Error::Budget("routing bend label index allocation".into()))?;
+            arena.push(Label {
+                node,
+                heading,
+                closed: false,
+                state,
+            });
+            ids.insert((node, heading), id);
+            return Ok(id);
+        }
+        self.set(node, state)?;
+        Ok(node)
+    }
     pub fn begin(&mut self, epoch: u32) {
         self.epoch = epoch;
         if let Records::Sparse(records) = &mut self.records {
             records.clear();
+        }
+        if let Records::Labels { arena, ids } = &mut self.records {
+            arena.clear();
+            ids.clear();
         }
     }
     pub fn get(&self, id: u32) -> Option<State> {
@@ -111,6 +257,7 @@ impl Search {
                 .filter(|r| r.epoch == self.epoch)
                 .map(|r| r.state),
             Records::Sparse(records) => records.get(&id).map(|&(s, _)| s),
+            Records::Labels { arena, .. } => arena.get(id as usize).map(|label| label.state),
         }
     }
     pub fn is_closed(&self, id: u32) -> bool {
@@ -119,6 +266,9 @@ impl Search {
                 .get(id as usize)
                 .is_some_and(|r| r.epoch == self.epoch && r.closed),
             Records::Sparse(records) => records.get(&id).is_some_and(|&(_, closed)| closed),
+            Records::Labels { arena, .. } => {
+                arena.get(id as usize).is_some_and(|label| label.closed)
+            }
         }
     }
     pub fn close(&mut self, id: u32) {
@@ -133,6 +283,11 @@ impl Search {
             Records::Sparse(records) => {
                 if let Some((_, closed)) = records.get_mut(&id) {
                     *closed = true;
+                }
+            }
+            Records::Labels { arena, .. } => {
+                if let Some(label) = arena.get_mut(id as usize) {
+                    label.closed = true;
                 }
             }
         }
@@ -159,6 +314,13 @@ impl Search {
                         .map_err(|_| Error::Budget("routing visited-state allocation".into()))?;
                 }
                 records.insert(id, (state, false));
+            }
+            Records::Labels { arena, .. } => {
+                let label = arena
+                    .get_mut(id as usize)
+                    .ok_or_else(|| Error::Invalid("missing routing label".into()))?;
+                label.state = state;
+                label.closed = false;
             }
         }
         Ok(())
@@ -373,6 +535,170 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn heading_labels_keep_the_more_expensive_arrival_that_wins_later() {
+        // Analytic diamond: N arrival costs 5, E arrival 6; east exit is 1.
+        // With a 10 bend fee, their completed prices are 16 and 7. A single
+        // point label incorrectly discards the second arrival. <1KiB fixture.
+        let mut search = Search::with_labels(4).unwrap();
+        search.begin(1);
+        let north = search
+            .insert(
+                10,
+                Heading::North,
+                State {
+                    cost: 5,
+                    parent: NONE,
+                    kind: NONE,
+                },
+            )
+            .unwrap();
+        let east = search
+            .insert(
+                10,
+                Heading::East,
+                State {
+                    cost: 6,
+                    parent: NONE,
+                    kind: NONE,
+                },
+            )
+            .unwrap();
+        assert_ne!(north, east);
+        search.close(north);
+        assert!(!search.is_closed(east));
+        let mut queue = crate::route_queue::Pending::new(4);
+        for parent in [north, east] {
+            let cost = search.get(parent).unwrap().cost
+                + 1
+                + search.heading(parent).unwrap().price(Heading::East, 10);
+            let old = search.find(11, Heading::East).and_then(|id| search.get(id));
+            if old.is_some_and(|state| state.cost <= cost) {
+                continue;
+            }
+            let id = search
+                .insert(
+                    11,
+                    Heading::East,
+                    State {
+                        cost,
+                        parent,
+                        kind: NONE,
+                    },
+                )
+                .unwrap();
+            queue.offer((cost, std::cmp::Reverse(cost), id)).unwrap();
+        }
+        let (price, _, goal) = queue.pop().unwrap();
+        assert_eq!(price, 7);
+        assert_eq!(search.get(goal).unwrap().parent, east);
+        assert_eq!(search.node(goal).unwrap(), 11);
+        assert_eq!(search.current_count(), 3);
+    }
+
+    #[test]
+    fn via_chains_preserve_heading_and_pay_only_the_next_planar_bend() {
+        let mut search = Search::with_labels(4).unwrap();
+        search.begin(1);
+        let first = search
+            .insert(
+                100,
+                Heading::East,
+                State {
+                    cost: 4,
+                    parent: NONE,
+                    kind: NONE,
+                },
+            )
+            .unwrap();
+        let mut last = first;
+        // Two arbitrary layer-changing vertices, each via costs 3.
+        for node in [200, 300] {
+            let heading = search.heading(last).unwrap();
+            last = search
+                .insert(
+                    node,
+                    heading,
+                    State {
+                        cost: search.get(last).unwrap().cost + 3,
+                        parent: last,
+                        kind: 1,
+                    },
+                )
+                .unwrap();
+            assert_eq!(search.heading(last).unwrap(), Heading::East);
+        }
+        let price = search.get(last).unwrap().cost
+            + 2
+            + search.heading(last).unwrap().price(Heading::North, 11);
+        let goal = search
+            .insert(
+                400,
+                Heading::North,
+                State {
+                    cost: price,
+                    parent: last,
+                    kind: NONE,
+                },
+            )
+            .unwrap();
+        assert_eq!(price, 23); // 4 + 3 + 3 + 2 + one 11 bend.
+        assert_eq!(Heading::East.price(Heading::East, 11), 0);
+        assert_eq!(Heading::None.price(Heading::North, 11), 0);
+        assert_eq!(Heading::East.price(Heading::West, 11), 11); // U-turn policy.
+        let mut id = goal;
+        for node in [400, 300, 200, 100] {
+            assert_eq!(search.node(id).unwrap(), node);
+            id = search.get(id).unwrap().parent;
+        }
+        assert_eq!(id, NONE);
+    }
+
+    #[test]
+    fn heading_label_cap_is_aggregate_preinsertion_and_reusable() {
+        assert!(Search::with_labels(0).is_err());
+        assert!(Search::with_labels(64_000_001).is_err());
+        let mut search = Search::with_labels(2).unwrap();
+        assert!(search.add_cost(u64::MAX, 1).is_err());
+        assert_eq!(
+            Search::new(2, 2).unwrap().add_cost(u64::MAX, 1).unwrap(),
+            u64::MAX
+        );
+        search.begin(1);
+        let state = State {
+            cost: 9,
+            parent: NONE,
+            kind: NONE,
+        };
+        let north = search.insert(10, Heading::North, state).unwrap();
+        search.insert(10, Heading::East, state).unwrap();
+        assert!(
+            search
+                .insert(10, Heading::West, state)
+                .unwrap_err()
+                .to_string()
+                .contains("BUDGET_EXCEEDED")
+        );
+        assert_eq!(search.current_count(), 2);
+        assert!(search.find(10, Heading::West).is_none());
+        assert_eq!(
+            search
+                .insert(10, Heading::North, State { cost: 1, ..state })
+                .unwrap(),
+            north
+        );
+        assert_eq!(search.current_count(), 2);
+        search.begin(2);
+        assert_eq!(search.current_count(), 0);
+        assert!(search.find(10, Heading::North).is_none());
+        assert_eq!(
+            search.insert(u32::MAX - 1, Heading::South, state).unwrap(),
+            0
+        );
+        assert!(std::mem::size_of::<Label>() <= 32);
+        assert!(std::mem::size_of::<((u32, Heading), u32)>() <= 16);
+    }
+
     #[test]
     fn history_journal_restores_repeated_saturated_and_new_entries() {
         for nodes in [16, 3_000_000_000] {

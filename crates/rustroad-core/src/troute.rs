@@ -37,7 +37,7 @@ mod owner_repair;
 pub(crate) mod replay;
 
 use crate::route_rules;
-use crate::route_search::{History, Search, State};
+use crate::route_search::{Heading, History, Search, State};
 use crate::routing::{
     Access, AccessEntry, Blockage, LayerRect, RouteInput, RouteLimits, RouteStats, Routes, Soft,
     Spatial, Terminal, TrackPlan, Via, ViaPair, WIRE, Wire, access_table_at, budget, contains,
@@ -644,6 +644,8 @@ pub(crate) fn check_plan(input: &RouteInput, plan: &TrackPlan) -> Result<()> {
         || plan.max_repair_rounds > 10_000_000
         || plan.via_cost == 0
         || plan.via_cost > 1 << 40
+        || plan.bend_cost > 1 << 40
+        || (plan.bend_cost != 0 && plan.max_labels.is_none_or(|n| n == 0 || n > 64_000_000))
         || plan.wrong_way_factor == 0
         || plan.wrong_way_factor > 1000
         || !(1..=16).contains(&plan.heuristic_weight)
@@ -798,13 +800,27 @@ fn memory_estimate_limited(
     }
     Ok(MemoryEstimate {
         held: input.held_bytes,
-        search: (if nodes <= crate::route_search::DENSE_NODES {
-            (nodes as u64).saturating_mul(NODE_BYTES)
+        search: (if input.tracks.as_ref().unwrap().bend_cost != 0 {
+            let labels = input
+                .tracks
+                .as_ref()
+                .unwrap()
+                .max_labels
+                .unwrap_or(0)
+                .min(nodes.saturating_mul(5));
+            (labels as u64)
+                .saturating_mul(crate::route_search::LABEL_BYTES)
+                .saturating_add(crate::route_search::LABEL_FIXED_BYTES)
+                .saturating_add((labels.min(limits.max_heap) as u64).saturating_mul(128))
+        } else if nodes <= crate::route_search::DENSE_NODES {
+            (nodes as u64)
+                .saturating_mul(NODE_BYTES)
+                .saturating_add((nodes.min(limits.max_heap) as u64).saturating_mul(128))
         } else {
             (nodes.min(limits.max_search_expansions.saturating_add(limits.max_heap)) as u64)
                 .saturating_mul(64)
+                .saturating_add((nodes.min(limits.max_heap) as u64).saturating_mul(128))
         })
-        .saturating_add((nodes.min(limits.max_heap) as u64).saturating_mul(128))
         .saturating_add((gcells as u64).saturating_mul(GCELL_BYTES))
         .saturating_add(access_memory)
         .saturating_add(
@@ -1221,13 +1237,20 @@ impl<'a> Router<'a> {
             pairs,
             slots,
             expansions: 0,
-            search: Search::new(
-                n,
-                limits
-                    .max_search_expansions
-                    .saturating_add(limits.max_heap)
-                    .min(n),
-            )?,
+            search: if plan.bend_cost != 0 {
+                Search::with_labels(
+                    plan.max_labels
+                        .ok_or_else(|| invalid("missing bend label limit"))?,
+                )?
+            } else {
+                Search::new(
+                    n,
+                    limits
+                        .max_search_expansions
+                        .saturating_add(limits.max_heap)
+                        .min(n),
+                )?
+            },
             epoch: 0,
             history: History::new(
                 n,
@@ -3194,8 +3217,9 @@ impl<'a> Router<'a> {
                 // Node id remains the final deterministic tie-break.
                 let mut heap = crate::route_queue::Pending::new(self.limits.max_heap);
                 self.search.begin(epoch);
-                self.search.set(
+                let start_id = self.search.insert(
                     start,
+                    Heading::None,
                     State {
                         cost: 0,
                         parent: NONE,
@@ -3213,7 +3237,7 @@ impl<'a> Router<'a> {
                         )?
                         .saturating_mul(pin_weight),
                     Reverse(0u64),
-                    start,
+                    start_id,
                 ))?;
                 limited = false;
                 touched_guide = false;
@@ -3227,7 +3251,8 @@ impl<'a> Router<'a> {
                     if self.search.get(id).is_none_or(|s| s.cost != cost) {
                         continue;
                     }
-                    if tree.contains(&id) {
+                    let node = self.search.node(id)?;
+                    if tree.contains(&node) {
                         found = Some(id);
                         break;
                     }
@@ -3262,7 +3287,7 @@ impl<'a> Router<'a> {
                                 rips.get(&net).copied().unwrap_or(0),
                                 self.graph.point(start),
                                 (root_layer, root_point),
-                                self.graph.point(id),
+                                self.graph.point(node),
                                 tree.len(),
                                 target.len(),
                             );
@@ -3274,7 +3299,7 @@ impl<'a> Router<'a> {
                     if close_nodes {
                         self.search.close(id);
                     }
-                    let (l, t_, s_) = self.graph.locate(id);
+                    let (l, t_, s_) = self.graph.locate(node);
                     let layer = self.graph.layers[l].layer;
                     let p = self.graph.xy(l, t_, s_);
                     let target_distance = target.bounds_distance(p);
@@ -3295,7 +3320,7 @@ impl<'a> Router<'a> {
                     } else {
                         None
                     };
-                    self.graph.neighbors(id, &mut nbuf);
+                    self.graph.neighbors(node, &mut nbuf);
                     // Dense channels otherwise retry nearly identical long-span
                     // probes at every unit stop. These optional edges are sampled;
                     // ordinary edges still cover every legal local detour.
@@ -3303,7 +3328,7 @@ impl<'a> Router<'a> {
                         && (search <= 16 || s_.is_multiple_of(64))
                     {
                         projection_attempts += 1;
-                        let work = self.graph.target_neighbors(id, root_point, &mut nbuf);
+                        let work = self.graph.target_neighbors(node, root_point, &mut nbuf);
                         self.spatial.work = self
                             .spatial
                             .work
@@ -3326,7 +3351,7 @@ impl<'a> Router<'a> {
                             let mut cur = id;
                             let mut steps = 0usize;
                             loop {
-                                if cur == start {
+                                if cur == start_id {
                                     escape_stack = start_via && !start_pad_ok && run < need;
                                     break (strict || self.area_level > 1) && escape_stack;
                                 }
@@ -3343,7 +3368,10 @@ impl<'a> Router<'a> {
                                     .get(cur)
                                     .ok_or_else(|| invalid("missing routing parent state"))?
                                     .parent;
-                                run += distance(self.graph.point(cur).1, self.graph.point(prev).1)?;
+                                run += distance(
+                                    self.graph.point(self.search.node(cur)?).1,
+                                    self.graph.point(self.search.node(prev)?).1,
+                                )?;
                                 cur = prev;
                                 steps += 1;
                                 if run >= need || steps > 64 {
@@ -3351,8 +3379,17 @@ impl<'a> Router<'a> {
                                 }
                             }
                         };
+                    let previous_heading = self.search.heading(id)?;
                     for &(next, mv) in nbuf.iter() {
-                        if close_nodes && self.search.is_closed(next) {
+                        let heading = if self.plan.bend_cost == 0 {
+                            Heading::None
+                        } else if matches!(mv, Move::Via(_)) {
+                            previous_heading
+                        } else {
+                            Heading::wire(p, self.graph.point(next).1)
+                        };
+                        let next_id = self.search.find(next, heading);
+                        if close_nodes && next_id.is_some_and(|key| self.search.is_closed(key)) {
                             continue;
                         }
                         let (nl, q) = self.graph.point(next);
@@ -3360,7 +3397,7 @@ impl<'a> Router<'a> {
                             continue;
                         }
                         let mut next_distance = None;
-                        if matches!(mv, Move::Along) && id.abs_diff(next) > 1 {
+                        if matches!(mv, Move::Along) && node.abs_diff(next) > 1 {
                             if let Some(current) = interior_distance {
                                 let remaining = target.distance(
                                     self.graph.slot[&nl],
@@ -3388,15 +3425,20 @@ impl<'a> Router<'a> {
                             Move::Via(_) if escape_stack => via_cost.saturating_mul(3),
                             Move::Via(_) => via_cost,
                         };
-                        if self
-                            .search
-                            .get(next)
-                            .is_some_and(|s| s.cost <= cost.saturating_add(step))
+                        if !matches!(mv, Move::Via(_)) && self.plan.bend_cost != 0 {
+                            step = step
+                                .checked_add(previous_heading.price(heading, self.plan.bend_cost))
+                                .ok_or_else(|| budget("routing bend step cost overflow"))?;
+                        }
+                        let minimum = self.search.add_cost(cost, step)?;
+                        if next_id
+                            .and_then(|key| self.search.get(key))
+                            .is_some_and(|s| s.cost <= minimum)
                         {
                             continue;
                         }
                         let jump = if matches!(mv, Move::Along) {
-                            id.abs_diff(next) as usize
+                            node.abs_diff(next) as usize
                         } else {
                             1
                         };
@@ -3419,7 +3461,7 @@ impl<'a> Router<'a> {
                                 .checked_add(cell_count + extra_work)
                                 .filter(|&n| n <= self.limits.max_comparisons)
                                 .ok_or_else(|| budget("routing macro-move work"))?;
-                            let before_end = if next > id { next - 1 } else { next + 1 };
+                            let before_end = if next > node { next - 1 } else { next + 1 };
                             let only_end_in_cell =
                                 self.cells.of(self.graph.point(before_end).1) != to_cell;
                             let mut usable = true;
@@ -3434,23 +3476,24 @@ impl<'a> Router<'a> {
                                     break;
                                 }
                             }
-                            if tree.len() == 1 && id.min(next) < root && root < id.max(next) {
+                            if tree.len() == 1 && node.min(next) < root && root < node.max(next) {
                                 usable = false;
                             }
                             if usable && inspect_nodes {
                                 if self.close_expanded {
                                     if tree.len() > 1 {
                                         let idx =
-                                            tree_sorted.partition_point(|&n| n <= id.min(next));
-                                        if tree_sorted.get(idx).is_some_and(|&n| n < id.max(next)) {
+                                            tree_sorted.partition_point(|&n| n <= node.min(next));
+                                        if tree_sorted.get(idx).is_some_and(|&n| n < node.max(next))
+                                        {
                                             usable = false;
                                         }
                                     }
                                     if usable && !self.history.is_zero() {
-                                        let (h_lo, h_hi) = if next > id {
-                                            (id + 1, next)
+                                        let (h_lo, h_hi) = if next > node {
+                                            (node + 1, next)
                                         } else {
-                                            (next, id - 1)
+                                            (next, node - 1)
                                         };
                                         let (h_sum, h_work) = self.history.range_sum(h_lo, h_hi);
                                         self.spatial.work = self
@@ -3462,17 +3505,17 @@ impl<'a> Router<'a> {
                                         step = step.saturating_add(h_sum.saturating_mul(hist_unit));
                                     }
                                 } else {
-                                    for node in id.min(next)..=id.max(next) {
-                                        if node == id {
+                                    for at in node.min(next)..=node.max(next) {
+                                        if at == node {
                                             continue;
                                         }
-                                        if node != next && tree.contains(&node) {
+                                        if at != next && tree.contains(&at) {
                                             usable = false;
                                             break;
                                         }
                                         if !self.history.is_zero() {
                                             step = step.saturating_add(
-                                                u64::from(self.history.get(node))
+                                                u64::from(self.history.get(at))
                                                     .saturating_mul(hist_unit),
                                             );
                                         }
@@ -3487,8 +3530,11 @@ impl<'a> Router<'a> {
                                 u64::from(self.history.get(next)).saturating_mul(hist_unit),
                             );
                         }
-                        let base = cost.saturating_add(step);
-                        if self.search.get(next).is_some_and(|s| s.cost <= base) {
+                        let base = self.search.add_cost(cost, step)?;
+                        if next_id
+                            .and_then(|key| self.search.get(key))
+                            .is_some_and(|s| s.cost <= base)
+                        {
                             continue;
                         }
                         let (kind, extra) = match mv {
@@ -3515,7 +3561,7 @@ impl<'a> Router<'a> {
                                 if kinds.is_empty() {
                                     continue;
                                 }
-                                if id != start
+                                if id != start_id
                                     && self
                                         .search
                                         .get(id)
@@ -3523,17 +3569,12 @@ impl<'a> Router<'a> {
                                         .kind
                                         == WIRE
                                 {
-                                    let prev = self
-                                        .graph
-                                        .point(
-                                            self.search
-                                                .get(id)
-                                                .ok_or_else(|| {
-                                                    invalid("missing routing parent state")
-                                                })?
-                                                .parent,
-                                        )
-                                        .1;
+                                    let parent = self
+                                        .search
+                                        .get(id)
+                                        .ok_or_else(|| invalid("missing routing parent state"))?
+                                        .parent;
+                                    let prev = self.graph.point(self.search.node(parent)?).1;
                                     let vertical = prev[0] == p[0];
                                     kinds.sort_by_key(|k| !self.pad_along(*k, layer, vertical));
                                 }
@@ -3702,12 +3743,16 @@ impl<'a> Router<'a> {
                                 }
                             }
                         };
-                        let nc = base.saturating_add(extra);
-                        if self.search.get(next).is_some_and(|s| s.cost <= nc) {
+                        let nc = self.search.add_cost(base, extra)?;
+                        if next_id
+                            .and_then(|key| self.search.get(key))
+                            .is_some_and(|s| s.cost <= nc)
+                        {
                             continue;
                         }
-                        self.search.set(
+                        let next_id = self.search.insert(
                             next,
+                            heading,
                             State {
                                 cost: nc,
                                 parent: id,
@@ -3727,7 +3772,7 @@ impl<'a> Router<'a> {
                         heap.offer((
                             nc.saturating_add(remaining.saturating_mul(pin_weight)),
                             Reverse(nc),
-                            next,
+                            next_id,
                         ))
                         .map_err(|e| budget(&format!("{e}; pin {} net {net}", t.pin)))?;
                     }
@@ -3771,11 +3816,14 @@ impl<'a> Router<'a> {
                 if state.parent == NONE {
                     break;
                 }
-                let prev = state.parent;
+                let parent = state.parent;
+                let prev = self.search.node(parent)?;
+                let current_node = self.search.node(current)?;
                 let a = self.graph.locate(prev);
-                let b = self.graph.locate(current);
-                if state.kind == WIRE && a.0 == b.0 && a.1 == b.1 && prev.abs_diff(current) > 1 {
-                    let mut at = current;
+                let b = self.graph.locate(current_node);
+                if state.kind == WIRE && a.0 == b.0 && a.1 == b.1 && prev.abs_diff(current_node) > 1
+                {
+                    let mut at = current_node;
                     while at != prev {
                         if path.len() >= self.limits.max_search_expansions {
                             return Err(budget("routing macro trace limit"));
@@ -3785,9 +3833,9 @@ impl<'a> Router<'a> {
                         at = before;
                     }
                 } else {
-                    path.push((prev, current, state.kind));
+                    path.push((prev, current_node, state.kind));
                 }
-                current = prev;
+                current = parent;
                 if path.len() > self.limits.max_search_expansions {
                     return Err(budget("routing trace limit"));
                 }
@@ -5469,6 +5517,8 @@ mod tests {
             max_ripups_per_net: 8,
             max_repair_rounds: 1000,
             via_cost: 80,
+            bend_cost: 0,
+            max_labels: None,
             wrong_way_factor: 4,
             heuristic_weight: 1,
             repair_heuristic_weight: None,
@@ -8022,6 +8072,126 @@ mod tests {
         let mut bad = a.clone();
         bad.vias.pop();
         assert!(crate::routing::validate(&i, &bad, &limits()).is_err());
+    }
+
+    #[test]
+    fn bend_search_checks_geometry_and_zero_keeps_legacy_bytes() {
+        // <1MiB of graph/test state, bounded by 10k direction labels. This is
+        // an internal geometry regression, not a foundry signoff oracle.
+        let mut design = input(
+            vec![
+                terminal(0, 7, true, rect(90, 90, 110, 110)),
+                terminal(1, 7, false, rect(890, 890, 910, 910)),
+            ],
+            Vec::new(),
+        );
+        let limits = RouteLimits {
+            max_search_expansions: 100_000,
+            ..limits()
+        };
+        let original = route_cpu_ref(&design, &limits).unwrap();
+        let original_plan = serde_json::to_vec(design.tracks.as_ref().unwrap()).unwrap();
+        let tiny = RouteLimits {
+            max_expansions: 1,
+            ..limits.clone()
+        };
+        let original_error = route_cpu_ref(&design, &tiny).unwrap_err().to_string();
+        design.tracks.as_mut().unwrap().bend_cost = 0;
+        let zero = route_cpu_ref(&design, &limits).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&zero).unwrap(),
+            serde_json::to_vec(&original).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_vec(design.tracks.as_ref().unwrap()).unwrap(),
+            original_plan
+        );
+        assert_eq!(
+            route_cpu_ref(&design, &tiny).unwrap_err().to_string(),
+            original_error
+        );
+        let p = design.tracks.as_mut().unwrap();
+        p.bend_cost = 80;
+        p.max_labels = Some(10_000);
+        let a = route_cpu_ref(&design, &limits).unwrap();
+        let b = route_cpu_ref(&design, &limits).unwrap();
+        assert_eq!(a.wires, b.wires);
+        assert_eq!(a.vias, b.vias);
+        crate::routing::validate(&design, &a, &limits).unwrap();
+        assert!(
+            a.wires
+                .iter()
+                .all(|w| w.start[0] == w.end[0] || w.start[1] == w.end[1])
+        );
+        design.tracks.as_mut().unwrap().max_labels = Some(1);
+        assert!(
+            route_cpu_ref(&design, &limits)
+                .unwrap_err()
+                .to_string()
+                .contains("BUDGET_EXCEEDED")
+        );
+        design.tracks.as_mut().unwrap().max_labels = None;
+        assert!(route_cpu_ref(&design, &limits).is_err());
+    }
+
+    #[test]
+    fn bend_labels_keep_minimum_area_checks_through_a_via_chain() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                Terminal {
+                    pin: 1,
+                    net: 0,
+                    driver: false,
+                    shapes: vec![LayerRect {
+                        layer: 2,
+                        rect: rect(90, 90, 110, 110),
+                    }],
+                    class: None,
+                },
+            ],
+            Vec::new(),
+        );
+        design.access_layer = 0;
+        design.layers[1].min_area = Some(1000);
+        design.tracks.as_mut().unwrap().bend_cost = 80;
+        design.tracks.as_mut().unwrap().max_labels = Some(10_000);
+        let routes = route_cpu_ref(&design, &limits()).unwrap();
+        assert!(routes.wires.iter().any(|w| w.layer == 1));
+        validate(&design, &routes, &limits()).unwrap();
+        let mut removed = routes;
+        removed.wires.retain(|w| w.layer != 1);
+        assert!(validate(&design, &removed, &limits()).is_err());
+    }
+
+    #[test]
+    fn bend_admission_replaces_grid_records_and_counts_aggregate_labels() {
+        let mut design = input(
+            vec![terminal(0, 7, true, rect(90, 90, 110, 110))],
+            Vec::new(),
+        );
+        let limits = limits();
+        let old = memory_estimate_limited(&design, 3_000_000, 100, &limits).unwrap();
+        design.tracks.as_mut().unwrap().bend_cost = 80;
+        design.tracks.as_mut().unwrap().max_labels = Some(10);
+        let bounded = memory_estimate_limited(&design, 3_000_000, 100, &limits).unwrap();
+        let larger_grid = memory_estimate_limited(&design, 6_000_000, 100, &limits).unwrap();
+        assert_eq!(bounded.search, larger_grid.search);
+        assert!(bounded.search < old.search);
+        design.tracks.as_mut().unwrap().max_labels = Some(11);
+        let one_more = memory_estimate_limited(&design, 3_000_000, 100, &limits).unwrap();
+        assert_eq!(
+            one_more.search - bounded.search,
+            crate::route_search::LABEL_BYTES + 128
+        );
+        design.tracks.as_mut().unwrap().bend_cost = 0;
+        design.tracks.as_mut().unwrap().max_labels = None;
+        assert_eq!(
+            memory_estimate_limited(&design, 3_000_000, 100, &limits)
+                .unwrap()
+                .search,
+            old.search
+        );
     }
 
     #[test]
