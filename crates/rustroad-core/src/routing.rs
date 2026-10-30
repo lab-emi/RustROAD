@@ -4961,6 +4961,128 @@ mod tests {
     }
 
     #[test]
+    fn wide_metal_absent_layer_parts_preserve_other_layer_violations() {
+        // Two declared rules do not imply wide geometry on both layers.
+        // The fixture is <1 MiB: a few integer rectangles, no path enumeration.
+        let mut input = rules_input();
+        let rule = WideSpacing {
+            width: 3,
+            parallel_run: 10,
+            spacing: 5,
+        };
+        input.layers[0].wide_spacing = Some(rule);
+        input.layers[1].wide_spacing = Some(rule);
+        input.terminals.push(Terminal {
+            pin: 2,
+            net: 2,
+            driver: true,
+            shapes: vec![LayerRect {
+                layer: 1,
+                rect: rect(59, 9, 61, 11),
+            }],
+            class: None,
+        });
+        let mut routes = manual(
+            &input,
+            &[([10, 10], [10, 40], 0), ([60, 10], [60, 40], 1)],
+            &[[80, 80]],
+        );
+        routes.wires[1].net = 2;
+        routes.wires.extend([
+            Wire {
+                net: 1,
+                layer: 0,
+                start: [18, 10],
+                end: [18, 40],
+            },
+            Wire {
+                net: 3,
+                layer: 1,
+                start: [68, 10],
+                end: [68, 40],
+            },
+        ]);
+        routes.patches.extend([
+            Patch {
+                net: 0,
+                layer: 0,
+                rect: rect(11, 15, 13, 35),
+            },
+            Patch {
+                net: 2,
+                layer: 1,
+                rect: rect(59, 15, 61, 17),
+            },
+        ]);
+        routes.nets = vec![0, 1, 2, 3];
+        let check = |routes: &Routes| {
+            route_rules::wide_check(&input, routes, &RouteLimits::default(), &mut 0).unwrap()
+        };
+        let first = check(&routes);
+        assert!(
+            matches!(
+                first.as_slice(),
+                [Violation::Wide {
+                    owner: 0,
+                    other: 1,
+                    layer: 0,
+                    run: 20,
+                    ..
+                }]
+            ),
+            "narrow M2 shapes must not hide the real M1 violation: {first:?}"
+        );
+        // Give M2 an actual wide component; its own pair must now be checked.
+        routes.patches.push(Patch {
+            net: 2,
+            layer: 1,
+            rect: rect(61, 15, 63, 35),
+        });
+        let both = check(&routes);
+        assert_eq!(both.len(), 2, "both layer violations must remain: {both:?}");
+        assert!(
+            both.iter().any(|v| matches!(
+                v,
+                Violation::Wide {
+                    owner: 2,
+                    other: 3,
+                    layer: 1,
+                    run: 20,
+                    ..
+                }
+            )),
+            "wide M2 must still be checked: {both:?}"
+        );
+        // Same-net disjoint polygons retain the same spacing obligation.
+        routes.wires[3].net = 2;
+        routes.nets = vec![0, 1, 2];
+        let same = check(&routes);
+        assert!(
+            same.iter().any(|v| matches!(
+                v,
+                Violation::Wide {
+                    owner: 2,
+                    other: 2,
+                    layer: 1,
+                    run: 20,
+                    ..
+                }
+            )),
+            "same-net wide notch must not be skipped: {same:?}"
+        );
+        let limits = RouteLimits {
+            max_comparisons: 1,
+            ..RouteLimits::default()
+        };
+        assert!(
+            route_rules::wide_check(&input, &routes, &limits, &mut 0)
+                .unwrap_err()
+                .to_string()
+                .contains("BUDGET_EXCEEDED")
+        );
+    }
+
+    #[test]
     fn wide_metal_partial_width_tongue_keeps_the_facing_run() {
         let mut input = rules_input();
         input.die = rect(0, 0, 4000, 4000);
