@@ -525,7 +525,11 @@ struct PhaseProfile {
     mark: std::time::Instant,
     ns: [u128; 8],
     strips: usize,
+    geometry_mark: std::time::Instant,
+    geometry_ns: [u128; 6],
+    geometry_work: [usize; 7],
 }
+const _: () = assert!(size_of::<PhaseProfile>() < 512);
 impl PhaseProfile {
     fn new() -> Self {
         let now = std::time::Instant::now();
@@ -535,6 +539,9 @@ impl PhaseProfile {
             mark: now,
             ns: [0; 8],
             strips: 0,
+            geometry_mark: now,
+            geometry_ns: [0; 6],
+            geometry_work: [0; 7],
         }
     }
     fn phase(&mut self, at: usize) {
@@ -544,34 +551,68 @@ impl PhaseProfile {
             self.mark = now;
         }
     }
+    fn geometry_start(&mut self, work: usize) {
+        if self.enabled {
+            self.geometry_mark = std::time::Instant::now();
+            self.geometry_work[0] = work;
+        }
+    }
+    fn geometry_phase(&mut self, at: usize, work: usize) {
+        if self.enabled {
+            let now = std::time::Instant::now();
+            self.geometry_ns[at] = self.geometry_ns[at]
+                .saturating_add(now.duration_since(self.geometry_mark).as_nanos());
+            self.geometry_mark = now;
+            self.geometry_work[at + 1] = work;
+        }
+    }
     fn report(&self, stats: &ExtractStats) {
         if self.enabled {
-            eprintln!(
-                "{}",
-                serde_json::json!({
-                    "schema": "rustroad.extract-phase-profile.v1",
-                    "scope": "extraction core; candidate queries may be parallel; electrical arithmetic remains serial",
-                    "elapsed_ns": self.start.elapsed().as_nanos(),
-                    "stage_ns": {
-                        "preflight_and_trees": self.ns[0],
-                        "geometry_pieces_passive_crossings": self.ns[1],
-                        "immutable_indexes": self.ns[2],
-                        "candidate_queries_and_sort": self.ns[3],
-                        "interval_events_setup": self.ns[4],
-                        "interval_geometry_numerics_and_ordered_additions": self.ns[5],
-                        "strip_iteration_and_metadata": self.ns[6],
-                        "finalization": self.ns[7],
-                    },
-                    "strips": self.strips,
-                    "intervals": stats.intervals,
-                    "passive_intervals": stats.passive_intervals,
-                    "work": stats.work,
-                    "max_run_candidates": stats.max_run_candidates,
-                    "profile_state_bytes": size_of::<Self>(),
-                    "floating_point_order": "unchanged individual serial additions",
-                })
-            );
+            eprintln!("{}", self.report_value(stats));
         }
+    }
+    fn report_value(&self, stats: &ExtractStats) -> serde_json::Value {
+        serde_json::json!({
+            "schema": "rustroad.extract-phase-profile.v1",
+            "scope": "extraction core; candidate queries may be parallel; electrical arithmetic remains serial",
+            "elapsed_ns": self.start.elapsed().as_nanos(),
+            "stage_ns": {
+                "preflight_and_trees": self.ns[0],
+                "geometry_pieces_passive_crossings": self.ns[1],
+                "immutable_indexes": self.ns[2],
+                "candidate_queries_and_sort": self.ns[3],
+                "interval_events_setup": self.ns[4],
+                "interval_geometry_numerics_and_ordered_additions": self.ns[5],
+                "strip_iteration_and_metadata": self.ns[6],
+                "finalization": self.ns[7],
+            },
+            "geometry": {
+                "stage_ns": {
+                    "initial_shapes_and_virtual_prefix": self.geometry_ns[0],
+                    "coarse_indexes_and_owned_bins": self.geometry_ns[1],
+                    "end_extensions_and_via_pads": self.geometry_ns[2],
+                    "patches": self.geometry_ns[3],
+                    "retained_passive_crossings": self.geometry_ns[4],
+                    "virtual_crossings": self.geometry_ns[5],
+                },
+                "legacy_work_snapshots": {
+                    "before_geometry": self.geometry_work[0],
+                    "after_initial_shapes_and_virtual_prefix": self.geometry_work[1],
+                    "after_coarse_indexes_and_owned_bins": self.geometry_work[2],
+                    "after_end_extensions_and_via_pads": self.geometry_work[3],
+                    "after_patches": self.geometry_work[4],
+                    "after_retained_passive_crossings": self.geometry_work[5],
+                    "after_virtual_crossings": self.geometry_work[6],
+                },
+            },
+            "strips": self.strips,
+            "intervals": stats.intervals,
+            "passive_intervals": stats.passive_intervals,
+            "work": stats.work,
+            "max_run_candidates": stats.max_run_candidates,
+            "profile_state_bytes": size_of::<Self>(),
+            "floating_point_order": "unchanged individual serial additions",
+        })
     }
 }
 #[derive(Clone, Copy, Debug)]
@@ -1930,6 +1971,7 @@ fn extract_with_queries(
     let memory = memory_estimate(input, limits)?;
     let (mut built, mut stats) = build_trees(input, limits)?;
     profile.phase(0);
+    profile.geometry_start(stats.work);
     stats.memory = Some(memory);
     let tech = input.tech;
     // Conductor shapes: wire-run bodies and passive shapes; the end
@@ -1958,6 +2000,7 @@ fn extract_with_queries(
     if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
+    profile.geometry_phase(0, stats.work);
     let routing_layers: Vec<u32> = (0..input.layers.len() as u32)
         .filter(|&l| tech.layers[l as usize].is_some())
         .collect();
@@ -1994,6 +2037,7 @@ fn extract_with_queries(
         .enumerate()
         .map(|(i, n)| (n.net, i))
         .collect();
+    profile.geometry_phase(1, stats.work);
     add_metal_pieces(
         input,
         limits,
@@ -2003,6 +2047,7 @@ fn extract_with_queries(
         &mut entries,
         &mut stats,
     )?;
+    profile.geometry_phase(2, stats.work);
     add_patches(
         input,
         limits,
@@ -2013,9 +2058,12 @@ fn extract_with_queries(
         &net_index,
         &mut stats,
     )?;
+    profile.geometry_phase(3, stats.work);
     let routed_runs = built.runs.len();
     add_passive_strips(input, limits, &mut built, &shapes, &mut bins, &mut stats)?;
+    profile.geometry_phase(4, stats.work);
     let crossed = virtual_crossings(&shapes, &mut bins, &routing_layers, &mut stats)?;
+    profile.geometry_phase(5, stats.work);
     profile.phase(1);
     if footprint_queries {
         // Construction is complete. Release the mutable owned-shape bins
@@ -2649,6 +2697,58 @@ fn extract_with_queries(
 mod tests {
     use super::*;
     use crate::routing::{Access, LayerRect, Patch, RouteStats, Via, Wire};
+
+    #[test]
+    fn geometry_profile_boundaries_preserve_parent_timer_and_disabled_state() {
+        let mut profile = PhaseProfile::new();
+        profile.enabled = false;
+        let parent_mark = profile.mark;
+        let geometry_mark = profile.geometry_mark;
+        profile.geometry_start(7);
+        profile.geometry_phase(0, 8);
+        assert_eq!(profile.geometry_mark, geometry_mark);
+        assert_eq!(profile.geometry_ns, [0; 6]);
+        assert_eq!(profile.geometry_work, [0; 7]);
+        profile.enabled = true;
+        profile.geometry_start(7);
+        for stage in 0..6 {
+            profile.geometry_phase(stage, stage + 8);
+        }
+        assert_eq!(profile.mark, parent_mark);
+        assert_eq!(profile.ns, [0; 8]);
+        assert_eq!(profile.geometry_work, [7, 8, 9, 10, 11, 12, 13]);
+    }
+
+    #[test]
+    fn geometry_profile_record_stays_below_four_kib_with_maximum_counters() {
+        let mut profile = PhaseProfile::new();
+        profile.ns = [u128::from(u64::MAX); 8];
+        profile.geometry_ns = [u128::from(u64::MAX); 6];
+        profile.geometry_work = [usize::MAX; 7];
+        profile.strips = usize::MAX;
+        let stats = ExtractStats {
+            intervals: usize::MAX,
+            passive_intervals: usize::MAX,
+            work: usize::MAX,
+            max_run_candidates: usize::MAX,
+            ..Default::default()
+        };
+        let mut value = profile.report_value(&stats);
+        value["elapsed_ns"] = u64::MAX.into();
+        value["profile_state_bytes"] = u64::MAX.into();
+        let record = format!("{value}\n");
+        assert!(record.len() < 4096, "profile record is {} bytes", record.len());
+        assert_eq!(value["geometry"]["stage_ns"].as_object().unwrap().len(), 6);
+        assert_eq!(
+            value["geometry"]["legacy_work_snapshots"]
+                .as_object()
+                .unwrap()
+                .len(),
+            7
+        );
+        assert_eq!(value["stage_ns"].as_object().unwrap().len(), 8);
+        assert_eq!(value["work"], serde_json::json!(usize::MAX));
+    }
 
     #[test]
     fn spatial_header_bound_covers_negative_bins_and_saturates_extreme_extents() {
