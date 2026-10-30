@@ -50,9 +50,14 @@ use std::sync::Arc;
 
 mod batch;
 mod inventory;
+mod repair_groups;
 mod report;
 pub use batch::{CheckBatchPlan, CheckBatchSummary, check_antenna_batch, read_check_batch_plan};
 pub use inventory::{InventoryBounds, InventoryEntry, InventoryReport, antenna_inventory};
+pub use repair_groups::{
+    GroupRepairPlan, GroupRepairPolicy, GroupRepairSummary, read_group_repair_plan,
+    repair_antenna_groups,
+};
 pub use report::{
     AnalysisLimits, NetCoverage, NetObservation, ReportMemoryStats, SelectedAnalysis,
 };
@@ -2017,6 +2022,32 @@ pub fn repair_antenna(
     request: &RepairRequest,
     limits: &Limits,
 ) -> Result<RepairReport> {
+    let lock = crate::lock(path, false, true)?;
+    let current = crate::head(path)?;
+    crate::check_base(base_rev, &current)?;
+    let snapshot = crate::load(path, lock, limits)?;
+    let placed: Vec<_> = snapshot.records().collect();
+    let (_lock, mut metadata) = snapshot.into_metadata();
+    let bundle = metadata
+        .physical
+        .as_ref()
+        .ok_or_else(|| fail("NO_PHYSICAL", "import a PDK design first"))?;
+    let state = bundle
+        .routing
+        .as_ref()
+        .ok_or_else(|| fail("NO_ROUTING", "route before the antenna repair"))?;
+    let prep = prepare(&metadata.design, bundle, &placed, state)?;
+    repair_prepared(path, base_rev, request, &mut metadata, &placed, &prep)
+}
+
+fn repair_prepared(
+    path: &Path,
+    base_rev: &str,
+    request: &RepairRequest,
+    metadata: &mut crate::Metadata,
+    placed: &[rustroad_core::Placed],
+    prep: &Prepared,
+) -> Result<RepairReport> {
     use rustroad_core::jumper::{Jumper, JumperPlanner, apply};
     let mut antenna = request.antenna.clone();
     if antenna.selected_nets.is_some()
@@ -2083,12 +2114,9 @@ pub fn repair_antenna(
         ));
     }
     request.jumper.validate()?;
-    let lock = crate::lock(path, false, true)?;
     let current = crate::head(path)?;
     crate::check_base(base_rev, &current)?;
-    let snapshot = crate::load(path, lock, limits)?;
-    let placed: Vec<_> = snapshot.records().collect();
-    let (_lock, mut metadata) = snapshot.into_metadata();
+    crate::check_base(base_rev, &metadata.revision)?;
     let design = metadata.design.clone();
     let bundle = metadata
         .physical
@@ -2098,7 +2126,6 @@ pub fn repair_antenna(
         .routing
         .as_ref()
         .ok_or_else(|| fail("NO_ROUTING", "route before the antenna repair"))?;
-    let prep = prepare(&design, bundle, &placed, state)?;
     let model = &bundle.connectivity;
     let route_limits = state.config.limits.clone();
     let mut planner_limits = route_limits.clone();
@@ -2160,7 +2187,7 @@ pub fn repair_antenna(
         // A supplied checker report describes the full routed scope. Bind it
         // before selecting, even if unselected macro histories remain partial.
         let (all_rows, _) = evaluate_all(
-            &prep,
+            prep,
             &design,
             model,
             &state.routes,
@@ -2177,7 +2204,7 @@ pub fn repair_antenna(
     let mut qualified = false;
     let mut coverage = Vec::new();
     let (rows_before, _) = evaluate_all(
-        &prep,
+        prep,
         &design,
         model,
         &state.routes,
@@ -2202,10 +2229,10 @@ pub fn repair_antenna(
     }
     let selected_analysis = if let (Some(input), Some(memory)) = (&selected_input, &memory) {
         let fresh = selected_analysis(
-            &prep,
+            prep,
             &design,
             model,
-            &placed,
+            placed,
             state,
             &antenna,
             &selected_names,
@@ -2314,16 +2341,16 @@ pub fn repair_antenna(
                 .enumerate()
                 .filter(|(_, t)| t.net == net)
                 .filter_map(|(ti, t)| {
-                    let (name, gate, _, _) = terminal_info(&prep, &design, model, ti, None);
+                    let (name, gate, _, _) = terminal_info(prep, &design, model, ti, None);
                     (gate > 0).then_some((name, t.pin))
                 })
                 .collect();
             let eval = |r: &core_routing::Routes, scratch: &mut AntennaStats| -> Result<Rows> {
-                charge_shape_scan(&prep, r, &antenna, scratch)?;
-                let shapes = net_shapes(&prep, r, &routed, Some(net), None, &antenna)?;
+                charge_shape_scan(prep, r, &antenna, scratch)?;
+                let shapes = net_shapes(prep, r, &routed, Some(net), None, &antenna)?;
                 let empty = Vec::new();
                 evaluate_net(
-                    &prep,
+                    prep,
                     &design,
                     model,
                     net,
@@ -2555,7 +2582,7 @@ pub fn repair_antenna(
     } else {
         drop(rows_before);
         evaluate_all(
-            &prep,
+            prep,
             &design,
             model,
             &routes,
@@ -2602,8 +2629,7 @@ pub fn repair_antenna(
         let bundle = metadata.physical.as_mut().unwrap();
         bundle.routing.as_mut().unwrap().routes = routes;
         metadata.parent_revision = current.clone();
-        drop(prep);
-        revision = crate::commit(path, metadata, &placed)?.revision;
+        revision = crate::commit_in_place(path, metadata, placed)?.revision;
     }
     Ok(RepairReport {
         schema: REPAIR_SCHEMA,

@@ -52,7 +52,7 @@ including every numeric token and field order. Its caller supplies the resource
 scope, timeout and GNU-time measurement. It also verifies that all copied revision
 files and HEAD remain unchanged.
 
-This command is a prerequisite for the B3 repair orchestration work. It can replace
+This command also provides the check primitive used by the [single-process grouped repair](antenna-groups.md). It can replace
 same-revision group checks, including the final coverage scan. It does not yet
 reproduce the grouped runner's mutation rounds, futile-group policy or deadline
 reserve policy, and does not establish the final repaired-design hash gate.

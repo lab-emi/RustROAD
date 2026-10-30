@@ -1568,3 +1568,181 @@ fn batch_holds_shared_workspace_lock_through_writer_flush() {
         .try_lock_exclusive()
         .expect("batch releases lock after successful flush");
 }
+
+#[test]
+fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
+    use rustroad_workspace::antenna::{
+        GroupRepairPlan, InventoryBounds, antenna_inventory, repair_antenna_groups,
+    };
+    let tech = TECHNOLOGY.replace(
+        "ANTENNADIFFSIDEAREARATIO 400 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+        "ANTENNADIFFSIDEAREARATIO 20 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+    );
+    let f = routed_with_technology(PLAIN, &tech);
+    let legacy = f.root.join("legacy-workspace");
+    fs::create_dir(&legacy).unwrap();
+    for name in ["HEAD", "workspace.lock"] {
+        fs::copy(f.workspace.join(name), legacy.join(name)).unwrap();
+    }
+    fs::create_dir(legacy.join("revisions")).unwrap();
+    let mut file_count = 0;
+    for revision in fs::read_dir(f.workspace.join("revisions")).unwrap() {
+        let revision = revision.unwrap();
+        let target = legacy.join("revisions").join(revision.file_name());
+        fs::create_dir(&target).unwrap();
+        for entry in fs::read_dir(revision.path()).unwrap() {
+            let entry = entry.unwrap();
+            file_count += 1;
+            assert!(file_count <= 64, "fixture copy file budget");
+            fs::copy(entry.path(), target.join(entry.file_name())).unwrap();
+        }
+    }
+    let inventory = antenna_inventory(&legacy, &InventoryBounds::default(), &limits()).unwrap();
+    let base = inventory.workspace_revision.clone();
+    let names: Vec<_> = inventory
+        .nets
+        .iter()
+        .map(|net| net.canonical_name.clone())
+        .collect();
+    drop(inventory);
+    let planning = check_antenna(
+        &legacy,
+        &AntennaRequest {
+            selected_nets: Some(names.clone()),
+            ..AntennaRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap();
+    let selected: Vec<_> = planning
+        .nets
+        .iter()
+        .filter(|net| net.violated)
+        .map(|net| net.net.clone())
+        .collect();
+    assert!(
+        !selected.is_empty(),
+        "planted native repair must be exercised"
+    );
+    let before = check_antenna(
+        &legacy,
+        &AntennaRequest {
+            selected_nets: Some(selected.clone()),
+            ..AntennaRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap();
+    let report_path = f.root.join("legacy-before.json");
+    let mut before_bytes = serde_json::to_vec_pretty(&before).unwrap();
+    before_bytes.push(b'\n');
+    fs::write(&report_path, &before_bytes).unwrap();
+    let repaired = repair_antenna(
+        &legacy,
+        &base,
+        &RepairRequest {
+            selected_report: Some(report_path),
+            scope: RepairScope::SelectedSupportedNets(selected),
+            ..RepairRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap();
+    assert!(!repaired.jumpers.is_empty());
+    let mut plan = GroupRepairPlan::new(f.root.join("group-repair"));
+    plan.max_rounds = 1;
+    let grouped = repair_antenna_groups(&f.workspace, &base, &plan, &limits()).unwrap();
+    assert_eq!(grouped.attempts.len(), 1);
+    assert_eq!(grouped.total_jumpers, repaired.jumpers.len());
+    assert_eq!(grouped.final_revision, repaired.revision);
+    assert_eq!(
+        fs::read(plan.output.join("repair-0-before.json")).unwrap(),
+        before_bytes
+    );
+    let mut repair_bytes = serde_json::to_vec_pretty(&repaired).unwrap();
+    repair_bytes.push(b'\n');
+    assert_eq!(
+        fs::read(plan.output.join("repair-0.json")).unwrap(),
+        repair_bytes
+    );
+    for entry in fs::read_dir(legacy.join("revisions").join(&repaired.revision)).unwrap() {
+        let entry = entry.unwrap();
+        assert_eq!(
+            fs::read(entry.path()).unwrap(),
+            fs::read(
+                f.workspace
+                    .join("revisions")
+                    .join(&repaired.revision)
+                    .join(entry.file_name())
+            )
+            .unwrap(),
+            "revision side-table bytes"
+        );
+    }
+    let final_inventory =
+        antenna_inventory(&legacy, &InventoryBounds::default(), &limits()).unwrap();
+    let mut inventory_bytes = Vec::new();
+    final_inventory.write_json(&mut inventory_bytes).unwrap();
+    inventory_bytes.push(b'\n');
+    assert_eq!(
+        fs::read(plan.output.join("inventory-final.json")).unwrap(),
+        inventory_bytes
+    );
+    assert_eq!(
+        fs::read(plan.output.join("model-initial.json")).unwrap(),
+        fs::read(plan.output.join("model-final.json")).unwrap()
+    );
+    assert_eq!(grouped.whole_layout_antenna_status, "unchecked");
+}
+
+#[test]
+fn grouped_repair_refuses_conflicts_and_invalid_or_existing_outputs() {
+    use rustroad_workspace::antenna::{GroupRepairPlan, repair_antenna_groups};
+    let f = routed(PLAIN);
+    let base = fs::read_to_string(f.workspace.join("HEAD"))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let plan = GroupRepairPlan::new(f.root.join("new-output"));
+    assert!(
+        repair_antenna_groups(&f.workspace, "rev999", &plan, &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("REVISION_CONFLICT")
+    );
+    assert!(!plan.output.exists());
+    let mut invalid = plan.clone();
+    invalid.policy.max_attempts = 65;
+    assert!(repair_antenna_groups(&f.workspace, &base, &invalid, &limits()).is_err());
+    assert!(!plan.output.exists());
+    fs::create_dir(&plan.output).unwrap();
+    assert!(repair_antenna_groups(&f.workspace, &base, &plan, &limits()).is_err());
+    assert_eq!(
+        fs::read_to_string(f.workspace.join("HEAD")).unwrap().trim(),
+        base
+    );
+}
+
+#[test]
+fn grouped_repair_exact_operation_budget_still_publishes_summary() {
+    use rustroad_workspace::antenna::{GroupRepairPlan, repair_antenna_groups};
+    let f = routed("module chip(input a, output y); BUF u0(.A(a),.Y(y)); endmodule");
+    let base = fs::read_to_string(f.workspace.join("HEAD"))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let mut plan = GroupRepairPlan::new(f.root.join("exact-fit"));
+    // Two inventory/model pairs plus one planning check and one final check.
+    // The legacy runner writes final lineage outside its operation counter.
+    plan.policy.max_commands = 6;
+    let summary = repair_antenna_groups(&f.workspace, &base, &plan, &limits()).unwrap();
+    assert!(
+        summary.attempts.is_empty(),
+        "the exact-fit fixture must stay clean"
+    );
+    assert!(plan.output.join("summary.json").is_file());
+    assert_eq!(summary.final_revision, base);
+    assert_eq!(summary.corner, "not_applicable");
+    assert_eq!(summary.wire_model, "none");
+    assert_eq!(summary.unconstrained_endpoints, None);
+}
