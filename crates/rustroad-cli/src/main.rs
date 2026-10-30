@@ -399,6 +399,12 @@ enum Command {
         #[arg(long, default_value_t = rustroad_workspace::antenna::DEFAULT_SAFETY_MARGIN)]
         safety_margin: f64,
     },
+    /// Stream ordered selected checks while decoding and preparing HEAD once.
+    CheckAntennaBatch {
+        /// Bounded rustroad.antenna-check-batch.v1 plan, pinned to one revision.
+        #[arg(long)]
+        plan: PathBuf,
+    },
     /// Diode-free antenna repair of HEAD: layer jumpers on the violating
     /// nets of the native check (new revision; netlist and placement kept).
     RepairAntenna {
@@ -1045,6 +1051,17 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             },
             &limits,
         )?),
+        Command::CheckAntennaBatch { plan } => {
+            let plan = rustroad_workspace::antenna::read_check_batch_plan(&plan)?;
+            let stdout = io::stdout();
+            rustroad_workspace::antenna::check_antenna_batch(
+                &workspace,
+                &plan,
+                &limits,
+                &mut stdout.lock(),
+            )?;
+            Ok(())
+        }
         Command::RepairAntenna {
             base_rev,
             antenna_report,

@@ -1415,3 +1415,156 @@ fn layer_jumpers_repair_partial_net_violations_without_diodes() {
         );
     }
 }
+
+#[test]
+fn batch_preserves_order_and_every_legacy_selected_report_byte() {
+    use rustroad_workspace::antenna::{CheckBatchPlan, check_antenna_batch};
+    let f = routed(
+        "module chip(input a, output y); wire n; BUF u0(.A(a),.Y(n)); BUF u1(.A(n),.Y(y)); endmodule",
+    );
+    let revision = read(&f.workspace, &limits())
+        .unwrap()
+        .metadata()
+        .revision
+        .clone();
+    let groups = vec![
+        vec!["y".into()],
+        vec!["a".into(), "n".into()],
+        vec!["a".into()],
+    ];
+    let plan = CheckBatchPlan::new(revision.clone(), groups.clone());
+    let mut output = Vec::new();
+    let summary = check_antenna_batch(&f.workspace, &plan, &limits(), &mut output).unwrap();
+    let reports: Vec<Box<serde_json::value::RawValue>> = serde_json::from_slice(&output).unwrap();
+    assert_eq!(summary.output_bytes, output.len() as u64);
+    assert_eq!(summary.groups, groups.len());
+    let mut work = 0;
+    for (group, report) in groups.into_iter().zip(reports) {
+        let legacy = check_antenna(
+            &f.workspace,
+            &AntennaRequest {
+                selected_nets: Some(group),
+                ..AntennaRequest::default()
+            },
+            &limits(),
+        )
+        .unwrap();
+        // Compare complete serialized values, including exact work/memory accounting,
+        // row order, source hashes and partial-model observations.
+        assert_eq!(
+            report.get().as_bytes(),
+            serde_json::to_vec(&legacy).unwrap()
+        );
+        work += legacy.stats.work;
+    }
+    assert_eq!(summary.work, work);
+    assert_eq!(
+        read(&f.workspace, &limits()).unwrap().metadata().revision,
+        revision
+    );
+}
+
+#[test]
+fn batch_refuses_revision_name_work_and_output_budgets() {
+    use rustroad_workspace::antenna::{CheckBatchPlan, check_antenna_batch};
+    let f = routed("module chip(input a, output y); BUF u0(.A(a),.Y(y)); endmodule");
+    let revision = read(&f.workspace, &limits())
+        .unwrap()
+        .metadata()
+        .revision
+        .clone();
+    let plan = CheckBatchPlan::new(revision, vec![vec!["a".into()]]);
+    let mut bad = plan.clone();
+    bad.revision = "rev999".into();
+    let mut output = Vec::new();
+    assert!(
+        check_antenna_batch(&f.workspace, &bad, &limits(), &mut output)
+            .unwrap_err()
+            .to_string()
+            .contains("REVISION_CONFLICT")
+    );
+    assert!(output.is_empty(), "conflict must precede all report bytes");
+    bad = plan.clone();
+    bad.groups = vec![vec!["y".into(), "a".into()]];
+    assert!(check_antenna_batch(&f.workspace, &bad, &limits(), &mut output).is_err());
+    assert!(
+        output.is_empty(),
+        "noncanonical groups must fail before output"
+    );
+    bad = plan.clone();
+    bad.max_work = 1;
+    assert!(
+        check_antenna_batch(&f.workspace, &bad, &limits(), &mut output)
+            .unwrap_err()
+            .to_string()
+            .contains("aggregate work admission")
+    );
+    output.clear();
+    bad = plan.clone();
+    bad.max_output_bytes = 3;
+    assert!(
+        check_antenna_batch(&f.workspace, &bad, &limits(), &mut output)
+            .unwrap_err()
+            .to_string()
+            .contains("output byte budget")
+    );
+    assert_eq!(
+        output, b"[",
+        "a rejected report must not be partially emitted"
+    );
+    bad = plan;
+    bad.snapshot_memory_bytes = 1;
+    assert!(
+        check_antenna_batch(&f.workspace, &bad, &limits(), &mut Vec::new())
+            .unwrap_err()
+            .to_string()
+            .contains("memory admission")
+    );
+}
+
+#[test]
+fn batch_holds_shared_workspace_lock_through_writer_flush() {
+    use fs2::FileExt;
+    use rustroad_workspace::antenna::{CheckBatchPlan, check_antenna_batch};
+    use std::io::{self, Write};
+    struct Writer {
+        lock: fs::File,
+        flushed: bool,
+    }
+    impl Write for Writer {
+        fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            let err = self
+                .lock
+                .try_lock_exclusive()
+                .expect_err("batch must retain shared lock during flush");
+            assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
+            self.flushed = true;
+            Ok(())
+        }
+    }
+    let f = routed("module chip(input a, output y); BUF u0(.A(a),.Y(y)); endmodule");
+    let revision = read(&f.workspace, &limits())
+        .unwrap()
+        .metadata()
+        .revision
+        .clone();
+    let plan = CheckBatchPlan::new(revision, vec![vec!["a".into()]]);
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(f.workspace.join("workspace.lock"))
+        .unwrap();
+    let mut writer = Writer {
+        lock,
+        flushed: false,
+    };
+    check_antenna_batch(&f.workspace, &plan, &limits(), &mut writer).unwrap();
+    assert!(writer.flushed);
+    writer
+        .lock
+        .try_lock_exclusive()
+        .expect("batch releases lock after successful flush");
+}

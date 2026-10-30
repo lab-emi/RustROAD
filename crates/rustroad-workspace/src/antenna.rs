@@ -48,8 +48,10 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod batch;
 mod inventory;
 mod report;
+pub use batch::{CheckBatchPlan, CheckBatchSummary, check_antenna_batch, read_check_batch_plan};
 pub use inventory::{InventoryBounds, InventoryEntry, InventoryReport, antenna_inventory};
 pub use report::{
     AnalysisLimits, NetCoverage, NetObservation, ReportMemoryStats, SelectedAnalysis,
@@ -1475,6 +1477,7 @@ fn selected_analysis(
     request: &AntennaRequest,
     names: &[String],
     mut coverage: Vec<NetCoverage>,
+    source_sha256: Option<&str>,
 ) -> Result<SelectedAnalysis> {
     let mut canonical_nets = names.to_vec();
     canonical_nets.sort();
@@ -1483,7 +1486,10 @@ fn selected_analysis(
         schema: "rustroad.antenna-selected.v1".into(),
         scope: "explicit_routed_net_subset".into(),
         selection_sha256: report::fingerprint(&canonical_nets)?,
-        source_sha256: source_fingerprint(design, model, placed, state, &prep.sources)?,
+        source_sha256: match source_sha256 {
+            Some(value) => value.to_owned(),
+            None => source_fingerprint(design, model, placed, state, &prep.sources)?,
+        },
         canonical_nets,
         limits: AnalysisLimits::from(request),
         coverage,
@@ -1509,6 +1515,26 @@ pub fn check_antenna(
         .ok_or_else(|| fail("NO_ROUTING", "route before the antenna check"))?;
     let placed: Vec<_> = snapshot.records().collect();
     let prep = prepare(design, bundle, &placed, state)?;
+    check_prepared(metadata, &placed, &prep, request, None)
+}
+
+fn check_prepared(
+    metadata: &crate::Metadata,
+    placed: &[rustroad_core::Placed],
+    prep: &Prepared,
+    request: &AntennaRequest,
+    source_sha256: Option<&str>,
+) -> Result<AntennaReport> {
+    let design = &metadata.design;
+    // Both callers validated these fields while preparing the same snapshot.
+    let bundle = metadata
+        .physical
+        .as_ref()
+        .ok_or_else(|| fail("NO_PHYSICAL", "missing prepared physical state"))?;
+    let state = bundle
+        .routing
+        .as_ref()
+        .ok_or_else(|| fail("NO_ROUTING", "missing prepared routing state"))?;
     let model = &bundle.connectivity;
     let selected = request
         .selected_nets
@@ -1596,7 +1622,7 @@ pub fn check_antenna(
     let mut qualified = false;
     let mut coverage = Vec::new();
     let (mut rows, worst) = evaluate_all(
-        &prep,
+        prep,
         design,
         model,
         &state.routes,
@@ -1626,7 +1652,15 @@ pub fn check_antenna(
         .as_ref()
         .map(|names| {
             selected_analysis(
-                &prep, design, model, &placed, state, request, names, coverage,
+                prep,
+                design,
+                model,
+                placed,
+                state,
+                request,
+                names,
+                coverage,
+                source_sha256,
             )
         })
         .transpose()?;
@@ -1669,7 +1703,7 @@ pub fn check_antenna(
         workspace_revision: metadata.revision.clone(),
         design: design.name.clone(),
         dbu_per_micron: prep.dbu,
-        sources: prep.sources,
+        sources: prep.sources.clone(),
         scope: AntennaScope {
             model: "LEF process-antenna partial ratios and per-gate cumulative process-stage DP",
             routing_scope: match state.scope {
@@ -1677,12 +1711,12 @@ pub fn check_antenna(
                 crate::routing::RouteScope::Clock => "clock_nets_only",
             },
             oxide: "OXIDE1",
-            cumulative: prep.cumulative,
+            cumulative: prep.cumulative.clone(),
             side_area: "union perimeter x LEF THICKNESS",
             block_ports: "top-level ports carry no gate or diffusion area",
             cell_internal_metal: "routing-layer pin port geometry counted; other cell-internal metal not modeled",
-            checked_layers: prep.checked_layers,
-            rule_free_layers: prep.rule_free_layers,
+            checked_layers: prep.checked_layers.clone(),
+            rule_free_layers: prep.rule_free_layers.clone(),
             extra_shapes: extra_count,
             drc_status: "unchecked",
         },
@@ -1697,7 +1731,7 @@ pub fn check_antenna(
             })
             .collect(),
         checks: rows,
-        unsupported: prep.unsupported,
+        unsupported: prep.unsupported.clone(),
         diagnostics,
         selection,
         _report_hold: report_hold,
@@ -2176,6 +2210,7 @@ pub fn repair_antenna(
             &antenna,
             &selected_names,
             coverage,
+            None,
         )?;
         input.bind(
             &current,
