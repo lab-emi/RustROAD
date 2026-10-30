@@ -68,6 +68,7 @@ struct Batch<'a> {
     order: &'a [u32],
     begin: usize,
     cap: u64,
+    prior: Option<&'a crate::troute::PriorRoutes>,
 }
 
 impl Batch<'_> {
@@ -114,7 +115,11 @@ impl Batch<'_> {
                     estimate.total() >> 20
                 );
             }
-            match routing::route_cpu_ref(view, &local) {
+            let attempt = match self.prior {
+                Some(prior) => routing::route_cpu_ref_with_prior(view, &local, prior),
+                None => routing::route_cpu_ref(view, &local),
+            };
+            match attempt {
                 Ok(done) => return Ok(done),
                 Err(error) => {
                     let crate::Error::PinAccess {
@@ -312,6 +317,23 @@ pub fn route(
     limits: &RouteLimits,
     batch_terminals: usize,
 ) -> Result<(Routes, BatchReport)> {
+    route_with_prior(input, limits, batch_terminals, None)
+}
+
+/// [`route`] with an ECO prior: the design must fit one batch, so the track
+/// router sees exactly the terminal order and ties of the batched run that
+/// produced the prior, and unchanged nets keep that run's geometry.
+pub fn route_with_prior(
+    input: &RouteInput,
+    limits: &RouteLimits,
+    batch_terminals: usize,
+    prior: Option<&crate::troute::PriorRoutes>,
+) -> Result<(Routes, BatchReport)> {
+    if prior.is_some() && input.terminals.len() > batch_terminals {
+        return Err(invalid(
+            "ECO prior routing needs every terminal in one batch",
+        ));
+    }
     if !(2..=MAX_BATCH_TERMINALS).contains(&batch_terminals) || input.tracks.is_none() {
         return Err(invalid(
             "batched routing requires tracks and 2..1000000 terminals per batch",
@@ -447,6 +469,7 @@ pub fn route(
             order: &order,
             begin,
             cap,
+            prior,
         }
         .route(&mut view, &mut out, &mut report)?;
         report.batches += 1;
@@ -461,6 +484,12 @@ pub fn route(
             .comparisons
             .checked_add(done.stats.comparisons)
             .ok_or_else(|| budget("batched routing work"))?;
+        if let Some(stats) = done.stats.single_owner_repair.take() {
+            out.stats
+                .single_owner_repair
+                .get_or_insert_with(Default::default)
+                .merge(&stats)?;
+        }
         out.stats.wire_length_dbu = out
             .stats
             .wire_length_dbu

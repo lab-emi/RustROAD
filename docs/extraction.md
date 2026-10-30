@@ -56,17 +56,19 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   extract and are listed separately, never as unannotated.
 * Candidate shapes per wire run (`--max-extract-candidates`, default 4,096)
   were a fixed cap; they are a budget now. Per run the extractor holds the
-  candidate list, two clamped cut points per candidate and at most one plane
-  entry per candidate: 44 B per candidate (`CANDIDATE_SCRATCH_BYTES`), one run
-  at a time. The ceiling is 48 MiB of that scratch, 1,143,901 candidates
-  (`MAX_CANDIDATES_CEILING`); the quadratic intervals x candidates work stays
-  charged to `--max-extract-work`. The report states `max_candidates_per_run`,
+  candidate list, interval events, ordered active set and plane list, with
+  vector growth and hash/tree occupancy included: 256 B per candidate
+  (`CANDIDATE_SCRATCH_BYTES`), one run at a time. The ceiling is 48 MiB of
+  that scratch, 196,608 candidates (`MAX_CANDIDATES_CEILING`). An interval sweep
+  skips disjoint candidates while keeping shape-ID accumulation order. Index
+  work and active-candidate comparisons debit `--max-extract-work`. The report states `max_candidates_per_run`,
   `candidate_scratch_bytes` and the observed `stats.max_run_candidates`.
   `--max-rc-elements` (resistors + nodes + 2 x couplings, explicitly bounded by the
   whole-process memory allowance) is a command-line budget too. SERV (scale-stream layout, sky130,
   7,959 nets): 8,054 candidates on its largest run, 4.3 M elements, work
   7.4e9, 20.6 s and 521 MB peak; the track recipe of the gate passes 65,536
-  candidates (2.9 MB scratch) and 8 M elements.
+  candidates (16 MiB scratch with the interval sweep) and 8 M elements. Those
+  SERV time/work values precede the sweep and are historical measurements.
 
 Cell pin and obstruction geometry is shared per master and decoded only for
 local queries. The default virtual-shape budget is 256 million and the separate

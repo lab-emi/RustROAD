@@ -14,8 +14,8 @@ rustroad-core = { path = "crates/rustroad-core" }
 rustroad-formats = { path = "crates/rustroad-formats" }
 rustroad-workspace = { path = "crates/rustroad-workspace" }
 rustroad-flow = { path = "crates/rustroad-flow" }
-serde = { version = "=1.0.228", features = ["derive"] }
-serde_json = "=1.0.149"
+serde = { version = "=1.0.228", features = ["derive", "rc"] }
+serde_json = { version = "=1.0.149", features = ["raw_value"] }
 thiserror = "=2.0.18"
 slotmap = "=1.1.1"
 rayon = "=1.12.0"

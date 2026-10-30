@@ -579,6 +579,7 @@ pub(crate) fn insert(
             range: None,
         });
         design.cells.push(Cell {
+            fixed: None,
             name: node.name.clone(),
             master: cfg.cell.clone(),
             width: size[0],

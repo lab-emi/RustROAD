@@ -79,6 +79,8 @@ fn netlist() -> String {
 
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -103,6 +105,7 @@ fn config() -> PhysicalConfig {
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,
         cell_spacing_sites: 0,
+        placement_blockages: Vec::new(),
         io_width: None,
         io_min_area: false,
         io_spacing: None,
@@ -281,6 +284,59 @@ fn batched_routing_persists_complete_coverage_and_failed_batches_keep_head() {
 }
 
 #[test]
+fn explicit_signal_layer_names_survive_export_and_reject_invalid_ranges() {
+    let fixture = Fixture::new();
+    let mut profile = routing(true);
+    profile["track_router"]["min_routing_layer"] = "M2".into();
+    profile["track_router"]["max_routing_layer"] = "M3".into();
+    fs::write(
+        fixture.path("restricted.json"),
+        serde_json::to_vec(&profile).unwrap(),
+    )
+    .unwrap();
+    let ws = fixture.flow("restricted", "restricted.json").unwrap();
+    let snapshot = read(&ws, &limits()).unwrap();
+    let config = snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .routing
+        .as_ref()
+        .unwrap()
+        .config
+        .track_router
+        .as_ref()
+        .unwrap();
+    assert_eq!(config.min_routing_layer.as_deref(), Some("M2"));
+    assert_eq!(config.max_routing_layer.as_deref(), Some("M3"));
+    assert_eq!(snapshot.summary().routed_nets, Some(19));
+    drop(snapshot);
+    for (tag, lower, upper) in [
+        ("absent-layer", "missing", "M3"),
+        ("cut-layer", "M2", "V1"),
+        ("reversed", "M3", "M2"),
+    ] {
+        profile["track_router"]["min_routing_layer"] = lower.into();
+        profile["track_router"]["max_routing_layer"] = upper.into();
+        fs::write(
+            fixture.path("invalid-range.json"),
+            serde_json::to_vec(&profile).unwrap(),
+        )
+        .unwrap();
+        assert!(fixture.flow(tag, "invalid-range.json").is_err(), "{tag}");
+        assert_eq!(
+            read(&fixture.path(&format!("{tag}-ws")), &limits())
+                .unwrap()
+                .summary()
+                .revision,
+            "rev2",
+            "{tag} must not publish partial routing"
+        );
+    }
+}
+
+#[test]
 fn floorplan_place_and_track_route_round_trip_through_schema_6() {
     let f = Fixture::new();
     let report = f.floorplan("a").unwrap();
@@ -334,6 +390,145 @@ fn floorplan_place_and_track_route_round_trip_through_schema_6() {
     assert!(read(&ws, &limits()).is_err());
     fs::write(&table, &bytes).unwrap();
     assert_eq!(first, def(&ws));
+}
+
+#[test]
+fn eco_route_reuses_an_unchanged_prior_and_checks_its_revision() {
+    let f = Fixture::new();
+    let prior = f.flow("p", "track.json").unwrap();
+    let prior_rev = fs::read_to_string(prior.join("HEAD"))
+        .unwrap()
+        .trim()
+        .to_string();
+    // The same design placed again in a fresh workspace, routed with the
+    // first routing as its prior: every routed net is offered and the
+    // result is the same validated routing.
+    f.floorplan("q").unwrap();
+    let ws = f.path("q-ws");
+    let imported = import_pdk_with_config(
+        &ws,
+        "rev0",
+        &ImportSources {
+            technology_lef: f.path("tech.lef"),
+            cell_lef: f.path("cells.lef"),
+            netlist: f.path("mapped.v"),
+            floorplan: f.path("q-floor.json"),
+        },
+        &limits(),
+        &ConnectivityLimits::default(),
+        Some(&f.path("q-physical.json")),
+    )
+    .unwrap();
+    let placed = place(&ws, &imported.revision, &limits()).unwrap();
+    let wrong = rustroad_workspace::routing::PriorSource {
+        workspace: &prior,
+        revision: "rev1",
+    };
+    assert!(matches!(
+        rustroad_workspace::routing::route_eco(
+            &ws,
+            &placed.revision,
+            &f.path("track.json"),
+            RouteScope::All,
+            Some(&wrong),
+            &limits(),
+        ),
+        Err(Error::Conflict { .. })
+    ));
+    let source = rustroad_workspace::routing::PriorSource {
+        workspace: &prior,
+        revision: &prior_rev,
+    };
+    let routed = rustroad_workspace::routing::route_eco(
+        &ws,
+        &placed.revision,
+        &f.path("track.json"),
+        RouteScope::All,
+        Some(&source),
+        &limits(),
+    )
+    .unwrap();
+    let eco = routed.eco_prior.expect("ECO report");
+    assert_eq!(eco.prior_routed_nets, 19);
+    assert_eq!(eco.offered_nets, 19);
+    assert_eq!((eco.changed_nets, eco.new_nets), (0, 0));
+    assert_eq!(def(&ws), def(&prior));
+    // The prior workspace is read, never written.
+    assert_eq!(
+        fs::read_to_string(prior.join("HEAD")).unwrap().trim(),
+        prior_rev
+    );
+}
+
+#[test]
+fn eco_route_accepts_one_batch_and_refuses_a_multi_batch_plan() {
+    let f = Fixture::new();
+    let prior = f.flow("p", "track.json").unwrap();
+    let prior_rev = fs::read_to_string(prior.join("HEAD"))
+        .unwrap()
+        .trim()
+        .to_string();
+    f.floorplan("q").unwrap();
+    let ws = f.path("q-ws");
+    let imported = import_pdk_with_config(
+        &ws,
+        "rev0",
+        &ImportSources {
+            technology_lef: f.path("tech.lef"),
+            cell_lef: f.path("cells.lef"),
+            netlist: f.path("mapped.v"),
+            floorplan: f.path("q-floor.json"),
+        },
+        &limits(),
+        &ConnectivityLimits::default(),
+        Some(&f.path("q-physical.json")),
+    )
+    .unwrap();
+    let placed = place(&ws, &imported.revision, &limits()).unwrap();
+    let source = rustroad_workspace::routing::PriorSource {
+        workspace: &prior,
+        revision: &prior_rev,
+    };
+    let track: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.path("track.json")).unwrap()).unwrap();
+    for (name, batch) in [("multi.json", 2), ("single.json", 100000)] {
+        let mut v = track.clone();
+        v["batch_terminals"] = serde_json::json!(batch);
+        fs::write(f.path(name), serde_json::to_vec(&v).unwrap()).unwrap();
+    }
+    // Two terminals per batch splits the design: refused before any search, HEAD unchanged.
+    assert!(matches!(
+        rustroad_workspace::routing::route_eco(
+            &ws,
+            &placed.revision,
+            &f.path("multi.json"),
+            RouteScope::All,
+            Some(&source),
+            &limits(),
+        ),
+        Err(Error::Invalid(_))
+    ));
+    assert_eq!(
+        fs::read_to_string(ws.join("HEAD")).unwrap().trim(),
+        placed.revision
+    );
+    // One batch holding every terminal is the whole-input track router.
+    let routed = rustroad_workspace::routing::route_eco(
+        &ws,
+        &placed.revision,
+        &f.path("single.json"),
+        RouteScope::All,
+        Some(&source),
+        &limits(),
+    )
+    .unwrap();
+    let eco = routed.eco_prior.expect("ECO report");
+    assert_eq!(
+        (eco.offered_nets, eco.changed_nets, eco.new_nets),
+        (19, 0, 0)
+    );
+    assert!(routed.route_memory.is_some());
+    assert_eq!(def(&ws), def(&prior));
 }
 
 #[test]
@@ -417,6 +612,7 @@ END TAP\nEND LIBRARY\n";
     fs::write(f.path("cells.lef"), library().replace("END LIBRARY\n", tap)).unwrap();
     let mut cfg = config();
     cfg.tap = Some(rustroad_workspace::physical::TapConfig {
+        body_view: Default::default(),
         cell: "TAP".into(),
         max_gap: 500,
         well_layer: "NW".into(),

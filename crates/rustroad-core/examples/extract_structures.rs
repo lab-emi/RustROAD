@@ -54,6 +54,7 @@ fn run(text: &str) -> Result<String, String> {
                     vertical: Some(vertical == 1),
                     min_area: None,
                     min_step: None,
+                    wide_spacing: None,
                 });
                 tech.push(Some(RcLayer {
                     metal,

@@ -254,6 +254,7 @@ fn case(rows: &[(&str, &str, f64, f64)], setup_ss: f64, profile: Value) -> Case 
     let prof = write(&d, "profile.json", &with_cell_lef(&d, profile));
     record(&d, "rev2", &netlist);
     let req = HoldEcoRequest {
+        cell_buses: None,
         timed_netlist: netlist.clone(),
         timed_netlist_sha256: None,
         cell_lef: None,
@@ -1292,4 +1293,134 @@ fn path_aware_infeasible_endpoints_carry_evidence_and_partial_plans_apply() {
         out.contains("AND2 g1 (.A(a[1]), .B(rr_eco_hold_0_n), .X(n1));"),
         "{out}"
     );
+}
+
+fn bus_case() -> Case {
+    let mut c = case(&[], 8.0, default_profile());
+    fs::write(
+        &c.req.netlist,
+        "module top(input [3:0] a,output [3:0] y); M m(.A(a),.Q(y)); endmodule\n",
+    )
+    .unwrap();
+    let mut lef = CELL_LEF.replace("END LIBRARY", "");
+    lef.push_str("MACRO M CLASS BLOCK ; SIZE 2 BY 2 ;\n");
+    for port in ["A", "Q"] {
+        for i in 0..4 {
+            lef.push_str(&format!(
+                " PIN {port}[{i}] DIRECTION {} ; USE SIGNAL ; END {port}[{i}]\n",
+                if port == "A" { "INPUT" } else { "OUTPUT" }
+            ));
+        }
+    }
+    lef.push_str("END M\nEND LIBRARY\n");
+    let lef_path = c.d.join("cells.lef");
+    fs::write(&lef_path, &lef).unwrap();
+    let mut profile: Value = serde_json::from_slice(&fs::read(&c.req.profile).unwrap()).unwrap();
+    profile["sources"][0]["sha256"] = json!(format!("{:x}", Sha256::digest(lef.as_bytes())));
+    profile["sources"][0]["bytes"] = json!(lef.len());
+    fs::write(&c.req.profile, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let row = |endpoint: &str, hold: f64, setup: f64| json!({"endpoint":endpoint,"inst":"m","cell":"M","net":"a[1]","net_driver":"a[1]","hold_slack_ns":hold,"setup_slack_ns":setup,"required_delay_ns":0.05-hold,"path":{"stages":[{"pin":"a[1]","net":"a[1]"},{"pin":"m/A[1]","net":"a[1]"}]}});
+    let hold = hold_report_rev(
+        0.05,
+        &[
+            ("tt", "m/A[1]", -0.02, 8.0),
+            ("ss", "m/A[1]", -0.04, 8.0),
+            ("ff", "m/A[1]", 0.01, 8.0),
+        ],
+        "spef_rc",
+        "rev2",
+        Some(&row),
+    );
+    c.req.hold_reports = vec![write(&c.d, "bus_hold.json", &hold)];
+    c.req.setup_reports = vec![write(
+        &c.d,
+        "bus_setup.json",
+        &setup_report("ss", &[("m/A[1]", 8.0)]),
+    )];
+    record(&c.d, "rev2", &c.req.netlist);
+    let schema = write(&c.d, "bus_schema.json", &json!({"M":{"A":[3,0],"Q":[3,0]}}));
+    c.req.cell_buses = Some(schema);
+    c
+}
+
+#[test]
+fn explicit_bus_ranges_bind_and_edit_only_the_selected_member() {
+    let mut c = bus_case();
+    let schema = c.req.cell_buses.take();
+    assert!(
+        plan_hold(&c.req)
+            .unwrap_err()
+            .to_string()
+            .contains("STALE_REPORT"),
+        "missing metadata must remain refused"
+    );
+    c.req.cell_buses = schema;
+    let plan = plan_hold(&c.req).expect("explicit bus data");
+    assert_eq!(plan.status, "planned");
+    assert_eq!(plan.eco.operations.len(), 1);
+    assert!(plan.inputs.cell_buses.is_some());
+    assert_eq!(plan.inputs.binding.hold_rows_bound, 3);
+    let text = fs::read_to_string(&c.req.out).unwrap();
+    let n = rustroad_formats::verilog::parse_verilog(&text, &Default::default()).unwrap();
+    let mut cells = rustroad_formats::eco::EcoCells {
+        pin_buses: [(
+            "M".into(),
+            [("A".into(), [3, 0]), ("Q".into(), [3, 0])].into(),
+        )]
+        .into(),
+        ..Default::default()
+    };
+    cells.pin_directions.insert(
+        "M".into(),
+        (0..4)
+            .flat_map(|i| {
+                [
+                    (format!("A[{i}]"), "INPUT".into()),
+                    (format!("Q[{i}]"), "OUTPUT".into()),
+                ]
+            })
+            .collect(),
+    );
+    let mut view = rustroad_formats::eco::PinView::new(&n, &cells, &Default::default()).unwrap();
+    let m = n.instances.iter().find(|i| i.name == "m").unwrap();
+    assert_eq!(
+        view.get(m, "A[1]").unwrap(),
+        rustroad_formats::verilog::Expr::Ident("rr_eco_hold_0_n".into())
+    );
+    for bit in [0, 2, 3] {
+        assert_eq!(
+            view.get(m, &format!("A[{bit}]")).unwrap(),
+            rustroad_formats::verilog::Expr::BitSelect {
+                name: "a".into(),
+                index: bit
+            }
+        );
+    }
+    assert!(
+        m.connections.iter().all(|p| p.pin == "A" || p.pin == "Q"),
+        "do not emit standalone escaped bus-member ports"
+    );
+}
+
+#[test]
+fn reversed_and_duplicate_bus_metadata_cannot_override_report_binding() {
+    let c = bus_case();
+    let schema = c.req.cell_buses.as_ref().unwrap();
+    fs::write(schema, r#"{"M":{"A":[0,3],"Q":[3,0]}}"#).unwrap();
+    assert!(
+        plan_hold(&c.req)
+            .unwrap_err()
+            .to_string()
+            .contains("STALE_REPORT")
+    );
+    assert!(!c.req.out.exists());
+    assert!(!c.req.plan_out.exists());
+    fs::write(schema, r#"{"M":{"A":[3,0],"A":[0,3],"Q":[3,0]}}"#).unwrap();
+    assert!(
+        plan_hold(&c.req)
+            .unwrap_err()
+            .to_string()
+            .contains("ECO_BUS_SCHEMA")
+    );
+    assert!(!c.req.out.exists());
 }

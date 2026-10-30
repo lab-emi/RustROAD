@@ -9,7 +9,7 @@ use rustroad_core::routing::{
 use rustroad_core::{Design, Limits, Placed, Rect};
 use rustroad_formats::lef::LefGeometry;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -18,6 +18,9 @@ use std::path::Path;
 pub struct LayerPolicy {
     pub name: String,
     pub spacing: i64,
+    /// Wide-metal spacing row (LEF SPACINGTABLE PARALLELRUNLENGTH), DBU.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wide_spacing: Option<rustroad_core::routing::WideSpacing>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -77,6 +80,12 @@ fn default_history(value: &usize) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrackRouterConfig {
+    /// Lowest signal-routing layer. Lower layers remain usable by pin access.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_routing_layer: Option<String>,
+    /// Highest signal-routing layer; omitted uses the highest selected layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_routing_layer: Option<String>,
     /// GCell side in DBU.
     pub gcell: i64,
     /// Path cost of one via (DBU-equivalent).
@@ -103,6 +112,15 @@ pub struct TrackRouterConfig {
         skip_serializing_if = "is_default_heuristic_weight"
     )]
     pub heuristic_weight: u64,
+    /// Optional soft-search priority weight; hard searches retain heuristic_weight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair_heuristic_weight: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub single_owner_repair: Option<routing::SingleOwnerRepairConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_pin_index: Option<routing::OwnPinIndex>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_index: Option<routing::InstanceIndexMode>,
     #[serde(default = "default_memory_mib")]
     pub memory_mib: u64,
     #[serde(
@@ -110,6 +128,9 @@ pub struct TrackRouterConfig {
         skip_serializing_if = "default_history"
     )]
     pub max_history_entries: usize,
+    /// Routed stacks need the minimum-area run in every search.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub area_stacks: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -165,10 +186,15 @@ impl RoutingConfig {
             || self.grid_step <= 0
             || !self.max_skew_ns.is_finite()
             || self.max_skew_ns <= 0.0
-            || self
-                .layers
-                .iter()
-                .any(|l| !rustroad_core::valid_object_name(&l.name) || l.spacing < 0)
+            || self.layers.iter().any(|l| {
+                !rustroad_core::valid_object_name(&l.name)
+                    || l.spacing < 0
+                    || l.wide_spacing.is_some_and(|w| {
+                        !(1..=1_000_000).contains(&w.width)
+                            || !(0..=10_000_000).contains(&w.parallel_run)
+                            || !(l.spacing..=1_000_000).contains(&w.spacing)
+                    })
+            })
             || self
                 .vias
                 .iter()
@@ -446,6 +472,9 @@ pub(crate) fn clock_nets(bundle: &PhysicalBundle) -> Result<BTreeSet<u32>> {
     }
     let model = &bundle.connectivity;
     let mut nets = BTreeSet::new();
+    // A selected gated root is also a clock net even though its driver is
+    // an existing functional gate instead of an inserted clock buffer.
+    nets.insert(crate::clock::root_net(bundle, cfg)?);
     for p in &model.pins {
         let source = match p.owner {
             PinOwner::Port { port, .. } => model.ports[port as usize].name == cfg.port,
@@ -494,6 +523,7 @@ fn route_via<'a>(
                 vertical: None,
                 min_area: None,
                 min_step: None,
+                wide_spacing: None,
             });
             indices.insert(tech.name.as_str(), i);
             i
@@ -623,6 +653,7 @@ pub(crate) fn route_technology<'a>(
             vertical: Some(vertical),
             min_area: if config.lef_rules { l.min_area } else { None },
             min_step: if config.lef_rules { l.min_step } else { None },
+            wide_spacing: policy.wide_spacing,
         });
     }
     let mut vias: Vec<RouteVia> = Vec::new();
@@ -688,7 +719,8 @@ pub(crate) fn build_input(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<RouteInput> {
-    build_input_impl(design, bundle, placed, config, scope, true, false).map(|(input, _)| input)
+    build_input_impl(design, bundle, placed, config, scope, GeometryView::Routing)
+        .map(|(input, _)| input)
 }
 
 /// Same routing input plus one owner per obstacle (parallel vector).
@@ -699,7 +731,14 @@ pub(crate) fn build_input_with_owners(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
-    build_input_impl(design, bundle, placed, config, scope, false, false)
+    build_input_impl(
+        design,
+        bundle,
+        placed,
+        config,
+        scope,
+        GeometryView::Explicit,
+    )
 }
 
 /// Shared master geometry with global pin ownership, without expanding cells.
@@ -710,12 +749,63 @@ pub(crate) fn build_compact_input_with_owners(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
-    build_input_impl(design, bundle, placed, config, scope, true, true)
+    build_input_impl(
+        design,
+        bundle,
+        placed,
+        config,
+        scope,
+        GeometryView::Extraction,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GeometryView {
+    Routing,
+    Explicit,
+    Extraction,
+}
+
+/// Keep the exact LEF geometry in the workspace. In the routing view only,
+/// supplement the ordinary spacing by the positive difference to explicit
+/// OBS spacing. A stricter configured layer spacing remains conservative.
+fn obstruction_rect(
+    master: &rustroad_core::connectivity::Master,
+    geometry: &Geometry,
+    layer: &RouteLayer,
+) -> Result<Rect> {
+    let (name, mut rect) = rectangle(geometry)?;
+    let extra = master
+        .obstruction_spacing
+        .get(name)
+        .copied()
+        .unwrap_or(layer.spacing)
+        .saturating_sub(layer.spacing)
+        .max(0);
+    rect.lx = rect
+        .lx
+        .checked_sub(extra)
+        .ok_or_else(|| fail("OBS spacing overflow"))?;
+    rect.ly = rect
+        .ly
+        .checked_sub(extra)
+        .ok_or_else(|| fail("OBS spacing overflow"))?;
+    rect.ux = rect
+        .ux
+        .checked_add(extra)
+        .ok_or_else(|| fail("OBS spacing overflow"))?;
+    rect.uy = rect
+        .uy
+        .checked_add(extra)
+        .ok_or_else(|| fail("OBS spacing overflow"))?;
+    Ok(rect)
 }
 
 fn obstacle_templates(
     masters: &[rustroad_core::connectivity::Master],
     indices: &HashMap<&str, u32>,
+    layers: &[RouteLayer],
+    block_obstructions: bool,
 ) -> Result<Vec<ObstacleTemplate>> {
     masters
         .iter()
@@ -726,7 +816,11 @@ fn obstacle_templates(
                     Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
                 };
                 if let Some(&layer) = indices.get(name.as_str()) {
-                    let (_, rect) = rectangle(geometry)?;
+                    let rect = if pin.is_none() {
+                        obstruction_rect(m, geometry, &layers[layer as usize])?
+                    } else {
+                        rectangle(geometry)?.1
+                    };
                     shapes.push(TemplateObstacle { layer, rect, pin });
                 }
                 Ok(())
@@ -736,8 +830,15 @@ fn obstacle_templates(
                     add(g, Some(pin as u32))?;
                 }
             }
-            for g in &m.obstructions {
-                add(g, None)?;
+            if block_obstructions
+                || !m
+                    .class
+                    .as_deref()
+                    .is_some_and(|c| c.split_whitespace().next() == Some("BLOCK"))
+            {
+                for g in &m.obstructions {
+                    add(g, None)?;
+                }
             }
             ObstacleTemplate::new(m.size[1], m.pins.len() as u32, shapes).map_err(Into::into)
         })
@@ -750,9 +851,10 @@ fn build_input_impl(
     placed: &[Placed],
     config: &RoutingConfig,
     scope: RouteScope,
-    compact_instances: bool,
-    instance_owners: bool,
+    view: GeometryView,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
+    let compact_instances = view != GeometryView::Explicit;
+    let instance_owners = view == GeometryView::Extraction;
     let trace = std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some();
     config.validate()?;
     let state = bundle
@@ -766,7 +868,12 @@ fn build_input_impl(
         .ok_or_else(|| fail("manufacturing grid missing"))?;
     let (layers, vias, indices) = route_technology(bundle, config)?;
     let templates = if compact_instances {
-        obstacle_templates(&model.masters, &indices)?
+        obstacle_templates(
+            &model.masters,
+            &indices,
+            &layers,
+            view != GeometryView::Extraction,
+        )?
     } else {
         Vec::new()
     };
@@ -850,7 +957,7 @@ fn build_input_impl(
             );
         }
         let master = &model.masters[model.instance_masters[i] as usize];
-        let orientation = rustroad_core::placed_orientation(design, p)?;
+        let orientation = rustroad_core::placed_orientation_for(design, &design.cells[i], p)?;
         let pin_start = u32::try_from(instance_pin_nets.len())
             .map_err(|_| fail("instance pin offset overflow"))?;
         let mut pending: Vec<(u32, u32)> = Vec::new();
@@ -908,7 +1015,7 @@ fn build_input_impl(
             if let Some(n) = net
                 && selected_pin
             {
-                let class = if config.lef_rules {
+                let class = if config.lef_rules && view != GeometryView::Extraction {
                     let key = (
                         model.instance_masters[i],
                         orientation == rustroad_core::Orientation::FS,
@@ -956,7 +1063,7 @@ fn build_input_impl(
                 Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
             };
             if let Some(&li) = indices.get(layer.as_str()) {
-                let (_, r) = rectangle(geometry)?;
+                let r = obstruction_rect(master, geometry, &layers[li as usize])?;
                 push(
                     li,
                     rustroad_core::transform_rect(r, p.x, p.y, p.height, orientation)?,
@@ -1194,6 +1301,26 @@ pub(crate) fn track_plan(
     config: &TrackRouterConfig,
     layers: &[RouteLayer],
 ) -> Result<rustroad_core::routing::TrackPlan> {
+    let routing_layers = if config.min_routing_layer.is_some() || config.max_routing_layer.is_some()
+    {
+        let first = layers.iter().position(|l| l.vertical.is_some());
+        let last = layers.iter().rposition(|l| l.vertical.is_some());
+        let resolve = |name: Option<&str>, default: Option<usize>| {
+            name.map_or(default, |name| {
+                layers
+                    .iter()
+                    .position(|l| l.name == name && l.vertical.is_some())
+            })
+            .and_then(|index| u32::try_from(index).ok())
+            .ok_or_else(|| fail("signal-routing limit names no selected routing layer"))
+        };
+        Some([
+            resolve(config.min_routing_layer.as_deref(), first)?,
+            resolve(config.max_routing_layer.as_deref(), last)?,
+        ])
+    } else {
+        None
+    };
     for o in &config.tracks {
         if !layers
             .iter()
@@ -1228,6 +1355,7 @@ pub(crate) fn track_plan(
     }
     Ok(rustroad_core::routing::TrackPlan {
         tracks,
+        routing_layers,
         gcell: config.gcell,
         global_iterations: config.global_iterations,
         capacity_percent: config.capacity_percent,
@@ -1238,8 +1366,13 @@ pub(crate) fn track_plan(
         via_cost: config.via_cost,
         wrong_way_factor: config.wrong_way_factor,
         heuristic_weight: config.heuristic_weight,
+        repair_heuristic_weight: config.repair_heuristic_weight,
+        single_owner_repair: config.single_owner_repair.clone(),
+        own_pin_index: config.own_pin_index,
+        instance_index: config.instance_index,
         memory_mib: config.memory_mib,
         max_history_entries: config.max_history_entries,
+        area_stacks: config.area_stacks,
     })
 }
 /// Relative (origin 0,0) pin and same-master other-net geometry of one
@@ -1256,12 +1389,16 @@ pub(crate) fn access_class(
         shapes: Vec::new(),
         blockers: Vec::new(),
     };
-    let mut add = |g: &Geometry, own: bool| -> Result<()> {
+    let mut add = |g: &Geometry, own: bool, obstruction: bool| -> Result<()> {
         let layer = match g {
             Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
         };
         if let Some(&li) = indices.get(layer.as_str()) {
-            let (_, r) = rectangle(g)?;
+            let r = if obstruction {
+                obstruction_rect(master, g, &layers[li as usize])?
+            } else {
+                rectangle(g)?.1
+            };
             let rect = rustroad_core::transform_rect(r, 0, 0, height, orientation)?;
             let shape = LayerRect { layer: li, rect };
             if own {
@@ -1276,11 +1413,11 @@ pub(crate) fn access_class(
     };
     for (ti, pin) in master.pins.iter().enumerate() {
         for g in pin.ports.iter().flatten() {
-            add(g, ti == pin_index)?;
+            add(g, ti == pin_index, false)?;
         }
     }
     for g in &master.obstructions {
-        add(g, false)?;
+        add(g, false, true)?;
     }
     Ok(class)
 }
@@ -1307,11 +1444,158 @@ fn mib(bytes: u64) -> u64 {
     bytes.div_ceil(1 << 20)
 }
 
+/// An earlier routed workspace revision of the same design for `route_eco`.
+#[derive(Clone, Debug)]
+pub struct PriorSource<'a> {
+    pub workspace: &'a Path,
+    pub revision: &'a str,
+}
+
+/// What an ECO route offered the router. A net is offered when the prior
+/// routed it and every terminal of it has the same driver flag and pin
+/// geometry (absolute shapes) in both inputs; the router still re-checks
+/// each offered net (escape tops reached, shapes clear) and keeps only those.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EcoPrior {
+    pub workspace: String,
+    pub revision: String,
+    pub prior_routed_nets: usize,
+    pub offered_nets: usize,
+    pub changed_nets: usize,
+    pub new_nets: usize,
+}
+
 pub fn route(
     path: &Path,
     base_rev: &str,
     config_path: &Path,
     scope: RouteScope,
+    limits: &Limits,
+) -> Result<Summary> {
+    route_eco(path, base_rev, config_path, scope, None, limits)
+}
+
+/// Terminals of each net as comparable geometry: (driver, sorted shapes),
+/// sorted. Pin and access-class ids are input-local and are not compared.
+type NetPins = Vec<(bool, Vec<(u32, i64, i64, i64, i64)>)>;
+fn net_pins(input: &RouteInput) -> BTreeMap<u32, NetPins> {
+    let mut out: BTreeMap<u32, NetPins> = BTreeMap::new();
+    for t in &input.terminals {
+        let mut shapes: Vec<_> = t
+            .shapes
+            .iter()
+            .map(|s| (s.layer, s.rect.lx, s.rect.ly, s.rect.ux, s.rect.uy))
+            .collect();
+        shapes.sort_unstable();
+        out.entry(t.net).or_default().push((t.driver, shapes));
+    }
+    for v in out.values_mut() {
+        v.sort_unstable();
+    }
+    out
+}
+
+/// Prior geometry of every net of `input` whose pins are unchanged, keyed by
+/// this input's net ids (matched by connectivity net name).
+fn prior_routes(
+    prior: &PriorSource<'_>,
+    config: &RoutingConfig,
+    scope: RouteScope,
+    bundle: &PhysicalBundle,
+    input: &RouteInput,
+    limits: &Limits,
+) -> Result<(rustroad_core::routing::PriorRoutes, EcoPrior)> {
+    let snapshot = crate::read(prior.workspace, limits)?;
+    crate::check_base(prior.revision, &crate::head(prior.workspace)?)?;
+    let placed: Vec<_> = snapshot.records().collect();
+    let metadata = snapshot.metadata();
+    let old = metadata
+        .physical
+        .as_ref()
+        .ok_or_else(|| fail("prior workspace has no physical design"))?;
+    let state = old
+        .routing
+        .as_ref()
+        .ok_or_else(|| fail("prior workspace revision is not routed"))?;
+    let old_input = build_input(&metadata.design, old, &placed, config, scope)?;
+    if state.layers
+        != input
+            .layers
+            .iter()
+            .map(|l| l.name.clone())
+            .collect::<Vec<_>>()
+        || state.via_names
+            != input
+                .vias
+                .iter()
+                .map(|v| v.name.clone())
+                .collect::<Vec<_>>()
+        || serde_json::to_value(&old_input.layers)? != serde_json::to_value(&input.layers)?
+        || serde_json::to_value(&old_input.vias)? != serde_json::to_value(&input.vias)?
+    {
+        return Err(fail("prior routing uses another layer or via table"));
+    }
+    let name_of = |b: &PhysicalBundle, n: u32| -> Result<String> {
+        b.connectivity
+            .nets
+            .get(n as usize)
+            .map(|x| x.name.clone())
+            .ok_or_else(|| fail("routing net outside connectivity"))
+    };
+    let mut old_ids = BTreeMap::new();
+    for &n in &state.routes.nets {
+        old_ids.insert(name_of(old, n)?, n);
+    }
+    let (new_pins, old_pins) = (net_pins(input), net_pins(&old_input));
+    let mut keep: BTreeMap<u32, u32> = BTreeMap::new();
+    let (mut changed, mut fresh) = (0usize, 0usize);
+    for (&n, pins) in &new_pins {
+        if pins.len() < 2 {
+            continue;
+        }
+        match old_ids.get(&name_of(bundle, n)?) {
+            Some(&o) if old_pins.get(&o) == Some(pins) => {
+                keep.insert(o, n);
+            }
+            Some(_) => changed += 1,
+            None => fresh += 1,
+        }
+    }
+    let mut routes = rustroad_core::routing::PriorRoutes::default();
+    for w in &state.routes.wires {
+        if let Some(&n) = keep.get(&w.net) {
+            let mut w = w.clone();
+            w.net = n;
+            routes.nets.entry(n).or_default().0.push(w);
+        }
+    }
+    for v in &state.routes.vias {
+        if let Some(&n) = keep.get(&v.net) {
+            let mut v = v.clone();
+            v.net = n;
+            routes.nets.entry(n).or_default().1.push(v);
+        }
+    }
+    let report = EcoPrior {
+        workspace: prior.workspace.display().to_string(),
+        revision: prior.revision.to_string(),
+        prior_routed_nets: state.routes.nets.len(),
+        offered_nets: routes.nets.len(),
+        changed_nets: changed,
+        new_nets: fresh,
+    };
+    Ok((routes, report))
+}
+
+/// `route`, optionally reusing the geometry of an earlier routed revision of
+/// the same design for every net whose pins did not change (ECO routing).
+pub fn route_eco(
+    path: &Path,
+    base_rev: &str,
+    config_path: &Path,
+    scope: RouteScope,
+    prior: Option<&PriorSource<'_>>,
     limits: &Limits,
 ) -> Result<Summary> {
     let lock = crate::lock(path, false, true)?;
@@ -1373,8 +1657,35 @@ pub fn route(
             _ => None,
         }
     };
-    let routes = if let Some(batch) = config.batch_terminals {
-        let (routes, report) = rustroad_core::route_batches::route(&input, &config.limits, batch)?;
+    let eco = match prior {
+        Some(source) => {
+            // A one-batch plan routes through the batch router's own view (its
+            // terminal order and ties, as in the run that made the prior); a real
+            // multi-batch plan is refused.
+            if config.track_router.is_none()
+                || config
+                    .batch_terminals
+                    .is_some_and(|b| input.terminals.len() > b)
+            {
+                return Err(fail(
+                    "ECO routing needs the track router with every terminal in one batch",
+                ));
+            }
+            Some(prior_routes(
+                source, &config, scope, bundle, &input, limits,
+            )?)
+        }
+        None => None,
+    };
+    let routes = if let (Some((prior, _)), None) = (&eco, config.batch_terminals) {
+        routing::route_cpu_ref_with_prior(&input, &config.limits, prior)?
+    } else if let Some(batch) = config.batch_terminals {
+        let (routes, report) = rustroad_core::route_batches::route_with_prior(
+            &input,
+            &config.limits,
+            batch,
+            eco.as_ref().map(|(prior, _)| prior),
+        )?;
         let estimate = report.peak_estimate;
         memory = Some(RouteMemory {
             estimate_mib: mib(estimate.total().max(report.final_validation_bytes)),
@@ -1414,6 +1725,7 @@ pub fn route(
     let mut summary = crate::commit(path, metadata, &placed)?;
     rustroad_core::memory::trace("committed");
     summary.route_memory = memory;
+    summary.eco_prior = eco.map(|(_, report)| report);
     Ok(summary)
 }
 /// On-disk bytes of one workspace revision (metadata and binary tables).
@@ -1559,73 +1871,526 @@ fn records(routes: &Routes, data: &mut impl Write) -> std::io::Result<()> {
     }
     Ok(())
 }
+/// Per-net export scratch is bounded independently of the full route table.
+/// At 512 bytes/edge (two tree-map vertices, adjacency, edge and visited state),
+/// this cap admits at most 98 MiB; actual Ibex nets have at most 1,055 edges.
+const MAX_DEF_PATH_EDGES: usize = 200_000;
+
+pub(crate) struct DefPathTechnology<'a> {
+    pub layers: &'a [String],
+    pub via_names: &'a [String],
+    pub via_layers: &'a [(u32, u32)],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct DefVertex {
+    layer: u32,
+    at: [i64; 2],
+}
+
+#[derive(Clone, Copy)]
+struct DefEdge {
+    ends: [DefVertex; 2],
+    via: Option<usize>,
+}
+
 pub(crate) fn write_def_paths(
     state: &RoutingState,
+    via_layers: &[(u32, u32)],
     wires: &[&routing::Wire],
     vias: &[&routing::Via],
     patches: &[&routing::Patch],
     out: &mut impl Write,
 ) -> Result<()> {
     write_paths(
-        &state.layers,
-        &state.via_names,
-        &state.via_lower_layers,
+        DefPathTechnology {
+            layers: &state.layers,
+            via_names: &state.via_names,
+            via_layers,
+        },
         wires,
         vias,
         patches,
+        &state.config.limits,
         out,
     )
 }
+
+/// Serialize connected trails, consuming every wire/via edge once, including
+/// cycles. Independent NEW records for every edge can lose loop connections
+/// when standard DEF consumers construct their route graph. No metal is added,
+/// removed or merged here; collinear normalization happens in `export_runs`.
+/// The visited edge set bounds the walk even on reconvergent or cyclic nets.
 pub(crate) fn write_paths(
-    layers: &[String],
-    via_names: &[String],
-    via_lower_layers: &[u32],
+    technology: DefPathTechnology<'_>,
     wires: &[&routing::Wire],
     vias: &[&routing::Via],
     patches: &[&routing::Patch],
+    limits: &RouteLimits,
     out: &mut impl Write,
 ) -> Result<()> {
-    let mut first = true;
-    for w in wires {
-        write!(
-            out,
-            "\n  {} {} ( {} {} ) ( {} {} )",
-            if first { "+ ROUTED" } else { "NEW" },
-            rustroad_core::def_name(&layers[w.layer as usize]),
-            w.start[0],
-            w.start[1],
-            w.end[0],
-            w.end[1]
-        )?;
-        first = false;
+    let count = wires
+        .len()
+        .checked_add(vias.len())
+        .ok_or_else(|| Error::Budget("DEF path edge count overflow".into()))?;
+    if count > limits.max_segments.min(MAX_DEF_PATH_EDGES) || patches.len() > limits.max_segments {
+        return Err(Error::Budget("DEF connected path edge cap".into()));
     }
-    for v in vias {
-        let name = &via_names[v.kind as usize];
-        let lower = &layers[via_lower_layers[v.kind as usize] as usize];
-        write!(
-            out,
-            "\n  {} {} ( {} {} ) {}",
-            if first { "+ ROUTED" } else { "NEW" },
-            rustroad_core::def_name(lower),
-            v.at[0],
-            v.at[1],
-            rustroad_core::def_name(name)
+    // Admission includes sorting/map comparisons and linear edge/vertex visits;
+    // tree depth is bounded by twice the admitted edge count. The walk itself
+    // pops each adjacency entry once and emits each edge once.
+    let depth = count.saturating_mul(2).max(1).ilog2() as usize + 1;
+    let work = count
+        .checked_mul(16 + 4 * depth)
+        .and_then(|n| n.checked_add(patches.len()))
+        .ok_or_else(|| Error::Budget("DEF path work overflow".into()))?;
+    if work > limits.max_comparisons {
+        return Err(Error::Budget("DEF connected path work cap".into()));
+    }
+    let DefPathTechnology {
+        layers,
+        via_names,
+        via_layers,
+    } = technology;
+    if via_names.len() != via_layers.len() {
+        return Err(fail("DEF via names and layer pairs differ"));
+    }
+    let mut edges = Vec::with_capacity(count);
+    let mut adjacency = BTreeMap::<DefVertex, Vec<usize>>::new();
+    let mut add = |ends: [DefVertex; 2], via| -> Result<()> {
+        if ends.iter().any(|v| v.layer as usize >= layers.len()) {
+            return Err(fail("DEF path layer outside routing technology"));
+        }
+        let index = edges.len();
+        edges.push(DefEdge { ends, via });
+        for vertex in ends {
+            adjacency.entry(vertex).or_default().push(index);
+        }
+        Ok(())
+    };
+    for wire in wires {
+        add(
+            [
+                DefVertex {
+                    layer: wire.layer,
+                    at: wire.start,
+                },
+                DefVertex {
+                    layer: wire.layer,
+                    at: wire.end,
+                },
+            ],
+            None,
         )?;
-        first = false;
+    }
+    for via in vias {
+        let kind = via.kind as usize;
+        let &(lower, upper) = via_layers
+            .get(kind)
+            .ok_or_else(|| fail("DEF via kind outside routing technology"))?;
+        if lower == upper {
+            return Err(fail("DEF via must join distinct routing layers"));
+        }
+        add(
+            [
+                DefVertex {
+                    layer: lower,
+                    at: via.at,
+                },
+                DefVertex {
+                    layer: upper,
+                    at: via.at,
+                },
+            ],
+            Some(kind),
+        )?;
+    }
+    let mut starts: Vec<_> = adjacency
+        .iter()
+        .map(|(&vertex, entries)| (entries.len() != 1, vertex))
+        .collect();
+    starts.sort_by(|(ad, a), (bd, b)| {
+        (ad, &layers[a.layer as usize], a.at).cmp(&(bd, &layers[b.layer as usize], b.at))
+    });
+    let mut seen = vec![false; edges.len()];
+    let mut emitted = 0;
+    let mut first = true;
+    for (_, start) in starts {
+        while let Some(edge) = next_def_edge(&mut adjacency, &seen, start) {
+            write!(
+                out,
+                "\n  {} {} ( {} {} )",
+                if first { "+ ROUTED" } else { "NEW" },
+                rustroad_core::def_name(&layers[start.layer as usize]),
+                start.at[0],
+                start.at[1]
+            )?;
+            first = false;
+            let mut node = start;
+            let mut next = Some(edge);
+            while let Some(index) = next {
+                let edge = edges[index];
+                seen[index] = true;
+                emitted += 1;
+                node = if node == edge.ends[0] {
+                    edge.ends[1]
+                } else {
+                    edge.ends[0]
+                };
+                if let Some(kind) = edge.via {
+                    write!(out, " {}", rustroad_core::def_name(&via_names[kind]))?;
+                } else {
+                    write!(out, " ( {} {} )", node.at[0], node.at[1])?;
+                }
+                next = next_def_edge(&mut adjacency, &seen, node);
+            }
+        }
+    }
+    if emitted != edges.len() {
+        return Err(fail("DEF path walk omitted an edge"));
     }
     // DEF 5.8 routing RECT, relative to its anchor point (the lower-left corner).
-    for p in patches {
+    for patch in patches {
+        let layer = layers
+            .get(patch.layer as usize)
+            .ok_or_else(|| fail("DEF patch layer outside routing technology"))?;
         write!(
             out,
             "\n  {} {} ( {} {} ) RECT ( 0 0 {} {} )",
             if first { "+ ROUTED" } else { "NEW" },
-            rustroad_core::def_name(&layers[p.layer as usize]),
-            p.rect.lx,
-            p.rect.ly,
-            p.rect.ux - p.rect.lx,
-            p.rect.uy - p.rect.ly
+            rustroad_core::def_name(layer),
+            patch.rect.lx,
+            patch.rect.ly,
+            patch.rect.ux - patch.rect.lx,
+            patch.rect.uy - patch.rect.ly
         )?;
         first = false;
     }
     Ok(())
+}
+
+fn next_def_edge(
+    adjacency: &mut BTreeMap<DefVertex, Vec<usize>>,
+    seen: &[bool],
+    vertex: DefVertex,
+) -> Option<usize> {
+    let entries = adjacency.get_mut(&vertex)?;
+    while let Some(index) = entries.pop() {
+        if !seen[index] {
+            return Some(index);
+        }
+    }
+    None
+}
+
+/// Read-only replay from an exactly bound physical compute view.
+///
+/// # Errors
+/// Rejects changed snapshot/config/workspace data and any admitted resource budget violation.
+pub fn replay_route(
+    path: &Path,
+    config_path: &Path,
+    snapshot_path: &Path,
+    options: &rustroad_core::routing::ReplayOptions,
+    limits: &Limits,
+) -> Result<rustroad_core::routing::ReplayReport> {
+    let snapshot = crate::load(path, crate::lock(path, false, false)?, limits)?;
+    let metadata = snapshot.metadata();
+    if metadata.stage != Stage::Placed {
+        return Err(fail("place before route replay"));
+    }
+    let (text, _) = crate::pdk::read_input(config_path, 1024 * 1024, "routing_config")?;
+    let config: RoutingConfig = serde_json::from_str(&text)?;
+    let placed: Vec<_> = snapshot.records().collect();
+    let bundle = metadata
+        .physical
+        .as_ref()
+        .ok_or_else(|| fail("physical design required"))?;
+    let input = build_input(&metadata.design, bundle, &placed, &config, RouteScope::All)?;
+    Ok(rustroad_core::routing::replay_route(
+        &input,
+        &config.limits,
+        snapshot_path,
+        options,
+    )?)
+}
+
+/// Diagnostic only: geometric cleanup on a `RUSTROAD_RULE_DUMP` file against
+/// this placed workspace's route input. Read-only; no revision is written.
+pub fn cleanup_replay(
+    path: &Path,
+    config_path: &Path,
+    dump_path: &Path,
+    limits: &Limits,
+) -> Result<rustroad_core::routing::CleanupReplayReport> {
+    let snapshot = crate::load(path, crate::lock(path, false, false)?, limits)?;
+    let metadata = snapshot.metadata();
+    let (text, _) = crate::pdk::read_input(config_path, 1024 * 1024, "routing_config")?;
+    let config: RoutingConfig = serde_json::from_str(&text)?;
+    let placed: Vec<_> = snapshot.records().collect();
+    let bundle = metadata
+        .physical
+        .as_ref()
+        .ok_or_else(|| fail("physical design required"))?;
+    let input = build_input(&metadata.design, bundle, &placed, &config, RouteScope::All)?;
+    Ok(rustroad_core::routing::cleanup_replay(
+        &input,
+        &config.limits,
+        dump_path,
+    )?)
+}
+
+#[cfg(test)]
+mod obstruction_tests {
+    use super::*;
+    use rustroad_core::connectivity::Master;
+
+    #[test]
+    fn rc_macro_view_omits_abstract_obs_but_keeps_pins() {
+        // One macro, one pin and one OBS rectangle: <16 KiB. Independent
+        // OpenRCX controls establish that BLOCK OBS are not RC conductors.
+        let shape = Geometry::Rect {
+            layer: "M2".into(),
+            rect: [0, 0, 100, 100],
+        };
+        let mut master = Master {
+            buses: Default::default(),
+            obstruction_spacing: Default::default(),
+            name: "RAM".into(),
+            class: Some("BLOCK".into()),
+            symmetry: vec![],
+            site: String::new(),
+            size: [1000, 1000],
+            pins: vec![rustroad_core::connectivity::MasterPin {
+                name: "A".into(),
+                direction: Some(Direction::Input),
+                use_: PinUse::Signal,
+                shape: None,
+                ports: vec![vec![shape.clone()]],
+            }],
+            obstructions: vec![shape],
+        };
+        let layers = vec![RouteLayer {
+            name: "M2".into(),
+            width: 20,
+            spacing: 20,
+            vertical: Some(true),
+            min_area: None,
+            min_step: None,
+            wide_spacing: None,
+        }];
+        let indices = HashMap::from([("M2", 0)]);
+        let count = |m: &Master, obs| {
+            let templates =
+                obstacle_templates(std::slice::from_ref(m), &indices, &layers, obs).unwrap();
+            InstanceObstacles::new(
+                templates,
+                vec![ObstacleInstance {
+                    template: 0,
+                    pin_start: 0,
+                    at: [0, 0],
+                    orientation: rustroad_core::Orientation::N,
+                }],
+                vec![0],
+            )
+            .unwrap()
+        };
+        assert_eq!(count(&master, true).shape_count(0), Some(2));
+        let extracted = count(&master, false);
+        assert_eq!(extracted.shape_count(0), Some(1));
+        assert_eq!(extracted.shape(0, 0).unwrap().0.net, Some(0));
+        master.class = Some("CORE".into());
+        assert_eq!(count(&master, false).shape_count(0), Some(2));
+    }
+
+    #[test]
+    fn explicit_obs_spacing_is_not_added_twice_or_written_into_source_geometry() {
+        // One rectangle and no graph: <8 KiB. Full real-macro pin access and
+        // external DRC remain the independent integration checks.
+        let geometry = Geometry::Rect {
+            layer: "M2".into(),
+            rect: [0, 0, 1000, 1000],
+        };
+        let mut master = Master {
+            buses: Default::default(),
+            obstruction_spacing: std::collections::BTreeMap::from([("M2".into(), 210)]),
+            name: "RAM".into(),
+            class: Some("BLOCK".into()),
+            symmetry: Vec::new(),
+            site: String::new(),
+            size: [1000, 1000],
+            pins: Vec::new(),
+            obstructions: vec![geometry.clone()],
+        };
+        let layer = RouteLayer {
+            name: "M2".into(),
+            width: 200,
+            spacing: 240,
+            vertical: Some(true),
+            min_area: None,
+            min_step: None,
+            wide_spacing: None,
+        };
+        assert_eq!(
+            obstruction_rect(&master, &geometry, &layer).unwrap(),
+            Rect {
+                lx: 0,
+                ly: 0,
+                ux: 1000,
+                uy: 1000
+            }
+        );
+        master.obstruction_spacing.insert("M2".into(), 300);
+        assert_eq!(
+            obstruction_rect(&master, &geometry, &layer).unwrap(),
+            Rect {
+                lx: -60,
+                ly: -60,
+                ux: 1060,
+                uy: 1060
+            }
+        );
+        assert_eq!(
+            master.obstructions[0], geometry,
+            "the imported LEF view stays exact"
+        );
+    }
+}
+
+#[cfg(test)]
+mod def_path_tests {
+    use super::*;
+
+    // Each fixture has at most six edges: <16 KiB including serialized text.
+    // Real-layout metal identity and fresh OpenRCX annotation are the external oracle.
+    fn emit(
+        wires: &[routing::Wire],
+        vias: &[routing::Via],
+        limits: &RouteLimits,
+    ) -> Result<String> {
+        let layers = vec!["M1".into(), "unused_cut".into(), "M2".into()];
+        let names = vec!["V12".into()];
+        let mut text = Vec::new();
+        write_paths(
+            DefPathTechnology {
+                layers: &layers,
+                via_names: &names,
+                via_layers: &[(0, 2)],
+            },
+            &wires.iter().collect::<Vec<_>>(),
+            &vias.iter().collect::<Vec<_>>(),
+            &[],
+            limits,
+            &mut text,
+        )?;
+        Ok(String::from_utf8(text).expect("DEF contains UTF-8 names"))
+    }
+
+    fn wire(layer: u32, start: [i64; 2], end: [i64; 2]) -> routing::Wire {
+        routing::Wire {
+            net: 0,
+            layer,
+            start,
+            end,
+        }
+    }
+
+    #[test]
+    fn connected_def_traverses_actual_via_layers_in_both_directions() {
+        let wires = [
+            wire(0, [0, 0], [10, 0]),
+            wire(2, [10, 0], [20, 0]),
+            wire(0, [20, 0], [30, 0]),
+        ];
+        let vias = [
+            routing::Via {
+                net: 0,
+                kind: 0,
+                at: [10, 0],
+            },
+            routing::Via {
+                net: 0,
+                kind: 0,
+                at: [20, 0],
+            },
+        ];
+        assert_eq!(
+            emit(&wires, &vias, &RouteLimits::default()).expect("valid path"),
+            "\n  + ROUTED M1 ( 0 0 ) ( 10 0 ) V12 ( 20 0 ) V12 ( 30 0 )"
+        );
+    }
+
+    #[test]
+    fn connected_def_consumes_a_cycle_and_branch_once() {
+        let wires = [
+            wire(0, [0, 0], [10, 0]),
+            wire(0, [10, 0], [10, 10]),
+            wire(0, [10, 10], [0, 10]),
+            wire(0, [0, 10], [0, 0]),
+            wire(0, [-10, 0], [0, 0]),
+            wire(0, [10, 10], [20, 10]),
+        ];
+        let text = emit(&wires, &[], &RouteLimits::default()).expect("bounded cyclic path");
+        assert_eq!(
+            text,
+            "\n  + ROUTED M1 ( -10 0 ) ( 0 0 ) ( 0 10 ) ( 10 10 ) ( 20 10 )\n  NEW M1 ( 0 0 ) ( 10 0 ) ( 10 10 )"
+        );
+    }
+
+    #[test]
+    fn connected_def_keeps_disconnected_components_and_patch_geometry() {
+        let layers = vec!["M1".into()];
+        let wires = [wire(0, [0, 0], [10, 0]), wire(0, [20, 0], [30, 0])];
+        let patch = routing::Patch {
+            net: 0,
+            layer: 0,
+            rect: Rect {
+                lx: 3,
+                ly: 4,
+                ux: 8,
+                uy: 11,
+            },
+        };
+        let mut bytes = Vec::new();
+        write_paths(
+            DefPathTechnology {
+                layers: &layers,
+                via_names: &[],
+                via_layers: &[],
+            },
+            &wires.iter().collect::<Vec<_>>(),
+            &[],
+            &[&patch],
+            &RouteLimits::default(),
+            &mut bytes,
+        )
+        .expect("disconnected route fragments remain explicit");
+        assert_eq!(
+            String::from_utf8(bytes).expect("UTF-8"),
+            "\n  + ROUTED M1 ( 0 0 ) ( 10 0 )\n  NEW M1 ( 20 0 ) ( 30 0 )\n  NEW M1 ( 3 4 ) RECT ( 0 0 5 7 )"
+        );
+    }
+
+    #[test]
+    fn connected_def_rejects_edge_and_work_budgets() {
+        let wires = [wire(0, [0, 0], [10, 0])];
+        for limits in [
+            RouteLimits {
+                max_segments: 0,
+                ..RouteLimits::default()
+            },
+            RouteLimits {
+                max_comparisons: 0,
+                ..RouteLimits::default()
+            },
+        ] {
+            assert!(matches!(emit(&wires, &[], &limits), Err(Error::Budget(_))));
+        }
+        let invalid = [routing::Via {
+            net: 0,
+            kind: 1,
+            at: [0, 0],
+        }];
+        assert!(emit(&[], &invalid, &RouteLimits::default()).is_err());
+    }
 }

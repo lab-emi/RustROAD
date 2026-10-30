@@ -352,7 +352,7 @@ pub fn export_access_test(
     // DEF
     let names: Vec<String> = input.layers.iter().map(|l| l.name.clone()).collect();
     let via_names: Vec<String> = input.vias.iter().map(|v| v.name.clone()).collect();
-    let lower: Vec<u32> = input.vias.iter().map(|v| v.lower).collect();
+    let via_layers: Vec<_> = input.vias.iter().map(|v| (v.lower, v.upper)).collect();
     let o = |o: Orientation| if o == Orientation::N { "N" } else { "FS" };
     writeln!(output, "VERSION 5.8 ;")?;
     writeln!(output, "DIVIDERCHAR \"/\" ;")?;
@@ -422,7 +422,18 @@ pub fn export_access_test(
             .iter()
             .filter(|p| p.net == k as u32)
             .collect();
-        write_paths(&names, &via_names, &lower, &wires, &vs, &ps, output)?;
+        write_paths(
+            crate::routing::DefPathTechnology {
+                layers: &names,
+                via_names: &via_names,
+                via_layers: &via_layers,
+            },
+            &wires,
+            &vs,
+            &ps,
+            &limits,
+            output,
+        )?;
         writeln!(output, " ;")?;
     }
     writeln!(output, "END NETS")?;

@@ -139,6 +139,8 @@ pub struct ExtractScope {
     pub crossings: &'static str,
     pub parallel_overlap: &'static str,
     pub cell_internal_metal: &'static str,
+    /// Hard-macro OBS shapes are abstract routing keepouts, not conductor polygons.
+    pub macro_obstructions: &'static str,
     pub routing_patches: &'static str,
     pub max_segment_length_dbu: i64,
     /// Candidate shapes per wire run and the upfront scratch estimate of
@@ -852,6 +854,7 @@ fn extract_impl(
                                unmodeled",
             cell_internal_metal: "pins and obstructions are neighbours, plates and overlap \
                                   partners; their own metal is not extracted",
+            macro_obstructions: "CLASS BLOCK OBS excluded from RC geometry; declared macro pin and supply geometry retained",
             routing_patches: "extracted: each piece not covered by same-net metal adds ground and \
                               coupling on all four edges at the RC node of the same-net conductor \
                               it overlaps (no new node or resistor)",

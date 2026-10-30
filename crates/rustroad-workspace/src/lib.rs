@@ -11,16 +11,20 @@ use std::path::{Path, PathBuf};
 pub mod access_test;
 pub mod antenna;
 pub mod clock;
+mod connections;
 pub mod eco;
 pub mod extract;
 pub mod floorplan;
 pub mod gds;
 pub mod input_buffer;
+pub mod macro_supply;
 pub mod netlist_export;
 pub mod pdk;
 pub mod physical;
+pub mod placement_seed;
 mod port_ties;
 pub mod routing;
+mod segmented_supply;
 mod storage;
 pub mod ties;
 use rustroad_core::connectivity::{ConnectedDesign, PinOwner};
@@ -120,6 +124,9 @@ pub struct Summary {
     /// Track-router memory estimate of this route command (route only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub route_memory: Option<routing::RouteMemory>,
+    /// ECO route only: the prior routing offered to the router.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eco_prior: Option<routing::EcoPrior>,
 }
 impl Metadata {
     pub fn summary(&self) -> Summary {
@@ -248,6 +255,7 @@ impl Metadata {
                 .and_then(|p| p.routing.as_ref().map(|r| r.routes.stats.expansions)),
             placement: self.physical.as_ref().and_then(|p| p.placement.clone()),
             route_memory: None,
+            eco_prior: None,
         }
     }
 }
@@ -579,16 +587,88 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 fn load(path: &Path, lock: File, limits: &Limits) -> Result<Snapshot> {
+    load_capped(path, lock, limits, None)
+}
+
+/// Additional admission bounds for the explicit antenna-inventory reader.
+/// Ordinary snapshot callers retain their existing limits and serialization.
+#[derive(Clone, Copy, Debug)]
+struct SnapshotCaps {
+    route_bytes: u64,
+    route_records: usize,
+    routed_ids: usize,
+    memory_bytes: u64,
+    inventory_bytes: u64,
+}
+
+impl SnapshotCaps {
+    fn admit(&self, metadata_bytes: u64, model_bytes: u64, route_bytes: u64) -> Result<()> {
+        let estimate = metadata_bytes
+            .saturating_add(model_bytes)
+            .saturating_mul(16)
+            .saturating_add(route_bytes.saturating_mul(2))
+            .saturating_add(256 << 20)
+            .saturating_add(self.inventory_bytes);
+        if route_bytes > self.route_bytes || estimate > self.memory_bytes {
+            return Err(Error::Budget(
+                "ANTENNA_INVENTORY: snapshot byte/memory admission".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn counts(&self, counts: [usize; 5]) -> Result<()> {
+        let records = counts
+            .into_iter()
+            .try_fold(0usize, usize::checked_add)
+            .ok_or_else(|| Error::Budget("ANTENNA_INVENTORY: route count overflow".into()))?;
+        if records > self.route_records || counts[4] > self.routed_ids {
+            return Err(Error::Budget(
+                "ANTENNA_INVENTORY: route record/ID admission".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn load_capped(
+    path: &Path,
+    lock: File,
+    limits: &Limits,
+    caps: Option<SnapshotCaps>,
+) -> Result<Snapshot> {
     let current = head(path)?;
     if current == "rev0" {
         return Err(Error::Invalid("workspace has no published revision".into()));
     }
     let revision_dir = path.join("revisions").join(&current);
-    let metadata: Metadata = serde_json::from_slice(&read_bounded(
-        &revision_dir.join("design.json"),
-        MAX_METADATA_BYTES,
-    )?)?;
+    let metadata_path = revision_dir.join("design.json");
+    let metadata_bytes = fs::metadata(&metadata_path)?.len();
+    if let Some(caps) = caps {
+        caps.admit(metadata_bytes, 0, 0)?;
+    }
+    let metadata: Metadata =
+        serde_json::from_slice(&read_bounded(&metadata_path, MAX_METADATA_BYTES)?)?;
     let mut metadata = metadata;
+    if let Some(caps) = caps {
+        let model_bytes = metadata.tables.as_ref().map_or(0, storage::Tables::bytes);
+        let state = metadata.physical.as_ref().and_then(|p| p.routing.as_ref());
+        let route_bytes = state.and_then(|r| r.table.as_ref()).map_or(0, |t| t.bytes);
+        caps.admit(metadata_bytes, model_bytes, route_bytes)?;
+        if let Some(r) = state {
+            let counts = r.table.as_ref().map_or(
+                [
+                    r.routes.wires.len(),
+                    r.routes.vias.len(),
+                    r.routes.access.len(),
+                    r.routes.patches.len(),
+                    r.routes.nets.len(),
+                ],
+                |t| [t.wires, t.vias, t.access, t.patches, t.nets],
+            );
+            caps.counts(counts)?;
+        }
+    }
     let format_version = storage::restore(&mut metadata, &revision_dir, limits)?;
     if !matches!(format_version, 1..=6)
         || metadata.revision != current
@@ -1117,6 +1197,7 @@ mod tests {
                 orientation: rustroad_core::Orientation::N,
             }],
             cells: vec![Cell {
+                fixed: None,
                 name: "u0".into(),
                 master: "BUF".into(),
                 width: 10,

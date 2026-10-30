@@ -1,4 +1,5 @@
 //! Bounded same-net pin-metal overlap queries for detailed routing.
+use crate::routing::OwnPinIndex;
 use crate::routing::{budget, invalid, overlap};
 use crate::{Rect, Result};
 
@@ -8,6 +9,13 @@ pub(crate) struct OwnPins {
     shapes: Vec<PinShape>,
     order: Vec<u32>,
     widths: Vec<i64>,
+    ranges: Option<Vec<LayerRange>>,
+}
+#[derive(Clone, Copy, Default)]
+struct LayerRange {
+    begin: usize,
+    end: usize,
+    bounds: Option<Rect>,
 }
 
 fn charge(work: &mut usize, count: usize, cap: usize) -> Result<()> {
@@ -19,7 +27,17 @@ fn charge(work: &mut usize, count: usize, cap: usize) -> Result<()> {
 }
 
 impl OwnPins {
+    #[cfg(test)]
     pub fn new(shapes: Vec<PinShape>, layers: usize, work: &mut usize, cap: usize) -> Result<Self> {
+        Self::with_index(shapes, layers, work, cap, None)
+    }
+    pub fn with_index(
+        shapes: Vec<PinShape>,
+        layers: usize,
+        work: &mut usize,
+        cap: usize,
+        mode: Option<OwnPinIndex>,
+    ) -> Result<Self> {
         if layers > 64 || shapes.len() > u32::MAX as usize {
             return Err(budget("same-net pin index count"));
         }
@@ -48,10 +66,35 @@ impl OwnPins {
             .map_err(|_| budget("same-net pin index allocation"))?;
         order.extend(0..shapes.len() as u32);
         order.sort_unstable_by_key(|&i| (shapes[i as usize].0, shapes[i as usize].1.lx, i));
+        let ranges = if mode.is_some() {
+            charge(work, layers.saturating_add(order.len()), cap)?;
+            let mut ranges = vec![LayerRange::default(); layers];
+            for (position, &id) in order.iter().enumerate() {
+                let (layer, rect, _) = shapes[id as usize];
+                let range = &mut ranges[layer as usize];
+                if range.bounds.is_none() {
+                    range.begin = position;
+                }
+                range.end = position + 1;
+                range.bounds = Some(match range.bounds {
+                    None => rect,
+                    Some(b) => Rect {
+                        lx: b.lx.min(rect.lx),
+                        ly: b.ly.min(rect.ly),
+                        ux: b.ux.max(rect.ux),
+                        uy: b.uy.max(rect.uy),
+                    },
+                });
+            }
+            Some(ranges)
+        } else {
+            None
+        };
         Ok(Self {
             shapes,
             order,
             widths,
+            ranges,
         })
     }
 
@@ -70,18 +113,28 @@ impl OwnPins {
             .widths
             .get(layer as usize)
             .ok_or_else(|| invalid("same-net query layer"))?;
+        let order = if let Some(ranges) = &self.ranges {
+            charge(work, 1, cap)?;
+            let range = &ranges[layer as usize];
+            if !range.bounds.is_some_and(|b| overlap(rect, b)) {
+                return Ok(false);
+            }
+            &self.order[range.begin..range.end]
+        } else {
+            &self.order[..]
+        };
         let lo = rect.lx.saturating_sub(width);
         let key = |&i: &u32| (self.shapes[i as usize].0, self.shapes[i as usize].1.lx);
-        let begin = self.order.partition_point(|i| key(i) < (layer, lo));
-        let end = self.order.partition_point(|i| key(i) <= (layer, rect.ux));
+        let begin = order.partition_point(|i| key(i) < (layer, lo));
+        let end = order.partition_point(|i| key(i) <= (layer, rect.ux));
         charge(
             work,
-            (self.order.len().max(1).ilog2() as usize + 1)
+            (order.len().max(1).ilog2() as usize + 1)
                 .saturating_mul(2)
                 .saturating_add(end - begin),
             cap,
         )?;
-        Ok(self.order[begin..end].iter().any(|&i| {
+        Ok(order[begin..end].iter().any(|&i| {
             let (_, pin, top) = self.shapes[i as usize];
             overlap(rect, pin) && !allowed.contains(&top)
         }))
@@ -91,6 +144,66 @@ impl OwnPins {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layer_ranges_match_linear_oracle_on_empty_cut_layers_and_touching_bounds() {
+        let shapes = (0..4000)
+            .map(|i| {
+                let x = i * 11 - 25000;
+                (
+                    (i % 2 * 2) as u32,
+                    Rect {
+                        lx: x,
+                        ly: -20,
+                        ux: x + 9,
+                        uy: 20,
+                    },
+                    [x + 4, 0],
+                )
+            })
+            .collect::<Vec<_>>();
+        let indexed = OwnPins::with_index(
+            shapes.clone(),
+            7,
+            &mut 0,
+            1_000_000,
+            Some(OwnPinIndex::LayerRanges),
+        )
+        .unwrap();
+        for layer in 0..7 {
+            for x in (-25020..20000).step_by(137) {
+                for (ly, uy) in [(-25, -20), (-20, -1), (0, 21), (20, 24)] {
+                    let rect = Rect {
+                        lx: x,
+                        ux: x + 9,
+                        ly,
+                        uy,
+                    };
+                    for allowed in [vec![], vec![[x + 4, 0]], vec![[x + 4, 0], [x + 15, 0]]] {
+                        let expected = shapes.iter().any(|(l, r, t)| {
+                            *l == layer && overlap(rect, *r) && !allowed.contains(t)
+                        });
+                        assert_eq!(
+                            indexed.blocks(layer, rect, &allowed, &mut 0, 200).unwrap(),
+                            expected,
+                            "layer {layer} rect {rect:?}"
+                        );
+                    }
+                }
+            }
+        }
+        let query = Rect {
+            lx: 0,
+            ly: 0,
+            ux: 2,
+            uy: 2,
+        };
+        let mut work = 0;
+        assert!(!indexed.blocks(1, query, &[], &mut work, 1).unwrap());
+        assert_eq!(work, 1, "empty-layer exact test remains charged");
+        assert!(indexed.blocks(1, query, &[], &mut 0, 0).is_err());
+        assert!(OwnPins::with_index(shapes, 7, &mut 0, 1, Some(OwnPinIndex::LayerRanges)).is_err());
+    }
 
     #[test]
     fn queries_match_linear_overlap_and_escape_exceptions() {
