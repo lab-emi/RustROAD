@@ -28,10 +28,10 @@ const FILES: [&str; 7] = [
     "routes.rbin",
 ];
 
-fn invalid(message: &'static str) -> Error {
+pub(super) fn invalid(message: &'static str) -> Error {
     Error::Invalid(message.into())
 }
-fn budget(message: &'static str) -> Error {
+pub(super) fn budget(message: &'static str) -> Error {
     Error::Budget(message.into())
 }
 
@@ -153,15 +153,15 @@ fn unique_files<'de, D: serde::Deserializer<'de>>(
     deserializer.deserialize_map(Visitor)
 }
 
-struct IoWork {
-    used: usize,
-    reserved: usize,
+pub(super) struct IoWork {
+    pub(super) used: usize,
+    pub(super) reserved: usize,
 }
-fn blocks(bytes: u64) -> Result<usize> {
+pub(super) fn blocks(bytes: u64) -> Result<usize> {
     usize::try_from(bytes.div_ceil(64)).map_err(|_| budget("CAPTURE_IO_OVERFLOW"))
 }
 impl IoWork {
-    fn charge(&mut self, bytes: u64, passes: usize) -> Result<()> {
+    pub(super) fn charge(&mut self, bytes: u64, passes: usize) -> Result<()> {
         let n = blocks(bytes)?
             .checked_mul(passes)
             .ok_or_else(|| budget("CAPTURE_IO_OVERFLOW"))?;
@@ -174,7 +174,7 @@ impl IoWork {
     }
 }
 
-fn plain(path: &Path, exists: bool) -> Result<PathBuf> {
+pub(super) fn plain(path: &Path, exists: bool) -> Result<PathBuf> {
     if !path.is_absolute()
         || path.as_os_str().len() > 4096
         || path.components().count() > 256
@@ -194,7 +194,7 @@ fn plain(path: &Path, exists: bool) -> Result<PathBuf> {
     }
     Ok(path.to_path_buf())
 }
-fn shape(value: &FileId, max: u64) -> Result<()> {
+pub(super) fn shape(value: &FileId, max: u64) -> Result<()> {
     plain(&value.path, true)?;
     if value.bytes > max
         || value.sha256.len() != 64
@@ -211,7 +211,7 @@ fn shape(value: &FileId, max: u64) -> Result<()> {
     }
     Ok(())
 }
-fn fingerprint(path: &Path, cap: u64, io: &mut IoWork) -> Result<FileId> {
+pub(super) fn fingerprint(path: &Path, cap: u64, io: &mut IoWork) -> Result<FileId> {
     plain(path, true)?;
     let before = fs::symlink_metadata(path)?;
     if !before.is_file() || before.nlink() != 1 || before.len() > cap {
@@ -258,13 +258,13 @@ fn fingerprint(path: &Path, cap: u64, io: &mut IoWork) -> Result<FileId> {
         bytes: before.len(),
     })
 }
-fn verify(value: &FileId, cap: u64, io: &mut IoWork) -> Result<()> {
+pub(super) fn verify(value: &FileId, cap: u64, io: &mut IoWork) -> Result<()> {
     if fingerprint(&value.path, cap, io)? != *value {
         return Err(invalid("CAPTURE_FILE_CHANGED"));
     }
     Ok(())
 }
-fn read_head(path: &Path) -> Result<Vec<u8>> {
+pub(super) fn read_head(path: &Path) -> Result<Vec<u8>> {
     let head = plain(&path.join("HEAD"), true)?;
     let metadata = fs::symlink_metadata(&head)?;
     if !metadata.is_file() || metadata.nlink() != 1 {
@@ -299,7 +299,7 @@ impl Write for FixedJson {
         Ok(())
     }
 }
-fn encoded(value: &impl Serialize, size: usize) -> Result<Vec<u8>> {
+pub(super) fn encoded(value: &impl Serialize, size: usize) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact(size)
@@ -313,7 +313,7 @@ fn encoded(value: &impl Serialize, size: usize) -> Result<Vec<u8>> {
     writer.bytes[size - 1] = b'\n';
     Ok(writer.bytes)
 }
-fn output_file(
+pub(super) fn output_file(
     path: &Path,
     chunks: impl Iterator<Item = impl AsRef<[u8]>>,
     bytes: u64,

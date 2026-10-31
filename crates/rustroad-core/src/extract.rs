@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, HashMap};
 mod bins;
 #[cfg(feature = "legacy-crossings-capture")]
 pub mod capture;
+#[cfg(feature = "legacy-crossings-stream-capture")]
+pub mod capture_stream;
 mod crossings;
 mod geometry;
 mod index;
@@ -1994,9 +1996,18 @@ fn prepare_crossings<'a>(
     input: &ExtractInput<'a>,
     limits: &ExtractLimits,
 ) -> Result<PreparedCrossings<'a>> {
+    prepare_crossings_admitted(input, limits, |_| Ok(()))
+}
+
+fn prepare_crossings_admitted<'a>(
+    input: &ExtractInput<'a>,
+    limits: &ExtractLimits,
+    admit: impl FnOnce(ExtractMemory) -> Result<()>,
+) -> Result<PreparedCrossings<'a>> {
     let mut profile = PhaseProfile::new();
     preflight(input, limits)?;
     let memory = memory_estimate(input, limits)?;
+    admit(memory)?;
     let (mut built, mut stats) = build_trees(input, limits)?;
     profile.phase(0);
     profile.geometry_start(stats.work);

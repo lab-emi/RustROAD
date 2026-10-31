@@ -25,3 +25,4 @@ workspace = true
 [features]
 default = []
 legacy-crossings-capture = ["rustroad-core/legacy-crossings-capture", "rustroad-workspace/legacy-crossings-capture"]
+legacy-crossings-stream-capture = ["legacy-crossings-capture", "rustroad-core/legacy-crossings-stream-capture", "rustroad-workspace/legacy-crossings-stream-capture"]

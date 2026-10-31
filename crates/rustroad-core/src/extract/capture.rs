@@ -59,12 +59,12 @@ pub struct CaptureData {
     pub counts: CaptureCounts,
 }
 
-struct Work {
-    used: usize,
-    cap: usize,
+pub(super) struct Work {
+    pub(super) used: usize,
+    pub(super) cap: usize,
 }
 impl Work {
-    fn charge(&mut self, n: usize) -> Result<()> {
+    pub(super) fn charge(&mut self, n: usize) -> Result<()> {
         self.used = self
             .used
             .checked_add(n)
@@ -74,12 +74,12 @@ impl Work {
     }
 }
 
-fn align(n: usize) -> Result<usize> {
+pub(super) fn align(n: usize) -> Result<usize> {
     n.checked_add(63)
         .map(|v| v & !63)
         .ok_or_else(|| budget("capture alignment"))
 }
-fn span(r: Rect, bin: i64) -> [i64; 4] {
+pub(super) fn span(r: Rect, bin: i64) -> [i64; 4] {
     [
         r.lx.div_euclid(bin),
         r.ly.div_euclid(bin),
@@ -87,7 +87,7 @@ fn span(r: Rect, bin: i64) -> [i64; 4] {
         r.uy.div_euclid(bin),
     ]
 }
-fn area(r: [i64; 4]) -> Result<usize> {
+pub(super) fn area(r: [i64; 4]) -> Result<usize> {
     usize::try_from(
         (i128::from(r[2]) - i128::from(r[0]) + 1)
             .checked_mul(i128::from(r[3]) - i128::from(r[1]) + 1)
@@ -95,7 +95,7 @@ fn area(r: [i64; 4]) -> Result<usize> {
     )
     .map_err(|_| budget("capture span"))
 }
-fn put(data: &mut [u8], at: usize, value: &[u8], work: &mut Work) -> Result<()> {
+pub(super) fn put(data: &mut [u8], at: usize, value: &[u8], work: &mut Work) -> Result<()> {
     work.charge(value.len())?;
     let end = at
         .checked_add(value.len())
@@ -105,11 +105,11 @@ fn put(data: &mut [u8], at: usize, value: &[u8], work: &mut Work) -> Result<()> 
         .copy_from_slice(value);
     Ok(())
 }
-fn u32put(data: &mut [u8], at: usize, value: usize, work: &mut Work) -> Result<()> {
+pub(super) fn u32put(data: &mut [u8], at: usize, value: usize, work: &mut Work) -> Result<()> {
     let v = u32::try_from(value).map_err(|_| budget("capture u32"))?;
     put(data, at, &v.to_le_bytes(), work)
 }
-fn boxput(data: &mut [u8], at: usize, r: Rect, work: &mut Work) -> Result<()> {
+pub(super) fn boxput(data: &mut [u8], at: usize, r: Rect, work: &mut Work) -> Result<()> {
     for (k, value) in [r.lx, r.ly, r.ux, r.uy].into_iter().enumerate() {
         put(data, at + k * 8, &value.to_le_bytes(), work)?;
     }

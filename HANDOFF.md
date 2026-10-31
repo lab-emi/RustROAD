@@ -71,3 +71,25 @@ Source03 all-feature test compilation passed, then strict clippy found four
 redundant borrows in the two new capture query-iterator calls. Source04 removes
 only those four extra reference operators; original serial/default paths and
 all budgets remain exact. Preserve source03 lint failure and independent review.
+
+## Source-only v2 stream capture branch (no build/runtime yet)
+
+New branch codex/ibex-g1-stream-capture starts d58145c, preserving the original
+legacy worktree/source04/ELF and actual tiny a208/root33ca closure. New feature and
+command are separate/default-off; source contract is Root d8cb plan + Common
+handshakeaecd + origin supplement6f812552. Do not change55f/194d or normal numeric/
+SPEF bytes, loosen v1 tiny limits, use cell placement boxes, or materialize QxI.
+All output caches count in phase admission; only proved late coupling reserve
+can be credited. New metadata partition8MiB stays inside the original64MiB live
+ceiling. Root auth holds all builds/tests/native/real copies/GPU until source
+freeze/review; source/test text only. Actual count/cache admission failure must
+remain explicit rejection at original3584MiB/100B.
+
+A source audit caught prefix/snapshot cache admission occurring too late if only
+the prepared boundary was checked. Root authorized a shared private callback
+immediately after original memory_estimate and before build_trees, preserving
+the old signature as explicit no-op wrapper and the single preprocessing body.
+Snapshot admission includes the same rounded caches/opaque reserve before
+shared decode. Zero-lowering and actual-lowering proofs are distinct; only
+late128*max_couplings is credited. All authored tests remain unexecuted. Rustfmt
+source parsing passed under1G512/CPU28,29, not Rust type/runtime qualification.

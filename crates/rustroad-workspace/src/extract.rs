@@ -5,6 +5,8 @@
 //! refused inside the workspace directory. Model: docs/extraction.md.
 #[cfg(feature = "legacy-crossings-capture")]
 pub mod capture;
+#[cfg(feature = "legacy-crossings-stream-capture")]
+pub mod capture_stream;
 use crate::pdk::read_input;
 use crate::routing::{ObstacleOwner, build_compact_input_with_owners};
 use crate::{Error, Result};

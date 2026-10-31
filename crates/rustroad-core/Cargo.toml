@@ -19,3 +19,4 @@ workspace = true
 [features]
 default = []
 legacy-crossings-capture = []
+legacy-crossings-stream-capture = ["legacy-crossings-capture"]
