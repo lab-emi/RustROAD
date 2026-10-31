@@ -1133,6 +1133,10 @@ pub(crate) struct InstanceQueryScratch {
     generation: u64,
 }
 impl InstanceQueryScratch {
+    pub(crate) fn allocation_bytes(&self) -> u64 {
+        (self.marks.capacity() as u64).saturating_mul(size_of::<u64>() as u64)
+    }
+
     pub(crate) fn new(instances: usize) -> Result<Self> {
         let mut marks = Vec::new();
         marks

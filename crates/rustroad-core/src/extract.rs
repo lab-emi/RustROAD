@@ -10,9 +10,11 @@ use crate::routing::{RouteLayer, RouteVia, Routes, Terminal};
 use crate::{Error, Rect, Result};
 use std::collections::{BTreeMap, HashMap};
 mod bins;
+mod crossings;
 mod geometry;
 mod index;
 mod parallel;
+pub use crossings::CrossingStats;
 use geometry::{InstanceGeometry, Shapes};
 pub use parallel::QueryStats;
 
@@ -112,6 +114,10 @@ pub struct ExtractLimits {
     pub query_batch_runs: usize,
     /// Additional query scratch hard cap, also bounded by memory_mib (1..=64).
     pub query_scratch_mib: u64,
+    /// Opt-in virtual-crossing workers; 1 keeps the original serial path.
+    pub crossing_workers: usize,
+    /// Additional crossing scratch cap, phase-disjoint from query scratch (1..=32).
+    pub crossing_scratch_mib: u64,
     /// Spatial-bin entries.
     pub max_bin_entries: usize,
     /// Straight runs longer than this are split at existing lattice nodes (DBU).
@@ -135,6 +141,8 @@ impl Default for ExtractLimits {
             query_workers: 1,
             query_batch_runs: 8,
             query_scratch_mib: 32,
+            crossing_workers: 1,
+            crossing_scratch_mib: 32,
             max_bin_entries: 8_000_000,
             max_segment_length: 25_000,
             min_coupling_pf: 0.0,
@@ -166,6 +174,7 @@ impl ExtractLimits {
             (self.max_work, 1usize << 40),
             (self.max_candidates, MAX_CANDIDATES_CEILING),
             (self.query_workers, 16),
+            (self.crossing_workers, 16),
             (self.query_batch_runs, 64),
             (self.max_bin_entries, 512_000_000),
         ] {
@@ -175,6 +184,9 @@ impl ExtractLimits {
         }
         if self.query_scratch_mib == 0 || self.query_scratch_mib > 64 {
             return Err(budget("extraction query scratch allowance"));
+        }
+        if self.crossing_scratch_mib == 0 || self.crossing_scratch_mib > 32 {
+            return Err(budget("extraction crossing scratch allowance"));
         }
         if self.memory_mib == 0 || self.memory_mib > 65_536 {
             return Err(budget("extraction memory allowance"));
@@ -221,6 +233,8 @@ pub struct ExtractStats {
     pub memory: Option<ExtractMemory>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_queries: Option<QueryStats>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_crossings: Option<CrossingStats>,
     pub nets: usize,
     pub lattice_wires: usize,
     pub wire_runs: usize,
@@ -2062,7 +2076,36 @@ fn extract_with_queries(
     let routed_runs = built.runs.len();
     add_passive_strips(input, limits, &mut built, &shapes, &mut bins, &mut stats)?;
     profile.geometry_phase(4, stats.work);
-    let crossed = virtual_crossings(&shapes, &mut bins, &routing_layers, &mut stats)?;
+    let (crossed, crossing_stats) = crossings::run(
+        &shapes,
+        &mut bins,
+        &routing_layers,
+        limits,
+        &memory,
+        &mut stats,
+    )?;
+    let crossing_scratch = crossing_stats.as_ref().map_or(0, |s| s.scratch_bytes);
+    let control_work = crossing_stats.as_ref().map_or(0, |s| s.control_work);
+    stats.parallel_crossings = crossing_stats;
+    // Legacy work remains in stats.work. Every subsequent legacy budget check
+    // uses the original allowance minus charged parallel control work.
+    let remaining_limits = if control_work > 0 {
+        Some(ExtractLimits {
+            max_work: limits
+                .max_work
+                .checked_sub(control_work)
+                .ok_or_else(|| budget("extraction crossing control work"))?,
+            ..limits.clone()
+        })
+    } else {
+        None
+    };
+    let limits = remaining_limits.as_ref().unwrap_or(limits);
+    if control_work > 0
+        && let Some(instances) = &mut bins.instances
+    {
+        instances.restrict_work(limits.max_work);
+    }
     profile.geometry_phase(5, stats.work);
     profile.phase(1);
     if footprint_queries {
@@ -2136,10 +2179,10 @@ fn extract_with_queries(
     if let Some(estimate) = stats.memory.as_mut() {
         estimate.working_bytes = estimate
             .working_bytes
-            .saturating_add(batch.stats.scratch_bytes);
+            .saturating_add(batch.stats.scratch_bytes.max(crossing_scratch));
         estimate.estimate_bytes = estimate
             .estimate_bytes
-            .saturating_add(batch.stats.scratch_bytes);
+            .saturating_add(batch.stats.scratch_bytes.max(crossing_scratch));
     }
     let mut runs = built.runs[..routed_runs]
         .iter()
@@ -2684,6 +2727,14 @@ fn extract_with_queries(
         return Err(budget("extraction RC elements"));
     }
     guard_memory(limits)?;
+    if let Some(crossings) = &mut stats.parallel_crossings {
+        crossings.legacy_work = stats.work;
+        crossings.total_work = stats
+            .work
+            .checked_add(crossings.control_work)
+            .filter(|&n| n <= crossings.original_max_work)
+            .ok_or_else(|| budget("extraction aggregate crossing work"))?;
+    }
     profile.phase(7);
     profile.report(&stats);
     Ok(RcNetwork {
@@ -3065,6 +3116,7 @@ mod tests {
             let mut value = serde_json::to_value(s).unwrap();
             value.as_object_mut().unwrap().remove("memory");
             value.as_object_mut().unwrap().remove("parallel_queries");
+            value.as_object_mut().unwrap().remove("parallel_crossings");
             value
         };
         assert_eq!(clean(&a.stats), clean(&b.stats));
@@ -3091,6 +3143,62 @@ mod tests {
             assert!(memory.estimate_bytes <= memory.limit_bytes);
             assert!(stats.admitted_workers <= workers);
             assert!(stats.scratch_bytes <= limits.query_scratch_mib * (1 << 20));
+        }
+    }
+    fn check_crossings(input: &ExtractInput<'_>, limits: &ExtractLimits, serial: &RcNetwork) {
+        for workers in [2, 4] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .unwrap();
+            let enabled = ExtractLimits {
+                crossing_workers: workers,
+                query_workers: workers,
+                ..limits.clone()
+            };
+            let parallel = pool.install(|| extract_cpu_ref(input, &enabled)).unwrap();
+            assert_network_exact(serial, &parallel);
+            let crossing = parallel.stats.parallel_crossings.as_ref().unwrap();
+            assert!(crossing.admitted_workers > 1);
+            assert!(crossing.parallel_tiles > 0);
+            assert!(crossing.control_work > 0);
+            assert_eq!(crossing.legacy_work, serial.stats.work);
+            assert_eq!(
+                crossing.total_work,
+                serial.stats.work + crossing.control_work
+            );
+            assert!(crossing.total_work <= limits.max_work);
+            let query = parallel.stats.parallel_queries.as_ref().unwrap();
+            let memory = parallel.stats.memory.unwrap();
+            assert_eq!(
+                memory.working_bytes,
+                serial.stats.memory.unwrap().working_bytes
+                    + crossing.scratch_bytes.max(query.scratch_bytes)
+            );
+            assert_eq!(
+                memory.estimate_bytes,
+                query.baseline_estimate_bytes + crossing.scratch_bytes.max(query.scratch_bytes)
+            );
+            assert!(memory.estimate_bytes <= memory.limit_bytes);
+        }
+        // Exact legacy allowance leaves no free credit for new control work.
+        // Either the preflight keeps serial/control0, or a later aggregate
+        // check must fail; positive control work cannot escape the global cap.
+        let tight = ExtractLimits {
+            crossing_workers: 4,
+            max_work: serial.stats.work,
+            ..limits.clone()
+        };
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        match pool.install(|| extract_cpu_ref(input, &tight)) {
+            Ok(network) => {
+                assert_network_exact(serial, &network);
+                assert_eq!(network.stats.parallel_crossings.unwrap().control_work, 0);
+            }
+            Err(error) => assert!(error.to_string().starts_with("BUDGET_EXCEEDED:")),
         }
     }
     fn run(
@@ -4722,6 +4830,23 @@ mod tests {
         )
         .unwrap();
         check_parallel(
+            &ExtractInput {
+                layers: &l,
+                vias: &v,
+                routes: &r,
+                terminals: &t,
+                passive: &[],
+                held_bytes: 0,
+                instances: Some(InstancedPassive {
+                    geometry: &source,
+                    signal_nets: &[true, true],
+                }),
+                tech: &tech,
+            },
+            &ExtractLimits::default(),
+            &b,
+        );
+        check_crossings(
             &ExtractInput {
                 layers: &l,
                 vias: &v,

@@ -252,6 +252,12 @@ enum Command {
         /// Additional query scratch cap within --extract-memory-mib (1..=64 MiB).
         #[arg(long, default_value_t = 32)]
         extract_query_scratch_mib: u64,
+        /// Opt-in virtual-crossing workers; default 1 retains serial traversal.
+        #[arg(long, default_value_t = 1)]
+        extract_crossing_workers: usize,
+        /// Crossing scratch within extraction memory, phase-disjoint from queries (1..=32 MiB).
+        #[arg(long, default_value_t = 32)]
+        extract_crossing_scratch_mib: u64,
         /// Couplings below this value (fF) become ground capacitance at both
         /// nodes; 0 keeps every coupling capacitor.
         #[arg(long, default_value_t = 0.0)]
@@ -1006,6 +1012,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             extract_query_workers,
             extract_query_batch_runs,
             extract_query_scratch_mib,
+            extract_crossing_workers,
+            extract_crossing_scratch_mib,
             min_coupling_ff,
         } => {
             if !(max_segment_um.is_finite() && (0.1..=10_000.0).contains(&max_segment_um)) {
@@ -1026,6 +1034,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 query_workers: extract_query_workers,
                 query_batch_runs: extract_query_batch_runs,
                 query_scratch_mib: extract_query_scratch_mib,
+                crossing_workers: extract_crossing_workers,
+                crossing_scratch_mib: extract_crossing_scratch_mib,
                 min_coupling_pf: min_coupling_ff / 1000.0,
             };
             emit(&rustroad_workspace::extract::extract_with_segment_um(

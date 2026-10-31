@@ -127,6 +127,10 @@ pub(super) struct InstanceGeometry<'a> {
     limits: RouteLimits,
 }
 impl<'a> InstanceGeometry<'a> {
+    pub(super) fn restrict_work(&mut self, max_work: usize) {
+        self.limits.max_comparisons = self.limits.max_comparisons.min(max_work);
+    }
+
     pub(super) fn new(
         shapes: &Shapes<'a>,
         bin: i64,
