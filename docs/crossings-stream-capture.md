@@ -1,4 +1,49 @@
-# Default-off Road query-stream diagnostic (source implementation, unbuilt)
+# Default-off Road query-stream diagnostic
+
+## Current local qualification — 2026-10-31
+
+Implementation commit `bd07958d57a3bb9333cdd73495bf88ef9477f0f3` matches all 577
+files of frozen Source02 and the actual compiled-source snapshot. Build02's eight
+guarded frontend stages passed: 470 tests, 11 ignored, default-off and feature
+checks, strict clippy, rustdoc and release CLI. Independent build closure is
+`35092fcbd1b24a17e8a2f87bacf988b3dd21be6048ce986179cfc126947afbac`.
+The qualified Road ELF is
+`76ddba42500f4e0fb2ae4612468130d95061931e5538c52f81fe2e46e6aacede`.
+
+Fresh tiny dual-PDK qualification completed 10 actual native commands: six
+min/nom/max default extracts with exact SPEFs and unmasked numeric/work receipts,
+two real Roadv2 captures and two Common c17/8be zero-tolerance word comparisons.
+Full successful defined tiny work ledgers were independently recomputed. Raw
+held/estimate/baseline memory observations and deltas remain visible; they depend
+on process residency and were not silently required to equal a historical ELF.
+Outer launcher wall 7.063025265s includes setup/copy/hash/commands/publication/
+cleanup; GNUtime worker wall 6.35s, whole peak reaped RSS 26240KiB. Per-child RSS
+was unmeasured/null. Sampled cgroup values are not child peak RSS.
+Root closure `69a10b2384967c1e957db13ab67ca54cccfdb101d134c1bc11ef6e37fa82bc8f`
+joins independent runtime closure
+`a59556a21b13aa4dca5ad65e098efa6acf1811b3a23051247c6058f844bbf0cc`.
+Records remain local under RustEDA `.work/perf-20261030/`.
+
+The first attempt remains preserved and unverified: six normal extracts and one
+SKY capture exited 0, then the independent helper expected final lowering caches
+in the earlier metadata-only prefix phase. No Common ran. A versioned helper-only
+correction and fresh replay closed tiny qualification; no Rust/cap/model change
+or retrospective acceptance occurred.
+
+The first selected-rev4 diagnostic has now completed Road, Common and the
+independent Python verifier with exit0, outer wall87.468013s and472017392B tape.
+Its authority/output audit is pending; real-design bridge acceptance remains
+unverified. The reported cgroup sample1264238592B is not a per-child RSS peak.
+This does not establish production admission or benefit.
+
+Accepted evidence remains tiny CPU diagnostic scope. Production memory admission
+is unclosed; GPU, full SPEF flow and physical signoff are unchecked. There is no speedup or QoR claim. This documentation
+commit does not replace frozen Source02, build outputs or qualification records.
+
+## Frozen source-stage design (historical pre-build checkpoint)
+
+The following text records the original Source02 design/authorization state;
+its statements about unexecuted tests precede the qualification above.
 
 This branch starts at d58145c in a new isolated worktree. Original serial whole
 55f627475f3b550b1742577aee707b6bdf7d5dcd031dcf5e67a9b60f644e9906/body

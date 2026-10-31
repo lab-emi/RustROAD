@@ -93,3 +93,27 @@ Snapshot admission includes the same rounded caches/opaque reserve before
 shared decode. Zero-lowering and actual-lowering proofs are distinct; only
 late128*max_couplings is credited. All authored tests remain unexecuted. Rustfmt
 source parsing passed under1G512/CPU28,29, not Rust type/runtime qualification.
+
+
+## Local stream source/build/tiny closure — 2026-10-31
+
+Exact frozen Source02 became local source commit `bd07958d` (12 intended paths,
+all 577 source leaves equal the actual compiled copy). No push/gitlink update.
+Build02: 8 guarded stages, 470 tests passed / 11 ignored, default-off+feature checks,
+strict clippy/docs/release; independent `35092fc`. Road ELF `76ddba42` stays frozen.
+Tinyv2 fresh attempt02 closed 10 real commands: 6 exact default SPEFs, 2 actual
+Roadstreams, 2 Common c17/8be exact word/defined-ledger comparisons, dual PDK.
+Root `69a10b23` + independent `a59556a2`; outer 7.063025265s / GNU 6.35s / whole RSS 26240KiB,
+per-child RSS null/unmeasured, cleanup verified. No real Ibex/production/GPU/fullflow
+or physical qualification follows from this. The first actual real rev4 experiment
+now exited0 through Road/Common/verifier (outer87.468013s, tape472017392B);
+independent authority/output audit remains pending, not accepted real qualification.
+
+Keep failed tiny01 unverified: its producer outputs did not rescue the failed
+campaign. Prefix phase has 8 MiB metadata / 1 MiB small cache before build_trees;
+static/tape lengths are 0 there. Later actual-count lowering admits its own live
+buffers/output caches. A checker must compare each receipt to that exact phase,
+not require equal final caches across phases. Fix the checker in a new version,
+preserve its old controls/failure and rerun fresh. No engine/cap changes were needed.
+Documentation status updates are separate from the exact pre-build source commit;
+never rewrite the 577 frozen source or compiled-source manifest to match new prose.
