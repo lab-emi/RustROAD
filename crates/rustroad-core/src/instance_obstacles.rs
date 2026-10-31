@@ -62,6 +62,19 @@ impl ObstacleTemplate {
             order,
         })
     }
+    #[cfg(feature = "legacy-crossings-capture")]
+    pub(crate) fn capture_height(&self) -> i64 {
+        self.height
+    }
+    #[cfg(feature = "legacy-crossings-capture")]
+    pub(crate) fn capture_len(&self) -> usize {
+        self.shape_count
+    }
+    #[cfg(feature = "legacy-crossings-capture")]
+    pub(crate) fn capture_shape(&self, ordinal: usize) -> Option<&TemplateObstacle> {
+        let &(layer, offset) = self.order.get(ordinal)?;
+        self.layers.get(&layer)?.get(offset).map(|(_, shape)| shape)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -118,6 +131,14 @@ impl InstanceObstacles {
         })
     }
 
+    #[cfg(feature = "legacy-crossings-capture")]
+    pub(crate) fn capture_templates(&self) -> &[ObstacleTemplate] {
+        &self.templates
+    }
+    #[cfg(feature = "legacy-crossings-capture")]
+    pub(crate) fn capture_instances(&self) -> &[ObstacleInstance] {
+        &self.instances
+    }
     pub fn len(&self) -> usize {
         self.instances.len()
     }

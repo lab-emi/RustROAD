@@ -64,6 +64,10 @@ impl<'a> Shapes<'a> {
     pub(super) fn push(&mut self, shape: Shape) {
         self.values.push(shape);
     }
+    #[cfg(feature = "legacy-crossings-capture")]
+    pub(super) fn capture_prefix(&self) -> &[u32] {
+        &self.first
+    }
     pub(super) fn virtual_count(&self) -> usize {
         self.virtual_count
     }

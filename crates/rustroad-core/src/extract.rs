@@ -10,6 +10,8 @@ use crate::routing::{RouteLayer, RouteVia, Routes, Terminal};
 use crate::{Error, Rect, Result};
 use std::collections::{BTreeMap, HashMap};
 mod bins;
+#[cfg(feature = "legacy-crossings-capture")]
+pub mod capture;
 mod crossings;
 mod geometry;
 mod index;
@@ -1975,11 +1977,23 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     extract_with_queries(input, limits, true)
 }
 
-fn extract_with_queries(
-    input: &ExtractInput<'_>,
+struct PreparedCrossings<'a> {
+    profile: PhaseProfile,
+    memory: ExtractMemory,
+    built: Built,
+    stats: ExtractStats,
+    shapes: Shapes<'a>,
+    bins: Bins<'a>,
+    net_index: HashMap<u32, usize>,
+    routing_layers: Vec<u32>,
+    routed_runs: usize,
+    bin_size: i64,
+}
+
+fn prepare_crossings<'a>(
+    input: &ExtractInput<'a>,
     limits: &ExtractLimits,
-    footprint_queries: bool,
-) -> Result<RcNetwork> {
+) -> Result<PreparedCrossings<'a>> {
     let mut profile = PhaseProfile::new();
     preflight(input, limits)?;
     let memory = memory_estimate(input, limits)?;
@@ -2076,6 +2090,38 @@ fn extract_with_queries(
     let routed_runs = built.runs.len();
     add_passive_strips(input, limits, &mut built, &shapes, &mut bins, &mut stats)?;
     profile.geometry_phase(4, stats.work);
+    Ok(PreparedCrossings {
+        profile,
+        memory,
+        built,
+        stats,
+        shapes,
+        bins,
+        net_index,
+        routing_layers,
+        routed_runs,
+        bin_size,
+    })
+}
+
+fn extract_with_queries(
+    input: &ExtractInput<'_>,
+    limits: &ExtractLimits,
+    footprint_queries: bool,
+) -> Result<RcNetwork> {
+    let PreparedCrossings {
+        mut profile,
+        memory,
+        mut built,
+        mut stats,
+        shapes,
+        mut bins,
+        net_index,
+        routing_layers,
+        routed_runs,
+        bin_size,
+    } = prepare_crossings(input, limits)?;
+    let tech = input.tech;
     let (crossed, crossing_stats) = crossings::run(
         &shapes,
         &mut bins,

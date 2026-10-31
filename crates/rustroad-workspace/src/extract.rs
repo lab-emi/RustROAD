@@ -3,6 +3,8 @@
 //! The workspace is opened under its shared lock and never written. The SPEF
 //! is written atomically next to `--out` (temporary file, fsync, rename) and is
 //! refused inside the workspace directory. Model: docs/extraction.md.
+#[cfg(feature = "legacy-crossings-capture")]
+pub mod capture;
 use crate::pdk::read_input;
 use crate::routing::{ObstacleOwner, build_compact_input_with_owners};
 use crate::{Error, Result};
@@ -325,12 +327,20 @@ pub fn extract_with_segment_um(
     extract_impl(workspace, request, limits, Some(segment_um))
 }
 
-fn extract_impl(
+fn with_preprocessed<T>(
     workspace: &Path,
     request: &ExtractRequest,
     limits: &Limits,
     segment_um: Option<f64>,
-) -> Result<ExtractReport> {
+    apply: impl FnOnce(
+        &extract::ExtractInput<'_>,
+        &crate::Snapshot,
+        &RcProfile,
+        ArtifactPin,
+        &ExtractRequest,
+        PathBuf,
+    ) -> Result<T>,
+) -> Result<T> {
     if request.max_spef_bytes == 0 || request.max_spef_bytes > HARD_MAX_SPEF_BYTES {
         return Err(Error::Budget("SPEF byte cap outside hard bounds".into()));
     }
@@ -525,31 +535,56 @@ fn extract_impl(
     } else {
         (&state.routes, Vec::new())
     };
-    let network = extract::extract_cpu_ref(
-        &extract::ExtractInput {
-            held_bytes: rustroad_core::memory::live_bytes().unwrap_or(
-                crate::routing::revision_bytes(workspace, &metadata.revision)?.saturating_mul(3),
-            ),
-            instances: input
-                .instances
-                .as_ref()
-                .map(|geometry| extract::InstancedPassive {
-                    geometry,
-                    signal_nets: &signal_nets,
-                }),
-            layers: &input.layers,
-            vias: &input.vias,
-            routes,
-            terminals: if has_ties {
-                &terminals
-            } else {
-                &input.terminals
-            },
-            passive: &passive,
-            tech: &tech,
+    let view = extract::ExtractInput {
+        held_bytes: rustroad_core::memory::live_bytes().unwrap_or(
+            crate::routing::revision_bytes(workspace, &metadata.revision)?.saturating_mul(3),
+        ),
+        instances: input
+            .instances
+            .as_ref()
+            .map(|geometry| extract::InstancedPassive {
+                geometry,
+                signal_nets: &signal_nets,
+            }),
+        layers: &input.layers,
+        vias: &input.vias,
+        routes,
+        terminals: if has_ties {
+            &terminals
+        } else {
+            &input.terminals
         },
-        &request.limits,
-    )?;
+        passive: &passive,
+        tech: &tech,
+    };
+    apply(&view, &snapshot, &profile, profile_pin, request, out)
+}
+
+fn extract_impl(
+    workspace: &Path,
+    request: &ExtractRequest,
+    limits: &Limits,
+    segment_um: Option<f64>,
+) -> Result<ExtractReport> {
+    with_preprocessed(workspace, request, limits, segment_um, finish_extract)
+}
+
+fn finish_extract(
+    view: &extract::ExtractInput<'_>,
+    snapshot: &crate::Snapshot,
+    profile: &RcProfile,
+    profile_pin: ArtifactPin,
+    request: &ExtractRequest,
+    out: PathBuf,
+) -> Result<ExtractReport> {
+    let metadata = snapshot.metadata();
+    let design = &metadata.design;
+    let model = &metadata
+        .physical
+        .as_ref()
+        .ok_or_else(|| fail("NO_PHYSICAL: preprocessed input"))?
+        .connectivity;
+    let network = extract::extract_cpu_ref(view, &request.limits)?;
     // Names: nets by connectivity name, pins as instance/pin, ports by bit.
     let pin_label = |pin: u32| -> Result<(spef::Node, spef::Direction, Option<String>)> {
         let c = model

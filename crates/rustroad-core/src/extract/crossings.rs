@@ -38,9 +38,9 @@ pub struct CrossingStats {
 }
 
 #[derive(Clone, Copy)]
-struct Query {
-    layer: u32,
-    rect: Rect,
+pub(super) struct Query {
+    pub(super) layer: u32,
+    pub(super) rect: Rect,
 }
 struct Slot {
     query: Option<Query>,
@@ -64,7 +64,10 @@ struct Plan {
     control_upper: usize,
 }
 
-fn queries<'a>(shapes: &'a Shapes<'_>, layers: &'a [u32]) -> impl Iterator<Item = Query> + 'a {
+pub(super) fn queries<'a>(
+    shapes: &'a Shapes<'_>,
+    layers: &'a [u32],
+) -> impl Iterator<Item = Query> + 'a {
     shapes
         .owned()
         .filter_map(|(_, shape)| matches!(shape.owner, Owner::Run(_)).then_some(shape))

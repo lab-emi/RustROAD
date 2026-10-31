@@ -204,6 +204,17 @@ enum Command {
         #[arg(long, default_value_t = 200_000_000)]
         max_export_work: usize,
     },
+    /// Explicit tiny original-serial boundary capture; no SPEF/component execution.
+    #[cfg(feature = "legacy-crossings-capture")]
+    CaptureCrossings {
+        #[arg(long)]
+        base_rev: String,
+        /// Strict hash-bound diagnostic job, including source HEAD/files/tool/limits.
+        #[arg(long)]
+        inputs: PathBuf,
+        #[arg(long)]
+        inputs_sha: String,
+    },
     /// Read-only native RC extraction of the routed HEAD revision to SPEF.
     Extract {
         /// rustroad.rc-profile.v1 JSON (scripts/build_rc_profile.py).
@@ -992,6 +1003,23 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             emit(&rustroad_workspace::gds::export_gds(
                 &workspace, &options, &limits,
             )?)
+        }
+        #[cfg(feature = "legacy-crossings-capture")]
+        Command::CaptureCrossings {
+            base_rev,
+            inputs,
+            inputs_sha,
+        } => {
+            let capture = rustroad_workspace::extract::capture::run(
+                &workspace,
+                &base_rev,
+                &inputs,
+                &inputs_sha,
+                &limits,
+                usize::from(cli.threads),
+            )?;
+            capture.write_stdout(&mut io::stdout().lock())?;
+            Ok(())
         }
         Command::Extract {
             rc_profile,
