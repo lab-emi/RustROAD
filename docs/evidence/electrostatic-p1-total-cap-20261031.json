@@ -1,0 +1,71 @@
+{
+  "schema": "rustroad.p1-totalcap-component-delivery.v1",
+  "status": "prototype_component_checks_passed_physical_unverified",
+  "source_head": "a62f0041e2f66869f4dfbcaaa96486a6c2e8e7ab",
+  "base_head": "9578dc147052387c93f83918106482b4bb914612",
+  "source_count": 575,
+  "binary": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-totalcap/bin/rustroad-p1",
+    "sha256": "c2b736d3d338375fa318e5739ebe9236189a5569a28e2310fa6be48643319762",
+    "bytes": 59582592
+  },
+  "engine_manifest": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-totalcap/engine-manifest.json",
+    "sha256": "33e41a64480e3d1b9c6f1a48d0792a9077abd0c87438947344c628ba1c1352dc",
+    "bytes": 92227
+  },
+  "component_checks": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-totalcap/P1_COMPONENT_CHECKS.json",
+    "sha256": "d5d09acda6e14883fc01589255ecffffd0f8700042d6240d20130f818781fad5",
+    "bytes": 23611
+  },
+  "executors": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-totalcap/executor-identities.json",
+    "sha256": "3e694f5735e9cf045dc8be92c908d32cff587595d1f86b91e2f8a4fa6883b6a5",
+    "bytes": 1341
+  },
+  "predecessor_intact": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-totalcap/PREDECESSOR_INTACT.json",
+    "sha256": "afc5710e6e24fddc2ca0d86b1be9f306269ccb31f07bc11040131a9cf04c4b57",
+    "bytes": 1443
+  },
+  "hard_total_work_cap": 20000000000,
+  "additional_work_cap": "configured max_work, further bounded by remaining total",
+  "handoff": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-totalcap/HANDOFF.md",
+    "sha256": "7e0fcec3a9c2defdbf67855e5bb77a831d3946bd5789279bfd3e5998aa375214",
+    "bytes": 1822
+  },
+  "physical_proposal": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-totalcap/physical-campaign-engine.json",
+    "sha256": "a37e3b921e9638cb93959f1bdd72199aa9d3c504ec93d3252b5e004d76618b34",
+    "bytes": 1439
+  },
+  "review_status": "root approved total-cap source diff; physical proposal pending review",
+  "remaining": [
+    "Enabled dualPDK placement smoke with independent actualpin physical checker",
+    "Separate rootreview before bounded14679cell initial-Ibex experiment",
+    "No fullflow/foundry/routing/timing/1Mumgoal acceptance"
+  ],
+  "scope": "Total-work contract fix and fresh required component validation complete; physical campaigns unlaunched",
+  "delivery": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-totalcap/READY.json",
+    "sha256": "84edb99798dae0838534538381e784fd9f499e7d6eedacd4ca1d3721248ecd5f",
+    "bytes": 2415
+  },
+  "summary": {
+    "focused_tests": 10,
+    "workspace_passed": 453,
+    "workspace_ignored": 11,
+    "independent_cases": 25,
+    "scalar_outputs": 864,
+    "consumer_negative_controls": 3,
+    "default_none_commands": 10,
+    "default_none_snapshot_files": 12,
+    "dual_pdk_commands": 36,
+    "def_geometry_comparisons": 6,
+    "strict_clippy": true,
+    "strict_docs": true,
+    "format": true
+  }
+}

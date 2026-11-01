@@ -18,7 +18,7 @@
 
 use crate::{Rect, valid_object_name};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -311,8 +311,9 @@ pub fn place_boundary_io(
 }
 
 /// Explicit I/O assignment: ordered pin names per side (increasing coordinate
-/// along the side) and optional along-edge track snapping `[pitch, offset]`
-/// of pin centres (x on south/north, y on west/east).
+/// along the side), optional along-edge track snapping `[pitch, offset]`
+/// of pin centres (x on south/north, y on west/east), and optional
+/// along-edge pin-centre targets in the same axis.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IoPlan {
@@ -324,10 +325,16 @@ pub struct IoPlan {
     pub x_track: Option<[i64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y_track: Option<[i64; 2]>,
+    /// Pin-centre target per planned pin. A targeted pin takes the slot
+    /// nearest its target; an untargeted one keeps its evenly spread slot.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub targets: BTreeMap<String, i64>,
 }
 
 /// Place pins by an explicit plan: evenly spread along each side in plan
 /// order, centres snapped to the side's track grid, spacing preserved.
+/// Targeted pins move to the slot nearest their target, still in plan order
+/// and one pin per slot. Without targets the result is the even spread.
 /// Output order is identical to `names`; every name must appear exactly once.
 pub fn place_planned_io(
     names: &[String],
@@ -354,6 +361,9 @@ pub fn place_planned_io(
             "I/O plan does not cover exactly the logical I/O pins",
         ));
     }
+    if plan.targets.keys().any(|n| !seen.contains(n.as_str())) {
+        return Err(invalid("I/O plan target names an unplanned pin"));
+    }
     for t in [plan.x_track, plan.y_track].into_iter().flatten() {
         if t[0] <= 0 || t[0] % config.grid != 0 || t[1] % config.grid != 0 {
             return Err(invalid("I/O track must be positive and on the grid"));
@@ -373,12 +383,25 @@ pub fn place_planned_io(
             });
         }
         let side = SIDES[index];
+        // Forward: the wanted slot, past the previous pin. Backward: leave a
+        // slot for every later pin. Even-spread slots already satisfy both.
+        let half = i128::from(width / 2);
+        let mut slots = Vec::with_capacity(list.len());
         for (k, name) in list.iter().enumerate() {
-            let slot = if list.len() == 1 {
-                (count - 1) / 2
-            } else {
-                k * (count - 1) / (list.len() - 1)
+            let want = match plan.targets.get(name) {
+                Some(&t) => (i128::from(t) - half - first + step / 2)
+                    .div_euclid(step)
+                    .clamp(0, count as i128 - 1) as usize,
+                None if list.len() == 1 => (count - 1) / 2,
+                None => k * (count - 1) / (list.len() - 1),
             };
+            slots.push(slots.last().map_or(want, |&p: &usize| want.max(p + 1)));
+        }
+        for k in (0..slots.len()).rev() {
+            let ceiling = slots.get(k + 1).map_or(count - 1, |&n| n - 1);
+            slots[k] = slots[k].min(ceiling);
+        }
+        for (name, slot) in list.iter().zip(slots) {
             let lower = first + step * slot as i128;
             placed.insert(
                 name.as_str(),
@@ -591,6 +614,7 @@ mod tests {
             north: vec!["port[5]".into()],
             x_track: Some([10, 4]),
             y_track: Some([8, 0]),
+            targets: BTreeMap::new(),
         };
         let pins = place_planned_io(&ports, &plan, &c, &IoLimits::default()).unwrap();
         assert_eq!(
@@ -622,6 +646,68 @@ mod tests {
         assert!(place_planned_io(&ports, &twice, &c, &IoLimits::default()).is_err());
         let cap = planned_capacity(&c, &plan, &IoLimits::default()).unwrap();
         assert!(cap.iter().all(|n| *n >= 2));
+    }
+    #[test]
+    fn targeted_pins_take_nearest_free_slots_in_plan_order() {
+        let c = constraints();
+        let ports = names(4);
+        let plan = IoPlan {
+            west: vec!["port[0]".into(), "port[1]".into(), "port[2]".into()],
+            east: vec!["port[3]".into()],
+            south: Vec::new(),
+            north: Vec::new(),
+            x_track: None,
+            y_track: None,
+            targets: BTreeMap::new(),
+        };
+        let place = |targets: &[(&str, i64)]| {
+            let mut p = plan.clone();
+            p.targets = targets.iter().map(|&(n, t)| (n.to_string(), t)).collect();
+            place_planned_io(&ports, &p, &c, &IoLimits::default())
+        };
+        let centre = |pins: &[IoPin], n: &str| {
+            let r = pins.iter().find(|p| p.name == n).unwrap().rect;
+            ((r.lx + r.ux) / 2, (r.ly + r.uy) / 2)
+        };
+        let even = place(&[]).unwrap();
+        // An absent target keeps the even spread: plans without targets are unchanged.
+        let lone = place(&[("port[0]", -500)]).unwrap();
+        assert_eq!(
+            lone, even,
+            "slot 0 is already the even slot of the first pin"
+        );
+        // Equal targets: the first pin takes the nearest slot, later ones the next free ones.
+        let crowd = place(&[("port[0]", 100), ("port[1]", 100), ("port[2]", 100)]).unwrap();
+        let y: Vec<i64> = ["port[0]", "port[1]", "port[2]"]
+            .iter()
+            .map(|n| centre(&crowd, n).1)
+            .collect();
+        let step = y[1] - y[0];
+        assert!(step > 0 && y[2] - y[1] == step, "{y:?}");
+        assert!((y[0] - 100).abs() * 2 <= step, "{y:?}");
+        assert_eq!(centre(&crowd, "port[3]"), centre(&even, "port[3]"));
+        // Targets beyond the end stop at the last slots, still in order.
+        let far = place(&[("port[1]", 10_000), ("port[2]", 10_000)]).unwrap();
+        let (y0, y1, y2) = (
+            centre(&far, "port[0]").1,
+            centre(&far, "port[1]").1,
+            centre(&far, "port[2]").1,
+        );
+        assert_eq!(y2, centre(&even, "port[2]").1, "last slot");
+        assert_eq!(y1, y2 - step);
+        assert_eq!(y0, centre(&even, "port[0]").1);
+        // A lone pin on a side moves off its midpoint to the target.
+        let east = place(&[("port[3]", 60)]).unwrap();
+        assert!((centre(&east, "port[3]").1 - 60).abs() * 2 <= step);
+        assert_eq!(east, place(&[("port[3]", 60)]).unwrap(), "deterministic");
+        assert!(
+            place(&[("port[9]", 60)]).is_err(),
+            "target for an unplanned pin"
+        );
+        // The JSON form omits empty targets and accepts plans written without them.
+        let text = serde_json::to_string(&plan).unwrap();
+        assert!(!text.contains("targets"));
+        assert_eq!(serde_json::from_str::<IoPlan>(&text).unwrap(), plan);
     }
     #[test]
     fn balanced_deterministic_and_grid_rounded() {

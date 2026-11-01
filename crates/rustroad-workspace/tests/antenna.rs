@@ -6,10 +6,13 @@
 
 use rustroad_core::Limits;
 use rustroad_core::connectivity::ConnectivityLimits;
-use rustroad_workspace::antenna::{AntennaRequest, RepairRequest, check_antenna, repair_antenna};
+use rustroad_workspace::antenna::{
+    AntennaRequest, RepairRequest, RepairScope, check_antenna, repair_antenna,
+};
 use rustroad_workspace::pdk::{ImportSources, import_pdk_with_config};
 use rustroad_workspace::physical::{PhysicalConfig, TieCell};
 use rustroad_workspace::{place, read};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -74,6 +77,8 @@ fn limits() -> Limits {
 
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -98,6 +103,7 @@ fn config() -> PhysicalConfig {
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,
         cell_spacing_sites: 0,
+        placement_blockages: Vec::new(),
         io_width: None,
         io_min_area: false,
         io_spacing: None,
@@ -106,7 +112,10 @@ fn config() -> PhysicalConfig {
         max_added_cells: 64,
         max_tie_fanout: 8,
         tap: None,
+        port_buffer: None,
+        input_buffer: None,
         clock: Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
             port: "a".into(),
             cell: "BUF".into(),
             input_pin: "A".into(),
@@ -116,6 +125,10 @@ fn config() -> PhysicalConfig {
             max_buffers: 10,
             max_work: 1000,
             level_cells: Vec::new(),
+            level_fanout: Vec::new(),
+            root_at_driver: false,
+            clustering: Default::default(),
+            regroup_prefixes: Vec::new(),
         }),
         placer: None,
         io_plan: None,
@@ -141,6 +154,27 @@ fn routed(netlist: &str) -> Fixture {
 
 /// Import, place, build the clock tree and route every signal net.
 fn routed_with_technology(netlist: &str, technology: &str) -> Fixture {
+    routed_with_scope(
+        netlist,
+        technology,
+        rustroad_workspace::routing::RouteScope::All,
+    )
+}
+
+fn routed_with_scope(
+    netlist: &str,
+    technology: &str,
+    scope: rustroad_workspace::routing::RouteScope,
+) -> Fixture {
+    routed_with_cells(netlist, technology, scope, &library())
+}
+
+fn routed_with_cells(
+    netlist: &str,
+    technology: &str,
+    scope: rustroad_workspace::routing::RouteScope,
+    cells: &str,
+) -> Fixture {
     let parent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.work/antenna-tests");
     fs::create_dir_all(&parent).unwrap();
     let root = parent.join(format!(
@@ -156,7 +190,7 @@ fn routed_with_technology(netlist: &str, technology: &str) -> Fixture {
         floorplan: root.join("floorplan.json"),
     };
     fs::write(&sources.technology_lef, technology).unwrap();
-    fs::write(&sources.cell_lef, library()).unwrap();
+    fs::write(&sources.cell_lef, cells).unwrap();
     fs::write(&sources.netlist, netlist).unwrap();
     let floorplan = serde_json::json!({
         "name":"chip", "units_per_micron":1000,
@@ -194,19 +228,408 @@ fn routed_with_technology(netlist: &str, technology: &str) -> Fixture {
         "layers":[{"name":"M1","spacing":200},{"name":"M2","spacing":200},{"name":"M3","spacing":200}],
         "vias":[{"name":"V12","cut_spacing":60},{"name":"V23","cut_spacing":60}],"max_skew_ns":1.0});
     fs::write(&routing, serde_json::to_vec(&value).unwrap()).unwrap();
-    rustroad_workspace::routing::route(
-        &workspace,
-        &clk.revision,
-        &routing,
-        rustroad_workspace::routing::RouteScope::All,
-        &limits(),
-    )
-    .unwrap();
+    rustroad_workspace::routing::route(&workspace, &clk.revision, &routing, scope, &limits())
+        .unwrap();
     Fixture {
         root,
         workspace,
         sources,
     }
+}
+
+#[test]
+fn clock_only_routing_is_partial_and_cannot_be_repaired_as_a_full_check() {
+    let f = routed_with_scope(
+        PLAIN,
+        TECHNOLOGY,
+        rustroad_workspace::routing::RouteScope::Clock,
+    );
+    let r = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    assert_eq!(r.status, "partial");
+    assert_eq!(r.scope.routing_scope, "clock_nets_only");
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|d| d.contains("ANTENNA_PARTIAL_ROUTING"))
+    );
+    let head = fs::read_to_string(f.workspace.join("HEAD")).unwrap();
+    let error = repair_antenna(
+        &f.workspace,
+        head.trim(),
+        &RepairRequest::default(),
+        &limits(),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("ANTENNA_UNMODELED"));
+    assert_eq!(head, fs::read_to_string(f.workspace.join("HEAD")).unwrap());
+}
+
+#[test]
+fn explicit_clock_selection_stays_partial_and_rejects_unknown_or_duplicate_nets() {
+    let f = routed_with_scope(
+        PLAIN,
+        TECHNOLOGY,
+        rustroad_workspace::routing::RouteScope::Clock,
+    );
+    let before = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    let net = before.checks.first().unwrap().net.clone();
+    let base = fs::read_to_string(f.workspace.join("HEAD")).unwrap();
+    let make = |names| RepairRequest {
+        scope: RepairScope::SelectedSupportedNets(names),
+        ..RepairRequest::default()
+    };
+    let result = repair_antenna(
+        &f.workspace,
+        base.trim(),
+        &make(vec![net.clone()]),
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(result.status, "subset_clean");
+    assert_eq!(result.routing_scope, "clock_nets_only");
+    assert_eq!(result.repair_scope, "selected_supported_nets");
+    assert_eq!(result.selected_nets.as_slice(), std::slice::from_ref(&net));
+    assert_eq!(result.antenna_status, "partial_selected_supported_nets");
+    assert!(result.requires_full_revalidation);
+    for names in [vec![], vec![net.clone(), net], vec!["missing_net".into()]] {
+        let error = repair_antenna(&f.workspace, base.trim(), &make(names), &limits()).unwrap_err();
+        assert!(error.to_string().contains("ANTENNA_SELECTION"), "{error}");
+        assert_eq!(base, fs::read_to_string(f.workspace.join("HEAD")).unwrap());
+    }
+}
+
+#[test]
+fn named_inventory_matches_routed_members_and_selected_source_without_signoff_claims() {
+    use rustroad_workspace::antenna::{InventoryBounds, antenna_inventory};
+    use sha2::{Digest, Sha256};
+    let f = routed(PLAIN);
+    let bounds = InventoryBounds::default();
+    let report = antenna_inventory(&f.workspace, &bounds, &limits()).unwrap();
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    let routes = &bundle.routing.as_ref().unwrap().routes;
+    let expected = routes
+        .nets
+        .iter()
+        .copied()
+        .filter(|&id| (id as usize) < bundle.connectivity.nets.len())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        report
+            .nets
+            .iter()
+            .map(|e| e.net_id)
+            .collect::<BTreeSet<_>>(),
+        expected
+    );
+    assert_eq!(report.routed_logical_net_count, expected.len());
+    assert_eq!(
+        report.model_logical_net_count,
+        bundle.connectivity.nets.len()
+    );
+    assert_eq!(
+        report.excluded_nonlogical_supply_tie_count + expected.len(),
+        report.router_declared_net_count
+    );
+    let names = report
+        .nets
+        .iter()
+        .map(|e| {
+            assert_eq!(
+                e.canonical_name,
+                bundle.connectivity.nets[e.net_id as usize].name
+            );
+            e.canonical_name.clone()
+        })
+        .collect::<Vec<_>>();
+    assert!(names.windows(2).all(|w| w[0] < w[1]));
+    let selected = check_antenna(
+        &f.workspace,
+        &AntennaRequest {
+            selected_nets: Some(names),
+            ..request(None)
+        },
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        report.source_sha256,
+        selected.selection.unwrap().source_sha256
+    );
+    let canonical = serde_json::to_vec(&(
+        &report.workspace_revision,
+        &report.routing_scope,
+        &report.source_sha256,
+        &report.nets,
+    ))
+    .unwrap();
+    assert_eq!(
+        report.inventory_sha256,
+        format!("{:x}", Sha256::digest(canonical))
+    );
+    assert_eq!(report.status, "inventory_only");
+    assert_eq!(
+        (
+            report.antenna_status,
+            report.drc_status,
+            report.lvs_status,
+            report.timing_status
+        ),
+        ("unchecked", "unchecked", "unchecked", "unchecked")
+    );
+    for b in [
+        InventoryBounds {
+            max_work: 1,
+            ..bounds.clone()
+        },
+        InventoryBounds {
+            max_routed_ids: 1,
+            ..bounds.clone()
+        },
+        InventoryBounds {
+            memory_bytes: 1,
+            ..bounds.clone()
+        },
+        InventoryBounds {
+            max_output_bytes: 1,
+            ..bounds.clone()
+        },
+        InventoryBounds {
+            max_name_bytes: 1,
+            ..bounds.clone()
+        },
+    ] {
+        assert!(antenna_inventory(&f.workspace, &b, &limits()).is_err());
+    }
+    fs::write(&f.sources.cell_lef, "changed").unwrap();
+    assert!(
+        antenna_inventory(&f.workspace, &bounds, &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("ANTENNA_SOURCE_CHANGED")
+    );
+}
+
+#[test]
+fn inventory_holds_its_shared_lock_until_output_owner_is_dropped() {
+    use rustroad_workspace::antenna::{InventoryBounds, antenna_inventory};
+    let f = routed(PLAIN);
+    let report = antenna_inventory(&f.workspace, &InventoryBounds::default(), &limits()).unwrap();
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(f.workspace.join("workspace.lock"))
+        .unwrap();
+    assert!(fs2::FileExt::try_lock_exclusive(&file).is_err());
+    drop(report);
+    fs2::FileExt::try_lock_exclusive(&file).unwrap();
+}
+
+#[test]
+fn selected_hierarchical_pin_history_is_still_rejected() {
+    let cells = library().replace(
+        "ANTENNAGATEAREA 0.1 ;",
+        "ANTENNAGATEAREA 0.1 ; ANTENNAMAXAREACAR 10 LAYER M1 ;",
+    );
+    let f = routed_with_cells(
+        PLAIN,
+        TECHNOLOGY,
+        rustroad_workspace::routing::RouteScope::Clock,
+        &cells,
+    );
+    let before = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    assert_eq!(before.status, "partial");
+    let net = before.checks.first().unwrap().net.clone();
+    let base = fs::read_to_string(f.workspace.join("HEAD")).unwrap();
+    let error = repair_antenna(
+        &f.workspace,
+        base.trim(),
+        &RepairRequest {
+            scope: RepairScope::SelectedSupportedNets(vec![net]),
+            ..RepairRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("ANTENNA_UNMODELED"), "{error}");
+    assert_eq!(base, fs::read_to_string(f.workspace.join("HEAD")).unwrap());
+}
+
+#[test]
+fn cumulative_report_keeps_gate_identity() {
+    let tech = TECHNOLOGY.replace(
+        "ANTENNAGATEPLUSDIFF 15 ; END M2",
+        "ANTENNAGATEPLUSDIFF 15 ; ANTENNACUMAREARATIO 0.01 ; END M2",
+    );
+    let f = routed_with_scope(PLAIN, &tech, rustroad_workspace::routing::RouteScope::Clock);
+    let before = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    let bad: Vec<_> = before
+        .checks
+        .iter()
+        .filter(|r| r.violated && r.kind == "cumulative_area")
+        .collect();
+    assert!(!bad.is_empty());
+    let base = fs::read_to_string(f.workspace.join("HEAD")).unwrap();
+    let mut altered = serde_json::to_value(&before).unwrap();
+    let row = altered["checks"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|r| r["violated"] == true)
+        .unwrap();
+    row["gates"][0] = serde_json::json!("another_gate");
+    let path = f.root.join("before.json");
+    fs::write(&path, serde_json::to_vec(&altered).unwrap()).unwrap();
+    let request = RepairRequest {
+        report: Some(path.clone()),
+        scope: RepairScope::SelectedSupportedNets(vec![bad[0].net.clone()]),
+        max_jumpers: 1,
+        max_jumpers_per_net: 1,
+        ..RepairRequest::default()
+    };
+    let error = repair_antenna(&f.workspace, base.trim(), &request, &limits()).unwrap_err();
+    assert!(error.to_string().contains("STALE_REPORT"), "{error}");
+    assert_eq!(base, fs::read_to_string(f.workspace.join("HEAD")).unwrap());
+    fs::write(&path, serde_json::to_vec(&before).unwrap()).unwrap();
+    let result = repair_antenna(&f.workspace, base.trim(), &request, &limits()).unwrap();
+    assert!(result.status.starts_with("subset_"));
+    assert!(result.requires_full_revalidation);
+}
+
+#[test]
+fn repair_work_cap_is_not_reset_for_every_candidate() {
+    let tech = TECHNOLOGY.replace(
+        "ANTENNADIFFSIDEAREARATIO 400 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+        "ANTENNADIFFSIDEAREARATIO 20 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+    );
+    let f = routed_with_technology(PLAIN, &tech);
+    let before = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    assert!(before.violations > 0);
+    let base = fs::read_to_string(f.workspace.join("HEAD")).unwrap();
+    let error = repair_antenna(
+        &f.workspace,
+        base.trim(),
+        &RepairRequest {
+            antenna: AntennaRequest {
+                max_work: before.stats.work,
+                ..AntennaRequest::default()
+            },
+            ..RepairRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().to_ascii_lowercase().contains("budget"),
+        "{error}"
+    );
+    assert_eq!(base, fs::read_to_string(f.workspace.join("HEAD")).unwrap());
+}
+
+#[test]
+fn spent_planner_budget_leaves_nets_unrepaired_instead_of_failing() {
+    let tech = TECHNOLOGY.replace(
+        "ANTENNADIFFSIDEAREARATIO 400 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+        "ANTENNADIFFSIDEAREARATIO 20 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+    );
+    let head = |f: &Path| {
+        fs::read_to_string(f.join("HEAD"))
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let f = routed_with_technology(PLAIN, &tech);
+    let full = repair_antenna(
+        &f.workspace,
+        &head(&f.workspace),
+        &RepairRequest::default(),
+        &limits(),
+    )
+    .unwrap();
+    assert!(!full.jumpers.is_empty() && full.stats.planner_work > 1);
+    // A spent planner cap ends in explicit unrepaired nets, not a failed command.
+    let f = routed_with_technology(PLAIN, &tech);
+    let base = head(&f.workspace);
+    let request = RepairRequest {
+        max_planner_work: Some(full.stats.planner_work / 2),
+        ..RepairRequest::default()
+    };
+    let r = repair_antenna(&f.workspace, &base, &request, &limits()).unwrap();
+    let spent: Vec<_> = r
+        .unrepaired
+        .iter()
+        .filter(|u| u.reason == "jumper planner work budget exhausted")
+        .collect();
+    assert!(!spent.is_empty(), "{:?}", r.unrepaired);
+    assert!(spent.iter().all(|u| u.ratio > u.effective_limit));
+    assert_ne!(r.status, "repaired");
+    assert!(r.stats.planner_work < full.stats.planner_work);
+}
+
+#[test]
+fn cumulative_side_and_cut_histories_remain_separate() {
+    let mut tech = TECHNOLOGY.to_string();
+    for end in ["END M1", "END M2", "END M3"] {
+        tech = tech.replace(end, &format!("ANTENNACUMSIDEAREARATIO 1000000 ; {end}"));
+    }
+    tech = tech
+        .replace("END V1\n", "ANTENNACUMAREARATIO 1000000 ; END V1\n")
+        .replace(
+            "END V2\n",
+            "ANTENNAAREARATIO 1000000 ; ANTENNACUMAREARATIO 1000000 ; END V2\n",
+        );
+    let f = routed_with_technology(PLAIN, &tech);
+    let r = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    assert_eq!(r.status, "passed");
+    let sum = |kind: &str, cut: bool| {
+        r.checks
+            .iter()
+            .filter(|c| {
+                c.net == "a" && c.kind == kind && c.layer.starts_with(if cut { 'V' } else { 'M' })
+            })
+            .map(|c| c.ratio)
+            .sum::<f64>()
+    };
+    let side = r
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "M3" && c.kind == "cumulative_side_area")
+        .unwrap();
+    let cut = r
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "V2" && c.kind == "cumulative_area")
+        .unwrap();
+    assert!((side.ratio - sum("side_area", false)).abs() < 1e-10);
+    assert!((cut.ratio - sum("area", true)).abs() < 1e-10);
+}
+
+#[test]
+fn cumulative_diffusion_pwl_changes_the_connected_gate_limit() {
+    let tech = TECHNOLOGY.replace(
+        "END M3",
+        "ANTENNACUMDIFFAREARATIO PWL ( ( 0 1 ) ( 0.1 1000 ) ( 100 1000000 ) ) ; END M3",
+    );
+    let before = routed_with_technology(PLAIN, &tech);
+    let r = check_antenna(&before.workspace, &request(None), &limits()).unwrap();
+    let root = r
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "M3" && c.kind == "cumulative_area")
+        .unwrap();
+    assert_eq!(root.limit, 1.0);
+    assert!(root.violated);
+    let diode = PLAIN.replace("endmodule", "DIO d0(.D(a)); endmodule");
+    let after = routed_with_technology(&diode, &tech);
+    let r = check_antenna(&after.workspace, &request(None), &limits()).unwrap();
+    let root = r
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "M3" && c.kind == "cumulative_area")
+        .unwrap();
+    assert!(root.diff_area_um2 >= 0.4 && root.limit > 1000.0 && !root.violated);
+    assert!(root.rule.starts_with("ANTENNACUMDIFFAREARATIO@diffusion"));
+    assert_eq!(r.status, "passed");
 }
 
 const PLAIN: &str = "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); \
@@ -245,6 +668,341 @@ fn request(extra: Option<&Path>) -> AntennaRequest {
         extra_shapes: extra.map(Path::to_path_buf),
         ..AntennaRequest::default()
     }
+}
+
+#[test]
+fn selected_reports_partition_full_rows_and_filter_before_retaining_shapes() {
+    let f = routed(PLAIN);
+    let full = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    let legacy = serde_json::to_value(&full).unwrap();
+    assert!(legacy.get("selection").is_none());
+    assert!(legacy["stats"].get("report_memory").is_none());
+    let names: BTreeSet<_> = full.checks.iter().map(|row| row.net.clone()).collect();
+    assert!(names.len() > 1);
+    let inventory = |rows: &[rustroad_workspace::antenna::CheckRow]| {
+        let mut counts = BTreeMap::new();
+        for row in rows {
+            *counts
+                .entry(serde_json::to_string(row).unwrap())
+                .or_insert(0usize) += 1;
+        }
+        counts
+    };
+    let mut partitioned = Vec::new();
+    for name in names {
+        let selected = AntennaRequest {
+            selected_nets: Some(vec![name.clone()]),
+            ..request(None)
+        };
+        let report = check_antenna(&f.workspace, &selected, &limits()).unwrap();
+        let scope = report.selection.as_ref().unwrap();
+        assert_eq!(scope.canonical_nets, vec![name.clone()]);
+        assert_eq!(scope.coverage.len(), 1);
+        assert_eq!(scope.coverage[0].rows, report.checks.len());
+        assert!(report.checks.iter().all(|row| row.net == name));
+        let memory = report.stats.report_memory.as_ref().unwrap();
+        assert!(memory.live_bytes <= memory.peak_live_bytes);
+        assert!(memory.peak_live_bytes <= memory.limit_bytes);
+        assert_eq!(
+            memory.cumulative_row_bytes,
+            report.stats.report_memory_bytes
+        );
+        assert!(report.stats.shapes < full.stats.shapes);
+        let tight = AntennaRequest {
+            max_total_shapes: report.stats.shapes,
+            ..selected
+        };
+        let bounded = check_antenna(&f.workspace, &tight, &limits()).unwrap();
+        assert_eq!(inventory(&bounded.checks), inventory(&report.checks));
+        assert!(
+            check_antenna(
+                &f.workspace,
+                &AntennaRequest {
+                    max_total_shapes: report.stats.shapes,
+                    ..request(None)
+                },
+                &limits(),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("max_total_shapes")
+        );
+        partitioned.extend(report.checks);
+    }
+    assert_eq!(inventory(&partitioned), inventory(&full.checks));
+}
+
+#[test]
+fn selected_no_gate_is_explicit_and_cannot_be_used_as_clean_repair_evidence() {
+    let f = routed(PLAIN);
+    let report = check_antenna(
+        &f.workspace,
+        &AntennaRequest {
+            selected_nets: Some(vec!["y".into()]),
+            ..request(None)
+        },
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(report.status, "subset_partial");
+    assert!(report.checks.is_empty());
+    let coverage = &report.selection.as_ref().unwrap().coverage[0];
+    assert_eq!(coverage.net, "y");
+    assert_eq!(
+        coverage.observation,
+        rustroad_workspace::antenna::NetObservation::NoGateArea
+    );
+    let path = f.root.join("no-observation.json");
+    fs::write(&path, serde_json::to_vec(&report).unwrap()).unwrap();
+    let error = repair_antenna(
+        &f.workspace,
+        &report.workspace_revision,
+        &RepairRequest {
+            scope: RepairScope::SelectedSupportedNets(vec!["y".into()]),
+            selected_report: Some(path),
+            ..RepairRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("ANTENNA_SELECTION"), "{error}");
+    assert_eq!(
+        report.workspace_revision,
+        fs::read_to_string(f.workspace.join("HEAD")).unwrap().trim()
+    );
+    for names in [vec![], vec!["y".into(), "y".into()], vec!["absent".into()]] {
+        assert!(
+            check_antenna(
+                &f.workspace,
+                &AntennaRequest {
+                    selected_nets: Some(names),
+                    ..request(None)
+                },
+                &limits()
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("ANTENNA_SELECTION")
+        );
+    }
+}
+
+#[test]
+fn selected_binding_and_fresh_evaluation_share_the_work_cap() {
+    let f = routed(PLAIN);
+    let full = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    let names = vec![full.checks[0].net.clone()];
+    let mut selected = AntennaRequest {
+        selected_nets: Some(names.clone()),
+        ..request(None)
+    };
+    let measured = check_antenna(&f.workspace, &selected, &limits()).unwrap();
+    selected.max_work = measured.stats.work;
+    let bounded = check_antenna(&f.workspace, &selected, &limits()).unwrap();
+    assert_eq!(bounded.stats.work, selected.max_work);
+    let path = f.root.join("bounded-selected.json");
+    fs::write(&path, serde_json::to_vec(&bounded).unwrap()).unwrap();
+    let error = repair_antenna(
+        &f.workspace,
+        &bounded.workspace_revision,
+        &RepairRequest {
+            scope: RepairScope::SelectedSupportedNets(names),
+            selected_report: Some(path),
+            antenna: AntennaRequest {
+                max_work: selected.max_work,
+                ..request(None)
+            },
+            ..RepairRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("max_work"), "{error}");
+    assert_eq!(
+        bounded.workspace_revision,
+        fs::read_to_string(f.workspace.join("HEAD")).unwrap().trim()
+    );
+}
+
+#[test]
+fn selected_report_binding_rejects_forgery_and_inherits_only_its_row_bound() {
+    let f = routed(PLAIN);
+    let full = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    let name = full.checks.first().unwrap().net.clone();
+    let report = check_antenna(
+        &f.workspace,
+        &AntennaRequest {
+            selected_nets: Some(vec![name.clone()]),
+            max_rows: 200_000,
+            ..request(None)
+        },
+        &limits(),
+    )
+    .unwrap();
+    let original = serde_json::to_value(&report).unwrap();
+    let path = f.root.join("selected.json");
+    let base = fs::read_to_string(f.workspace.join("HEAD")).unwrap();
+    let req = RepairRequest {
+        scope: RepairScope::SelectedSupportedNets(vec![name]),
+        selected_report: Some(path.clone()),
+        ..RepairRequest::default()
+    };
+    type ReportMutation = Box<dyn Fn(&mut serde_json::Value)>;
+    let mut controls: Vec<ReportMutation> = vec![
+        Box::new(|v| v["workspace_revision"] = serde_json::json!("rev0")),
+        Box::new(|v| v["safety_margin"]["fraction"] = serde_json::json!(0.0)),
+        Box::new(|v| v["selection"]["source_sha256"] = serde_json::json!("0".repeat(64))),
+        Box::new(|v| v["selection"]["selection_sha256"] = serde_json::json!("0".repeat(64))),
+        Box::new(|v| v["selection"]["canonical_nets"][0] = serde_json::json!("another_net")),
+        Box::new(|v| {
+            v["selection"]["canonical_nets"]
+                .as_array_mut()
+                .unwrap()
+                .clear();
+        }),
+        Box::new(|v| {
+            let n = v["selection"]["canonical_nets"][0].clone();
+            v["selection"]["canonical_nets"]
+                .as_array_mut()
+                .unwrap()
+                .push(n);
+        }),
+        Box::new(|v| v["sources"][0]["sha256"] = serde_json::json!("0".repeat(64))),
+        Box::new(|v| v["scope"]["extra_shapes"] = serde_json::json!(1)),
+        Box::new(|v| v["checks"][0]["ratio"] = serde_json::json!(123456.0)),
+        Box::new(|v| v["checks"][0]["gates"][0] = serde_json::json!("other_gate")),
+        Box::new(|v| {
+            v["checks"].as_array_mut().unwrap().pop();
+        }),
+        Box::new(|v| {
+            let r = v["checks"][0].clone();
+            v["checks"].as_array_mut().unwrap().push(r);
+        }),
+        Box::new(|v| v["status"] = serde_json::json!("passed")),
+    ];
+    for (index, mutate) in controls.drain(..).enumerate() {
+        let mut forged = original.clone();
+        mutate(&mut forged);
+        fs::write(&path, serde_json::to_vec(&forged).unwrap()).unwrap();
+        let error = repair_antenna(&f.workspace, base.trim(), &req, &limits()).unwrap_err();
+        assert!(
+            error.to_string().contains("STALE_REPORT")
+                || error.to_string().contains("ANTENNA_SELECTION"),
+            "control{index}: {error}"
+        );
+        assert_eq!(base, fs::read_to_string(f.workspace.join("HEAD")).unwrap());
+    }
+    fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+    let conflict = RepairRequest {
+        max_rows: Some(100_000),
+        ..req.clone()
+    };
+    assert!(
+        repair_antenna(&f.workspace, base.trim(), &conflict, &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("REPORT_LIMIT_MISMATCH")
+    );
+    let typed_conflict = RepairRequest {
+        antenna: AntennaRequest {
+            max_rows: 50_000,
+            ..request(None)
+        },
+        ..req.clone()
+    };
+    assert!(
+        repair_antenna(&f.workspace, base.trim(), &typed_conflict, &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("REPORT_LIMIT_MISMATCH")
+    );
+    let legacy = RepairRequest {
+        report: Some(path.clone()),
+        selected_report: None,
+        ..req.clone()
+    };
+    assert!(
+        repair_antenna(&f.workspace, base.trim(), &legacy, &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("STALE_REPORT")
+    );
+    fs::write(&path, serde_json::to_vec(&full).unwrap()).unwrap();
+    assert!(
+        repair_antenna(&f.workspace, base.trim(), &req, &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("STALE_REPORT")
+    );
+    fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+    let repaired = repair_antenna(&f.workspace, base.trim(), &req, &limits()).unwrap();
+    assert_eq!(
+        repaired.selected_analysis.as_ref().unwrap().limits.max_rows,
+        200_000
+    );
+    assert!(repaired.stats.report_memory.is_some());
+    assert!(repaired.requires_full_revalidation);
+    assert_eq!(base, fs::read_to_string(f.workspace.join("HEAD")).unwrap());
+}
+
+#[test]
+fn selected_report_repairs_real_routed_geometry_and_rejects_old_revision() {
+    let tech = TECHNOLOGY.replace(
+        "ANTENNADIFFSIDEAREARATIO 400 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+        "ANTENNADIFFSIDEAREARATIO 20 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+    );
+    let f = routed_with_technology(PLAIN, &tech);
+    let full = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    let names: Vec<_> = full
+        .checks
+        .iter()
+        .filter(|r| r.violated)
+        .map(|r| r.net.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let report = check_antenna(
+        &f.workspace,
+        &AntennaRequest {
+            selected_nets: Some(names.clone()),
+            ..request(None)
+        },
+        &limits(),
+    )
+    .unwrap();
+    assert!(report.violations > 0);
+    let path = f.root.join("selected-before.json");
+    fs::write(&path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    let req = RepairRequest {
+        selected_report: Some(path),
+        scope: RepairScope::SelectedSupportedNets(names.clone()),
+        ..RepairRequest::default()
+    };
+    let result = repair_antenna(&f.workspace, &report.workspace_revision, &req, &limits()).unwrap();
+    assert!(!result.jumpers.is_empty());
+    assert_eq!(result.status, "subset_repaired");
+    assert_eq!(result.after.violations, 0);
+    let fresh = check_antenna(
+        &f.workspace,
+        &AntennaRequest {
+            selected_nets: Some(names),
+            ..request(None)
+        },
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(fresh.workspace_revision, result.revision);
+    assert_eq!(fresh.violations, 0);
+    assert!(
+        repair_antenna(&f.workspace, &result.revision, &req, &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("STALE_REPORT")
+    );
+    assert_eq!(
+        fresh.workspace_revision,
+        fs::read_to_string(f.workspace.join("HEAD")).unwrap().trim()
+    );
 }
 
 #[test]
@@ -343,15 +1101,15 @@ fn changed_sources_unsupported_rules_and_budgets_are_explicit() {
     assert!(check_antenna(&f.workspace, &request(Some(&bad)), &limits()).is_err());
     fs::write(&bad, r#"[{"net":"a","layer":"V1","rect":[0,0,10,10]}]"#).unwrap();
     assert!(check_antenna(&f.workspace, &request(Some(&bad)), &limits()).is_err());
-    // Unmodeled cumulative rules make the verdict partial, never passed.
+    // Unmodeled area-minus-diff rules make the verdict partial, never passed.
     let mut tech = TECHNOLOGY.replace(
         "ANTENNASIDEAREARATIO 400 ; END M1",
-        "ANTENNASIDEAREARATIO 400 ; ANTENNACUMAREARATIO 5000 ; END M1",
+        "ANTENNASIDEAREARATIO 400 ; ANTENNAAREAMINUSDIFF 2 ; END M1",
     );
     let g = routed_with_technology(PLAIN, &tech);
     let r = check_antenna(&g.workspace, &request(None), &limits()).unwrap();
     assert_eq!(r.status, "partial");
-    assert_eq!(r.scope.cumulative, "present_in_lef_unsupported");
+    assert_eq!(r.scope.cumulative, "not_present_in_lef");
     // A technology LEF edited after import is refused.
     tech.push_str("\n# edited\n");
     fs::write(&g.sources.technology_lef, tech).unwrap();
@@ -361,6 +1119,125 @@ fn changed_sources_unsupported_rules_and_budgets_are_explicit() {
             .to_string()
             .contains("ANTENNA_SOURCE_CHANGED")
     );
+}
+
+#[test]
+fn cumulative_only_rules_are_checked_and_sum_process_stage_ratios() {
+    let mut tech = TECHNOLOGY.to_string();
+    for end in ["END M1", "END M2", "END M3"] {
+        tech = tech.replace(
+            end,
+            &format!("ANTENNAAREARATIO 1000000 ; ANTENNACUMAREARATIO 100 ; {end}"),
+        );
+    }
+    let f = routed_with_technology(PLAIN, &tech);
+    let r = check_antenna(
+        &f.workspace,
+        &AntennaRequest {
+            safety_margin: 0.0,
+            ..request(Some(&long_wire(&f, 50)))
+        },
+        &limits(),
+    )
+    .unwrap();
+    let area_sum: f64 = r
+        .checks
+        .iter()
+        .filter(|row| row.net == "a" && row.kind == "area" && row.layer.starts_with('M'))
+        .map(|row| row.ratio)
+        .sum();
+    let cumulative = r
+        .checks
+        .iter()
+        .find(|row| row.net == "a" && row.layer == "M3" && row.kind == "cumulative_area")
+        .expect("cumulative-only rules must produce observed rows");
+    assert!(
+        (cumulative.ratio - area_sum).abs() < 1e-10,
+        "routing CAR {} must exclude cut PARs from routing sum {area_sum}",
+        cumulative.ratio
+    );
+    assert!(cumulative.violated && cumulative.ratio > 100.0);
+    assert_eq!(r.scope.cumulative, "per_gate_process_stage_dp");
+    assert!(r.diagnostics.iter().all(|d| !d.contains("cumulative")));
+    // A high cumulative threshold changes the verdict without changing geometry.
+    let clean_tech = tech.replace("ANTENNACUMAREARATIO 100 ;", "ANTENNACUMAREARATIO 1000000 ;");
+    let clean = routed_with_technology(PLAIN, &clean_tech);
+    let report = check_antenna(&clean.workspace, &request(None), &limits()).unwrap();
+    assert_eq!(report.status, "passed");
+}
+
+#[test]
+fn cumulative_rules_reference_fixtures_and_work_guards() {
+    // The exported original LEF/DEF is consumed by an independent OpenROAD
+    // executable in the bounded integration harness, never a translated model.
+    for (name, threshold) in [("positive", 1000000), ("negative", 1)] {
+        let mut tech = TECHNOLOGY.to_string();
+        for end in ["END M1", "END M2", "END M3"] {
+            tech = tech.replace(end, &format!("ANTENNACUMAREARATIO {threshold} ; {end}"));
+        }
+        let fixture = routed_with_technology(PLAIN, &tech);
+        let report = check_antenna(&fixture.workspace, &request(None), &limits()).unwrap();
+        assert_eq!(
+            report.status,
+            if name == "positive" {
+                "passed"
+            } else {
+                "violated"
+            }
+        );
+        if name == "negative" {
+            assert!(
+                report
+                    .checks
+                    .iter()
+                    .any(|r| r.kind == "cumulative_area" && r.violated)
+            );
+        }
+        let mut tight = request(None);
+        tight.max_work = 1;
+        assert!(
+            check_antenna(&fixture.workspace, &tight, &limits())
+                .unwrap_err()
+                .to_string()
+                .contains("max_work")
+        );
+        tight = request(None);
+        tight.max_total_shapes = 1;
+        assert!(
+            check_antenna(&fixture.workspace, &tight, &limits())
+                .unwrap_err()
+                .to_string()
+                .contains("max_total_shapes")
+        );
+        tight = request(None);
+        tight.max_rows = 1;
+        assert!(
+            check_antenna(&fixture.workspace, &tight, &limits())
+                .unwrap_err()
+                .to_string()
+                .contains("max_rows")
+        );
+        if let Some(root) = std::env::var_os("RUSTROAD_ANTENNA_EVIDENCE") {
+            let output = PathBuf::from(root).join(name);
+            fs::create_dir_all(&output).unwrap();
+            for (input, name) in [
+                (&fixture.sources.technology_lef, "tech.lef"),
+                (&fixture.sources.cell_lef, "cells.lef"),
+                (&fixture.sources.netlist, "mapped.v"),
+            ] {
+                fs::copy(input, output.join(name)).unwrap();
+            }
+            let snapshot = read(&fixture.workspace, &limits()).unwrap();
+            let mut def = Vec::new();
+            snapshot.export_def(&mut def).unwrap();
+            fs::write(output.join("design.def"), def).unwrap();
+            fs::write(
+                output.join("native.json"),
+                serde_json::to_vec_pretty(&report).unwrap(),
+            )
+            .unwrap();
+        }
+    }
 }
 
 #[test]
@@ -537,4 +1414,335 @@ fn layer_jumpers_repair_partial_net_violations_without_diodes() {
             ("clean", r.revision.as_str())
         );
     }
+}
+
+#[test]
+fn batch_preserves_order_and_every_legacy_selected_report_byte() {
+    use rustroad_workspace::antenna::{CheckBatchPlan, check_antenna_batch};
+    let f = routed(
+        "module chip(input a, output y); wire n; BUF u0(.A(a),.Y(n)); BUF u1(.A(n),.Y(y)); endmodule",
+    );
+    let revision = read(&f.workspace, &limits())
+        .unwrap()
+        .metadata()
+        .revision
+        .clone();
+    let groups = vec![
+        vec!["y".into()],
+        vec!["a".into(), "n".into()],
+        vec!["a".into()],
+    ];
+    let plan = CheckBatchPlan::new(revision.clone(), groups.clone());
+    let mut output = Vec::new();
+    let summary = check_antenna_batch(&f.workspace, &plan, &limits(), &mut output).unwrap();
+    let reports: Vec<Box<serde_json::value::RawValue>> = serde_json::from_slice(&output).unwrap();
+    assert_eq!(summary.output_bytes, output.len() as u64);
+    assert_eq!(summary.groups, groups.len());
+    let mut work = 0;
+    for (group, report) in groups.into_iter().zip(reports) {
+        let legacy = check_antenna(
+            &f.workspace,
+            &AntennaRequest {
+                selected_nets: Some(group),
+                ..AntennaRequest::default()
+            },
+            &limits(),
+        )
+        .unwrap();
+        // Compare complete serialized values, including exact work/memory accounting,
+        // row order, source hashes and partial-model observations.
+        assert_eq!(
+            report.get().as_bytes(),
+            serde_json::to_vec(&legacy).unwrap()
+        );
+        work += legacy.stats.work;
+    }
+    assert_eq!(summary.work, work);
+    assert_eq!(
+        read(&f.workspace, &limits()).unwrap().metadata().revision,
+        revision
+    );
+}
+
+#[test]
+fn batch_refuses_revision_name_work_and_output_budgets() {
+    use rustroad_workspace::antenna::{CheckBatchPlan, check_antenna_batch};
+    let f = routed("module chip(input a, output y); BUF u0(.A(a),.Y(y)); endmodule");
+    let revision = read(&f.workspace, &limits())
+        .unwrap()
+        .metadata()
+        .revision
+        .clone();
+    let plan = CheckBatchPlan::new(revision, vec![vec!["a".into()]]);
+    let mut bad = plan.clone();
+    bad.revision = "rev999".into();
+    let mut output = Vec::new();
+    assert!(
+        check_antenna_batch(&f.workspace, &bad, &limits(), &mut output)
+            .unwrap_err()
+            .to_string()
+            .contains("REVISION_CONFLICT")
+    );
+    assert!(output.is_empty(), "conflict must precede all report bytes");
+    bad = plan.clone();
+    bad.groups = vec![vec!["y".into(), "a".into()]];
+    assert!(check_antenna_batch(&f.workspace, &bad, &limits(), &mut output).is_err());
+    assert!(
+        output.is_empty(),
+        "noncanonical groups must fail before output"
+    );
+    bad = plan.clone();
+    bad.max_work = 1;
+    assert!(
+        check_antenna_batch(&f.workspace, &bad, &limits(), &mut output)
+            .unwrap_err()
+            .to_string()
+            .contains("aggregate work admission")
+    );
+    output.clear();
+    bad = plan.clone();
+    bad.max_output_bytes = 3;
+    assert!(
+        check_antenna_batch(&f.workspace, &bad, &limits(), &mut output)
+            .unwrap_err()
+            .to_string()
+            .contains("output byte budget")
+    );
+    assert_eq!(
+        output, b"[",
+        "a rejected report must not be partially emitted"
+    );
+    bad = plan;
+    bad.snapshot_memory_bytes = 1;
+    assert!(
+        check_antenna_batch(&f.workspace, &bad, &limits(), &mut Vec::new())
+            .unwrap_err()
+            .to_string()
+            .contains("memory admission")
+    );
+}
+
+#[test]
+fn batch_holds_shared_workspace_lock_through_writer_flush() {
+    use fs2::FileExt;
+    use rustroad_workspace::antenna::{CheckBatchPlan, check_antenna_batch};
+    use std::io::{self, Write};
+    struct Writer {
+        lock: fs::File,
+        flushed: bool,
+    }
+    impl Write for Writer {
+        fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            let err = self
+                .lock
+                .try_lock_exclusive()
+                .expect_err("batch must retain shared lock during flush");
+            assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
+            self.flushed = true;
+            Ok(())
+        }
+    }
+    let f = routed("module chip(input a, output y); BUF u0(.A(a),.Y(y)); endmodule");
+    let revision = read(&f.workspace, &limits())
+        .unwrap()
+        .metadata()
+        .revision
+        .clone();
+    let plan = CheckBatchPlan::new(revision, vec![vec!["a".into()]]);
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(f.workspace.join("workspace.lock"))
+        .unwrap();
+    let mut writer = Writer {
+        lock,
+        flushed: false,
+    };
+    check_antenna_batch(&f.workspace, &plan, &limits(), &mut writer).unwrap();
+    assert!(writer.flushed);
+    writer
+        .lock
+        .try_lock_exclusive()
+        .expect("batch releases lock after successful flush");
+}
+
+#[test]
+fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
+    use rustroad_workspace::antenna::{
+        GroupRepairPlan, InventoryBounds, antenna_inventory, repair_antenna_groups,
+    };
+    let tech = TECHNOLOGY.replace(
+        "ANTENNADIFFSIDEAREARATIO 400 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+        "ANTENNADIFFSIDEAREARATIO 20 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+    );
+    let f = routed_with_technology(PLAIN, &tech);
+    let legacy = f.root.join("legacy-workspace");
+    fs::create_dir(&legacy).unwrap();
+    for name in ["HEAD", "workspace.lock"] {
+        fs::copy(f.workspace.join(name), legacy.join(name)).unwrap();
+    }
+    fs::create_dir(legacy.join("revisions")).unwrap();
+    let mut file_count = 0;
+    for revision in fs::read_dir(f.workspace.join("revisions")).unwrap() {
+        let revision = revision.unwrap();
+        let target = legacy.join("revisions").join(revision.file_name());
+        fs::create_dir(&target).unwrap();
+        for entry in fs::read_dir(revision.path()).unwrap() {
+            let entry = entry.unwrap();
+            file_count += 1;
+            assert!(file_count <= 64, "fixture copy file budget");
+            fs::copy(entry.path(), target.join(entry.file_name())).unwrap();
+        }
+    }
+    let inventory = antenna_inventory(&legacy, &InventoryBounds::default(), &limits()).unwrap();
+    let base = inventory.workspace_revision.clone();
+    let names: Vec<_> = inventory
+        .nets
+        .iter()
+        .map(|net| net.canonical_name.clone())
+        .collect();
+    drop(inventory);
+    let planning = check_antenna(
+        &legacy,
+        &AntennaRequest {
+            selected_nets: Some(names.clone()),
+            ..AntennaRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap();
+    let selected: Vec<_> = planning
+        .nets
+        .iter()
+        .filter(|net| net.violated)
+        .map(|net| net.net.clone())
+        .collect();
+    assert!(
+        !selected.is_empty(),
+        "planted native repair must be exercised"
+    );
+    let before = check_antenna(
+        &legacy,
+        &AntennaRequest {
+            selected_nets: Some(selected.clone()),
+            ..AntennaRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap();
+    let report_path = f.root.join("legacy-before.json");
+    let mut before_bytes = serde_json::to_vec_pretty(&before).unwrap();
+    before_bytes.push(b'\n');
+    fs::write(&report_path, &before_bytes).unwrap();
+    let repaired = repair_antenna(
+        &legacy,
+        &base,
+        &RepairRequest {
+            selected_report: Some(report_path),
+            scope: RepairScope::SelectedSupportedNets(selected),
+            ..RepairRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap();
+    assert!(!repaired.jumpers.is_empty());
+    let mut plan = GroupRepairPlan::new(f.root.join("group-repair"));
+    plan.max_rounds = 1;
+    let grouped = repair_antenna_groups(&f.workspace, &base, &plan, &limits()).unwrap();
+    assert_eq!(grouped.attempts.len(), 1);
+    assert_eq!(grouped.total_jumpers, repaired.jumpers.len());
+    assert_eq!(grouped.final_revision, repaired.revision);
+    assert_eq!(
+        fs::read(plan.output.join("repair-0-before.json")).unwrap(),
+        before_bytes
+    );
+    let mut repair_bytes = serde_json::to_vec_pretty(&repaired).unwrap();
+    repair_bytes.push(b'\n');
+    assert_eq!(
+        fs::read(plan.output.join("repair-0.json")).unwrap(),
+        repair_bytes
+    );
+    for entry in fs::read_dir(legacy.join("revisions").join(&repaired.revision)).unwrap() {
+        let entry = entry.unwrap();
+        assert_eq!(
+            fs::read(entry.path()).unwrap(),
+            fs::read(
+                f.workspace
+                    .join("revisions")
+                    .join(&repaired.revision)
+                    .join(entry.file_name())
+            )
+            .unwrap(),
+            "revision side-table bytes"
+        );
+    }
+    let final_inventory =
+        antenna_inventory(&legacy, &InventoryBounds::default(), &limits()).unwrap();
+    let mut inventory_bytes = Vec::new();
+    final_inventory.write_json(&mut inventory_bytes).unwrap();
+    inventory_bytes.push(b'\n');
+    assert_eq!(
+        fs::read(plan.output.join("inventory-final.json")).unwrap(),
+        inventory_bytes
+    );
+    assert_eq!(
+        fs::read(plan.output.join("model-initial.json")).unwrap(),
+        fs::read(plan.output.join("model-final.json")).unwrap()
+    );
+    assert_eq!(grouped.whole_layout_antenna_status, "unchecked");
+}
+
+#[test]
+fn grouped_repair_refuses_conflicts_and_invalid_or_existing_outputs() {
+    use rustroad_workspace::antenna::{GroupRepairPlan, repair_antenna_groups};
+    let f = routed(PLAIN);
+    let base = fs::read_to_string(f.workspace.join("HEAD"))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let plan = GroupRepairPlan::new(f.root.join("new-output"));
+    assert!(
+        repair_antenna_groups(&f.workspace, "rev999", &plan, &limits())
+            .unwrap_err()
+            .to_string()
+            .contains("REVISION_CONFLICT")
+    );
+    assert!(!plan.output.exists());
+    let mut invalid = plan.clone();
+    invalid.policy.max_attempts = 65;
+    assert!(repair_antenna_groups(&f.workspace, &base, &invalid, &limits()).is_err());
+    assert!(!plan.output.exists());
+    fs::create_dir(&plan.output).unwrap();
+    assert!(repair_antenna_groups(&f.workspace, &base, &plan, &limits()).is_err());
+    assert_eq!(
+        fs::read_to_string(f.workspace.join("HEAD")).unwrap().trim(),
+        base
+    );
+}
+
+#[test]
+fn grouped_repair_exact_operation_budget_still_publishes_summary() {
+    use rustroad_workspace::antenna::{GroupRepairPlan, repair_antenna_groups};
+    let f = routed("module chip(input a, output y); BUF u0(.A(a),.Y(y)); endmodule");
+    let base = fs::read_to_string(f.workspace.join("HEAD"))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let mut plan = GroupRepairPlan::new(f.root.join("exact-fit"));
+    // Two inventory/model pairs plus one planning check and one final check.
+    // The legacy runner writes final lineage outside its operation counter.
+    plan.policy.max_commands = 6;
+    let summary = repair_antenna_groups(&f.workspace, &base, &plan, &limits()).unwrap();
+    assert!(
+        summary.attempts.is_empty(),
+        "the exact-fit fixture must stay clean"
+    );
+    assert!(plan.output.join("summary.json").is_file());
+    assert_eq!(summary.final_revision, base);
+    assert_eq!(summary.corner, "not_applicable");
+    assert_eq!(summary.wire_model, "none");
+    assert_eq!(summary.unconstrained_endpoints, None);
 }

@@ -3,14 +3,15 @@ use crate::{
     Error, Metadata, Result, Stage, Summary, check_base, commit, head, lock, read_bounded,
 };
 use rustroad_core::connectivity::{
-    ConnectedDesign, Connection, ConnectivityDb, ConnectivityLimits, Direction, Geometry, Master,
-    MasterPin, Net, PinOwner, PinUse, Port,
+    ConnectedDesign, Connection, ConnectivityLimits, Direction, Geometry, Master, MasterPin, Net,
+    PinOwner, PinUse, Port,
 };
-use rustroad_core::{Cell, Design, DesignDb, Limits, Rect, Row, Site};
+use rustroad_core::{Cell, Design, Limits, Rect, Row, Site};
 use rustroad_formats::{lef, verilog};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 const MAX_LEF_BYTES: u64 = 64 * 1024 * 1024;
@@ -67,6 +68,10 @@ pub struct PhysicalBundle {
     pub generated_fillers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub generated_taps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub port_buffers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_buffers: Option<crate::input_buffer::Report>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock_tree: Option<crate::clock::ClockReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -92,6 +97,12 @@ pub(crate) struct Floorplan {
     pub(crate) core_area: Rect,
     pub(crate) site: Site,
     pub(crate) rows: Vec<Row>,
+    /// Fixed hard macros in DBU; independent of power-grid configuration.
+    #[serde(default)]
+    pub(crate) macro_placements: BTreeMap<String, rustroad_core::fixed::FixedPlacement>,
+    /// Per-master Verilog ranges, bound to the original macro interface by the caller.
+    #[serde(default)]
+    pub(crate) pin_buses: BTreeMap<String, BTreeMap<String, [i64; 2]>>,
 }
 pub(crate) type FloorplanSpec = Floorplan;
 /// `select_technology` for the file-only floorplan command.
@@ -117,6 +128,66 @@ pub(crate) fn read_input(path: &Path, limit: u64, role: &str) -> Result<(String,
         .map_err(|_| Error::Invalid(format!("{role}: input is not UTF-8")))?;
     Ok((text, pin))
 }
+
+/// Hash exactly the bytes consumed by the streaming structural reader.
+pub(crate) fn read_netlist(
+    path: &Path,
+    limits: &verilog::VerilogLimits,
+) -> Result<(verilog::Netlist, SourcePin)> {
+    read_netlist_digests(path, limits).map(|(netlist, source, _)| (netlist, source))
+}
+
+pub(crate) fn read_netlist_digests(
+    path: &Path,
+    limits: &verilog::VerilogLimits,
+) -> Result<(verilog::Netlist, SourcePin, String)> {
+    struct Hashed<R> {
+        reader: R,
+        hash: Sha256,
+        xxh3: xxhash_rust::xxh3::Xxh3,
+        bytes: u64,
+    }
+    impl<R: Read> Read for Hashed<R> {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            let count = self.reader.read(output)?;
+            self.hash.update(&output[..count]);
+            self.xxh3.update(&output[..count]);
+            self.bytes += count as u64;
+            Ok(count)
+        }
+    }
+    let file = std::fs::File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(invalid("mapped netlist must be a regular file"));
+    }
+    if meta.len() > limits.max_input_bytes as u64 {
+        return Err(budget("mapped netlist input byte limit"));
+    }
+    let mut reader = Hashed {
+        reader: file,
+        hash: Sha256::new(),
+        xxh3: xxhash_rust::xxh3::Xxh3::new(),
+        bytes: 0,
+    };
+    let netlist =
+        verilog::parse_verilog_reader(BufReader::with_capacity(1024 * 1024, &mut reader), limits)
+            .map_err(|error| match error {
+            verilog::VerilogError::Budget(message) => budget(message),
+            other => invalid(other.to_string()),
+        })?;
+    if reader.bytes != meta.len() {
+        return Err(invalid("mapped netlist changed while reading"));
+    }
+    let pin = SourcePin {
+        role: "mapped_verilog".into(),
+        path: path.to_path_buf(),
+        sha256: format!("{:x}", reader.hash.finalize()),
+        bytes: reader.bytes as usize,
+    };
+    let digest = format!("xxh3:{:016x}", reader.xxh3.digest());
+    Ok((netlist, pin, digest))
+}
 fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())
 }
@@ -124,12 +195,39 @@ fn budget(message: impl Into<String>) -> Error {
     Error::Budget(message.into())
 }
 
-fn input_preflight(sources: &ImportSources) -> Result<()> {
+/// Format validation uses the same physical instance ceiling as the workspace.
+pub(crate) fn retained_netlist_limits() -> verilog::VerilogLimits {
+    verilog::VerilogLimits {
+        max_instances: rustroad_core::MAX_PHYSICAL_INSTANCES,
+        ..verilog::VerilogLimits::large_design_ceiling()
+    }
+}
+
+/// Internal validation capacities follow a design that was already admitted by
+/// the caller's object budget. They never increase the initial import budget.
+pub(crate) fn connection_limits(design: &Design) -> Result<ConnectivityLimits> {
+    connection_limits_for_cells(design.cells.len())
+}
+pub(crate) fn connection_limits_for_cells(count: usize) -> Result<ConnectivityLimits> {
+    if count > crate::storage::MAX_CELLS {
+        return Err(budget("physical design exceeds the instance ceiling"));
+    }
+    let cells = count.max(250_000);
+    Ok(ConnectivityLimits {
+        max_instances: cells,
+        max_nets: cells.saturating_mul(4),
+        max_pins: cells.saturating_mul(16),
+        max_aliases: cells.saturating_mul(16),
+        ..ConnectivityLimits::default()
+    })
+}
+
+fn input_preflight(sources: &ImportSources, netlist_bytes: usize) -> Result<()> {
     let mut total = 0u64;
     for (path, limit) in [
         (&sources.technology_lef, MAX_LEF_BYTES),
         (&sources.cell_lef, MAX_LEF_BYTES),
-        (&sources.netlist, MAX_NETLIST_BYTES),
+        (&sources.netlist, netlist_bytes as u64),
         (&sources.floorplan, MAX_NETLIST_BYTES),
     ] {
         let metadata = std::fs::metadata(path)?;
@@ -142,7 +240,7 @@ fn input_preflight(sources: &ImportSources) -> Result<()> {
         total = total
             .checked_add(metadata.len())
             .ok_or_else(|| budget("PDK input byte count overflow"))?;
-        if total > MAX_AGGREGATE_BYTES {
+        if total > MAX_AGGREGATE_BYTES + netlist_bytes as u64 {
             return Err(budget("PDK aggregate source budget exceeded"));
         }
     }
@@ -169,15 +267,22 @@ pub(crate) fn validate_bundle(
     for source in &bundle.sources {
         if source.sha256.len() != 64
             || !source.sha256.bytes().all(|b| b.is_ascii_hexdigit())
-            || source.bytes > MAX_LEF_BYTES as usize
+            || source.bytes
+                > if source.role == "mapped_verilog" {
+                    2 * 1024 * 1024 * 1024
+                } else {
+                    MAX_LEF_BYTES as usize
+                }
         {
             return Err(invalid("invalid source pin"));
         }
     }
-    if bundle.sources.iter().map(|p| p.bytes as u64).sum::<u64>() > MAX_AGGREGATE_BYTES {
+    if bundle.sources.iter().map(|p| p.bytes as u64).sum::<u64>()
+        > MAX_AGGREGATE_BYTES + 2 * 1024 * 1024 * 1024
+    {
         return Err(budget("stored PDK source aggregate limit exceeded"));
     }
-    verilog::validate_netlist(&bundle.netlist, &verilog::VerilogLimits::default())
+    verilog::validate_netlist(&bundle.netlist, &retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
     for (instance, cell) in bundle.netlist.instances.iter().zip(&design.cells) {
         if instance.name != cell.name || instance.cell != cell.master {
@@ -206,6 +311,10 @@ pub(crate) fn validate_bundle(
             .generated_fillers
             .len()
             .checked_add(bundle.generated_taps.len())
+            .and_then(|n| n.checked_add(bundle.port_buffers.len()))
+            .and_then(|n| {
+                n.checked_add(bundle.input_buffers.as_ref().map_or(0, |r| r.buffers.len()))
+            })
             .and_then(|n| n.checked_add(bundle.clock_tree.as_ref().map_or(0, |t| t.buffers.len())))
             .and_then(|n| n.checked_add(bundle.ties.as_ref().map_or(0, |t| t.new_cells)))
             .ok_or_else(|| budget("generated physical-cell count overflow"))?;
@@ -240,6 +349,19 @@ pub(crate) fn validate_bundle(
             }
         }
         crate::physical::validate_ties(bundle)?;
+        crate::physical::validate_output_ports(bundle)?;
+        crate::input_buffer::validate(bundle)?;
+        for name in &bundle.port_buffers {
+            if !names.insert(name) {
+                return Err(invalid("duplicate generated port buffer"));
+            }
+            let inst = instance_names
+                .get(name.as_str())
+                .ok_or_else(|| invalid("generated port buffer missing"))?;
+            if Some(inst.cell.as_str()) != cfg.port_buffer.as_ref().map(|b| b.cell.as_str()) {
+                return Err(invalid("generated port buffer uses the wrong master"));
+            }
+        }
         crate::physical::validate_tap_master(bundle)?;
         crate::clock::validate_tree(bundle)?;
         for name in &bundle.generated_taps {
@@ -256,6 +378,7 @@ pub(crate) fn validate_bundle(
             }
         }
     } else if bundle.ties.is_some()
+        || bundle.input_buffers.is_some()
         || bundle.clock_tree.is_some()
         || bundle.routing.is_some()
         || bundle.state.is_some()
@@ -291,27 +414,50 @@ pub fn import_pdk_with_config(
     connection_limits: &ConnectivityLimits,
     config_path: Option<&Path>,
 ) -> Result<Summary> {
-    let _lock = lock(path, true, true)?;
-    let current = head(path)?;
-    check_base(base_rev, &current)?;
-    input_preflight(sources)?;
-    let (floor_text, floor_pin) = read_input(&sources.floorplan, MAX_NETLIST_BYTES, "floorplan")?;
-    let floor: Floorplan = serde_json::from_str(&floor_text)?;
-    if floor.rows.len() > limits.max_rows {
-        return Err(budget("floorplan max_rows exceeded"));
-    }
-    let vlimits = verilog::VerilogLimits {
+    let parser = verilog::VerilogLimits {
         max_instances: limits.max_cells,
         max_connections: connection_limits.max_pins,
         max_nets: connection_limits.max_nets,
         max_expr_nodes: connection_limits.max_pins,
         ..Default::default()
     };
-    let (verilog_text, verilog_pin) =
-        read_input(&sources.netlist, MAX_NETLIST_BYTES, "mapped_verilog")?;
-    let mut netlist =
-        verilog::parse_verilog(&verilog_text, &vlimits).map_err(|e| invalid(e.to_string()))?;
-    drop(verilog_text);
+    import_pdk_bounded(
+        path,
+        base_rev,
+        sources,
+        limits,
+        connection_limits,
+        config_path,
+        &parser,
+    )
+}
+
+/// Import with explicit input-byte and parser work budgets.
+pub fn import_pdk_bounded(
+    path: &Path,
+    base_rev: &str,
+    sources: &ImportSources,
+    limits: &Limits,
+    connection_limits: &ConnectivityLimits,
+    config_path: Option<&Path>,
+    parser: &verilog::VerilogLimits,
+) -> Result<Summary> {
+    if parser.max_input_bytes > 2 * 1024 * 1024 * 1024
+        || parser.max_instances > limits.max_cells
+        || limits.max_cells > crate::storage::MAX_CELLS
+    {
+        return Err(budget("physical import limits exceed absolute ceiling"));
+    }
+    let _lock = lock(path, true, true)?;
+    let current = head(path)?;
+    check_base(base_rev, &current)?;
+    input_preflight(sources, parser.max_input_bytes)?;
+    let (floor_text, floor_pin) = read_input(&sources.floorplan, MAX_NETLIST_BYTES, "floorplan")?;
+    let floor: Floorplan = serde_json::from_str(&floor_text)?;
+    if floor.rows.len() > limits.max_rows {
+        return Err(budget("floorplan max_rows exceeded"));
+    }
+    let (mut netlist, verilog_pin) = read_netlist(&sources.netlist, parser)?;
     if floor.name != netlist.module {
         return Err(invalid("floorplan name does not match the mapped module"));
     }
@@ -329,7 +475,7 @@ pub fn import_pdk_with_config(
         .iter()
         .map(|p| p.bytes as u64)
         .sum::<u64>();
-    if actual_bytes > MAX_AGGREGATE_BYTES {
+    if actual_bytes > MAX_AGGREGATE_BYTES + parser.max_input_bytes as u64 {
         return Err(budget("PDK aggregate source budget exceeded during read"));
     }
     let cells = lef::parse_lef(&cell_text, floor.units_per_micron, &llef)
@@ -344,6 +490,10 @@ pub fn import_pdk_with_config(
         (None, None)
     };
     let mut tie_report = None;
+    let mut tie_limits = crate::ties::TieLimits::default();
+    if parser.max_input_bytes > 16 * 1024 * 1024 {
+        tie_limits.max_work = parser.max_input_bytes.saturating_mul(16);
+    }
     if let Some(cfg) = &config {
         let find = |name: &str| {
             tech.macros
@@ -373,24 +523,19 @@ pub fn import_pdk_with_config(
             pin: &cfg.tie_low.pin,
             rail: cfg.tie_low.rail(),
         };
-        let (dissolved, count) = crate::ties::dissolve_constant_cells(
-            &netlist,
-            &specs,
-            high,
-            low,
-            &crate::ties::TieLimits::default(),
-        )
-        .map_err(|e| invalid(e.to_string()))?;
-        let (updated, mut report) = crate::ties::materialize_constants_with(
-            &dissolved,
+        let (dissolved, count) =
+            crate::ties::dissolve_constant_cells_owned(netlist, &specs, high, low, &tie_limits)
+                .map_err(|e| invalid(e.to_string()))?;
+        let remaining_cells = limits.max_cells.saturating_sub(dissolved.instances.len());
+        let (updated, mut report) = crate::ties::materialize_constants_owned_with_buses(
+            dissolved,
             high,
             low,
             &crate::ties::TieLimits {
-                max_new_cells: cfg
-                    .max_added_cells
-                    .min(limits.max_cells.saturating_sub(netlist.instances.len())),
-                ..Default::default()
+                max_new_cells: cfg.max_added_cells.min(remaining_cells),
+                ..tie_limits
             },
+            &floor.pin_buses,
         )
         .map_err(|e| invalid(e.to_string()))?;
         report.dissolved_cells = count;
@@ -421,11 +566,21 @@ pub fn import_pdk_with_config(
         if let Some(t) = &c.clock {
             v.extend(t.masters());
         }
+        if let Some(b) = &c.port_buffer {
+            v.push(b.cell.clone());
+        }
+        if let Some(b) = &c.input_buffer {
+            v.push(b.cell.clone());
+        }
         v
     });
     let (technology, masters) = select_technology(&tech, &cells, &floor, &netlist, &extra)?;
     drop(tech);
     drop(cells);
+    let macro_placements = floor.macro_placements;
+    if macro_placements.len() > 4096 {
+        return Err(budget("fixed macro count exceeds 4096"));
+    }
     let mut design = Design {
         name: floor.name,
         units_per_micron: floor.units_per_micron,
@@ -454,13 +609,36 @@ pub fn import_pdk_with_config(
             .get(inst.cell.as_str())
             .ok_or_else(|| invalid(format!("missing LEF master {}", inst.cell)))?;
         let m = &masters[id as usize];
+        let fixed = macro_placements.get(&inst.name).copied();
+        if m.class
+            .as_deref()
+            .is_some_and(|c| c.split_whitespace().next() == Some("BLOCK"))
+            != fixed.is_some()
+        {
+            return Err(invalid(format!(
+                "instance {} needs an explicit fixed placement exactly when its LEF class is BLOCK",
+                inst.name
+            )));
+        }
         design.cells.push(Cell {
+            fixed,
             name: inst.name.clone(),
             master: inst.cell.clone(),
             width: m.size[0],
             height: m.size[1],
         });
         instance_masters.push(id);
+    }
+    for name in macro_placements.keys() {
+        if !design
+            .cells
+            .iter()
+            .any(|c| c.name == *name && c.fixed.is_some())
+        {
+            return Err(invalid(format!(
+                "macro placement names absent instance {name}"
+            )));
+        }
     }
     design.validate(limits)?;
     let (mut ports, mut nets, mut pins) =
@@ -484,9 +662,8 @@ pub fn import_pdk_with_config(
         nets,
         pins,
     };
-    let db = ConnectivityDb::new(&connectivity, &design, connection_limits)?;
-    let (_, _, pin_count) = db.counts();
-    drop(db);
+    connectivity.validate(&design, connection_limits)?;
+    let pin_count = connectivity.pins.len();
     let supplies = connectivity
         .pins
         .iter()
@@ -510,10 +687,12 @@ pub fn import_pdk_with_config(
     if let Some(pin) = config_pin {
         source_pins.push(pin);
     }
-    if source_pins.iter().map(|p| p.bytes as u64).sum::<u64>() > MAX_AGGREGATE_BYTES {
+    if source_pins.iter().map(|p| p.bytes as u64).sum::<u64>()
+        > MAX_AGGREGATE_BYTES + 2 * 1024 * 1024 * 1024
+    {
         return Err(budget("physical import aggregate byte budget"));
     }
-    let physical = PhysicalBundle {
+    let mut physical = PhysicalBundle {
         import_version: 1,
         technology,
         netlist,
@@ -524,6 +703,8 @@ pub fn import_pdk_with_config(
         ties: tie_report,
         generated_fillers: Vec::new(),
         generated_taps: Vec::new(),
+        port_buffers: Vec::new(),
+        input_buffers: None,
         clock_tree: None,
         routing: None,
         state: None,
@@ -531,9 +712,13 @@ pub fn import_pdk_with_config(
         net_weights: None,
         placement_seed: None,
     };
+    crate::physical::distribute_ties(&mut design, &mut physical, limits)?;
+    crate::physical::isolate_output_ports(&mut design, &mut physical, limits)?;
+    crate::input_buffer::insert(&mut design, &mut physical, limits)?;
     validate_bundle(&physical, &design, connection_limits)?;
-    let records = DesignDb::new(&design, limits)?.unplaced_records();
+    let records = rustroad_core::snapshot_records(&design, limits)?;
     let metadata = Metadata {
+        tables: None,
         format_version: if physical
             .config
             .as_ref()
@@ -613,7 +798,11 @@ fn select_technology(
                 m.name
             )));
         }
-        if m.site.as_deref() != Some(floor.site.name.as_str()) {
+        let block = m
+            .class
+            .as_deref()
+            .is_some_and(|c| c.split_whitespace().next() == Some("BLOCK"));
+        if !block && m.site.as_deref() != Some(floor.site.name.as_str()) {
             return Err(invalid(format!(
                 "master {} does not use selected site",
                 m.name
@@ -645,10 +834,12 @@ fn select_technology(
             })
             .collect::<Result<Vec<_>>>()?;
         masters.push(Master {
+            buses: floor.pin_buses.get(&m.name).cloned().unwrap_or_default(),
+            obstruction_spacing: m.obstruction_spacing.clone(),
             name: m.name.clone(),
             class: m.class.clone(),
             symmetry: m.symmetry.clone(),
-            site: floor.site.name.clone(),
+            site: m.site.clone().unwrap_or_default(),
             size: m.size,
             pins,
             obstructions: m.obstructions.iter().map(geometry).collect(),
@@ -698,6 +889,7 @@ fn geometry(value: &lef::LefGeometry) -> Geometry {
         },
     }
 }
+
 fn vdirection(value: verilog::Direction) -> Direction {
     match value {
         verilog::Direction::Input => Direction::Input,
@@ -955,9 +1147,55 @@ pub(super) fn link(
                 return Err(invalid("duplicate cell pin connection"));
             }
         }
+        let mut bus_bits = HashMap::new();
+        for (name, range) in &master.buses {
+            let width = (i128::from(range[0]) - i128::from(range[1])).unsigned_abs() + 1;
+            if width > 65_536 || width > limits.max_pins as u128 {
+                return Err(budget("macro bus expansion limit"));
+            }
+            let Some(expr) = named.remove(name.as_str()) else {
+                continue;
+            };
+            // A width-N concat has N leaves plus its root (and may have
+            // bounded nested concats); traversal work is not its bit width.
+            let work_budget = (width as usize)
+                .saturating_mul(2)
+                .saturating_add(128)
+                .min(limits.max_pins);
+            let bits = signals.expand(expr, work_budget)?;
+            if !bits.is_empty() && bits.len() != width as usize {
+                return Err(invalid(format!(
+                    "macro port {}.{name} width mismatch",
+                    instance.name
+                )));
+            }
+            connection_work = connection_work
+                .checked_add(width as usize)
+                .ok_or_else(|| budget("bus work overflow"))?;
+            if connection_work > limits.max_pins {
+                return Err(budget("macro bus connection work"));
+            }
+            for bit in 0..width as usize {
+                let index = if range[0] <= range[1] {
+                    range[0] + bit as i64
+                } else {
+                    range[0] - bit as i64
+                };
+                let pin = format!("{name}[{index}]");
+                if named.contains_key(pin.as_str()) {
+                    return Err(invalid("mixed scalar and bus macro port connections"));
+                }
+                if !master.pins.iter().any(|p| p.name == pin) {
+                    return Err(invalid(format!("bus member absent from LEF: {pin}")));
+                }
+                bus_bits.insert(pin, bits.get(bit).copied());
+            }
+        }
         for (terminal, spec) in master.pins.iter().enumerate() {
             let expr = named.remove(spec.name.as_str());
-            let net = if spec.use_.is_supply() {
+            let net = if let Some(bit) = bus_bits.remove(&spec.name) {
+                bit.map(|bit| signal_nets[bit])
+            } else if spec.use_.is_supply() {
                 if expr.is_some() {
                     return Err(invalid(
                         "explicit supply pin wiring requires a supply-network importer",
@@ -975,14 +1213,35 @@ pub(super) fn link(
                         instance.name, spec.name
                     ))
                 })?;
-                let bits = signals.expand(expr, limits.max_pins)?;
+                // Mapped cell pins are overwhelmingly scalar. Borrow their
+                // existing bit list instead of allocating once per connection.
+                let single;
+                let expanded;
+                let bits: &[usize] = match expr {
+                    verilog::Expr::Ident(name) => {
+                        &signals
+                            .declared
+                            .get(name)
+                            .ok_or_else(|| invalid(format!("undeclared signal {name}")))?
+                            .1
+                    }
+                    verilog::Expr::BitSelect { name, index } => {
+                        single = [signals.bit(name, *index)?];
+                        &single
+                    }
+                    verilog::Expr::Unconnected => &[],
+                    _ => {
+                        expanded = signals.expand(expr, limits.max_pins)?;
+                        &expanded
+                    }
+                };
                 connection_work = connection_work
                     .checked_add(bits.len())
                     .ok_or_else(|| budget("connection work overflow"))?;
                 if connection_work > limits.max_pins {
                     return Err(budget("connection expansion work limit exceeded"));
                 }
-                match bits.as_slice() {
+                match bits {
                     [] => None,
                     [i] => Some(signal_nets[*i]),
                     _ => {
@@ -1006,4 +1265,86 @@ pub(super) fn link(
         }
     }
     Ok((ports, nets, pins))
+}
+
+#[cfg(test)]
+mod macro_port_tests {
+    use super::*;
+
+    // Four scalar pins, two two-bit buses; <16 KiB, no graph search.
+    fn master(range: [i64; 2]) -> Master {
+        Master {
+            obstruction_spacing: Default::default(),
+            name: "RAM".into(),
+            class: Some("BLOCK".into()),
+            site: String::new(),
+            symmetry: vec![],
+            size: [1000, 2000],
+            obstructions: vec![],
+            buses: BTreeMap::from([("D".into(), range), ("Q".into(), range)]),
+            pins: ["D[0]", "D[1]", "Q[0]", "Q[1]"]
+                .into_iter()
+                .map(|name| MasterPin {
+                    name: name.into(),
+                    direction: Some(if name.starts_with('D') {
+                        Direction::Input
+                    } else {
+                        Direction::Output
+                    }),
+                    use_: PinUse::Signal,
+                    shape: None,
+                    ports: vec![],
+                })
+                .collect(),
+        }
+    }
+    #[test]
+    fn bus_range_maps_msb_to_msb_for_both_directions() {
+        let netlist = verilog::parse_verilog(
+            "module t(input [3:2] a,output [5:4] q); RAM r(.D(a),.Q(q)); endmodule",
+            &verilog::VerilogLimits::default(),
+        )
+        .unwrap();
+        for (range, first, last) in [([1, 0], "a[2]", "a[3]"), ([0, 1], "a[3]", "a[2]")] {
+            let (_, nets, pins) = link(
+                &netlist,
+                &[master(range)],
+                &[0],
+                &ConnectivityLimits::default(),
+            )
+            .unwrap();
+            let pin_net = |terminal| {
+                let p = pins
+                    .iter()
+                    .find(|p| {
+                        p.owner
+                            == PinOwner::Instance {
+                                instance: 0,
+                                terminal,
+                            }
+                    })
+                    .unwrap();
+                nets[p.net.unwrap() as usize].name.as_str()
+            };
+            assert_eq!(pin_net(0), first);
+            assert_eq!(pin_net(1), last);
+        }
+    }
+    #[test]
+    fn bus_width_mismatch_is_not_silently_extended() {
+        let netlist = verilog::parse_verilog(
+            "module t(input a,output [1:0] q); RAM r(.D(a),.Q(q)); endmodule",
+            &verilog::VerilogLimits::default(),
+        )
+        .unwrap();
+        assert!(
+            link(
+                &netlist,
+                &[master([1, 0])],
+                &[0],
+                &ConnectivityLimits::default()
+            )
+            .is_err()
+        );
+    }
 }

@@ -74,11 +74,11 @@ SPEF annotation rather than falling back to ideal wires.
 - OpenSTA reports nonzero propagated latency and rise/fall skew for all four
   clock sinks. The configured skew limits are 0.5 ns (Sky130) and 1 ns (GF180).
   A 10,000× resistance perturbation in one clock branch fails this skew gate.
-- Maximum RustSTA/OpenSTA endpoint differences are about **3.15 ps / 6.79 ps**,
-  beyond the unchanged **1 ps** gate. These are recorded as `different`, not a
-  pass. OpenSTA uses its default delay calculator; identical delay algorithms
-  are not asserted. No reference-tool implementation was inspected to explain
-  or mask the differences.
+- RustSTA/OpenSTA endpoint differences exceed the unchanged **1 ps** gate.
+  They are recorded as `different`, not a pass. OpenSTA uses its default
+  delay calculator; identical delay algorithms are not asserted. No
+  reference-tool implementation was inspected to explain or mask the
+  differences.
 - Native hold reports have violations; small Sky130 differences can change a
   near-zero hold verdict. Both native and reference numbers are retained. This
   demands timing-model parity and hold repair before closure can be claimed.
@@ -103,9 +103,9 @@ cargo build --release --locked --offline --bin rustroad
 ```
 
 Expected current result: `functional_status=passed`, `status=partial`, exit 3.
-The [HTML report](cts-routing.md) and
-[retained results](evidence/routing-results.json) include exact hashes, resource
-measurements, scope and negative controls. The raw local logs are linked there.
+The [retained results](evidence/routing-results.json) include exact hashes,
+scope and negative controls; they are historical evidence kept for
+reproducibility. The raw local logs are linked there.
 
 Next gates: independently resolve the observed timing-model differences, repair
 hold without changing the intended constraints, improve pin access/rip-up for

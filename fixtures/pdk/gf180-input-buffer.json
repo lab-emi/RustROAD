@@ -1,0 +1,10 @@
+{
+  "cell": "gf180mcu_fd_sc_mcu7t5v0__buf_4",
+  "input_pin": "I",
+  "output_pin": "Z",
+  "max_fanout": 8,
+  "max_buffers": 250000,
+  "max_sinks": 2000000,
+  "max_work": 250000000,
+  "memory_mib": 2048
+}

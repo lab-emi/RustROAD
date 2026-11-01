@@ -38,26 +38,15 @@ copied into these layout files.
 
 | Check | Sky130 HD | GF180 MCU 7T5V0 |
 |---|---:|---:|
-| Physical cells | 97 | 44 |
-| Inserted tie cells | 2 | 2 |
-| Added filler cells | 77 | 20 |
-| Mirrored FS cells, reported as MX by OpenDB | 46 | 19 |
-| Connected PG pins, including body-bias pins | 388 | 176 |
-| Placed signal / PG boundary terminals | 20 / 2 | 20 / 2 |
-| Filled rows with intrinsic primary-rail continuity | 8 | 8 |
-| Actual special wires / fixed vias | 11 / 9 | 11 / 9 |
+| Filled rows with intrinsic primary-rail continuity | all | all |
 | Connected geometric components per VDD/VSS | 1 / 1 | 1 / 1 |
-| Conductor rectangles checked | 223 | 301 |
-| Bounded intersection comparisons | 5,505 | 7,236 |
 | Native and Yosys post-insertion CEC | equivalent / proved | equivalent / proved |
 | Verilator input combinations | 512 passed | 512 passed |
-| OpenROAD peak RSS | 88,640 KiB | 85,588 KiB |
 
-The full serial run took **6.90 seconds** with **290,696 KiB** maximum host-process
-RSS. This includes synthesis, import, physical preparation, exports, native and
-external CEC, Verilator build/execution, OpenDB inspection, geometry checks and
-STA consistency/differential checks. These are small integration measurements,
-not placement/routing performance claims. Raw evidence is retained under
+The run covers synthesis, import, physical preparation, exports, native and
+external CEC, Verilator build/execution, OpenDB inspection, geometry checks
+and STA consistency/differential checks. It is a small integration check, not
+a placement/routing performance claim. Raw evidence is retained under
 `.work/power-io-verified/`; the outer measurement is
 `.work/power-io-verified.time`.
 
@@ -121,9 +110,8 @@ following segment. The preflight examples and their observed bounds remain in
 
 The final logical export also passes frozen RustSTA full, independent and no-op
 incremental/full consistency checks. The same explicit ideal-wire library is
-used for the OpenSTA comparison, with 0.001 ns tolerance. Maximum setup/hold
-slack differences are 0.000000602940417593345 ns for Sky130 and
-0.0000008695038307138248 ns for GF180.
+used for the OpenSTA comparison, with 0.001 ns tolerance; both PDKs are
+within it.
 
 Each PDK has **14 constrained endpoints and 2 no-data-arrival endpoints**. The
 unconstrained records are exactly `r0/D` and `r1/D`, whose inputs are driven by

@@ -133,6 +133,32 @@ pub struct PinAntenna {
     pub diff_area: i64,
     /// Some value was restricted to one LAYER (kept, summed, reported).
     pub layer_qualified: bool,
+    /// Exact hierarchical area and internal-damage values, including layers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<PinAntennaValue>,
+}
+
+/// A LEF pin antenna quantity; ratios use millionths, areas use integer DBU².
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PinAntennaKind {
+    GateArea,
+    DiffArea,
+    PartialMetalArea,
+    PartialMetalSideArea,
+    PartialCutArea,
+    MaxAreaCar,
+    MaxSideAreaCar,
+    MaxCutCar,
+}
+
+/// One pin antenna quantity, retaining its optional process-layer qualifier.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PinAntennaValue {
+    pub kind: PinAntennaKind,
+    pub layer: Option<String>,
+    pub value: i64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,6 +212,9 @@ pub struct LefMacro {
     pub symmetry: Vec<String>,
     pub pins: Vec<LefPin>,
     pub obstructions: Vec<LefGeometry>,
+    /// Explicit per-layer OBS spacing in DBU. Retained separately from shapes.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub obstruction_spacing: std::collections::BTreeMap<String, i64>,
     /// `FOREIGN name [x y [orient]]` bindings to an external (GDS) cell.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<LefForeign>,
@@ -212,6 +241,8 @@ pub struct LefPin {
 pub struct LefPort {
     pub class: Option<String>,
     pub geometries: Vec<LefGeometry>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub layer_spacing: std::collections::BTreeMap<String, i64>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -975,6 +1006,7 @@ impl<'a> Parser<'a, '_> {
         let mut result = LefPort {
             class: None,
             geometries: Vec::new(),
+            layer_spacing: Default::default(),
         };
         loop {
             let key = self.next()?;
@@ -996,7 +1028,30 @@ impl<'a> Parser<'a, '_> {
                     if values.is_empty() {
                         return Err(error("LEF_SYNTAX", key.line, "LAYER missing name"));
                     }
-                    self.arity(&values, 1, key.line)?;
+                    if scope == "OBS" && values.len() == 3 && values[1].is("SPACING") {
+                        let spacing = self.coord(values[2])?;
+                        if spacing < 0 {
+                            return Err(error(
+                                "LEF_GEOMETRY",
+                                key.line,
+                                "OBS spacing must be nonnegative",
+                            ));
+                        }
+                        let name = self.owned(values[0])?;
+                        if result
+                            .layer_spacing
+                            .insert(name, spacing)
+                            .is_some_and(|old| old != spacing)
+                        {
+                            return Err(error(
+                                "LEF_UNSUPPORTED",
+                                key.line,
+                                "different spacing on repeated OBS layer",
+                            ));
+                        }
+                    } else {
+                        self.arity(&values, 1, key.line)?;
+                    }
                     current_layer = self.owned(values[0])?;
                 }
                 "RECT" | "POLYGON" => {
@@ -1021,8 +1076,10 @@ impl<'a> Parser<'a, '_> {
             gate_area: 0,
             diff_area: 0,
             layer_qualified: false,
+            values: Vec::new(),
         };
         let mut antenna_seen = false;
+        let mut oxide_one = true;
         let mut pin = LefPin {
             name: self.owned(name)?,
             direction: None,
@@ -1051,21 +1108,58 @@ impl<'a> Parser<'a, '_> {
             }
             let values = self.statement()?;
             let upper = key.text.to_ascii_uppercase();
-            if upper == "ANTENNAGATEAREA" || upper == "ANTENNADIFFAREA" {
+            if upper == "ANTENNAMODEL" {
+                let valid = values.len() == 1 && values[0].is("OXIDE1");
+                oxide_one = valid;
+                if !valid {
+                    self.antenna_unsupported(
+                        &format!("pin {}", name.text),
+                        key,
+                        "pin model other than OXIDE1 or malformed model",
+                    )?;
+                }
+                continue;
+            }
+            let antenna_kind = match upper.as_str() {
+                "ANTENNAGATEAREA" => Some(PinAntennaKind::GateArea),
+                "ANTENNADIFFAREA" => Some(PinAntennaKind::DiffArea),
+                "ANTENNAPARTIALMETALAREA" => Some(PinAntennaKind::PartialMetalArea),
+                "ANTENNAPARTIALMETALSIDEAREA" => Some(PinAntennaKind::PartialMetalSideArea),
+                "ANTENNAPARTIALCUTAREA" => Some(PinAntennaKind::PartialCutArea),
+                "ANTENNAMAXAREACAR" => Some(PinAntennaKind::MaxAreaCar),
+                "ANTENNAMAXSIDEAREACAR" => Some(PinAntennaKind::MaxSideAreaCar),
+                "ANTENNAMAXCUTCAR" => Some(PinAntennaKind::MaxCutCar),
+                _ => None,
+            };
+            if let Some(kind) = antenna_kind {
+                let is_ratio = matches!(
+                    kind,
+                    PinAntennaKind::MaxAreaCar
+                        | PinAntennaKind::MaxSideAreaCar
+                        | PinAntennaKind::MaxCutCar
+                );
                 let qualified = values.len() == 3 && values[1].is("LAYER");
-                let parsed = if values.len() != 1 && !qualified {
+                let parsed = if !oxide_one
+                    || (values.len() != 1 && !qualified)
+                    || (is_ratio && !qualified)
+                {
                     Err(error(
                         "LEF_SYNTAX",
                         key.line,
-                        format!("{upper} value [LAYER name]"),
+                        "OXIDE1 pin antenna value [LAYER name]; MAXCAR requires LAYER",
                     ))
                 } else {
-                    self.area(values[0]).and_then(|v| {
+                    let value = if is_ratio {
+                        self.ratio(values[0])
+                    } else {
+                        self.area(values[0])
+                    };
+                    value.and_then(|v| {
                         if v < 0 {
                             Err(error(
                                 "LEF_SYNTAX",
                                 key.line,
-                                "antenna area must not be negative",
+                                "antenna value must not be negative",
                             ))
                         } else {
                             Ok(v)
@@ -1073,26 +1167,53 @@ impl<'a> Parser<'a, '_> {
                     })
                 };
                 match parsed {
-                    Ok(v) => {
-                        let slot = if upper == "ANTENNAGATEAREA" {
-                            &mut antenna.gate_area
+                    Ok(value) => {
+                        let layer = if qualified {
+                            Some(self.owned(values[2])?)
                         } else {
-                            &mut antenna.diff_area
+                            None
                         };
-                        *slot = slot.checked_add(v).ok_or_else(|| {
-                            error("LEF_BUDGET", key.line, "antenna area overflow")
-                        })?;
+                        if antenna
+                            .values
+                            .iter()
+                            .any(|v| v.kind == kind && v.layer == layer)
+                        {
+                            self.antenna_unsupported(
+                                &format!("pin {}", name.text),
+                                key,
+                                "duplicate pin antenna kind/layer",
+                            )?;
+                            continue;
+                        }
+                        if antenna.values.len() >= 128 {
+                            return Err(error("LEF_BUDGET", key.line, "pin antenna value budget"));
+                        }
+                        self.charge(2 * size_of::<PinAntennaValue>(), key.line)?;
+                        if matches!(kind, PinAntennaKind::GateArea | PinAntennaKind::DiffArea) {
+                            let slot = if kind == PinAntennaKind::GateArea {
+                                &mut antenna.gate_area
+                            } else {
+                                &mut antenna.diff_area
+                            };
+                            *slot = slot.checked_add(value).ok_or_else(|| {
+                                error("LEF_BUDGET", key.line, "antenna area overflow")
+                            })?;
+                        }
                         antenna.layer_qualified |= qualified;
+                        antenna.values.push(PinAntennaValue { kind, layer, value });
                         antenna_seen = true;
                     }
                     Err(e) => {
-                        let owner = format!("pin {}", name.text);
-                        self.antenna_or_unsupported(&owner, key, Err(e))?;
+                        self.antenna_or_unsupported(&format!("pin {}", name.text), key, Err(e))?
                     }
                 }
+                continue;
             } else if upper.starts_with("ANTENNA") {
-                let owner = format!("pin {}", name.text);
-                self.antenna_unsupported(&owner, key, "pin antenna statement not modeled")?;
+                self.antenna_unsupported(
+                    &format!("pin {}", name.text),
+                    key,
+                    "pin antenna statement not modeled",
+                )?;
             }
             match key.text.to_ascii_uppercase().as_str() {
                 "DIRECTION" => { if pin.direction.is_some() { return Err(error("LEF_SYNTAX",key.line,"duplicate pin DIRECTION")); } let direction=self.text_values(&values,key.line)?; if !matches!(direction.as_str(),"INPUT"|"OUTPUT"|"OUTPUT TRISTATE"|"INOUT"|"FEEDTHRU") { return Err(self.unsupported(key,"pin DIRECTION")); } pin.direction=Some(direction); }
@@ -1127,6 +1248,7 @@ impl<'a> Parser<'a, '_> {
             symmetry: Vec::new(),
             pins: Vec::new(),
             obstructions: Vec::new(),
+            obstruction_spacing: Default::default(),
             foreign: Vec::new(),
         };
         let mut size_seen = false;
@@ -1158,7 +1280,9 @@ impl<'a> Parser<'a, '_> {
                     return Err(error("LEF_SYNTAX", key.line, "duplicate OBS block"));
                 }
                 obs_seen = true;
-                result.obstructions = self.geometry_block(None, "OBS")?.geometries;
+                let obs = self.geometry_block(None, "OBS")?;
+                result.obstructions = obs.geometries;
+                result.obstruction_spacing = obs.layer_spacing;
                 continue;
             }
             let values = self.statement()?;
@@ -1568,6 +1692,117 @@ fn decimal_scaled(text: &str, dbu: i128, line: usize) -> Result<i64> {
 mod tests {
     use super::*;
     #[test]
+    fn hierarchical_pin_quantities_preserve_layers_models_and_limits() {
+        let source = "MACRO ram SIZE 1 BY 1 ; PIN A DIRECTION INPUT ;
+ANTENNAPARTIALMETALAREA 3.9871 LAYER Metal2 ;
+ANTENNAPARTIALMETALAREA 203.31695 LAYER Metal3 ;
+ANTENNAPARTIALCUTAREA 0.0722 LAYER Via2 ; ANTENNAMODEL OXIDE1 ;
+ANTENNAGATEAREA 1.43 LAYER Metal2 ; ANTENNAGATEAREA 27.885 LAYER Metal3 ;
+ANTENNAMAXAREACAR 3.213636 LAYER Metal2 ; ANTENNAMAXAREACAR 17.563993 LAYER Metal3 ;
+ANTENNAMAXCUTCAR 0.151469 LAYER Via2 ; END A END ram";
+        let parsed = parse_lef(source, 1000, &LefLimits::default()).unwrap();
+        assert!(parsed.antenna.unsupported.is_empty());
+        let values = &parsed.antenna.pins[0].values;
+        assert_eq!(values.len(), 8);
+        assert!(values.contains(&PinAntennaValue {
+            kind: PinAntennaKind::GateArea,
+            layer: Some("Metal3".into()),
+            value: 27_885_000
+        }));
+        assert!(values.contains(&PinAntennaValue {
+            kind: PinAntennaKind::MaxCutCar,
+            layer: Some("Via2".into()),
+            value: 151_469
+        }));
+        let changed = source.replace("OXIDE1", "OXIDE2");
+        let unsupported = parse_lef(&changed, 1000, &LefLimits::default()).unwrap();
+        assert!(
+            unsupported
+                .antenna
+                .unsupported
+                .iter()
+                .any(|u| u.keyword == "ANTENNAMODEL")
+        );
+        assert!(unsupported.antenna.pins[0].values.iter().all(|v| !matches!(
+            v.kind,
+            PinAntennaKind::GateArea | PinAntennaKind::MaxAreaCar | PinAntennaKind::MaxCutCar
+        )));
+        let mut excessive = String::from("MACRO a SIZE 1 BY 1 ; PIN A ");
+        for layer in 0..129 {
+            excessive.push_str(&format!("ANTENNAGATEAREA 0.1 LAYER M{layer} ; "));
+        }
+        excessive.push_str("END A END a");
+        assert_eq!(
+            parse_lef(&excessive, 1000, &LefLimits::default())
+                .unwrap_err()
+                .code,
+            "LEF_BUDGET"
+        );
+    }
+
+    #[test]
+    #[ignore = "explicit original IHP/EZ130 paths required; absence is unverified"]
+    fn real_ihp_sram_antenna_metadata() {
+        let source = std::fs::read_to_string(
+            std::env::var("RUSTROAD_IHP_SRAM_LEF").expect("explicit original SRAM path required"),
+        )
+        .unwrap();
+        let document = parse_lef(&source, 2000, &LefLimits::default()).unwrap();
+        assert!(
+            document.antenna.unsupported.is_empty(),
+            "{:?}",
+            document.antenna.unsupported
+        );
+        assert_eq!(document.antenna.pins.len(), 190);
+        let count = |kind| {
+            document
+                .antenna
+                .pins
+                .iter()
+                .flat_map(|p| &p.values)
+                .filter(|v| v.kind == kind)
+                .count()
+        };
+        assert_eq!(count(PinAntennaKind::GateArea), 159);
+        assert_eq!(count(PinAntennaKind::PartialMetalArea), 197);
+        assert_eq!(count(PinAntennaKind::PartialCutArea), 7);
+        assert_eq!(count(PinAntennaKind::MaxAreaCar), 159);
+        assert_eq!(count(PinAntennaKind::MaxCutCar), 1);
+        assert_eq!(count(PinAntennaKind::DiffArea), 32);
+        for variable in ["RUSTROAD_IHP_TECH_LEF", "RUSTROAD_IHP_BASE_TECH_LEF"] {
+            let path =
+                std::env::var(variable).expect("explicit original IHP/EZ technology path required");
+            let source = std::fs::read_to_string(path).unwrap();
+            let technology = parse_lef(&source, 2000, &LefLimits::default()).unwrap();
+            assert!(
+                technology
+                    .antenna
+                    .layers
+                    .iter()
+                    .any(|a| a.cum_area_ratio.is_some() && a.cum_diff_area_ratio.is_some()),
+                "{variable}"
+            );
+            assert!(
+                technology.antenna.unsupported.is_empty(),
+                "{variable}: {:?}",
+                technology.antenna.unsupported
+            );
+        }
+        let cells = std::fs::read_to_string(
+            std::env::var("RUSTROAD_EZ130_CELL_LEF")
+                .expect("explicit original EZ130 cell path required"),
+        )
+        .unwrap();
+        let parsed = parse_lef(&cells, 2000, &LefLimits::default()).unwrap();
+        assert!(!parsed.antenna.pins.is_empty());
+        assert!(
+            parsed.antenna.unsupported.is_empty(),
+            "{:?}",
+            parsed.antenna.unsupported
+        );
+    }
+
+    #[test]
     fn antenna_rules_and_pin_areas_are_retained_exactly() {
         let lef = "VERSION 5.8 ; UNITS DATABASE MICRONS 1000 ; END UNITS
 LAYER li1 TYPE ROUTING ; DIRECTION VERTICAL ; WIDTH 0.17 ; THICKNESS 0.1 ;
@@ -1620,13 +1855,17 @@ PORT LAYER li1 ; RECT 0 0 0.5 0.5 ; END END DIODE END d END LIBRARY";
             .iter()
             .map(|u| (u.owner.as_str(), u.keyword.as_str()))
             .collect();
-        // Decreasing PWL, an inexact ratio, OXIDE2, a partial-metal pin area and an
+        assert!(pin.values.contains(&PinAntennaValue {
+            kind: PinAntennaKind::PartialMetalArea,
+            layer: None,
+            value: 1_000_000,
+        }));
+        // Decreasing PWL, an inexact ratio, OXIDE2 and an
         // inexact pin area are recorded, never silently used or fatal.
         for expected in [
             ("M3", "ANTENNADIFFSIDEAREARATIO"),
             ("M3", "ANTENNASIDEAREARATIO"),
             ("M2", "ANTENNASIDEAREARATIO"),
-            ("d/DIODE", "ANTENNAPARTIALMETALAREA"),
             ("d/DIODE", "ANTENNAGATEAREA"),
         ] {
             assert!(
@@ -1668,11 +1907,15 @@ OBS LAYER Metal1 ; RECT 0.3 0.1 0.4 0.2 ; END END cell END LIBRARY"#;
         assert!(
             matches!(&cell.pins[1].ports[0].geometries[0],LefGeometry::Polygon{points,..} if points.len()==4)
         );
-        assert!(
-            doc.diagnostics
-                .iter()
-                .any(|d| d.keyword == "ANTENNAGATEAREA")
+        assert_eq!(
+            doc.antenna.pins[0].values,
+            [PinAntennaValue {
+                kind: PinAntennaKind::GateArea,
+                layer: None,
+                value: 123450,
+            }]
         );
+        assert!(doc.antenna.unsupported.is_empty());
     }
     #[test]
     fn foreign_bindings_are_retained_exactly() {
@@ -1770,7 +2013,7 @@ MACRO b FOREIGN other 0.5 -1 FS ; FOREIGN b ; SIZE 1 BY 1 ; END b";
     }
     #[test]
     fn diagnostics_aggregate_repeated_semantics() {
-        let s = "MACRO a SIZE 1 BY 1 ; PIN A ANTENNAGATEAREA 1 ; ANTENNAGATEAREA 2 ; END A END a";
+        let s = "MACRO a SIZE 1 BY 1 ; PIN A ANTENNAUNMODELED 1 ; ANTENNAUNMODELED 2 ; END A END a";
         let doc = parse_lef(s, 1000, &LefLimits::default()).unwrap();
         assert_eq!(doc.diagnostics.len(), 1);
         assert_eq!(doc.diagnostics[0].occurrences, 2);

@@ -176,18 +176,18 @@ fn master<'a>(spec: TieSpec<'a>, work: &mut Work<'_>) -> TieResult<Master<'a>> {
 }
 
 // Count serialization without constructing a second unbounded JSON buffer.
-fn input_bound(netlist: &verilog::Netlist) -> TieResult<()> {
+fn input_bound(netlist: &verilog::Netlist, limits: &TieLimits) -> TieResult<()> {
     struct Counter {
-        remaining: usize,
+        remaining: u64,
         exceeded: bool,
     }
     impl Write for Counter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if bytes.len() > self.remaining {
+            if bytes.len() as u64 > self.remaining {
                 self.exceeded = true;
                 return Err(std::io::Error::other("tie input AST byte cap"));
             }
-            self.remaining -= bytes.len();
+            self.remaining -= bytes.len() as u64;
             Ok(bytes.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
@@ -195,12 +195,12 @@ fn input_bound(netlist: &verilog::Netlist) -> TieResult<()> {
         }
     }
     let mut counter = Counter {
-        remaining: 16 * 1024 * 1024,
+        remaining: (limits.max_work as u64).clamp(16 * 1024 * 1024, 16 * 1024 * 1024 * 1024),
         exceeded: false,
     };
     if let Err(error) = serde_json::to_writer(&mut counter, netlist) {
         if counter.exceeded {
-            return Err(budget("input AST exceeds 16 MiB serialized limit"));
+            return Err(budget("input AST exceeds configured serialized byte limit"));
         }
         return Err(invalid(error.to_string()));
     }
@@ -480,7 +480,7 @@ impl Transform<'_> {
         if self.cells.len() >= self.work.limits.max_new_cells {
             return Err(budget("max_new_cells exceeded"));
         }
-        let vlimits = verilog::VerilogLimits::default();
+        let vlimits = crate::pdk::retained_netlist_limits();
         if self.base_cells + self.cells.len() >= vlimits.max_instances
             || self.base_wires + self.wires.len() >= vlimits.max_nets
         {
@@ -634,8 +634,24 @@ pub fn dissolve_constant_cells(
     low: TieSpec<'_>,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, usize)> {
+    verilog::validate_netlist(netlist, &crate::pdk::retained_netlist_limits())
+        .map_err(|e| invalid(e.to_string()))?;
+    input_bound(netlist, limits)?;
+    dissolve_constant_cells_owned(netlist.clone(), cells, high, low, limits)
+}
+
+/// Consuming constant-cell rewrite; unchanged instances retain their allocations.
+pub fn dissolve_constant_cells_owned(
+    mut netlist: verilog::Netlist,
+    cells: &[ConstantCellSpec<'_>],
+    high: TieSpec<'_>,
+    low: TieSpec<'_>,
+    limits: &TieLimits,
+) -> TieResult<(verilog::Netlist, usize)> {
+    verilog::validate_netlist(&netlist, &crate::pdk::retained_netlist_limits())
+        .map_err(|e| invalid(e.to_string()))?;
     if cells.is_empty() {
-        return Ok((netlist.clone(), 0));
+        return Ok((netlist, 0));
     }
     let mut work = Work { used: 0, limits };
     let mut values: HashMap<&str, HashMap<&str, bool>> = HashMap::new();
@@ -673,19 +689,15 @@ pub fn dissolve_constant_cells(
             )));
         }
     }
-    let mut out = verilog::Netlist {
-        module: netlist.module.clone(),
-        ports: netlist.ports.clone(),
-        wires: netlist.wires.clone(),
-        assigns: netlist.assigns.clone(),
-        instances: Vec::with_capacity(netlist.instances.len()),
-    };
+    let instances = std::mem::take(&mut netlist.instances);
+    let mut out = netlist;
+    out.instances = Vec::with_capacity(instances.len());
     let literal = |value: bool| verilog::Expr::Constant(if value { "1'b1" } else { "1'b0" }.into());
     let mut dissolved = 0usize;
-    for instance in &netlist.instances {
+    for instance in instances {
         work.charge(1)?;
         let Some(map) = values.get(instance.cell.as_str()) else {
-            out.instances.push(instance.clone());
+            out.instances.push(instance);
             continue;
         };
         let mut driven = Vec::new();
@@ -737,7 +749,7 @@ pub fn dissolve_constant_cells(
             });
         }
     }
-    verilog::validate_netlist(&out, &verilog::VerilogLimits::default())
+    verilog::validate_netlist(&out, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
     Ok((out, dissolved))
 }
@@ -775,9 +787,34 @@ pub fn materialize_constants_with(
     low: TieSpec<'_>,
     limits: &TieLimits,
 ) -> TieResult<(verilog::Netlist, TieReport)> {
-    verilog::validate_netlist(netlist, &verilog::VerilogLimits::default())
+    verilog::validate_netlist(netlist, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
-    input_bound(netlist)?;
+    input_bound(netlist, limits)?;
+    materialize_constants_owned(netlist.clone(), high, low, limits)
+}
+
+/// Rewrite literals in place, retaining all unchanged netlist record allocations.
+pub fn materialize_constants_owned(
+    netlist: verilog::Netlist,
+    high: TieSpec<'_>,
+    low: TieSpec<'_>,
+    limits: &TieLimits,
+) -> TieResult<(verilog::Netlist, TieReport)> {
+    materialize_constants_owned_with_buses(netlist, high, low, limits, &Default::default())
+}
+
+/// The same rewrite with explicitly declared macro bus widths. Scalar-only
+/// callers retain the original strict one-bit destination contract.
+pub fn materialize_constants_owned_with_buses(
+    mut netlist: verilog::Netlist,
+    high: TieSpec<'_>,
+    low: TieSpec<'_>,
+    limits: &TieLimits,
+    buses: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, [i64; 2]>>,
+) -> TieResult<(verilog::Netlist, TieReport)> {
+    verilog::validate_netlist(&netlist, &crate::pdk::retained_netlist_limits())
+        .map_err(|e| invalid(e.to_string()))?;
+    input_bound(&netlist, limits)?;
     if high.cell.name == low.cell.name
         && high.pin == low.pin
         && !matches!((high.rail, low.rail), (Some(h), Some(l)) if h.0 == l.0 && h.1 != l.1)
@@ -847,60 +884,59 @@ pub fn materialize_constants_with(
         },
         rails_used: [false; 2],
     };
-    let mut rewritten = verilog::Netlist {
-        module: netlist.module.clone(),
-        ports: netlist.ports.clone(),
-        wires: netlist.wires.clone(),
-        assigns: Vec::with_capacity(netlist.assigns.len()),
-        instances: Vec::with_capacity(netlist.instances.len()),
-    };
-    for assign in &netlist.assigns {
+    for assign in &mut netlist.assigns {
         let width = transform.width(&assign.lhs, 1)?;
-        rewritten.assigns.push(verilog::Assign {
-            lhs: assign.lhs.clone(),
-            rhs: transform.rewrite(&assign.rhs, Some(width), 1)?,
-        });
+        assign.rhs = transform.rewrite(&assign.rhs, Some(width), 1)?;
     }
-    for instance in &netlist.instances {
-        let mut connections = Vec::with_capacity(instance.connections.len());
-        for connection in &instance.connections {
-            let signal = match transform.existing_rail(
+    for instance in &mut netlist.instances {
+        for connection in &mut instance.connections {
+            let width = match buses
+                .get(&instance.cell)
+                .and_then(|ports| ports.get(&connection.pin))
+            {
+                Some(range) => {
+                    let width = (i128::from(range[0]) - i128::from(range[1])).unsigned_abs() + 1;
+                    if width > 65_536 || width > limits.max_bits as u128 {
+                        return Err(budget("macro destination width limit"));
+                    }
+                    width as usize
+                }
+                None => 1,
+            };
+            connection.signal = match transform.existing_rail(
                 &instance.cell,
                 &connection.pin,
                 &connection.signal,
             )? {
                 Some(rail) => rail,
-                None => transform.rewrite(&connection.signal, Some(1), 1)?,
+                None => transform.rewrite(&connection.signal, Some(width), 1)?,
             };
-            connections.push(verilog::Connection {
-                pin: connection.pin.clone(),
-                signal,
-            });
         }
-        rewritten.instances.push(verilog::Instance {
-            name: instance.name.clone(),
-            cell: instance.cell.clone(),
-            connections,
-        });
     }
     transform.report.new_cells = transform.cells.len();
-    for (used, wire) in transform
-        .rails_used
+    let Transform {
+        report,
+        cells,
+        wires,
+        rails_used,
+        ..
+    } = transform;
+    for (used, wire) in rails_used
         .into_iter()
         .zip([RAIL_POWER_WIRE, RAIL_GROUND_WIRE])
     {
         if used {
-            rewritten.wires.push(verilog::Wire {
+            netlist.wires.push(verilog::Wire {
                 name: wire.into(),
                 range: None,
             });
         }
     }
-    rewritten.wires.extend(transform.wires);
-    rewritten.instances.extend(transform.cells);
-    verilog::validate_netlist(&rewritten, &verilog::VerilogLimits::default())
+    netlist.wires.extend(wires);
+    netlist.instances.extend(cells);
+    verilog::validate_netlist(&netlist, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
-    Ok((rewritten, transform.report))
+    Ok((netlist, report))
 }
 
 #[cfg(test)]
@@ -911,6 +947,7 @@ mod tests {
     }
     fn cell(name: &str) -> lef::LefMacro {
         lef::LefMacro {
+            obstruction_spacing: Default::default(),
             name: name.into(),
             class: Some("CORE".into()),
             origin: [0, 0],

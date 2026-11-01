@@ -53,13 +53,15 @@ bound artifact) and runs the oracle that must catch it; the control is
                     (margin evidence recorded). A plant the conservative
                     native check flags but the deck passes is recorded in
                     `deck_plants` and the next candidate is planted (at
-                    most MAX_DECK_PLANTS deck runs)
+                    most MAX_DECK_PLANTS deck runs). If ports leave upward,
+                    extend an existing gate-connected routed segment instead.
 """
 from __future__ import annotations
 
 from verify_logic import gnu_time_program
 
 import json
+import itertools
 from pathlib import Path
 import re
 import shutil
@@ -592,36 +594,98 @@ def antenna_candidates(netlist_text: str, bits: list[str]) -> list[str]:
 MAX_DECK_PLANTS = 3
 
 
+def route_antenna_shapes(def_text: str, checks: list[dict], widths: dict[str, int],
+                         candidates: list[str], length_um: int, dbu: int) -> list[dict]:
+    """Extend an existing gate-connected route toward its nearest die edge."""
+    from def_segmentation import nets_section, parse_nets
+    die = re.search(r'(?m)^DIEAREA \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \) ;', def_text)
+    if die is None:
+        raise GateError('antenna route plant needs a DIEAREA')
+    lx, ly, ux, uy = map(int, die.groups())
+    nets = parse_nets(nets_section(def_text)[1])
+    eligible = {(c['net'], c['layer']) for c in checks
+                if c.get('gates') and c.get('gate_area_um2', 0) > 0
+                and c.get('diff_area_um2', 0) == 0 and c['net'] in candidates}
+    choices = []
+    for net, layer in sorted(eligible):
+        width = widths.get(layer)
+        if width is None or width <= 0 or width % 2:
+            continue
+        half = width // 2
+        for wire in nets.get(net, {}).get('wires', []):
+            if wire[0] != layer:
+                continue
+            x0, y0, x1, y1 = map(int, wire[1:])
+            if x0 == x1:
+                for y, edge, direction in [(min(y0, y1), ly, -1), (max(y0, y1), uy, 1)]:
+                    choices.append((abs(y - edge), net, layer, width, (x0, y), direction, True, edge))
+            elif y0 == y1:
+                for x, edge, direction in [(min(x0, x1), lx, -1), (max(x0, x1), ux, 1)]:
+                    choices.append((abs(x - edge), net, layer, width, (x, y0), direction, False, edge))
+            if len(choices) >= 4096:
+                break
+        if len(choices) >= 4096:
+            break
+    result, seen = [], set()
+    for _, net, layer, width, (x, y), direction, vertical, edge in sorted(choices):
+        for factor in (1, 2, 4):
+            length = length_um * factor * dbu
+            half = width // 2
+            far = edge + direction * length
+            if vertical:
+                rect = [x - half, min(y - half, far), x + half, max(y + half, far)]
+            else:
+                rect = [min(x - half, far), y - half, max(x + half, far), y + half]
+            key = net, layer, tuple(rect)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(dict(net=net, layer=layer, rect=rect, length_um=length_um * factor,
+                               width_dbu=width, anchor='existing gate-connected route', anchor_point=[x, y]))
+            if len(result) >= 192:
+                return result
+    return result
+
+
 def antenna_planted(ctx, gate, b, work: Path) -> dict:
     flow, phys = b["flow"], b["phys"]
     work.mkdir(parents=True, exist_ok=True)
     candidates = antenna_candidates(Path(phys["paths"]["netlist"]).read_text(), input_bits(ctx))
     if not candidates:
         raise GateError("no input port bit without an antenna diode")
-    # The strip must join a partial net that reaches a gate on the I/O layer
-    # (a route that leaves the pin upward has no gate at that layer's etch):
-    # the first candidate/length the native check flags is planted.
+    # Prefer an I/O extension. If all ports leave upward, extend an existing
+    # routed segment on a layer whose partial net already reaches a gate.
     base = flow.plant_shape(phys, port=candidates[0])["length_um"]
     k, native, shape, hit = 0, None, None, False
     tried = []
     deck = None
-    for port in candidates[:64]:
-        for length in (base, 2 * base, 4 * base):
-            shape = flow.plant_shape(phys, port=port, length_um=length)
-            extra = work / f"extra{k}.json"
-            extra.write_text(json.dumps([{kk: shape[kk] for kk in ("net", "layer", "rect")}]))
-            native = flow.check_antenna(f"{gate.tag}_ctl_antenna{k}", phys["workspace"], extra)
-            k += 1
-            # Only a violation on the planted net counts (another net may
-            # already violate; that is antenna_native's verdict).
-            hit = any(v["net"] == shape["net"] for v in native["violated"])
-            if hit:
-                break
+    def fallback_shapes():
+        baseline = json.loads(Path(b['antenna']['report']).read_text())
+        tech = Path(flow.p['technology_lef']['path']).read_text()
+        mapping = json.loads((ROOT / f'fixtures/pdk/{gate.tag}-gds-map.json').read_text())
+        routing_layers = {entry['lef'] for entry in mapping['layers'] if entry.get('kind') == 'routing'}
+        widths = {m[1]: round(float(m[2]) * baseline['dbu_per_micron'])
+                  for m in re.finditer(r'(?ms)^LAYER\s+(\S+)\b.*?^\s*WIDTH\s+([0-9.]+)\s*;', tech)
+                  if m[1] in routing_layers}
+        yield from route_antenna_shapes(Path(phys['paths']['def']).read_text(), baseline['checks'],
+                                       widths, candidates[:64], base, baseline['dbu_per_micron'])
+
+    port_shapes = (flow.plant_shape(phys, port=port, length_um=length)
+                   for port in candidates[:64] for length in (base, 2 * base, 4 * base))
+    for shape in itertools.chain(port_shapes, fallback_shapes()):
+        extra = work / f"extra{k}.json"
+        extra.write_text(json.dumps([{kk: shape[kk] for kk in ("net", "layer", "rect")}]))
+        native = flow.check_antenna(f"{gate.tag}_ctl_antenna{k}", phys["workspace"], extra)
+        k += 1
+        # Only a violation on the planted net counts; another net cannot
+        # substitute for the deliberately changed geometry.
+        hit = any(v["net"] == shape["net"] for v in native["violated"])
         if not hit:
             continue
         planted = flow.plant_gds(f"{gate.tag}_ctl_antenna{len(tried) or ''}", b["gds"], b["gds_export"], shape)
         deck = flow.deck_antenna(f"{gate.tag}_ctl_antenna{len(tried) or ''}", planted, phys)
-        tried.append(dict(port=shape["net"], length_um=shape["length_um"], deck=deck["status"]))
+        tried.append(dict(port=shape["net"], layer=shape["layer"], length_um=shape["length_um"],
+                          anchor=shape.get('anchor', 'input port'), deck=deck["status"]))
         # The native model is conservative (safety margin, LEF gate areas):
         # a plant it flags but the deck passes is recorded and the next
         # candidate is tried, at most MAX_DECK_PLANTS deck runs.
@@ -629,8 +693,7 @@ def antenna_planted(ctx, gate, b, work: Path) -> dict:
             break
         hit = False
     if deck is None:
-        raise GateError(f"no input pin whose I/O-layer partial net reaches a gate ({k} plants tried): every route "
-                        "leaves its pin upward, so the planted strip has no gate at that layer's etch")
+        raise GateError(f"no gate-connected input or routed-segment antenna plant ({k} bounded trials)")
     report = json.loads(Path(native["report"]).read_text())
     rows = [c for c in report["checks"] if c["net"] == shape["net"] and c["violated"]]
     deck_summary = json.loads(Path(deck["summary"]).read_text())

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/rustroad-wordmark.svg" alt="RustROAD" width="440">
+  <img src="docs/assets/rustroad-wordmark.svg" alt="RustROAD" width="360">
 </p>
 
 <h1 align="center">Physical design for the next design iteration.</h1>
@@ -13,7 +13,7 @@
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/rustroad-banner.svg">
-  <img src="docs/assets/rustroad-banner.gif" alt="RustROAD implements placement, clock trees, routing, extraction and GDS export" width="1200" height="360">
+  <img src="docs/assets/rustroad-banner.gif" alt="RustROAD implements placement, clock trees, routing, extraction and GDS export" width="1200">
 </picture>
 
 RustROAD implements placement, clock trees, routing, extraction and GDS export. The recorded small-block baseline spans SKY130 HD and GF180 7T: **15 ordinary passes and one declared deviation**. OpenC910 physical implementation remains unverified.
@@ -21,6 +21,18 @@ RustROAD implements placement, clock trees, routing, extraction and GDS export. 
 Part of **[RustEDA](https://github.com/lab-emi/RustEDA)**, infrastructure for chip-design recursive self-improvement. Native tools shorten the work between inference steps; verified results guide the next iteration.
 
 [Current qualification and limits](docs/closeout-2026-10-25.md) · [Flow guide](docs/rtl2gds.md)
+
+## Latest development · 2026-11-01
+
+The development source combines bounded extraction indices and query workers,
+single-session antenna repair, an opt-in staggered tap lattice, placement-stage
+diagnostics and spacing-aware electrostatic density. The density model accounts
+for the same cell spacing required by legalization. Optional checkpoint retention
+at an evaluation horizon reports the reason explicitly; the default policy stays
+strict. Repeated same-path routing near misses receive bounded repair.
+
+[Current source and qualification](docs/development-status.md) ·
+[Latest complete-flow evidence](https://lab-emi.github.io/RustEDA/benchmarks/)
 
 ## Build and try
 

@@ -10,6 +10,7 @@ name = "rustroad"
 path = "src/main.rs"
 
 [dependencies]
+rustroad-formats.workspace = true
 clap.workspace = true
 rayon.workspace = true
 rustroad-core.workspace = true

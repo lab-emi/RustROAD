@@ -106,7 +106,7 @@ memory cap, two CPUs, bounded files, and an inner 25 second timeout. The interna
 `/usr/bin/time` receipt records actual OpenROAD RSS; host `podman` RSS is not
 presented as OpenROAD memory. No reference implementation is inspected.
 
-## Verified RustROAD 0.2.0 results
+## Verified RustROAD 0.2.0 checks
 
 [Tracked results](evidence/pdk-import-results.json) contain the complete scoped
 findings and 70 hashed process receipts. [Source pins](evidence/pdk-import-sources.json)
@@ -117,35 +117,28 @@ All engine entrypoint hashes were unchanged from start to finish.
 
 | Acceptance check | Sky130 HD | GF180 MCU 7T5V0 |
 |---|---:|---:|
-| Mapped standard cells / retained state bits | 16 / 4 | 20 / 4 |
-| Logical signal nets | 26 | 30 |
-| Connected signal endpoints | 74 | 82 |
-| Stored pins, including preserved PG pins | 138 | 162 |
-| Top-level terminal directions verified in OpenDB | 18 | 18 |
 | Native / external CEC | equivalent / proved | equivalent / proved |
 | Verilator input combinations | 512 passed | 512 passed |
+| Top-level terminal directions in OpenDB | verified | verified |
 | Imported master identity and integer dimensions vs OpenDB | passed | passed |
-| Signal/PG pin definitions, including direction and use | 30 matched | 36 matched |
-| MPin rectangle geometry, layers and port grouping | 65 rectangles matched | 114 rectangles matched |
-| Obstruction rectangle geometry and layers | 124 rectangles matched | 55 rectangles matched |
+| Signal/PG pin definitions, including direction and use | matched | matched |
+| MPin rectangle geometry, layers and port grouping | matched | matched |
+| Obstruction rectangle geometry and layers | matched | matched |
 | OpenDB placement and signal-net partition comparison | passed | passed |
 | Deliberately rewired DEF remains geometrically legal but differs logically | detected | detected |
 | Unknown cell pin import, before HEAD publication | rejected | rejected |
 | Deliberately rewired Verilog, topology and CEC | rejected | rejected |
 | RustSTA full, independent and no-op incremental/full checks | agree | agree |
-| Maximum setup/hold difference vs OpenSTA | 0.000000602940417593345 ns | 0.0000008695038307138248 ns |
+| Setup/hold against OpenSTA (0.001 ns tolerance) | within tolerance | within tolerance |
 | Constrained / unconstrained timing endpoints | 12 / 0 | 12 / 0 |
-| OpenROAD positive-case peak RSS | 88,904 KiB | 86,096 KiB |
 
-The full serial campaign took **12.61 seconds**, with **289,556 KiB** maximum
-host-process RSS. It includes synthesis, LEF/link import, placement, immutable
+The campaign covers synthesis, LEF/link import, placement, immutable
 workspace publication/readback, exports, graph comparison, CEC, Verilator
 compilation/execution and timing checks. It is a small integration workload,
-not a chip-scale performance comparison or a claim that placement causes the
-observed ideal-wire timing numbers. Raw receipts remain under
+not a chip-scale performance comparison. Raw receipts remain under
 `.work/pdk-import-geometry-final/`; the outer `/usr/bin/time -v` receipt is
-`.work/pdk-import-geometry-final.time`. Container-internal time receipts measure
-OpenROAD itself separately from `podman`.
+`.work/pdk-import-geometry-final.time`. Container-internal time receipts
+measure OpenROAD itself separately from `podman`.
 
 The timing comparison uses TT Liberty, ideal clocks and explicitly matched
 ideal wires, with a tolerance of 0.001 ns. The Sky130 verification-only

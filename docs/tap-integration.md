@@ -40,6 +40,33 @@ readable. Logical Verilog omits physical-only taps/fillers; powered Verilog and
 DEF include them and their supply connections. Clock buffers remain in both
 Verilog views.
 
+### Experimental staggered rows
+
+An explicit optional `tap.pattern` selects a staggered lattice. For example,
+`"max_gap": 30000, "pattern": {"kind": "staggered", "phase": 15000}`
+uses DBU, not microns. Absent `pattern` retains the original planner and JSON
+output. No public PDK profile selects this experiment by default.
+
+`max_gap` still bounds the **clear horizontal gap between tap-cell bounding
+boxes**. The staggered mode also uses it as the nominal lattice pitch; pitch
+and odd-row phase round down to whole sites. Phase is relative to the physical
+row number from the core origin, never the macro-cut segment number. The
+lattice's x origin is the core's left edge. Each row segment keeps taps at both
+ends, including macro halo boundaries; a short segment that excludes every
+lattice anchor receives a bounded interior repair when needed. Narrow segments
+that cannot hold the boundary taps fail explicitly. Placement, free intervals,
+persisted-policy validation and repeated placement all use this same policy.
+
+The native gap metric is distinct from foundry diffusion-to-corresponding-tie
+distance. The pattern does not establish connected well/body domains, electrical
+contact or latch-up compliance. Its report retains
+`requires_independent_GDS_verification`. Candidate acceptance requires original
+GDS geometry in connected domains and unchanged foundry rule runs. In the pinned
+IHP decks, main emits LU.b and maximal emits LU.a; retain both full category
+inventories and their missing-tie negative controls. Neither deck name alone
+establishes both rule scopes. No full-flow or default promotion follows from
+planner tests or a component placement replay.
+
 ## Independent physical verification
 
 `verify_taps.py` invokes pinned OpenROAD/OpenDB as an external process to read

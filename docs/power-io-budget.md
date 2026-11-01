@@ -37,3 +37,15 @@ RSS receipts. Runs estimated above 4 GiB must use the constitution's scale lock.
 Verification claims are separate: row/rail geometry and supply connectivity are
 not foundry DRC, well/tap checking, IR drop or EM. An unexecuted check stays
 unchecked. No CTS, signal routing or parasitic extraction is implied by this phase.
+
+An optional `port_buffer` physical role (`cell`, `input_pin`, `output_pin`)
+separates each external output into its own net for layout connectivity checks.
+The configured cell must expose one signal input and one signal output; its
+identity function is checked with the selected Liberty in the independent CEC
+harness. Constant outputs instead use separate configured constant sources.
+Mixed vector directions and input-to-output feedthroughs preserve scalar bit
+identity. The pass scans pins once, rewrites bounded expressions once, and adds
+at most 100,000 buffers within both the physical added-cell and global instance
+limits. The generated names and count persist in the workspace; later tap,
+filler and clock insertion debit the same added-cell allowance. Import and
+reopen reject outputs that still share an external net when this role is set.
