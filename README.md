@@ -1,3 +1,17 @@
+# Recorded G1 extraction stream capture
+
+This development branch preserves the bounded capture/bridge experiment at its
+original engine base. It is an experimental alternative, not the current
+production Road source. Production integration and end-to-end GPU acceleration
+remain unchecked. Use the default branch for the qualified placement/routing
+source and consult the current RustEDA evidence before drawing performance
+conclusions.
+
+[Current Road](https://github.com/lab-emi/RustROAD) ·
+[Measurement scope](https://lab-emi.github.io/RustEDA/benchmarks/)
+
+---
+
 <p align="center">
   <img src="docs/assets/rustroad-wordmark.svg" alt="RustROAD" width="440">
 </p>
@@ -21,6 +35,32 @@ RustROAD implements placement, clock trees, routing, extraction and GDS export. 
 Part of **[RustEDA](https://github.com/lab-emi/RustEDA)**, infrastructure for chip-design recursive self-improvement. Native tools shorten the work between inference steps; verified results guide the next iteration.
 
 [Current qualification and limits](docs/closeout-2026-10-25.md) · [Flow guide](docs/rtl2gds.md)
+
+## Ibex on IHP SG13G2 / EZ130
+
+Engine commit `0813571` (this branch) completed a fresh public RTL-to-GDS run
+of Ibex RV32 with two real IHP SRAMs on IHP SG13G2 with the ETH EZ130 8T
+library (run16, 2026-10-30). All 16 gates passed:
+
+- complete foundry main DRC deck: 0 violations; complete antenna deck: 0 violations;
+- full device-level LVS, including both SRAMs;
+- synthesis and final equivalence proven; vendor-model simulation;
+- TT/SS extracted timing; RustSTA/OpenSTA same-SPEF parity 0.806 ps under the 1 ps gate;
+- final density 50.7% (cap 70%).
+
+On top of `05bcf92`, this branch carries the v21 closure engine (`e0e6d2d`)
+and three fixes:
+
+- `6fbb669` places planned I/O pins at optional along-side targets.
+- `2685cc0` extends channel spines over every split-rail stack they feed and
+  requires each stack's strap pad to land on a spine. Older engines left the
+  SRAM-band rails floating: 528 TM1.a DRC errors and 132 floating supply nets
+  in LVS.
+- `0813571` keeps spine validation work out of the stored state; without it
+  the v23 engine rejected geometry-identical workspaces prepared earlier.
+
+The matched LibreLane comparison is published on the
+[RustEDA benchmarks page](https://lab-emi.github.io/RustEDA/benchmarks/).
 
 ## Build and try
 
@@ -164,18 +204,17 @@ cells before filler insertion. This first router can fail on dense pin access
 or its finite lattice; a failed route preserves HEAD. Re-placement invalidates
 routes. Schema 5 stores checked geometry in `routing.rbin`.
 
-The [CTS/routing report](docs/cts-routing.md) records actual results.
-The small four-register pipeline routes all 19 signal nets on both PDKs, with
-independent OpenDB/KLayout geometry, original-GDS tap checks, external OpenRCX
-extraction, CEC and simulation. The six-register dense case remains outside this
-router's demonstrated coverage. GF180 extraction uses its dedicated PDK rules,
-not the technology LEF's explicitly unsuitable parasitic values.
+The [CTS/routing report](docs/cts-routing.md) describes the checks on the
+routed four-register pipeline fixture: independent OpenDB/KLayout geometry,
+original-GDS tap checks, external OpenRCX extraction, CEC, simulation,
+propagated-clock skew limits and the strict 1 ps RustSTA/OpenSTA parity gate.
+This lattice router is demonstrated on small blocks only. GF180 extraction uses
+its dedicated PDK rules, not the technology LEF's explicitly unsuitable
+parasitic values.
 
-Propagated-clock skew passes the configured limits, but the strict 1 ps
-RustSTA/OpenSTA parity gate does not: differences and hold violations remain
-visible. The verification command exits **3** for this partial result; it must
-not be treated as complete timing closure. See
-[the exact scope and reproduction steps](docs/cts-routing.md).
+The verification command exits **3** when the functional chain passes but a
+timing gate does not; that partial result must not be treated as complete
+timing closure. See [the exact scope and reproduction steps](docs/cts-routing.md).
 
 ### GDSII streamout
 
@@ -190,15 +229,13 @@ rustroad export-gds --workspace .work/chip \
 ```
 
 GF180 LEF coordinates (2000 DBU/um) are divided exactly onto the 0.001 um GDS
-grid; an odd coordinate is an explicit error. On both PDKs the native stream is
-XOR-identical to an independent KLayout LEF/DEF reference and gets the same
-Magic/KLayout DRC counts and Netgen/KLayout LVS verdicts. Wires are written as
-maximal collinear runs (the same runs `export-def` writes) and the router's
-same-net patches are streamed. On the integrated LEF-rule flow both PDKs give
-Magic 0 / KLayout 0 DRC items and LVS matches in both tools; the Sky130 block
-still has one Magic metal3 antenna violation (clock input net) for the antenna
-ECO. See [the GDS export guide](docs/gds-export.md) and
-[the requalification report](docs/requalification.md).
+grid; an odd coordinate is an explicit error. Wires are written as maximal
+collinear runs (the same runs `export-def` writes) and the router's same-net
+patches are streamed. `scripts/verify_gds.py` requires the native stream to be
+XOR-identical (geometry and labels) to an independent KLayout LEF/DEF reference
+streamout, both DRC decks to report zero items on it and both LVS tools to
+match, with planted negative controls. See [the GDS export guide](docs/gds-export.md)
+and [the requalification report](docs/requalification.md).
 
 ## Native RC extraction
 
@@ -215,16 +252,12 @@ Routing patches add capacitance at the node of the conductor they overlap.
 Pins, obstructions and supply metal that a routed wire crosses count their own
 cut, and non-plate overlaps on other layers couple over their area. The SPEF
 imports into RustSTA 0.3/0.4 (`wire_model=spef_rc`). The model, SPEF naming,
-budgets and the three-way comparison (native, OpenRCX, Magic) at min/nom/max on
-both PDKs are in [docs/extraction.md](docs/extraction.md), with a 3-D field
-solver (`scripts/field_solver.py`) for wire crossings. The result is partial:
-total and per-net C meet their targets against OpenRCX on pipeline.v; the
-10 ps slack target is met on the hold-closed design at every corner (RustSTA
-`09bf9f85` and `c407c742`, OpenRCX at its flow and lossless coupling
-thresholds) but missed at GF180 ss+max on the pre-hold design (10.05 ps) and on
-the larger regfile and mult designs; OpenRCX extracts no cell pin, obstruction
-or via-pad metal, and min/max resistance follows different PDK data than
-OpenRCX.
+budgets and the oracle campaign (native against OpenRCX and Magic at
+min/nom/max on both PDKs) are in [docs/extraction.md](docs/extraction.md), with
+a 3-D field solver (`scripts/field_solver.py`) for wire crossings. Neither
+oracle is geometry-identical: OpenRCX extracts no cell pin, obstruction or
+via-pad metal, Magic uses its own capacitance data, and min/max resistance
+follows different PDK data than OpenRCX.
 
 ## Hold closure, CTS drive and antenna repair
 
@@ -240,9 +273,9 @@ HEAD. The clock profile may set per-level buffer masters (`clock.level_cells`).
 ECO netlist -> place -> CTS -> route -> native extraction (min/nom/max) ->
 RustSTA tt/ss/ff -> hold-eco.
 
-On `pipeline.v` it closes hold >= +0.05 ns and setup >= 0 at tt+nom, ss+max
-and ff+min on both PDKs:
-- RustSTA/OpenSTA parity <= 1 ps on the native SPEF;
+Its final gates per PDK:
+- hold >= +0.05 ns and setup >= 0 at tt+nom, ss+max and ff+min in RustSTA and
+  OpenSTA, with per-endpoint parity <= 1 ps on the same native SPEF;
 - the final post-ECO, post-CTS netlist passes RustSys CEC, Yosys CEC and
   512-vector simulation;
 - native-GDS DRC is no worse than before the ECO;

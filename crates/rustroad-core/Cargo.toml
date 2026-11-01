@@ -8,8 +8,15 @@ license.workspace = true
 [dependencies]
 rayon.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
 slotmap.workspace = true
 thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+default = []
+legacy-crossings-capture = []
+legacy-crossings-stream-capture = ["legacy-crossings-capture"]

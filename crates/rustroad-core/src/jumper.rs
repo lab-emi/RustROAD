@@ -828,6 +828,7 @@ mod tests {
             vertical,
             min_area: None,
             min_step: None,
+            wide_spacing: None,
         }
     }
     /// One net: a driver pin at x = 10 and a gate pin at x = 90 on M1.
@@ -876,6 +877,7 @@ mod tests {
             access_classes: Vec::new(),
             tracks: None,
             ties: Vec::new(),
+            instances: None,
             held_bytes: 0,
         }
     }

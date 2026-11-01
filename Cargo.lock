@@ -284,6 +284,7 @@ dependencies = [
  "rayon",
  "rustroad-core",
  "rustroad-flow",
+ "rustroad-formats",
  "rustroad-workspace",
  "serde",
  "serde_json",
@@ -295,6 +296,8 @@ version = "0.5.0"
 dependencies = [
  "rayon",
  "serde",
+ "serde_json",
+ "sha2",
  "slotmap",
  "thiserror",
 ]

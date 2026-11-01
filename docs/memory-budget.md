@@ -1,5 +1,11 @@
 # Resource contract
 
+This page records the original small-workspace contract. For the current
+large-netlist implementation, schema-7 side tables, sparse routing, live
+footprint accounting and explicit ceilings, see [scaling](scaling.md) and
+[the routing budget](routing-budget.md). Historical measurements below do
+not qualify full OpenC910 implementation.
+
 For real technology/netlist import in version 0.2, also read
 [the PDK import budget](pdk-import-budget.md), which includes parser, alias,
 connectivity, geometry and snapshot reconciliation state.

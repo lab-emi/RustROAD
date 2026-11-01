@@ -20,8 +20,10 @@
 //!
 //! Work is bounded: grouping is O(n log n) in the wire count and the
 //! perpendicular-touch test per (net, layer) is charged against `max_work`.
+//! Line maps and junction sets are retained for one net at a time.
 use crate::routing::{Access, Via, Wire};
 use crate::{Error, Result};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// `(net, layer, vertical, cross)` identifies one track line of one net.
@@ -54,6 +56,65 @@ pub fn collinear_runs(
     via_layers: &[(u32, u32)],
     access: &[&Access],
     max_work: usize,
+) -> Result<Vec<Wire>> {
+    // Most callers already emit net order. Borrow those slices; otherwise
+    // sort only references, retaining geometry in its original storage.
+    let wires = net_order(wires, |w| w.net);
+    let vias = net_order(vias, |v| v.net);
+    let access = net_order(access, |a| a.net);
+    // Preserve validation even for a via whose net has no wire records.
+    for v in vias.iter() {
+        if v.kind as usize >= via_layers.len() {
+            return Err(invalid("via kind outside the via table"));
+        }
+    }
+    let (mut wi, mut vi, mut ai) = (0, 0, 0);
+    let mut work = 0;
+    let mut out = Vec::new();
+    while wi < wires.len() {
+        let net = wires[wi].net;
+        let end = wi + wires[wi..].partition_point(|w| w.net == net);
+        while vi < vias.len() && vias[vi].net < net {
+            vi += 1;
+        }
+        let vend = vi + vias[vi..].partition_point(|v| v.net == net);
+        while ai < access.len() && access[ai].net < net {
+            ai += 1;
+        }
+        let aend = ai + access[ai..].partition_point(|a| a.net == net);
+        out.extend(net_runs(
+            &wires[wi..end],
+            &vias[vi..vend],
+            via_layers,
+            &access[ai..aend],
+            &mut work,
+            max_work,
+            max_work,
+        )?);
+        (wi, vi, ai) = (end, vend, aend);
+    }
+    Ok(out)
+}
+
+fn net_order<'a, T>(values: &'a [&'a T], net: impl Fn(&T) -> u32) -> Cow<'a, [&'a T]> {
+    if values.windows(2).all(|pair| net(pair[0]) <= net(pair[1])) {
+        Cow::Borrowed(values)
+    } else {
+        let mut sorted = values.to_vec();
+        sorted.sort_unstable_by_key(|value| net(value));
+        Cow::Owned(sorted)
+    }
+}
+
+/// Only this net's line maps and junction sets remain live beside the output.
+pub(crate) fn net_runs(
+    wires: &[&Wire],
+    vias: &[&Via],
+    via_layers: &[(u32, u32)],
+    access: &[&Access],
+    work: &mut usize,
+    max_work: usize,
+    max_output: usize,
 ) -> Result<Vec<Wire>> {
     let mut lines = BTreeMap::<Line, Vec<(i64, i64)>>::new();
     for w in wires {
@@ -97,12 +158,11 @@ pub fn collinear_runs(
             }
         }
     }
-    let mut work = 0usize;
     for (key, (horizontal, vertical)) in &by_layer {
-        work = work
+        *work = work
             .checked_add(horizontal.len().saturating_mul(vertical.len()))
             .ok_or_else(|| Error::Budget("wire-run junction work".into()))?;
-        if work > max_work {
+        if *work > max_work {
             return Err(Error::Budget("wire-run junction work".into()));
         }
         for &(y, x0, x1) in horizontal {
@@ -130,23 +190,15 @@ pub fn collinear_runs(
         }
         .unwrap_or(&empty);
         for &(lo, hi) in intervals {
-            // Strictly interior junctions; `range` yields them in order.
-            let cuts: Vec<i64> = if hi - lo >= 2 {
-                junctions
-                    .range([cross, lo + 1]..=[cross, hi - 1])
-                    .map(|p| p[1])
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            work = work
-                .checked_add(cuts.len() + 1)
-                .ok_or_else(|| Error::Budget("wire-run junction work".into()))?;
-            if work > max_work {
-                return Err(Error::Budget("wire-run junction work".into()));
-            }
             let mut from = lo;
-            for to in cuts.into_iter().chain(std::iter::once(hi)) {
+            let mut emit = |to| -> Result<()> {
+                if out.len() >= max_output {
+                    return Err(Error::Budget("wire-run output record limit".into()));
+                }
+                *work = work
+                    .checked_add(1)
+                    .filter(|&n| n <= max_work)
+                    .ok_or_else(|| Error::Budget("wire-run junction work".into()))?;
                 let (start, end) = if vertical {
                     ([cross, from], [cross, to])
                 } else {
@@ -159,7 +211,15 @@ pub fn collinear_runs(
                     end,
                 });
                 from = to;
+                Ok(())
+            };
+            // Iterate interior junctions directly; charge before each output.
+            if hi - lo >= 2 {
+                for point in junctions.range([cross, lo + 1]..=[cross, hi - 1]) {
+                    emit(point[1])?;
+                }
             }
+            emit(hi)?;
         }
     }
     Ok(out)
@@ -221,6 +281,117 @@ mod tests {
             let ua = union_area(a, l, n, h);
             ua == union_area(b, l, n, h) && ua == union_area(&both, l, n, h)
         })
+    }
+
+    #[test]
+    fn interleaved_nets_keep_sorted_geometry_and_share_the_work_limit() {
+        let wires = [
+            w(9, 0, [10, 0], [20, 0]),
+            w(2, 0, [0, 0], [10, 0]),
+            w(9, 0, [0, 0], [10, 0]),
+        ];
+        let via = Via {
+            net: 9,
+            kind: 0,
+            at: [10, 0],
+        };
+        let extra = Via {
+            net: 4,
+            kind: 0,
+            at: [10, 0],
+        };
+        let result = collinear_runs(
+            &wires.iter().collect::<Vec<_>>(),
+            &[&via, &extra],
+            &[(0, 1)],
+            &[],
+            3,
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            [
+                w(2, 0, [0, 0], [10, 0]),
+                w(9, 0, [0, 0], [10, 0]),
+                w(9, 0, [10, 0], [20, 0])
+            ]
+        );
+        assert!(
+            collinear_runs(
+                &wires.iter().collect::<Vec<_>>(),
+                &[&via],
+                &[(0, 1)],
+                &[],
+                2
+            )
+            .is_err()
+        );
+        assert!(
+            net_runs(
+                &wires[0..1].iter().collect::<Vec<_>>(),
+                &[],
+                &[],
+                &[],
+                &mut 0,
+                100,
+                0,
+            )
+            .is_err()
+        );
+        let invalid = Via {
+            net: 4,
+            kind: 5,
+            at: [0, 0],
+        };
+        assert!(collinear_runs(&[], &[&invalid], &[(0, 1)], &[], 100).is_err());
+    }
+
+    #[test]
+    #[ignore = "standalone scale fixture; run under an OS memory and wall-clock guard"]
+    fn many_net_normalization_scale_fixture() {
+        let count = 100_001u32;
+        let wires: Vec<_> = (0..count)
+            .flat_map(|net| {
+                [
+                    w(net, 0, [0, 0], [5, 0]),
+                    w(net, 0, [5, 0], [10, 0]),
+                    w(net, 0, [10, 0], [20, 0]),
+                ]
+            })
+            .collect();
+        let vias: Vec<_> = (0..count)
+            .map(|net| Via {
+                net,
+                kind: 0,
+                at: [10, 0],
+            })
+            .collect();
+        let access: Vec<_> = (0..count)
+            .map(|net| Access {
+                pin: net,
+                net,
+                layer: 0,
+                at: [0, 0],
+            })
+            .collect();
+        let result = collinear_runs(
+            &wires.iter().collect::<Vec<_>>(),
+            &vias.iter().collect::<Vec<_>>(),
+            &[(0, 1)],
+            &access.iter().collect::<Vec<_>>(),
+            count as usize * 4,
+        )
+        .unwrap();
+        assert_eq!(result.len(), count as usize * 2);
+        for (net, pair) in result.chunks_exact(2).enumerate() {
+            assert_eq!(
+                pair,
+                [
+                    w(net as u32, 0, [0, 0], [10, 0]),
+                    w(net as u32, 0, [10, 0], [20, 0])
+                ]
+            );
+        }
     }
 
     #[test]

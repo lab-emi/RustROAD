@@ -6,7 +6,11 @@
 # resolves every macro to the PDK standard-cell GDS structure (never to LEF
 # geometry), and writes a hierarchical GDS at 0.001 um without timestamps.
 import json
+import sys
+from pathlib import Path
 import pya
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gds_hierarchy import shape_counts
 
 opt = pya.LoadLayoutOptions()
 cfg = opt.lefdef_config
@@ -25,15 +29,9 @@ if len(tops) != 1:
     raise RuntimeError("expected exactly one top cell, got %d" % len(tops))
 top = tops[0]
 layers = {}
-for index in ly.layer_indexes():
+for index, count in shape_counts(ly, top).items():
     lp = ly.get_info(index)
-    it = top.begin_shapes_rec(index)
-    count = 0
-    while not it.at_end():
-        count += 1
-        it.next()
-    if count:
-        layers["%d/%d" % (lp.layer, lp.datatype)] = count
+    layers["%d/%d" % (lp.layer, lp.datatype)] = count
 lib_cells = set(c.name for c in cells.each_cell())
 resolved = sorted(set(c.name for c in ly.each_cell() if c.name in lib_cells))
 save = pya.SaveLayoutOptions()

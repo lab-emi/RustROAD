@@ -54,6 +54,7 @@ fn run(text: &str) -> Result<String, String> {
                     vertical: Some(vertical == 1),
                     min_area: None,
                     min_step: None,
+                    wide_spacing: None,
                 });
                 tech.push(Some(RcLayer {
                     metal,
@@ -176,6 +177,8 @@ fn run(text: &str) -> Result<String, String> {
     };
     let network = extract_cpu_ref(
         &ExtractInput {
+            held_bytes: 0,
+            instances: None,
             layers: &layers,
             vias: &[],
             routes: &routes,

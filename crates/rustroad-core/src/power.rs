@@ -68,7 +68,7 @@ pub enum RailPolarity {
     Power,
     Ground,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RailDiagnostic {
     pub code: String,
@@ -77,7 +77,7 @@ pub struct RailDiagnostic {
     pub x_range: Option<[i64; 2]>,
     pub message: String,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RailSpan {
     pub row: u32,
@@ -89,7 +89,7 @@ pub struct RailSpan {
     pub y_min: i64,
     pub y_max: i64,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RailReport {
     pub status: String,
@@ -354,11 +354,15 @@ pub fn validate_rail_continuity(
         }
         let top = row.y.checked_add(row.height).ok_or_else(overflow)?;
         if i > 0 {
-            let previous_top = rows[i - 1]
+            let previous = &rows[i - 1];
+            let previous_top = previous
                 .y
-                .checked_add(rows[i - 1].height)
+                .checked_add(previous.height)
                 .ok_or_else(overflow)?;
-            if previous_top > row.y {
+            if (previous.y == row.y
+                && (previous.height != row.height || previous.x_end > row.x_start))
+                || (previous.y != row.y && previous_top > row.y)
+            {
                 return Err(invalid("rows must be ordered and nonoverlapping"));
             }
         }
@@ -384,7 +388,10 @@ pub fn validate_rail_continuity(
         } else {
             usize::BITS as usize - rows.len().leading_zeros() as usize
         })?;
-        let Ok(ri) = rows.binary_search_by_key(&cell.y, |row| row.y) else {
+        let first = rows.partition_point(|row| row.y < cell.y);
+        let last = rows.partition_point(|row| row.y <= cell.y);
+        let right = cell.x.checked_add(master.size[0]).ok_or_else(overflow)?;
+        if first == last {
             work.issue(
                 "CELL_NOT_ON_ROW",
                 None,
@@ -393,9 +400,10 @@ pub fn validate_rail_continuity(
                 "placed lower edge does not match a declared row",
             )?;
             continue;
-        };
+        }
+        let offset = rows[first..last].partition_point(|row| row.x_end <= cell.x);
+        let ri = (first + offset).min(last - 1);
         let row = &rows[ri];
-        let right = cell.x.checked_add(master.size[0]).ok_or_else(overflow)?;
         let top = row.y.checked_add(row.height).ok_or_else(overflow)?;
         if master.size[1] != row.height
             || cell.x < row.x_start
@@ -540,34 +548,38 @@ pub fn validate_rail_continuity(
         }
     }
     let mut shared_boundaries_checked = 0;
-    for ri in 1..rows.len() {
+    for ri in 0..rows.len() {
         work.tick(1)?;
-        if rows[ri - 1]
-            .y
-            .checked_add(rows[ri - 1].height)
-            .ok_or_else(overflow)?
-            != rows[ri].y
-        {
-            continue;
-        }
-        let (Some(lower), Some(upper)) = (occupied[ri - 1], occupied[ri]) else {
+        let Some(lower) = occupied[ri] else {
             continue;
         };
-        let overlap = [lower[0].max(upper[0]), lower[1].min(upper[1])];
-        if overlap[0] >= overlap[1] {
-            continue;
-        }
-        shared_boundaries_checked += 1;
-        if expected_polarity(rows[ri - 1].orientation, RailEdge::Top)
-            != expected_polarity(rows[ri].orientation, RailEdge::Bottom)
-        {
-            work.issue(
-                "SHARED_BOUNDARY_POLARITY_MISMATCH",
-                Some(ri as u32),
-                None,
-                Some(overlap),
-                "adjacent occupied row edges place different supply polarities together",
-            )?;
+        let top = rows[ri]
+            .y
+            .checked_add(rows[ri].height)
+            .ok_or_else(overflow)?;
+        let first = rows.partition_point(|row| row.y < top);
+        let last = rows.partition_point(|row| row.y <= top);
+        for upper_index in first..last {
+            work.tick(1)?;
+            let Some(upper) = occupied[upper_index] else {
+                continue;
+            };
+            let overlap = [lower[0].max(upper[0]), lower[1].min(upper[1])];
+            if overlap[0] >= overlap[1] {
+                continue;
+            }
+            shared_boundaries_checked += 1;
+            if expected_polarity(rows[ri].orientation, RailEdge::Top)
+                != expected_polarity(rows[upper_index].orientation, RailEdge::Bottom)
+            {
+                work.issue(
+                    "SHARED_BOUNDARY_POLARITY_MISMATCH",
+                    Some(upper_index as u32),
+                    None,
+                    Some(overlap),
+                    "adjacent occupied row edges place different supply polarities together",
+                )?;
+            }
         }
     }
     if occupied_rows == 0 {
@@ -623,6 +635,8 @@ mod tests {
             }]],
         };
         Master {
+            buses: Default::default(),
+            obstruction_spacing: Default::default(),
             name: "CELL".into(),
             class: Some("CORE".into()),
             symmetry: vec!["X".into(), "Y".into()],
@@ -684,6 +698,66 @@ mod tests {
                 orientation: Orientation::FS,
             },
         ]
+    }
+    #[test]
+    fn segmented_rows_preserve_gaps_and_check_each_shared_boundary() {
+        // Six cells, three row segments; <16 KiB, no graph enumeration.
+        let rows = vec![
+            PowerRow {
+                x_start: 0,
+                x_end: 10,
+                y: 0,
+                height: 20,
+                orientation: Orientation::N,
+            },
+            PowerRow {
+                x_start: 30,
+                x_end: 40,
+                y: 0,
+                height: 20,
+                orientation: Orientation::N,
+            },
+            PowerRow {
+                x_start: 0,
+                x_end: 40,
+                y: 20,
+                height: 20,
+                orientation: Orientation::FS,
+            },
+        ];
+        let cells: Vec<_> = [(0, 0), (30, 0), (0, 20), (10, 20), (20, 20), (30, 20)]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (x, y))| PowerCell {
+                instance: i as u32,
+                master: 0,
+                x,
+                y,
+                orientation: if y == 0 {
+                    Orientation::N
+                } else {
+                    Orientation::FS
+                },
+            })
+            .collect();
+        let report = validate_rail_continuity(
+            &[master()],
+            &cells,
+            &rows,
+            &config(),
+            &RailLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(report.status, "pass");
+        assert_eq!(report.shared_boundaries_checked, 2);
+        assert_eq!(
+            (report.row_rails[0].x_start, report.row_rails[0].x_end),
+            (0, 10)
+        );
+        assert_eq!(
+            (report.row_rails[2].x_start, report.row_rails[2].x_end),
+            (30, 40)
+        );
     }
     #[test]
     fn alternating_rows_have_continuous_primary_rails() {

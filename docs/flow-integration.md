@@ -11,11 +11,8 @@ physical milestone, not a closed RTL-to-GDS flow.
 The tracked [logic evidence](evidence/logic-verification.json) contains executable
 version/hash pins, original Liberty hashes, native scope/diagnostics, every
 comparison, negative controls, and an index of 48 local process receipts. The
-full raw run is `.work/logic-suite-v2/`; the suite took 10.09 seconds and peaked
-at 290,124 KiB RSS on this host. These are integration smoke measurements, not
-chip-scale performance results. The outer measurement covers the complete
-invocation, including subprocess startup, imports, mmap files, checks and the
-Verilator build. RSS is maximum process RSS, not aggregate process-family memory.
+full raw run is `.work/logic-suite-v2/`. This is an integration smoke test,
+not a chip-scale performance result.
 
 | Check | Sky130 HD TT 1.80 V / 25 C | GF180 MCU 7T5V0 TT 3.30 V / 25 C |
 |---|---|---|
@@ -24,7 +21,7 @@ Verilator build. RSS is maximum process RSS, not aggregate process-family memory
 | Verilator simulation | all 4 input combinations agree in RTL and mapped model; wrong oracle rejects | same |
 | RustSTA full and independent checks | `agree` | `agree` |
 | RustSTA no-op incremental update vs fresh full check | `agree`, 0 ns difference | `agree`, 0 ns difference |
-| RustSTA vs OpenSTA setup/hold, 2 endpoints | max difference 0.0000010211960717043667 ns | max difference 0.0000005134069436252275 ns |
+| RustSTA vs OpenSTA setup/hold, 2 endpoints | within the 0.001 ns tolerance | within the 0.001 ns tolerance |
 
 The differential tolerance is 0.001 ns. Both tools use the **same explicitly
 hashed verification-only ideal-wire library** for this comparison. The Sky130
@@ -154,8 +151,7 @@ Inputs are bounded to 16 MiB, 250,000 cells and 100,000 rows. The independent
 checker uses O((cells + rows) log(cells + rows)) work and bounded linear storage;
 no pairwise overlap matrix or path materialization. A conservative 1 GiB cap
 covers JSON objects, dictionaries, coordinate-compressed row events and sorting.
-The 24-cell check/control run measured 20,236 KiB RSS including initialization,
-placement and export; this is not a large-design memory claim. It handles only
+The checker handles only
 the documented single-height, N-oriented, one-statement-per-line emitted DEF
 subset. DRC/LVS and connectivity remain `unchecked`.
 

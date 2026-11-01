@@ -115,20 +115,58 @@ pub fn write(
     nets: &[Net],
     out: &mut impl Write,
 ) -> Result<()> {
-    // Name map: nets first, then instances in first-use order.
-    let mut instances: Vec<&str> = Vec::new();
-    let mut instance_index = std::collections::HashMap::<&str, usize>::new();
-    for net in nets {
-        if net.ground.len() != net.nodes.len() {
-            return Err(SpefError::Invalid("ground vector length".into()));
+    if nets.iter().any(|n| n.ground.len() != n.nodes.len()) {
+        return Err(SpefError::Invalid("ground vector length".into()));
+    }
+    let names: Vec<&str> = nets.iter().map(|n| n.name.as_str()).collect();
+    let instances = nets.iter().flat_map(|n| &n.nodes).filter_map(|n| match n {
+        Node::Pin { instance, .. } => Some(instance.as_str()),
+        _ => None,
+    });
+    write_streamed(
+        header,
+        ports,
+        &names,
+        instances,
+        |i| Ok(nets[i].clone()),
+        |n, p| {
+            nets.get(n)
+                .and_then(|n| n.nodes.get(p as usize))
+                .cloned()
+                .ok_or_else(|| SpefError::Invalid("coupling node index".into()))
+        },
+        out,
+    )
+}
+
+/// Serialize one generated net at a time. Names and instance first-use order
+/// are supplied without cloning a second design-sized graph of labeled nodes.
+/// The node resolver handles cross-net coupling endpoints independently of the
+/// transient Net. Callbacks are invoked only for bounded existing indices.
+pub fn write_streamed<'a>(
+    header: &Header,
+    ports: &[(String, Direction)],
+    net_names: &[&str],
+    instance_names: impl IntoIterator<Item = &'a str>,
+    mut net_at: impl FnMut(usize) -> Result<Net>,
+    mut node_at: impl FnMut(usize, u32) -> Result<Node>,
+    out: &mut impl Write,
+) -> Result<()> {
+    if net_names.len() > 64_000_000 {
+        return Err(SpefError::Invalid("net-name budget".into()));
+    }
+    let mut instances = Vec::new();
+    let mut instance_index = std::collections::HashMap::new();
+    for (visited, name) in instance_names.into_iter().enumerate() {
+        if visited >= 256_000_000 {
+            return Err(SpefError::Invalid("instance-name budget".into()));
         }
-        for node in &net.nodes {
-            if let Node::Pin { instance, .. } = node
-                && !instance_index.contains_key(instance.as_str())
-            {
-                instance_index.insert(instance.as_str(), nets.len() + 1 + instances.len());
-                instances.push(instance.as_str());
+        if !instance_index.contains_key(name) {
+            if instances.len() >= 16_000_000 {
+                return Err(SpefError::Invalid("instance-name budget".into()));
             }
+            instance_index.insert(name, net_names.len() + 1 + instances.len());
+            instances.push(name);
         }
     }
     writeln!(out, "*SPEF \"IEEE 1481-1999\"")?;
@@ -147,49 +185,62 @@ pub fn write(
     writeln!(out, "*L_UNIT 1 HENRY")?;
     writeln!(out)?;
     writeln!(out, "*NAME_MAP")?;
-    for (i, net) in nets.iter().enumerate() {
-        writeln!(out, "*{} {}", i + 1, escape(&net.name))?;
+    for (i, name) in net_names.iter().enumerate() {
+        writeln!(out, "*{} {}", i + 1, escape(name))?;
     }
     for (i, name) in instances.iter().enumerate() {
-        writeln!(out, "*{} {}", nets.len() + 1 + i, escape(name))?;
+        writeln!(out, "*{} {}", net_names.len() + 1 + i, escape(name))?;
     }
     writeln!(out)?;
     writeln!(out, "*PORTS")?;
     for (name, direction) in ports {
         writeln!(out, "{} {}", escape(name), direction.code())?;
     }
-    for (ni, net) in nets.iter().enumerate() {
-        let node_name = |n: &Node| -> String {
-            match n {
-                Node::Port(p) => escape(p),
-                Node::Pin { instance, pin } => {
-                    format!("*{}:{}", instance_index[instance.as_str()], escape(pin))
-                }
-                Node::Internal(k) => format!("*{}:{}", ni + 1, k),
-            }
-        };
-        let other_name = |net_index: usize, node: u32| -> Result<String> {
-            let other = nets
-                .get(net_index)
-                .ok_or_else(|| SpefError::Invalid("coupling net index".into()))?;
-            let n = other
-                .nodes
-                .get(node as usize)
-                .ok_or_else(|| SpefError::Invalid("coupling node index".into()))?;
+    for (ni, name) in net_names.iter().enumerate() {
+        let net = net_at(ni)?;
+        if net.name != *name || net.ground.len() != net.nodes.len() {
+            return Err(SpefError::Invalid(
+                "generated net identity/ground length".into(),
+            ));
+        }
+        let node_name = |n: &Node| -> Result<String> {
             Ok(match n {
                 Node::Port(p) => escape(p),
                 Node::Pin { instance, pin } => {
-                    format!("*{}:{}", instance_index[instance.as_str()], escape(pin))
+                    let i = instance_index
+                        .get(instance.as_str())
+                        .ok_or_else(|| SpefError::Invalid("unlisted instance".into()))?;
+                    format!("*{i}:{}", escape(pin))
+                }
+                Node::Internal(k) => format!("*{}:{}", ni + 1, k),
+            })
+        };
+        let mut other_name = |net_index: usize, node: u32| -> Result<String> {
+            if net_index >= net_names.len() {
+                return Err(SpefError::Invalid("coupling net index".into()));
+            }
+            Ok(match node_at(net_index, node)? {
+                Node::Port(p) => escape(&p),
+                Node::Pin { instance, pin } => {
+                    let i = instance_index
+                        .get(instance.as_str())
+                        .ok_or_else(|| SpefError::Invalid("unlisted coupling instance".into()))?;
+                    format!("*{i}:{}", escape(&pin))
                 }
                 Node::Internal(k) => format!("*{}:{}", net_index + 1, k),
             })
         };
-        let mut lines = Vec::with_capacity(net.nodes.len() + net.couplings.len());
+        let count = net
+            .nodes
+            .len()
+            .checked_add(net.couplings.len())
+            .ok_or_else(|| SpefError::Invalid("capacitance record count".into()))?;
+        let mut lines = Vec::with_capacity(count);
         let mut total = 0.0f64;
         for (i, g) in net.ground.iter().enumerate() {
             let (text, parsed) = value(*g)?;
             total += parsed;
-            lines.push(format!("{} {}", node_name(&net.nodes[i]), text));
+            lines.push(format!("{} {}", node_name(&net.nodes[i])?, text));
         }
         for &(node, other, other_node, pf) in &net.couplings {
             if other == ni {
@@ -206,7 +257,7 @@ pub fn write(
                 .ok_or_else(|| SpefError::Invalid("coupling node index".into()))?;
             lines.push(format!(
                 "{} {} {}",
-                node_name(own),
+                node_name(own)?,
                 other_name(other, other_node)?,
                 text
             ));
@@ -220,9 +271,9 @@ pub fn write(
                 .get(c.node as usize)
                 .ok_or_else(|| SpefError::Invalid("connection node index".into()))?;
             match node {
-                Node::Port(_) => writeln!(out, "*P {} {}", node_name(node), c.direction.code())?,
+                Node::Port(_) => writeln!(out, "*P {} {}", node_name(node)?, c.direction.code())?,
                 Node::Pin { .. } => {
-                    write!(out, "*I {} {}", node_name(node), c.direction.code())?;
+                    write!(out, "*I {} {}", node_name(node)?, c.direction.code())?;
                     if let Some(cell) = &c.cell {
                         write!(out, " *D {}", escape(cell))?;
                     }
@@ -252,8 +303,8 @@ pub fn write(
                 out,
                 "{} {} {} {}",
                 i + 1,
-                node_name(na),
-                node_name(nb),
+                node_name(na)?,
+                node_name(nb)?,
                 text
             )?;
         }
@@ -387,5 +438,60 @@ mod tests {
         };
         assert!(write(&bad, &[], &sample(), &mut Vec::new()).is_err());
         assert_eq!(escape("x/y:z*"), "x\\/y\\:z\\*");
+    }
+    #[test]
+    fn generated_nets_are_requested_once_in_order_and_match_serialization() {
+        let header = Header {
+            design: "top".into(),
+            vendor: "v".into(),
+            program: "p".into(),
+            version: "1".into(),
+            date: "fixed".into(),
+        };
+        let nets = sample();
+        let mut expected = Vec::new();
+        write(&header, &[], &nets, &mut expected).unwrap();
+        let names: Vec<_> = nets.iter().map(|n| n.name.as_str()).collect();
+        let mut requested = Vec::new();
+        let mut actual = Vec::new();
+        write_streamed(
+            &header,
+            &[],
+            &names,
+            ["g0", "g0"],
+            |i| {
+                requested.push(i);
+                Ok(nets[i].clone())
+            },
+            |n, p| Ok(nets[n].nodes[p as usize].clone()),
+            &mut actual,
+        )
+        .unwrap();
+        assert_eq!(requested, vec![0, 1]);
+        assert_eq!(actual, expected);
+        assert!(
+            write_streamed(
+                &header,
+                &[],
+                &names,
+                std::iter::empty(),
+                |i| Ok(nets[i].clone()),
+                |n, p| Ok(nets[n].nodes[p as usize].clone()),
+                &mut Vec::new()
+            )
+            .is_err()
+        );
+        assert!(
+            write_streamed(
+                &header,
+                &[],
+                &names,
+                ["g0"],
+                |_| Ok(nets[1].clone()),
+                |n, p| Ok(nets[n].nodes[p as usize].clone()),
+                &mut Vec::new()
+            )
+            .is_err()
+        );
     }
 }

@@ -54,7 +54,7 @@ impl Default for SupplyLimits {
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SupplyWire {
     pub polarity: RailPolarity,
@@ -63,21 +63,21 @@ pub struct SupplyWire {
     pub start: [i64; 2],
     pub end: [i64; 2],
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SupplyVia {
     pub polarity: RailPolarity,
     pub name: String,
     pub at: [i64; 2],
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SupplyPort {
     pub polarity: RailPolarity,
     pub layer: String,
     pub rect: Rect,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SupplyGrid {
     pub wires: Vec<SupplyWire>,

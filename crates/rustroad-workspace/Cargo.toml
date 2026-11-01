@@ -20,3 +20,8 @@ xxhash-rust = { version = "=0.8.19", default-features = false, features = ["xxh3
 
 [lints]
 workspace = true
+
+[features]
+default = []
+legacy-crossings-capture = ["rustroad-core/legacy-crossings-capture"]
+legacy-crossings-stream-capture = ["legacy-crossings-capture", "rustroad-core/legacy-crossings-stream-capture"]
