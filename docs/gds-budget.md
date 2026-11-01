@@ -1,8 +1,8 @@
 # GDSII streamout resource contract
 
 Written before implementing `rustroad export-gds`, its record codec and its
-verification harness (AGENTS.md Rule 9). Measured values are appended in
-`docs/gds-export.md` after the first runs.
+verification harness (AGENTS.md Rule 9). Run receipts are kept as historical
+evidence in `docs/evidence/gds-verification.json`.
 
 ## Record codec (`rustroad-formats::gds`)
 
@@ -28,8 +28,7 @@ of lookahead. No graph, path, cut or clause is materialized.
 
 ## `export-gds`
 
-Per call: one workspace snapshot (existing loader, metadata cap 16 MiB; the
-measured end-to-end flow peaked at 404 MiB host RSS including external tools),
+Per call: one workspace snapshot (existing loader, metadata cap 16 MiB),
 the cell GDS buffer (cap 256 MiB, actual 4.2 MB), the cell LEF re-read for the
 FOREIGN binding check (cap 64 MiB, actual 1.4 MB; LEF reader AST budget 256 MiB,
 expected < 64 MiB for real PDKs), the layer map (cap 1 MiB) and a streaming
@@ -55,8 +54,23 @@ single linear pass, O(elements). Expected peak RSS for the fixture < 128 MiB.
 ## Verification harness (`scripts/verify_gds.py`)
 
 External tools run one at a time inside the pinned iic-osic-tools image with
-`--memory=4g`: KLayout DEF reference streamout / strmxor / DRC / LVS (measured
-420-454 MB each by the signoff scout), Magic DRC/extraction (70-111 MB) and
-Netgen (257-475 MB). Native exports run on the host under the cgroup cap above.
+`--memory=4g`: KLayout DEF reference streamout / strmxor / DRC / LVS, Magic
+DRC/extraction and Netgen. Native exports run on the host under the cgroup cap above.
 Workspaces are copies under `.work/` (never RAM-backed `/tmp`); the read-only
 `.work/rc-timing/ready` run is never mutated.
+
+The independent KLayout streamout counts hierarchy contents with a bounded
+DAG reduction. Each unique cell is visited once; SREF and AREF multiplicities
+are propagated without walking every instantiated leaf shape. It rejects
+cycles, overflowing counts and configured cell, reference, edge, layer, work
+and count-entry limits. A real nested-array fixture matches KLayout's flattened
+shape iterator exactly. This reporting change does not alter written geometry.
+
+The reference DEF metadata scan also streams bounded statements rather than
+copying a complete COMPONENTS section: at most16GiB/file,16MiB/statement,
+65536 statement lines,64M components and65536 distinct masters. Declared counts,
+unterminated records and GF180 coordinate parity are checked. Large reference
+streamout jobs may explicitly set `--memory-gib` (1..64) and `--threads` (1..64);
+defaults remain4GiB and2 workers. Adapter hashes and the selected limits are
+recorded in the receipt. These are validation/streamout limits, not a statement
+that a full OpenC910 layout has passed signoff.

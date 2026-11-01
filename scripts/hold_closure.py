@@ -320,6 +320,8 @@ class Flow:
         files.update({f'openrcx_rules_{c}': v for c, v in self.openrcx_rules.items()})
         if self.design.sizing_profile is not None:
             files['sizing_profile'] = self.design.sizing_profile
+        if self.p.get('input_buffer_override'):
+            files['input_buffer_policy'] = Path(self.p['input_buffer_override']['policy_path'])
         return {k: fingerprint(v) for k, v in sorted(files.items())}
 
     # ------------------------------------------------------------ physical
@@ -364,8 +366,22 @@ class Flow:
             '--margin-um', fp['margin_um'], *clock, '--out-floorplan', floor, '--out-physical-config', phys]])
         same_floor = floor.read_bytes() == self.design.floorplan.read_bytes()
         same_phys = phys.read_bytes() == self.config.read_bytes()
+        override = self.p.get('input_buffer_override')
+        policy_bound = None
+        if override:
+            base = Path(override['base_path']).read_bytes()
+            policy_bytes = Path(override['policy_path']).read_bytes()
+            policy_bound = (hashlib.sha256(base).hexdigest() == override['base_sha256']
+                            and hashlib.sha256(policy_bytes).hexdigest() == override['policy_sha256'])
+            generated = json.loads(phys.read_text())
+            if generated.get('input_buffer') is not None:
+                raise ValueError('base floorplan unexpectedly contains an input-buffer policy')
+            generated['input_buffer'] = override['policy']
+            expected = (json.dumps(generated, indent=2) + '\n').encode()
+            same_phys = policy_bound and phys.read_bytes() == base and expected == self.config.read_bytes()
         return dict(status='passed' if same_floor and same_phys else 'failed', floorplan_identical=same_floor,
                     physical_config_identical=same_phys, recipe=fp,
+                    input_buffer_policy_bound=policy_bound,
                     report={k: rep.get(k) for k in ('die_area', 'core_area', 'rows', 'estimated_utilization', 'io_pins',
                                                     'clock_buffers_estimate', 'cell_area_um2')})
 
@@ -436,8 +452,11 @@ class Flow:
         rec['spef'] = {}
         for c in self.libs:
             spef = h.root / f'{t}_{self.rc[c]}.spef'
+            extraction_limits = getattr(self.args, 'extract_limits', None)
+            if extraction_limits is None:
+                extraction_limits = EXTRACT_LIMITS[self.design.recipe]
             argv = list(map(str, road + ['extract', '--rc-profile', self.rc_profiles[c], '--corner', self.rc[c],
-                                         '--out', spef, *EXTRACT_LIMITS[self.design.recipe]]))
+                                         '--out', spef, *extraction_limits]))
             # The SPEF is capped by the extractor's own --max-spef-mib; the
             # process file-size limit must not be tighter than that cap.
             r = h.run(f'{t}_extract_{self.rc[c]}', argv, file_limit_bytes=spef_file_limit(argv))
@@ -1379,11 +1398,16 @@ class Flow:
         divisor = export['coordinate_divisor']
         require(all(v % divisor == 0 for v in shape['rect']), f'{label}: planted rectangle off the GDS grid')
         rect = ','.join(str(v // divisor) for v in shape['rect'])
+        layer_map = json.loads((ROOT / f'fixtures/pdk/{self.tag}-gds-map.json').read_text())
+        mapped = [entry['net'] for entry in layer_map['layers']
+                  if entry.get('lef') == shape['layer'] and entry.get('kind') == 'routing']
+        require(len(mapped) == 1 and len(mapped[0]) == 1, f'{label}: ambiguous planted GDS layer')
+        metal = '/'.join(str(v) for v in mapped[0][0])
         work = self.h.root / f'{label}_plant'
         out = work / 'planted.gds'
         cmd = ['/foss/tools/klayout/klayout', '-b', '-r', '/scripts/kl_plant.py']
         for k, v in dict(gds='/in/design.gds', out='/out/planted.gds', report='/out/planted.json', kind='rect',
-                         metal=PLANT[self.tag]['gds_layer'], rect=rect).items():
+                         metal=metal, rect=rect).items():
             cmd += ['-rd', f'{k}={v}']
         r = container.run(cmd, out_dir=work, label=container.next_label(work, 'plant_rect'),
                           ro=[(str(ROOT / 'scripts/signoff'), '/scripts'), (str(gds.resolve()), '/in/design.gds')],

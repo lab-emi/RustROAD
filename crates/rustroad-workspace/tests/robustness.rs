@@ -86,12 +86,14 @@ fn fixture() -> Design {
         }],
         cells: vec![
             Cell {
+                fixed: None,
                 name: "u0".into(),
                 master: "BUF".into(),
                 width: 10,
                 height: 20,
             },
             Cell {
+                fixed: None,
                 name: "u1".into(),
                 master: "BUF".into(),
                 width: 10,

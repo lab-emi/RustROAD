@@ -34,15 +34,15 @@ wall limit. Each REA scenario had a 30-second deadline, 256 KiB output cap and
 128-sample process bound. The preflight estimate is in
 [`resource-estimate.md`](../evidence/rea/resource-estimate.md).
 
-| Probe | Observable outcome | Outer wall | Outer maximum RSS |
-| --- | --- | --- | --- |
-| `-version` | `unknown`, exit 0 | 1.21 s | 326,948 KiB |
-| `-help` | Batch/GUI/web flags, exit 0 | 1.51 s | 318,204 KiB |
-| Public Tcl `help` | 21 requested commands listed, exit 0 | 1.52 s | 320,276 KiB |
+| Probe | Observable outcome |
+| --- | --- |
+| `-version` | `unknown`, exit 0 |
+| `-help` | Batch/GUI/web flags, exit 0 |
+| Public Tcl `help` | 21 requested commands listed, exit 0 |
 
-These numbers include REA/container startup and do not measure a physical-design
-algorithm. GNU time does not establish a synchronized process-family or container
-RSS peak. No placement/routing speedup is claimed. All captures were untruncated.
+The time receipts kept with the captures include REA/container startup and
+measure no physical-design algorithm. No placement/routing speedup is
+claimed. All captures were untruncated.
 REA reported verified owned-process-group cleanup and removal of its temporary
 root, but the help and Tcl captures also contain `unverified_processes` from
 `EACCES` reading `/proc/.../environ`. Full descendant observation is therefore
@@ -151,10 +151,10 @@ It is a geometry fixture, not a fabrication PDK. Inputs contain 24 placed
 instances and six rows. The driver is
 [`openroad_placement_oracle.sh`](../scripts/openroad_placement_oracle.sh).
 
-| Case | External observation | Outer wall / maximum RSS |
-| --- | --- | --- |
-| Exported placement | Read 24 components; accepted; exit 0 | 1.17 s / 318,180 KiB |
-| Negative control | Second instance moved onto the first; one overlap reported; rejected; exit 42 | 1.53 s / 318,756 KiB |
+| Case | External observation |
+| --- | --- |
+| Exported placement | Read 24 components; accepted; exit 0 |
+| Negative control | Second instance moved onto the first; one overlap reported; rejected; exit 42 |
 
 The negative control reported `u1 (CELL2) overlaps u0 (CELL4)` and diagnostic
 `DPL-0033`. The harness requires this overlap-specific observation and a rejected

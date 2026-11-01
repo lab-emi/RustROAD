@@ -1,13 +1,13 @@
 # Native GDSII streamout (`export-gds`)
 
 Status: implemented and black-box verified on the routed pipeline fixture for
-SKY130 (`sky130_fd_sc_hd`) and GF180 (`gf180mcu_fd_sc_mcu7t5v0`). Scope is a
-block/macro: no pad ring, no seal ring; IR/EM/SI/OCV/CPPR are unchecked.
-`export-gds` itself reports `drc_status: "unchecked"`; the foundry checks run
-in the harnesses below. On the integrated LEF-rule flow the native GDS is DRC
-clean (Magic 0, KLayout 0) and LVS-matched on both PDKs; Sky130 has one Magic
-antenna item (see `docs/requalification.md`). Resource contract:
-`docs/gds-budget.md`. Evidence: `docs/evidence/gds-verification.json`.
+SKY130 (`sky130_fd_sc_hd`) and GF180 (`gf180mcu_fd_sc_mcu7t5v0`) by
+`scripts/verify_gds.py` (below). Scope is a block/macro: no pad ring, no seal
+ring; IR/EM/SI/OCV/CPPR are unchecked. `export-gds` itself reports
+`drc_status: "unchecked"`; the foundry checks run in the harnesses below.
+Resource contract: `docs/gds-budget.md`. Run receipts:
+`docs/evidence/gds-verification.json` (historical evidence, kept for
+reproducibility).
 
 ## Command
 
@@ -143,83 +143,44 @@ patch must be streamed on its layer's net purpose, and deleting those
 rectangles must make the XOR fail. LVS runs the basic Netgen/KLayout checks and
 both LVS checks of `scripts/signoff` (named-net and port pairing).
 
-Requalification run (stream b0, 2026-10-24; `.work/runs/gds5` on the
-policy-producer LEF-rule flow `.work/runs/r2`, binary `ff523a9d...`, 189.7 s
-wall, largest container 464 MiB):
+Negative controls (each must be detected):
 
-| Check | SKY130 | GF180 |
-|---|---|---|
-| strmxor native vs KLayout LEF/DEF reference | No differences found | No differences found |
-| Top labels / flattened texts equal | 12 / 668 equal | 12 / 1056 equal |
-| PDK cell structures byte-identical | 10 / 10 | 10 / 10 |
-| Re-export and independent-copy export identical | yes (`48cdfd7e...`, 65,110 B, 5,176 records) | yes (`d2c20a1e...`, 46,368 B, 3,768 records) |
-| Routing patches streamed (DEF `RECT`) | 8 / 8 | 1 / 1 |
-| Magic drc(full), KLayout main deck (native = reference) | 0, 0 | 0, 0 |
-| Planted sub-minimum square detected (Magic / KLayout) | 2 / m2.1 x2, m2.6 x1 | 2 / M2.1 x2, M2.3 x1 |
-| Density (separate) | passed, 0 items | failed, 8 items (no fill) |
-| LVS: Netgen, KLayout, signoff Netgen, signoff KLayout | match x4 (native and reference) | match x4 (native and reference) |
-| Layer-map citations | 36 claims, 0 problems | 30 claims, 0 problems |
+- deleted signal wire (the largest signal wire, a DEF NETS path): XOR
+  difference, and Netgen and the signoff KLayout check fail; the basic
+  KLayout check alone still says match, which is why the signoff checks are
+  required;
+- wrong map entry (met2/Metal2 `net` datatype changed): XOR differences on
+  the drawing layer plus a spurious layer; the citation verifier rejects it;
+- missing cell structure: removed from the output -> XOR differences on all
+  cell layers; removed from the cell library -> `GDS_CELL_MISSING`, exit 2,
+  no output file;
+- patches removed: XOR differences only on the patch layers;
+- planted sub-minimum square: both decks count it;
+- SKY130 density without the 235/4 boundary -> non-finite densities,
+  reported failed (not a silent pass);
+- odd GF180 coordinate (a Via1_HV cut edge planted in a workspace copy):
+  refused by the workspace reader (`INVALID_WORKSPACE`, LEF-rule via
+  enclosure / supply via grid) before streaming, or by the exporter
+  (`GDS_ODD_COORDINATE`); exit 2, no output file.
 
-Controls (all detected): deleted signal wire (port `z[1]`; XOR 1 shape; Netgen
-and the signoff KLayout check fail, the basic KLayout check still says match,
-which is why the signoff checks are now required), wrong map entry, missing
-cell structure, patches removed (XOR only on the patch layers: Sky130
-68/20 x3, 69/20 x5, 70/20 x1; GF180 36/0 x2), planted DRC square, Sky130
-density without the boundary, GF180 odd coordinate (now refused by the
-workspace reader, `INVALID_WORKSPACE`, before streaming; no output file).
+KLayout deep-mode items are counted over every cell. Density is reported
+separately and is never part of the DRC verdict (owner decision). The
+per-run tables of the stream b0 requalification and of the earlier phase-A
+run are in `docs/evidence/gds-verification.json`, kept as historical
+evidence for reproducibility, not as current results.
 
-Phase-A run on the earlier router (historical: `.work/gds/final`, binary sha256 `7c34a6d3...acce`, 109.6 s wall
-for both PDKs, largest external step 474 MB RSS; evidence written with
-`--evidence docs/evidence/gds-verification.json`):
-
-| Check | SKY130 | GF180 |
-|---|---|---|
-| strmxor native vs KLayout LEF/DEF reference | No differences found | No differences found |
-| Top labels / flattened texts equal | 12 / 677 equal | 12 / 1056 equal |
-| PDK cell structures byte-identical | 8 / 8 | 10 / 10 |
-| Re-export and independent-copy export identical | yes (sha256 `b714fdf1...`) | yes (sha256 `e877c9f6...`) |
-| Workspace read-only (HEAD rev6 + tree hash) | unchanged | unchanged |
-| Magic drc(full) total, native = reference | 26 = 26 | 13 = 13 |
-| KLayout main deck, native = reference | m1.2 x5, m2.2 x4 | M1.2a x4, M2.3 x3 |
-| Density deck (separate `density_status`) | passed: 0 items, finite (li1 0.94 ... m5 1.0) | failed: 8 items (DCF.1b, PL.8, M1.4-M5.4, MT.3) |
-| Netgen LVS native / reference | match / match | match / match |
-| KLayout LVS native / reference | match / match | match / match |
-| Layer-map citations re-derived | 36 claims, 0 problems | 30 claims, 0 problems |
-
-The KLayout GF180 M1.2a items are attributed 3 to `lane_smoke` and 1 to the
-`clkbuf_1` child cell; counts use every cell. Density is reported separately and
-is never part of the DRC verdict (owner decision); the GF180 block has no fill.
-
-Negative controls (all detected):
-
-- deleted wire (largest met2/Metal2 segment removed): strmxor 1 difference on
-  69/20 (36/0), Netgen and KLayout LVS mismatch;
-- wrong map entry (met2/Metal2 `net` datatype 21/1): strmxor 27 (37) differences
-  on the drawing layer plus a spurious layer; citation verifier rejects it;
-- missing cell structure: removed from the output -> strmxor differences on all
-  cell layers; removed from the cell library -> `GDS_CELL_MISSING`, exit 2, no
-  output file;
-- odd GF180 coordinate (Via1_HV cut edge -261 LEF DBU planted in a workspace
-  copy) -> `GDS_ODD_COORDINATE`, exit 2, no output file;
-- SKY130 density without the 235/4 boundary -> non-finite densities, reported
-  failed (not a silent pass).
-
-Native export cost: SKY130 0.04 s / 16.0 MiB peak RSS, GF180 0.02 s / 10.1 MiB
-(374,534 / 359,540 bytes; 29,286 records for SKY130). These are single small
-fixtures, not a scaling claim.
-
-Rust tests: 97 ordinary tests pass (18 new: GDS codec round trip, exact real8
-vectors incl. the PDK UNITS bytes and round-to-even decoding, budgets,
-every-prefix truncation, 2,000 single-bit mutations, grammar violations,
-closure depth/cycles, unit grids, layer-map validation, FOREIGN parsing, and a
-routed self-authored workspace: determinism, read-only, FS/N transforms,
-labels, caps, missing cells, collisions, wrong maps, FOREIGN mismatch, changed
-LEF, 2000-DBU exact division and odd-coordinate rejection). Ignored real-PDK
-tests (run with explicit paths) also pass: both PDK cell libraries parse and
-re-encode byte-identically through the typed model, all 437/229 cell-LEF
-FOREIGN bindings name their own macro at offset 0, and copies of both routed
-workspaces stream verbatim cells. Strict Clippy (`-D warnings`) and rustfmt are
-clean. Full test run: 5.9 s, 461 MB peak (cargo + tests).
+Rust tests cover the GDS codec round trip, exact real8 vectors incl. the PDK
+UNITS bytes and round-to-even decoding, budgets, every-prefix truncation,
+2,000 single-bit mutations, grammar violations, closure depth/cycles, unit
+grids, layer-map validation, FOREIGN parsing, and a routed self-authored
+workspace: determinism, read-only, FS/N transforms, labels, caps, missing
+cells, collisions, wrong maps, FOREIGN mismatch, changed LEF, 2000-DBU exact
+division and odd-coordinate rejection. Ignored real-PDK tests (run with
+explicit paths) parse both PDK cell libraries and re-encode them
+byte-identically through the typed model, check that every cell-LEF FOREIGN
+binding names its own macro at offset 0, and stream verbatim cells from
+copies of both routed workspaces. Strict Clippy (`-D warnings`) and rustfmt
+are part of the checks.
 
 ## Limitations
 

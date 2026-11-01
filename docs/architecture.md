@@ -56,7 +56,7 @@ original PDK extraction rules, then imports detailed SPEF into pinned postroute
 RustSTA candidate tools and compares propagated-clock timing with OpenSTA.
 This is an independently checked functional chain on a four-register pipeline.
 The dense six-register case still exceeds this router's demonstrated coverage.
-The unchanged 1 ps parity gate is not met (about 3.15/6.79 ps discrepancies), and
+The unchanged 1 ps parity gate is not met on that fixture, and
 hold closure is incomplete. The harness returns partial, never signoff success.
 See `cts-routing.md`; a native calibrated RC extractor remains future work.
 

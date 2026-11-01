@@ -6,16 +6,42 @@
 //! variant per layer pair, a per-(master, orientation, pin) access table and a
 //! bounded post-route same-net pass (dangling-stub pruning, notch patches and
 //! minimum-area stubs, see `route_rules`). Without it, behavior is unchanged.
+pub use crate::instance_obstacles::{
+    InstanceObstacles, ObstacleInstance, ObstacleTemplate, TemplateObstacle,
+};
 use crate::route_rules;
 pub(crate) use crate::route_rules::Violation;
+pub use crate::troute::replay::{
+    BudgetErrorContext, BudgetErrorStage, ReplayCapture, ReplayOptions, ReplayPhase, ReplayReport,
+};
 use crate::{Error, Rect, Result};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RouteLimits {
+    /// Optional bounded diagnostic snapshot; routing semantics are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ReplayCapture>,
+    /// Explicit staged search work allowances. Omission preserves legacy scouts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scouts: Option<ScoutLimits>,
+    /// Whole-net budget for immediately reconnecting one displaced routed net.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eager_repair_expansions: Option<usize>,
+    /// Maximum displaced nets eligible for eager reconnect; omission means one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eager_repair_max_victims: Option<usize>,
+    /// Per-pin search cap inside one eager reconnect. Omission keeps the
+    /// smaller of the whole-net allowance and the ordinary hard-search cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eager_repair_search_expansions: Option<usize>,
+    /// Bound on the length of a net re-routed after rip-up, relative to its
+    /// first routed length. Omission preserves legacy acceptance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair_detour: Option<DetourBound>,
     pub max_axis: usize,
     pub max_grid_nodes: usize,
     pub max_obstacles: usize,
@@ -23,12 +49,117 @@ pub struct RouteLimits {
     pub max_segments: usize,
     pub max_expansions: usize,
     pub max_search_expansions: usize,
+    /// Optional earlier handoff from hard search to bounded routing repair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_hard_search_expansions: Option<usize>,
+    /// Nodes or raw edges retained for one detailed net, independently of the design output size.
+    #[serde(default = "default_active_nodes")]
+    pub max_active_nodes: usize,
+    /// Exact routing-tree segments retained by the bounded distance index.
+    #[serde(default = "default_target_segments")]
+    pub max_target_segments: usize,
+    /// Retries that may reopen earlier nets after a later pin loses access.
+    #[serde(default = "default_batch_retries")]
+    pub max_batch_retries: usize,
+    /// Distinct completed nets reopened during one batch.
+    #[serde(default = "default_batch_displaced_nets")]
+    pub max_batch_displaced_nets: usize,
+    /// Total terminals, including reopened nets, admitted to a repair batch.
+    #[serde(default = "default_batch_repair_terminals")]
+    pub max_batch_repair_terminals: usize,
+    /// Retained same-net violations per check; exceeding the limit is an error.
+    #[serde(default = "default_rule_violations")]
+    pub max_rule_violations: usize,
+    /// Cells in one coordinate-compressed hole-detection grid.
+    #[serde(default = "default_rule_grid_cells")]
+    pub max_rule_grid_cells: usize,
     pub max_comparisons: usize,
     pub max_heap: usize,
 }
+
+/// Repair-time detour bound. A hard re-route of a net that already had a
+/// route is rejected when its wire length exceeds `percent`% of the first
+/// routed length plus `slack` DBU; the net then negotiates through soft
+/// rip-up instead. Rejections are bounded per net and in total, after which
+/// re-routes are accepted unbounded, so routability never depends on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetourBound {
+    pub percent: u64,
+    pub slack: u64,
+    pub max_rejections_per_net: usize,
+    pub max_rejections: usize,
+}
+impl DetourBound {
+    fn validate(&self) -> Result<()> {
+        if !(100..=1000).contains(&self.percent)
+            || self.slack > 1_000_000_000
+            || !(1..=64).contains(&self.max_rejections_per_net)
+            || !(1..=10_000_000).contains(&self.max_rejections)
+        {
+            return Err(invalid("repair detour bound"));
+        }
+        Ok(())
+    }
+    /// Largest admitted length for a net first routed with `first` DBU.
+    pub fn allowed(&self, first: u64) -> u64 {
+        first
+            .saturating_mul(self.percent)
+            .saturating_div(100)
+            .saturating_add(self.slack)
+    }
+}
+
+/// Work budgets for staged routing attempts; retained storage stays separately bounded.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScoutLimits {
+    /// Expanded-guide attempt that does not displace routed owners.
+    pub wide_hard_expansions: usize,
+    /// First ordinary soft-search stage per sink.
+    pub soft_expansions: usize,
+    /// Clear-prefix search that may reuse already selected owners only.
+    pub reuse_expansions: usize,
+    /// Whole-net allowance for the optional non-growing fast candidate.
+    pub fast_expansions: usize,
+    /// First constrained owner attempt, also capped by its owner allocation.
+    pub owner_first_expansions: usize,
+    /// Promoted constrained owner attempt, also capped by its owner allocation.
+    pub owner_progress_expansions: usize,
+}
+fn default_rule_grid_cells() -> usize {
+    1_000_000
+}
+
+fn default_rule_violations() -> usize {
+    100_000
+}
+
+fn default_active_nodes() -> usize {
+    200_000
+}
+fn default_target_segments() -> usize {
+    8192
+}
+fn default_batch_retries() -> usize {
+    16
+}
+fn default_batch_displaced_nets() -> usize {
+    1024
+}
+fn default_batch_repair_terminals() -> usize {
+    1_000_000
+}
+
 impl Default for RouteLimits {
     fn default() -> Self {
         Self {
+            replay: None,
+            scouts: None,
+            eager_repair_expansions: None,
+            eager_repair_max_victims: None,
+            eager_repair_search_expansions: None,
+            repair_detour: None,
             max_axis: 1024,
             max_grid_nodes: 2_000_000,
             max_obstacles: 200_000,
@@ -36,6 +167,14 @@ impl Default for RouteLimits {
             max_segments: 100_000,
             max_expansions: 2_000_000,
             max_search_expansions: 200_000,
+            max_hard_search_expansions: None,
+            max_active_nodes: default_active_nodes(),
+            max_target_segments: default_target_segments(),
+            max_batch_retries: default_batch_retries(),
+            max_batch_displaced_nets: default_batch_displaced_nets(),
+            max_batch_repair_terminals: default_batch_repair_terminals(),
+            max_rule_violations: default_rule_violations(),
+            max_rule_grid_cells: default_rule_grid_cells(),
             max_comparisons: 200_000_000,
             max_heap: 500_000,
         }
@@ -47,14 +186,30 @@ impl RouteLimits {
     /// its upfront memory estimate against `TrackPlan::memory_mib`.
     pub fn ceiling() -> Self {
         Self {
+            replay: None,
+            scouts: None,
+            eager_repair_expansions: None,
+            eager_repair_max_victims: None,
+            eager_repair_search_expansions: None,
+            repair_detour: None,
             max_axis: 1 << 20,
-            max_grid_nodes: 64_000_000,
-            max_obstacles: 8_000_000,
-            max_bin_entries: 64_000_000,
-            max_segments: 8_000_000,
-            max_expansions: 2_000_000_000,
-            max_search_expansions: 50_000_000,
-            max_comparisons: 1usize << 40,
+            max_grid_nodes: u32::MAX as usize - 1,
+            max_obstacles: 256_000_000,
+            max_bin_entries: 512_000_000,
+            max_segments: 128_000_000,
+            // Work quotas do not size retained search storage. Memory admission
+            // and the independent active-node/heap limits still bound allocation.
+            max_expansions: 1usize << 40,
+            max_search_expansions: 500_000_000,
+            max_hard_search_expansions: None,
+            max_active_nodes: 50_000_000,
+            max_target_segments: 1_000_000,
+            max_batch_retries: 128,
+            max_batch_displaced_nets: 4096,
+            max_batch_repair_terminals: 1_000_000,
+            max_rule_violations: 1_000_000,
+            max_rule_grid_cells: 4_000_000,
+            max_comparisons: 1usize << 50,
             max_heap: 64_000_000,
         }
     }
@@ -66,6 +221,59 @@ impl RouteLimits {
         self.validate_against(&Self::ceiling())
     }
     fn validate_against(&self, hard: &Self) -> Result<()> {
+        if let Some(capture) = &self.replay {
+            capture.validate()?;
+        }
+        if let Some(bound) = &self.repair_detour {
+            bound.validate()?;
+        }
+        if self.max_batch_retries > hard.max_batch_retries {
+            return Err(budget("batch retry limit outside hard bounds"));
+        }
+        if self
+            .max_hard_search_expansions
+            .is_some_and(|n| n == 0 || n > self.max_search_expansions)
+        {
+            return Err(budget("hard search limit exceeds per-search bounds"));
+        }
+        if let Some(scouts) = &self.scouts {
+            for work in [
+                scouts.wide_hard_expansions,
+                scouts.soft_expansions,
+                scouts.reuse_expansions,
+                scouts.fast_expansions,
+                scouts.owner_first_expansions,
+                scouts.owner_progress_expansions,
+            ] {
+                if work == 0 || work > self.max_search_expansions {
+                    return Err(budget("scout limit exceeds per-search bounds"));
+                }
+            }
+        }
+        if self
+            .eager_repair_expansions
+            .is_some_and(|n| n == 0 || n > self.max_search_expansions)
+        {
+            return Err(budget("eager repair limit exceeds per-search bounds"));
+        }
+        if self
+            .eager_repair_max_victims
+            .is_some_and(|n| !(1..=16).contains(&n) || self.eager_repair_expansions.is_none())
+        {
+            return Err(budget(
+                "eager victim limit requires work allowance and 1..16 victims",
+            ));
+        }
+        if self.eager_repair_search_expansions.is_some_and(|n| {
+            n == 0
+                || self
+                    .eager_repair_expansions
+                    .is_none_or(|allowance| n > allowance)
+        }) {
+            return Err(budget(
+                "eager search limit requires work allowance and must not exceed it",
+            ));
+        }
         for (a, b) in [
             (self.max_axis, hard.max_axis),
             (self.max_grid_nodes, hard.max_grid_nodes),
@@ -74,6 +282,15 @@ impl RouteLimits {
             (self.max_segments, hard.max_segments),
             (self.max_expansions, hard.max_expansions),
             (self.max_search_expansions, hard.max_search_expansions),
+            (self.max_active_nodes, hard.max_active_nodes),
+            (self.max_target_segments, hard.max_target_segments),
+            (self.max_batch_displaced_nets, hard.max_batch_displaced_nets),
+            (
+                self.max_batch_repair_terminals,
+                hard.max_batch_repair_terminals,
+            ),
+            (self.max_rule_violations, hard.max_rule_violations),
+            (self.max_rule_grid_cells, hard.max_rule_grid_cells),
             (self.max_comparisons, hard.max_comparisons),
             (self.max_heap, hard.max_heap),
         ] {
@@ -98,6 +315,18 @@ pub struct RouteLayer {
     /// LEF MINSTEP in DBU (rules mode, pin-access landing pads only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_step: Option<i64>,
+    /// Wide-metal row of the LEF SPACINGTABLE (configured; checked after cleanup).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wide_spacing: Option<WideSpacing>,
+}
+/// Metal wider than `width` needs `spacing` to other nets wherever the two
+/// run parallel for more than `parallel_run` (DBU).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WideSpacing {
+    pub width: i64,
+    pub parallel_run: i64,
+    pub spacing: i64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -113,13 +342,13 @@ pub struct RouteVia {
     pub upper: u32,
     pub shapes: Vec<LayerRect>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Blockage {
     pub layer: u32,
     pub rect: Rect,
     pub net: Option<u32>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Terminal {
     pub pin: u32,
     pub net: u32,
@@ -129,19 +358,22 @@ pub struct Terminal {
     pub class: Option<(u32, [i64; 2])>,
 }
 /// One (master, orientation, pin) access geometry relative to the origin.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AccessClass {
     pub shapes: Vec<LayerRect>,
     /// Other-net geometry of the same master (other pins, OBS) on selected layers.
     pub blockers: Vec<LayerRect>,
 }
 /// Per-layer track grid and router parameters of the track router.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TrackPlan {
     /// Indexed like `RouteInput::layers`: `(pitch, offset)` of the cross-axis
     /// track coordinates (vertical layer: x = offset + k * pitch); `None` for
     /// cut layers.
     pub tracks: Vec<Option<(i64, i64)>>,
+    /// Inclusive signal-routing layer indices; lower layers remain available
+    /// to fixed pin escapes. `None` retains all selected routing layers.
+    pub routing_layers: Option<[u32; 2]>,
     /// Square GCell side in DBU for global routing.
     pub gcell: i64,
     pub global_iterations: usize,
@@ -157,20 +389,263 @@ pub struct TrackPlan {
     pub via_cost: u64,
     /// Cost multiplier of non-preferred-direction wire edges.
     pub wrong_way_factor: u64,
+    /// Integer multiplier of the detailed-search lower bound (1..=16).
+    /// Values above one favor progress over shortest-path optimality.
+    pub heuristic_weight: u64,
+    /// Optional priority weight for soft rip-up searches only (1..=16).
+    /// Omitted values retain the normal detailed-search weight and encoding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repair_heuristic_weight: Option<u64>,
+    /// Optional bounded one-owner trials before ordinary soft rip-up.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub single_owner_repair: Option<SingleOwnerRepairConfig>,
+    /// Exact per-layer own-pin range and bounding-box queries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub own_pin_index: Option<OwnPinIndex>,
+    /// Exact static-instance bins restricted to template layer presence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_index: Option<InstanceIndexMode>,
     /// Upfront memory estimate ceiling for graph, guides and search state.
     pub memory_mib: u64,
+    /// Separate cap for cumulative congestion-history entries.
+    pub max_history_entries: usize,
+    /// Require the minimum-area run before a routed via stacks through a
+    /// layer in every search, not only in strict re-routes after cleanup.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub area_stacks: bool,
+}
+
+/// Explicit bounds for one-owner trials. None in TrackPlan preserves legacy
+/// routing and snapshot encoding; all trials share the router's real ledger.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SingleOwnerRepairConfig {
+    pub max_candidates: usize,
+    pub max_frontier_nodes: usize,
+    pub first_search_expansions: usize,
+    pub max_progress_candidates: usize,
+    pub progress_search_expansions: usize,
+    pub max_total_expansions: usize,
+    /// Refine a completed multi-owner soft candidate under the same local
+    /// allocation. Omitted values preserve the prior route and encoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_soft_refinement: Option<PostSoftRefinement>,
+    /// Optional priority weight for constrained one-owner trials only.
+    /// More specific than a replay-wide weight; omission preserves its value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heuristic_weight: Option<u64>,
+}
+
+/// Additional selection after ordinary soft routing has supplied real owners.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PostSoftRefinement {
+    /// Try one observed owner at a time, keeping the original route on failure.
+    SingleOwner,
+}
+impl SingleOwnerRepairConfig {
+    /// Validate explicit local caps without enlarging the original global cap.
+    pub fn validate(&self, limits: &RouteLimits) -> Result<()> {
+        if !(1..=16).contains(&self.max_candidates)
+            || !(1..=4096).contains(&self.max_frontier_nodes)
+            || !(1..=500_000).contains(&self.first_search_expansions)
+            || self.max_progress_candidates > 4
+            || self.progress_search_expansions < self.first_search_expansions
+            || self.progress_search_expansions > 2_000_000
+            || self.progress_search_expansions > limits.max_search_expansions
+            || self.max_total_expansions == 0
+            || self.max_total_expansions > 20_000_000
+            || self
+                .heuristic_weight
+                .is_some_and(|weight| !(1..=16).contains(&weight))
+        {
+            return Err(invalid("single-owner repair limits"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn working_bytes(&self, limits: &RouteLimits, max_via_shapes: usize) -> u64 {
+        let base = (self.max_frontier_nodes as u64)
+            .saturating_mul(256)
+            .saturating_add((limits.max_active_nodes as u64).saturating_mul(8))
+            .saturating_add(64 << 10);
+        if self.post_soft_refinement.is_none() {
+            return base;
+        }
+        // One retained fallback, its shape handles and reversible history
+        // coexist with the existing trial scratch. Account for Vec growth.
+        let per_node = (std::mem::size_of::<Wire>() as u64)
+            .saturating_add(std::mem::size_of::<Via>() as u64)
+            .saturating_add((max_via_shapes.max(1) as u64).saturating_mul(8))
+            .saturating_add(std::mem::size_of::<(u32, u16)>() as u64)
+            .saturating_mul(2);
+        // A rejected fast candidate can leave dead spatial slots until the
+        // next compaction. Its wire/via vectors are dropped before refinement.
+        let fast_staging = if self.heuristic_weight.is_some() {
+            (limits.max_active_nodes as u64)
+                .saturating_mul((max_via_shapes as u64).saturating_add(1))
+                .saturating_mul(80)
+        } else {
+            0
+        };
+        base.saturating_add((limits.max_active_nodes as u64).saturating_mul(per_node))
+            .saturating_add(fast_staging)
+    }
+}
+
+/// Measurements of refinement over an already completed soft candidate.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PostSoftRefinementStats {
+    pub stages: usize,
+    pub candidate_owners: usize,
+    pub attempts: usize,
+    pub successes: usize,
+    pub fallbacks: usize,
+    pub quota_skips: usize,
+}
+impl PostSoftRefinementStats {
+    fn merge(&mut self, other: &Self) -> Result<()> {
+        let sum = |a: usize, b: usize| {
+            a.checked_add(b)
+                .ok_or_else(|| budget("post-soft telemetry overflow"))
+        };
+        *self = Self {
+            stages: sum(self.stages, other.stages)?,
+            candidate_owners: sum(self.candidate_owners, other.candidate_owners)?,
+            attempts: sum(self.attempts, other.attempts)?,
+            successes: sum(self.successes, other.successes)?,
+            fallbacks: sum(self.fallbacks, other.fallbacks)?,
+            quota_skips: sum(self.quota_skips, other.quota_skips)?,
+        };
+        Ok(())
+    }
+}
+
+/// Measured repair-stage counters; absent when the stage was not enabled.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SingleOwnerRepairStats {
+    pub stages: usize,
+    pub candidate_owners: usize,
+    pub attempts: usize,
+    pub successes: usize,
+    pub frontier_skips: usize,
+    pub local_budget_exhaustions: usize,
+    pub trial_expansions: usize,
+    pub trial_comparisons: usize,
+    pub committed_history_updates: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_soft_refinement: Option<PostSoftRefinementStats>,
+    /// Explicit one-owner override actually used; absent in legacy operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heuristic_weight: Option<u64>,
+}
+impl SingleOwnerRepairStats {
+    pub(crate) fn merge(&mut self, other: &Self) -> Result<()> {
+        let sum = |a: usize, b: usize| {
+            a.checked_add(b)
+                .ok_or_else(|| budget("single-owner telemetry overflow"))
+        };
+        let mut post = self.post_soft_refinement.clone();
+        let heuristic_weight = match (self.heuristic_weight, other.heuristic_weight) {
+            (Some(a), Some(b)) if a != b => {
+                return Err(invalid("inconsistent owner priority telemetry"));
+            }
+            (a, b) => a.or(b),
+        };
+        if let Some(value) = &other.post_soft_refinement {
+            post.get_or_insert_with(Default::default).merge(value)?;
+        }
+        let next = Self {
+            stages: sum(self.stages, other.stages)?,
+            candidate_owners: sum(self.candidate_owners, other.candidate_owners)?,
+            attempts: sum(self.attempts, other.attempts)?,
+            successes: sum(self.successes, other.successes)?,
+            frontier_skips: sum(self.frontier_skips, other.frontier_skips)?,
+            local_budget_exhaustions: sum(
+                self.local_budget_exhaustions,
+                other.local_budget_exhaustions,
+            )?,
+            trial_expansions: sum(self.trial_expansions, other.trial_expansions)?,
+            trial_comparisons: sum(self.trial_comparisons, other.trial_comparisons)?,
+            committed_history_updates: sum(
+                self.committed_history_updates,
+                other.committed_history_updates,
+            )?,
+            post_soft_refinement: post,
+            heuristic_weight,
+        };
+        *self = next;
+        Ok(())
+    }
+}
+impl TrackPlan {
+    pub(crate) fn allows_routing_layer(&self, layer: u32) -> bool {
+        self.routing_layers
+            .is_none_or(|[lower, upper]| lower <= layer && layer <= upper)
+    }
+}
+pub const DEFAULT_MAX_HISTORY_ENTRIES: usize = 4_000_000;
+/// Optional exact own-pin broad phase; omission retains the legacy query ledger.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OwnPinIndex {
+    LayerRanges,
+}
+
+/// Optional static-index representation; obstacle geometry is unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceIndexMode {
+    TemplateLayers,
+}
+
+/// Explicit replay-only query representation, applied after source validation.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryIndices {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_pin_index: Option<OwnPinIndex>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_index: Option<InstanceIndexMode>,
 }
 /// Process baseline counted in every route memory estimate (binary, libc,
 /// stacks, thread pool).
 pub const PROCESS_BASE_BYTES: u64 = 8 << 20;
-/// Resident bytes per on-disk workspace byte once loaded (parsed metadata,
-/// its working copy and the decoded tables; measured 1.9-2.5x).
+/// Conservative pre-load allowance per on-disk workspace byte. This is also
+/// the fallback on platforms without a process-footprint probe.
 pub const WORKSPACE_LOAD_FACTOR: u64 = 3;
 
 /// Bytes the caller holds while the router runs: the process baseline, the
 /// loaded workspace (`workspace_bytes` on disk) and this input, counted
-/// twice (vector growth and the builder's transient lookup tables).
+/// twice (vector growth and the builder's transient lookup tables). Used
+/// before loading or when the platform cannot report the live footprint.
 pub fn held_estimate(workspace_bytes: u64, input: &RouteInput) -> u64 {
+    PROCESS_BASE_BYTES
+        .saturating_add(workspace_bytes.saturating_mul(WORKSPACE_LOAD_FACTOR))
+        .saturating_add(input_heap_estimate(input).saturating_mul(2))
+}
+
+/// After the complete input has been decoded, account for the live process
+/// rather than charging it for already-freed builder maps and metadata clones.
+/// Add 25% allocator/page headroom; never fall below the input's structural
+/// allowance. Callers must include swapped pages in `live_process_bytes`.
+/// Future router allocations are separately covered by MemoryEstimate.
+pub fn loaded_held_estimate(
+    workspace_bytes: u64,
+    input: &RouteInput,
+    live_process_bytes: Option<u64>,
+) -> u64 {
+    match live_process_bytes.filter(|&n| n > 0) {
+        Some(bytes) => bytes
+            .saturating_add(bytes.div_ceil(4))
+            .max(PROCESS_BASE_BYTES.saturating_add(input_heap_estimate(input).saturating_mul(2))),
+        None => held_estimate(workspace_bytes, input),
+    }
+}
+
+pub(crate) fn input_heap_estimate(input: &RouteInput) -> u64 {
     use std::mem::size_of;
     let shapes = |v: &[LayerRect]| std::mem::size_of_val(v) as u64;
     let terminals: u64 = input
@@ -186,27 +661,28 @@ pub fn held_estimate(workspace_bytes: u64, input: &RouteInput) -> u64 {
     // Obstacles plus the caller's parallel owner table (8 bytes each).
     let obstacles = (input.obstacles.len() * (size_of::<Blockage>() + 8)) as u64;
     let ties = (input.ties.len() * size_of::<SupplyTie>()) as u64;
-    PROCESS_BASE_BYTES
-        .saturating_add(workspace_bytes.saturating_mul(WORKSPACE_LOAD_FACTOR))
-        .saturating_add(
-            obstacles
-                .saturating_add(terminals)
-                .saturating_add(classes)
-                .saturating_add(ties)
-                .saturating_mul(2),
-        )
+    let instances = input
+        .instances
+        .as_ref()
+        .map_or(0, InstanceObstacles::heap_bytes);
+    obstacles
+        .saturating_add(terminals)
+        .saturating_add(classes)
+        .saturating_add(ties)
+        .saturating_add(instances)
 }
 
 /// Supply tie (rail-input tie cells): router net `net` holds a cell input
 /// pin and a pseudo-driver on the cell's own rail rectangle `zone`; it is
 /// not a logical net. A routed shape of `net` that overlaps `zone` may touch
 /// (never merely approach) fixed shapes of the supply net `supply`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct SupplyTie {
     pub net: u32,
     pub supply: u32,
     pub zone: LayerRect,
 }
+#[derive(Serialize)]
 pub struct RouteInput {
     pub die: Rect,
     pub grid: i64,
@@ -215,6 +691,8 @@ pub struct RouteInput {
     pub layers: Vec<RouteLayer>,
     pub vias: Vec<RouteVia>,
     pub obstacles: Vec<Blockage>,
+    /// Shared cell templates and connectivity; translated only during queries.
+    pub instances: Option<InstanceObstacles>,
     pub terminals: Vec<Terminal>,
     /// Enable LEF-rule mode (variants, access table, same-net cleanup/checks).
     pub rules: bool,
@@ -227,6 +705,7 @@ pub struct RouteInput {
     /// Bytes the caller already holds for this route (loaded workspace and
     /// this input), counted with the router's own estimate against the
     /// track plan's `memory_mib`.
+    #[serde(skip)]
     pub held_bytes: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,6 +746,8 @@ pub struct RouteStats {
     pub expansions: usize,
     pub comparisons: usize,
     pub wire_length_dbu: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub single_owner_repair: Option<SingleOwnerRepairStats>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -279,6 +760,87 @@ pub struct Routes {
     pub nets: Vec<u32>,
     pub stats: RouteStats,
 }
+/// Replay a single captured repair without changing a workspace or claiming signoff.
+///
+/// # Errors
+/// Returns a diagnostic for stale views, invalid geometry and bounded work/memory failures.
+pub fn replay_route(
+    input: &RouteInput,
+    limits: &RouteLimits,
+    snapshot: &std::path::Path,
+    options: &ReplayOptions,
+) -> Result<ReplayReport> {
+    crate::troute::replay::replay(input, limits, snapshot, options)
+}
+
+/// One `RUSTROAD_RULE_DUMP` file (see `troute::dump_rule_state`).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuleDump {
+    schema: String,
+    pass: usize,
+    violations: Vec<serde_json::Value>,
+    routes: Routes,
+}
+
+/// What a diagnostic cleanup replay left.
+#[derive(Debug, Serialize)]
+pub struct CleanupReplayReport {
+    pub pass: usize,
+    pub violations_before: usize,
+    pub violations_after: usize,
+    pub patches_added: usize,
+    pub wires_added: usize,
+    pub work: usize,
+    /// Remaining violations by kind and layer.
+    pub remaining: BTreeMap<String, usize>,
+    pub first: Vec<String>,
+}
+
+/// Diagnostic only: re-run the bounded geometric cleanup on the routes of a
+/// rule dump and report what remains. Never writes a routing revision.
+///
+/// # Errors
+/// Returns a diagnostic for unreadable or oversized dumps and bounded work failures.
+pub fn cleanup_replay(
+    input: &RouteInput,
+    limits: &RouteLimits,
+    dump: &std::path::Path,
+) -> Result<CleanupReplayReport> {
+    let file = std::fs::File::open(dump).map_err(|e| invalid(&format!("rule dump open: {e}")))?;
+    let bytes = file
+        .metadata()
+        .map_err(|e| invalid(&format!("rule dump metadata: {e}")))?
+        .len();
+    if bytes == 0 || bytes > 1 << 30 {
+        return Err(budget("rule dump byte limit"));
+    }
+    let dump: RuleDump = serde_json::from_reader(std::io::BufReader::new(file))
+        .map_err(|e| invalid(&format!("rule dump decode: {e}")))?;
+    if dump.schema != "rustroad.rule-dump.v1" {
+        return Err(invalid("rule dump schema"));
+    }
+    let mut routes = dump.routes;
+    let (patches, wires) = (routes.patches.len(), routes.wires.len());
+    let (work, left) = cleanup_report(input, &mut routes, limits)?;
+    let mut remaining = BTreeMap::new();
+    for v in &left {
+        *remaining
+            .entry(format!("{} layer {}", v.kind(), v.layer()))
+            .or_insert(0) += 1;
+    }
+    Ok(CleanupReplayReport {
+        pass: dump.pass,
+        violations_before: dump.violations.len(),
+        violations_after: left.len(),
+        patches_added: routes.patches.len().saturating_sub(patches),
+        wires_added: routes.wires.len().saturating_sub(wires),
+        work,
+        remaining,
+        first: left.iter().take(64).map(|v| v.describe()).collect(),
+    })
+}
+
 pub(crate) fn budget(s: &str) -> Error {
     Error::Budget(s.into())
 }
@@ -329,6 +891,13 @@ pub(crate) fn contains(r: Rect, p: [i64; 2]) -> bool {
 pub(crate) fn overlap(a: Rect, b: Rect) -> bool {
     a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy
 }
+/// The rectangular envelope is a broad-phase test. Routing-metal corners
+/// use the same integer minimum distance as native rule validation. Cut
+/// spacing keeps its existing conservative envelope.
+fn routing_separated(rule: &RouteLayer, a: Rect, b: Rect) -> bool {
+    rule.vertical.is_some()
+        && route_rules::relation(a, b, rule.spacing) == route_rules::Relation::Far
+}
 
 /// Deterministic multiplicative hasher for spatial bin keys (lookups only;
 /// no iteration order depends on it).
@@ -359,12 +928,35 @@ impl std::hash::Hasher for Fx {
     }
 }
 const NIL: u32 = u32::MAX;
+pub(crate) const BIN_PAGE_SIDE: i64 = 32;
+const BIN_PAGE_CELLS: usize = (BIN_PAGE_SIDE * BIN_PAGE_SIDE) as usize;
+type BinPageKey = (u32, i64, i64);
+type BinPage = Box<[[u32; 2]; BIN_PAGE_CELLS]>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BinMode {
+    Dense,
+    Paged,
+    Sparse,
+}
+pub(crate) fn bin_mode(input: &RouteInput, cells: u64) -> BinMode {
+    if cells.saturating_mul(input.layers.len() as u64) <= 1_000_000 {
+        BinMode::Dense
+    } else if input.obstacles.len() + input.instances.as_ref().map_or(0, InstanceObstacles::len)
+        >= 1024
+    {
+        BinMode::Paged
+    } else {
+        BinMode::Sparse
+    }
+}
 /// Spatial bins: one dense head/tail grid per layer over the die and every
 /// fixed shape, entries chained in insertion order (so iteration order, and
 /// with it every work count, matches a per-bin list). A layer's grid is
 /// allocated on its first shape: 8 bytes per bin plus 8 bytes per entry.
 /// Bins outside the grid (never produced by router inputs) use a hash map.
 struct BinGrid {
+    mode: BinMode,
     bx0: i64,
     by0: i64,
     nx: i64,
@@ -373,6 +965,7 @@ struct BinGrid {
     cells: Vec<Vec<[u32; 2]>>,
     /// `[shape id, next entry]`.
     entries: Vec<[u32; 2]>,
+    pages: HashMap<BinPageKey, BinPage, BuildFx>,
     overflow: HashMap<(u32, i64, i64), Vec<usize>, BuildFx>,
 }
 enum BinIter<'g> {
@@ -401,20 +994,47 @@ impl BinGrid {
         (dx >= 0 && dy >= 0 && dx < self.nx && dy < self.ny).then(|| (dy * self.nx + dx) as usize)
     }
     fn push(&mut self, layer: u32, x: i64, y: i64, id: usize) -> Result<()> {
-        let Some(k) = self.slot(x, y) else {
-            self.overflow.entry((layer, x, y)).or_default().push(id);
+        if self.mode == BinMode::Sparse
+            || (self.mode == BinMode::Dense && self.slot(x, y).is_none())
+        {
+            self.overflow
+                .try_reserve(1)
+                .map_err(|_| budget("sparse routing bin allocation"))?;
+            let bin = self.overflow.entry((layer, x, y)).or_default();
+            bin.try_reserve(1)
+                .map_err(|_| budget("sparse routing bin entries"))?;
+            bin.push(id);
             return Ok(());
-        };
+        }
         let e = u32::try_from(self.entries.len())
             .ok()
             .filter(|&e| e != NIL)
             .ok_or_else(|| budget("routing spatial-bin count"))?;
         let id = u32::try_from(id).map_err(|_| budget("routing obstacle count"))?;
-        let grid = &mut self.cells[layer as usize];
-        if grid.is_empty() {
-            grid.resize((self.nx * self.ny) as usize, [NIL, NIL]);
-        }
-        let cell = &mut grid[k];
+        let cell = if self.mode == BinMode::Paged {
+            let key = (
+                layer,
+                x.div_euclid(BIN_PAGE_SIDE),
+                y.div_euclid(BIN_PAGE_SIDE),
+            );
+            self.pages
+                .try_reserve(1)
+                .map_err(|_| budget("routing bin-page allocation"))?;
+            let page = self
+                .pages
+                .entry(key)
+                .or_insert_with(|| Box::new([[NIL, NIL]; BIN_PAGE_CELLS]));
+            let slot = (y.rem_euclid(BIN_PAGE_SIDE) * BIN_PAGE_SIDE + x.rem_euclid(BIN_PAGE_SIDE))
+                as usize;
+            &mut page[slot]
+        } else {
+            let k = self.slot(x, y).expect("dense bin is inside the grid");
+            let grid = &mut self.cells[layer as usize];
+            if grid.is_empty() {
+                grid.resize((self.nx * self.ny) as usize, [NIL, NIL]);
+            }
+            &mut grid[k]
+        };
         if cell[1] == NIL {
             cell[0] = e;
         } else {
@@ -425,7 +1045,20 @@ impl BinGrid {
         Ok(())
     }
     fn iter(&self, layer: u32, x: i64, y: i64) -> BinIter<'_> {
-        match self.slot(x, y) {
+        if self.mode == BinMode::Paged {
+            let key = (
+                layer,
+                x.div_euclid(BIN_PAGE_SIDE),
+                y.div_euclid(BIN_PAGE_SIDE),
+            );
+            let slot = (y.rem_euclid(BIN_PAGE_SIDE) * BIN_PAGE_SIDE + x.rem_euclid(BIN_PAGE_SIDE))
+                as usize;
+            return BinIter::Chain {
+                entries: &self.entries,
+                at: self.pages.get(&key).map_or(NIL, |p| p[slot][0]),
+            };
+        }
+        match self.slot(x, y).filter(|_| self.mode == BinMode::Dense) {
             Some(k) => BinIter::Chain {
                 entries: &self.entries,
                 at: self.cells[layer as usize].get(k).map_or(NIL, |c| c[0]),
@@ -439,7 +1072,21 @@ impl BinGrid {
     }
     /// Grid bins allocated over all layers.
     fn allocated(&self) -> usize {
-        self.cells.iter().map(Vec::len).sum()
+        self.cells.iter().map(Vec::len).sum::<usize>()
+            + self.overflow.len()
+            + self.pages.len() * BIN_PAGE_CELLS
+    }
+    fn clear(&mut self) {
+        for grid in &mut self.cells {
+            if !grid.is_empty() {
+                grid.fill([NIL, NIL]);
+            }
+        }
+        self.entries.clear();
+        for page in self.pages.values_mut() {
+            page.fill([NIL, NIL]);
+        }
+        self.overflow.clear();
     }
 }
 /// Bin index range `[x0, x1] x [y0, y1]` covering the die and every fixed
@@ -466,12 +1113,469 @@ pub(crate) fn bin_side(input: &RouteInput) -> Result<i64> {
     input
         .step
         .checked_mul(if input.tracks.is_some() { 2 } else { 8 })
+        .filter(|&side| side > 0)
         .ok_or_else(|| invalid("bin overflow"))
+}
+
+pub(crate) struct InstanceIndex<'a> {
+    source: &'a InstanceObstacles,
+    bin: i64,
+    bins: BinGrid,
+    marks: Vec<u64>,
+    generation: u64,
+    entries: usize,
+    mode: Option<InstanceIndexMode>,
+}
+
+/// Bounded worker-private deduplication state for immutable instance queries.
+pub(crate) struct InstanceQueryScratch {
+    marks: Vec<u64>,
+    generation: u64,
+}
+impl InstanceQueryScratch {
+    pub(crate) fn allocation_bytes(&self) -> u64 {
+        (self.marks.capacity() as u64).saturating_mul(size_of::<u64>() as u64)
+    }
+
+    pub(crate) fn new(instances: usize) -> Result<Self> {
+        let mut marks = Vec::new();
+        marks
+            .try_reserve_exact(instances)
+            .map_err(|_| budget("instance query scratch allocation"))?;
+        marks.resize(instances, 0);
+        Ok(Self {
+            marks,
+            generation: 0,
+        })
+    }
+}
+
+fn instance_extent(
+    die: Rect,
+    bin: i64,
+    source: &InstanceObstacles,
+    mode: Option<InstanceIndexMode>,
+) -> Result<(i64, Rect, usize)> {
+    if bin <= 0 {
+        return Err(invalid("instance bin size"));
+    }
+    let mut bounds = die;
+    let mut entries = 0usize;
+    for i in 0..source.len() {
+        if let Some(r) = source.bounds(i)? {
+            bounds.lx = bounds.lx.min(r.lx);
+            bounds.ly = bounds.ly.min(r.ly);
+            bounds.ux = bounds.ux.max(r.ux);
+            bounds.uy = bounds.uy.max(r.uy);
+            let nx = i128::from(r.ux.div_euclid(bin)) - i128::from(r.lx.div_euclid(bin)) + 1;
+            let ny = i128::from(r.uy.div_euclid(bin)) - i128::from(r.ly.div_euclid(bin)) + 1;
+            let n = usize::try_from(nx * ny).map_err(|_| budget("instance bin count"))?;
+            entries = entries
+                .checked_add(
+                    n.checked_mul(if mode.is_some() {
+                        source.instance_layers(i).count()
+                    } else {
+                        1
+                    })
+                    .ok_or_else(|| budget("instance layer-bin count"))?,
+                )
+                .ok_or_else(|| budget("instance bin count"))?;
+        }
+    }
+    Ok((bin, bounds, entries))
+}
+
+pub(crate) fn instance_index_bytes(input: &RouteInput, limits: &RouteLimits) -> Result<u64> {
+    instance_index_override_bytes(
+        input,
+        limits,
+        input.tracks.as_ref().and_then(|p| p.instance_index),
+    )
+}
+pub(crate) fn instance_index_override_bytes(
+    input: &RouteInput,
+    limits: &RouteLimits,
+    mode: Option<InstanceIndexMode>,
+) -> Result<u64> {
+    let Some(source) = &input.instances else {
+        return Ok(0);
+    };
+    instance_geometry_bytes_mode(
+        source,
+        input.die,
+        input
+            .step
+            .checked_mul(16)
+            .ok_or_else(|| budget("instance bin size"))?,
+        input.layers.len(),
+        limits,
+        mode,
+    )
+}
+
+pub(crate) fn instance_geometry_bytes(
+    source: &InstanceObstacles,
+    die: Rect,
+    bin: i64,
+    layer_count: usize,
+    limits: &RouteLimits,
+) -> Result<u64> {
+    instance_geometry_bytes_mode(source, die, bin, layer_count, limits, None)
+}
+fn instance_geometry_bytes_mode(
+    source: &InstanceObstacles,
+    die: Rect,
+    bin: i64,
+    layer_count: usize,
+    limits: &RouteLimits,
+    mode: Option<InstanceIndexMode>,
+) -> Result<u64> {
+    source.validate(layer_count, limits)?;
+    let (bin, b, entries) = instance_extent(die, bin, source, mode)?;
+    if entries > limits.max_bin_entries {
+        return Err(budget("instance bin-entry limit"));
+    }
+    let (x0, x1, y0, y1) = (
+        b.lx.div_euclid(bin),
+        b.ux.div_euclid(bin),
+        b.ly.div_euclid(bin),
+        b.uy.div_euclid(bin),
+    );
+    let slots = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+    let pages = (i128::from(x1.div_euclid(BIN_PAGE_SIDE))
+        - i128::from(x0.div_euclid(BIN_PAGE_SIDE))
+        + 1)
+        * (i128::from(y1.div_euclid(BIN_PAGE_SIDE)) - i128::from(y0.div_euclid(BIN_PAGE_SIDE)) + 1);
+    let indexed_layers = if mode.is_some() {
+        source.layer_count() as u64
+    } else {
+        1
+    };
+    let grid = if slots.saturating_mul(i128::from(indexed_layers)) <= 1_000_000 {
+        (slots as u64)
+            .saturating_mul(indexed_layers)
+            .saturating_mul(8)
+    } else if source.len() >= 1024 {
+        u64::try_from(pages)
+            .unwrap_or(u64::MAX)
+            .saturating_mul(indexed_layers)
+            .min(entries as u64)
+            .saturating_mul(8320)
+    } else {
+        u64::try_from(slots)
+            .unwrap_or(u64::MAX)
+            .saturating_mul(indexed_layers)
+            .min(entries as u64)
+            .saturating_mul(96)
+    };
+    Ok(grid
+        .saturating_add(entries as u64 * 16)
+        .saturating_add(source.len() as u64 * 8)
+        .saturating_add(if mode.is_some() {
+            layer_count as u64 * 24
+        } else {
+            0
+        }))
+}
+
+impl<'a> InstanceIndex<'a> {
+    fn build_work(
+        source: &InstanceObstacles,
+        die: Rect,
+        bin: i64,
+        mode: Option<InstanceIndexMode>,
+    ) -> Result<usize> {
+        if mode.is_none() {
+            return Ok(0);
+        }
+        let (_, _, entries) = instance_extent(die, bin, source, mode)?;
+        entries
+            .checked_add(source.len())
+            .and_then(|n| n.checked_mul(2))
+            .ok_or_else(|| budget("instance layer-index construction work"))
+    }
+    fn new(
+        input: &RouteInput,
+        source: &'a InstanceObstacles,
+        limits: &RouteLimits,
+    ) -> Result<Self> {
+        Self::for_geometry_mode(
+            source,
+            input.die,
+            input
+                .step
+                .checked_mul(16)
+                .ok_or_else(|| budget("instance bin size"))?,
+            input.layers.len(),
+            limits,
+            input.tracks.as_ref().and_then(|p| p.instance_index),
+        )
+    }
+    pub(crate) fn for_geometry(
+        source: &'a InstanceObstacles,
+        die: Rect,
+        bin: i64,
+        layer_count: usize,
+        limits: &RouteLimits,
+    ) -> Result<Self> {
+        Self::for_geometry_mode(source, die, bin, layer_count, limits, None)
+    }
+    fn for_geometry_mode(
+        source: &'a InstanceObstacles,
+        die: Rect,
+        bin: i64,
+        layer_count: usize,
+        limits: &RouteLimits,
+        mode: Option<InstanceIndexMode>,
+    ) -> Result<Self> {
+        source.validate(layer_count, limits)?;
+        let (bin, b, entries) = instance_extent(die, bin, source, mode)?;
+        if entries > limits.max_bin_entries {
+            return Err(budget("instance bin-entry limit"));
+        }
+        let (x0, x1, y0, y1) = (
+            b.lx.div_euclid(bin),
+            b.ux.div_euclid(bin),
+            b.ly.div_euclid(bin),
+            b.uy.div_euclid(bin),
+        );
+        let cells = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        let bin_mode = if cells.saturating_mul(if mode.is_some() {
+            source.layer_count() as i128
+        } else {
+            1
+        }) <= 1_000_000
+        {
+            BinMode::Dense
+        } else if source.len() >= 1024 {
+            BinMode::Paged
+        } else {
+            BinMode::Sparse
+        };
+        let mut bins = BinGrid {
+            mode: bin_mode,
+            bx0: x0,
+            by0: y0,
+            nx: x1 - x0 + 1,
+            ny: y1 - y0 + 1,
+            cells: vec![Vec::new(); if mode.is_some() { layer_count } else { 1 }],
+            entries: Vec::new(),
+            pages: HashMap::with_hasher(BuildFx),
+            overflow: HashMap::with_hasher(BuildFx),
+        };
+        for i in 0..source.len() {
+            if let Some(r) = source.bounds(i)? {
+                for x in r.lx.div_euclid(bin)..=r.ux.div_euclid(bin) {
+                    for y in r.ly.div_euclid(bin)..=r.uy.div_euclid(bin) {
+                        if mode.is_some() {
+                            for layer in source.instance_layers(i) {
+                                bins.push(layer, x, y, i)?;
+                            }
+                        } else {
+                            bins.push(0, x, y, i)?;
+                        }
+                    }
+                }
+            }
+        }
+        let mut marks = Vec::new();
+        marks
+            .try_reserve_exact(source.len())
+            .map_err(|_| budget("instance query-mark allocation"))?;
+        marks.resize(source.len(), 0);
+        Ok(Self {
+            source,
+            bin,
+            bins,
+            marks,
+            generation: 0,
+            entries,
+            mode,
+        })
+    }
+    fn visit(
+        &mut self,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        limits: &RouteLimits,
+        mut visitor: impl FnMut(Blockage) -> Result<bool>,
+    ) -> Result<bool> {
+        let source = self.source;
+        self.visit_cells(layer, query, work, limits, |i, work| {
+            source.visit_near(
+                i,
+                layer,
+                query,
+                || {
+                    *work = work
+                        .checked_add(1)
+                        .filter(|&n| n <= limits.max_comparisons)
+                        .ok_or_else(|| budget("instance geometry work"))?;
+                    Ok(())
+                },
+                |_, b, _| visitor(b),
+            )
+        })
+    }
+    pub(crate) fn visit_cells(
+        &mut self,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        limits: &RouteLimits,
+        visitor: impl FnMut(usize, &mut usize) -> Result<bool>,
+    ) -> Result<bool> {
+        Self::visit_cells_inner(
+            self.source,
+            self.bin,
+            &self.bins,
+            self.mode,
+            &mut self.marks,
+            &mut self.generation,
+            layer,
+            query,
+            work,
+            limits,
+            visitor,
+        )
+    }
+    /// The spatial bins remain shared; each concurrent query owns its marks.
+    pub(crate) fn visit_cells_with_scratch(
+        &self,
+        scratch: &mut InstanceQueryScratch,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        limits: &RouteLimits,
+        visitor: impl FnMut(usize, &mut usize) -> Result<bool>,
+    ) -> Result<bool> {
+        if scratch.marks.len() != self.source.len() {
+            return Err(budget("instance query scratch extent"));
+        }
+        Self::visit_cells_inner(
+            self.source,
+            self.bin,
+            &self.bins,
+            self.mode,
+            &mut scratch.marks,
+            &mut scratch.generation,
+            layer,
+            query,
+            work,
+            limits,
+            visitor,
+        )
+    }
+    pub(crate) fn query_work_bound(
+        &self,
+        layer: u32,
+        query: Rect,
+        virtual_shapes: usize,
+    ) -> Option<usize> {
+        if !self.source.has_layer(layer) {
+            return Some(0);
+        }
+        let span = |lo: i64, hi: i64| {
+            i128::from(hi.div_euclid(self.bin)) - i128::from(lo.div_euclid(self.bin)) + 1
+        };
+        let extent = span(query.lx, query.ux).checked_mul(span(query.ly, query.uy))?;
+        // Each cell is visited once; each instance and template shape at most once.
+        usize::try_from(extent)
+            .ok()?
+            .checked_add(self.source.len())?
+            .checked_add(virtual_shapes)
+    }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "split immutable index fields from private query marks"
+    )]
+    fn visit_cells_inner(
+        source: &InstanceObstacles,
+        bin: i64,
+        bins: &BinGrid,
+        mode: Option<InstanceIndexMode>,
+        marks: &mut [u64],
+        generation: &mut u64,
+        layer: u32,
+        query: Rect,
+        work: &mut usize,
+        limits: &RouteLimits,
+        mut visitor: impl FnMut(usize, &mut usize) -> Result<bool>,
+    ) -> Result<bool> {
+        if !source.has_layer(layer) {
+            return Ok(true);
+        }
+        *generation = generation
+            .checked_add(1)
+            .ok_or_else(|| budget("instance query generation"))?;
+        let (x0, x1, y0, y1) = (
+            query.lx.div_euclid(bin),
+            query.ux.div_euclid(bin),
+            query.ly.div_euclid(bin),
+            query.uy.div_euclid(bin),
+        );
+        let extent = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        if extent > limits.max_bin_entries as i128 {
+            return Err(budget("instance query extent"));
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                *work = work
+                    .checked_add(1)
+                    .filter(|&n| n <= limits.max_comparisons)
+                    .ok_or_else(|| budget("instance query work"))?;
+                for i in bins.iter(if mode.is_some() { layer } else { 0 }, x, y) {
+                    if marks[i] == *generation {
+                        continue;
+                    }
+                    marks[i] = *generation;
+                    *work = work
+                        .checked_add(1)
+                        .filter(|&n| n <= limits.max_comparisons)
+                        .ok_or_else(|| budget("instance query work"))?;
+                    if !source.bounds(i)?.is_some_and(|b| overlap(query, b)) {
+                        continue;
+                    }
+                    let clear = visitor(i, work)?;
+                    if !clear {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct SpatialCapture<'a> {
+    shapes: &'a [Blockage],
+    alive: &'a [bool],
+    routed: &'a [bool],
+    work: usize,
+    bin: i64,
+    entries: usize,
+    generation: u64,
+    instance_generation: Option<u64>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SpatialState {
+    shapes: Vec<Blockage>,
+    alive: Vec<bool>,
+    routed: Vec<bool>,
+    pub(crate) work: usize,
+    bin: i64,
+    entries: usize,
+    generation: u64,
+    instance_generation: Option<u64>,
 }
 pub(crate) struct Spatial<'a> {
     pub(crate) input: &'a RouteInput,
     limits: &'a RouteLimits,
     bin: i64,
+    /// Added geometry only; immutable fixed shapes remain in `input.obstacles`.
     shapes: Vec<Blockage>,
     bins: BinGrid,
     marks: Vec<u64>,
@@ -483,6 +1587,11 @@ pub(crate) struct Spatial<'a> {
     /// True for rip-up-able routed shapes (track router); obstacles, pins and
     /// reserved pin access are fixed.
     routed: Vec<bool>,
+    /// Reclaimed `shapes` offsets un-indexed by `compact_dead`.
+    free_offsets: Vec<usize>,
+    /// Count of `!alive` shapes still present in `bins`.
+    dead_count: usize,
+    instances: Option<InstanceIndex<'a>>,
     /// Supply ties by router net: (supply net, rail zone).
     ties: HashMap<u32, (u32, LayerRect)>,
 }
@@ -492,89 +1601,394 @@ pub(crate) enum Soft {
     Blocked,
     Clear { near: bool, victims: Vec<u32> },
 }
+fn same_net_shapes(
+    ties: &HashMap<u32, (u32, LayerRect)>,
+    net: u32,
+    layer: u32,
+    rect: Rect,
+    b: &Blockage,
+) -> bool {
+    if b.net == Some(net) {
+        return true;
+    }
+    match (ties.get(&net), b.net) {
+        (Some((supply, zone)), Some(n)) if n == *supply => {
+            zone.layer == layer
+                && overlap(rect, zone.rect)
+                && route_rules::relation(rect, b.rect, 0) == route_rules::Relation::Connected
+        }
+        _ => false,
+    }
+}
+
 impl<'a> Spatial<'a> {
+    pub(crate) fn capture(&self) -> Result<SpatialCapture<'_>> {
+        if self.shapes.len() > 4_000_000 {
+            return Err(budget("replay shape capture limit"));
+        }
+        Ok(SpatialCapture {
+            shapes: &self.shapes,
+            alive: &self.alive,
+            routed: &self.routed,
+            work: self.work,
+            bin: self.bin,
+            entries: self.entries,
+            generation: self.generation,
+            instance_generation: self.instances.as_ref().map(|v| v.generation),
+        })
+    }
+    pub(crate) fn restore_capture(
+        input: &'a RouteInput,
+        limits: &'a RouteLimits,
+        state: SpatialState,
+    ) -> Result<Self> {
+        let n = state.shapes.len();
+        if n > 4_000_000
+            || n != state.alive.len()
+            || n != state.routed.len()
+            || state.work > limits.max_comparisons
+            || state.entries > limits.max_bin_entries
+        {
+            return Err(budget("replay spatial state limits"));
+        }
+        let mut result = Self::new(input, limits)?;
+        for (i, shape) in state.shapes.into_iter().enumerate() {
+            if shape.layer as usize >= input.layers.len() || !shape.rect.valid() {
+                return Err(invalid("replay obstacle geometry"));
+            }
+            let id = if state.routed[i] {
+                result.add_routed(shape)?
+            } else {
+                result.add_fixed(shape)?
+            };
+            if !state.alive[i] {
+                result.remove(id);
+            }
+        }
+        if result.bin != state.bin || result.entries != state.entries {
+            return Err(invalid("replay spatial index differs"));
+        }
+        result.work = state
+            .work
+            .checked_add(result.instance_index_build_work()?)
+            .filter(|&n| n <= limits.max_comparisons)
+            .ok_or_else(|| budget("replay instance-index construction work"))?;
+        result.generation = state.generation;
+        match (&mut result.instances, state.instance_generation) {
+            (Some(index), Some(generation)) => index.generation = generation,
+            (None, None) => (),
+            _ => return Err(invalid("replay instance index differs")),
+        }
+        Ok(result)
+    }
+
     pub(crate) fn new(input: &'a RouteInput, limits: &'a RouteLimits) -> Result<Self> {
+        if input
+            .obstacles
+            .len()
+            .saturating_add(input.instances.as_ref().map_or(0, InstanceObstacles::len))
+            > limits.max_obstacles
+        {
+            return Err(budget("routing obstacle count"));
+        }
+        let instance_work = input.instances.as_ref().map_or(Ok(0), |source| {
+            InstanceIndex::build_work(
+                source,
+                input.die,
+                input
+                    .step
+                    .checked_mul(16)
+                    .ok_or_else(|| budget("instance bin size"))?,
+                input.tracks.as_ref().and_then(|p| p.instance_index),
+            )
+        })?;
+        if instance_work > limits.max_comparisons {
+            return Err(budget("instance-index construction work"));
+        }
+        let instances = input
+            .instances
+            .as_ref()
+            .map(|s| InstanceIndex::new(input, s, limits))
+            .transpose()?;
+        let instance_entries = instances.as_ref().map_or(0, |i| i.entries);
         // The track router queries far more often with short edges; it
         // uses bins of two access steps (the lattice router keeps eight).
         let bin = bin_side(input)?;
         let (x0, x1, y0, y1, cells) = bin_extent(input, bin);
-        if cells.saturating_mul(input.layers.len() as u64) > limits.max_bin_entries as u64 {
-            return Err(budget("routing spatial-bin grid"));
-        }
         let mut s = Self {
             input,
             limits,
             bin,
             shapes: Vec::new(),
             bins: BinGrid {
+                mode: bin_mode(input, cells),
                 bx0: x0,
                 by0: y0,
                 nx: x1 - x0 + 1,
                 ny: y1 - y0 + 1,
                 cells: vec![Vec::new(); input.layers.len()],
                 entries: Vec::new(),
+                pages: HashMap::with_hasher(BuildFx),
                 overflow: HashMap::with_hasher(BuildFx),
             },
-            marks: Vec::new(),
+            marks: vec![0; input.obstacles.len()],
             generation: 0,
-            entries: 0,
-            work: 0,
+            entries: instance_entries,
+            work: instance_work,
             alive: Vec::new(),
             routed: Vec::new(),
+            free_offsets: Vec::new(),
+            dead_count: 0,
+            instances,
             ties: input
                 .ties
                 .iter()
                 .map(|t| (t.net, (t.supply, t.zone.clone())))
                 .collect(),
         };
-        for b in &input.obstacles {
-            s.add(b.clone())?;
+        for (id, b) in input.obstacles.iter().enumerate() {
+            s.index(id, b)?;
         }
         Ok(s)
+    }
+    pub(crate) fn replay_instance_index(
+        &mut self,
+        mode: Option<InstanceIndexMode>,
+    ) -> Result<usize> {
+        if self.instances.as_ref().and_then(|i| i.mode) == mode {
+            return Ok(0);
+        }
+        let Some(source) = self.input.instances.as_ref() else {
+            return Ok(0);
+        };
+        let bin = self
+            .input
+            .step
+            .checked_mul(16)
+            .ok_or_else(|| budget("instance bin size"))?;
+        let bytes = instance_geometry_bytes_mode(
+            source,
+            self.input.die,
+            bin,
+            self.input.layers.len(),
+            self.limits,
+            mode,
+        )?;
+        if bytes
+            > self
+                .input
+                .tracks
+                .as_ref()
+                .map_or(0, |p| p.memory_mib)
+                .saturating_mul(1 << 20)
+        {
+            return Err(budget("replay instance-index memory admission"));
+        }
+        let charged = InstanceIndex::build_work(source, self.input.die, bin, mode)?;
+        self.work = self
+            .work
+            .checked_add(charged)
+            .filter(|&n| n <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("replay instance-index construction work"))?;
+        let previous_entries = self.instances.as_ref().map_or(0, |i| i.entries);
+        let generation = self.instances.as_ref().map_or(0, |i| i.generation);
+        // No query may retain this representation across a replay boundary.
+        // Dynamic shape handles and tombstones are deliberately untouched.
+        drop(self.instances.take());
+        let mut index = InstanceIndex::for_geometry_mode(
+            source,
+            self.input.die,
+            bin,
+            self.input.layers.len(),
+            self.limits,
+            mode,
+        )?;
+        self.entries = self
+            .entries
+            .checked_sub(previous_entries)
+            .and_then(|n| n.checked_add(index.entries))
+            .filter(|&n| n <= self.limits.max_bin_entries)
+            .ok_or_else(|| budget("replay combined bin-entry limit"))?;
+        index.generation = generation;
+        self.instances = Some(index);
+        Ok(charged)
+    }
+    pub(crate) fn instance_index_build_work(&self) -> Result<usize> {
+        match &self.instances {
+            Some(index) if index.mode.is_some() => index
+                .entries
+                .checked_add(index.source.len())
+                .and_then(|n| n.checked_mul(2))
+                .ok_or_else(|| budget("instance layer-index construction work")),
+            _ => Ok(0),
+        }
     }
     /// Is stored shape `b` the query net's own metal? A supply tie also owns
     /// supply shapes that its query touches inside its rail zone.
     fn same_net(&self, net: u32, layer: u32, rect: Rect, b: &Blockage) -> bool {
-        if b.net == Some(net) {
-            return true;
-        }
-        match (self.ties.get(&net), b.net) {
-            (Some((supply, zone)), Some(n)) if n == *supply => {
-                zone.layer == layer
-                    && overlap(rect, zone.rect)
-                    && route_rules::relation(rect, b.rect, 0) == route_rules::Relation::Connected
+        same_net_shapes(&self.ties, net, layer, rect, b)
+    }
+    fn probe_instances(
+        &mut self,
+        layer: u32,
+        rect: Rect,
+        query: Rect,
+        net: u32,
+    ) -> Result<Option<bool>> {
+        let Some(instances) = &mut self.instances else {
+            return Ok(Some(false));
+        };
+        let ties = &self.ties;
+        let routing = self.input.layers[layer as usize].vertical.is_some();
+        let rules = self.input.rules;
+        let spacing = self.input.layers[layer as usize].spacing;
+        let mut near = false;
+        let clear = instances.visit(layer, query, &mut self.work, self.limits, |b| {
+            if !overlap(query, b.rect) {
+                return Ok(true);
             }
-            _ => false,
-        }
+            if rules && routing_separated(&self.input.layers[layer as usize], rect, b.rect) {
+                return Ok(true);
+            }
+            let shared = same_net_shapes(ties, net, layer, rect, &b) && (routing || rect == b.rect);
+            if !shared {
+                return Ok(false);
+            }
+            if rules
+                && routing
+                && route_rules::relation(rect, b.rect, spacing) == route_rules::Relation::Near
+            {
+                near = true;
+            }
+            Ok(true)
+        })?;
+        Ok(clear.then_some(near))
     }
     /// Add a rip-up-able routed shape; returns its id.
     pub(crate) fn add_routed(&mut self, b: Blockage) -> Result<usize> {
-        self.add(b)?;
-        let id = self.shapes.len() - 1;
-        self.routed[id] = true;
-        Ok(id)
+        self.add_slot(b, true)
     }
     /// Add a fixed shape; returns its id.
     pub(crate) fn add_fixed(&mut self, b: Blockage) -> Result<usize> {
-        self.add(b)?;
-        Ok(self.shapes.len() - 1)
+        self.add_slot(b, false)
     }
     pub(crate) fn remove(&mut self, id: usize) {
-        self.alive[id] = false;
+        let offset = id - self.input.obstacles.len();
+        if self.alive[offset] {
+            self.alive[offset] = false;
+            self.dead_count += 1;
+        }
+    }
+    pub(crate) fn restore(&mut self, id: usize) -> Result<()> {
+        let offset = id
+            .checked_sub(self.input.obstacles.len())
+            .ok_or_else(|| invalid("cannot restore an input obstacle"))?;
+        let alive = self
+            .alive
+            .get_mut(offset)
+            .ok_or_else(|| invalid("invalid restored obstacle"))?;
+        if !*alive {
+            *alive = true;
+            self.dead_count = self.dead_count.saturating_sub(1);
+        }
+        Ok(())
+    }
+    pub(crate) fn should_compact(&self) -> bool {
+        self.dead_count >= 262_144 && self.free_offsets.len() < 65_536
+    }
+    pub(crate) fn compact_dead(&mut self) -> Result<()> {
+        self.bins.clear();
+        self.entries = self.instances.as_ref().map_or(0, |i| i.entries);
+        self.free_offsets.clear();
+        self.dead_count = 0;
+        for (id, b) in self.input.obstacles.iter().enumerate() {
+            self.index(id, b)?;
+        }
+        let base = self.input.obstacles.len();
+        for offset in 0..self.shapes.len() {
+            if self.alive[offset] {
+                let b = self.shapes[offset].clone();
+                self.index(base + offset, &b)?;
+            }
+        }
+        for offset in (0..self.shapes.len()).rev() {
+            if !self.alive[offset] {
+                self.free_offsets.push(offset);
+            }
+        }
+        Ok(())
     }
     /// (allocated grid bins, bin entries, shapes, bin side) for telemetry.
     pub(crate) fn footprint(&self) -> (usize, usize, usize, i64) {
         (
-            self.bins.allocated(),
+            self.bins.allocated() + self.instances.as_ref().map_or(0, |i| i.bins.allocated()),
             self.entries,
-            self.shapes.len(),
+            self.len()
+                + self
+                    .input
+                    .instances
+                    .as_ref()
+                    .map_or(0, InstanceObstacles::len),
             self.bin,
         )
     }
     pub(crate) fn add(&mut self, b: Blockage) -> Result<()> {
-        if self.shapes.len() >= self.limits.max_obstacles {
-            return Err(budget("routing obstacle count"));
+        self.add_slot(b, false).map(|_| ())
+    }
+    fn add_slot(&mut self, b: Blockage, routed: bool) -> Result<usize> {
+        if let Some(&offset) = self.free_offsets.last() {
+            let id = self.input.obstacles.len() + offset;
+            self.index(id, &b)?;
+            self.free_offsets.pop();
+            self.shapes[offset] = b;
+            self.marks[id] = 0;
+            self.alive[offset] = true;
+            self.routed[offset] = routed;
+            return Ok(id);
         }
+        if self.len().saturating_add(
+            self.input
+                .instances
+                .as_ref()
+                .map_or(0, InstanceObstacles::len),
+        ) >= self.limits.max_obstacles
+        {
+            return Err(budget(&format!(
+                "routing obstacle count: {} stored plus {} instance shapes, limit {}; {} removed stored shapes",
+                self.len(),
+                self.input
+                    .instances
+                    .as_ref()
+                    .map_or(0, InstanceObstacles::len),
+                self.limits.max_obstacles,
+                self.alive.iter().filter(|alive| !**alive).count()
+            )));
+        }
+        let id = self.len();
+        self.index(id, &b)?;
+        self.shapes.push(b);
+        self.marks.push(0);
+        self.alive.push(true);
+        self.routed.push(routed);
+        Ok(id)
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.input.obstacles.len() + self.shapes.len()
+    }
+    fn shape(&self, id: usize) -> &Blockage {
+        if id < self.input.obstacles.len() {
+            &self.input.obstacles[id]
+        } else {
+            &self.shapes[id - self.input.obstacles.len()]
+        }
+    }
+    fn alive(&self, id: usize) -> bool {
+        id < self.input.obstacles.len() || self.alive[id - self.input.obstacles.len()]
+    }
+    fn routed(&self, id: usize) -> bool {
+        id >= self.input.obstacles.len() && self.routed[id - self.input.obstacles.len()]
+    }
+    fn index(&mut self, id: usize, b: &Blockage) -> Result<()> {
         if b.layer as usize >= self.input.layers.len() || !b.rect.valid() {
             return Err(invalid("routing obstacle"));
         }
@@ -588,21 +2002,75 @@ impl<'a> Spatial<'a> {
         if n < 0 || n > self.limits.max_bin_entries.saturating_sub(self.entries) as i128 {
             return Err(budget("routing spatial-bin count"));
         }
-        let id = self.shapes.len();
         for x in x0..=x1 {
             for y in y0..=y1 {
                 self.bins.push(b.layer, x, y, id)?;
                 self.entries += 1;
             }
         }
-        self.shapes.push(b);
-        self.marks.push(0);
-        self.alive.push(true);
-        self.routed.push(false);
         Ok(())
     }
     pub(crate) fn clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
         Ok(self.probe(layer, rect, net)?.is_some())
+    }
+    /// Exact clearance for a long capacity span. Sparse fixtures can have
+    /// fewer stored shapes than empty bins along the span; scan those shapes
+    /// directly instead of charging work proportional to empty chip area.
+    pub(crate) fn span_clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
+        let query = expand(rect, self.input.layers[layer as usize].spacing)?;
+        let columns = i128::from(query.ux.div_euclid(self.bin))
+            - i128::from(query.lx.div_euclid(self.bin))
+            + 1;
+        let rows = i128::from(query.uy.div_euclid(self.bin))
+            - i128::from(query.ly.div_euclid(self.bin))
+            + 1;
+        if self.instances.is_some() || columns.saturating_mul(rows) <= self.len() as i128 {
+            return self.clear(layer, rect, net);
+        }
+        if !self.input.die.contains(rect) {
+            return Ok(false);
+        }
+        self.work = self
+            .work
+            .checked_add(self.len().saturating_add(1))
+            .filter(|&n| n <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("capacity span comparison limit"))?;
+        let routing = self.input.layers[layer as usize].vertical.is_some();
+        for id in 0..self.len() {
+            let shape = self.shape(id);
+            if self.alive(id)
+                && shape.layer == layer
+                && overlap(query, shape.rect)
+                && !(self.input.rules
+                    && routing_separated(&self.input.layers[layer as usize], rect, shape.rect))
+                && !(self.same_net(net, layer, rect, shape) && (routing || rect == shape.rect))
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Bounded diagnostic for a stored shape rejected by the independent
+    /// validator. Instance-template collisions remain identified by layer.
+    pub(crate) fn stored_collision(&self, layer: u32, rect: Rect, net: u32) -> Result<String> {
+        let query = expand(rect, self.input.layers[layer as usize].spacing)?;
+        let routing = self.input.layers[layer as usize].vertical.is_some();
+        for id in 0..self.len() {
+            if !self.alive(id) {
+                continue;
+            }
+            let b = self.shape(id);
+            if b.layer == layer
+                && overlap(query, b.rect)
+                && !(self.input.rules
+                    && routing_separated(&self.input.layers[layer as usize], rect, b.rect))
+                && !(self.same_net(net, layer, rect, b) && (routing || rect == b.rect))
+            {
+                return Ok(format!("against net {:?} rect {:?}", b.net, b.rect));
+            }
+        }
+        Ok("against instance geometry or die boundary".into())
     }
     /// Like `probe`, but routed shapes of other nets do not block: their nets
     /// are returned as victims. Fixed shapes of other nets still block.
@@ -644,18 +2112,23 @@ impl<'a> Spatial<'a> {
                         if self.work > self.limits.max_comparisons {
                             return Err(budget("routing comparison limit"));
                         }
-                        if !self.alive[id] {
+                        if !self.alive(id) {
                             continue;
                         }
-                        let b = &self.shapes[id];
+                        let b = self.shape(id);
                         if !overlap(query, b.rect) {
+                            continue;
+                        }
+                        if self.input.rules
+                            && routing_separated(&self.input.layers[layer as usize], rect, b.rect)
+                        {
                             continue;
                         }
                         let shared =
                             self.same_net(net, layer, rect, b) && (routing || rect == b.rect);
                         if !shared {
                             match b.net {
-                                Some(other) if self.routed[id] && other != net => {
+                                Some(other) if self.routed(id) && other != net => {
                                     victims.push(other)
                                 }
                                 _ => return Ok(Soft::Blocked),
@@ -675,6 +2148,10 @@ impl<'a> Spatial<'a> {
                     }
                 }
             }
+        }
+        match self.probe_instances(layer, rect, query, net)? {
+            Some(n) => near |= n,
+            None => return Ok(Soft::Blocked),
         }
         victims.sort_unstable();
         victims.dedup();
@@ -737,12 +2214,17 @@ impl<'a> Spatial<'a> {
                         if self.work > self.limits.max_comparisons {
                             return Err(budget("routing comparison limit"));
                         }
-                        if !self.alive[id] {
+                        if !self.alive(id) {
                             continue;
                         }
-                        let b = &self.shapes[id];
+                        let b = self.shape(id);
                         let routing = self.input.layers[layer as usize].vertical.is_some();
                         if !overlap(query, b.rect) {
+                            continue;
+                        }
+                        if self.input.rules
+                            && routing_separated(&self.input.layers[layer as usize], rect, b.rect)
+                        {
                             continue;
                         }
                         let shared =
@@ -763,6 +2245,10 @@ impl<'a> Spatial<'a> {
                     }
                 }
             }
+        }
+        match self.probe_instances(layer, rect, query, net)? {
+            Some(n) => near |= n,
+            None => return Ok(None),
         }
         Ok(Some(near))
     }
@@ -826,6 +2312,9 @@ pub(crate) fn preflight(input: &RouteInput, limits: &RouteLimits) -> Result<()> 
     if let Some(plan) = &input.tracks {
         limits.validate_track()?;
         crate::troute::check_plan(input, plan)?;
+        if let Some(config) = &plan.single_owner_repair {
+            config.validate(limits)?;
+        }
     } else {
         limits.validate()?;
     }
@@ -874,6 +2363,12 @@ pub(crate) fn preflight(input: &RouteInput, limits: &RouteLimits) -> Result<()> 
             || !v.shapes.iter().any(|s| s.layer == v.upper)
         {
             return Err(invalid("via lacks routing enclosure"));
+        }
+    }
+    if let Some(instances) = &input.instances {
+        instances.validate(input.layers.len(), limits)?;
+        if instances.len().saturating_add(input.obstacles.len()) > limits.max_obstacles {
+            return Err(budget("retained instance-obstacle records"));
         }
     }
     let mut pins = HashSet::new();
@@ -1237,7 +2732,7 @@ pub(crate) fn access_table_at(
                     let halo = expand(rect, rule.spacing)?;
                     for b in class.blockers.iter().filter(|b| b.layer == s.layer) {
                         *work += 1;
-                        if overlap(halo, b.rect) {
+                        if overlap(halo, b.rect) && !routing_separated(rule, rect, b.rect) {
                             continue 'kind;
                         }
                     }
@@ -1557,6 +3052,24 @@ pub fn track_memory_estimate(
     crate::troute::estimate_for(input, limits)
 }
 
+pub use crate::troute::PriorRoutes;
+
+/// Track-router ECO: keep the still-valid prior geometry (see
+/// `troute::route_with_prior`); the lattice router has no ECO mode.
+pub fn route_cpu_ref_with_prior(
+    input: &RouteInput,
+    limits: &RouteLimits,
+    prior: &PriorRoutes,
+) -> Result<Routes> {
+    preflight(input, limits)?;
+    if input.tracks.is_none() {
+        return Err(invalid(
+            "ECO routing with a prior route needs the track router",
+        ));
+    }
+    crate::troute::route_with_prior(input, limits, Some(prior))
+}
+
 pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> {
     preflight(input, limits)?;
     if input.tracks.is_some() {
@@ -1802,10 +3315,12 @@ pub fn route_cpu_ref(input: &RouteInput, limits: &RouteLimits) -> Result<Routes>
     Ok(out)
 }
 
+#[cfg(test)]
 type Node = (u32, u32, i64, i64);
 
 /// Remove dead-end wires/vias that lead to no access point (bounded by edges).
-fn prune(input: &RouteInput, out: &mut Routes) {
+#[cfg(test)]
+fn prune_legacy(input: &RouteInput, out: &mut Routes) {
     let anchors: BTreeSet<Node> = out
         .access
         .iter()
@@ -1871,9 +3386,39 @@ fn prune(input: &RouteInput, out: &mut Routes) {
     });
 }
 
+/// Prune one endpoint graph at a time; output order and cyclic metal remain unchanged.
+fn prune(input: &RouteInput, out: &mut Routes, limits: &RouteLimits) -> Result<usize> {
+    let mut work = 0;
+    let index = crate::route_graph::NetIndex::new(out, limits, &mut work)?;
+    let nw = out.wires.len();
+    let mut alive = vec![true; nw + out.vias.len()];
+    for &net in index.nets() {
+        let sources = index.sources(out, net);
+        let graph = crate::route_graph::Graph::new(input, out, sources, limits, &mut work)?;
+        let kept = graph.pruned(&mut work, limits.max_comparisons)?;
+        for (&i, &keep) in sources.wires.iter().zip(&kept) {
+            alive[i as usize] = keep;
+        }
+        for (&i, &keep) in sources.vias.iter().zip(&kept[sources.wires.len()..]) {
+            alive[nw + i as usize] = keep;
+        }
+    }
+    let mut i = 0;
+    out.wires.retain(|_| {
+        i += 1;
+        alive[i - 1]
+    });
+    out.vias.retain(|_| {
+        i += 1;
+        alive[i - 1]
+    });
+    Ok(work)
+}
+
 /// Post-route same-net legalization: prune dead ends, then up to eight rounds
-/// of notch/point-contact patches and minimum-area stubs, each checked against
-/// other nets. Unresolved violations fail explicitly (HEAD stays unchanged).
+/// of notch/point-contact patches, minimum-area stubs and same-net wide-gap
+/// bridges, each checked against other nets. Unresolved violations fail explicitly
+/// (HEAD stays unchanged).
 pub(crate) fn cleanup(input: &RouteInput, out: &mut Routes, limits: &RouteLimits) -> Result<usize> {
     let (work, remaining) = cleanup_report(input, out, limits)?;
     if let Some(v) = remaining.first() {
@@ -1892,7 +3437,7 @@ pub(crate) fn cleanup_report(
     out: &mut Routes,
     limits: &RouteLimits,
 ) -> Result<(usize, Vec<Violation>)> {
-    prune(input, out);
+    let mut work = prune(input, out, limits)?;
     let mut spatial = Spatial::new(input, limits)?;
     for w in &out.wires {
         spatial.add_wire(w)?;
@@ -1900,12 +3445,24 @@ pub(crate) fn cleanup_report(
     for v in &out.vias {
         spatial.add_via(v)?;
     }
-    let mut work = 0usize;
+    for p in &out.patches {
+        spatial.add(Blockage {
+            layer: p.layer,
+            rect: p.rect,
+            net: Some(p.net),
+        })?;
+    }
     let mut tried = BTreeSet::new();
     for _ in 0..8 {
-        let violations = route_rules::check(input, out, limits, &mut work)?;
+        let mut violations = route_rules::check(input, out, limits, &mut work)?;
         if violations.is_empty() {
-            break;
+            violations = route_rules::wide_check(input, out, limits, &mut work)?
+                .into_iter()
+                .filter(|v| matches!(v, Violation::Wide { owner, other, .. } if owner == other))
+                .collect();
+            if violations.is_empty() {
+                break;
+            }
         }
         let mut changed = false;
         let cache = if input.tracks.is_some()
@@ -1913,7 +3470,12 @@ pub(crate) fn cleanup_report(
                 .iter()
                 .any(|v| matches!(v, Violation::Area { .. }))
         {
-            Some(route_rules::collect(input, out)?)
+            Some(crate::rule_index::RuleIndex::new(
+                input,
+                out,
+                &mut work,
+                limits.max_comparisons,
+            )?)
         } else {
             None
         };
@@ -1926,18 +3488,36 @@ pub(crate) fn cleanup_report(
                     } else {
                         route_rules::fill_for(*a, *b, width, input.grid)
                     };
-                    if tried.insert((*net, *layer, fill.lx, fill.ly, fill.ux, fill.uy))
-                        && spatial.clear(*layer, fill, *net)?
-                    {
+                    let fresh = tried.insert((*net, *layer, fill.lx, fill.ly, fill.ux, fill.uy));
+                    let fills = if fresh && spatial.clear(*layer, fill, *net)? {
+                        vec![fill]
+                    } else if fresh && input.tracks.is_some() {
+                        // The robust box reaches another net: try the smaller bridges.
+                        let mut chosen = Vec::new();
+                        for rects in route_rules::bridges(*a, *b, width, input.grid) {
+                            let mut clear = true;
+                            for r in &rects {
+                                clear = clear && spatial.clear(*layer, *r, *net)?;
+                            }
+                            if clear {
+                                chosen = rects;
+                                break;
+                            }
+                        }
+                        chosen
+                    } else {
+                        Vec::new()
+                    };
+                    for rect in fills {
                         spatial.add(Blockage {
                             layer: *layer,
-                            rect: fill,
+                            rect,
                             net: Some(*net),
                         })?;
                         out.patches.push(Patch {
                             net: *net,
                             layer: *layer,
-                            rect: fill,
+                            rect,
                         });
                         changed = true;
                     }
@@ -1945,7 +3525,7 @@ pub(crate) fn cleanup_report(
                 Violation::Area {
                     net, layer, shapes, ..
                 } => {
-                    if let Some(w) = area_stub(
+                    if let Some(stubs) = area_stub(
                         input,
                         out,
                         &mut spatial,
@@ -1956,8 +3536,10 @@ pub(crate) fn cleanup_report(
                         &mut work,
                         cache.as_ref(),
                     )? {
-                        spatial.add_wire(&w)?;
-                        out.wires.push(w);
+                        for w in stubs {
+                            spatial.add_wire(&w)?;
+                            out.wires.push(w);
+                        }
                         changed = true;
                     }
                 }
@@ -1984,14 +3566,73 @@ pub(crate) fn cleanup_report(
                         changed = true;
                     }
                 }
-                Violation::Floating { .. } => {}
+                Violation::Neck { net, layer, a, b } => {
+                    let width = input.layers[*layer as usize].width;
+                    let Some((_, mut fills)) = route_rules::neck(*a, *b, width) else {
+                        continue;
+                    };
+                    fills.sort_by_key(|f| i128::from(f.ux - f.lx) * i128::from(f.uy - f.ly));
+                    for fill in fills {
+                        if tried.insert((*net, *layer, fill.lx, fill.ly, fill.ux, fill.uy))
+                            && spatial.clear(*layer, fill, *net)?
+                        {
+                            spatial.add(Blockage {
+                                layer: *layer,
+                                rect: fill,
+                                net: Some(*net),
+                            })?;
+                            out.patches.push(Patch {
+                                net: *net,
+                                layer: *layer,
+                                rect: fill,
+                            });
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+                Violation::Wide {
+                    owner,
+                    other,
+                    layer,
+                    wide,
+                    near,
+                    ..
+                } if owner == other => {
+                    // Fill an open gap of the same electrical net across
+                    // their illegal wide-spacing gap. All rules are checked
+                    // again; a blocked bridge is left for strict re-routing.
+                    let width = input.layers[*layer as usize].width;
+                    let fill = route_rules::fill_for_robust(*wide, *near, width, input.grid);
+                    if tried.insert((*owner, *layer, fill.lx, fill.ly, fill.ux, fill.uy))
+                        && spatial.clear(*layer, fill, *owner)?
+                    {
+                        if out.patches.len() >= limits.max_segments {
+                            return Err(budget("wide-metal patch count"));
+                        }
+                        spatial.add(Blockage {
+                            layer: *layer,
+                            rect: fill,
+                            net: Some(*owner),
+                        })?;
+                        out.patches.push(Patch {
+                            net: *owner,
+                            layer: *layer,
+                            rect: fill,
+                        });
+                        changed = true;
+                    }
+                }
+                Violation::Floating { .. } | Violation::Wide { .. } => {}
             }
         }
         if !changed {
             break;
         }
     }
-    let remaining = route_rules::check(input, out, limits, &mut work)?;
+    let mut remaining = route_rules::check(input, out, limits, &mut work)?;
+    // Remaining wide pairs require re-routing the owner or a routed neighbour.
+    remaining.extend(route_rules::wide_check(input, out, limits, &mut work)?);
     let work = work
         .checked_add(spatial.work)
         .ok_or_else(|| budget("routing comparison limit"))?;
@@ -2000,6 +3641,8 @@ pub(crate) fn cleanup_report(
 
 /// Shortest default-width stub from a via/wire node of the component that
 /// lifts its merged area to the LEF minimum without new same-net notches.
+/// When no single direction has room (a pad between two neighbours on its
+/// track), the extension is split into two stubs on opposite sides.
 #[allow(clippy::too_many_arguments)]
 fn area_stub(
     input: &RouteInput,
@@ -2010,18 +3653,24 @@ fn area_stub(
     shapes: &[Rect],
     limits: &RouteLimits,
     work: &mut usize,
-    cache: Option<&BTreeMap<(u32, u32), Vec<route_rules::Shape>>>,
-) -> Result<Option<Wire>> {
+    cache: Option<&crate::rule_index::RuleIndex>,
+) -> Result<Option<Vec<Wire>>> {
     let rule = &input.layers[layer as usize];
     let Some(min) = rule.min_area else {
         return Ok(None);
     };
     let cap = limits.max_comparisons;
+    let owned;
+    let index = if let Some(index) = cache {
+        index
+    } else {
+        owned = crate::rule_index::RuleIndex::new(input, out, work, cap)?;
+        &owned
+    };
     let inside = |p: [i64; 2]| shapes.iter().any(|s| contains(*s, p));
     let mut anchors: Vec<[i64; 2]> = Vec::new();
-    let vias: BTreeSet<[i64; 2]> = out
-        .vias
-        .iter()
+    let vias: BTreeSet<[i64; 2]> = index
+        .vias(out, net)?
         .filter(|v| {
             v.net == net
                 && input.vias[v.kind as usize]
@@ -2033,28 +3682,20 @@ fn area_stub(
         .map(|v| v.at)
         .collect();
     anchors.extend(vias.iter().copied());
-    let ends: BTreeSet<[i64; 2]> = out
-        .wires
-        .iter()
+    let ends: BTreeSet<[i64; 2]> = index
+        .wires(out, net)?
         .filter(|w| w.net == net && w.layer == layer)
         .flat_map(|w| [w.start, w.end])
         .filter(|p| inside(*p))
         .collect();
     anchors.extend(ends.into_iter().filter(|p| !vias.contains(p)));
-    let others: Vec<Rect> = match cache {
-        // Track mode: one same-net collection per repair round (shapes of
-        // this round's own patches are re-checked in the next round).
-        Some(groups) => groups
-            .get(&(net, layer))
-            .map(|g| g.iter().map(|s| s.rect).collect())
-            .unwrap_or_default(),
-        None => route_rules::collect(input, out)?
-            .remove(&(net, layer))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| s.rect)
-            .collect(),
-    };
+    let others: Vec<Rect> = index
+        .collect(input, out, net, limits, work)?
+        .remove(&(net, layer))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|shape| shape.rect)
+        .collect();
     let span = shapes
         .iter()
         .map(|s| (s.ux - s.lx).max(s.uy - s.ly))
@@ -2081,16 +3722,18 @@ fn area_stub(
         let r = wire_rect(&w, rule.width)?;
         Ok((w, r))
     };
-    for a in anchors {
-        for d in dirs {
+    // Shortest n in 1..=steps whose stub (plus `extra`) reaches the minimum.
+    let shortest =
+        |a: [i64; 2], d: [i64; 2], extra: Option<Rect>, work: &mut usize| -> Result<Option<i64>> {
             let area = |n: i64, work: &mut usize| -> Result<i128> {
                 let (_, r) = stub(a, d, n)?;
                 let mut all = shapes.to_vec();
+                all.extend(extra);
                 all.push(r);
                 route_rules::union_area(&all, work, cap)
             };
             if area(steps, work)? < i128::from(min) {
-                continue;
+                return Ok(None);
             }
             let (mut lo, mut hi) = (1i64, steps);
             while lo < hi {
@@ -2101,13 +3744,61 @@ fn area_stub(
                     lo = mid + 1;
                 }
             }
-            let (w, r) = stub(a, d, lo)?;
+            Ok(Some(lo))
+        };
+    for &a in &anchors {
+        for d in dirs {
+            let Some(n) = shortest(a, d, None, work)? else {
+                continue;
+            };
+            let (w, r) = stub(a, d, n)?;
             if !spatial.clear(layer, r, net)?
                 || !route_rules::local_ok(r, &others, rule.spacing, work, cap)?
             {
                 continue;
             }
-            return Ok(Some(w));
+            return Ok(Some(vec![w]));
+        }
+    }
+    for &a in &anchors {
+        for d in [dirs[0], dirs[2]] {
+            let back = [-d[0], -d[1]];
+            // A longer back stub only covers more, so the first blocked one ends the scan.
+            for n1 in 1..steps {
+                let (w1, r1) = stub(a, back, n1)?;
+                if !spatial.clear(layer, r1, net)? {
+                    break;
+                }
+                let Some(n2) = shortest(a, d, Some(r1), work)? else {
+                    continue;
+                };
+                let (w2, r2) = stub(a, d, n2)?;
+                if spatial.clear(layer, r2, net)?
+                    && route_rules::local_ok(r1, &others, rule.spacing, work, cap)?
+                    && route_rules::local_ok(r2, &others, rule.spacing, work, cap)?
+                {
+                    return Ok(Some(vec![w1, w2]));
+                }
+            }
+        }
+    }
+    // Diagnostic only: what blocks the shortest one-sided stubs.
+    if std::env::var_os("RUSTROAD_AREA_TRACE").is_some() {
+        for &a in anchors.iter().take(4) {
+            for d in dirs {
+                let reason = match shortest(a, d, None, work)? {
+                    None => "no length reaches the area".to_string(),
+                    Some(n) => {
+                        let (_, r) = stub(a, d, n)?;
+                        if !spatial.clear(layer, r, net)? {
+                            spatial.stored_collision(layer, r, net)?
+                        } else {
+                            "same-net notch".to_string()
+                        }
+                    }
+                };
+                eprintln!("[area-trace] net {net} layer {layer} anchor {a:?} dir {d:?}: {reason}");
+            }
         }
     }
     Ok(None)
@@ -2116,6 +3807,32 @@ fn area_stub(
 /// Independent of search history: check geometry against blockages and bounded
 /// endpoint-graph connectivity. External OpenDB/KLayout are the physical oracle.
 pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Result<()> {
+    validate_geometry(input, routes, limits, None)
+}
+
+/// Validate stored routing under its original telemetry limits, with a separate
+/// cap for the comparisons performed by this geometry validation. A previous
+/// search may legitimately have used more work than this read-only check.
+pub fn validate_with_work_limit(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    max_validation_comparisons: usize,
+) -> Result<()> {
+    if max_validation_comparisons == 0 {
+        return Err(budget(
+            "geometry validation comparison limit must be nonzero",
+        ));
+    }
+    validate_geometry(input, routes, limits, Some(max_validation_comparisons))
+}
+
+fn validate_geometry(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    validation_work: Option<usize>,
+) -> Result<()> {
     preflight(input, limits)?;
     let length = routes.wires.iter().try_fold(0u64, |n, w| {
         n.checked_add(distance(w.start, w.end)?)
@@ -2133,6 +3850,13 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
     {
         return Err(invalid("routing telemetry/geometry mismatch"));
     }
+    let validation_limits = RouteLimits {
+        max_comparisons: limits
+            .max_comparisons
+            .min(validation_work.unwrap_or(limits.max_comparisons)),
+        ..limits.clone()
+    };
+    let limits = &validation_limits;
     if routes.wires.len() + routes.vias.len() + routes.patches.len() > limits.max_segments
         || routes.access.len() > input.terminals.len()
     {
@@ -2142,21 +3866,27 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
         return Err(invalid("routing patches require LEF-rule mode"));
     }
     let mut spatial = Spatial::new(input, limits)?;
-    let mut counts = BTreeMap::<u32, usize>::new();
-    for t in &input.terminals {
-        *counts.entry(t.net).or_default() += 1;
+    let mut selected: Vec<u32> = input.terminals.iter().map(|t| t.net).collect();
+    selected.sort_unstable();
+    let (mut read, mut write) = (0, 0);
+    while read < selected.len() {
+        let net = selected[read];
+        let start = read;
+        while read < selected.len() && selected[read] == net {
+            read += 1;
+        }
+        if read - start >= 2 {
+            selected[write] = net;
+            write += 1;
+        }
     }
-    let selected: BTreeSet<_> = counts
-        .into_iter()
-        .filter_map(|(n, c)| (c >= 2).then_some(n))
-        .collect();
-    if selected.iter().copied().collect::<Vec<_>>() != routes.nets {
+    selected.truncate(write);
+    let selected = selected.into_boxed_slice();
+    if selected.as_ref() != routes.nets {
         return Err(invalid("stored routed-net coverage"));
     }
-    type Key = (u32, i64, i64);
-    let mut graph = BTreeMap::<u32, HashMap<Key, Vec<Key>>>::new();
     for w in &routes.wires {
-        if !selected.contains(&w.net)
+        if selected.binary_search(&w.net).is_err()
             || w.layer as usize >= input.layers.len()
             || input.layers[w.layer as usize].vertical.is_none()
         {
@@ -2173,36 +3903,39 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             return Err(invalid("wire collides with blockage/other net"));
         }
         spatial.add_wire(w)?;
-        let (a, b) = (
-            (w.layer, w.start[0], w.start[1]),
-            (w.layer, w.end[0], w.end[1]),
-        );
-        let g = graph.entry(w.net).or_default();
-        g.entry(a).or_default().push(b);
-        g.entry(b).or_default().push(a);
     }
     for v in &routes.vias {
-        if !selected.contains(&v.net)
+        if selected.binary_search(&v.net).is_err()
             || v.kind as usize >= input.vias.len()
             || v.at.iter().any(|x| x % input.grid != 0)
         {
             return Err(invalid("stored via identity/grid"));
         }
         if !spatial.via_clear(v.kind as usize, v.at, v.net)? {
-            return Err(invalid("via collides with blockage/other net"));
+            let kind = &input.vias[v.kind as usize];
+            let mut blocked = Vec::new();
+            for shape in &kind.shapes {
+                let rect = shifted(shape.rect, v.at)?;
+                if !spatial.clear(shape.layer, rect, v.net)? {
+                    let collision = spatial.stored_collision(shape.layer, rect, v.net)?;
+                    blocked.push(format!(
+                        "{} [{},{},{},{}] {collision}",
+                        input.layers[shape.layer as usize].name, rect.lx, rect.ly, rect.ux, rect.uy
+                    ));
+                }
+            }
+            return Err(invalid(&format!(
+                "via {} net {} at {:?} collides with blockage/other net on {}",
+                kind.name,
+                v.net,
+                v.at,
+                blocked.join(", ")
+            )));
         }
         spatial.add_via(v)?;
-        let spec = &input.vias[v.kind as usize];
-        let (a, b) = (
-            (spec.lower, v.at[0], v.at[1]),
-            (spec.upper, v.at[0], v.at[1]),
-        );
-        let g = graph.entry(v.net).or_default();
-        g.entry(a).or_default().push(b);
-        g.entry(b).or_default().push(a);
     }
     for p in &routes.patches {
-        if !selected.contains(&p.net)
+        if selected.binary_search(&p.net).is_err()
             || p.layer as usize >= input.layers.len()
             || input.layers[p.layer as usize].vertical.is_none()
             || !p.rect.valid()
@@ -2221,15 +3954,23 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             net: Some(p.net),
         })?;
     }
-    let terminals: HashMap<_, _> = input.terminals.iter().map(|t| (t.pin, t)).collect();
-    let mut seen = HashSet::new();
+    let mut work = validation_work.map_or(0, |_| spatial.work);
+    let terminals = crate::rule_index::order(
+        input.terminals.len(),
+        |i| input.terminals[i].pin,
+        &mut work,
+        limits.max_comparisons,
+    )?;
+    let mut seen = vec![false; input.terminals.len()];
     for a in &routes.access {
-        let t = terminals
-            .get(&a.pin)
-            .ok_or_else(|| invalid("routing access pin absent"))?;
-        if !selected.contains(&a.net)
+        let slot = terminals
+            .binary_search_by_key(&a.pin, |&i| input.terminals[i as usize].pin)
+            .map_err(|_| invalid("routing access pin absent"))?;
+        let i = terminals[slot] as usize;
+        let t = &input.terminals[i];
+        if selected.binary_search(&a.net).is_err()
             || t.net != a.net
-            || !seen.insert(a.pin)
+            || seen[i]
             || !t
                 .shapes
                 .iter()
@@ -2237,47 +3978,36 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
         {
             return Err(invalid("routing access does not touch its pin"));
         }
-        graph
-            .entry(a.net)
-            .or_default()
-            .entry((a.layer, a.at[0], a.at[1]))
-            .or_default();
+        seen[i] = true;
     }
     if input
         .terminals
         .iter()
-        .filter(|t| selected.contains(&t.net))
-        .any(|t| !seen.contains(&t.pin))
+        .enumerate()
+        .any(|(i, t)| selected.binary_search(&t.net).is_ok() && !seen[i])
     {
         return Err(invalid("missing routed terminal"));
     }
-    let mut work = 0usize;
-    for g in graph.values() {
-        let Some(&root) = g.keys().next() else {
-            continue;
-        };
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::from([root]);
-        while let Some(node) = queue.pop_front() {
-            if !visited.insert(node) {
-                continue;
-            }
-            for &next in &g[&node] {
-                work += 1;
-                if work > limits.max_comparisons {
-                    return Err(budget("routing connectivity work"));
-                }
-                if !visited.contains(&next) {
-                    queue.push_back(next);
-                }
-            }
-        }
-        if visited.len() != g.len() {
+    drop(terminals);
+    drop(seen);
+    let index = crate::route_graph::NetIndex::new(routes, limits, &mut work)?;
+    for &net in index.nets() {
+        let graph = crate::route_graph::Graph::new(
+            input,
+            routes,
+            index.sources(routes, net),
+            limits,
+            &mut work,
+        )?;
+        if !graph.connected(&mut work, limits.max_comparisons)? {
             return Err(invalid("disconnected routed net"));
         }
     }
+    drop(index);
     if input.rules {
-        let mut work = 0usize;
+        if validation_work.is_none() {
+            work = 0;
+        }
         let violations = route_rules::check(input, routes, limits, &mut work)?;
         if let Some(v) = violations.first() {
             return Err(invalid(&format!(
@@ -2293,6 +4023,687 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn template_layer_bins_match_linear_integer_geometry_and_callback_order() {
+        use crate::Orientation;
+        let shape = |layer, r| TemplateObstacle {
+            layer,
+            rect: r,
+            pin: None,
+        };
+        let source = InstanceObstacles::new(
+            vec![
+                ObstacleTemplate::new(
+                    20,
+                    0,
+                    vec![shape(
+                        0,
+                        Rect {
+                            lx: 0,
+                            ly: 0,
+                            ux: 10,
+                            uy: 20,
+                        },
+                    )],
+                )
+                .unwrap(),
+                ObstacleTemplate::new(
+                    40,
+                    0,
+                    vec![
+                        shape(
+                            2,
+                            Rect {
+                                lx: 0,
+                                ly: 0,
+                                ux: 90,
+                                uy: 8,
+                            },
+                        ),
+                        shape(
+                            4,
+                            Rect {
+                                lx: 10,
+                                ly: 10,
+                                ux: 80,
+                                uy: 20,
+                            },
+                        ),
+                        shape(
+                            6,
+                            Rect {
+                                lx: 0,
+                                ly: 32,
+                                ux: 90,
+                                uy: 40,
+                            },
+                        ),
+                        shape(
+                            4,
+                            Rect {
+                                lx: 20,
+                                ly: 20,
+                                ux: 70,
+                                uy: 32,
+                            },
+                        ),
+                    ],
+                )
+                .unwrap(),
+            ],
+            (0..12)
+                .map(|i| ObstacleInstance {
+                    template: (i % 3 == 0) as u32,
+                    pin_start: 0,
+                    at: [i * 20 - 80, if i % 2 == 0 { -20 } else { 0 }],
+                    orientation: if i % 2 == 0 {
+                        Orientation::N
+                    } else {
+                        Orientation::FS
+                    },
+                })
+                .collect(),
+            vec![],
+        )
+        .unwrap();
+        let die = Rect {
+            lx: -200,
+            ly: -100,
+            ux: 300,
+            uy: 100,
+        };
+        let limits = RouteLimits::default();
+        for bin in [8, 64, 1000] {
+            let mut old = InstanceIndex::for_geometry(&source, die, bin, 8, &limits).unwrap();
+            let mut new = InstanceIndex::for_geometry_mode(
+                &source,
+                die,
+                bin,
+                8,
+                &limits,
+                Some(InstanceIndexMode::TemplateLayers),
+            )
+            .unwrap();
+            for layer in 0..8 {
+                for x in (-100..200).step_by(13) {
+                    let query = Rect {
+                        lx: x,
+                        ly: -10,
+                        ux: x + 31,
+                        uy: 20,
+                    };
+                    let gather = |index: &mut InstanceIndex<'_>| {
+                        let mut hits = Vec::new();
+                        index
+                            .visit(layer, query, &mut 0, &limits, |b| {
+                                hits.push((b.layer, b.rect.lx, b.rect.ly, b.rect.ux, b.rect.uy));
+                                Ok(true)
+                            })
+                            .unwrap();
+                        hits
+                    };
+                    let old_hits = gather(&mut old);
+                    let new_hits = gather(&mut new);
+                    assert_eq!(
+                        old_hits, new_hits,
+                        "callback order layer {layer} query {query:?}"
+                    );
+                    let mut oracle = Vec::new();
+                    for i in 0..source.len() {
+                        for ordinal in 0..source.shape_count(i).unwrap() {
+                            let (b, _) = source.shape(i, ordinal).unwrap();
+                            if b.layer == layer && overlap(query, b.rect) {
+                                oracle.push((b.layer, b.rect.lx, b.rect.ly, b.rect.ux, b.rect.uy));
+                            }
+                        }
+                    }
+                    let mut actual = new_hits;
+                    actual.sort();
+                    oracle.sort();
+                    assert_eq!(
+                        actual, oracle,
+                        "linear oracle layer {layer} query {query:?}"
+                    );
+                }
+            }
+            assert!(new.entries > old.entries);
+        }
+        let tight = RouteLimits {
+            max_bin_entries: 1,
+            ..limits.clone()
+        };
+        assert!(
+            InstanceIndex::for_geometry_mode(
+                &source,
+                die,
+                8,
+                8,
+                &tight,
+                Some(InstanceIndexMode::TemplateLayers)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn optional_post_soft_stats_merge_is_checked_and_atomic() {
+        let mut aggregate = SingleOwnerRepairStats::default();
+        assert!(
+            serde_json::to_value(&aggregate)
+                .unwrap()
+                .get("post_soft_refinement")
+                .is_none()
+        );
+        let partial = SingleOwnerRepairStats {
+            attempts: 2,
+            trial_expansions: 123,
+            post_soft_refinement: Some(PostSoftRefinementStats {
+                stages: 1,
+                attempts: 2,
+                successes: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        aggregate.merge(&partial).unwrap();
+        aggregate.merge(&partial).unwrap();
+        assert_eq!(aggregate.attempts, 4);
+        assert_eq!(aggregate.trial_expansions, 246);
+        assert_eq!(
+            aggregate.post_soft_refinement.as_ref().unwrap().successes,
+            2
+        );
+        let before = serde_json::to_value(&aggregate).unwrap();
+        let overflow = SingleOwnerRepairStats {
+            post_soft_refinement: Some(PostSoftRefinementStats {
+                stages: usize::MAX,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(aggregate.merge(&overflow).is_err());
+        assert_eq!(serde_json::to_value(&aggregate).unwrap(), before);
+    }
+
+    #[test]
+    fn validation_work_budget_is_separate_from_historical_search_statistics() {
+        let input = fixture();
+        let limits = RouteLimits::default();
+        let mut routes = route_cpu_ref(&input, &limits).unwrap();
+        // Synthetic boundary telemetry for this format/control test. Actual
+        // Ibex evidence retains the original4.53B comparison count unchanged.
+        routes.stats.comparisons = limits.max_comparisons;
+        validate_with_work_limit(&input, &routes, &limits, 1_000_000).unwrap();
+        assert_eq!(routes.stats.comparisons, limits.max_comparisons);
+        let error = validate_with_work_limit(&input, &routes, &limits, 1).unwrap_err();
+        assert!(matches!(error, Error::Budget(_)), "{error}");
+        let mut invalid = routes.clone();
+        invalid.stats.comparisons += 1;
+        let error = validate_with_work_limit(&input, &invalid, &limits, 1_000_000).unwrap_err();
+        assert!(error.to_string().contains("telemetry/geometry mismatch"));
+    }
+
+    #[test]
+    fn per_net_pruning_matches_whole_graph_with_cycles_branches_and_vias() {
+        let input = fixture();
+        let mut state = 0x5a17u32;
+        for case in 0..100 {
+            let mut next = || {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                state ^ (state >> 16)
+            };
+            let mut original = Routes {
+                wires: Vec::new(),
+                vias: Vec::new(),
+                access: Vec::new(),
+                patches: Vec::new(),
+                nets: (0..8).collect(),
+                stats: RouteStats::default(),
+            };
+            for net in 0..8 {
+                for _ in 0..24 {
+                    let a = i64::from(next() % 8);
+                    let b = i64::from(next() % 8);
+                    original.wires.push(Wire {
+                        net,
+                        layer: next() % 2,
+                        start: [a, 0],
+                        end: [b, 0],
+                    });
+                }
+                for _ in 0..4 {
+                    original.vias.push(Via {
+                        net,
+                        kind: 0,
+                        at: [i64::from(next() % 8), 0],
+                    });
+                }
+                for pin in 0..4 {
+                    original.access.push(Access {
+                        pin: net * 4 + pin,
+                        net,
+                        layer: next() % 2,
+                        at: [i64::from(next() % 8), 0],
+                    });
+                }
+            }
+            original.wires.reverse();
+            original.vias.reverse();
+            let mut expected = original.clone();
+            prune_legacy(&input, &mut expected);
+            prune(&input, &mut original, &RouteLimits::default()).unwrap();
+            assert_eq!(original.wires, expected.wires, "wire pruning case {case}");
+            assert_eq!(original.vias, expected.vias, "via pruning case {case}");
+        }
+    }
+
+    #[test]
+    fn endpoint_graph_rejects_disconnected_access_and_enforces_per_net_budget() {
+        let input = fixture();
+        let mut out = Routes {
+            wires: vec![Wire {
+                net: 0,
+                layer: 0,
+                start: [0, 0],
+                end: [10, 0],
+            }],
+            vias: Vec::new(),
+            access: vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 0,
+                    layer: 0,
+                    at: [10, 0],
+                },
+            ],
+            patches: Vec::new(),
+            nets: vec![0],
+            stats: RouteStats::default(),
+        };
+        let limits = RouteLimits::default();
+        for connected in [true, false] {
+            if !connected {
+                out.access[1].at = [20, 0];
+            }
+            let mut work = 0;
+            let index = crate::route_graph::NetIndex::new(&out, &limits, &mut work).unwrap();
+            let graph = crate::route_graph::Graph::new(
+                &input,
+                &out,
+                index.sources(&out, 0),
+                &limits,
+                &mut work,
+            )
+            .unwrap();
+            assert_eq!(
+                graph.connected(&mut work, limits.max_comparisons).unwrap(),
+                connected
+            );
+            let tiny = RouteLimits {
+                max_active_nodes: 1,
+                ..limits.clone()
+            };
+            assert!(matches!(
+                crate::route_graph::Graph::new(
+                    &input,
+                    &out,
+                    index.sources(&out, 0),
+                    &tiny,
+                    &mut work
+                ),
+                Err(Error::Budget(_))
+            ));
+            assert!(graph.connected(&mut 0, 1).is_err());
+        }
+    }
+
+    #[test]
+    #[ignore = "explicit bounded whole-graph versus per-net RSS comparison"]
+    fn endpoint_pruning_memory_fixture() {
+        let input = fixture();
+        let nets = 100_001u32;
+        let mut out = Routes {
+            wires: Vec::new(),
+            vias: Vec::new(),
+            access: Vec::new(),
+            patches: Vec::new(),
+            nets: (0..nets).collect(),
+            stats: RouteStats::default(),
+        };
+        for net in 0..nets {
+            for x in [0, 10, 20] {
+                out.wires.push(Wire {
+                    net,
+                    layer: 0,
+                    start: [x, 0],
+                    end: [x + 10, 0],
+                });
+            }
+            out.access.extend([
+                Access {
+                    pin: net * 2,
+                    net,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: net * 2 + 1,
+                    net,
+                    layer: 0,
+                    at: [20, 0],
+                },
+            ]);
+        }
+        if std::env::var_os("RUSTROAD_LEGACY_PRUNE").is_some() {
+            prune_legacy(&input, &mut out);
+        } else {
+            prune(
+                &input,
+                &mut out,
+                &RouteLimits {
+                    max_segments: 400_004,
+                    max_comparisons: 100_000_000,
+                    ..RouteLimits::ceiling()
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(out.wires.len(), 2 * nets as usize);
+        assert!(out.wires.iter().all(|w| w.end[0] <= 20));
+        std::hint::black_box(out);
+    }
+
+    #[test]
+    fn instanced_wall_routes_identically_to_explicit_geometry() {
+        let flat = fixture();
+        let mut instanced = fixture();
+        instanced.obstacles.clear();
+        instanced.instances = Some(
+            InstanceObstacles::new(
+                vec![
+                    ObstacleTemplate::new(
+                        100,
+                        0,
+                        vec![TemplateObstacle {
+                            layer: 0,
+                            rect: Rect {
+                                lx: 0,
+                                ly: 0,
+                                ux: 10,
+                                uy: 100,
+                            },
+                            pin: None,
+                        }],
+                    )
+                    .unwrap(),
+                ],
+                vec![ObstacleInstance {
+                    template: 0,
+                    pin_start: 0,
+                    at: [45, 0],
+                    orientation: crate::Orientation::N,
+                }],
+                Vec::new(),
+            )
+            .unwrap(),
+        );
+        let limits = RouteLimits::default();
+        let expected = route_cpu_ref(&flat, &limits).unwrap();
+        let actual = route_cpu_ref(&instanced, &limits).unwrap();
+        assert_eq!(actual.wires, expected.wires);
+        assert_eq!(actual.vias, expected.vias);
+        assert_eq!(actual.access, expected.access);
+        validate(&instanced, &actual, &limits).unwrap();
+    }
+
+    #[test]
+    fn instanced_flipped_pin_matches_explicit_negative_coordinates() {
+        let mut flat = fixture();
+        flat.die = Rect {
+            lx: -100,
+            ly: -100,
+            ux: 100,
+            uy: 100,
+        };
+        flat.obstacles = vec![Blockage {
+            layer: 0,
+            rect: Rect {
+                lx: -45,
+                ly: -40,
+                ux: -35,
+                uy: -30,
+            },
+            net: Some(7),
+        }];
+        let mut instanced = fixture();
+        instanced.die = flat.die;
+        instanced.obstacles.clear();
+        instanced.instances = Some(
+            InstanceObstacles::new(
+                vec![
+                    ObstacleTemplate::new(
+                        30,
+                        1,
+                        vec![TemplateObstacle {
+                            layer: 0,
+                            rect: Rect {
+                                lx: 0,
+                                ly: 10,
+                                ux: 10,
+                                uy: 20,
+                            },
+                            pin: Some(0),
+                        }],
+                    )
+                    .unwrap(),
+                ],
+                vec![ObstacleInstance {
+                    template: 0,
+                    pin_start: 0,
+                    at: [-45, -50],
+                    orientation: crate::Orientation::FS,
+                }],
+                vec![7],
+            )
+            .unwrap(),
+        );
+        let limits = RouteLimits::default();
+        let mut a = Spatial::new(&flat, &limits).unwrap();
+        let mut b = Spatial::new(&instanced, &limits).unwrap();
+        for net in [7, 8] {
+            for x in (-60..0).step_by(5) {
+                for y in (-60..0).step_by(5) {
+                    let rect = Rect {
+                        lx: x,
+                        ly: y,
+                        ux: x + 2,
+                        uy: y + 2,
+                    };
+                    assert_eq!(
+                        a.probe(0, rect, net).unwrap(),
+                        b.probe(0, rect, net).unwrap()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn millions_of_virtual_obstacles_keep_compact_storage() {
+        let mut input = fixture();
+        input.die = Rect {
+            lx: 0,
+            ly: 0,
+            ux: 20_000,
+            uy: 200_000,
+        };
+        input.obstacles.clear();
+        let template = ObstacleTemplate::new(
+            100,
+            0,
+            (0..102)
+                .map(|_| TemplateObstacle {
+                    layer: 0,
+                    rect: Rect {
+                        lx: 1,
+                        ly: 1,
+                        ux: 3,
+                        uy: 3,
+                    },
+                    pin: None,
+                })
+                .collect(),
+        )
+        .unwrap();
+        let instances = (0..100_000)
+            .map(|i| ObstacleInstance {
+                template: 0,
+                pin_start: 0,
+                at: [(i % 1000) * 20, (i / 1000) * 100],
+                orientation: crate::Orientation::N,
+            })
+            .collect();
+        let provider = InstanceObstacles::new(vec![template], instances, Vec::new()).unwrap();
+        assert_eq!(provider.virtual_shapes(), 10_200_000);
+        assert!(provider.heap_bytes() < 8 * 1024 * 1024);
+        input.instances = Some(provider);
+        let limits = RouteLimits::default();
+        let mut spatial = Spatial::new(&input, &limits).unwrap();
+        assert!(
+            !spatial
+                .clear(
+                    0,
+                    Rect {
+                        lx: 1,
+                        ly: 1,
+                        ux: 2,
+                        uy: 2
+                    },
+                    5
+                )
+                .unwrap()
+        );
+        assert!(spatial.shapes.is_empty());
+    }
+
+    #[test]
+    fn every_bin_mode_matches_an_independent_ordered_bucket_oracle() {
+        let mut reference = BTreeMap::<(u32, i64, i64), Vec<usize>>::new();
+        let mut sequence = Vec::new();
+        let mut random = 0x25bd_7c91_ae02_1843u64;
+        for id in 0..4096usize {
+            random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let x = ((random >> 16) % 201) as i64 - 100;
+            let y = ((random >> 32) % 201) as i64 - 100;
+            let layer = (random & 1) as u32;
+            sequence.push((layer, x, y, id));
+            reference.entry((layer, x, y)).or_default().push(id);
+        }
+        for mode in [BinMode::Dense, BinMode::Sparse, BinMode::Paged] {
+            let mut grid = BinGrid {
+                mode,
+                bx0: -64,
+                by0: -64,
+                nx: 129,
+                ny: 129,
+                cells: vec![Vec::new(); 2],
+                entries: Vec::new(),
+                pages: HashMap::with_hasher(BuildFx),
+                overflow: HashMap::with_hasher(BuildFx),
+            };
+            for &(layer, x, y, id) in &sequence {
+                grid.push(layer, x, y, id).unwrap();
+            }
+            for (&(layer, x, y), expected) in &reference {
+                assert_eq!(grid.iter(layer, x, y).collect::<Vec<_>>(), *expected);
+            }
+            assert_eq!(grid.iter(0, 300, -300).count(), 0);
+        }
+    }
+
+    #[test]
+    fn immutable_obstacles_are_shared_and_survive_route_ripup() {
+        let input = fixture();
+        let limits = RouteLimits::default();
+        let mut spatial = Spatial::new(&input, &limits).unwrap();
+        assert!(spatial.shapes.is_empty());
+        assert!(std::ptr::eq(spatial.shape(0), &input.obstacles[0]));
+        let fixed = Rect {
+            lx: 46,
+            ly: 20,
+            ux: 54,
+            uy: 30,
+        };
+        assert!(!spatial.clear(0, fixed, 8).unwrap());
+        let routed = Rect {
+            lx: 10,
+            ly: 10,
+            ux: 20,
+            uy: 20,
+        };
+        let id = spatial
+            .add_routed(Blockage {
+                layer: 0,
+                rect: routed,
+                net: Some(7),
+            })
+            .unwrap();
+        assert_eq!(id, input.obstacles.len());
+        assert!(!spatial.clear(0, routed, 8).unwrap());
+        assert!(matches!(spatial.probe_soft(0, routed, 8).unwrap(),
+            Soft::Clear { victims, .. } if victims == [7]));
+        spatial.remove(id);
+        assert!(spatial.clear(0, routed, 8).unwrap());
+        assert!(!spatial.clear(0, fixed, 8).unwrap());
+    }
+
+    #[test]
+    fn large_spatial_extent_allocates_only_touched_pages() {
+        let mut input = fixture();
+        input.die = Rect {
+            lx: -100_000,
+            ly: -100_000,
+            ux: 100_000,
+            uy: 100_000,
+        };
+        input.obstacles = vec![input.obstacles[0].clone(); 1024];
+        let limits = RouteLimits::default();
+        let mut spatial = Spatial::new(&input, &limits).unwrap();
+        assert!(spatial.bins.mode == BinMode::Paged);
+        assert_eq!(spatial.bins.pages.len(), 1);
+        let fixed = Rect {
+            lx: 46,
+            ly: 20,
+            ux: 54,
+            uy: 30,
+        };
+        assert!(!spatial.clear(0, fixed, 8).unwrap());
+        let negative = Rect {
+            lx: -100,
+            ly: -100,
+            ux: -90,
+            uy: -90,
+        };
+        let id = spatial
+            .add_routed(Blockage {
+                layer: 0,
+                rect: negative,
+                net: Some(7),
+            })
+            .unwrap();
+        assert_eq!(spatial.bins.pages.len(), 2);
+        assert!(!spatial.clear(0, negative, 8).unwrap());
+        spatial.remove(id);
+        assert!(spatial.clear(0, negative, 8).unwrap());
+    }
+
     fn fixture() -> RouteInput {
         let layers = vec![
             RouteLayer {
@@ -2302,6 +4713,7 @@ mod tests {
                 vertical: Some(false),
                 min_area: None,
                 min_step: None,
+                wide_spacing: None,
             },
             RouteLayer {
                 name: "M2".into(),
@@ -2310,6 +4722,7 @@ mod tests {
                 vertical: Some(true),
                 min_area: None,
                 min_step: None,
+                wide_spacing: None,
             },
             RouteLayer {
                 name: "V1".into(),
@@ -2318,6 +4731,7 @@ mod tests {
                 vertical: None,
                 min_area: None,
                 min_step: None,
+                wide_spacing: None,
             },
         ];
         RouteInput {
@@ -2393,6 +4807,7 @@ mod tests {
             access_classes: Vec::new(),
             tracks: None,
             ties: Vec::new(),
+            instances: None,
             held_bytes: 0,
         }
     }
@@ -2408,6 +4823,7 @@ mod tests {
             vertical,
             min_area: None,
             min_step: None,
+            wide_spacing: None,
         }
     }
     fn via(name: &str, m1: Rect) -> RouteVia {
@@ -2462,6 +4878,7 @@ mod tests {
             access_classes: Vec::new(),
             tracks: None,
             ties: Vec::new(),
+            instances: None,
             held_bytes: 0,
         }
     }
@@ -2488,6 +4905,7 @@ mod tests {
                     .iter()
                     .map(|w| distance(w.start, w.end).unwrap())
                     .sum(),
+                single_owner_repair: None,
             },
             wires,
             vias: vias
@@ -2516,6 +4934,398 @@ mod tests {
             nets: vec![0],
         }
     }
+    #[test]
+    fn wide_metal_spacing_needs_width_gap_and_parallel_run() {
+        let mut input = rules_input();
+        input.layers[0].wide_spacing = Some(WideSpacing {
+            width: 3,
+            parallel_run: 10,
+            spacing: 5,
+        });
+        let check = |input: &RouteInput, patch: Rect, foreign_x: i64| {
+            let mut routes = manual(input, &[([10, 10], [10, 40], 0)], &[]);
+            routes.patches.push(Patch {
+                net: 0,
+                layer: 0,
+                rect: patch,
+            });
+            routes.wires.push(Wire {
+                net: 1,
+                layer: 0,
+                start: [foreign_x, 10],
+                end: [foreign_x, 40],
+            });
+            routes.nets = vec![0, 1];
+            route_rules::wide_check(input, &routes, &RouteLimits::default(), &mut 0).unwrap()
+        };
+        // Wire 9..11 plus patch 11..13 is 4 wide (> 3); net 1 at 17..19 is 4
+        // away (>= spacing 4, < wide spacing 5) along 20 > 10.
+        let found = check(&input, rect(11, 15, 13, 35), 18);
+        assert_eq!(found.len(), 1, "{found:?}");
+        match &found[0] {
+            Violation::Wide {
+                net,
+                owner,
+                other,
+                run,
+                wide,
+                near,
+                ..
+            } => {
+                assert_eq!((*net, *owner, *other, *run), (0, 0, 1, 20));
+                // Only the patch part faces net 1 closer than the wide spacing;
+                // `near` bounds net 1's facing wire.
+                assert_eq!(*wide, rect(11, 15, 13, 35));
+                assert_eq!(*near, rect(17, 9, 19, 41));
+            }
+            v => panic!("unexpected {}", v.describe()),
+        }
+        // Distinct polygons of one net have the same foundry spacing rule.
+        let mut routes = manual(
+            &input,
+            &[([10, 10], [10, 40], 0), ([18, 10], [18, 40], 0)],
+            &[],
+        );
+        routes.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(11, 15, 13, 35),
+        });
+        let same =
+            route_rules::wide_check(&input, &routes, &RouteLimits::default(), &mut 0).unwrap();
+        assert!(
+            matches!(
+                same.as_slice(),
+                [Violation::Wide {
+                    owner: 0,
+                    other: 0,
+                    run: 20,
+                    ..
+                }]
+            ),
+            "{same:?}"
+        );
+        routes.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(11, 36, 17, 38),
+        });
+        let joined =
+            route_rules::wide_check(&input, &routes, &RouteLimits::default(), &mut 0).unwrap();
+        assert!(
+            matches!(
+                joined.as_slice(),
+                [Violation::Wide {
+                    owner: 0,
+                    other: 0,
+                    run: 20,
+                    ..
+                }]
+            ),
+            "a remote bridge leaves the long notch: {joined:?}"
+        );
+        routes.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(13, 20, 17, 22),
+        });
+        let partial =
+            route_rules::wide_check(&input, &routes, &RouteLimits::default(), &mut 0).unwrap();
+        assert!(
+            partial
+                .iter()
+                .any(|v| matches!(v, Violation::Wide { run: 13, .. })),
+            "only the covered facing interval is removed: {partial:?}"
+        );
+        routes.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(13, 15, 17, 35),
+        });
+        let filled =
+            route_rules::wide_check(&input, &routes, &RouteLimits::default(), &mut 0).unwrap();
+        assert!(
+            filled.is_empty(),
+            "the full facing gap is filled: {filled:?}"
+        );
+        // Parallel run 9 is not more than 10; gap 5 is enough.
+        assert!(check(&input, rect(11, 15, 13, 24), 18).is_empty());
+        assert!(check(&input, rect(11, 15, 13, 35), 19).is_empty());
+        // Without the row nothing is checked.
+        input.layers[0].wide_spacing = None;
+        assert!(check(&input, rect(11, 15, 13, 35), 18).is_empty());
+    }
+
+    #[test]
+    fn wide_metal_absent_layer_parts_preserve_other_layer_violations() {
+        // Two declared rules do not imply wide geometry on both layers.
+        // The fixture is <1 MiB: a few integer rectangles, no path enumeration.
+        let mut input = rules_input();
+        let rule = WideSpacing {
+            width: 3,
+            parallel_run: 10,
+            spacing: 5,
+        };
+        input.layers[0].wide_spacing = Some(rule);
+        input.layers[1].wide_spacing = Some(rule);
+        input.terminals.push(Terminal {
+            pin: 2,
+            net: 2,
+            driver: true,
+            shapes: vec![LayerRect {
+                layer: 1,
+                rect: rect(59, 9, 61, 11),
+            }],
+            class: None,
+        });
+        let mut routes = manual(
+            &input,
+            &[([10, 10], [10, 40], 0), ([60, 10], [60, 40], 1)],
+            &[[80, 80]],
+        );
+        routes.wires[1].net = 2;
+        routes.wires.extend([
+            Wire {
+                net: 1,
+                layer: 0,
+                start: [18, 10],
+                end: [18, 40],
+            },
+            Wire {
+                net: 3,
+                layer: 1,
+                start: [68, 10],
+                end: [68, 40],
+            },
+        ]);
+        routes.patches.extend([
+            Patch {
+                net: 0,
+                layer: 0,
+                rect: rect(11, 15, 13, 35),
+            },
+            Patch {
+                net: 2,
+                layer: 1,
+                rect: rect(59, 15, 61, 17),
+            },
+        ]);
+        routes.nets = vec![0, 1, 2, 3];
+        let check = |routes: &Routes| {
+            route_rules::wide_check(&input, routes, &RouteLimits::default(), &mut 0).unwrap()
+        };
+        let first = check(&routes);
+        assert!(
+            matches!(
+                first.as_slice(),
+                [Violation::Wide {
+                    owner: 0,
+                    other: 1,
+                    layer: 0,
+                    run: 20,
+                    ..
+                }]
+            ),
+            "narrow M2 shapes must not hide the real M1 violation: {first:?}"
+        );
+        // Give M2 an actual wide component; its own pair must now be checked.
+        routes.patches.push(Patch {
+            net: 2,
+            layer: 1,
+            rect: rect(61, 15, 63, 35),
+        });
+        let both = check(&routes);
+        assert_eq!(both.len(), 2, "both layer violations must remain: {both:?}");
+        assert!(
+            both.iter().any(|v| matches!(
+                v,
+                Violation::Wide {
+                    owner: 2,
+                    other: 3,
+                    layer: 1,
+                    run: 20,
+                    ..
+                }
+            )),
+            "wide M2 must still be checked: {both:?}"
+        );
+        // Same-net disjoint polygons retain the same spacing obligation.
+        routes.wires[3].net = 2;
+        routes.nets = vec![0, 1, 2];
+        let same = check(&routes);
+        assert!(
+            same.iter().any(|v| matches!(
+                v,
+                Violation::Wide {
+                    owner: 2,
+                    other: 2,
+                    layer: 1,
+                    run: 20,
+                    ..
+                }
+            )),
+            "same-net wide notch must not be skipped: {same:?}"
+        );
+        let limits = RouteLimits {
+            max_comparisons: 1,
+            ..RouteLimits::default()
+        };
+        assert!(
+            route_rules::wide_check(&input, &routes, &limits, &mut 0)
+                .unwrap_err()
+                .to_string()
+                .contains("BUDGET_EXCEEDED")
+        );
+    }
+
+    #[test]
+    fn wide_metal_partial_width_tongue_keeps_the_facing_run() {
+        let mut input = rules_input();
+        input.die = rect(0, 0, 4000, 4000);
+        input.step = 420;
+        input.terminals.clear();
+        input.layers[0].width = 200;
+        input.layers[0].spacing = 210;
+        input.layers[0].wide_spacing = Some(WideSpacing {
+            width: 390,
+            parallel_run: 1000,
+            spacing: 240,
+        });
+        let mut original = manual(
+            &input,
+            &[([100, 100], [100, 1380], 0), ([520, 100], [520, 1380], 0)],
+            &[],
+        );
+        original.access.clear();
+        original.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(620, 0, 840, 1480),
+        });
+        original.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(410, 400, 420, 600),
+        });
+        // The complete IHP main deck retains M2.e for this 10 nm tongue.
+        // Check both orientations; intruding metal must not hide the gap.
+        for rotated in [false, true] {
+            let mut routes = original.clone();
+            if rotated {
+                for w in &mut routes.wires {
+                    w.start.swap(0, 1);
+                    w.end.swap(0, 1);
+                }
+                for p in &mut routes.patches {
+                    p.rect = rect(p.rect.ly, p.rect.lx, p.rect.uy, p.rect.ux);
+                }
+            }
+            let found =
+                route_rules::wide_check(&input, &routes, &RouteLimits::default(), &mut 0).unwrap();
+            assert!(
+                found
+                    .iter()
+                    .any(|v| matches!(v, Violation::Wide { run: 1480, .. })),
+                "rotation {rotated}: {found:?}"
+            );
+        }
+        // Two adjacent bridge rectangles jointly cover the gap at its
+        // midpoint. The remaining 640 nm runs are below the 1000 nm rule.
+        original.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(200, 640, 310, 840),
+        });
+        original.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(310, 640, 420, 840),
+        });
+        let found =
+            route_rules::wide_check(&input, &original, &RouteLimits::default(), &mut 0).unwrap();
+        assert!(found.is_empty(), "a full bridge splits the run: {found:?}");
+    }
+
+    #[test]
+    fn cleanup_joins_same_net_wide_polygons_only_when_the_gap_is_clear() {
+        let mut input = rules_input();
+        input.layers[0].wide_spacing = Some(WideSpacing {
+            width: 3,
+            parallel_run: 10,
+            spacing: 5,
+        });
+        let endpoints = [[10, 10], [10, 40], [18, 10], [18, 40]];
+        input.terminals = endpoints
+            .iter()
+            .enumerate()
+            .map(|(pin, &[x, y])| {
+                terminal(pin as u32, pin == 0, vec![rect(x - 1, y - 1, x + 1, y + 1)])
+            })
+            .collect();
+        let mut original = manual(
+            &input,
+            &[
+                ([10, 10], [10, 40], 0),
+                ([18, 10], [18, 40], 0),
+                ([10, 10], [18, 10], 1),
+            ],
+            &[[10, 10], [18, 10]],
+        );
+        original.access = endpoints
+            .iter()
+            .enumerate()
+            .map(|(pin, &at)| Access {
+                pin: pin as u32,
+                net: 0,
+                layer: 0,
+                at,
+            })
+            .collect();
+        original.patches.push(Patch {
+            net: 0,
+            layer: 0,
+            rect: rect(11, 15, 13, 35),
+        });
+        let limits = RouteLimits::default();
+        let mut clear = original.clone();
+        let (_, remaining) = cleanup_report(&input, &mut clear, &limits).unwrap();
+        assert!(remaining.is_empty(), "{remaining:?}");
+        assert_eq!(clear.patches.len(), 2, "exactly one legal bridge");
+        assert_eq!(clear.patches[1].rect, rect(13, 15, 17, 35));
+        validate(&input, &clear, &limits).unwrap();
+        let (_, again) = cleanup_report(&input, &mut clear, &limits).unwrap();
+        assert!(again.is_empty(), "{again:?}");
+        assert_eq!(clear.patches.len(), 2, "cleanup must be idempotent");
+
+        // A foreign shape in the gap must keep the violation unresolved;
+        // the cleanup must not make a short to clear a wide-spacing marker.
+        input.obstacles.push(Blockage {
+            layer: 0,
+            rect: rect(14, 20, 16, 22),
+            net: Some(1),
+        });
+        let (_, blocked) = cleanup_report(&input, &mut original, &limits).unwrap();
+        assert!(
+            matches!(
+                blocked.as_slice(),
+                [Violation::Wide {
+                    owner: 0,
+                    other: 0,
+                    ..
+                }]
+            ),
+            "{blocked:?}"
+        );
+        assert_eq!(original.patches.len(), 1, "foreign gap stays unpatched");
+
+        let mut bounded = limits;
+        bounded.max_comparisons = 1;
+        assert!(
+            cleanup_report(&input, &mut original, &bounded).is_err(),
+            "spent work budget cannot pass"
+        );
+    }
+
     #[test]
     fn planted_same_net_notch_is_rejected_by_native_validate() {
         let mut input = rules_input();
@@ -2571,6 +5381,55 @@ mod tests {
         assert!(validate(&input, &floating, &RouteLimits::default()).is_err());
     }
     #[test]
+    fn min_area_cleanup_splits_the_stub_when_no_side_alone_has_room() {
+        // M2 island 2 x 4 at y 9..13 needs height 25 (area 50). Fixed M2
+        // metal leaves 9 DBU below (die edge) and 14 above (spacing 4), and
+        // walls on both sides forbid sideways stubs: no single stub fits.
+        let mut input = rules_input();
+        input.layers[1].min_area = Some(50);
+        for r in [
+            rect(0, 0, 4, 100),
+            rect(16, 0, 20, 100),
+            rect(5, 31, 15, 40),
+        ] {
+            input.obstacles.push(Blockage {
+                layer: 1,
+                rect: r,
+                net: None,
+            });
+        }
+        let limits = RouteLimits::default();
+        let mut routes = manual(
+            &input,
+            &[([10, 10], [10, 12], 1), ([10, 12], [10, 25], 0)],
+            &[[10, 10], [10, 12]],
+        );
+        let (_, remaining) = cleanup_report(&input, &mut routes, &limits).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "{:?}",
+            remaining.iter().map(|v| v.describe()).collect::<Vec<_>>()
+        );
+        let m2: Vec<_> = routes.wires.iter().filter(|w| w.layer == 1).collect();
+        assert_eq!(m2.len(), 3, "{m2:?}");
+        routes.stats.wire_length_dbu = routes
+            .wires
+            .iter()
+            .map(|w| distance(w.start, w.end).unwrap())
+            .sum();
+        validate(&input, &routes, &limits).unwrap();
+        // One more DBU of wall above leaves too little room even when split.
+        input.obstacles[2].rect.ly = 27;
+        let mut routes = manual(
+            &input,
+            &[([10, 10], [10, 12], 1), ([10, 12], [10, 25], 0)],
+            &[[10, 10], [10, 12]],
+        );
+        let (_, remaining) = cleanup_report(&input, &mut routes, &limits).unwrap();
+        assert_eq!(remaining.len(), 1);
+    }
+
+    #[test]
     fn rules_mode_adds_min_area_stub_and_is_deterministic() {
         // A full-height M1 wall forces an M2 hop that is below its area rule.
         let mut input = rules_input();
@@ -2612,6 +5471,63 @@ mod tests {
         input.layers[1].min_area = Some(120);
         assert!(validate(&input, &plain, &limits).is_err());
     }
+    #[test]
+    fn routing_corner_spacing_accepts_a_covered_pad_and_rejects_a_closer_corner() {
+        // Integer geometry of the EZ130 AOI211X2 C/B access corner. The lower
+        // pad is wholly inside C:125^2+175^2 >180^2, although its square
+        // spacing envelope overlaps B. Moving B closer reverses that result.
+        let mut input = rules_input();
+        input.die = rect(0, 0, 2000, 2000);
+        input.layers[0].spacing = 180;
+        input.vias[0].shapes[0].rect = rect(-105, -145, 105, 145);
+        input.vias[0].shapes[1].rect = rect(-100, -145, 100, 145);
+        input.vias[0].shapes[2].rect = rect(-95, -95, 95, 95);
+        let pin = rect(1275, 1535, 1575, 1840);
+        input.obstacles.push(Blockage {
+            layer: 0,
+            rect: rect(765, 1155, 1195, 1365),
+            net: Some(1),
+        });
+        let mut class = AccessClass {
+            shapes: vec![LayerRect {
+                layer: 0,
+                rect: pin,
+            }],
+            blockers: vec![LayerRect {
+                layer: 0,
+                rect: input.obstacles[0].rect,
+            }],
+        };
+        let slots = HashMap::from([(0, 0), (1, 1)]);
+        let pairs = via_pairs(&input);
+        let limits = RouteLimits::default();
+        let at = [1425, 1685];
+        let entries =
+            access_table_at(&input, &slots, &pairs, &class, &[(0, at)], &mut 0, &limits).unwrap();
+        assert_eq!(
+            entries[0].kinds,
+            [0],
+            "the original pin already contains the entire pad"
+        );
+        assert!(
+            Spatial::new(&input, &limits)
+                .unwrap()
+                .via_clear(0, at, 0)
+                .unwrap()
+        );
+        input.obstacles[0].rect.ux = 1280;
+        class.blockers[0].rect.ux = 1280;
+        let entries =
+            access_table_at(&input, &slots, &pairs, &class, &[(0, at)], &mut 0, &limits).unwrap();
+        assert!(entries[0].kinds.is_empty());
+        assert!(
+            !Spatial::new(&input, &limits)
+                .unwrap()
+                .via_clear(0, at, 0)
+                .unwrap()
+        );
+    }
+
     #[test]
     fn access_table_picks_the_variant_whose_pad_fits_the_pin() {
         let mut input = rules_input();
@@ -2715,5 +5631,18 @@ mod tests {
         let mut i = fixture();
         i.vias.clear();
         assert!(route_cpu_ref(&i, &RouteLimits::default()).is_err());
+    }
+    #[test]
+    fn loaded_footprint_keeps_headroom_and_conservative_fallback() {
+        let input = rules_input();
+        let fallback = held_estimate(1 << 30, &input);
+        assert_eq!(loaded_held_estimate(1 << 30, &input, None), fallback);
+        assert_eq!(loaded_held_estimate(1 << 30, &input, Some(0)), fallback);
+        assert_eq!(
+            loaded_held_estimate(1 << 30, &input, Some(1 << 30)),
+            5 << 28
+        );
+        assert!(loaded_held_estimate(0, &input, Some(1)) >= PROCESS_BASE_BYTES);
+        assert_eq!(loaded_held_estimate(0, &input, Some(u64::MAX)), u64::MAX);
     }
 }
