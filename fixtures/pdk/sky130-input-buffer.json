@@ -1,0 +1,10 @@
+{
+  "cell": "sky130_fd_sc_hd__buf_4",
+  "input_pin": "A",
+  "output_pin": "X",
+  "max_fanout": 8,
+  "max_buffers": 250000,
+  "max_sinks": 2000000,
+  "max_work": 250000000,
+  "memory_mib": 2048
+}

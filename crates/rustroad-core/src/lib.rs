@@ -6,17 +6,30 @@ use std::collections::{HashMap, HashSet};
 
 pub mod connectivity;
 pub mod extract;
+pub mod fixed;
+mod hole_sweep;
+mod instance_obstacles;
 pub mod io;
 pub mod jumper;
 pub mod memory;
+mod own_pins;
 pub mod place;
 pub mod power;
+pub mod route_batches;
+mod route_graph;
+mod route_queue;
 pub(crate) mod route_rules;
+mod route_search;
 pub mod routing;
+mod routing_target;
+mod rule_index;
 pub mod supply;
 pub mod tap;
 pub(crate) mod troute;
 pub use troute::MemoryEstimate;
+
+/// Maximum admitted physical instances, including fillers, taps, and clock buffers.
+pub const MAX_PHYSICAL_INSTANCES: usize = 32_000_000;
 pub mod wire_runs;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +76,15 @@ new_key_type! { pub struct InstId; }
 pub enum Error {
     #[error("INVALID_DESIGN: {0}")]
     Invalid(String),
+    /// A pin cannot escape the current fixed geometry; includes consumed search work.
+    #[error("INVALID_DESIGN: NO_ROUTE: pin {pin} net {net} has no legal access")]
+    PinAccess {
+        pin: u32,
+        net: u32,
+        region: Rect,
+        comparisons: usize,
+        expansions: usize,
+    },
     #[error("BUDGET_EXCEEDED: {0}")]
     Budget(String),
     #[error("PLACEMENT_CAPACITY: no legal row remains for instance {0}")]
@@ -130,6 +152,8 @@ pub struct Cell {
     pub master: String,
     pub width: i64,
     pub height: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed: Option<fixed::FixedPlacement>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -162,7 +186,7 @@ pub fn valid_object_name(value: &str) -> bool {
 pub fn def_name(value: &str) -> String {
     let mut result = String::with_capacity(value.len());
     for c in value.chars() {
-        if !c.is_ascii_alphanumeric() && !matches!(c, '_' | '.' | '/' | '[' | ']' | '-') {
+        if !c.is_ascii_alphanumeric() && !matches!(c, '_' | '.' | '/' | '[' | ']' | '-' | '!') {
             result.push('\\');
         }
         result.push(c);
@@ -234,8 +258,9 @@ impl Design {
                 return Err(Error::Invalid("invalid or duplicate instance name".into()));
             }
             if cell.width <= 0
-                || cell.width % self.site.width != 0
-                || cell.height != self.site.height
+                || cell.height <= 0
+                || (cell.fixed.is_none()
+                    && (cell.width % self.site.width != 0 || cell.height != self.site.height))
             {
                 return Err(Error::Invalid(format!(
                     "{} is not a single-height, site-aligned cell",
@@ -252,6 +277,7 @@ impl Design {
                 )));
             }
         }
+        fixed::validate(self, limits.max_expansions)?;
         Ok(())
     }
 }
@@ -283,6 +309,7 @@ pub struct Instance {
     pub master: Symbol,
     pub width: i64,
     pub height: i64,
+    pub fixed: Option<fixed::FixedPlacement>,
 }
 pub struct DesignDb {
     symbols: SymbolInterner,
@@ -300,7 +327,7 @@ impl DesignDb {
             symbols: SymbolInterner::default(),
             instances: SlotMap::with_key(),
             order: Vec::with_capacity(design.cells.len()),
-            rows: design.rows.clone(),
+            rows: fixed::row_segments(design, limits.max_expansions)?,
         };
         for cell in &design.cells {
             let name = db.symbols.intern(&cell.name);
@@ -310,6 +337,7 @@ impl DesignDb {
                 master,
                 width: cell.width,
                 height: cell.height,
+                fixed: cell.fixed,
             }));
         }
         Ok(db)
@@ -334,8 +362,8 @@ impl DesignDb {
                 let inst = &self.instances[*id];
                 Placed {
                     id: id.data().as_ffi(),
-                    x: 0,
-                    y: 0,
+                    x: inst.fixed.map_or(0, |p| p.x),
+                    y: inst.fixed.map_or(0, |p| p.y),
                     width: inst.width,
                     height: inst.height,
                 }
@@ -343,6 +371,30 @@ impl DesignDb {
             .collect()
     }
 }
+/// Flat immutable records with the same fresh generational IDs as DesignDb,
+/// without rebuilding its strings and mutable instance payloads.
+pub fn snapshot_records(design: &Design, limits: &Limits) -> Result<Vec<Placed>> {
+    design.validate(limits)?;
+    if design.cells.len() >= u32::MAX as usize {
+        return Err(Error::Budget("snapshot instance identity capacity".into()));
+    }
+    let mut ids: SlotMap<InstId, ()> = SlotMap::with_capacity_and_key(design.cells.len());
+    let mut records = Vec::new();
+    records
+        .try_reserve_exact(design.cells.len())
+        .map_err(|_| Error::Budget("snapshot record allocation".into()))?;
+    for cell in &design.cells {
+        records.push(Placed {
+            id: ids.insert(()).data().as_ffi(),
+            x: cell.fixed.map_or(0, |p| p.x),
+            y: cell.fixed.map_or(0, |p| p.y),
+            width: cell.width,
+            height: cell.height,
+        });
+    }
+    Ok(records)
+}
+
 pub struct ComputeView {
     ids: Vec<InstId>,
     widths: Vec<i64>,
@@ -369,6 +421,16 @@ pub fn place_cpu_ref(db: &DesignDb, limits: &Limits) -> Result<Placement> {
         return Err(Error::Budget(
             "compute view exceeds configured limit".into(),
         ));
+    }
+    if db.order.iter().any(|id| db.instances[*id].fixed.is_some()) {
+        let fixed: Vec<_> = db
+            .order
+            .iter()
+            .map(|id| db.instances[*id].fixed.is_some())
+            .collect();
+        return pack_records(db.unplaced_records(), &db.rows, &fixed, limits, |i| {
+            db.symbols.resolve(db.instances[db.order[i]].name).into()
+        });
     }
     let view = db.lower_cpu_ref();
     let mut cells = Vec::with_capacity(view.ids.len());
@@ -407,6 +469,70 @@ pub fn place_cpu_ref(db: &DesignDb, limits: &Limits) -> Result<Placement> {
     Ok(Placement { cells, expansions })
 }
 
+/// Fixed-order packing directly from a validated immutable design snapshot.
+pub fn place_design_cpu_ref(design: &Design, limits: &Limits) -> Result<Placement> {
+    pack_records(
+        snapshot_records(design, limits)?,
+        &fixed::row_segments(design, limits.max_expansions)?,
+        &design
+            .cells
+            .iter()
+            .map(|c| c.fixed.is_some())
+            .collect::<Vec<_>>(),
+        limits,
+        |i| design.cells[i].name.clone(),
+    )
+}
+
+fn pack_records(
+    mut cells: Vec<Placed>,
+    rows: &[Row],
+    fixed: &[bool],
+    limits: &Limits,
+    name: impl Fn(usize) -> String,
+) -> Result<Placement> {
+    if cells.len() > limits.max_cells || rows.len() > limits.max_rows {
+        return Err(Error::Budget(
+            "compute view exceeds configured limit".into(),
+        ));
+    }
+    if rows.is_empty() {
+        return Err(Error::Invalid("placement requires at least one row".into()));
+    }
+    let mut row_index = 0;
+    let mut x = rows[0].x_start;
+    let mut expansions = 0;
+    for (i, cell) in cells.iter_mut().enumerate() {
+        if fixed[i] {
+            continue;
+        }
+        loop {
+            if expansions >= limits.max_expansions {
+                return Err(Error::Budget(
+                    "max_expansions reached during placement".into(),
+                ));
+            }
+            expansions += 1;
+            let row = rows[row_index];
+            if let Some(right) = x
+                .checked_add(cell.width)
+                .filter(|right| *right <= row.x_end)
+            {
+                cell.x = x;
+                cell.y = row.y;
+                x = right;
+                break;
+            }
+            row_index += 1;
+            if row_index == rows.len() {
+                return Err(Error::Capacity(name(i)));
+            }
+            x = rows[row_index].x_start;
+        }
+    }
+    Ok(Placement { cells, expansions })
+}
+
 impl Orientation {
     pub fn def(self) -> &'static str {
         match self {
@@ -414,6 +540,17 @@ impl Orientation {
             Self::FS => "FS",
         }
     }
+}
+
+pub fn placed_orientation_for(
+    design: &Design,
+    spec: &Cell,
+    placed: &Placed,
+) -> Result<Orientation> {
+    if let Some(fixed) = spec.fixed {
+        return Ok(fixed.orientation);
+    }
+    placed_orientation(design, placed)
 }
 
 pub fn placed_orientation(design: &Design, placed: &Placed) -> Result<Orientation> {
@@ -432,7 +569,40 @@ pub fn validate_placement(design: &Design, cells: &[Placed], limits: &Limits) ->
         return Err(Error::Invalid("placement length mismatch".into()));
     }
     let mut intervals = Vec::with_capacity(cells.len());
+    let blocked = fixed::envelopes(design)?;
+    let mut work = 0usize;
     for (cell, spec) in cells.iter().zip(&design.cells) {
+        if let Some(fixed) = spec.fixed {
+            if cell.x != fixed.x
+                || cell.y != fixed.y
+                || cell.width != spec.width
+                || cell.height != spec.height
+            {
+                return Err(Error::Invalid("fixed macro moved or resized".into()));
+            }
+            continue;
+        }
+        let rect = Rect {
+            lx: cell.x,
+            ly: cell.y,
+            ux: cell
+                .x
+                .checked_add(cell.width)
+                .ok_or_else(|| Error::Invalid("cell coordinate overflow".into()))?,
+            uy: cell
+                .y
+                .checked_add(cell.height)
+                .ok_or_else(|| Error::Invalid("cell coordinate overflow".into()))?,
+        };
+        for &b in &blocked {
+            work += 1;
+            if work > limits.max_expansions {
+                return Err(Error::Budget("fixed macro placement overlap work".into()));
+            }
+            if fixed::overlaps(rect, b) {
+                return Err(Error::Invalid("cell intersects fixed macro halo".into()));
+            }
+        }
         let index = design
             .rows
             .binary_search_by_key(&cell.y, |r| r.y)
@@ -488,7 +658,7 @@ pub fn write_def_components(
         &Limits {
             max_cells: cells.len(),
             max_rows: design.rows.len(),
-            max_expansions: 0,
+            max_expansions: 64_000_000,
         },
     )
     .map_err(std::io::Error::other)?;
@@ -504,7 +674,8 @@ pub fn write_def_components(
         "DIEAREA ( {} {} ) ( {} {} ) ;",
         die.lx, die.ly, die.ux, die.uy
     )?;
-    for (i, row) in design.rows.iter().enumerate() {
+    let rows = fixed::row_segments(design, 64_000_000).map_err(std::io::Error::other)?;
+    for (i, row) in rows.iter().enumerate() {
         let count =
             (i128::from(row.x_end) - i128::from(row.x_start)) / i128::from(design.site.width);
         writeln!(
@@ -521,12 +692,17 @@ pub fn write_def_components(
     for (cell, placed) in design.cells.iter().zip(cells) {
         writeln!(
             output,
-            "- {} {} + PLACED ( {} {} ) {} ;",
+            "- {} {} + {} ( {} {} ) {} ;",
             def_name(&cell.name),
             def_name(&cell.master),
+            if cell.fixed.is_some() {
+                "FIXED"
+            } else {
+                "PLACED"
+            },
             placed.x,
             placed.y,
-            placed_orientation(design, placed)
+            placed_orientation_for(design, cell, placed)
                 .map_err(std::io::Error::other)?
                 .def()
         )?;
@@ -537,6 +713,28 @@ pub fn write_def_components(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_records_preserve_arena_identity_and_fixed_placement() {
+        let d = design();
+        let limits = Limits::default();
+        let db = DesignDb::new(&d, &limits).unwrap();
+        assert_eq!(
+            snapshot_records(&d, &limits).unwrap(),
+            db.unplaced_records()
+        );
+        let from_db = place_cpu_ref(&db, &limits).unwrap();
+        let from_snapshot = place_design_cpu_ref(&d, &limits).unwrap();
+        assert_eq!(from_snapshot.cells, from_db.cells);
+        assert_eq!(from_snapshot.expansions, from_db.expansions);
+        let small = Limits {
+            max_cells: 1,
+            ..limits
+        };
+        assert!(snapshot_records(&d, &small).is_err());
+        assert!(place_cpu_ref(&db, &small).is_err());
+    }
+
     fn design() -> Design {
         Design {
             name: "tiny".into(),
@@ -574,6 +772,7 @@ mod tests {
             ],
             cells: (0..3)
                 .map(|i| Cell {
+                    fixed: None,
                     name: format!("u{i}"),
                     master: "BUF".into(),
                     width: 40,
@@ -607,6 +806,7 @@ mod tests {
         assert!(matches!(place_cpu_ref(&db, &limits), Err(Error::Budget(_))));
         let mut d = d;
         d.cells.extend((3..5).map(|i| Cell {
+            fixed: None,
             name: format!("u{i}"),
             master: "BUF".into(),
             width: 40,

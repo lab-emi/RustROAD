@@ -23,13 +23,10 @@ Use the local pinned PDK profile and the usual process memory/time guards.
 The new top-level `timing_accuracy_status` separates endpoint parity from the
 existing `functional_status` and overall result. An absent tool never passes.
 
-The [HTML report](postroute-timing.md) records measured timing and resources.
-Sky130's nominal setup/hold checks meet the constraints, with only about 0.247 ps
-hold margin; that margin is below the 1 ps comparison gate. GF180 still has four
-hold violations, worst about -0.635535 ns. Therefore the full flow correctly
-remains `partial` even though both accuracy gates and the functional chain pass.
-The next physical optimization must improve the data/clock relationship and
-re-route/re-extract before checking again. No violation is clipped or hidden.
+The flow remains `partial` while any hold or parity gate fails, even when the
+accuracy gates and the functional chain pass; no violation is clipped or
+hidden. A physical optimization must re-route and re-extract before the
+checks run again.
 
 Scope: TT/f64, factor-one grounded coupling, primary propagated clocks and
 CPPR off; 19 signal nets, 46 terminals and eight timing endpoints per PDK.

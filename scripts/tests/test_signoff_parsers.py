@@ -690,6 +690,39 @@ class ContainerAndManifestTest(unittest.TestCase):
 class SignoffHarnessTest(unittest.TestCase):
     """Harness behaviour that needs no container: identity failures and tool-run failures."""
 
+    def test_metadata_only_probe_is_upgraded_before_flat_label_comparison(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            session = object.__new__(signoff.Session)
+            session.preflight = None
+            session.out = Path(d)
+            session.top = "top"
+            session.spec = {"boundary_layer": [235, 4]}
+            session.probe_max_texts = 5_000_000
+            session.probe_text_mib = 4096
+            session.mounts = lambda: []
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append(command)
+                info = {"top_exists": True, "top_texts": []}
+                if any(value.startswith("texts_out=") for value in command):
+                    info["flat_texts"] = {"count": 0, "sha256": "checked"}
+                (session.out / "preflight_design.json").write_text(json.dumps(info))
+                return dict(label=kwargs["label"], exit_code=0, wall_seconds=0.1,
+                            peak_rss_kib=1000, timed_out=False, host_error=None,
+                            time={"inner_exit_status": 0})
+
+            with patch.object(signoff.container, "run", side_effect=run):
+                self.assertNotIn("flat_texts", session.probe(include_texts=False))
+                session.probe(include_texts=False)
+                self.assertEqual(len(calls), 1, "metadata can reuse its cached result")
+                self.assertIn("flat_texts", session.probe())
+                self.assertEqual(len(calls), 2, "XOR requires a fresh complete label probe")
+                session.probe()
+                self.assertEqual(len(calls), 2)
+
     def test_run_incomplete_codes(self):
         base = dict(exit_code=0, timed_out=False, host_error=None, time={"inner_exit_status": 0})
         self.assertIsNone(signoff.run_incomplete(base))

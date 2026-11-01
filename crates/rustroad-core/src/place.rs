@@ -22,6 +22,21 @@
 //! O(cells + pins); work is counted against `PlaceLimits::max_work`.
 //! See docs/scaling.md for the estimate.
 use crate::{Error, Result};
+use rayon::prelude::*;
+mod electrostatic;
+pub use electrostatic::diagnostics::{
+    DiagnosticContext, DiagnosticPhase, DiagnosticPhaseView, DiagnosticResult, DiagnosticStage,
+    DiagnosticSummary, NativeCost, diagnose_cpu_ref,
+};
+pub use electrostatic::{
+    Counters as ElectrostaticCounters, ElectrostaticConfig, ElectrostaticReport,
+    StageReport as ElectrostaticStageReport,
+};
+
+/// Actual explicitly installed pool size, without initializing a global pool.
+pub fn diagnostic_pool_threads() -> Option<usize> {
+    rayon::current_thread_index().map(|_| rayon::current_num_threads())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PinRef {
@@ -72,6 +87,45 @@ pub struct PlaceConfig {
     /// Nets with more pins are ignored by the wirelength model.
     #[serde(default = "default_max_net_pins")]
     pub max_net_pins: usize,
+    /// Unseeded numerical target prototype; omission preserves the legacy path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub electrostatic: Option<ElectrostaticConfig>,
+    /// Legalize every cell whose modelled nets join it only to fixed pins
+    /// (e.g. a tie cell driving one macro pin) at the site nearest the HPWL
+    /// optimum of those pins before global placement, and keep it out of
+    /// spreading. Its optimum does not depend on any other cell, but a
+    /// density cut through a macro can otherwise push it to the macro's far
+    /// side. Omission preserves the legacy placer bit for bit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub anchor_isolated: bool,
+    /// Lighter alternative to `anchor_isolated` (the two are exclusive): run
+    /// the unchanged global placement, then target every isolated cell at
+    /// the HPWL optimum of its fixed pins before the common legalization and
+    /// detailed passes. Other cells keep their global targets, so they move
+    /// only by the legalization displacement the retargeted cells cause; no
+    /// interval is carved. Omission preserves the legacy placer bit for bit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retarget_isolated: bool,
+    /// Seeded (ECO) placement only: legalize the cells without a seed (new
+    /// or rebuilt cells such as clock buffers) before the seeded ones. The
+    /// legalizer otherwise assigns wide cells first, so a narrow new cell
+    /// whose target lies beside a macro finds the nearby rows already taken
+    /// by unchanged neighbours and can land hundreds of microns away; a
+    /// rebuilt clock buffer then turns that displacement into skew. Seeded
+    /// cells absorb the displacement instead. Omission preserves the legacy
+    /// placer bit for bit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub new_cells_first: bool,
+    /// Seeded (ECO) placement only: a detailed-placement move must end
+    /// within the move window (8 row heights in x, 2 rows in y) of the
+    /// cell's own target, or closer to it than before. HPWL alone slides a
+    /// repeater along its chain toward its driver (every point between
+    /// driver and sinks ties), turning the seeded short wire into a long
+    /// load the repair round never sized; seeded cells otherwise keep the
+    /// "legalization displacement only" contract. Omission preserves the
+    /// legacy placer bit for bit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local_detail: bool,
 }
 fn default_global() -> usize {
     12
@@ -92,6 +146,11 @@ impl Default for PlaceConfig {
             cg_iterations: default_cg(),
             detailed_passes: default_detailed(),
             max_net_pins: default_max_net_pins(),
+            electrostatic: None,
+            anchor_isolated: false,
+            retarget_isolated: false,
+            new_cells_first: false,
+            local_detail: false,
         }
     }
 }
@@ -112,11 +171,16 @@ impl Default for PlaceLimits {
 }
 #[derive(Clone, Debug)]
 pub struct PlaceResult {
+    /// Present only for the explicitly requested numerical prototype.
+    pub electrostatic: Option<ElectrostaticReport>,
     /// Lower-left corner of every cell (DBU).
     pub positions: Vec<[i64; 2]>,
     pub hpwl: u64,
     pub global_hpwl: u64,
     pub work: u64,
+    /// Cells placed at their fixed-pin anchors (`anchor_isolated` or
+    /// `retarget_isolated`).
+    pub anchored: usize,
 }
 
 fn budget(s: &str) -> Error {
@@ -129,14 +193,57 @@ fn invalid(s: &str) -> Error {
 struct Work {
     used: u64,
     max: u64,
+    // Diagnostic reservations are never reported as completed work.
+    held: u64,
 }
 impl Work {
     fn add(&mut self, n: u64) -> Result<()> {
-        self.used = self.used.saturating_add(n);
-        if self.used > self.max {
-            return Err(budget("work limit"));
-        }
+        let next = self
+            .used
+            .checked_add(n)
+            .filter(|v| {
+                v.checked_add(self.held)
+                    .is_some_and(|total| total <= self.max)
+            })
+            .ok_or_else(|| budget("work limit"))?;
+        self.used = next;
         Ok(())
+    }
+
+    fn reserve(&mut self, units: u64) -> Result<()> {
+        let held = self
+            .held
+            .checked_add(units)
+            .filter(|held| {
+                self.used
+                    .checked_add(*held)
+                    .is_some_and(|total| total <= self.max)
+            })
+            .ok_or_else(|| budget("diagnostic work reservation"))?;
+        self.held = held;
+        Ok(())
+    }
+
+    fn consume_reserved(&mut self, units: u64) -> Result<()> {
+        let held = self
+            .held
+            .checked_sub(units)
+            .ok_or_else(|| budget("diagnostic reservation exhausted"))?;
+        let used = self
+            .used
+            .checked_add(units)
+            .filter(|used| {
+                used.checked_add(held)
+                    .is_some_and(|total| total <= self.max)
+            })
+            .ok_or_else(|| budget("diagnostic reserved work overflow"))?;
+        self.held = held;
+        self.used = used;
+        Ok(())
+    }
+
+    fn release_reserved(&mut self) -> u64 {
+        std::mem::take(&mut self.held)
     }
 }
 
@@ -241,6 +348,27 @@ struct Csr {
     col: Vec<u32>,
     val: Vec<f64>,
 }
+
+fn multiply(diag: &[f64], csr: &Csr, values: &[f64], output: &mut [f64]) {
+    let row = |i: usize, result: &mut f64| {
+        let mut sum = diag[i] * values[i];
+        for k in csr.start[i]..csr.start[i + 1] {
+            sum += csr.val[k] * values[csr.col[k] as usize];
+        }
+        *result = sum;
+    };
+    if output.len() >= 16_384 {
+        output
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, value)| row(i, value));
+    } else {
+        output
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, value)| row(i, value));
+    }
+}
 fn compress(n: usize, mut off: Vec<(u32, u32, f64)>) -> Csr {
     off.sort_unstable_by_key(|e| (e.0, e.1));
     let mut start = vec![0usize; n + 1];
@@ -273,18 +401,9 @@ fn solve(
     work: &mut Work,
 ) -> Result<()> {
     let n = x.len();
-    let mul = |v: &[f64], out: &mut [f64]| {
-        for i in 0..n {
-            let mut s = diag[i] * v[i];
-            for k in csr.start[i]..csr.start[i + 1] {
-                s += csr.val[k] * v[csr.col[k] as usize];
-            }
-            out[i] = s;
-        }
-    };
     let mut r = vec![0.0; n];
     let mut ap = vec![0.0; n];
-    mul(x, &mut ap);
+    multiply(diag, csr, x, &mut ap);
     for i in 0..n {
         r[i] = b[i] - ap[i];
     }
@@ -298,7 +417,7 @@ fn solve(
         if rn <= 1e-9 * norm_b {
             break;
         }
-        mul(&p, &mut ap);
+        multiply(diag, csr, &p, &mut ap);
         let pap: f64 = p.iter().zip(&ap).map(|(a, b)| a * b).sum();
         if pap <= 0.0 || !pap.is_finite() {
             break;
@@ -506,6 +625,11 @@ impl Spread<'_> {
             rest -= w;
             k += 1;
         }
+        // Whole-cell rounding can leave a region over-full; its overflow
+        // stays on the side that has rows (a macro may cover the other).
+        if b_cap == 0 {
+            k = cells.len();
+        }
         let (left, right) = cells.split_at_mut(k);
         if vertical_cut {
             self.run(left, pos, r0, r1, x0, cut_x, work)?;
@@ -552,14 +676,20 @@ impl Spread<'_> {
     }
 }
 
-/// Legalization in two steps. (1) Assignment: cells sorted by target x pick
+/// Legalization in two steps. (1) Assignment: cells (those marked `first`
+/// before all others, then wide before narrow) sorted by target x pick
 /// the interval of least estimated displacement that still has room for
 /// their width (capacity counts widths plus spacing, so every interval's
 /// cells always fit). (2) Per interval, an order-preserving minimum
 /// displacement solve: cells keep their target order and overlapping
 /// neighbours merge into clusters placed at their mean target, clamped to
 /// the interval and snapped to the site grid.
-fn legalize(problem: &PlaceProblem, target: &[[f64; 2]], work: &mut Work) -> Result<Vec<[i64; 2]>> {
+fn legalize(
+    problem: &PlaceProblem,
+    target: &[[f64; 2]],
+    first: Option<&[bool]>,
+    work: &mut Work,
+) -> Result<Vec<[i64; 2]>> {
     let n = target.len();
     let ivs = &problem.intervals;
     let mut rows: Vec<i64> = ivs.iter().map(|v| v.y).collect();
@@ -574,10 +704,12 @@ fn legalize(problem: &PlaceProblem, target: &[[f64; 2]], work: &mut Work) -> Res
     let mut members: Vec<Vec<usize>> = vec![Vec::new(); ivs.len()];
     let lx_of = |c: usize| target[c][0] - problem.widths[c] as f64 / 2.0;
     let mut order: Vec<usize> = (0..n).collect();
-    // Wide cells first so they find room; then by target x.
+    // Marked cells, then wide cells first so they find room; then by target x.
+    let later = |c: usize| first.is_some_and(|f| !f[c]);
     order.sort_by(|a, b| {
-        problem.widths[*b]
-            .cmp(&problem.widths[*a])
+        later(*a)
+            .cmp(&later(*b))
+            .then(problem.widths[*b].cmp(&problem.widths[*a]))
             .then(lx_of(*a).total_cmp(&lx_of(*b)))
             .then(a.cmp(b))
     });
@@ -598,24 +730,62 @@ fn legalize(problem: &PlaceProblem, target: &[[f64; 2]], work: &mut Work) -> Res
                 if best.is_some_and(|b| dy >= b.0) {
                     continue;
                 }
-                for &i in &by_row[r] {
+                let intervals = &by_row[r];
+                let middle =
+                    intervals.partition_point(|&i| ((ivs[i].ux - w).max(ivs[i].lx) as f64) < tx);
+                let (mut left, mut right) = (middle, middle);
+                let lower_bound = |i: usize| {
+                    let v = ivs[i];
+                    let x = tx.clamp(v.lx as f64, (v.ux - w).max(v.lx) as f64);
+                    (x - tx).abs() + dy
+                };
+                loop {
+                    let before = left
+                        .checked_sub(1)
+                        .map(|k| (lower_bound(intervals[k]), intervals[k]));
+                    let after = intervals.get(right).map(|&i| (lower_bound(i), i));
+                    let (bound, i) = match (before, after) {
+                        (None, None) => break,
+                        (Some(a), Some(b)) if a.0 <= b.0 => {
+                            left -= 1;
+                            a
+                        }
+                        (Some(a), None) => {
+                            left -= 1;
+                            a
+                        }
+                        (_, Some(b)) => {
+                            right += 1;
+                            b
+                        }
+                    };
+                    // Both directions have monotone distance lower bounds.
+                    // A positive fill penalty cannot make a farther interval win.
+                    if best.is_some_and(|b| bound > b.0) {
+                        break;
+                    }
                     work.add(1)?;
                     let v = ivs[i];
                     let need = if members[i].is_empty() { w } else { w + gap };
                     if used[i] + need > v.ux - v.lx {
                         continue;
                     }
-                    // Displacement estimate, plus a crowding term so cells
-                    // spread over equally close intervals.
                     let x = tx.clamp(v.lx as f64, (v.ux - w) as f64);
                     let fill = (used[i] + need) as f64 / (v.ux - v.lx) as f64;
                     let cost = (x - tx).abs() + dy + fill * problem.row_height as f64;
-                    if best.is_none_or(|b| cost < b.0) {
+                    if best.is_none_or(|b| cost < b.0 || (cost == b.0 && i < b.1)) {
                         best = Some((cost, i));
                     }
                 }
             }
-            if best.is_some() || (lo == 0 && hi == rows.len()) {
+            // A row outside the window costs at least its own |dy|; a blocked
+            // window (e.g. rows beside a macro) must not hide a nearer row.
+            let outside = [lo.checked_sub(1).map(|r| rows[r]), rows.get(hi).copied()]
+                .into_iter()
+                .flatten()
+                .map(|y| (y as f64 - ty).abs())
+                .fold(f64::INFINITY, f64::min);
+            if best.is_some_and(|b| b.0 <= outside) || (lo == 0 && hi == rows.len()) {
                 break;
             }
             radius *= 2;
@@ -686,16 +856,25 @@ fn legalize(problem: &PlaceProblem, target: &[[f64; 2]], work: &mut Work) -> Res
     Ok(out)
 }
 
-/// Bounded HPWL-driven detailed placement on legal positions.
+/// Bounded HPWL-driven detailed placement on legal positions. With
+/// `anchor` (cell-centre targets), a gap move must end within the move
+/// window of the cell's own target or closer to it than its current place.
 fn detailed(
     problem: &PlaceProblem,
     pos: &mut [[i64; 2]],
     passes: usize,
+    max_net_pins: usize,
+    anchor: Option<&[[f64; 2]]>,
     work: &mut Work,
 ) -> Result<()> {
     let n = pos.len();
     let mut nets_of: Vec<Vec<u32>> = vec![Vec::new(); n];
     for (k, net) in problem.nets.iter().enumerate() {
+        work.add(1)?;
+        if net.len() < 2 || net.len() > max_net_pins {
+            continue;
+        }
+        work.add(net.len() as u64)?;
         for p in net {
             if let PinRef::Cell(c) = p {
                 let v = &mut nets_of[*c as usize];
@@ -724,16 +903,21 @@ fn detailed(
     };
     // Weighted (milli-unit) HPWL; with no weights every net counts 1000x,
     // which orders moves exactly like the unweighted sum.
-    let cost = |pos: &[[i64; 2]], cells: &[usize]| -> u64 {
+    let cost = |pos: &[[i64; 2]], cells: &[usize], work: &mut Work| -> Result<u64> {
         let mut ks: Vec<u32> = cells
             .iter()
             .flat_map(|c| nets_of[*c].iter().copied())
             .collect();
         ks.sort_unstable();
         ks.dedup();
-        ks.iter()
-            .map(|k| net_hpwl(pos, *k).saturating_mul(u64::from(problem.weight(*k as usize))))
-            .fold(0u64, u64::saturating_add)
+        let mut total = 0u64;
+        for &k in &ks {
+            work.add(problem.nets[k as usize].len() as u64)?;
+            total = total.saturating_add(
+                net_hpwl(pos, k).saturating_mul(u64::from(problem.weight(k as usize))),
+            );
+        }
+        Ok(total)
     };
     let gap = problem.gap;
     for _ in 0..passes {
@@ -762,11 +946,11 @@ fn detailed(
                 if problem.widths[a] != problem.widths[b] {
                     continue;
                 }
-                let before = cost(pos, &[a, b]);
+                let before = cost(pos, &[a, b], work)?;
                 let (pa, pb) = (pos[a], pos[b]);
                 pos[a] = pb;
                 pos[b] = pa;
-                if cost(pos, &[a, b]) < before {
+                if cost(pos, &[a, b], work)? < before {
                     v[j - 1].2 = b;
                     v[j].2 = a;
                     improved = true;
@@ -782,6 +966,7 @@ fn detailed(
             let mut xs = Vec::new();
             let mut ys = Vec::new();
             for &k in &nets_of[c] {
+                work.add(problem.nets[k as usize].len() as u64)?;
                 let (mut x0, mut x1, mut y0, mut y1) = (i64::MAX, i64::MIN, i64::MAX, i64::MIN);
                 for p in &problem.nets[k as usize] {
                     let [x, y] = match *p {
@@ -812,45 +997,101 @@ fn detailed(
             let cur = find(pos[c]).unwrap();
             // Candidate gaps in rows near my.
             let mut best: Option<(u64, usize, i64)> = None;
-            let before = cost(pos, &[c]);
-            for (i, v) in problem.intervals.iter().enumerate() {
-                if (v.y + problem.row_height / 2 - my).abs() > 2 * problem.row_height
-                    || v.ux < mx - 8 * problem.row_height
-                    || v.lx > mx + 8 * problem.row_height
-                {
-                    continue;
+            let before = cost(pos, &[c], work)?;
+            let height = i128::from(problem.row_height);
+            // How far a cell centre lies outside the move window of the
+            // cell's own target (0 inside; always 0 without an anchor).
+            let away = |at: [i64; 2]| -> i128 {
+                anchor.map_or(0, |a| {
+                    let dx = (at[0] as f64 - a[c][0]).abs() as i128;
+                    let dy = (at[1] as f64 - a[c][1]).abs() as i128;
+                    (dx - 8 * height).max(0) + (dy - 2 * height).max(0)
+                })
+            };
+            let centre = |p: [i64; 2]| [p[0] + w / 2, p[1] + problem.row_height / 2];
+            let now_away = away(centre(pos[c]));
+            let (mx, my) = match anchor {
+                Some(a) => {
+                    let (ax, ay) = (a[c][0] as i64, a[c][1] as i64);
+                    let (hx, hy) = (8 * problem.row_height, 2 * problem.row_height);
+                    (mx.clamp(ax - hx, ax + hx), my.clamp(ay - hy, ay + hy))
                 }
-                work.add(occ[i].len() as u64 + 1)?;
-                let mut left = v.lx;
-                let items = &occ[i];
-                for k in 0..=items.len() {
-                    let right = if k < items.len() { items[k].0 } else { v.ux };
-                    // Free gap [left, right) (own cell counts as free).
-                    let (gl, gr) = (left, right);
-                    if k < items.len() && items[k].2 == c {
-                        left = left.max(items[k].0); // keep scanning past self
-                        continue;
-                    }
-                    let room_end = if k < items.len() { gr - gap } else { gr };
-                    if room_end - gl >= w {
-                        let want = mx - w / 2;
-                        let x = gl
-                            + (((want - gl).clamp(0, room_end - w - gl)) / problem.site)
-                                * problem.site;
-                        if x >= gl && x + w <= room_end {
-                            let old = pos[c];
-                            pos[c] = [x, v.y];
-                            let after = cost(pos, &[c]);
-                            pos[c] = old;
-                            if after < before && best.is_none_or(|b| after < b.0) {
-                                best = Some((after, i, x));
+                None => (mx, my),
+            };
+            let low_y = i128::from(my) - 2 * height;
+            let high_y = i128::from(my) + 2 * height;
+            let low_x = i128::from(mx) - 8 * height;
+            let high_x = i128::from(mx) + 8 * height;
+            let first = problem
+                .intervals
+                .partition_point(|v| i128::from(v.y) + height / 2 < low_y);
+            let end = problem
+                .intervals
+                .partition_point(|v| i128::from(v.y) + height / 2 <= high_y);
+            let mut row_start = first;
+            while row_start < end {
+                let row_y = problem.intervals[row_start].y;
+                let row_end =
+                    row_start + problem.intervals[row_start..end].partition_point(|v| v.y == row_y);
+                let row = &problem.intervals[row_start..row_end];
+                let x_start = row.partition_point(|v| i128::from(v.ux) < low_x);
+                let x_end = row.partition_point(|v| i128::from(v.lx) <= high_x);
+                let first_interval = row_start + x_start;
+                for (relative, items) in occ[first_interval..row_start + x_end].iter().enumerate() {
+                    let i = first_interval + relative;
+                    let v = &problem.intervals[i];
+                    // A full-width row is one interval. Restrict its gaps as
+                    // well as its interval to the existing local x window.
+                    let first = items.partition_point(|e| i128::from(e.0) < low_x);
+                    let last = items
+                        .partition_point(|e| i128::from(e.0) <= high_x)
+                        .saturating_add(1)
+                        .min(items.len() + 1);
+                    work.add((last - first) as u64 + 1)?;
+                    let mut left = if first == 0 {
+                        v.lx
+                    } else if items[first - 1].2 == c {
+                        items[first - 1].0
+                    } else {
+                        items[first - 1].0 + items[first - 1].1 + gap
+                    };
+                    for k in first..last {
+                        let right = if k < items.len() { items[k].0 } else { v.ux };
+                        // Free gap [left, right) (own cell counts as free).
+                        let (gl, gr) = (left, right);
+                        if k < items.len() && items[k].2 == c {
+                            left = left.max(items[k].0); // keep scanning past self
+                            continue;
+                        }
+                        let room_end = if k < items.len() { gr - gap } else { gr };
+                        if room_end - gl >= w
+                            && i128::from(gl) <= high_x
+                            && i128::from(room_end) >= low_x
+                        {
+                            let want = mx - w / 2;
+                            let x = gl
+                                + (((want - gl).clamp(0, room_end - w - gl)) / problem.site)
+                                    * problem.site;
+                            if x >= gl
+                                && x + w <= room_end
+                                && (away(centre([x, v.y])) == 0
+                                    || away(centre([x, v.y])) < now_away)
+                            {
+                                let old = pos[c];
+                                pos[c] = [x, v.y];
+                                let after = cost(pos, &[c], work)?;
+                                pos[c] = old;
+                                if after < before && best.is_none_or(|b| after < b.0) {
+                                    best = Some((after, i, x));
+                                }
                             }
                         }
-                    }
-                    if k < items.len() {
-                        left = items[k].0 + items[k].1 + gap;
+                        if k < items.len() {
+                            left = items[k].0 + items[k].1 + gap;
+                        }
                     }
                 }
+                row_start = row_end;
             }
             if let Some((_, i, x)) = best {
                 occ[cur].retain(|e| e.2 != c);
@@ -867,19 +1108,11 @@ fn detailed(
     Ok(())
 }
 
-/// Validate the legal result independently of the algorithm.
+/// Validate the legal result independently of the algorithm. The gap holds
+/// between neighbours of one free interval; across an interval boundary the
+/// fixed cell (tap) or blockage between them is the separation.
 fn check_legal(problem: &PlaceProblem, pos: &[[i64; 2]]) -> Result<()> {
-    let mut items: Vec<(i64, i64, i64)> = pos
-        .iter()
-        .enumerate()
-        .map(|(c, p)| (p[1], p[0], p[0] + problem.widths[c]))
-        .collect();
-    items.sort_unstable();
-    for w in items.windows(2) {
-        if w[0].0 == w[1].0 && w[0].2 + problem.gap > w[1].1 && w[0].2 > w[1].1 - problem.gap {
-            return Err(invalid("overlap or spacing violation after placement"));
-        }
-    }
+    let mut items: Vec<(usize, i64, i64)> = Vec::with_capacity(pos.len());
     for (c, p) in pos.iter().enumerate() {
         let i = problem
             .intervals
@@ -895,11 +1128,26 @@ fn check_legal(problem: &PlaceProblem, pos: &[[i64; 2]]) -> Result<()> {
         {
             return Err(invalid("cell outside free intervals"));
         }
+        items.push((i - 1, p[0], p[0] + problem.widths[c]));
+    }
+    items.sort_unstable();
+    for w in items.windows(2) {
+        if w[0].0 == w[1].0 && w[0].2 + problem.gap > w[1].1 {
+            return Err(invalid("overlap or spacing violation after placement"));
+        }
     }
     Ok(())
 }
 
 fn validate(problem: &PlaceProblem, config: &PlaceConfig, limits: &PlaceLimits) -> Result<()> {
+    if let Some(mode) = &config.electrostatic {
+        mode.validate()?;
+        if config.anchor_isolated {
+            return Err(invalid(
+                "electrostatic is incompatible with anchor_isolated",
+            ));
+        }
+    }
     let n = problem.widths.len();
     if n > limits.max_cells || problem.nets.iter().map(Vec::len).sum::<usize>() > limits.max_pins {
         return Err(budget("problem size"));
@@ -917,6 +1165,7 @@ fn validate(problem: &PlaceProblem, config: &PlaceConfig, limits: &PlaceLimits) 
         })
         || problem.intervals.iter().any(|v| v.ux <= v.lx)
         || (!problem.weights.is_empty() && problem.weights.len() != problem.nets.len())
+        || (config.anchor_isolated && config.retarget_isolated)
         || problem
             .weights
             .iter()
@@ -962,16 +1211,23 @@ pub fn place_seeded(
         return Err(invalid("seed count differs from the cell count"));
     }
     let mut work = Work {
+        held: 0,
         used: 0,
         max: limits.max_work,
     };
     if n == 0 {
-        return Ok(PlaceResult {
+        let mut result = PlaceResult {
+            electrostatic: None,
             positions: Vec::new(),
             hpwl: 0,
             global_hpwl: 0,
             work: 0,
-        });
+            anchored: 0,
+        };
+        if let Some(mode) = &config.electrostatic {
+            result.electrostatic = Some(electrostatic::skipped_seeded(&result, mode));
+        }
+        return Ok(result);
     }
     let region = [
         problem.intervals.iter().map(|v| v.lx).min().unwrap() as f64,
@@ -1045,36 +1301,335 @@ pub fn place_seeded(
         })
         .collect();
     let global_hpwl = hpwl(problem, &global);
-    let mut legal = legalize(problem, &targets, &mut work)?;
-    detailed(problem, &mut legal, config.detailed_passes, &mut work)?;
+    let new: Vec<bool> = seeds.iter().map(Option::is_none).collect();
+    let first = config.new_cells_first.then_some(&new[..]);
+    let mut legal = legalize(problem, &targets, first, &mut work)?;
+    detailed(
+        problem,
+        &mut legal,
+        config.detailed_passes,
+        config.max_net_pins,
+        config.local_detail.then_some(&targets[..]),
+        &mut work,
+    )?;
     check_legal(problem, &legal)?;
-    Ok(PlaceResult {
+    let mut result = PlaceResult {
+        electrostatic: None,
         hpwl: hpwl(problem, &legal),
         positions: legal,
         global_hpwl,
         work: work.used,
-    })
+        anchored: 0,
+    };
+    if let Some(mode) = &config.electrostatic {
+        result.electrostatic = Some(electrostatic::skipped_seeded(&result, mode));
+    }
+    Ok(result)
 }
 
+/// HPWL-optimal centre of every cell whose modelled nets (2..=`max_net_pins`
+/// pins) join it only to fixed pins: per axis the median of those nets'
+/// fixed-pin bounding boxes. `None` for a cell that shares a modelled net
+/// with another cell, is on an unmodelled net, or has no fixed pin.
+fn isolated_targets(
+    problem: &PlaceProblem,
+    max_net_pins: usize,
+    work: &mut Work,
+) -> Result<Vec<Option<[f64; 2]>>> {
+    const SHARED: u8 = 2;
+    let n = problem.widths.len();
+    let mut state = vec![0u8; n];
+    let only_cell = |net: &[PinRef]| -> Option<Option<u32>> {
+        let mut only = None;
+        for p in net {
+            if let PinRef::Cell(c) = *p {
+                match only {
+                    None => only = Some(c),
+                    Some(o) if o != c => return None,
+                    _ => {}
+                }
+            }
+        }
+        Some(only)
+    };
+    for net in &problem.nets {
+        work.add(net.len() as u64 + 1)?;
+        let modelled = net.len() >= 2 && net.len() <= max_net_pins;
+        match only_cell(net) {
+            Some(Some(c)) if modelled => {
+                if net.iter().any(|p| matches!(p, PinRef::Fixed(_))) {
+                    let s = &mut state[c as usize];
+                    *s = (*s).max(1);
+                }
+            }
+            Some(None) => {}
+            _ => {
+                for p in net {
+                    if let PinRef::Cell(c) = *p {
+                        state[c as usize] = SHARED;
+                    }
+                }
+            }
+        }
+    }
+    let mut boxes: Vec<(u32, [i64; 4])> = Vec::new();
+    for net in &problem.nets {
+        if let Some(Some(c)) = only_cell(net)
+            && state[c as usize] == 1
+        {
+            let (mut x0, mut x1, mut y0, mut y1) = (i64::MAX, i64::MIN, i64::MAX, i64::MIN);
+            for p in net {
+                if let PinRef::Fixed([x, y]) = *p {
+                    x0 = x0.min(x);
+                    x1 = x1.max(x);
+                    y0 = y0.min(y);
+                    y1 = y1.max(y);
+                }
+            }
+            if x0 <= x1 {
+                work.add(1)?;
+                boxes.push((c, [x0, x1, y0, y1]));
+            }
+        }
+    }
+    boxes.sort_by_key(|b| b.0);
+    let mut out = vec![None; n];
+    for group in boxes.chunk_by(|a, b| a.0 == b.0) {
+        let mut xs: Vec<i64> = group.iter().flat_map(|b| [b.1[0], b.1[1]]).collect();
+        let mut ys: Vec<i64> = group.iter().flat_map(|b| [b.1[2], b.1[3]]).collect();
+        xs.sort_unstable();
+        ys.sort_unstable();
+        out[group[0].0 as usize] = Some([xs[xs.len() / 2] as f64, ys[ys.len() / 2] as f64]);
+    }
+    Ok(out)
+}
+
+/// Remove every placed cell, widened by the spacing gap on both sides and
+/// rounded outwards to the site grid of its interval, from the free
+/// interval that holds it. The pieces stay sorted and disjoint.
+fn carve(
+    problem: &PlaceProblem,
+    widths: &[i64],
+    positions: &[[i64; 2]],
+    work: &mut Work,
+) -> Result<Vec<Interval>> {
+    let ivs = &problem.intervals;
+    let site = problem.site;
+    let mut taken: Vec<Vec<(i64, i64)>> = vec![Vec::new(); ivs.len()];
+    for (p, w) in positions.iter().zip(widths) {
+        let i = ivs.partition_point(|v| (v.y, v.lx) <= (p[1], p[0]));
+        if i == 0 || ivs[i - 1].y != p[1] || p[0] + w > ivs[i - 1].ux {
+            return Err(invalid("anchored cell outside free intervals"));
+        }
+        taken[i - 1].push((p[0], p[0] + w));
+    }
+    let mut out = Vec::with_capacity(ivs.len() + positions.len());
+    for (v, cells) in ivs.iter().zip(&mut taken) {
+        work.add(cells.len() as u64 + 1)?;
+        cells.sort_unstable();
+        let mut lx = v.lx;
+        for &(a, b) in cells.iter() {
+            let ux = v.lx + (a - problem.gap - v.lx).div_euclid(site) * site;
+            if ux > lx {
+                out.push(Interval { y: v.y, lx, ux });
+            }
+            let next = b + problem.gap - v.lx;
+            lx = lx.max(v.lx + (next + site - 1).div_euclid(site) * site);
+        }
+        if v.ux > lx {
+            out.push(Interval {
+                y: v.y,
+                lx,
+                ux: v.ux,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// `place` with `anchor_isolated`: the isolated cells are legalized alone at
+/// their anchors, carved out of the free intervals, and every other cell is
+/// placed by the legacy placer on the remaining intervals without the nets
+/// that join only isolated cells (they hold no other movable cell).
+fn place_anchored(
+    problem: &PlaceProblem,
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
+    anchors: &[Option<[f64; 2]>],
+    mut work: Work,
+) -> Result<PlaceResult> {
+    let n = problem.widths.len();
+    let (fixed, free): (Vec<usize>, Vec<usize>) = (0..n).partition(|&c| anchors[c].is_some());
+    let sub = PlaceProblem {
+        widths: fixed.iter().map(|&c| problem.widths[c]).collect(),
+        row_height: problem.row_height,
+        site: problem.site,
+        gap: problem.gap,
+        nets: Vec::new(),
+        intervals: problem.intervals.clone(),
+        weights: Vec::new(),
+    };
+    let targets: Vec<[f64; 2]> = fixed.iter().filter_map(|&c| anchors[c]).collect();
+    let anchored = legalize(&sub, &targets, None, &mut work)?;
+    let mut positions = vec![[0i64; 2]; n];
+    for (&c, p) in fixed.iter().zip(&anchored) {
+        positions[c] = *p;
+    }
+    let mut result = PlaceResult {
+        electrostatic: None,
+        positions: Vec::new(),
+        hpwl: 0,
+        global_hpwl: 0,
+        work: 0,
+        anchored: fixed.len(),
+    };
+    if !free.is_empty() {
+        let intervals = carve(&sub, &sub.widths, &anchored, &mut work)?;
+        if intervals.is_empty() {
+            return Err(Error::Capacity(
+                "no free interval left after anchored cells".into(),
+            ));
+        }
+        let mut index = vec![u32::MAX; n];
+        for (j, &c) in free.iter().enumerate() {
+            index[c] = j as u32;
+        }
+        let mut nets = Vec::new();
+        let mut weights = Vec::new();
+        for (k, net) in problem.nets.iter().enumerate() {
+            work.add(net.len() as u64 + 1)?;
+            if net
+                .iter()
+                .any(|p| matches!(*p, PinRef::Cell(c) if anchors[c as usize].is_some()))
+            {
+                continue;
+            }
+            nets.push(
+                net.iter()
+                    .map(|p| match *p {
+                        PinRef::Cell(c) => PinRef::Cell(index[c as usize]),
+                        f => f,
+                    })
+                    .collect(),
+            );
+            if !problem.weights.is_empty() {
+                weights.push(problem.weights[k]);
+            }
+        }
+        let reduced = PlaceProblem {
+            widths: free.iter().map(|&c| problem.widths[c]).collect(),
+            row_height: problem.row_height,
+            site: problem.site,
+            gap: problem.gap,
+            nets,
+            intervals,
+            weights,
+        };
+        let inner = PlaceConfig {
+            anchor_isolated: false,
+            ..config.clone()
+        };
+        let rest = place(
+            &reduced,
+            &inner,
+            &PlaceLimits {
+                max_work: limits.max_work.saturating_sub(work.used),
+                ..limits.clone()
+            },
+        )?;
+        for (&c, p) in free.iter().zip(&rest.positions) {
+            positions[c] = *p;
+        }
+        // The dropped nets keep their legal length in the global figure.
+        let dropped = hpwl(problem, &positions).saturating_sub(hpwl(&reduced, &rest.positions));
+        result.global_hpwl = rest.global_hpwl.saturating_add(dropped);
+        result.work = rest.work;
+    } else {
+        result.global_hpwl = hpwl(problem, &positions);
+    }
+    check_legal(problem, &positions)?;
+    result.hpwl = hpwl(problem, &positions);
+    result.work = result.work.saturating_add(work.used);
+    result.positions = positions;
+    Ok(result)
+}
+
+/// Place cells with the legacy backend or explicitly requested numerical targets.
 pub fn place(
     problem: &PlaceProblem,
     config: &PlaceConfig,
     limits: &PlaceLimits,
 ) -> Result<PlaceResult> {
+    place_dispatch(problem, config, limits, None)
+}
+/// Use an explicit integer core rectangle for the numerical density domain.
+/// With no numerical mode, this calls the unchanged legacy backend.
+pub fn place_in_region(
+    problem: &PlaceProblem,
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
+    core: crate::Rect,
+) -> Result<PlaceResult> {
+    place_dispatch(problem, config, limits, Some(core))
+}
+fn place_dispatch(
+    problem: &PlaceProblem,
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
+    core: Option<crate::Rect>,
+) -> Result<PlaceResult> {
+    if config.electrostatic.is_none() {
+        return place_legacy(problem, config, limits);
+    }
+    let limits = electrostatic::bounded_limits(limits);
+    validate(problem, config, &limits)?;
+    let mut legacy = config.clone();
+    legacy.electrostatic = None;
+    let baseline = place_legacy(problem, &legacy, &limits)?;
+    electrostatic::refine(problem, config, &limits, baseline, core)
+}
+fn place_legacy(
+    problem: &PlaceProblem,
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
+) -> Result<PlaceResult> {
+    let started = std::time::Instant::now();
+    let trace = |phase: &str, iteration: usize, work: u64| {
+        if std::env::var_os("RUSTROAD_PLACE_TRACE").is_some() {
+            eprintln!(
+                "[place] {phase} {iteration}: {:.3}s work {work}",
+                started.elapsed().as_secs_f64()
+            );
+        }
+    };
     validate(problem, config, limits)?;
     let n = problem.widths.len();
     let mut work = Work {
+        held: 0,
         used: 0,
         max: limits.max_work,
     };
     if n == 0 {
         return Ok(PlaceResult {
+            electrostatic: None,
             positions: Vec::new(),
             hpwl: 0,
             global_hpwl: 0,
             work: 0,
+            anchored: 0,
         });
     }
+    if config.anchor_isolated {
+        let anchors = isolated_targets(problem, config.max_net_pins, &mut work)?;
+        if anchors.iter().any(Option::is_some) {
+            return place_anchored(problem, config, limits, &anchors, work);
+        }
+    }
+    let retarget = if config.retarget_isolated {
+        isolated_targets(problem, config.max_net_pins, &mut work)?
+    } else {
+        Vec::new()
+    };
     let region = [
         problem.intervals.iter().map(|v| v.lx).min().unwrap() as f64,
         problem.intervals.iter().map(|v| v.y).min().unwrap() as f64,
@@ -1102,8 +1657,9 @@ pub fn place(
     }
     let x_lo = region[0] as i64;
     let x_hi = region[2] as i64;
-    for _ in 0..3 {
+    for iteration in 0..3 {
         quadratic(problem, config, &mut pos, None, region, &mut work)?;
+        trace("initial solve", iteration, work.used);
     }
     let mut spread = Spread {
         problem,
@@ -1115,6 +1671,7 @@ pub fn place(
         let mut cells: Vec<usize> = (0..n).collect();
         let nrows = spread.rows.len();
         spread.run(&mut cells, &pos, 0, nrows, x_lo, x_hi, &mut work)?;
+        trace("spread", k, work.used);
         targets.clone_from(&spread.out);
         if k + 1 == config.global_iterations {
             break;
@@ -1128,6 +1685,14 @@ pub fn place(
             region,
             &mut work,
         )?;
+        trace("anchored solve", k, work.used);
+    }
+    let mut anchored = 0;
+    for (t, a) in targets.iter_mut().zip(&retarget) {
+        if let Some(a) = a {
+            *t = *a;
+            anchored += 1;
+        }
     }
     let global: Vec<[i64; 2]> = targets
         .iter()
@@ -1140,20 +1705,63 @@ pub fn place(
         })
         .collect();
     let global_hpwl = hpwl(problem, &global);
-    let mut legal = legalize(problem, &targets, &mut work)?;
-    detailed(problem, &mut legal, config.detailed_passes, &mut work)?;
+    let mut legal = legalize(problem, &targets, None, &mut work)?;
+    trace("legalized", 0, work.used);
+    detailed(
+        problem,
+        &mut legal,
+        config.detailed_passes,
+        config.max_net_pins,
+        None,
+        &mut work,
+    )?;
+    trace("detailed", 0, work.used);
     check_legal(problem, &legal)?;
     Ok(PlaceResult {
+        electrostatic: None,
         hpwl: hpwl(problem, &legal),
         positions: legal,
         global_hpwl,
         work: work.used,
+        anchored,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn csr_rows_match_an_analytic_result_and_are_bitwise_thread_independent() {
+        let n = 32_768;
+        let diag = vec![2.0; n];
+        let mut off = Vec::with_capacity((n - 1) * 2);
+        for i in 1..n {
+            off.push((i as u32, i as u32 - 1, -1.0));
+            off.push((i as u32 - 1, i as u32, -1.0));
+        }
+        let csr = compress(n, off);
+        let values = vec![1.0; n];
+        let evaluate = |threads| {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("test pool");
+            let mut output = vec![0.0; n];
+            pool.install(|| multiply(&diag, &csr, &values, &mut output));
+            output
+        };
+        let one = evaluate(1);
+        let four = evaluate(4);
+        assert_eq!(one.first(), Some(&1.0));
+        assert_eq!(one.last(), Some(&1.0));
+        assert!(one[1..n - 1].iter().all(|v| *v == 0.0));
+        assert!(
+            one.iter()
+                .zip(four)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+        );
+    }
     fn chain(n: usize, rows: usize, width: i64) -> PlaceProblem {
         let mut nets = vec![vec![PinRef::Fixed([0, 50]), PinRef::Cell(0)]];
         for i in 1..n {
@@ -1175,6 +1783,161 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+    #[test]
+    fn legalization_looks_past_a_blocked_row_window() {
+        // Rows 3..=7 are open only at the far right (as beside a macro); rows
+        // 2 and 8 are open everywhere. A cell aimed at row 5, x = 90 belongs in
+        // row 2 or 8 near x = 90, not 800 sites away in its own blocked window.
+        let intervals = (0..10)
+            .map(|r| {
+                let lx = if (3..=7).contains(&r) { 900 } else { 0 };
+                Interval {
+                    y: r * 100,
+                    lx,
+                    ux: 1000,
+                }
+            })
+            .collect();
+        let p = PlaceProblem {
+            weights: Vec::new(),
+            widths: vec![20],
+            row_height: 100,
+            site: 10,
+            gap: 0,
+            nets: Vec::new(),
+            intervals,
+        };
+        let mut work = Work {
+            held: 0,
+            used: 0,
+            max: 1_000_000,
+        };
+        let at = legalize(&p, &[[100.0, 550.0]], None, &mut work).unwrap()[0];
+        assert!(at[1] == 200 || at[1] == 800, "{at:?}");
+        assert!((at[0] - 90).abs() <= 10, "{at:?}");
+    }
+    #[test]
+    fn new_cells_first_keeps_a_new_cell_beside_a_macro_near_its_target() {
+        // Rows 3..=7 are open only at the far right (beside a macro). Rows 0..3
+        // and 8..10 are exactly filled by 125 wide seeded cells. A narrow new
+        // cell (a rebuilt clock buffer) aims at row 5, x = 90 inside the macro.
+        // Wide-first legalization leaves it the far opening only; with
+        // `new_cells_first` it takes row 2 or 8 near x = 90 and one seeded
+        // cell moves to the opening instead.
+        let intervals: Vec<Interval> = (0..10)
+            .map(|r| Interval {
+                y: r * 100,
+                lx: if (3..=7).contains(&r) { 900 } else { 0 },
+                ux: 1000,
+            })
+            .collect();
+        let full: Vec<i64> = vec![0, 1, 2, 8, 9];
+        let mut widths = vec![40; 125];
+        widths.push(20);
+        let mut seeds: Vec<Option<[i64; 2]>> = (0..125)
+            .map(|i| Some([(i % 25) * 40, full[i as usize / 25] * 100]))
+            .collect();
+        seeds.push(None);
+        let p = PlaceProblem {
+            weights: Vec::new(),
+            widths,
+            row_height: 100,
+            site: 10,
+            gap: 0,
+            nets: vec![vec![
+                PinRef::Fixed([80, 550]),
+                PinRef::Cell(125),
+                PinRef::Fixed([100, 550]),
+            ]],
+            intervals,
+        };
+        let config = PlaceConfig {
+            detailed_passes: 0,
+            ..PlaceConfig::default()
+        };
+        let legacy = place_seeded(&p, &seeds, &config, &PlaceLimits::default()).unwrap();
+        check_legal(&p, &legacy.positions).unwrap();
+        assert!(
+            legacy.positions[125][0] >= 900,
+            "{:?}",
+            legacy.positions[125]
+        );
+        let first = PlaceConfig {
+            new_cells_first: true,
+            ..config.clone()
+        };
+        let r = place_seeded(&p, &seeds, &first, &PlaceLimits::default()).unwrap();
+        check_legal(&p, &r.positions).unwrap();
+        let at = r.positions[125];
+        assert!(at[1] == 200 || at[1] == 800, "{at:?}");
+        assert!((at[0] - 80).abs() <= 40, "{at:?}");
+        let moved = (0..125)
+            .filter(|&i| (300..800).contains(&r.positions[i][1]))
+            .count();
+        assert_eq!(moved, 1);
+        // Inert for unseeded placement and omitted from the legacy encoding.
+        assert_eq!(
+            place(&chain(30, 3, 400), &first, &PlaceLimits::default())
+                .unwrap()
+                .positions,
+            place(&chain(30, 3, 400), &config, &PlaceLimits::default())
+                .unwrap()
+                .positions
+        );
+        assert!(
+            !serde_json::to_string(&config)
+                .unwrap()
+                .contains("new_cells_first")
+        );
+    }
+    #[test]
+    fn local_detail_keeps_a_seeded_repeater_off_its_driver() {
+        // A repeater (cell 0) seeded beside its two sinks (fixed pins at x
+        // 2500 and 5400) is fed by a driver at x 10700. Every x between 5400
+        // and 10700 ties on HPWL, so legacy detailed placement moves the
+        // seeded repeater next to the driver. `local_detail` keeps it inside
+        // its move window: the short sink wire the repair round sized.
+        let p = PlaceProblem {
+            weights: Vec::new(),
+            widths: vec![20],
+            row_height: 100,
+            site: 10,
+            gap: 0,
+            nets: vec![
+                vec![PinRef::Fixed([10_700, 450]), PinRef::Cell(0)],
+                vec![
+                    PinRef::Cell(0),
+                    PinRef::Fixed([2_500, 450]),
+                    PinRef::Fixed([5_400, 450]),
+                ],
+            ],
+            intervals: (0..10)
+                .map(|r| Interval {
+                    y: r * 100,
+                    lx: 0,
+                    ux: 11_000,
+                })
+                .collect(),
+        };
+        let seeds = vec![Some([3_900, 400])];
+        let config = PlaceConfig::default();
+        let legacy = place_seeded(&p, &seeds, &config, &PlaceLimits::default()).unwrap();
+        assert!(legacy.positions[0][0] >= 5_400, "{:?}", legacy.positions);
+        let local = PlaceConfig {
+            local_detail: true,
+            ..config.clone()
+        };
+        let r = place_seeded(&p, &seeds, &local, &PlaceLimits::default()).unwrap();
+        check_legal(&p, &r.positions).unwrap();
+        let x = r.positions[0][0] + 10;
+        assert!((x - 3_910).abs() <= 800, "{:?}", r.positions);
+        assert!(r.hpwl <= 10_700 - 2_500 + 2 * 3_000, "{}", r.hpwl);
+        assert!(
+            !serde_json::to_string(&config)
+                .unwrap()
+                .contains("local_detail")
+        );
     }
     #[test]
     fn chain_is_legal_deterministic_and_short() {
@@ -1307,5 +2070,298 @@ mod tests {
             place(&p, &PlaceConfig::default(), &tight),
             Err(Error::Budget(_))
         ));
+    }
+
+    #[test]
+    fn spacing_applies_within_an_interval_not_across_a_narrower_tap() {
+        // Intervals [0,100) and [130,230) around a 3-site tap; gap is 4 sites.
+        let p = PlaceProblem {
+            weights: Vec::new(),
+            widths: vec![20; 3],
+            row_height: 100,
+            site: 10,
+            gap: 40,
+            nets: Vec::new(),
+            intervals: vec![
+                Interval {
+                    y: 0,
+                    lx: 0,
+                    ux: 100,
+                },
+                Interval {
+                    y: 0,
+                    lx: 130,
+                    ux: 230,
+                },
+            ],
+        };
+        check_legal(&p, &[[80, 0], [130, 0], [190, 0]]).expect("flush against the tap");
+        assert!(check_legal(&p, &[[80, 0], [130, 0], [180, 0]]).is_err());
+        assert!(check_legal(&p, &[[80, 0], [140, 0], [90, 0]]).is_err());
+    }
+
+    #[test]
+    fn spreading_overflow_never_enters_a_region_without_rows() {
+        // Top-right quarter is a macro: rows 2-3 only have [0,110) / [0,100).
+        // Rows 0-1 fit 15 cells of 50, so 5 cells (250) must go up into 210:
+        // the 40 of whole-cell overflow used to be sent into the macro.
+        let p = PlaceProblem {
+            weights: Vec::new(),
+            widths: vec![40; 20],
+            row_height: 100,
+            site: 10,
+            gap: 10,
+            nets: Vec::new(),
+            intervals: Vec::new(),
+        };
+        let mut spread = Spread {
+            problem: &p,
+            rows: vec![
+                (0, vec![(0, 390)]),
+                (100, vec![(0, 400)]),
+                (200, vec![(0, 110)]),
+                (300, vec![(0, 100)]),
+            ],
+            out: vec![[0.0; 2]; 20],
+        };
+        let pos: Vec<[f64; 2]> = (0..20).map(|i| [390.0 - i as f64, 350.0]).collect();
+        let mut cells: Vec<usize> = (0..20).collect();
+        let mut work = Work {
+            held: 0,
+            used: 0,
+            max: 1_000_000,
+        };
+        spread
+            .run(&mut cells, &pos, 0, 4, 0, 400, &mut work)
+            .expect("overflow stays beside the macro");
+        let upper: Vec<_> = spread.out.iter().filter(|c| c[1] > 200.0).collect();
+        assert_eq!(upper.len(), 5);
+        assert!(upper.iter().all(|c| c[0] < 200.0), "{upper:?}");
+    }
+
+    #[test]
+    fn global_fanout_cutoff_also_applies_to_detailed_placement() {
+        let base = chain(1024, 32, 1000);
+        let mut with_clock = chain(1024, 32, 1000);
+        with_clock.nets.push((0..1024).map(PinRef::Cell).collect());
+        let config = PlaceConfig {
+            global_iterations: 2,
+            cg_iterations: 10,
+            detailed_passes: 1,
+            max_net_pins: 16,
+            electrostatic: None,
+            anchor_isolated: false,
+            retarget_isolated: false,
+            new_cells_first: false,
+            local_detail: false,
+        };
+        let caps = PlaceLimits {
+            max_work: 10_000_000,
+            ..PlaceLimits::default()
+        };
+        let expected = place(&base, &config, &caps).expect("bounded chain placement");
+        let actual = place(&with_clock, &config, &caps)
+            .expect("high-fanout net is outside the placement model");
+        assert_eq!(actual.positions, expected.positions);
+        check_legal(&with_clock, &actual.positions)
+            .expect("legal placement with the ignored clock");
+        assert!(actual.work < caps.max_work);
+    }
+
+    #[test]
+    fn long_row_gap_search_stays_local_and_keeps_an_optimal_placement() {
+        let n = 5000usize;
+        let problem = PlaceProblem {
+            widths: vec![10; n],
+            row_height: 20,
+            site: 10,
+            gap: 0,
+            nets: (0..n)
+                .map(|i| {
+                    vec![
+                        PinRef::Cell(i as u32),
+                        PinRef::Fixed([i as i64 * 20 + 5, 10]),
+                    ]
+                })
+                .collect(),
+            intervals: vec![Interval {
+                y: 0,
+                lx: 0,
+                ux: n as i64 * 20,
+            }],
+            weights: Vec::new(),
+        };
+        let expected: Vec<[i64; 2]> = (0..n).map(|i| [i as i64 * 20, 0]).collect();
+        let mut positions = expected.clone();
+        let mut work = Work {
+            held: 0,
+            used: 0,
+            max: 2_000_000,
+        };
+        detailed(&problem, &mut positions, 1, 256, None, &mut work)
+            .expect("local gaps must stay within the linear-sized work budget");
+        assert_eq!(positions, expected);
+        assert_eq!(hpwl(&problem, &positions), 0);
+    }
+
+    /// 20 rows x 2000; a macro covers rows 8..16 over x [500, 1500). A chain
+    /// pinned to the macro's bottom edge (like its interface logic) fills the
+    /// rows to ~96%; 24 ties each drive one pin on the same edge.
+    fn macro_ties(anchor: bool) -> (PlaceProblem, PlaceConfig, usize) {
+        let chain = 1000usize;
+        let ties = 24usize;
+        let mut nets = vec![vec![PinRef::Fixed([600, 800]), PinRef::Cell(0)]];
+        for i in 1..chain {
+            nets.push(vec![PinRef::Cell(i as u32 - 1), PinRef::Cell(i as u32)]);
+        }
+        nets.push(vec![
+            PinRef::Cell(chain as u32 - 1),
+            PinRef::Fixed([1400, 800]),
+        ]);
+        for t in 0..ties {
+            let x = 600 + 35 * t as i64;
+            nets.push(vec![
+                PinRef::Cell((chain + t) as u32),
+                PinRef::Fixed([x, 800]),
+            ]);
+        }
+        let mut intervals = Vec::new();
+        for r in 0..20i64 {
+            if (8..16).contains(&r) {
+                intervals.push(Interval {
+                    y: r * 100,
+                    lx: 0,
+                    ux: 500,
+                });
+                intervals.push(Interval {
+                    y: r * 100,
+                    lx: 1500,
+                    ux: 2000,
+                });
+            } else {
+                intervals.push(Interval {
+                    y: r * 100,
+                    lx: 0,
+                    ux: 2000,
+                });
+            }
+        }
+        let problem = PlaceProblem {
+            weights: Vec::new(),
+            widths: vec![20; chain + ties],
+            row_height: 100,
+            site: 10,
+            gap: 10,
+            nets,
+            intervals,
+        };
+        let config = PlaceConfig {
+            anchor_isolated: anchor,
+            ..PlaceConfig::default()
+        };
+        (problem, config, chain)
+    }
+    #[test]
+    fn isolated_cells_stay_beside_their_macro_pins() {
+        let (p, config, chain) = macro_ties(true);
+        let a = place(&p, &config, &PlaceLimits::default()).unwrap();
+        let b = place(&p, &config, &PlaceLimits::default()).unwrap();
+        assert_eq!(a.positions, b.positions);
+        assert_eq!(a.anchored, 24);
+        check_legal(&p, &a.positions).unwrap();
+        for (t, at) in a.positions[chain..].iter().enumerate() {
+            let pin = 600 + 35 * t as i64;
+            // Below the macro, within two rows and a few sites of the pin.
+            assert!((500..800).contains(&at[1]), "tie {t} at {at:?}");
+            assert!((at[0] + 10 - pin).abs() <= 100, "tie {t} at {at:?}");
+        }
+        let (p, legacy, _) = macro_ties(false);
+        let old = place(&p, &legacy, &PlaceLimits::default()).unwrap();
+        assert_eq!(old.anchored, 0);
+        check_legal(&p, &old.positions).unwrap();
+    }
+    #[test]
+    fn retargeted_isolated_cells_land_beside_their_macro_pins() {
+        // Same 20 x 2000 fixture as the anchored case (1024 cells, < 1 MiB).
+        let (p, legacy, chain) = macro_ties(false);
+        let config = PlaceConfig {
+            retarget_isolated: true,
+            ..legacy.clone()
+        };
+        let a = place(&p, &config, &PlaceLimits::default()).unwrap();
+        let b = place(&p, &config, &PlaceLimits::default()).unwrap();
+        assert_eq!(a.positions, b.positions);
+        assert_eq!(a.anchored, 24);
+        check_legal(&p, &a.positions).unwrap();
+        for (t, at) in a.positions[chain..].iter().enumerate() {
+            let pin = 600 + 35 * t as i64;
+            assert!((500..800).contains(&at[1]), "tie {t} at {at:?}");
+            assert!((at[0] + 10 - pin).abs() <= 100, "tie {t} at {at:?}");
+        }
+        let both = PlaceConfig {
+            anchor_isolated: true,
+            ..config.clone()
+        };
+        assert!(place(&p, &both, &PlaceLimits::default()).is_err());
+        let text = serde_json::to_string(&legacy).unwrap();
+        assert!(!text.contains("retarget_isolated"), "{text}");
+        let parsed: PlaceConfig = serde_json::from_str(r#"{"retarget_isolated":true}"#).unwrap();
+        assert!(parsed.retarget_isolated && !parsed.anchor_isolated);
+    }
+    #[test]
+    fn anchored_option_is_inert_without_isolated_cells_and_omitted_when_off() {
+        let p = chain(40, 4, 400);
+        let base = place(&p, &PlaceConfig::default(), &PlaceLimits::default()).unwrap();
+        let on = PlaceConfig {
+            anchor_isolated: true,
+            ..PlaceConfig::default()
+        };
+        // chain() cells 0 and n-1 also join a neighbour: none is isolated.
+        let with = place(&p, &on, &PlaceLimits::default()).unwrap();
+        assert_eq!(base.positions, with.positions);
+        assert_eq!(with.anchored, 0);
+        let text = serde_json::to_string(&PlaceConfig::default()).unwrap();
+        assert!(!text.contains("anchor_isolated"), "{text}");
+        let parsed: PlaceConfig = serde_json::from_str(r#"{"anchor_isolated":true}"#).unwrap();
+        assert!(parsed.anchor_isolated);
+    }
+    #[test]
+    fn carving_keeps_the_gap_and_the_site_grid() {
+        let p = PlaceProblem {
+            weights: Vec::new(),
+            widths: vec![20, 20],
+            row_height: 100,
+            site: 10,
+            gap: 15,
+            nets: Vec::new(),
+            intervals: vec![Interval {
+                y: 0,
+                lx: 5,
+                ux: 305,
+            }],
+        };
+        let mut work = Work {
+            held: 0,
+            used: 0,
+            max: 1_000,
+        };
+        let pieces = carve(&p, &p.widths, &[[105, 0], [145, 0]], &mut work).unwrap();
+        // [105,125) and [145,165) widened by 15 and rounded out from lx = 5.
+        assert_eq!(
+            pieces,
+            vec![
+                Interval {
+                    y: 0,
+                    lx: 5,
+                    ux: 85
+                },
+                Interval {
+                    y: 0,
+                    lx: 185,
+                    ux: 305
+                },
+            ]
+        );
+        assert!(carve(&p, &[20], &[[300, 0]], &mut work).is_err());
     }
 }

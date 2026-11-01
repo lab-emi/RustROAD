@@ -30,6 +30,7 @@ incomplete oracle). Third-party tools run only as black-box executables.
 from __future__ import annotations
 
 import argparse
+import copy
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -129,6 +130,7 @@ class Context:
             setup_margin=self.budgets["hold_eco_setup_margin_ns"], physical_config={},
             gate_margin=self.budgets["hold_margin_ns"],
             cell_policy=D.resolve(manifest["cell_policy"]["path"]), manifest=self.signoff_manifest,
+            extract_limits=[] if getattr(args, "small_extraction_budgets", False) else None,
             openrcx=False, antenna_controls=False, signoff=False)
 
 
@@ -146,7 +148,7 @@ def guard(statuses: dict, keys: list[str], status: str, reason: str):
 class PdkGate:
     def __init__(self, ctx: Context, tag: str, profile: dict):
         self.ctx, self.tag = ctx, tag
-        self.spec = ctx.manifest["pdks"][tag]
+        self.spec = copy.deepcopy(ctx.manifest["pdks"][tag])
         p = dict(profile)
         p["config"] = str(D.resolve(self.spec["physical_config"]["path"]))
         p["routing_config"] = str(D.resolve(self.spec["routing_config"]["path"]))
@@ -156,6 +158,69 @@ class PdkGate:
         self.recipe = ctx.manifest["recipe"]["physical"]
         self.statuses: dict[str, dict] = {}
         self.details: dict = {}
+        input_fanout = getattr(ctx.args, "input_buffer_fanout", None)
+        if input_fanout is not None:
+            original = Path(p["config"])
+            source = original.read_bytes()
+            source_hash = hashlib.sha256(source).hexdigest()
+            if source_hash != self.spec["physical_config"]["sha256"] or source_hash != self.spec["frozen"]["physical_config"]:
+                raise GateError("cannot derive input buffering from an unpinned physical profile")
+            config = json.loads(source)
+            if config.get("input_buffer") is not None:
+                raise GateError("input-buffer override requires a base profile without that policy")
+            policy_path = ROOT / "fixtures/pdk" / f"{tag}-input-buffer.json"
+            policy_bytes = policy_path.read_bytes()
+            if len(policy_bytes) > 1 << 20:
+                raise GateError("input-buffer policy byte budget")
+            policy = json.loads(policy_bytes)
+            policy["max_fanout"] = input_fanout
+            config["input_buffer"] = policy
+            derived = ctx.h.root / f"{tag}_input_physical.json"
+            encoded = (json.dumps(config, indent=2) + "\n").encode()
+            expected_hash = hashlib.sha256(encoded).hexdigest()
+            policy_hash = hashlib.sha256(policy_bytes).hexdigest()
+            derived.write_bytes(encoded)
+            self.spec["frozen"]["physical_config"] = expected_hash
+            self.spec["frozen"]["input_buffer_policy"] = policy_hash
+            p["config"] = str(derived)
+            p["input_buffer_override"] = dict(policy=policy, base_path=str(original),
+                                                base_sha256=source_hash, policy_path=str(policy_path),
+                                                policy_sha256=policy_hash)
+            self.details["input_buffer_config"] = dict(path=str(derived), sha256=expected_hash,
+                                                         source_sha256=source_hash,
+                                                         policy_sha256=policy_hash,
+                                                         max_fanout=input_fanout,
+                                                         scope="fixed base floorplan; input buffering during import")
+        batch = getattr(ctx.args, "route_batch_terminals", None)
+        hard_search = getattr(ctx.args, "route_hard_search_expansions", None)
+        weight = getattr(ctx.args, "route_heuristic_weight", None)
+        if batch is not None or hard_search is not None or weight is not None:
+            original = Path(p["routing_config"])
+            source = original.read_bytes()
+            source_hash = hashlib.sha256(source).hexdigest()
+            if source_hash != self.spec["routing_config"]["sha256"] or source_hash != self.spec["frozen"]["routing_profile"]:
+                raise GateError("cannot derive batch configuration from an unpinned routing profile")
+            routing = json.loads(source)
+            if batch is not None:
+                routing["batch_terminals"] = batch
+            if hard_search is not None:
+                if "limits" not in routing:
+                    raise GateError("hard-search override requires an explicit routing limits object")
+                routing["limits"]["max_hard_search_expansions"] = hard_search
+            if weight is not None:
+                if "track_router" not in routing:
+                    raise GateError("heuristic override requires a track-router profile")
+                routing["track_router"]["heuristic_weight"] = weight
+            derived = ctx.h.root / f"{tag}_batch_routing.json"
+            encoded = (json.dumps(routing, indent=2) + "\n").encode()
+            expected_hash = hashlib.sha256(encoded).hexdigest()
+            derived.write_bytes(encoded)
+            self.spec["frozen"]["routing_profile"] = expected_hash
+            p["routing_config"] = str(derived)
+            self.details["batch_routing_config"] = dict(path=str(derived), sha256=expected_hash,
+                                                        source_sha256=source_hash, terminals=batch,
+                                                        hard_search_expansions=hard_search,
+                                                        heuristic_weight=weight)
         self.container_peaks: list = []  # peak RSS of every signoff container run (steps)
         want = [(c["name"], c["liberty"], c["rc"]) for c in self.spec["corners"]]
         if want != CORNERS[tag]:
@@ -575,10 +640,25 @@ def main(argv=None) -> int:
     ap.add_argument("--no-controls", action="store_true")
     ap.add_argument("--no-determinism", action="store_true")
     ap.add_argument("--preflight-only", action="store_true")
+    ap.add_argument("--route-batch-terminals", type=int, help="opt-in bounded routing batches of whole nets (2..1000000 terminals)")
+    ap.add_argument("--route-hard-search-expansions", type=int, help="bounded hard search before repair; at most the profile's full search limit")
+    ap.add_argument("--route-heuristic-weight", type=int, help="detailed track-search priority weight (1..16)")
+    ap.add_argument("--input-buffer-fanout", type=int,
+                    help="explicit input-tree policy on the frozen floorplan (2..128); clocks remain under CTS")
+    ap.add_argument("--small-extraction-budgets", action="store_true",
+                    help="use default small-design RC object/work caps, including for a track-router fixture")
     ap.add_argument("--evidence", type=Path, help="also write the compact tracked evidence JSON")
     ap.add_argument("--evidence-from", type=Path, metavar="SUMMARY",
                     help="only rewrite --evidence from an existing summary.json (no run)")
     args = ap.parse_args(argv)
+    if args.route_batch_terminals is not None and not 2 <= args.route_batch_terminals <= 1_000_000:
+        ap.error("--route-batch-terminals must be in 2..1000000")
+    if args.route_hard_search_expansions is not None and not 1 <= args.route_hard_search_expansions <= 50_000_000:
+        ap.error("--route-hard-search-expansions must be in 1..50000000")
+    if args.route_heuristic_weight is not None and not 1 <= args.route_heuristic_weight <= 16:
+        ap.error("--route-heuristic-weight must be in 1..16")
+    if args.input_buffer_fanout is not None and not 2 <= args.input_buffer_fanout <= 128:
+        ap.error("--input-buffer-fanout must be in 2..128")
     if args.evidence_from:
         if args.evidence is None:
             ap.error("--evidence-from needs --evidence")
@@ -602,6 +682,17 @@ def main(argv=None) -> int:
     started = args.started = time.monotonic()
     summary = dict(schema=D.SUMMARY_SCHEMA, status="unverified", exit_code=3, scope=SCOPE, gating=GATING,
                    reported=REPORTED, global_statuses={}, pdks=[])
+    if args.route_batch_terminals is not None:
+        summary["routing_batches"] = dict(max_terminals=args.route_batch_terminals, scope="whole nets; final combined geometry validated")
+    if args.route_hard_search_expansions is not None:
+        summary["routing_hard_search_expansions"] = args.route_hard_search_expansions
+    if args.route_heuristic_weight is not None:
+        summary["routing_heuristic_weight"] = args.route_heuristic_weight
+    if args.small_extraction_budgets:
+        summary["extraction_budgets"] = "default small-design caps"
+    if args.input_buffer_fanout is not None:
+        summary["input_buffering"] = dict(max_fanout=args.input_buffer_fanout,
+                                          scope="fixed floorplan; native nonclock input trees; unchanged physical gates")
     h = None
     ctx = None
     try:

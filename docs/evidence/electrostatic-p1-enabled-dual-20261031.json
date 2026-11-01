@@ -1,0 +1,107 @@
+{
+  "schema": "rustroad.p1-enabled-dual-delivery.v1",
+  "status": "passed_stage1_physical_smoke",
+  "engine": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-totalcap/bin/rustroad-p1",
+    "sha256": "c2b736d3d338375fa318e5739ebe9236189a5569a28e2310fa6be48643319762",
+    "bytes": 59582592
+  },
+  "source_head": "a62f0041e2f66869f4dfbcaaa96486a6c2e8e7ab",
+  "complete": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-enabled-dual01/COMPLETE.json",
+    "sha256": "3f770859d7dccb91273748bcb3f9416f8d65d8e6319bb8b006b1344b3943501b",
+    "bytes": 88778
+  },
+  "root_review": {
+    "path": "/home/cgao/git/RustEDA/.work/perf-20261030/placement-root-review01/stage1-completion-review01.json",
+    "sha256": "cac44a7f78c3f0335c69aca7c16ea174c0f593fbc2e9a74d72c7a1976a32ebb4",
+    "bytes": 3486
+  },
+  "controller": {
+    "gnu_wall": "0:25.00",
+    "gnu_seconds": 25.0,
+    "maximum_rss_kib": 108484,
+    "time": {
+      "path": "/home/cgao/git/RustEDA/.work/perf-20261030/place-p1-enabled-dual01/controller02.time",
+      "sha256": "325c0acc93d5b55714a23b14cb7ceda6242df8af10973a7d6159a98f5b8a8ffc",
+      "bytes": 1246
+    }
+  },
+  "whole_worker_cgroup_peak_bytes": 193400832,
+  "cases": [
+    {
+      "case": "sky130-none",
+      "native_center_hpwl_dbu": 219050,
+      "actual_pin_hpwl_um": {
+        "numerator": 1142,
+        "denominator": 5
+      },
+      "actual_pin_hpwl_twice_dbu": 456800,
+      "place_wall": "0:00.07",
+      "place_rss_kib": 10624,
+      "numerical_status": null
+    },
+    {
+      "case": "sky130-p1-w1",
+      "native_center_hpwl_dbu": 190770,
+      "actual_pin_hpwl_um": {
+        "numerator": 18887,
+        "denominator": 100
+      },
+      "actual_pin_hpwl_twice_dbu": 377740,
+      "place_wall": "0:00.09",
+      "place_rss_kib": 10800,
+      "numerical_status": "accepted_no_worse"
+    },
+    {
+      "case": "sky130-p1-w4",
+      "native_center_hpwl_dbu": 190770,
+      "actual_pin_hpwl_um": {
+        "numerator": 18887,
+        "denominator": 100
+      },
+      "actual_pin_hpwl_twice_dbu": 377740,
+      "place_wall": "0:00.11",
+      "place_rss_kib": 11352,
+      "numerical_status": "accepted_no_worse"
+    },
+    {
+      "case": "gf180-none",
+      "native_center_hpwl_dbu": 572640,
+      "actual_pin_hpwl_um": {
+        "numerator": 7716,
+        "denominator": 25
+      },
+      "actual_pin_hpwl_twice_dbu": 1234560,
+      "place_wall": "0:00.08",
+      "place_rss_kib": 11148,
+      "numerical_status": null
+    },
+    {
+      "case": "gf180-p1-w1",
+      "native_center_hpwl_dbu": 563680,
+      "actual_pin_hpwl_um": {
+        "numerator": 7497,
+        "denominator": 25
+      },
+      "actual_pin_hpwl_twice_dbu": 1199520,
+      "place_wall": "0:00.10",
+      "place_rss_kib": 11536,
+      "numerical_status": "accepted_no_worse"
+    },
+    {
+      "case": "gf180-p1-w4",
+      "native_center_hpwl_dbu": 563680,
+      "actual_pin_hpwl_um": {
+        "numerator": 7497,
+        "denominator": 25
+      },
+      "actual_pin_hpwl_twice_dbu": 1199520,
+      "place_wall": "0:00.10",
+      "place_rss_kib": 11512,
+      "numerical_status": "accepted_no_worse"
+    }
+  ],
+  "worker_exactness": "Both PDKs: whole DEF/exported Verilog/rev1 snapshots exact; rev2 metadata and whole place summary differ only by one actual-workers digit1\u21924; all other rev2 files exact. Independent full physical/comparison objects exact.",
+  "scope": "Actual Stage1 only: independent physical/actualpin checks passed; foundryDRC/LVS/timing/fullflow unchecked; no Stage2 launch"
+}

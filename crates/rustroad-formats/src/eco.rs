@@ -36,6 +36,10 @@ use crate::verilog::{self, Connection, Expr, Instance, Netlist, VerilogLimits, W
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+mod bit_aliases;
+mod pin_bits;
+pub use pin_bits::{PinBuses, PinView};
+
 pub const ECO_PLAN_SCHEMA: &str = "rustroad.eco-plan.v1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +158,9 @@ pub struct EcoCells {
     /// whose master/pin is missing here is refused (never assumed INPUT).
     #[serde(default)]
     pub pin_directions: PinDirections,
+    /// Explicit original Verilog master bus ranges. Bracketed names alone imply nothing.
+    #[serde(default)]
+    pub pin_buses: PinBuses,
     /// Sizing families `resize_cell` may move an instance within.
     #[serde(default)]
     pub families: Vec<SizeFamily>,
@@ -293,6 +300,117 @@ fn expr_text(expr: &Expr) -> String {
     }
 }
 
+/// Resolve immutable scalar wire aliases without changing the emitted netlist.
+/// Output-port assigns may be rewritten by an ECO and deliberately remain roots.
+struct ScalarAliases<'a> {
+    roots: HashMap<&'a str, &'a str>,
+}
+
+enum Aliases<'a> {
+    Scalar(ScalarAliases<'a>),
+    Bits(bit_aliases::BitAliases),
+}
+impl<'a> Aliases<'a> {
+    fn new(n: &'a Netlist, cells: &EcoCells, limits: &VerilogLimits) -> Result<Self> {
+        if cells.pin_buses.is_empty() {
+            ScalarAliases::new(n, limits.max_expr_nodes).map(Self::Scalar)
+        } else {
+            bit_aliases::BitAliases::new(n, cells, limits).map(Self::Bits)
+        }
+    }
+    fn same(&self, a: &Expr, b: &Expr) -> bool {
+        match self {
+            Self::Scalar(view) => view.same(a, b),
+            Self::Bits(view) => view.same(a, b),
+        }
+    }
+}
+impl<'a> ScalarAliases<'a> {
+    fn new(netlist: &'a Netlist, limit: usize) -> Result<Self> {
+        let ports: HashSet<_> = netlist.ports.iter().map(|p| p.name.as_str()).collect();
+        let wires: HashSet<_> = netlist
+            .wires
+            .iter()
+            .filter(|w| w.range.is_none() && !ports.contains(w.name.as_str()))
+            .map(|w| w.name.as_str())
+            .collect();
+        let scalars: HashSet<_> = wires
+            .iter()
+            .copied()
+            .chain(
+                netlist
+                    .ports
+                    .iter()
+                    .filter(|p| p.range.is_none())
+                    .map(|p| p.name.as_str()),
+            )
+            .collect();
+        let mut edges = BTreeMap::new();
+        let mut assigned = HashSet::new();
+        for assignment in &netlist.assigns {
+            if let Expr::Ident(lhs) = &assignment.lhs
+                && wires.contains(lhs.as_str())
+            {
+                if !assigned.insert(lhs.as_str()) {
+                    return Err(EcoError::Invalid(format!(
+                        "multiple assignments to scalar alias {lhs}"
+                    )));
+                }
+                if let Expr::Ident(rhs) = &assignment.rhs
+                    && scalars.contains(rhs.as_str())
+                {
+                    edges.insert(lhs.as_str(), rhs.as_str());
+                }
+            }
+        }
+        if edges.len() > limit {
+            return Err(EcoError::Budget("scalar alias count".into()));
+        }
+        let mut roots = HashMap::new();
+        let mut work = 0usize;
+        for start in edges.keys().copied() {
+            if roots.contains_key(start) {
+                continue;
+            }
+            let mut path = Vec::new();
+            let mut active = HashSet::new();
+            let mut node = start;
+            let root = loop {
+                work = work
+                    .checked_add(1)
+                    .ok_or_else(|| EcoError::Budget("alias work overflow".into()))?;
+                if work > limit.saturating_mul(4) || path.len() > edges.len() {
+                    return Err(EcoError::Budget("scalar alias work".into()));
+                }
+                if let Some(root) = roots.get(node) {
+                    break *root;
+                }
+                let Some(next) = edges.get(node) else {
+                    break node;
+                };
+                if !active.insert(node) {
+                    return Err(EcoError::Invalid(format!("scalar alias cycle at {node}")));
+                }
+                path.push(node);
+                node = next;
+            };
+            for node in path {
+                roots.insert(node, root);
+            }
+        }
+        Ok(Self { roots })
+    }
+    fn same(&self, a: &Expr, b: &Expr) -> bool {
+        match (a, b) {
+            (Expr::Ident(a), Expr::Ident(b)) => {
+                self.roots.get(a.as_str()).copied().unwrap_or(a)
+                    == self.roots.get(b.as_str()).copied().unwrap_or(b)
+            }
+            _ => a == b,
+        }
+    }
+}
+
 /// Resolve a report net name to a scalar expression. An exact scalar wire or
 /// port wins; otherwise `name[i]` must select one bit of a declared vector.
 /// A name that matches both forms is ambiguous and rejected.
@@ -336,6 +454,81 @@ pub fn resolve_net(netlist: &Netlist, name: &str) -> Result<Expr> {
     }
 }
 
+/// Give every scalar output port that a `buffer_sinks` operation moves, and
+/// that a cell pin drives directly (the port is the driver's net, no
+/// `assign`), its own source net: `<instance>_src` takes every reference to
+/// the port and `assign port = <instance>_src;` keeps the port on it. The
+/// netlist is electrically unchanged (one alias added per port); the ECO then
+/// moves the port like any assign-driven one. Bus bits stay unsupported.
+fn materialize_port_sources(netlist: &Netlist, plan: &EcoPlan) -> Result<Option<Netlist>> {
+    fn rewrite(e: &mut Expr, from: &str, to: &str) {
+        match e {
+            Expr::Ident(n) if n == from => *n = to.to_string(),
+            Expr::Concat(parts) => parts.iter_mut().for_each(|p| rewrite(p, from, to)),
+            _ => {}
+        }
+    }
+    fn uses(e: &Expr, name: &str) -> bool {
+        match e {
+            Expr::Ident(n) => n == name,
+            Expr::BitSelect { name: n, .. } | Expr::PartSelect { name: n, .. } => n == name,
+            Expr::Concat(parts) => parts.iter().any(|p| uses(p, name)),
+            _ => false,
+        }
+    }
+    let mut out: Option<Netlist> = None;
+    for op in &plan.operations {
+        let EcoOp::BufferSinks {
+            instance, ports, ..
+        } = op
+        else {
+            continue;
+        };
+        for port in ports {
+            let n = out.as_ref().unwrap_or(netlist);
+            let scalar_output = n.ports.iter().any(|p| {
+                p.name == *port && p.range.is_none() && p.direction == verilog::Direction::Output
+            });
+            let assigned = n.assigns.iter().any(|a| a.lhs == Expr::Ident(port.clone()));
+            if !scalar_output || assigned {
+                continue;
+            }
+            let src = format!("{instance}_src");
+            if n.wires.iter().any(|w| w.name == src)
+                || n.ports.iter().any(|p| p.name == src)
+                || n.instances.iter().any(|i| i.name == src)
+            {
+                return Err(EcoError::Name(format!(
+                    "port source net {src} collides with an existing object"
+                )));
+            }
+            let m = out.get_or_insert_with(|| netlist.clone());
+            for i in &mut m.instances {
+                for c in &mut i.connections {
+                    rewrite(&mut c.signal, port, &src);
+                }
+            }
+            for a in &mut m.assigns {
+                if uses(&a.lhs, port) {
+                    return Err(EcoError::Invalid(format!(
+                        "output port {port} is assigned in parts; it cannot move"
+                    )));
+                }
+                rewrite(&mut a.rhs, port, &src);
+            }
+            m.wires.push(Wire {
+                name: src.clone(),
+                range: None,
+            });
+            m.assigns.push(verilog::Assign {
+                lhs: Expr::Ident(port.clone()),
+                rhs: Expr::Ident(src),
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// Apply `plan` to `netlist` and return the edited AST. The input is not
 /// modified; on any error nothing is returned.
 pub fn apply(
@@ -345,6 +538,8 @@ pub fn apply(
     limits: &EcoLimits,
     verilog_limits: &VerilogLimits,
 ) -> Result<(Netlist, EcoReport)> {
+    let prepared = materialize_port_sources(netlist, plan)?;
+    let netlist = prepared.as_ref().unwrap_or(netlist);
     if plan.schema != ECO_PLAN_SCHEMA {
         return Err(EcoError::Invalid(format!(
             "plan schema {:?}, expected {ECO_PLAN_SCHEMA}",
@@ -376,6 +571,7 @@ pub fn apply(
         ));
     }
     verilog::validate_netlist(netlist, verilog_limits)?;
+    let aliases = Aliases::new(netlist, cells, verilog_limits)?;
     let buffers: HashMap<&str, &BufferCell> =
         cells.buffers.iter().map(|b| (b.name.as_str(), b)).collect();
     let diodes: HashMap<&str, &DiodeCell> =
@@ -394,6 +590,7 @@ pub fn apply(
         }
     }
     let mut out = netlist.clone();
+    let mut pin_view = PinView::new(netlist, cells, verilog_limits)?;
     let mut taken: HashSet<String> = out
         .instances
         .iter()
@@ -439,17 +636,8 @@ pub fn apply(
                     EcoError::Invalid(format!("sink instance {} absent", sink.instance))
                 })?;
                 cells.check_sink(&out.instances[at].cell, &sink.instance, &sink.pin)?;
-                let connection = out.instances[at]
-                    .connections
-                    .iter_mut()
-                    .find(|c| c.pin == sink.pin)
-                    .ok_or_else(|| {
-                        EcoError::Invalid(format!(
-                            "sink pin {}/{} is not connected",
-                            sink.instance, sink.pin
-                        ))
-                    })?;
-                let driver = match &connection.signal {
+                let signal = pin_view.get(&out.instances[at], &sink.pin)?;
+                let driver = match &signal {
                     e @ (Expr::Ident(_) | Expr::BitSelect { .. }) => e.clone(),
                     other => {
                         return Err(EcoError::Invalid(format!(
@@ -462,7 +650,8 @@ pub fn apply(
                 };
                 claim(instance, "instance")?;
                 claim(net, "net")?;
-                connection.signal = Expr::Ident(net.clone());
+                pin_view.replace(&mut out.instances[at], &sink.pin, Expr::Ident(net.clone()))?;
+                pin_view.add_scalar(net)?;
                 out.wires.push(Wire {
                     name: net.clone(),
                     range: None,
@@ -524,7 +713,7 @@ pub fn apply(
                     };
                     match &driver {
                         None => driver = Some(e),
-                        Some(d) if *d == e => {}
+                        Some(d) if aliases.same(d, &e) => {}
                         Some(d) => {
                             return Err(EcoError::Invalid(format!(
                                 "{what} is on {} but the other sinks of {instance} are on {}",
@@ -548,17 +737,8 @@ pub fn apply(
                         EcoError::Invalid(format!("sink instance {} absent", sink.instance))
                     })?;
                     cells.check_sink(&out.instances[at].cell, &sink.instance, &sink.pin)?;
-                    let c = out.instances[at]
-                        .connections
-                        .iter()
-                        .find(|c| c.pin == sink.pin)
-                        .ok_or_else(|| {
-                            EcoError::Invalid(format!(
-                                "sink pin {}/{} is not connected",
-                                sink.instance, sink.pin
-                            ))
-                        })?;
-                    same(&c.signal, &format!("sink {}/{}", sink.instance, sink.pin))?;
+                    let signal = pin_view.get(&out.instances[at], &sink.pin)?;
+                    same(&signal, &format!("sink {}/{}", sink.instance, sink.pin))?;
                     at_of.push(at);
                 }
                 let mut port_assigns = Vec::with_capacity(ports.len());
@@ -594,13 +774,13 @@ pub fn apply(
                 let driver = driver.expect("at least one sink or port");
                 claim(instance, "instance")?;
                 claim(net, "net")?;
+                pin_view.add_scalar(net)?;
                 for (sink, at) in sinks.iter().zip(&at_of) {
-                    let c = out.instances[*at]
-                        .connections
-                        .iter_mut()
-                        .find(|c| c.pin == sink.pin)
-                        .expect("checked above");
-                    c.signal = Expr::Ident(net.clone());
+                    pin_view.replace(
+                        &mut out.instances[*at],
+                        &sink.pin,
+                        Expr::Ident(net.clone()),
+                    )?;
                 }
                 for k in port_assigns {
                     out.assigns[k].rhs = Expr::Ident(net.clone());
@@ -787,6 +967,7 @@ endmodule
     }
     fn cells() -> EcoCells {
         EcoCells {
+            pin_buses: PinBuses::new(),
             buffers: vec![
                 BufferCell {
                     name: "dly_1".into(),
@@ -963,6 +1144,67 @@ endmodule
     }
 
     #[test]
+    fn grouped_buffers_accept_internal_scalar_aliases_and_reject_cycles() {
+        // Two registers and two aliases; <32 KiB. The actual primary-clock
+        // ECO is additionally checked with independent CEC by the flow.
+        let source = "module top(input clk,input d,output q0,output q1); wire c0;wire c1; assign c0=clk;assign c1=c0; dff r0(.D(d),.CLK(c1),.Q(q0));dff r1(.D(d),.CLK(clk),.Q(q1));endmodule";
+        let n = parse_verilog(source, &VerilogLimits::default()).unwrap();
+        let plan = EcoPlan {
+            schema: ECO_PLAN_SCHEMA.into(),
+            module: "top".into(),
+            operations: vec![group(
+                "dly_1",
+                "clock_branch",
+                "clock_branch_n",
+                &[("r0", "CLK"), ("r1", "CLK")],
+                &[],
+            )],
+        };
+        let (out, _) = apply(
+            &n,
+            &plan,
+            &cells(),
+            &EcoLimits::default(),
+            &VerilogLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            out.assigns, n.assigns,
+            "existing alias connections remain unchanged"
+        );
+        for name in ["r0", "r1"] {
+            assert_eq!(
+                out.instances
+                    .iter()
+                    .find(|i| i.name == name)
+                    .unwrap()
+                    .connections
+                    .iter()
+                    .find(|c| c.pin == "CLK")
+                    .unwrap()
+                    .signal,
+                Expr::Ident("clock_branch_n".into())
+            );
+        }
+        let cycle = parse_verilog(
+            &source.replace("assign c0=clk", "assign c0=c1"),
+            &VerilogLimits::default(),
+        )
+        .unwrap();
+        assert!(
+            apply(
+                &cycle,
+                &plan,
+                &cells(),
+                &EcoLimits::default(),
+                &VerilogLimits::default()
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("alias cycle")
+        );
+    }
+    #[test]
     fn buffer_sinks_moves_a_group_of_one_net_and_output_port_assigns() {
         let (out, report) = run(vec![group(
             "dly_1",
@@ -1061,6 +1303,93 @@ endmodule
                 "{port}"
             );
         }
+    }
+
+    #[test]
+    fn buffer_sinks_moves_a_scalar_output_port_driven_by_a_cell_pin() {
+        // `o` is the net of r0/Q itself (no assign). The ECO gives it a source
+        // net (b0_src takes r0/Q and every reader), keeps `o` on an assign
+        // and moves that assign to the buffer, like an assign-driven port.
+        let n = parse_verilog(
+            "module top(input wire clk, input wire d, output wire o, output wire p);
+  wire n1;
+  dff r0 (.D(d), .CLK(clk), .Q(o));
+  cellx g0 (.A(o), .B(d), .X(n1));
+  dff r1 (.D(n1), .CLK(clk), .Q(p));
+endmodule
+",
+            &VerilogLimits::default(),
+        )
+        .unwrap();
+        let run_on = |ops: Vec<EcoOp>| {
+            apply(
+                &n,
+                &plan(ops),
+                &cells(),
+                &EcoLimits::default(),
+                &VerilogLimits::default(),
+            )
+        };
+        let (out, report) = run_on(vec![group("dly_1", "b0", "b0_n", &[], &["o"])]).unwrap();
+        let pin = |inst: &str, pin: &str| {
+            out.instances
+                .iter()
+                .find(|i| i.name == inst)
+                .unwrap()
+                .connections
+                .iter()
+                .find(|c| c.pin == pin)
+                .unwrap()
+                .signal
+                .clone()
+        };
+        assert_eq!(pin("r0", "Q"), Expr::Ident("b0_src".into()));
+        assert_eq!(pin("g0", "A"), Expr::Ident("b0_src".into()));
+        assert_eq!(pin("b0", "A"), Expr::Ident("b0_src".into()));
+        assert_eq!(pin("b0", "X"), Expr::Ident("b0_n".into()));
+        assert_eq!(
+            out.assigns,
+            vec![verilog::Assign {
+                lhs: Expr::Ident("o".into()),
+                rhs: Expr::Ident("b0_n".into()),
+            }]
+        );
+        assert_eq!(report.applied[0].ports, vec!["o".to_string()]);
+        // The sinks named with the port move too; untouched nets and the
+        // input netlist are unchanged.
+        let (both, _) = run_on(vec![group("dly_1", "b0", "b0_n", &[("g0", "A")], &["o"])]).unwrap();
+        let g0 = both.instances.iter().find(|i| i.name == "g0").unwrap();
+        assert_eq!(g0.connections[0].signal, Expr::Ident("b0_n".into()));
+        assert!(n.assigns.is_empty());
+        let mut text = Vec::new();
+        write_verilog(&out, &mut text).unwrap();
+        let again = parse_verilog(
+            std::str::from_utf8(&text).unwrap(),
+            &VerilogLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(again, out);
+        // Ports never named stay as they are; a taken source name fails.
+        assert!(out.instances.iter().any(|i| {
+            i.name == "r1"
+                && i.connections
+                    .iter()
+                    .any(|c| c.signal == Expr::Ident("p".into()))
+        }));
+        let mut taken = n.clone();
+        taken.wires.push(Wire {
+            name: "b0_src".into(),
+            range: None,
+        });
+        let e = apply(
+            &taken,
+            &plan(vec![group("dly_1", "b0", "b0_n", &[], &["o"])]),
+            &cells(),
+            &EcoLimits::default(),
+            &VerilogLimits::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(e, EcoError::Name(_)), "{e}");
     }
 
     #[test]

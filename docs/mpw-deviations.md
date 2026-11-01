@@ -43,8 +43,7 @@ Limits: eight affected nets and 64 affected rows per source; 64 timing probes
 per net; resistance factors within 20% of the original; step bracket width
 at most 0.0001 in resistance scale; 10,000 circuit nodes; 50,000 resistors;
 128 characterization cells; 32 MiB input SPEF; 16 MiB subprocess logs.
-Subprocess memory/time guards remain active. The FIFO prototype's measured
-maximum child RSS was 524,064 KiB.
+Subprocess memory/time guards remain active.
 
 ## Reproduction
 

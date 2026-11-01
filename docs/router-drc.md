@@ -1,12 +1,9 @@
 # Foundry-DRC-clean via landings and pin access
 
-The routed `fixtures/flow/pipeline.v` block now has zero Magic `drc(full)` items
-and zero KLayout main-deck items on both default PDKs. Before this change the
-same harness found sky130 Magic 26 / KLayout 9 (m1.2 x5, m2.2 x4) and gf180
-Magic 13 / KLayout 7 (M1.2a x4, M2.3 x3). All of them were same-net geometry
-at via landings and pin access: notches between via pads and their own wires or
-pins, sub-AREA via-pad islands, and a Via1_HV pad 5 nm wider than the clkbuf_1
-`I` pin leg.
+LEF-rule mode removes the same-net geometry defects that the foundry decks
+flagged at via landings and pin access of the routed `fixtures/flow/pipeline.v`
+block on both default PDKs: notches between via pads and their own wires or
+pins, sub-AREA via-pad islands, and a via pad wider than a narrow pin leg.
 
 Scope is block level: no pad ring, no seal ring. IR, EM, SI, OCV and CPPR are
 unchecked. Density is reported on its own and is never part of the block DRC
@@ -78,8 +75,8 @@ contains the new fields.
 
 Notes for other streams:
 - OpenRCX reads DEF `RECT` patches without error but leaves them out of the
-  SPEF. A patch is at most a few tenths of a um^2 (sky130: 9 patches; gf180:
-  1), so the missing C is negligible, but it is not zero. A native extractor
+  SPEF. A patch is at most a few tenths of a um^2, so the missing C is
+  small, but it is not zero. A native extractor
   should include `routes.patches`. (Done in stream b0: `extract` and
   `export-gds` include patches, and `export-def` writes merged runs; see
   `docs/requalification.md`.)
@@ -122,47 +119,21 @@ The controls catch planted defects:
 - a sub-AREA square: both decks flag it;
 - one input swapped between two cells: both LVS tools report a mismatch.
 
-A placement-only copy of the layout (routing stripped) gives 0/0 on both PDKs.
+A placement-only copy of the layout (routing stripped) is checked as well.
 
-## Results (final binary, fresh runs)
+## Receipts
 
-| | sky130_fd_sc_hd | gf180mcu_fd_sc_mcu7t5v0 |
-|---|---|---|
-| Magic drc(full) / KLayout main | 0 / 0 (was 26 / 9) | 0 / 0 (was 13 / 7) |
-| Antenna | 0 (Magic) | 0 (KLayout deck) |
-| Density, separate | 0 items, passed | 8 global rules fail (DCF.1b, PL.8, M1-M5.4, MT.3), failed |
-| LVS Netgen / KLayout | match / match | match / match |
-| Access test: masters x orientations x pins | 22 layouts, 0 / 0 | 22 layouts, 0 / 0 |
-| Same access test with `lef_rules=false` | 0 / 0 | Magic 5, KLayout 14 (M1.2a, M2.2a) |
-| Wires / vias / patches | 4940 / 95 / 9 | 5002 / 76 / 1 |
-| Expansions / comparisons (cap 2M / 200M) | 474,443 / 59.4M | 566,373 / 33.4M |
-| route --scope all | 0.58 s, 15.9 MiB | 0.57 s, 14.3 MiB |
-
-Further results:
-- **Determinism.** Two independent flow runs give byte-identical DEF, Verilog
-  and `export-routes` output. The SPEF differs only in the extractor's
-  `*DATE` line. The in-flow re-route is also DEF-identical.
-- **Full flow.** 28.1 s wall time, 403,648 KiB peak host RSS.
-- **Signoff harness.** 154 s wall time, peak container RSS 474,824 KiB.
-- **Hard caps.** All are unchanged.
-
-Timing side effect, at tt with nominal RC:
-- **sky130.** Before this change hold was +0.25 ps, already below the 1 ps
-  parity gate. It is now -16.1 ps on one endpoint. The routed clock skew rose
-  from 43.5 ps to 61.9 ps.
-- **gf180.** Worst hold is -0.6336 ns; it was -0.6355 ns.
-- **Parity.** RustSTA/OpenSTA parity is still under 1 ps: 0.545 ps on sky130,
-  0.300 ps on gf180.
-
-Hold closure is a separate work item and must be done on top of this router.
+The run receipts of this change are in `docs/evidence/router-drc.json`, kept
+as historical evidence for reproducibility, not as current results. The hard
+caps are unchanged by the LEF-rule mode. Hold closure is a separate work item
+and must be done on top of this router.
 
 ## Limits
 
-- The denser six-register fixture (`.work/tap-release-final/*_literal.v`) still
-  fails on both PDKs. The error is
-  `BUDGET_EXCEEDED: routing expansion limit: per-sink search, pin 49 net 7,
-  7 nets done`, and it is identical with `lef_rules=false`. This is the
-  existing lattice router's scaling limit; nothing here claims scaling.
+- The lattice router's per-sink search budget limits it to small blocks: the
+  denser six-register fixture (`.work/tap-release-final/*_literal.v`) ends
+  with `BUDGET_EXCEEDED` (routing expansion limit, per-sink search) with or
+  without `lef_rules`. Nothing here claims scaling.
 - The native same-net rules cover:
   - same-net notches and spacing (Chebyshev, Euclidean at corners);
   - point contacts;

@@ -84,7 +84,6 @@ Five focused unit cases passed: alternating N/FS common rail bands; an N/N
 shared-boundary polarity fault; an internal gap repaired by adding a filler;
 a wrong orientation/missing supply pin; and explicit work/interval/shape budget
 exhaustion. `cargo clippy -p rustroad-core --all-targets -- -D warnings` passed.
-The guarded targeted test command took 0.74 s and reported 267,312 KiB maximum
-RSS including Rust compilation (`.work/power-unit-tests.time`). These are small
+These are small
 synthetic tests, not independent PDK or signoff evidence. The separate external
 checker owns the dual-PDK physical comparison and planted-defect acceptance.

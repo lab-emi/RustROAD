@@ -1,7 +1,8 @@
 //! Self-authored integration fixture: four 1 x 2 um masters, three routing
-//! layers, one cut layer/via, two ten-site rows, and at most 20 instances.
-//! Before implementation: source/AST/geometry/maps/exports total < 1 MiB per
-//! test; two concurrent test workers stay < 2 MiB incremental fixture memory.
+//! layers, one cut layer/via and two rows. Input-buffer refusal tests use at
+//! most 1,000 instances; other fixtures have fewer than 150.
+//! Before implementation: source/AST/geometry/maps/exports total < 8 MiB per
+//! test; two concurrent test workers stay < 16 MiB incremental fixture memory.
 //! No PDK parse, path traversal, SAT problem or unbounded fixture generation.
 //! Use repository CARGO_BUILD_JOBS=2/RUST_TEST_THREADS=2 and OS/time guards.
 //! This tests workspace integration; real-PDK OpenDB/CEC remain separate gates.
@@ -9,6 +10,7 @@
 use rustroad_core::connectivity::{ConnectivityLimits, PinOwner, PinUse};
 use rustroad_core::{Limits, Orientation};
 use rustroad_formats::verilog;
+use rustroad_workspace::clock::{ClockClustering, ClockConfig};
 use rustroad_workspace::pdk::{ImportSources, import_pdk_with_config};
 use rustroad_workspace::physical::{PhysicalConfig, TapConfig, TieCell};
 use rustroad_workspace::{Error, place, read};
@@ -65,6 +67,8 @@ fn limits() -> Limits {
 }
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -89,6 +93,7 @@ fn config() -> PhysicalConfig {
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,
         cell_spacing_sites: 0,
+        placement_blockages: Vec::new(),
         io_width: None,
         io_min_area: false,
         io_spacing: None,
@@ -97,6 +102,8 @@ fn config() -> PhysicalConfig {
         max_added_cells: 64,
         max_tie_fanout: 8,
         tap: None,
+        port_buffer: None,
+        input_buffer: None,
         clock: None,
         placer: None,
         io_plan: None,
@@ -181,6 +188,8 @@ impl Drop for Fixture {
 fn tapped_fixture() -> Fixture {
     let mut cfg = config();
     cfg.tap = Some(TapConfig {
+        pattern: None,
+        body_view: Default::default(),
         cell: "TAP".into(),
         max_gap: 3000,
         well_layer: "NW".into(),
@@ -203,6 +212,7 @@ fn tapped_fixture() -> Fixture {
 fn clock_fixture(max_buffers: usize) -> Fixture {
     let mut c = config();
     c.clock = Some(rustroad_workspace::clock::ClockConfig {
+        root_net: None,
         port: "a".into(),
         cell: "BUF".into(),
         input_pin: "A".into(),
@@ -212,11 +222,423 @@ fn clock_fixture(max_buffers: usize) -> Fixture {
         max_buffers,
         max_work: 1000,
         level_cells: Vec::new(),
+        level_fanout: Vec::new(),
+        root_at_driver: false,
+        clustering: Default::default(),
+        regroup_prefixes: Vec::new(),
     });
     Fixture::new(
         "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule",
         &c,
     )
+}
+
+#[test]
+fn supply_stack_keeps_original_vias_and_enclosed_intermediate_metal() {
+    // Three logic cells and two rows; <1 MiB including the workspace.
+    let mut cfg = config();
+    cfg.strap_layer = "M3".into();
+    cfg.io_layer = "M2".into();
+    cfg.rail_via_stack = vec!["V12".into(), "V23".into()];
+    let f = Fixture::new(LOGIC, &cfg);
+    let via = "LAYER V2 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V2\nVIA V23 DEFAULT\nLAYER M2 ; RECT -0.05 -0.05 0.05 0.05 ;\nLAYER V2 ; RECT -0.03 -0.03 0.03 0.03 ;\nLAYER M3 ; RECT -0.05 -0.05 0.05 0.05 ; END V23\nEND LIBRARY";
+    fs::write(
+        &f.sources.technology_lef,
+        TECHNOLOGY.replace("END LIBRARY", via),
+    )
+    .unwrap();
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let supply = &snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .state
+        .as_ref()
+        .unwrap()
+        .supply;
+    assert!(supply.vias.iter().any(|v| v.name == "V12"));
+    assert!(supply.vias.iter().any(|v| v.name == "V23"));
+    for v in &supply.vias {
+        assert!(
+            supply
+                .wires
+                .iter()
+                .any(|w| w.layer == "M2" && w.polarity == v.polarity && {
+                    let r = rustroad_core::supply::wire_bounds(w).unwrap();
+                    r.lx <= v.at[0] - 50
+                        && r.ly <= v.at[1] - 50
+                        && r.ux >= v.at[0] + 50
+                        && r.uy >= v.at[1] + 50
+                }),
+            "intermediate landing at {:?}",
+            v.at
+        );
+    }
+    let mut def = Vec::new();
+    snapshot.export_def(&mut def).unwrap();
+    let def = String::from_utf8(def).unwrap();
+    for line in def.lines().filter(|line| line.ends_with(" V23")) {
+        assert!(
+            line.contains("+ ROUTED M2 0"),
+            "higher via must start on its own lower layer: {line}"
+        );
+    }
+}
+
+#[test]
+fn split_rail_stacks_above_the_last_full_row_land_on_a_spine() {
+    // A fixed block on the upper row splits its rails above the last
+    // full-width row (as SRAMs on the Ibex floorplan do). The primary grid
+    // ends at that row, so every stack's strap pad must still sit on an
+    // extended spine of its polarity, never beside one. <1 MiB per test.
+    let mut cfg = config();
+    cfg.macro_supply = Some(rustroad_workspace::macro_supply::Config {
+        collection_layer: "M3".into(),
+        pin_layer: "M2".into(),
+        pin_via: "V23".into(),
+        via_stack: vec!["V23".into()],
+        wire_width: 200,
+    });
+    let f = Fixture::new(
+        "module chip(input a, output y, output h, output l);\n\
+         BUF b0 (.A(a), .Y(y)); BUF b1 (.A(1'b1), .Y(h)); BUF b2 (.A(1'b0), .Y(l));\n\
+         RAM m0 (.D(a));\nendmodule\n",
+        &cfg,
+    );
+    let via = "LAYER V2 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V2\nVIA V23 DEFAULT\nLAYER M2 ; RECT -0.05 -0.05 0.05 0.05 ;\nLAYER V2 ; RECT -0.03 -0.03 0.03 0.03 ;\nLAYER M3 ; RECT -0.05 -0.05 0.05 0.05 ; END V23\nEND LIBRARY";
+    fs::write(
+        &f.sources.technology_lef,
+        TECHNOLOGY.replace("END LIBRARY", via),
+    )
+    .unwrap();
+    let ram = "MACRO RAM\nCLASS BLOCK ; ORIGIN 0 0 ; SIZE 2 BY 2 ; SYMMETRY X Y ;\n\
+PIN D DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M2 ; RECT 0.9 0.9 1.1 1.1 ; END END D\n\
+PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M2 ; RECT 0.2 1.5 1.8 1.8 ; END END VDD\n\
+PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M2 ; RECT 0.2 0.2 1.8 0.5 ; END END VSS\n\
+OBS LAYER M1 ; RECT 0 0 2 2 ; END\nEND RAM\nEND LIBRARY";
+    fs::write(&f.sources.cell_lef, library().replace("END LIBRARY", ram)).unwrap();
+    let mut floorplan: serde_json::Value =
+        serde_json::from_slice(&fs::read(&f.sources.floorplan).unwrap()).unwrap();
+    floorplan["macro_placements"] =
+        serde_json::json!({"m0": {"x": 9000, "y": 7000, "orientation": "N", "halo": 0}});
+    fs::write(
+        &f.sources.floorplan,
+        serde_json::to_vec(&floorplan).unwrap(),
+    )
+    .unwrap();
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let supply = &snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .state
+        .as_ref()
+        .unwrap()
+        .supply;
+    let spines: Vec<_> = supply
+        .wires
+        .iter()
+        .filter(|w| w.layer == "M2" && w.start[0] == w.end[0])
+        .collect();
+    assert!(spines.len() >= 4, "primary and channel spines: {spines:?}");
+    let rail_stacks: Vec<_> = supply.vias.iter().filter(|v| v.name == "V12").collect();
+    assert!(
+        rail_stacks.iter().any(|v| v.at[1] >= 8900),
+        "the split upper rail has its own stack: {rail_stacks:?}"
+    );
+    for v in rail_stacks {
+        assert!(
+            spines.iter().any(|w| w.polarity == v.polarity && {
+                let r = rustroad_core::supply::wire_bounds(w).unwrap();
+                r.lx <= v.at[0] - 50
+                    && r.ly <= v.at[1] - 50
+                    && r.ux >= v.at[0] + 50
+                    && r.uy >= v.at[1] + 50
+            }),
+            "strap pad at {:?} lies beside every {:?} spine",
+            v.at,
+            v.polarity
+        );
+    }
+}
+
+#[test]
+fn internal_clock_tree_preserves_its_original_driver() {
+    // Five cells, two rows and fewer than 32 inserted buffers: <1 MiB. The
+    // externally selected root must not silently bypass the original gate.
+    let mut c = config();
+    c.clock = Some(rustroad_workspace::clock::ClockConfig {
+        root_net: Some("gated".into()),
+        port: "a".into(),
+        cell: "BUF".into(),
+        input_pin: "A".into(),
+        output_pin: "Y".into(),
+        sink_pin: "A".into(),
+        max_fanout: 2,
+        max_buffers: 32,
+        max_work: 1000,
+        level_cells: Vec::new(),
+        level_fanout: Vec::new(),
+        root_at_driver: false,
+        clustering: Default::default(),
+        regroup_prefixes: Vec::new(),
+    });
+    let f = Fixture::new(
+        "module chip(input a, output y, output h, output l); wire gated; BUF gate(.A(a),.Y(gated)); BUF b0(.A(gated),.Y(y)); BUF b1(.A(gated),.Y(h)); BUF b2(.A(gated),.Y(l)); endmodule",
+        &c,
+    );
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    let gate = bundle
+        .netlist
+        .instances
+        .iter()
+        .find(|i| i.name == "gate")
+        .unwrap();
+    assert_eq!(gate.connections[0].signal, verilog::Expr::Ident("a".into()));
+    assert_eq!(
+        gate.connections[1].signal,
+        verilog::Expr::Ident("gated".into())
+    );
+    let root = bundle
+        .netlist
+        .instances
+        .iter()
+        .filter(|i| i.name.starts_with("rr_clkbuf_"))
+        .filter(|i| {
+            i.connections
+                .iter()
+                .any(|p| p.pin == "A" && p.signal == verilog::Expr::Ident("gated".into()))
+        })
+        .count();
+    assert_eq!(root, 1, "one tree root must stay behind the original gate");
+    assert!(
+        !bundle
+            .netlist
+            .instances
+            .iter()
+            .filter(|i| i.name.starts_with("rr_clkbuf_"))
+            .any(|i| {
+                i.connections
+                    .iter()
+                    .any(|p| p.pin == "A" && p.signal == verilog::Expr::Ident("a".into()))
+            }),
+        "clock buffering must not bypass the internal root"
+    );
+}
+
+fn input_policy() -> rustroad_workspace::input_buffer::Config {
+    rustroad_workspace::input_buffer::Config {
+        cell: "BUF".into(),
+        input_pin: "A".into(),
+        output_pin: "Y".into(),
+        max_fanout: 8,
+        max_buffers: 128,
+        max_sinks: 1000,
+        max_work: 100_000,
+        memory_mib: 16,
+    }
+}
+
+fn input_logic(count: usize) -> String {
+    assert!(count <= 650, "bounded fanout fixture");
+    let mut text = format!("module chip(input a, output [{}:0] y);\n", count - 1);
+    for i in 0..count {
+        text.push_str(&format!("BUF b{i}(.A(a),.Y(y[{i}]));\n"));
+    }
+    text.push_str("endmodule\n");
+    text
+}
+
+fn widen_input_fixture(f: &Fixture) {
+    let mut floor: serde_json::Value =
+        serde_json::from_slice(&fs::read(&f.sources.floorplan).unwrap()).unwrap();
+    floor["die_area"]["ux"] = 60_000.into();
+    floor["core_area"]["ux"] = 55_000.into();
+    for row in floor["rows"].as_array_mut().unwrap() {
+        row["x_end"] = 55_000.into();
+    }
+    fs::write(&f.sources.floorplan, serde_json::to_vec(&floor).unwrap()).unwrap();
+}
+
+#[test]
+fn input_trees_preserve_bus_bits_and_clock_ownership_after_replacement() {
+    for range in ["[1:0]", "[0:1]"] {
+        let mut cfg = config();
+        cfg.max_added_cells = 128;
+        cfg.input_buffer = Some(input_policy());
+        cfg.clock = Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
+            port: "clk".into(),
+            cell: "BUF".into(),
+            input_pin: "A".into(),
+            output_pin: "Y".into(),
+            sink_pin: "A".into(),
+            max_fanout: 4,
+            max_buffers: 32,
+            max_work: 10_000,
+            level_cells: Vec::new(),
+            level_fanout: Vec::new(),
+            root_at_driver: false,
+            clustering: Default::default(),
+            regroup_prefixes: Vec::new(),
+        });
+        let mut logic = format!(
+            "module chip(input {range} a, input clk, output [30:0] y);\nwire rr_input_net_2;\n"
+        );
+        for i in 0..31 {
+            let source = if i < 17 {
+                "a[0]"
+            } else if i < 22 {
+                "a[1]"
+            } else {
+                "clk"
+            };
+            let name = if i == 0 {
+                "rr_input_buffer_0".into()
+            } else {
+                format!("b{i}")
+            };
+            logic.push_str(&format!("BUF {name}(.A({source}),.Y(y[{i}]));\n"));
+        }
+        logic.push_str("endmodule\n");
+        let f = Fixture::new(&logic, &cfg);
+        widen_input_fixture(&f);
+        let imported = f.import().unwrap();
+        assert_eq!(imported.inserted_input_buffers, Some(3));
+        let snapshot = read(&f.workspace, &limits()).unwrap();
+        let report = snapshot
+            .metadata()
+            .physical
+            .as_ref()
+            .unwrap()
+            .input_buffers
+            .as_ref()
+            .unwrap();
+        assert_eq!(report.trees.len(), 1);
+        assert_eq!(report.trees[0].port, "a");
+        assert_eq!(report.trees[0].bit, u32::from(range == "[1:0]"));
+        assert_eq!(report.trees[0].sinks, 17);
+        assert_eq!(report.skipped_clock_inputs, 1);
+        assert!(report.buffers.iter().all(|b| b.name != "rr_input_buffer_0"));
+        drop(snapshot);
+        place(&f.workspace, "rev1", &limits()).unwrap();
+        let clock = rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+        assert_eq!(clock.inserted_input_buffers, Some(3));
+        let snapshot = read(&f.workspace, &limits()).unwrap();
+        let mut output = Vec::new();
+        snapshot.export_verilog(&mut output).unwrap();
+        assert!(!output.is_empty());
+    }
+}
+
+#[test]
+fn input_trees_have_bounded_multilevel_topology_and_reject_a_cycle() {
+    let mut cfg = config();
+    cfg.input_buffer = Some(input_policy());
+    let f = Fixture::new(&input_logic(73), &cfg);
+    widen_input_fixture(&f);
+    assert_eq!(f.import().unwrap().inserted_input_buffers, Some(12));
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let report = snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .input_buffers
+        .as_ref()
+        .unwrap();
+    assert_eq!(report.trees[0].levels, 2);
+    let leaf = report.buffers[0].instance;
+    let root = report.buffers[10].instance;
+    drop(snapshot);
+    let path = f.workspace.join("revisions/rev1/design.json");
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let physical = &mut value["physical"];
+    let signal =
+        physical["netlist"]["instances"][leaf as usize]["connections"][1]["signal"].clone();
+    physical["netlist"]["instances"][root as usize]["connections"][0]["signal"] = signal;
+    let net = physical["connectivity"]["pins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["owner"]["instance"] == leaf && p["owner"]["terminal"] == 1)
+        .unwrap()["net"]
+        .clone();
+    for pin in physical["connectivity"]["pins"].as_array_mut().unwrap() {
+        if pin["owner"]["instance"] == root && pin["owner"]["terminal"] == 0 {
+            pin["net"] = net.clone();
+        }
+    }
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let error = match read(&f.workspace, &limits()) {
+        Ok(_) => panic!("cyclic input buffer topology was accepted"),
+        Err(e) => e,
+    };
+    assert!(error.to_string().contains("cyclic"), "{error}");
+    assert_eq!(f.head(), "rev1\n");
+}
+
+#[test]
+fn input_buffer_budgets_fail_before_publication() {
+    for budget in ["buffers", "sinks", "work", "total", "memory"] {
+        let mut cfg = config();
+        let mut policy = input_policy();
+        let count = if budget == "memory" { 650 } else { 17 };
+        match budget {
+            "buffers" => policy.max_buffers = 2,
+            "sinks" => policy.max_sinks = 16,
+            "work" => policy.max_work = 1,
+            "total" => cfg.max_added_cells = 2,
+            "memory" => {
+                cfg.max_added_cells = 1000;
+                policy.max_buffers = 500;
+                policy.max_fanout = 3;
+                policy.memory_mib = 1;
+            }
+            _ => unreachable!(),
+        }
+        cfg.input_buffer = Some(policy);
+        let f = Fixture::new(&input_logic(count), &cfg);
+        let error = f.import().unwrap_err();
+        assert!(matches!(error, Error::Budget(_)), "{budget}: {error}");
+        assert!(
+            !f.workspace.join("HEAD").exists(),
+            "{budget} published a revision"
+        );
+    }
+}
+
+#[test]
+fn input_tree_passive_loads_are_counted_without_becoming_functional_endpoints() {
+    let mut cfg = config();
+    cfg.input_buffer = Some(input_policy());
+    let logic = input_logic(17).replace("endmodule", "DIO d0(.D(a)); endmodule");
+    let f = Fixture::new(&logic, &cfg);
+    let diode = "MACRO DIO CLASS CORE ANTENNACELL ; ORIGIN 0 0 ; SIZE 1 BY 2 ; SITE s ; SYMMETRY X Y ;\nPIN D DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M1 ; RECT 0.3 0.4 0.5 0.6 ; END END D\nEND DIO\nEND LIBRARY";
+    fs::write(&f.sources.cell_lef, library().replace("END LIBRARY", diode)).unwrap();
+    assert_eq!(f.import().unwrap().inserted_input_buffers, Some(3));
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let tree = &snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .input_buffers
+        .as_ref()
+        .unwrap()
+        .trees[0];
+    assert_eq!(tree.sinks, 17);
+    assert_eq!(tree.loads, 18);
 }
 
 #[test]
@@ -276,6 +698,7 @@ PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 2 2.1 ; END END
     ] {
         let mut c = config();
         c.clock = Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
             port: "a".into(),
             cell: "BUF".into(),
             input_pin: "A".into(),
@@ -285,6 +708,10 @@ PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 2 2.1 ; END END
             max_buffers: 10,
             max_work: 1000,
             level_cells: levels.clone(),
+            level_fanout: Vec::new(),
+            root_at_driver: false,
+            clustering: Default::default(),
+            regroup_prefixes: Vec::new(),
         });
         let f = Fixture::new(logic, &c);
         fs::write(
@@ -333,6 +760,61 @@ PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 2 2.1 ; END END
 }
 
 #[test]
+fn clock_level_fanout_narrows_upper_levels_only() {
+    let bufs: String = (0..8)
+        .map(|i| format!("BUF b{i}(.A(a),.Y(y{i})); "))
+        .collect();
+    let outs: String = (0..8).map(|i| format!(", output y{i}")).collect();
+    let logic = format!("module chip(input a{outs}); {bufs}endmodule");
+    for (level_fanout, levels, buffers) in [
+        (vec![], 2, 3),
+        (vec![4, 2], 2, 3),
+        (vec![2], 3, 7),
+        (vec![4, 1], 0, 0),
+    ] {
+        let mut c = config();
+        c.clock = Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
+            port: "a".into(),
+            cell: "BUF".into(),
+            input_pin: "A".into(),
+            output_pin: "Y".into(),
+            sink_pin: "A".into(),
+            max_fanout: 4,
+            max_buffers: 16,
+            max_work: 1000,
+            level_cells: Vec::new(),
+            level_fanout: level_fanout.clone(),
+            root_at_driver: false,
+            clustering: Default::default(),
+            regroup_prefixes: Vec::new(),
+        });
+        let f = Fixture::new(&logic, &c);
+        if levels == 0 {
+            // A level fanout below 2 could never reduce the tree.
+            assert!(f.import().is_err(), "{level_fanout:?}");
+            continue;
+        }
+        f.import().unwrap();
+        place(&f.workspace, "rev1", &limits()).unwrap();
+        rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+        let s = read(&f.workspace, &limits()).unwrap();
+        let report = s
+            .metadata()
+            .physical
+            .as_ref()
+            .unwrap()
+            .clock_tree
+            .as_ref()
+            .unwrap();
+        assert_eq!(report.sinks.len(), 8, "{level_fanout:?}");
+        assert_eq!(report.levels, levels, "{level_fanout:?}");
+        assert_eq!(report.buffers.len(), buffers, "{level_fanout:?}");
+        assert_eq!(report.max_fanout, 4);
+    }
+}
+
+#[test]
 fn antenna_diode_stays_a_passive_load_on_the_clock_root() {
     let diode = "MACRO DIO\nCLASS CORE ANTENNACELL ; ORIGIN 0 0 ; SIZE 1 BY 2 ; SITE s ; SYMMETRY X Y ;\n\
 PIN D DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M1 ; RECT 0.3 0.4 0.5 0.6 ; END END D\n\
@@ -340,6 +822,7 @@ PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M1 ; RECT 0 -0.1 1 0.1 ; END E
 PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 1 2.1 ; END END VDD\nEND DIO\nEND LIBRARY\n";
     let mut c = config();
     c.clock = Some(rustroad_workspace::clock::ClockConfig {
+        root_net: None,
         port: "a".into(),
         cell: "BUF".into(),
         input_pin: "A".into(),
@@ -349,6 +832,10 @@ PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 1 2.1 ; END END
         max_buffers: 10,
         max_work: 1000,
         level_cells: Vec::new(),
+        level_fanout: Vec::new(),
+        root_at_driver: false,
+        clustering: Default::default(),
+        regroup_prefixes: Vec::new(),
     });
     let f = Fixture::new(
         "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); DIO d0(.D(a)); endmodule",
@@ -532,6 +1019,80 @@ fn tap_identity_and_spacing_fail_without_publishing() {
 }
 
 #[test]
+fn staggered_taps_roundtrip_reopen_repeat_and_stale_revision_contract() {
+    let f = tapped_fixture();
+    let mut cfg: PhysicalConfig =
+        serde_json::from_slice(&fs::read(&f.config_path).unwrap()).unwrap();
+    let legacy_json = serde_json::to_value(&cfg).unwrap();
+    assert!(legacy_json["tap"].get("pattern").is_none());
+    cfg.tap.as_mut().unwrap().max_gap = 5000;
+    cfg.tap.as_mut().unwrap().pattern =
+        Some(rustroad_core::tap::TapPattern::Staggered { phase: 2000 });
+    fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+    f.import().unwrap();
+    let first = place(&f.workspace, "rev1", &limits()).unwrap();
+    let s = read(&f.workspace, &limits()).unwrap();
+    let tap = s
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .state
+        .as_ref()
+        .unwrap()
+        .tap
+        .as_ref()
+        .unwrap();
+    assert_eq!(tap.requested_max_gap, 5000);
+    assert!(tap.max_clear_gap <= 5000);
+    assert_eq!(
+        s.metadata()
+            .physical
+            .as_ref()
+            .unwrap()
+            .config
+            .as_ref()
+            .unwrap()
+            .tap
+            .as_ref()
+            .unwrap()
+            .pattern,
+        Some(rustroad_core::tap::TapPattern::Staggered { phase: 2000 })
+    );
+    let mut before = Vec::new();
+    s.export_def(&mut before).unwrap();
+    drop(s);
+    assert!(matches!(
+        place(&f.workspace, "rev1", &limits()),
+        Err(rustroad_workspace::Error::Conflict { .. })
+    ));
+    assert_eq!(f.head().trim(), first.revision);
+    place(&f.workspace, &first.revision, &limits()).unwrap();
+    let s = read(&f.workspace, &limits()).unwrap();
+    let mut after = Vec::new();
+    s.export_def(&mut after).unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn malformed_staggered_tap_policy_rejects_before_workspace_publication() {
+    for pattern in [
+        r#"{"kind":"checkerboard","phase":2000}"#,
+        r#"{"kind":"staggered","phase":3000}"#,
+        r#"{"kind":"staggered","phase":-1}"#,
+        r#"{"kind":"staggered","phase":1000,"pitch":5000}"#,
+    ] {
+        let f = tapped_fixture();
+        let mut cfg: serde_json::Value =
+            serde_json::from_slice(&fs::read(&f.config_path).unwrap()).unwrap();
+        cfg["tap"]["pattern"] = serde_json::from_str(pattern).unwrap();
+        fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+        assert!(f.import().is_err());
+        assert!(!f.workspace.join("HEAD").exists());
+    }
+}
+
+#[test]
 fn lost_tap_metadata_is_rejected_on_read() {
     let f = tapped_fixture();
     f.import().unwrap();
@@ -548,6 +1109,70 @@ fn lost_tap_metadata_is_rejected_on_read() {
         .pop();
     fs::write(file, serde_json::to_vec(&value).unwrap()).unwrap();
     assert!(read(&f.workspace, &limits()).is_err());
+}
+
+#[test]
+fn placement_seed_export_is_read_only_and_excludes_only_generated_cells() {
+    let fixture = tapped_fixture();
+    fs::write(
+        &fixture.sources.netlist,
+        LOGIC.replace("BUF b0 (", "BUF rr_fill_logical ("),
+    )
+    .unwrap();
+    fixture.import().unwrap();
+    let before = fixture.head();
+    let imported = read(&fixture.workspace, &limits()).unwrap();
+    assert!(
+        rustroad_workspace::placement_seed::from_snapshot(&imported).is_err(),
+        "an imported but unplaced snapshot cannot provide coordinates"
+    );
+    drop(imported);
+    assert_eq!(fixture.head(), before);
+    place(&fixture.workspace, "rev1", &limits()).unwrap();
+    let before = fixture.head();
+    let snapshot = read(&fixture.workspace, &limits()).unwrap();
+    let seed = rustroad_workspace::placement_seed::from_snapshot(&snapshot).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    assert!(seed.cells.contains_key("rr_fill_logical"));
+    assert!(!bundle.generated_fillers.is_empty());
+    assert!(!bundle.generated_taps.is_empty());
+    for name in bundle
+        .generated_fillers
+        .iter()
+        .chain(&bundle.generated_taps)
+    {
+        assert!(
+            !seed.cells.contains_key(name),
+            "physical-only instance {name}"
+        );
+    }
+    assert_eq!(
+        seed.cells.len(),
+        snapshot.metadata().design.cells.len()
+            - bundle.generated_fillers.len()
+            - bundle.generated_taps.len()
+    );
+    for (cell, placed) in snapshot
+        .metadata()
+        .design
+        .cells
+        .iter()
+        .zip(snapshot.records())
+    {
+        if let Some(point) = seed.cells.get(&cell.name) {
+            assert_eq!(*point, [placed.x, placed.y]);
+        }
+    }
+    assert_eq!(seed.source["revision"], "rev2");
+    assert_eq!(seed.source["units_per_micron"], 1000);
+    assert!(seed.source["imported_netlist_sha256"].as_str().is_some());
+    let bytes = serde_json::to_vec_pretty(&seed).unwrap();
+    assert!(bytes.len() <= rustroad_workspace::placement_seed::MAX_OUTPUT_BYTES);
+    let restored: rustroad_workspace::physical::PlacementSeed =
+        serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(seed, restored);
+    drop(snapshot);
+    assert_eq!(fixture.head(), before);
 }
 
 #[test]
@@ -749,11 +1374,117 @@ fn invalid_config_fanout_and_added_cell_budgets_do_not_publish() {
     assert!(!f.workspace.join("HEAD").exists());
     let mut low_fanout = config();
     low_fanout.max_tie_fanout = 1;
+    low_fanout.max_added_cells = 1;
     let logic = "module chip(input a,output y,output h,output l); wire k; assign k=1'b1; BUF b0(.A(k),.Y(y)); BUF b1(.A(k),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule";
     let f = Fixture::new(logic, &low_fanout);
     let error = f.import().unwrap_err();
     assert!(error.to_string().contains("fanout"));
     assert!(!f.workspace.join("HEAD").exists());
+}
+
+#[test]
+fn shared_constant_sources_are_replicated_with_bounded_fanout() {
+    let mut cfg = config();
+    cfg.max_tie_fanout = 1;
+    let logic = "module chip(input a,output y,output h,output l); wire k; assign k=1'b1; BUF b0(.A(k),.Y(y)); BUF b1(.A(k),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule";
+    let f = Fixture::new(logic, &cfg);
+    f.import().expect("shared constant should be replicated");
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    assert_eq!(bundle.ties.as_ref().unwrap().new_cells, 2);
+    let input = |name: &str| {
+        bundle
+            .netlist
+            .instances
+            .iter()
+            .find(|i| i.name == name)
+            .unwrap()
+            .connections
+            .iter()
+            .find(|p| p.pin == "A")
+            .unwrap()
+            .signal
+            .clone()
+    };
+    assert_ne!(input("b0"), input("b1"));
+    let copied = bundle
+        .netlist
+        .instances
+        .iter()
+        .find(|i| i.name.starts_with("rr_tie_copy_"))
+        .unwrap();
+    assert_eq!(copied.cell, "HI");
+}
+
+#[test]
+fn in_place_constant_sources_are_included_in_fanout_repair() {
+    let mut cfg = config();
+    cfg.max_tie_fanout = 1;
+    let f = Fixture::new(
+        "module chip(output y,output z); wire k; HI source(.Y(k)); BUF b0(.A(k),.Y(y)); BUF b1(.A(k),.Y(z)); endmodule",
+        &cfg,
+    );
+    f.import().expect("existing source must be replicated");
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    assert_eq!(bundle.ties.as_ref().unwrap().new_cells, 1);
+    assert!(bundle.netlist.instances.iter().any(|i| i.name == "source"));
+    assert_eq!(
+        bundle
+            .netlist
+            .instances
+            .iter()
+            .filter(|i| i.cell == "HI")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn constant_top_level_alias_repair_obeys_its_added_cell_budget() {
+    let mut cfg = config();
+    cfg.max_tie_fanout = 1;
+    cfg.max_added_cells = 1;
+    let f = Fixture::new(
+        "module chip(output a,output b); wire k; assign k=1'b1; assign a=k; assign b=k; endmodule",
+        &cfg,
+    );
+    let error = f
+        .import()
+        .expect_err("port repair must obey its cell budget");
+    assert!(error.to_string().contains("fanout"));
+    assert!(!f.workspace.join("HEAD").exists());
+}
+
+#[test]
+fn constant_output_aliases_are_split_without_changing_port_identity() {
+    let mut cfg = config();
+    cfg.max_tie_fanout = 1;
+    let f = Fixture::new(
+        "module chip(output a,output b); wire k; assign k=1'b1; assign a=k; assign b=k; endmodule",
+        &cfg,
+    );
+    f.import().expect("constant port aliases should be split");
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    assert_eq!(bundle.ties.as_ref().unwrap().new_cells, 2);
+    let port_nets: Vec<_> = bundle
+        .connectivity
+        .pins
+        .iter()
+        .filter_map(|p| {
+            if let PinOwner::Port { port, .. } = p.owner
+                && bundle.connectivity.ports[port as usize].direction
+                    == rustroad_core::connectivity::Direction::Output
+            {
+                p.net
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(port_nets.len(), 2);
+    assert_ne!(port_nets[0], port_nets[1]);
 }
 
 #[test]
@@ -846,4 +1577,485 @@ END LIBRARY\n";
     let error = f.import().unwrap_err();
     assert!(error.to_string().contains("conflicting fixed VIA"));
     assert!(!f.workspace.join("HEAD").exists());
+}
+
+#[test]
+fn output_aliases_and_feedthroughs_have_distinct_external_nets() {
+    let mut cfg = config();
+    cfg.port_buffer = Some(rustroad_workspace::physical::PortBuffer {
+        cell: "BUF".into(),
+        input_pin: "A".into(),
+        output_pin: "Y".into(),
+    });
+    let source = "module chip(input [1:0] a, output [0:1] y, output [1:0] z, output [3:0] c); BUF b0(.A(a[0]), .Y(y[0])); assign y[1]=a[1]; assign z={y[0],y[1]}; assign c=4'b1010; endmodule";
+    let f = Fixture::new(source, &cfg);
+    let report = f.import().unwrap();
+    assert_eq!(report.inserted_port_buffers, Some(3));
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let model = &snapshot.metadata().physical.as_ref().unwrap().connectivity;
+    let mut outputs = std::collections::HashSet::new();
+    for pin in &model.pins {
+        if let PinOwner::Port { port, .. } = pin.owner
+            && model.ports[port as usize].direction
+                == rustroad_core::connectivity::Direction::Output
+        {
+            assert!(outputs.insert(pin.net.unwrap()));
+        }
+    }
+    assert_eq!(outputs.len(), 8);
+    drop(snapshot);
+    cfg.max_added_cells = 4;
+    let blocked = Fixture::new(source, &cfg);
+    assert!(matches!(blocked.import(), Err(Error::Budget(_))));
+    assert!(!blocked.workspace.join("HEAD").exists());
+}
+
+fn regroup_clock(clustering: ClockClustering, prefixes: &[&str]) -> ClockConfig {
+    ClockConfig {
+        root_net: None,
+        port: "clk".into(),
+        cell: "BUF".into(),
+        input_pin: "A".into(),
+        output_pin: "Y".into(),
+        sink_pin: "A".into(),
+        max_fanout: 4,
+        max_buffers: 8,
+        max_work: 10_000,
+        level_cells: Vec::new(),
+        level_fanout: Vec::new(),
+        root_at_driver: false,
+        clustering,
+        regroup_prefixes: prefixes.iter().map(|p| p.to_string()).collect(),
+    }
+}
+
+#[test]
+fn regroup_requires_hilbert_and_a_bounded_prefix_list() {
+    assert!(
+        regroup_clock(ClockClustering::Hilbert, &["native_fanout_"])
+            .validate()
+            .is_ok()
+    );
+    assert!(
+        regroup_clock(ClockClustering::Raster, &["native_fanout_"])
+            .validate()
+            .is_err()
+    );
+    assert!(
+        regroup_clock(ClockClustering::Hilbert, &["bad name"])
+            .validate()
+            .is_err()
+    );
+    let many: Vec<String> = (0..17).map(|i| format!("p{i}_")).collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    assert!(
+        regroup_clock(ClockClustering::Hilbert, &many)
+            .validate()
+            .is_err()
+    );
+}
+
+#[test]
+fn regroup_moves_sinks_between_same_level_buffers_by_hilbert_order_only() {
+    // 17 logic cells plus at most 2 clock buffers on a 2 x 50-site fixture;
+    // < 1 MiB including the workspace.
+    let mut cfg = config();
+    cfg.max_added_cells = 128;
+    cfg.clock = Some(regroup_clock(ClockClustering::Hilbert, &["native_fanout_"]));
+    let mut logic = String::from(
+        "module chip(input a, input b, input clk, output [5:0] y, output [5:0] z, output w, output k);\n\
+         wire n0, n1, m0;\n\
+         BUF native_fanout_0_0_0(.A(a),.Y(n0)); BUF native_fanout_0_0_1(.A(a),.Y(n1));\n\
+         BUF native_fanout_1_0_0(.A(b),.Y(m0)); BUF native_fanout_1_0_1(.A(b),.Y(w));\n\
+         BUF c0(.A(clk),.Y(k));\n",
+    );
+    // Interleaved membership: a geometric grouping almost surely differs.
+    for i in 0..6 {
+        let (n, m) = if i % 2 == 0 {
+            ("n0", "m0")
+        } else {
+            ("n1", "w")
+        };
+        logic.push_str(&format!(
+            "BUF s{i}(.A({n}),.Y(y[{i}])); BUF t{i}(.A({m}),.Y(z[{i}]));\n"
+        ));
+    }
+    logic.push_str("endmodule\n");
+    let f = Fixture::new(&logic, &cfg);
+    widen_input_fixture(&f);
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let placed = read(&f.workspace, &limits()).unwrap();
+    let centre: std::collections::HashMap<String, [i64; 2]> = placed
+        .metadata()
+        .design
+        .cells
+        .iter()
+        .zip(placed.records())
+        .map(|(c, p)| (c.name.clone(), [p.x + p.width / 2, p.y + p.height / 2]))
+        .collect();
+    drop(placed);
+    rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    assert_eq!(
+        bundle.clock_tree.as_ref().unwrap().regrouped,
+        ["native_fanout_0_0_0", "native_fanout_0_0_1"]
+    );
+    let driver = |sink: &str| -> String {
+        let i = bundle
+            .netlist
+            .instances
+            .iter()
+            .find(|i| i.name == sink)
+            .unwrap();
+        match &i.connections.iter().find(|c| c.pin == "A").unwrap().signal {
+            verilog::Expr::Ident(n) => n.clone(),
+            other => panic!("{other:?}"),
+        }
+    };
+    // The level whose buffer drives a port is left exactly as written.
+    for i in 0..6 {
+        assert_eq!(
+            driver(&format!("t{i}")),
+            if i % 2 == 0 { "m0" } else { "w" }
+        );
+    }
+    // Same-level reassignment only, group sizes kept, contiguous Hilbert chunks.
+    let names: Vec<String> = (0..6).map(|i| format!("s{i}")).collect();
+    let points: Vec<[i64; 2]> = names.iter().map(|n| centre[n]).collect();
+    let keys = rustroad_workspace::clock::hilbert_keys(&points);
+    let mut order: Vec<usize> = (0..6).collect();
+    order.sort_by_key(|&k| (keys[k], points[k]));
+    let mut first: Vec<usize> = order[..3].to_vec();
+    first.sort_unstable();
+    assert!(
+        first != [0, 2, 4] && first != [1, 3, 5],
+        "fixture must force a reassignment"
+    );
+    for (chunk, net) in order.chunks(3).zip(["n0", "n1"]) {
+        for &k in chunk {
+            assert_eq!(driver(&names[k]), net, "{}", names[k]);
+        }
+    }
+    for b in ["native_fanout_0_0_0", "native_fanout_0_0_1"] {
+        let i = bundle
+            .netlist
+            .instances
+            .iter()
+            .find(|i| i.name == b)
+            .unwrap();
+        assert_eq!(
+            i.connections.iter().find(|c| c.pin == "A").unwrap().signal,
+            verilog::Expr::Ident("a".into())
+        );
+    }
+}
+
+#[test]
+fn clock_tree_reuses_the_leaf_order_of_a_seed_over_the_same_sinks() {
+    // Five clock sinks, fan-out 2 (six buffers) on a 2 x 50-site fixture,
+    // three small workspaces; < 1 MiB each.
+    let mut cfg = config();
+    cfg.max_added_cells = 128;
+    cfg.placer = Some(Default::default());
+    cfg.clock = Some(ClockConfig {
+        max_fanout: 2,
+        max_buffers: 16,
+        ..regroup_clock(ClockClustering::Hilbert, &[])
+    });
+    let mut logic = String::from("module chip(input clk, output [4:0] y);\n");
+    for i in 0..5 {
+        logic.push_str(&format!("BUF s{i}(.A(clk),.Y(y[{i}]));\n"));
+    }
+    logic.push_str("endmodule\n");
+    let tree = |f: &Fixture| {
+        let s = read(&f.workspace, &limits()).unwrap();
+        let bundle = s.metadata().physical.as_ref().unwrap();
+        let report = bundle.clock_tree.clone().unwrap();
+        let drivers: Vec<String> = report
+            .sinks
+            .iter()
+            .map(|sink| {
+                let i = bundle
+                    .netlist
+                    .instances
+                    .iter()
+                    .find(|i| i.name == sink.instance)
+                    .unwrap();
+                match &i.connections.iter().find(|c| c.pin == "A").unwrap().signal {
+                    verilog::Expr::Ident(n) => n.clone(),
+                    other => panic!("{other:?}"),
+                }
+            })
+            .collect();
+        (report, drivers)
+    };
+    let first = Fixture::new(&logic, &cfg);
+    widen_input_fixture(&first);
+    first.import().unwrap();
+    place(&first.workspace, "rev1", &limits()).unwrap();
+    rustroad_workspace::clock::synthesize(&first.workspace, "rev2", &limits()).unwrap();
+    let (report, _) = tree(&first);
+    assert!(!report.seed_order);
+    let snapshot = read(&first.workspace, &limits()).unwrap();
+    let mut seed = rustroad_workspace::placement_seed::from_snapshot(&snapshot).unwrap();
+    drop(snapshot);
+    let leaves: Vec<String> = report.sinks.iter().map(|s| s.instance.clone()).collect();
+    assert_eq!(seed.clock_sinks, leaves);
+    // The reversed order is not the geometric one, so only reuse yields it.
+    seed.clock_sinks.reverse();
+    let rerun = |seed: &rustroad_workspace::physical::PlacementSeed| {
+        let f = Fixture::new(&logic, &cfg);
+        widen_input_fixture(&f);
+        f.import().unwrap();
+        let file = f.root.join("seed.json");
+        fs::write(&file, serde_json::to_vec(seed).unwrap()).unwrap();
+        rustroad_workspace::place_with(&f.workspace, "rev1", &limits(), None, Some(&file)).unwrap();
+        rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+        f
+    };
+    let reused = rerun(&seed);
+    let (report, drivers) = tree(&reused);
+    assert!(report.seed_order);
+    let order: Vec<String> = report.sinks.iter().map(|s| s.instance.clone()).collect();
+    assert_eq!(order, seed.clock_sinks);
+    // Leaf groups are consecutive chunks of the reused order.
+    for (k, chunk) in drivers.chunks(2).enumerate() {
+        assert!(chunk.iter().all(|d| d == &chunk[0]), "leaf group {k}");
+        assert!(drivers[..2 * k].iter().all(|d| d != &chunk[0]));
+    }
+    // Another sink set keeps the configured clustering.
+    seed.clock_sinks.pop();
+    let fallback = rerun(&seed);
+    assert!(!tree(&fallback).0.seed_order);
+    seed.clock_sinks.push(seed.clock_sinks[0].clone());
+    assert!(seed.validate().is_err(), "repeated clock sink");
+}
+
+#[test]
+fn rebuilt_root_buffer_starts_at_the_gate_only_when_asked() {
+    // A gate at the left end drives five sinks at the right end of a 2 x 50
+    // site row pair (six buffers, fan-out 2); two small workspaces, < 1 MiB.
+    // Without the option the rebuilt root targets its neighbours' mean, i.e.
+    // the sink side; with it, the gate's seed.
+    let mut cfg = config();
+    cfg.max_added_cells = 128;
+    cfg.placer = Some(Default::default());
+    cfg.clock = Some(ClockConfig {
+        root_net: Some("gated".into()),
+        max_fanout: 2,
+        max_buffers: 16,
+        ..regroup_clock(ClockClustering::Hilbert, &[])
+    });
+    let mut logic = String::from(
+        "module chip(input clk, output [4:0] y); wire gated; BUF gate(.A(clk),.Y(gated));\n",
+    );
+    for i in 0..5 {
+        logic.push_str(&format!("BUF s{i}(.A(gated),.Y(y[{i}]));\n"));
+    }
+    logic.push_str("endmodule\n");
+    let first = Fixture::new(&logic, &cfg);
+    widen_input_fixture(&first);
+    first.import().unwrap();
+    place(&first.workspace, "rev1", &limits()).unwrap();
+    rustroad_workspace::clock::synthesize(&first.workspace, "rev2", &limits()).unwrap();
+    let snapshot = read(&first.workspace, &limits()).unwrap();
+    let mut seed = rustroad_workspace::placement_seed::from_snapshot(&snapshot).unwrap();
+    drop(snapshot);
+    seed.clock_sinks.clear();
+    seed.cells.insert("gate".into(), [5_000, 5_000]);
+    for i in 0..5 {
+        seed.cells
+            .insert(format!("s{i}"), [45_000 + 2_000 * i, 7_000]);
+    }
+    let run = |at_driver: bool| {
+        let mut c = cfg.clone();
+        c.clock.as_mut().unwrap().root_at_driver = at_driver;
+        let f = Fixture::new(&logic, &c);
+        widen_input_fixture(&f);
+        f.import().unwrap();
+        let file = f.root.join("seed.json");
+        fs::write(&file, serde_json::to_vec(&seed).unwrap()).unwrap();
+        rustroad_workspace::place_with(&f.workspace, "rev1", &limits(), None, Some(&file)).unwrap();
+        rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+        let s = read(&f.workspace, &limits()).unwrap();
+        let bundle = s.metadata().physical.as_ref().unwrap();
+        let report = bundle.clock_tree.clone().unwrap();
+        assert!(!report.seed_order);
+        let root = report.buffers.last().unwrap().clone();
+        let x = |name: &str| {
+            s.metadata()
+                .design
+                .cells
+                .iter()
+                .zip(s.records())
+                .find(|(c, _)| c.name == name)
+                .unwrap()
+                .1
+                .x
+        };
+        (report.root_at_driver, x(&root) - x("gate"))
+    };
+    let (flag, apart) = run(false);
+    assert!(!flag);
+    assert!(apart > 20_000, "default root follows its children: {apart}");
+    let (flag, apart) = run(true);
+    assert!(flag);
+    assert!(apart.abs() <= 3_000, "root beside its gate: {apart}");
+}
+
+#[test]
+fn regroup_keeps_a_seed_partition_that_covers_the_level_exactly() {
+    // Same 17-cell, 2 x 50-site fixture as the Hilbert regroup test, three
+    // workspaces; < 1 MiB each.
+    let mut cfg = config();
+    cfg.max_added_cells = 128;
+    cfg.placer = Some(Default::default());
+    cfg.clock = Some(regroup_clock(ClockClustering::Hilbert, &["native_fanout_"]));
+    let mut logic = String::from(
+        "module chip(input a, input clk, output [5:0] y, output k);\n\
+         wire n0, n1;\n\
+         BUF native_fanout_0_0_0(.A(a),.Y(n0)); BUF native_fanout_0_0_1(.A(a),.Y(n1));\n\
+         BUF c0(.A(clk),.Y(k));\n",
+    );
+    for i in 0..6 {
+        let n = if i % 2 == 0 { "n0" } else { "n1" };
+        logic.push_str(&format!("BUF s{i}(.A({n}),.Y(y[{i}]));\n"));
+    }
+    logic.push_str("endmodule\n");
+    let run = |seed: Option<&rustroad_workspace::physical::PlacementSeed>| {
+        let f = Fixture::new(&logic, &cfg);
+        widen_input_fixture(&f);
+        f.import().unwrap();
+        let file = f.root.join("seed.json");
+        if let Some(seed) = seed {
+            fs::write(&file, serde_json::to_vec(seed).unwrap()).unwrap();
+        }
+        rustroad_workspace::place_with(
+            &f.workspace,
+            "rev1",
+            &limits(),
+            None,
+            seed.map(|_| file.as_path()),
+        )
+        .unwrap();
+        rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+        let s = read(&f.workspace, &limits()).unwrap();
+        let bundle = s.metadata().physical.as_ref().unwrap();
+        let report = bundle.clock_tree.clone().unwrap();
+        let mut groups = std::collections::BTreeMap::<String, Vec<String>>::new();
+        for i in &bundle.netlist.instances {
+            if let Some(verilog::Expr::Ident(n)) = i
+                .connections
+                .iter()
+                .find(|c| c.pin == "A")
+                .map(|c| &c.signal)
+                && i.name.starts_with('s')
+            {
+                groups.entry(n.clone()).or_default().push(i.name.clone());
+            }
+        }
+        let seed = rustroad_workspace::placement_seed::from_snapshot(&s).unwrap();
+        drop(s);
+        (report, groups, seed)
+    };
+    let (report, groups, mut seed) = run(None);
+    assert_eq!(report.seed_regrouped, 0);
+    assert_eq!(seed.regroup.len(), 2);
+    for (buffer, net) in [("native_fanout_0_0_0", "n0"), ("native_fanout_0_0_1", "n1")] {
+        let mut names: Vec<String> = seed.regroup[buffer].iter().map(|s| s[0].clone()).collect();
+        names.sort();
+        assert_eq!(names, groups[net], "{buffer}");
+        assert!(seed.regroup[buffer].iter().all(|s| s[1] == "A"));
+    }
+    // Swap one sink: a partition the geometry did not choose, sizes kept.
+    let first = seed
+        .regroup
+        .get_mut("native_fanout_0_0_0")
+        .unwrap()
+        .pop()
+        .unwrap();
+    let second = seed
+        .regroup
+        .get_mut("native_fanout_0_0_1")
+        .unwrap()
+        .pop()
+        .unwrap();
+    seed.regroup
+        .get_mut("native_fanout_0_0_0")
+        .unwrap()
+        .push(second);
+    seed.regroup
+        .get_mut("native_fanout_0_0_1")
+        .unwrap()
+        .push(first);
+    let expected: Vec<Vec<String>> = ["native_fanout_0_0_0", "native_fanout_0_0_1"]
+        .iter()
+        .map(|b| {
+            let mut v: Vec<String> = seed.regroup[*b].iter().map(|s| s[0].clone()).collect();
+            v.sort();
+            v
+        })
+        .collect();
+    let (report, groups, _) = run(Some(&seed));
+    assert_eq!(report.seed_regrouped, 2);
+    assert_eq!(groups["n0"], expected[0]);
+    assert_eq!(groups["n1"], expected[1]);
+    // A partition naming another sink falls back to the Hilbert regroup.
+    seed.regroup.get_mut("native_fanout_0_0_0").unwrap()[0][0] = "absent".into();
+    assert_eq!(run(Some(&seed)).0.seed_regrouped, 0);
+    seed.regroup.get_mut("native_fanout_0_0_0").unwrap()[0] =
+        seed.regroup["native_fanout_0_0_1"][0].clone();
+    assert!(seed.validate().is_err(), "repeated regrouped sink");
+}
+
+#[test]
+fn placement_blockages_keep_every_placed_cell_out_and_need_the_analytic_placer() {
+    let f = tapped_fixture();
+    let mut cfg = config();
+    cfg.tap = Some(TapConfig {
+        pattern: None,
+        body_view: Default::default(),
+        cell: "TAP".into(),
+        max_gap: 3000,
+        well_layer: "NW".into(),
+        substrate_layer: "PW".into(),
+    });
+    // The right 4 of 10 sites in both rows are closed to placed cells.
+    let blocked = rustroad_core::Rect {
+        lx: 11_000,
+        ly: 5_000,
+        ux: 15_000,
+        uy: 9_000,
+    };
+    cfg.placement_blockages = vec![blocked];
+    fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+    assert!(matches!(f.import(), Err(Error::Invalid(m)) if m.contains("analytic placer")));
+    cfg.placer = Some(Default::default());
+    fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let s = read(&f.workspace, &limits()).unwrap();
+    let bundle = s.metadata().physical.as_ref().unwrap();
+    let generated: std::collections::HashSet<&str> = bundle
+        .generated_fillers
+        .iter()
+        .chain(&bundle.generated_taps)
+        .map(String::as_str)
+        .collect();
+    let mut placed = 0;
+    for (cell, p) in s.metadata().design.cells.iter().zip(s.records()) {
+        if generated.contains(cell.name.as_str()) {
+            continue;
+        }
+        placed += 1;
+        assert!(
+            p.x + p.width <= blocked.lx,
+            "{} at x {} enters the blockage",
+            cell.name,
+            p.x
+        );
+    }
+    assert!(placed >= 3);
 }

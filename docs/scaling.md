@@ -1,15 +1,98 @@
 # Scaling RustROAD beyond the 13-cell fixture
 
-Stream W14-W16 (`feat/rtl2gds-scale`). RustROAD now floorplans, places and
-routes the RustSys fixtures (43-418 logic cells, up to 1.8k placed cells with
-taps and fillers), the dense six-register fixture and `pipeline.v` on
-sky130_fd_sc_hd and gf180mcu_fd_sc_mcu7t5v0, and every native GDS is checked
-by the pinned foundry decks: all 16 design/PDK rows pass DRC (Magic and
-KLayout), XOR, antenna, Netgen and KLayout LVS, CEC (with a planted-mutation
-control) and a byte-identical rerun. Scope is block level: no pad ring, no seal ring;
-IR, EM, SI, OCV and CPPR are `unchecked`; density is reported separately and
-never gates; timing (hold closure, multi-corner STA) runs after merge in the
-unified gate and is not claimed here.
+Stream W14-W16 (`feat/rtl2gds-scale`) added the floorplanner, the analytic
+placer and the track router used for the RustSys fixtures, the dense
+six-register fixture and `pipeline.v` on sky130_fd_sc_hd and
+gf180mcu_fd_sc_mcu7t5v0. Every native GDS goes through the pinned foundry
+decks (Magic and KLayout DRC, XOR, antenna, Netgen and KLayout LVS), CEC with
+a planted-mutation control and a byte-identical rerun. Scope is block level:
+no pad ring, no seal ring; IR, EM, SI, OCV and CPPR are `unchecked`; density
+is reported separately and never gates; timing (hold closure, multi-corner
+STA) runs in the unified gate (`docs/rtl2gds.md`) and is not claimed here.
+
+## Large-design implementation (unreleased)
+
+The current branch extends storage and routing preparation for large flat
+netlists. Full OpenC910 RTL-to-GDS qualification remains in progress; these
+implementation changes are not an end-to-end speedup claim.
+
+- Verilog is read through a bounded streaming lexer. The input byte, token,
+  instance, pin and net limits are explicit; the ordinary CLI defaults remain
+  small. `--max-input-mib` admits a larger file without retaining its source or
+  a complete token vector alongside the netlist.
+- Large revisions use workspace schema 7 and hash-bound `model.rbin` frames.
+  Encoding `RROADB02` stores cells, netlist/connectivity records, clock sinks,
+  tap sites and prepared geometry outside the JSON envelope. Readers also
+  accept `RROADB01`. Every frame and array count is checked before decoding;
+  physical and route tables are written and checked incrementally.
+- Immutable placement records are constructed without a duplicate mutable
+  string-interning database. The global placer parallelizes independent
+  matrix rows while retaining arithmetic order within each row and reduction.
+  Detailed placement uses indexed local intervals and gaps; high-fanout nets
+  follow the same explicit cutoff in global and detailed optimization.
+- Routing preparation retains cell geometry once per master, with instance
+  positions/orientations and a compact pin-to-net column. Cell bounding boxes
+  are indexed in pages; pin and obstruction rectangles are translated only
+  when queried. Native RC extraction also uses shared shapes and global pin identities,
+  generating local conductor contributions without flattening the geometry.
+  The explicit path remains available to other consumers. Full-chip extraction
+  qualification remains separate from these storage changes.
+- Large routing grids use bounded sparse search state. Spatial bins allocate
+  32 by 32 pages on populated large layouts. Fixed rectangles are shared;
+  completed nets retain collinear runs rather than every track edge. Clock
+  membership uses an indexed bit mask, and supply-net IDs are resolved once
+  for the entire input build.
+- The detailed frontier uses indexed priority updates, with one pending entry
+  per node. Queue growth is independent of how often a better path reaches
+  that node; its memory allowance is included in the route preflight.
+- Target distance uses an exact bounded segment index, including layer changes
+  and directional costs. Exceeding `max_target_segments` fails explicitly;
+  large trees never silently collapse to one bounding box. Rip-up penalties
+  use the displaced net's history once, without a multiplier from unrelated
+  repairs or the current net's attempts.
+- Bounded preferred-track spans reduce search through open channels while
+  retaining ordinary moves, full-wire collision checks and intermediate guide
+  checks. Large sparse hole checks use a bounded sweep rather than allocating
+  the Cartesian product of x/y coordinates.
+- `track_router.max_history_entries` independently bounds congestion history
+  (default 4,000,000). Pin-access memoization has a bounded memory cache;
+  eviction recomputes the same geometry. Object/work limits, the whole-process
+  memory estimate and the runtime RSS guard remain active. Resource limits
+  are independent of geometric and timing acceptance checks.
+- After decoding, the routing estimate uses resident plus swapped process
+  bytes with 25% headroom, while future search, index, route and checking
+  allocations stay separately budgeted. Pre-load and unavailable-probe paths
+  retain the conservative serialized-size estimate.
+- Access tables share the exact relative landing geometry. Local escape repair
+  queries a bounded interval index and keeps the original ascending-pin repair
+  order. Both construction and candidate scans count toward the work cap.
+- Optional `port_buffer` roles isolate output aliases and feedthroughs. SPEF
+  formatting generates one labeled net at a time; it does not copy the complete
+  extracted network into a second string-rich representation.
+- Dead-end pruning and endpoint connectivity use compact source indices for
+  the full design and build only one net's graph at a time. Per-net edge,
+  endpoint and work limits are checked before graph allocation. Cycles and
+  disconnected access points retain their previous validation semantics.
+- Same-net pin-metal queries use a bounded spatial index. Equal-cost global
+  searches prefer progress toward their target. Exhausted hard searches can
+  use the existing bounded wider-guide and rip-up attempts; soft-search and
+  aggregate budgets still fail explicitly.
+- An explicit `batch_terminals` routing profile bounds the active whole-net
+  group. Completed metal becomes fixed geometry for later groups; no net is
+  split or omitted. The combined result passes the full-design validator
+  before publication. Global work/output limits remain cumulative. Congestion
+  that cannot be resolved within a group fails explicitly; earlier groups are
+  not silently discarded. This mode still needs full-core qualification.
+- Constant fanout repair covers inserted and in-place converted tie sources,
+  including top-level output aliases. Mixed signal/constant buses preserve
+  their declared bit order. Independent Yosys equivalence and wrong-output
+  controls cover both baseline PDKs.
+- Optional [primary-input trees](input-buffering.md) bound nonclock input
+  fanout before placement, with explicit buffer, sink, work and memory limits.
+  They use a fixed floorplan; automatic sizing refuses the policy explicitly.
+- Independent GDS metadata counts use bounded hierarchy dynamic programming.
+  Complete XOR label lists are sorted through bounded disk chunks and merges,
+  retaining exact hashes and negative controls without a full label vector.
 
 ## What changed
 
@@ -17,15 +100,16 @@ unified gate and is not claimed here.
 |---|---|---|
 | Floorplan | hand-written JSON | `rustroad floorplan` (utilization, aspect, margin; I/O plan) |
 | Placement | fixed netlist-order packing | `placer` config: analytic global placement, legalization, detailed placement (fixed order stays the default) |
-| I/O | round-robin W/E/S/N in port order | optional `io_plan`: connectivity-aware sides and order, track-snapped centres |
+| I/O | round-robin W/E/S/N in port order | optional `io_plan`: connectivity-aware sides and order, track-snapped centres, optional along-side targets |
 | Router | one lattice with pin coordinates, greedy access, no rip-up, caps = defaults | `track_router` profile: per-layer tracks, conflict-aware access, GCell global routing with negotiated congestion, guide-restricted detailed routing with rip-up and reroute (lattice router unchanged and byte-identical) |
 | Route storage | every lattice edge in design.json + mirror `routing.rbin` | schema 6: maximal runs in the authoritative `routes.rbin`, its sha256 and counts in design.json |
 | Caps | lattice defaults are hard caps | track mode: configurable up to absolute ceilings, checked against an upfront whole-process memory estimate and a runtime RSS guard |
 | Constants (sky130) | `conb_1` tie cells | rail-input ties: `inv_1` with its input routed to its own rail (no `conb_1`) |
-| Spatial index | hash map of bins | dense head/tail grid per layer (same order, same results, 15-30% less peak RSS) |
+| Spatial index | hash map of bins | dense head/tail grid per layer (same order, same results) |
 
-Everything is `cpu_ref`: deterministic, single worker, integer DBU geometry
-(the placer's solver alone uses f64 and rounds back to the site grid).
+These engines use deterministic CPU reference implementations and integer DBU
+geometry. The placer can parallelize independent matrix rows; the router is
+single-worker. The placer's solver uses f64 and rounds back to the site grid.
 
 ## Floorplan (`rustroad floorplan`)
 
@@ -56,6 +140,15 @@ on stdout.
    `place_planned_io` spreads them over a slot lattice whose centres are on
    the side's track (`x_track`: the I/O layer's perpendicular neighbour,
    `y_track`: the I/O layer).
+7. An `io_plan` may also carry `targets`: a pin-centre coordinate along the
+   side (y on west/east, x on south/north) per pin. A targeted pin takes the
+   lattice slot nearest its target. A forward pass keeps plan order and one
+   pin per slot; a backward pass leaves room for the pins after it. Untargeted
+   pins keep their evenly spread slot, so a plan without targets places
+   exactly as before. An even spread puts a side's first pin at its corner,
+   however far its loads are. The Ibex recipe derives targets from a
+   pin-planning placement: run14's corner `clk_i` and `rst_ni` nets broke the
+   1 ps timing parity gate and the reset input's max capacitance.
 
 ## Placement (`placer` in the physical configuration)
 
@@ -70,7 +163,9 @@ on stdout.
   reserved taps: the region is cut at its middle (columns when wider than
   tall), cells sorted along the cut are split so each side's area matches
   its capacity share, down to single-row segments where cells are spread in
-  x with the whitespace shared evenly.
+  x with the whitespace shared evenly. Whole-cell rounding can over-fill a
+  region; a side without capacity (covered by a macro) never receives cells,
+  the overflow stays on the side that has rows and legalization resolves it.
 * **Legalization:** widest cells first, every cell takes the interval of
   least estimated displacement (plus a fill penalty) that still has room;
   inside each interval an order-preserving cluster solve (overlapping
@@ -81,8 +176,9 @@ on stdout.
   the best free gap near the median of the cell's nets, accepted only when
   HPWL drops.
 * **Check:** an independent legality check (inside a free interval, on the
-  site grid, no overlap, spacing kept) runs before the result is used; taps
-  and fillers are then added exactly as before.
+  site grid, no overlap, spacing kept between neighbours of one free
+  interval; across a tap the tap itself separates the cells) runs before the
+  result is used; taps and fillers are then added exactly as before.
 * `place` and `clock-tree` both use it; `inspect`/command summaries carry a
   `placement` report: HPWL (centre to centre, DBU) of the result, of the
   global placement and of fixed-order packing of the same cells into the same
@@ -101,6 +197,14 @@ on stdout.
 
 ## Router (`track_router` in the routing profile; needs `lef_rules`)
 
+`track_router.min_routing_layer` and `max_routing_layer` optionally restrict
+global capacity and detailed signal wires/vias by selected LEF layer name.
+The access layer must lie inside that range. Lower layers remain available
+for fixed pin escapes; for example, selecting Metal2 through Metal5 keeps
+Metal1 cell-pin access while reserving TopMetal for the supply grid. Omitting
+both fields retains the previous behavior for existing profiles. Invalid,
+reversed or cut-layer limits are rejected.
+
 1. **Track graph.** Every routing layer has its own tracks from the LEF
    `PITCH`/`OFFSET` (cross axis), replaced by profile `tracks` overrides.
    Along a track the nodes are the tracks of the via-paired perpendicular
@@ -115,12 +219,14 @@ on stdout.
      cells put their pins on x = 0.28 + 0.56k um: with the LEF offset 500 of
      608 used pin/orientation pairs have no on-track landing, so the profile
      shifts the vertical layers (Metal2, Metal4) by 0.28 um.
-2. **Pin access (conflict aware).** Each terminal searches (Dijkstra) a local
+2. **Pin access (conflict aware).** Each terminal searches (A*) a local
    lattice made of its landing candidates and the nearby track/stop
    coordinates of the layers up to the access layer, and stops at the first
-   on-graph node of the access layer (met2 / Metal2). Candidates are the
+   on-graph node of the access layer (met2 / Metal2). The lower bound is the
+   distance to that layer's track grid plus the minimum via-hop cost; the
+   small layer-hop table is built once. Candidates are the
    on-graph points inside the pin plus the quartile points, checked once per
-   (master, orientation, pin, origin modulo the track period) by the
+   (master, orientation, pin, exact relative landing points) by the
    existing LEF-rule access table (other-net blockers, same-pin notches,
    MINSTEP, pads inside the pin first); escapes keep the via-variant and
    same-pin checks. Terminals with the fewest candidates go first. A terminal
@@ -135,16 +241,18 @@ on stdout.
    edges (negotiated congestion, clean-room). The dilated GCell set of each
    net (`guide_margin` 1) is its guide.
 4. **Detailed routing.** Nets in order of guide size. Each sink: A* from its
-   escape top to the net's tree (multi-target, heuristic = distance to the
-   tree's bounding box), restricted to the guide, then to the guide box plus
+   escape top to the net's tree. A bounded spatial index finds the distance
+   to actual tree segments, including unavoidable layer changes and directional
+   costs. `heuristic_weight` defaults to one; explicit values up to sixteen
+   can favor progress without changing geometric checks or resource limits.
+   Search is restricted to the guide, then to the guide box plus
    `expand_margin` (4) GCells. Every wire edge and via is checked by the
    spatial index against obstacles, pins, escapes and other nets (via
    variants as in `lef_rules`); a same-net near miss costs one via. On a
-   layer whose single via pads are below `AREA` (sky130 li1/met1/met3/met4,
-   GF180 Metal1-4) a via may leave only after a wire run of at least
-   `AREA / width` since the via that entered the layer, and a path may not
-   join the tree with a via at a tree node that already has one, so no
-   pad-only min-area island is created. A via taken right after a wire
+   layer with `AREA` constraints, initial routes defer path-dependent area
+   checks to bounded geometric repair. Strict retries accept actual via-pad
+   area certificates or require a sufficient intervening wire run. Final
+   area validation is always required. A via taken right after a wire
    prefers the variant whose pad is elongated along that wire; after
    routing, variants are re-picked where exactly one wire ends at a via on a
    layer and the pad runs across it (LEF58 end-of-line enclosure, e.g.
@@ -153,7 +261,7 @@ on stdout.
    one spatial shape.
 5. **Rip-up and reroute.** A net that fails is re-tried in a soft mode in a
    wider box: routed metal of other nets is crossable at
-   `10 x via_cost x (1 + round) x (1 + rips of that net)`; nets it crosses
+   `10 x via_cost x (1 + rip-ups of the crossed net)`; nets it crosses
    are ripped up and queued; contested nodes gain history cost for every
    later search. Bounded by `max_ripups_per_net` (24) and
    `max_repair_rounds` (200k); fixed geometry (pins, obstructions, supply,
@@ -202,9 +310,7 @@ both LVS checks accept.)
    "low": ["LO"]}`) makes the import and `floorplan` rebuild each such
    instance first (`dissolved_cells` in the tie report): with one connected
    output it becomes the tie master for that value at the same name and
-   netlist position (so placement sees the same cell order: SERV sky130
-   keeps the identical HPWL; appending a new tie cell instead perturbed the
-   placement enough that the repair loop ran out of budget), with several
+   netlist position (so placement sees the same cell order), with several
    connected outputs it becomes literal assignments. Every literal constant
    bit then gets its own tie instance as before (`ties.rs`); a tie
    master's rail input is connected to the reserved wire
@@ -228,8 +334,8 @@ both LVS checks accept.)
    RustSTA reports the inverter as a constant driver); the powered netlist
    writes `VSS`/`VDD`. DEF writes the tie wiring in a `NETS` entry of the
    supply net (which keeps its `SPECIALNETS` entry and pins); KLayout's DEF
-   reader (the XOR reference) and OpenROAD's read it (OpenRCX on dense
-   sky130 extracts the 31 signal nets and no supply net). GDS draws it
+   reader (the XOR reference) and OpenROAD's read it (OpenRCX extracts the
+   signal nets and no supply net). GDS draws it
    with the supply net. `extract` treats tie metal as grounded passive
    conductors (coupling to signal nets is kept, no SPEF net); the native
    `check-antenna` skips tie nets and says so
@@ -268,14 +374,14 @@ whole-process estimate exceeds `track_router.memory_mib` (default 2048):
 
 | symbol | meaning |
 |---|---|
-| J | bytes of the HEAD revision on disk (design.json and its tables); loaded metadata, its working copy and decoded tables measured 1.9-2.5 J |
+| J | bytes of the HEAD revision on disk (design.json and its tables); `3 J` covers the loaded metadata, its working copy and decoded tables |
 | I | the routing input as built (obstacles + owner table, terminals and their shapes, access classes), counted twice for vector growth and the builder's lookup tables |
 | N, G | track-graph nodes and GCells (cost u64, parent, via kind, epoch u32, history u16 per node) |
 | O, T | obstacles and terminals |
 | B, L | grid bins over the die and every obstacle (per layer), routing+cut layers |
 | E | bin entries of the fixed obstacles, counted shape by shape without allocating |
-| 20 T | shapes the router adds (escapes, routed runs and vias, ripped-up shapes that stay indexed; measured 13-16 T) |
-| R | output records (wires, vias, patches, access; measured 5.2-7.0 T) |
+| 20 T | shapes the router adds (escapes, routed runs and vias, ripped-up shapes that stay indexed) |
+| R | output records (wires, vias, patches, access) |
 
 `check` is the rule-repair / validation index over the fixed shapes and the
 result (alive together with the router) plus the same-net groups and the
@@ -289,51 +395,21 @@ is inactive and only the estimate applies). The route command's JSON
 reports `route_memory` (estimate, cap and parts, MiB).
 
 The coefficients were fitted on route-step re-runs of finished workspaces
-(counter, regfile and mult on both PDKs, SERV on both, rv_core GF180; peak
-RSS by GNU time around the binary). The final sweeps (`s8`, `x6`) confirm
-the bound on every routed design, from the flow's own route step:
-
-| design | PDK | N | T | estimate MiB | peak RSS MiB | ratio |
-|---|---|---|---|---|---|---|
-| counter | sky130 | 110,032 | 194 | 16 | 12.4 | 1.29 |
-| counter | gf180 | 116,232 | 189 | 17 | 12.8 | 1.32 |
-| uart_tx | sky130 | 191,040 | 394 | 23 | 15.9 | 1.44 |
-| uart_tx | gf180 | 181,440 | 403 | 24 | 16.6 | 1.44 |
-| fifo | sky130 | 191,040 | 382 | 23 | 16.4 | 1.40 |
-| fifo | gf180 | 261,096 | 475 | 29 | 19.7 | 1.47 |
-| alu | sky130 | 302,176 | 921 | 35 | 23.6 | 1.48 |
-| alu | gf180 | 261,096 | 950 | 34 | 23.7 | 1.43 |
-| regfile | sky130 | 429,120 | 1,668 | 51 | 34.1 | 1.50 |
-| regfile | gf180 | 463,752 | 1,478 | 52 | 34.3 | 1.52 |
-| mult | sky130 | 429,120 | 1,520 | 49 | 32.8 | 1.50 |
-| mult | gf180 | 463,752 | 1,438 | 51 | 33.5 | 1.52 |
-| dense | sky130 | 110,032 | 90 | 15 | 10.9 | 1.37 |
-| dense | gf180 | 65,472 | 94 | 13 | 10.1 | 1.29 |
-| pipeline_track | sky130 | 51,200 | 42 | 11 | 9.2 | 1.20 |
-| pipeline_track | gf180 | 65,472 | 42 | 12 | 9.4 | 1.28 |
-| serv | sky130 | 4,756,800 | 29,739 | 635 | 430.5 | 1.47 |
-| serv | gf180 | 5,769,588 | 24,685 | 623 | 473.1 | 1.32 |
-| rv_core | sky130 | 4,278,176 | 21,404 | 504 | 289.0 | 1.74 (route failed: `BUDGET_EXCEEDED`, comparisons) |
-| rv_core | gf180 | 7,879,224 | 30,548 | 809 | 593.7 | 1.36 |
-
-(rv_core sky130's estimate is from the route log; the step fails before it
-writes its summary.)
-
-The same comparison for every run of the sweep is in the evidence
-(`route_memory.estimate_mib` versus the route receipt's peak RSS,
-`estimate_bounds_route_rss`).
+against the route step's own peak RSS (GNU time around the binary). Every
+route receipt records `route_memory.estimate_mib` next to the measured peak
+(`estimate_bounds_route_rss`); the sweep receipts are historical evidence
+kept for reproducibility, not current benchmarks.
 
 The spatial index stores bins in a dense per-layer grid (head/tail entry
 index per bin, entries chained in insertion order) instead of a hash map of
 vectors: iteration order and every work count are unchanged (DEF, GDS,
 Verilog and `routes.json` byte-identical on counter/fifo/regfile/mult on
-both PDKs and against the previous evidence), and peak RSS drops: SERV
-514 -> 428 MiB (sky130), 536 -> 455 MiB (GF180), rv_core GF180 843 ->
-594 MiB.
+both PDKs and against the previous evidence).
 
 Limits in track mode may exceed the lattice defaults up to
-`RouteLimits::ceiling()` (64M nodes, 8M obstacles, 64M bin entries, 8M
-segments, 2e9 expansions, 2^40 comparisons, 64M heap); the grid's bins over
+`RouteLimits::ceiling()` (4,294,967,294 implicit nodes, 256M retained obstacle
+records, 512M bin entries, 128M segments, 2e9 expansions, 2^40 comparisons,
+64M heap entries); the grid's bins over
 all layers count against `max_bin_entries`. The scale profiles use 8M nodes,
 4M obstacles, 32M bin entries, 2M segments, 4e8 expansions, 4e6 per search,
 4e10 comparisons (`gf180-scale-routing-large.json`, used by rv_core only:
@@ -348,12 +424,11 @@ work (CG multiply-adds, spreading and legalization steps) counted against
 
 Harness: host tools run under `prlimit --as` 8 GiB and GNU time (their own
 peak RSS; `wait4` on a child of the Python harness reports the interpreter's
-resident pages, 15-25 MiB, because Linux keeps the replaced address space's
+resident pages, because Linux keeps the replaced address space's
 high-water mark at exec; a step killed at its timeout is recorded as
 unmeasured, not with the wrapper's numbers); the whole harness under
 `systemd-run --user --scope -p MemoryMax=... -p MemorySwapMax=2G`; signoff
 containers at 4 GiB.
-Test binaries peak at 10-16 MiB RSS (largest: `scale_flow`, 16 MiB).
 
 ## Verification
 
@@ -421,7 +496,7 @@ python3 scripts/scale_evidence.py --runs .work/scale/runs --out docs/evidence/sc
 ```
 
 Stretch designs (SERV, rv_core) run behind `flock .work/scale.lock` with a
-14000 s flow timeout (Magic extraction for LVS alone takes ~25 min);
+14000 s flow timeout;
 `--pdk gf180` reruns one PDK, and the evidence can merge run directories
 (`--runs A --runs B`, later PDK entries win, all from one binary):
 
@@ -434,139 +509,22 @@ Route-step memory per phase: `RUSTROAD_ROUTE_TRACE=1` (the harness sets it)
 prints `[route]`/`[troute]` lines with the estimate inputs, the estimate
 and the resident set after each phase.
 
-## Results (binary `0988dce9…`, RustSys policy producer `3de13b3a…`)
+## Controls and receipts
 
-`docs/evidence/scale.json` holds every row below with hashes and receipts
-(`scripts/scale_evidence.py`, run directory `s8`). Signoff image
-`4c48415d8bd0` (Magic 8.3.678, Netgen 1.5.323, KLayout 0.30.9). Every
-design ran twice per PDK from RTL; DEF, GDS, Verilog and powered Verilog
-were byte-identical both times. Native GDS == KLayout's streamout of the
-DEF (XOR 0) everywhere. All 16 rows pass every gating item.
+The harness controls above (CEC planted mutation, build-step failure
+reporting, byte-identical rerun) run on every row. Two further controls
+exercise the budgets and the tap profile:
 
-| design | PDK | logic cells (placed incl. taps/fillers) | routed nets | Magic | KLayout | antenna | Netgen LVS | KLayout LVS | CEC (planted control) | HPWL / fixed order | route s / peak MiB / estimate MiB | flow s |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| counter | sky130 | 43 (264) | 53 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.73 | 0.12 / 12.4 / 16 | 17 |
-| counter | gf180 | 46 (306) | 51 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.53 | 0.08 / 12.8 / 17 | 19 |
-| uart_tx | sky130 | 89 (560) | 107 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.55 | 0.26 / 15.9 / 23 | 24 |
-| uart_tx | gf180 | 100 (600) | 114 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.47 | 0.16 / 16.6 / 24 | 24 |
-| fifo | sky130 | 81 (481) | 102 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.44 | 0.22 / 16.4 / 23 | 26 |
-| fifo | gf180 | 114 (820) | 132 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.38 | 0.18 / 19.7 / 29 | 26 |
-| alu | sky130 | 253 (1094) | 272 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.54 | 0.52 / 23.6 / 35 | 46 |
-| alu | gf180 | 252 (1001) | 271 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.41 | 0.42 / 23.7 / 34 | 33 |
-| regfile | sky130 | 372 (1479) | 425 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.42 | 1.20 / 34.1 / 51 | 79 |
-| regfile | gf180 | 358 (1737) | 387 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.38 | 1.75 / 34.3 / 52 | 44 |
-| mult | sky130 | 418 (1651) | 440 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.41 | 0.74 / 32.8 / 49 | 65 |
-| mult | gf180 | 414 (1793) | 436 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.41 | 0.74 / 33.5 / 51 | 42 |
-| dense | sky130 | literal (258) | 33 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.61 | 0.06 / 10.9 / 15 | 13 |
-| dense | gf180 | literal (160) | 35 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.62 | 0.04 / 10.1 / 13 | 16 |
-| pipeline_track | sky130 | 10 (77) | 17 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.72 | 0.04 / 9.2 / 11 | 12 |
-| pipeline_track | gf180 | 10 (132) | 17 | 0 | 0 | 0 | match | match | equivalent (detected) | 0.63 | 0.02 / 9.4 / 12 | 16 |
+* Memory controls (route step only): a `memory_mib` below the load estimate
+  is refused before the workspace is loaded, one below the total estimate is
+  refused before the router allocates (the message lists the parts), and the
+  runtime guard is unit-tested with a 1 MiB cap.
+* Tap gap control: GF180 counter with a 60 um tap gap must fail the KLayout
+  DF.13_MV/DF.14_MV tap distance rules, which the 23 um scale gap passes.
 
-* `dense` sky130 (constants `high_bit <= 1`, `low_bit <= 0`) now gets two
-  rail-tied `inv_1` instead of `conb_1`: Netgen "Final result: Circuits
-  match uniquely." with no disconnected node, KLayout "Congratulations!
-  Netlists match.", DRC 0/0, antenna 0, CEC equivalent. Raw logs:
-  `.work/scale/runs/s8/dense/sky130/a/signoff/lvs_{netgen,klayout}/`.
-* Every other row's DEF, GDS, Verilog and powered Verilog are
-  byte-identical to the previous evidence (binary `a453e4ca`, run `s5`):
-  the dense spatial grid and the estimate change no routing decision, and
-  designs without constants do not see the tie change. (Intermediate
-  sweeps `s6` and `s7`, binaries `a4f5c17a` and `8603d1e4` from the
-  development of this round, gave the same bytes on all 16 rows; their run
-  directories were removed after the comparison.)
-* CEC control: in every row the planted dual-master swap of the final
-  netlist came back `not-equivalent` on the first candidate.
-* Antenna: Magic `antennacheck` (sky130) and the KLayout antenna deck
-  (GF180), plus the native `check-antenna` (0 violations on every required
-  design, so no antenna ECO was needed).
-* Density (separate, never gating): GF180 fails the whole-block coverage
-  rules (7-8 items, no fill), sky130 windowed density is `unverified`
-  (block smaller than the window), as for `pipeline.v` before.
-* `route` = the `route --scope all` step: wall seconds, the tool's peak RSS
-  (GNU time) and the router's upfront estimate; the estimate is above the
-  measured peak in every row (`estimate_bounds_route_rss`). `flow` = one PDK
-  of the harness end to end: synthesis, floorplan, import, place, CTS,
-  route, antenna check, exports, native GDS, reference streamout, all
-  signoff checks, CEC with its control and the full second run. Host tools
-  peak at 60-105 MiB (RustSys synthesis); signoff containers 440-520 MiB.
-* The lattice router (`pipeline.v`, `scripts/verify_routing.py` with the
-  integrated profiles, `.work/scale/legacy/vr_v16`) gives DEF `cb94ea92…`
-  (sky130) and `3a07101c…` (GF180) and the same exported and powered
-  Verilog as the e0d074d binary (`vr_base`): the requalified DRC 0/0 and
-  LVS match carry over (status `partial` as before: post-route timing).
-* `scripts/hold_closure.py` (lattice-router profiles, native extraction,
-  RustSTA round-2 binaries) closes `pipeline.v` with this binary: `passed`
-  on both PDKs (sky130 3 iterations, GF180 2; `.work/scale/hold_v16`).
-* Memory controls (regfile GF180, route step only): `memory_mib` 9 is
-  refused before the workspace is loaded ("loading 1 MiB of workspace needs
-  about 11 MiB"), 40 before the router allocates ("estimate 51 MiB ...
-  held 14 search 11 spatial 7 routed 9 check 9 MiB"), 60 routes (peak
-  33.8 MiB). The runtime guard is unit-tested with a 1 MiB cap.
-* Tap gap control: GF180 counter with a 60 um tap gap gives KLayout
-  DF.13_MV 31 + DF.14_MV 26 items (Magic 0); the 23 um scale gap gives 0.
-* `cargo test --workspace`: 165 passed, 4 ignored; every test binary
-  peaks at 10-16 MiB RSS. `python3 -m unittest discover -s scripts/tests`:
-  59 tests.
-
-## Stretch designs (same binary)
-
-`docs/evidence/scale-stretch.json` (run directory `x6`), behind
-`flock .work/scale.lock` with a 14000 s flow timeout.
-
-| design | PDK | logic cells (placed) | routed nets | Magic | KLayout | antenna signoff / native | Netgen LVS | KLayout LVS | CEC | rerun | HPWL / fixed order | route s / peak MiB / estimate MiB | flow s |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| serv | sky130 | 7370 (24318) | 7960 | 0 | 0 | 29 / 102 | port errors | unverified | equivalent (control detected) | identical | 0.19 | 101 / 431 / 635 | 1822 |
-| serv | gf180 | 6221 (26145) | 6481 | 0 | 0 | 45 / 13 | port errors | unverified | equivalent (control detected) | identical | 0.18 | 98 / 473 / 623 | 657 |
-| rv_core | sky130 | 5047 (19290) | - | - | - | - | - | - | - | - | 0.24 | **failed** (371 s / 288 / 504) | - |
-| rv_core | gf180 | 7915 (35042) | 8128 | 0 | 0 | 17 / 4 | port errors | unverified | **unverified** (timeout) | identical | 0.21 | 277 / 593 / 809 | 2952 (1800 CEC) |
-
-* SERV is DRC-clean (Magic and KLayout 0, XOR 0) on both PDKs, equivalent
-  to the RTL (the planted-mutation control was rejected) and identical on
-  the rerun. Its sky130 netlist from RustSys has one `conb_1` (`LO` only),
-  now rebuilt in place as a rail-tied `inv_1`: the four `conb_1`
-  `VPB`/`VNB` nodes are gone from Netgen's report, and placement, HPWL and
-  routing stay what they were with `conb_1`. Netgen still reports "Netlists
-  match uniquely with port errors": SERV drives several output ports from
-  one net (`o_ext_rs1[i]`/`o_dbus_adr[i]`, `o_ext_rs2[i]`/`o_dbus_dat[i]`)
-  and leaves inputs unused (`i_ibus_rdt[1:0]`, `i_ext_rd`: the 70
-  remaining disconnected nodes), so Magic flags shorted ports and the pin
-  lists differ; the KLayout check and the port-label check are
-  `unverified` because the reference netlist has aliased ports ("shorted
-  ports are unsupported"). Fixing this needs a buffer per aliased output in
-  synthesis or the flow, not a routing change.
-* Antenna: the native check finds 102 (sky130: 47 on clock-tree nets, 55
-  on signal nets) and 13 (GF180: 1 clock, 12 signal) violations.
-  `antenna-eco` refuses the whole plan as soon as one violating net is a
-  clock-tree net (`ANTENNA_ECO_INFEASIBLE`: not a net of the mapped
-  netlist), so the signal-net violations stay unrepaired as well. Signoff:
-  sky130 Magic 29 (met3 23, met4 5, met1 1), GF180 KLayout
-  `ANT.16_ii_ANT.4` 45 (Magic secondary 7). GF180 density fails (7 items,
-  separate, no fill).
-* rv_core sky130 does not route: 19 nets fail the first detailed pass and
-  the repair loop exceeds the 4e10 comparison budget (`BUDGET_EXCEEDED`,
-  structured, after 371 s at 288 MiB). The harness now reports it as
-  `failed` with `failed_step: sky130_a_route0` (the steps before it
-  `passed`, everything after it `unverified`). Earlier untracked
-  experiments on the same placement: 5x work budgets stop at "net 1700
-  ripped up more than 24 times" (12 min); 5x budgets with 64 rip-ups exceed
-  2e11 comparisons (18.5 min); utilization 0.4 fails earlier with one pin
-  that has "no legal access after local repair". The root cause (a
-  congestion hot spot the negotiation cannot spread, or a pin-access corner
-  case) is not isolated.
-* rv_core GF180 uses `gf180-scale-physical-wide.json` (25.2 um tap gap for
-  its 24.1 um cells) and `gf180-scale-routing-large.json` (it needs 4.3e8
-  expansions, above the default 4e8). It is DRC-clean (Magic 0, KLayout 0
-  including the DF.13/DF.14 tap distance rules, XOR 0). Netgen reports port
-  errors only (`dmem_addr_o[0]`/`[1]` share one net in the netlist); the
-  native antenna check finds 4 violations, all on clock-tree nets, and
-  KLayout 17 (`ANT.16_ii_ANT.4` 14, `ANT.16_ii_ANT.5` 3). `rustsys check
-  synth` did not finish within the harness' 1800 s, so CEC is `unverified`
-  (the control only runs after a pass); the same check of the synthesized
-  netlist before floorplanning also runs past 1800 s, so this is the
-  checker on rv_core's logic, not the physical flow.
-* Memory: every stretch route stays below its estimate (table in "Budgets
-  and memory estimate"); the dense spatial grid cut the measured peaks from
-  514/536/860 MiB (previous round) to 431/473/593 MiB.
+The sweep receipts (`docs/evidence/scale.json`,
+`docs/evidence/scale-stretch.json`) are historical evidence kept for
+reproducibility, not current benchmarks.
 
 ## Limits and open issues
 
@@ -582,15 +540,14 @@ DEF (XOR 0) everywhere. All 16 rows pass every gating item.
   flip-flops and AOI cells RustSys maps to); the KLayout DF.13/DF.14 tap
   distance rules pass at 23 um and fail at 60 um. rv_core needs a 24.1 um
   cell, which `floorplan` refuses (`FLOORPLAN_TAP_GAP`) with that profile;
-  its manifest uses `gf180-scale-physical-wide.json` (25.2 um), which the
-  KLayout main deck accepts on the routed rv_core (0 items).
-* **Antenna.** No required design needs a diode. `antenna-eco` cannot repair
-  clock-tree nets and refuses the whole plan when one violating net is a
-  clock-tree net, so SERV keeps its signal-net violations too (rv_core's
-  native violations are all on clock-tree nets). A partial ECO (repair
-  signal nets, report clock nets), layer hopping or CTS-aware diodes are
-  not implemented; on GF180 the native check reports fewer violations than
-  the KLayout deck has items (13 vs 45 on SERV, 4 vs 17 on rv_core).
+  its manifest uses `gf180-scale-physical-wide.json` (25.2 um).
+* **Antenna.** `antenna-eco` cannot repair clock-tree nets and refuses the
+  whole plan when one violating net is a clock-tree net, so signal-net
+  violations of the same design stay unrepaired too. A partial ECO (repair
+  signal nets, report clock nets) or CTS-aware diodes are not implemented;
+  diode-free layer jumpers are described in `docs/hold-closure.md`. On GF180
+  the native check can report fewer violations than the KLayout deck has
+  items; the deck decides.
 * **Aliased output ports.** SERV and rv_core drive several output ports from
   one net (rv_core: `dmem_addr_o[0]`/`[1]`); Netgen then reports port errors
   and the KLayout LVS is `unverified`. A buffer per aliased port (synthesis
@@ -599,12 +556,10 @@ DEF (XOR 0) everywhere. All 16 rows pass every gating item.
   the unified gate after merge. The CTS profile here uses clkbuf_2 with
   fan-out 8; skew/hold are not optimized by the placer or router.
 * **Performance.** Detailed routing is one sequential A* per sink with
-  Spatial checks per edge (`cpu_ref` only, no parallel batches yet):
-  ~1-2 s for the required designs, 2-5 min for SERV/rv_core-size blocks;
-  the repair loop and same-net pass are bounded but not tuned, and rv_core
-  on sky130 does not converge within any budget tried (see Stretch designs).
-* **Memory estimate.** The upfront estimate is calibrated (1.20-1.52x
-  the measured route peak on every routed design of the final sweeps); its routed-state and
+  spatial checks per edge (`cpu_ref` only, no parallel batches yet); the
+  repair loop and same-net pass are bounded but not tuned.
+* **Memory estimate.** The upfront estimate is calibrated against measured
+  route peaks; its routed-state and
   record terms are per-terminal averages, so a pathological net mix could
   exceed it. The runtime guard (peak RSS against `memory_mib`) needs Linux
   procfs; elsewhere only the estimate applies, so the harness keeps its
@@ -615,3 +570,50 @@ DEF (XOR 0) everywhere. All 16 rows pass every gating item.
   of very long runs are not split out).
 * **Escaped names.** RustSys' `\p_q[0]` next to port `p_q` is renamed by the
   harness, not by RustROAD's importer, which still refuses the ambiguity.
+
+The physical side-table format admits up to 32 million instances, including fillers, taps and clock buffers. Commands still require an explicit sufficient cell capacity and obey the 16 GiB table and 1 MiB record limits; raising a capacity never allocates absent rows.
+
+The physical instance ceiling is shared by stored tables, retained-netlist validation, instance geometry, and extraction indices; per-command limits remain independent and may be lower.
+
+Track profiles may set `heuristic_weight` from 1 to 16 (default 1). It scales
+the detailed search's distance estimate when ordering pending nodes. Higher
+values favor progress toward the target and may produce a longer route; they
+do not change wire/via costs, collision checks, expansion limits or final
+validation. Priority arithmetic saturates at `u64::MAX`. Qualify the chosen
+weight on both PDKs and report measured routed quality along with run time.
+
+Congestion repair starts from an internal driver when present, orders the
+other internal escapes from their coordinate median outward, and attaches
+I/O ports last when the net has internal pins.
+A remote I/O driver therefore need not be the first geometric root
+of the undirected route tree. Logical driver identities are unchanged. The
+ordering reuses each net's terminal slice, takes bounded `O(N log N)` work,
+and is charged to the comparison budget before sorting.
+
+A soft search that reaches its per-search limit releases its partial metal
+and may retry once from an alternate terminal root. Each attempt keeps the
+same limit and both consume the existing aggregate work/expansion budget.
+Exhausting both attempts fails explicitly; no partial result is published.
+
+Detailed search also offers the track stops bracketing the target coordinate
+as checked macro-wire endpoints. They use the same complete-span obstacle,
+guide, history and topology checks as other long moves, then expand to bounded
+unit edges for the stored route. To limit repeated full-span queries in dense
+layouts, probes are sampled after the first 16 expansions and capped at 1,024
+per sink. Unit moves remain available for detours.
+
+Via junctions use the area of the actual via pads. A smaller unused variant
+does not force a wire run when an incident pad already meets the layer's
+minimum area. The conservative minimum-run restriction is used on strict
+reroutes. Initial routes defer this path-dependent restriction to bounded
+geometric repair, which adds area stubs before final validation; unresolved
+violations trigger strict rerouting or an explicit failure. The pad table
+has a one-million-entry cap, is included in memory admission, and is checked
+before search; final geometry validation still checks the complete union.
+
+Pin access reserves a clear upward via envelope before accepting a landing
+below the access layer. If that exit is blocked, the bounded local search
+continues to another landing. These envelopes protect subsequent access and
+detailed routing, but are excluded from global conductor-capacity estimates
+and from exported geometry. Their shape/index storage is included in memory
+admission and released with the owning escape plan.
