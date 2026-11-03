@@ -95,11 +95,15 @@ route table and side tables must equal the original final revision's (its
 Ibex SG13G2 host replay (2026-11-03, rev4 of the native-final postroute
 workspace, `--threads 4`): all 64 attempts, 77 jumpers, the 225 unresolved nets
 and every repair's jumper list match the producer run; all 404 check, 64 repair,
-inventory and model reports compare equal as described; the committed `rev52`
-`routes.rbin` has SHA-256 `695e2205a7e0cbfd2bcf5a14cb6d58cf1273671ce0437d344a11da9bbbdfa040`
-and `export-gds` of it reproduces the reference GDS. The command took 18.7 s wall
-and 20.8 s user CPU at 816 MB peak RSS and wrote 126 MB, against 360 s, 345 s
-user and 5.79 GB written for the per-attempt-commit runner. Reports are 31 MB
+inventory and model reports compare equal as described (every `planner_work`
+included); the committed `rev52` `routes.rbin` has SHA-256
+`695e2205a7e0cbfd2bcf5a14cb6d58cf1273671ce0437d344a11da9bbbdfa040` and
+`export-gds` of it reproduces the reference GDS. The command took 8.9-9.9 s wall
+and 11.2-13.2 s user CPU at 0.81-0.88 GB peak RSS and wrote 126 MB, against
+360 s, 345 s user and 5.79 GB written for the per-attempt-commit runner (the
+lower user times are with a receipt-stamped base revision, whose read skips the
+full validation). Through the antenna_session wrapper the step took 11.7 s (from
+388 s) and its independent verifier 1.9 s (from 21.4 s). Reports are 31 MB
 instead of 780 MB, and the workspace grows by one revision (93 MB, the side
 tables hard-linked) instead of 48 (4.7 GB). The paranoid run gave identical
 reports and summary.
