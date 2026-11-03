@@ -10,9 +10,9 @@
 //! of f64 additions at any thread count.
 use super::index::GridIndex;
 use super::{
-    CouplingKey, ExtractInput, ExtractLimits, ExtractStats, InstanceGeometry, Owner, PassiveOwner,
-    RcLayer, RcTech, Run, Shape, Shapes, body_rect, budget, invalid, nearer_end, sample, um,
-    virtual_strip,
+    ExtractInput, ExtractLimits, ExtractStats, InstanceGeometry, NodeIds, Owner, PassiveOwner,
+    PieceInfo, RcLayer, RcTech, Run, Shape, Shapes, body_rect, budget, conductor_strip, invalid,
+    nearer_end, piece_strip, sample, um,
 };
 use crate::routing::{BuildFx, InstanceQueryScratch};
 use crate::{Error, Rect, Result};
@@ -25,15 +25,45 @@ pub(super) struct Cand {
     pub shape: Shape,
 }
 
-/// One ordered accumulation of the original serial loop.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum Op {
-    /// `nets[net].ground[node] += pf` (`net` is the local net index).
-    Ground { net: u32, node: u32, pf: f64 },
-    /// `coupling[key] += pf`, then the coupling-count budget.
-    Couple { key: CouplingKey, pf: f64 },
+/// Key prefix of a ground record: `GROUND | g` adds to global node `g`.
+pub(super) const GROUND: u64 = 0xFFFF_FFFF_0000_0000;
+/// Key of the overlap-area statistic.
+pub(super) const AREA: u64 = u64::MAX;
+
+/// One ordered accumulation of the original serial loop, in 16 bytes.
+/// `key` names the accumulator: a coupling capacitor between global nodes
+/// `ga <= gb` is `ga << 32 | gb` (global node IDs ascend with the
+/// `(net, node)` endpoint, so key order is the original endpoint order),
+/// ground at global node `g` is `GROUND | g`, and the overlap-area statistic
+/// is `AREA`. Global node IDs stay below `u32::MAX`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Op {
+    pub key: u64,
+    pub pf: f64,
+}
+impl Op {
+    /// `ground[g] += pf`.
+    #[inline]
+    pub(super) fn ground(g: u32, pf: f64) -> Self {
+        Self {
+            key: GROUND | u64::from(g),
+            pf,
+        }
+    }
+    /// `coupling[{a, b}] += pf`, then the coupling-count budget.
+    #[inline]
+    pub(super) fn couple(a: u32, b: u32, pf: f64) -> Self {
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        Self {
+            key: u64::from(lo) << 32 | u64::from(hi),
+            pf,
+        }
+    }
     /// `stats.overlap_area_um2 += um2`.
-    Area(f64),
+    #[inline]
+    pub(super) fn area(um2: f64) -> Self {
+        Self { key: AREA, pf: um2 }
+    }
 }
 
 /// Why a strip stopped: a real error, or a parallel-only bound (candidate
@@ -153,9 +183,14 @@ pub(super) struct Ctx<'c, 'a> {
     pub instances: Option<&'c InstanceGeometry<'a>>,
     pub routing_layers: &'c [u32],
     pub limits: &'c ExtractLimits,
+    /// Wire bodies (`Owner::Run`).
     pub runs: &'c [Run],
+    /// Rectangle pieces (`Owner::Piece`); piece `p` is shape `piece_shape0 + p`.
+    pub pieces: &'c [PieceInfo],
+    pub piece_shape0: u32,
     pub pin_nodes: &'c HashMap<u32, (u32, u32), BuildFx>,
     pub net_index: &'c HashMap<u32, usize, BuildFx>,
+    pub nodes: &'c NodeIds,
     layers: Vec<Option<LayerInfo<'a>>>,
     metal_layer: HashMap<u32, usize, BuildFx>,
 }
@@ -172,8 +207,10 @@ impl<'c, 'a> Ctx<'c, 'a> {
         routing_layers: &'c [u32],
         limits: &'c ExtractLimits,
         runs: &'c [Run],
+        (pieces, piece_shape0): (&'c [PieceInfo], u32),
         pin_nodes: &'c HashMap<u32, (u32, u32), BuildFx>,
         net_index: &'c HashMap<u32, usize, BuildFx>,
+        nodes: &'c NodeIds,
     ) -> Result<Self> {
         let tech = input.tech;
         let mut layers = Vec::with_capacity(tech.layers.len());
@@ -213,8 +250,11 @@ impl<'c, 'a> Ctx<'c, 'a> {
             routing_layers,
             limits,
             runs,
+            pieces,
+            piece_shape0,
             pin_nodes,
             net_index,
+            nodes,
             layers,
             metal_layer,
         })
@@ -261,13 +301,39 @@ impl Scratch {
     }
 }
 
-/// One unit of strip work: a wire body, or the x/y strip pair of one piece,
-/// passive conductor or crossed virtual conductor (they share one shape).
+/// One unit of strip work: a wire body, or the x/y strip pair of one
+/// rectangle (they share one shape): a piece of routed metal, or a crossed
+/// passive conductor (retained or virtual). Pair strips are generated from
+/// the shape when the unit is computed; they are never stored.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum UnitRef {
     Body(u32),
-    Pair(u32),
-    Virtual(u32),
+    Piece(u32),
+    Conductor(u32),
+}
+
+/// The strips of one unit, in their original order: a body alone, or a
+/// rectangle's x strip then its y strip.
+#[inline]
+pub(super) fn strips(ctx: &Ctx<'_, '_>, unit: UnitRef) -> (Run, Option<Run>) {
+    match unit {
+        UnitRef::Body(i) => (ctx.runs[i as usize], None),
+        UnitRef::Piece(p) => {
+            let id = ctx.piece_shape0 + p;
+            let (shape, info) = (ctx.shapes.get(id), ctx.pieces[p as usize]);
+            (
+                piece_strip(id, shape.rect, shape.layer, info, false),
+                Some(piece_strip(id, shape.rect, shape.layer, info, true)),
+            )
+        }
+        UnitRef::Conductor(id) => {
+            let shape = ctx.shapes.get(id);
+            (
+                conductor_strip(id, shape, false),
+                Some(conductor_strip(id, shape, true)),
+            )
+        }
+    }
 }
 
 /// Computes one unit. `cap` bounds the candidates of each strip: exceeding
@@ -281,23 +347,9 @@ pub(super) fn unit<S: Sink>(
     work: &mut usize,
     counts: &mut Counts,
 ) -> Flow {
-    match unit {
-        UnitRef::Body(i) => {
-            let run = ctx.runs[i as usize];
-            single(ctx, &run, cap, sc, sink, work, counts)
-        }
-        UnitRef::Pair(i) => {
-            let (x, y) = (ctx.runs[i as usize], ctx.runs[i as usize + 1]);
-            pair(ctx, &x, &y, cap, sc, sink, work, counts)
-        }
-        UnitRef::Virtual(id) => {
-            let shape = ctx.shapes.get(id);
-            let (x, y) = (
-                virtual_strip(id, shape, false),
-                virtual_strip(id, shape, true),
-            );
-            pair(ctx, &x, &y, cap, sc, sink, work, counts)
-        }
+    match strips(ctx, unit) {
+        (run, None) => single(ctx, &run, cap, sc, sink, work, counts),
+        (x, Some(y)) => pair(ctx, &x, &y, cap, sc, sink, work, counts),
     }
 }
 
@@ -819,6 +871,7 @@ fn numeric<S: Sink>(
     let same_metal = |sh: &Shape| -> bool {
         match (sh.owner, run.passive) {
             (Owner::Run(o), _) => ctx.runs[o as usize].net == run.net,
+            (Owner::Piece(p), _) => ctx.pieces[p as usize].net == run.net,
             (Owner::Passive(p), None) => {
                 matches!(p, PassiveOwner::Pin { net, .. } if net == run.net)
             }
@@ -1045,7 +1098,7 @@ fn numeric<S: Sink>(
                         continue;
                     };
                     let area = um(tech, covered) * length;
-                    sink.op(Op::Area(area))?;
+                    sink.op(Op::area(area))?;
                     shielded += area_cap * area;
                     for &(sh, w) in &face.owners[first..last] {
                         contributions.push((sh, ov * um(tech, w) * length, 1.0));
@@ -1073,7 +1126,7 @@ fn numeric<S: Sink>(
                         continue;
                     };
                     for &(sh, w) in owners.iter().filter(passive) {
-                        sink.op(Op::Area(um(tech, w) * length))?;
+                        sink.op(Op::area(um(tech, w) * length))?;
                         contributions.push((sh, ov * um(tech, w) * length, 1.0));
                     }
                 }
@@ -1088,34 +1141,39 @@ fn numeric<S: Sink>(
                 if run_factor < 1.0 {
                     continue;
                 }
-                let Owner::Run(o) = cands[s as usize].shape.owner else {
-                    continue;
+                let (onet, pnode) = match cands[s as usize].shape.owner {
+                    Owner::Run(o) => {
+                        let other = &ctx.runs[o as usize];
+                        if other.passive.is_some() {
+                            continue;
+                        }
+                        (other.net, nearer_end(other, mid_point))
+                    }
+                    // A piece's two end nodes are its one node.
+                    Owner::Piece(p) => {
+                        let info = ctx.pieces[p as usize];
+                        (info.net, info.node)
+                    }
+                    Owner::Passive(_) => continue,
                 };
-                let other = &ctx.runs[o as usize];
-                if other.passive.is_some() || other.net == run.net {
+                if onet == run.net {
                     continue;
                 }
-                let pnode = nearer_end(other, mid_point);
-                let li = ctx.net_index[&other.net];
+                let b = ctx.nodes.of(ctx.net_index, onet, pnode);
                 let pin_node = match run.passive {
                     Some(PassiveOwner::Pin { pin, .. }) => ctx.pin_nodes.get(&pin).copied(),
                     _ => None,
                 };
                 match pin_node {
-                    Some(a) => {
-                        let b = (other.net, pnode);
-                        let key = if a <= b { (a, b) } else { (b, a) };
-                        sink.op(Op::Couple { key, pf: value })?;
+                    Some((net, node)) => {
+                        let a = ctx.nodes.of(ctx.net_index, net, node);
+                        sink.op(Op::couple(a, b, value))?;
                     }
                     None => {
                         if matches!(run.passive, Some(PassiveOwner::Pin { .. })) {
                             counts.unrouted_pin_partners += 1;
                         }
-                        sink.op(Op::Ground {
-                            net: li as u32,
-                            node: pnode,
-                            pf: value,
-                        })?;
+                        sink.op(Op::ground(b, value))?;
                     }
                 }
             }
@@ -1123,17 +1181,12 @@ fn numeric<S: Sink>(
             continue;
         }
         // Attach to this run's end nodes by position (pi split).
-        let net = net_local as u32;
-        sink.op(Op::Ground {
-            net,
-            node: run.node_lo,
-            pf: ground * (1.0 - w_hi),
-        })?;
-        sink.op(Op::Ground {
-            net,
-            node: run.node_hi,
-            pf: ground * w_hi,
-        })?;
+        let (g_lo, g_hi) = (
+            ctx.nodes.local(net_local, run.node_lo),
+            ctx.nodes.local(net_local, run.node_hi),
+        );
+        sink.op(Op::ground(g_lo, ground * (1.0 - w_hi)))?;
+        sink.op(Op::ground(g_hi, ground * w_hi))?;
         for &(s, value, run_factor) in contributions.iter() {
             let partner = match cands[s as usize].shape.owner {
                 Owner::Run(o) => {
@@ -1144,6 +1197,14 @@ fn numeric<S: Sink>(
                         None
                     } else {
                         Some(Some((other.net, nearer_end(other, mid_point), run_factor)))
+                    }
+                }
+                Owner::Piece(p) => {
+                    let info = ctx.pieces[p as usize];
+                    if info.net == run.net {
+                        None
+                    } else {
+                        Some(Some((info.net, info.node, run_factor)))
                     }
                 }
                 Owner::Passive(PassiveOwner::Ground) => Some(None),
@@ -1161,27 +1222,17 @@ fn numeric<S: Sink>(
             match partner {
                 None => {}
                 Some(None) => {
-                    sink.op(Op::Ground {
-                        net,
-                        node: run.node_lo,
-                        pf: value * (1.0 - w_hi),
-                    })?;
-                    sink.op(Op::Ground {
-                        net,
-                        node: run.node_hi,
-                        pf: value * w_hi,
-                    })?;
+                    sink.op(Op::ground(g_lo, value * (1.0 - w_hi)))?;
+                    sink.op(Op::ground(g_hi, value * w_hi))?;
                 }
                 Some(Some((pnet, pnode, factor))) => {
-                    for (node, weight) in [(run.node_lo, 1.0 - w_hi), (run.node_hi, w_hi)] {
+                    let b = ctx.nodes.of(ctx.net_index, pnet, pnode);
+                    for (a, weight) in [(g_lo, 1.0 - w_hi), (g_hi, w_hi)] {
                         let v = value * factor * weight;
                         if v <= 0.0 {
                             continue;
                         }
-                        let a = (run.net, node);
-                        let b = (pnet, pnode);
-                        let key = if a <= b { (a, b) } else { (b, a) };
-                        sink.op(Op::Couple { key, pf: v })?;
+                        sink.op(Op::couple(a, b, v))?;
                     }
                 }
             }

@@ -527,8 +527,6 @@ fn invalid(s: &str) -> Error {
 }
 
 type Key = (u32, i64, i64);
-/// Ordered coupling endpoints `((net, node), (net, node))`, first <= second.
-type CouplingKey = ((u32, u32), (u32, u32));
 
 /// Private phase-timing instrumentation: fixed state, no contribution records.
 /// Enabled only by RUSTROAD_EXTRACT_PROFILE (stderr); never changes results.
@@ -560,8 +558,8 @@ impl PhaseProfile {
             eprintln!(
                 "{}",
                 serde_json::json!({
-                    "schema": "rustroad.extract-phase-profile.v2",
-                    "scope": "extraction core; strips computed on the --threads pool, accumulations committed in run order",
+                    "schema": "rustroad.extract-phase-profile.v3",
+                    "scope": "extraction core; strips computed on the --threads pool, accumulations committed in run order per sharded accumulator",
                     "elapsed_ns": self.start.elapsed().as_nanos(),
                     "stage_ns": {
                         "preflight_and_trees": self.ns[0],
@@ -575,6 +573,8 @@ impl PhaseProfile {
                         "ordered_commit": strips.commit_ns,
                     },
                     "lanes": strips.lanes,
+                    "shards": strips.shards,
+                    "barriers": strips.barriers,
                     "chunks": strips.chunks,
                     "units": strips.units,
                     "serial_units": strips.units.min(strips.serial_units),
@@ -637,12 +637,23 @@ impl Run {
         self.minus + (self.plus - self.minus) / 2
     }
 }
-/// Owner of a conductor shape. Every routed-net shape (wire body or piece) is
-/// a `Run` strip that models its own exposed sides.
+/// Owner of a conductor shape. Every routed-net shape (wire body or piece)
+/// models its own exposed sides.
 #[derive(Clone, Copy, Debug)]
 enum Owner {
+    /// Wire body `Built::runs[i]`.
     Run(u32),
+    /// Rectangle piece `Built::pieces[p]` (end extension, via pad or patch).
+    Piece(u32),
     Passive(PassiveOwner),
+}
+/// A rectangle piece of routed metal: its net and the one RC node all of
+/// its capacitance attaches to. Its rectangle and layer are its shape; its
+/// x and y strips are generated when its unit is computed.
+#[derive(Clone, Copy, Debug)]
+struct PieceInfo {
+    net: u32,
+    node: u32,
 }
 /// Via landing-pad metal on a routing layer, at the via's node in the tree.
 #[derive(Clone, Copy, Debug)]
@@ -662,15 +673,20 @@ impl Shape {
     /// Signal net of a passive pin shape (runs are resolved through `runs`).
     fn net(&self) -> Option<u32> {
         match self.owner {
-            Owner::Run(_) => None,
+            Owner::Run(_) | Owner::Piece(_) => None,
             Owner::Passive(PassiveOwner::Pin { net, .. }) => Some(net),
             Owner::Passive(PassiveOwner::Ground) => None,
         }
     }
+    /// Routed metal (a wire body or a piece).
+    fn routed(&self) -> bool {
+        matches!(self.owner, Owner::Run(_) | Owner::Piece(_))
+    }
 }
-fn shape_net(runs: &[Run], s: &Shape) -> Option<u32> {
+fn shape_net(built: &Built, s: &Shape) -> Option<u32> {
     match s.owner {
-        Owner::Run(o) => Some(runs[o as usize].net),
+        Owner::Run(o) => Some(built.runs[o as usize].net),
+        Owner::Piece(p) => Some(built.pieces[p as usize].net),
         _ => s.net(),
     }
 }
@@ -695,10 +711,93 @@ fn body_rect(r: &Run) -> Rect {
 
 struct Built {
     nets: Vec<RcNet>,
+    /// Wire bodies, in tree order per net.
     runs: Vec<Run>,
+    /// Rectangle pieces in creation order; piece `p` is shape
+    /// `piece_shape0 + p`.
+    pieces: Vec<PieceInfo>,
+    piece_shape0: u32,
+    /// Retained passive conductors crossed by routed metal, by shape ID in
+    /// shape order (each is an x/y strip pair).
+    passive_units: Vec<u32>,
     pads: Vec<Pad>,
     /// Pin index -> (net, local node).
     pin_nodes: HashMap<u32, (u32, u32), BuildFx>,
+}
+impl Built {
+    /// Strip records of the original layout: one per body, two per piece
+    /// and per crossed retained passive conductor.
+    fn strips(&self) -> usize {
+        self.runs.len() + 2 * (self.pieces.len() + self.passive_units.len())
+    }
+}
+
+/// Global RC node IDs: nets in ascending net ID, then local node order, so
+/// global ID order equals `(net, node)` order. IDs stay below `u32::MAX`.
+struct NodeIds {
+    /// By local net index: global ID of its node 0.
+    base: Vec<u32>,
+    /// By net ID (dense IDs only): the base of `net_index[net]`.
+    by_net: Vec<u32>,
+    /// `(base, local net index)` ascending, for decoding.
+    sorted: Vec<(u32, u32)>,
+    total: usize,
+}
+impl NodeIds {
+    fn new(nets: &[RcNet], net_index: &HashMap<u32, usize, BuildFx>) -> Result<Self> {
+        let mut order: Vec<u32> = (0..nets.len() as u32).collect();
+        order.sort_by_key(|&l| (nets[l as usize].net, l));
+        let mut base = vec![0u32; nets.len()];
+        let mut sorted = Vec::with_capacity(nets.len());
+        let mut total = 0usize;
+        for l in order {
+            let b = u32::try_from(total)
+                .ok()
+                .filter(|&b| b < u32::MAX - 1)
+                .ok_or_else(|| budget("extraction RC node IDs"))?;
+            base[l as usize] = b;
+            sorted.push((b, l));
+            total += nets[l as usize].nodes.len();
+        }
+        if total >= u32::MAX as usize - 1 {
+            return Err(budget("extraction RC node IDs"));
+        }
+        let top = nets.iter().map(|n| n.net as usize + 1).max().unwrap_or(0);
+        let by_net = if top <= 4 * nets.len() + 65_536 {
+            let mut v = vec![u32::MAX; top];
+            for (&net, &l) in net_index {
+                v[net as usize] = base[l];
+            }
+            v
+        } else {
+            Vec::new()
+        };
+        Ok(Self {
+            base,
+            by_net,
+            sorted,
+            total,
+        })
+    }
+    /// Global ID of `node` of local net `local`.
+    #[inline]
+    fn local(&self, local: usize, node: u32) -> u32 {
+        self.base[local] + node
+    }
+    /// Global ID of `(net, node)`; the net is resolved like `net_index`.
+    #[inline]
+    fn of(&self, net_index: &HashMap<u32, usize, BuildFx>, net: u32, node: u32) -> u32 {
+        match self.by_net.get(net as usize) {
+            Some(&b) if b != u32::MAX => b + node,
+            _ => self.base[net_index[&net]] + node,
+        }
+    }
+    /// `(local net index, node)` of a global ID.
+    fn decode(&self, g: u32) -> (usize, u32) {
+        let i = self.sorted.partition_point(|&(b, _)| b <= g) - 1;
+        let (b, l) = self.sorted[i];
+        (l as usize, g - b)
+    }
 }
 
 fn layer_model<'a>(input: &ExtractInput<'a>, layer: u32) -> Result<&'a RcLayer> {
@@ -794,6 +893,9 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
     let mut out = Built {
         nets: Vec::new(),
         runs: Vec::new(),
+        pieces: Vec::new(),
+        piece_shape0: 0,
+        passive_units: Vec::new(),
         pads: Vec::new(),
         pin_nodes: HashMap::default(),
     };
@@ -1265,14 +1367,14 @@ impl NetShapes {
     }
     fn new(
         shapes: &Shapes<'_>,
-        runs: &[Run],
+        built: &Built,
         limits: &ExtractLimits,
         allowance: u64,
     ) -> Result<Self> {
         let mut lists: HashMap<(u32, u32), Vec<u32>, BuildFx> = HashMap::default();
         let mut virtual_pins = 0usize;
         for (id, s) in shapes.owned() {
-            if let Some(net) = shape_net(runs, s) {
+            if let Some(net) = shape_net(built, s) {
                 lists.entry((net, s.layer)).or_default().push(id);
             }
         }
@@ -1377,9 +1479,10 @@ fn uncovered(r: Rect, covering: &[u32], shapes: &Shapes<'_>) -> Result<Vec<Rect>
     Ok(pieces)
 }
 
-/// Add one rectangle piece as a conductor shape with two side strips (along x
-/// and along y), all of its capacitance at `node`. Pieces add capacitance only:
-/// never a node or a resistor.
+/// Add one rectangle piece as a conductor shape, all of its capacitance at
+/// `node`; its two side strips (along x and along y) are generated from the
+/// shape when its unit is computed. Pieces add capacitance only: never a
+/// node or a resistor.
 #[allow(clippy::too_many_arguments)]
 fn add_piece(
     piece: Rect,
@@ -1392,32 +1495,17 @@ fn add_piece(
     limits: &ExtractLimits,
 ) -> Result<()> {
     let shape = shapes.len() as u32;
-    let first = built.runs.len() as u32;
-    for vertical in [false, true] {
-        let (lo, hi, minus, plus) = if vertical {
-            (piece.ly, piece.uy, piece.lx, piece.ux)
-        } else {
-            (piece.lx, piece.ux, piece.ly, piece.uy)
-        };
-        built.runs.push(Run {
-            net,
-            layer,
-            vertical,
-            lo,
-            hi,
-            minus,
-            plus,
-            shape,
-            piece: true,
-            passive: None,
-            node_lo: node,
-            node_hi: node,
-        });
+    let index = built.pieces.len() as u32;
+    if index == 0 {
+        built.piece_shape0 = shape;
+    } else if shape != built.piece_shape0 + index {
+        return Err(invalid("piece shapes are not contiguous"));
     }
+    built.pieces.push(PieceInfo { net, node });
     shapes.push(Shape {
         layer,
         rect: piece,
-        owner: Owner::Run(first),
+        owner: Owner::Piece(index),
     });
     near.push(net, layer, shape);
     if shapes.retained_len() > limits.max_shapes {
@@ -1443,7 +1531,7 @@ fn add_metal_pieces(
 ) -> Result<()> {
     // (net, layer, rect, node, is_pad) in a fixed order.
     let mut candidates: Vec<(u32, u32, Rect, u32, bool)> = Vec::new();
-    for r in built.runs.iter().filter(|r| !r.piece) {
+    for r in &built.runs {
         let e = input.layers[r.layer as usize].width / 2;
         if e <= 0 {
             continue;
@@ -1544,21 +1632,18 @@ fn add_patches(
             .max_by_key(|&s| (overlap(shapes.get(s).rect), std::cmp::Reverse(s)))
             .ok_or_else(|| invalid("floating routing patch (touches no same-net conductor)"))?;
         let node = match shapes.get(anchor).owner {
+            Owner::Piece(p) => built.pieces[p as usize].node,
             Owner::Run(o) => {
                 let run = &built.runs[o as usize];
-                if run.piece {
+                let centre = if run.vertical {
+                    r.ly + (r.uy - r.ly) / 2
+                } else {
+                    r.lx + (r.ux - r.lx) / 2
+                };
+                if (centre - run.lo).abs() <= (run.hi - centre).abs() {
                     run.node_lo
                 } else {
-                    let centre = if run.vertical {
-                        r.ly + (r.uy - r.ly) / 2
-                    } else {
-                        r.lx + (r.ux - r.lx) / 2
-                    };
-                    if (centre - run.lo).abs() <= (run.hi - centre).abs() {
-                        run.node_lo
-                    } else {
-                        run.node_hi
-                    }
+                    run.node_hi
                 }
             }
             Owner::Passive(PassiveOwner::Pin { pin, .. }) => built
@@ -1615,7 +1700,8 @@ fn nearer_end(run: &Run, point: [f64; 2]) -> u32 {
 /// conductor on another routing layer overlaps get two strips (along x and
 /// along y, like a piece) so that their own cross-section is counted where a
 /// routed conductor is their calibration plate: a crossing is counted from
-/// both conductors' cross-sections whoever owns them.
+/// both conductors' cross-sections whoever owns them. Their shape IDs are
+/// recorded; the strips are generated when their units are computed.
 fn add_passive_strips(
     input: &ExtractInput<'_>,
     limits: &ExtractLimits,
@@ -1628,14 +1714,14 @@ fn add_passive_strips(
         .filter(|&l| input.tech.layers[l as usize].is_some())
         .collect();
     for (si, sh) in shapes.owned() {
-        let Owner::Passive(owner) = sh.owner else {
+        if !matches!(sh.owner, Owner::Passive(_)) {
             continue;
-        };
+        }
         let r = sh.rect;
         let mut crossed = false;
         for &layer in routing.iter().filter(|&&l| l != sh.layer) {
             grid.visit(layer, r, limits, &mut stats.work, |id, _| {
-                crossed = matches!(shapes.get(id).owner, Owner::Run(_));
+                crossed = shapes.get(id).routed();
                 Ok(!crossed)
             })?;
             if crossed {
@@ -1645,33 +1731,9 @@ fn add_passive_strips(
         if !crossed {
             continue;
         }
-        let net = match owner {
-            PassiveOwner::Pin { net, .. } => net,
-            PassiveOwner::Ground => u32::MAX,
-        };
-        for vertical in [false, true] {
-            let (lo, hi, minus, plus) = if vertical {
-                (r.ly, r.uy, r.lx, r.ux)
-            } else {
-                (r.lx, r.ux, r.ly, r.uy)
-            };
-            built.runs.push(Run {
-                net,
-                layer: sh.layer,
-                vertical,
-                lo,
-                hi,
-                minus,
-                plus,
-                shape: si,
-                piece: true,
-                passive: Some(owner),
-                node_lo: 0,
-                node_hi: 0,
-            });
-        }
+        built.passive_units.push(si);
         stats.passive_strips += 2;
-        if built.runs.len() > limits.max_shapes.saturating_mul(2) {
+        if built.strips() > limits.max_shapes.saturating_mul(2) {
             return Err(budget("extraction strips"));
         }
     }
@@ -1691,7 +1753,7 @@ fn virtual_crossings(
         return Ok(marked);
     };
     for (_, shape) in shapes.owned() {
-        if !matches!(shape.owner, Owner::Run(_)) {
+        if !shape.routed() {
             continue;
         }
         for &layer in layers.iter().filter(|&&l| l != shape.layer) {
@@ -1718,9 +1780,10 @@ fn virtual_crossings(
     Ok(marked)
 }
 
-fn virtual_strip(id: u32, shape: Shape, vertical: bool) -> Run {
+/// One strip (x or y) of a crossed passive conductor (retained or virtual).
+fn conductor_strip(id: u32, shape: Shape, vertical: bool) -> Run {
     let Owner::Passive(owner) = shape.owner else {
-        unreachable!("virtual conductor is passive")
+        unreachable!("crossed conductor is passive")
     };
     let r = shape.rect;
     let (lo, hi, minus, plus) = if vertical {
@@ -1744,6 +1807,30 @@ fn virtual_strip(id: u32, shape: Shape, vertical: bool) -> Run {
         passive: Some(owner),
         node_lo: 0,
         node_hi: 0,
+    }
+}
+
+/// One strip (x or y) of a routed-metal piece: both ends at its node.
+#[inline]
+fn piece_strip(id: u32, r: Rect, layer: u32, info: PieceInfo, vertical: bool) -> Run {
+    let (lo, hi, minus, plus) = if vertical {
+        (r.ly, r.uy, r.lx, r.ux)
+    } else {
+        (r.lx, r.ux, r.ly, r.uy)
+    };
+    Run {
+        net: info.net,
+        layer,
+        vertical,
+        lo,
+        hi,
+        minus,
+        plus,
+        shape: id,
+        piece: true,
+        passive: None,
+        node_lo: info.node,
+        node_hi: info.node,
     }
 }
 
@@ -1781,54 +1868,6 @@ enum Queries {
     /// window on every layer, one strip at a time, serial.
     #[cfg(test)]
     Reference,
-}
-
-/// Strip units of `runs[range]` in run order: a wire body alone; a piece or
-/// passive conductor as its consecutive x/y strip pair.
-fn strip_units(
-    runs: &[Run],
-    range: std::ops::Range<usize>,
-) -> impl Iterator<Item = strip::UnitRef> + '_ {
-    let mut at = range.start;
-    std::iter::from_fn(move || {
-        if at >= range.end {
-            return None;
-        }
-        let i = at as u32;
-        if runs[at].piece {
-            at += 2;
-            Some(strip::UnitRef::Pair(i))
-        } else {
-            at += 1;
-            Some(strip::UnitRef::Body(i))
-        }
-    })
-}
-
-/// Every piece and passive strip is immediately followed by its twin of the
-/// same shape and rectangle, x strip first.
-fn check_pairs(runs: &[Run], range: std::ops::Range<usize>) -> Result<()> {
-    let mut at = range.start;
-    while at < range.end {
-        if runs[at].piece {
-            let (x, y) = (&runs[at], runs.get(at + 1).filter(|_| at + 1 < range.end));
-            let twin = y.is_some_and(|y| {
-                y.piece
-                    && y.vertical
-                    && !x.vertical
-                    && y.shape == x.shape
-                    && y.passive == x.passive
-                    && body_rect(y) == body_rect(x)
-            });
-            if !twin {
-                return Err(invalid("strip pair"));
-            }
-            at += 2;
-        } else {
-            at += 1;
-        }
-    }
-    Ok(())
 }
 
 fn extract_with_queries(
@@ -1891,7 +1930,7 @@ fn extract_with_queries(
         .map(|(i, n)| (n.net, i))
         .collect();
     {
-        let mut near = NetShapes::new(&shapes, &built.runs, limits, index_budget)?;
+        let mut near = NetShapes::new(&shapes, &built, limits, index_budget)?;
         add_metal_pieces(
             input,
             limits,
@@ -1938,15 +1977,13 @@ fn extract_with_queries(
         index_budget,
         &mut stats.work,
     )?;
-    let routed_runs = built.runs.len();
     add_passive_strips(input, limits, &mut built, &shapes, &grid, &mut stats)?;
     let crossed = virtual_crossings(&shapes, instances.as_mut(), &routing_layers, &mut stats)?;
-    stats.wire_runs = built.runs.iter().filter(|r| !r.piece).count();
+    stats.wire_runs = built.runs.len();
     stats.shapes = shapes.len();
     if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
-    check_pairs(&built.runs, 0..built.runs.len())?;
     profile.phase(2);
     // Parallel lanes use the unused index allowance first, then headroom.
     let instance_count = input.instances.map_or(0, |i| i.geometry.len());
@@ -1974,25 +2011,30 @@ fn extract_with_queries(
             }
         }
     }
-    let mut coupling = BTreeMap::<CouplingKey, f64>::new();
+    let nodes = NodeIds::new(&built.nets, &net_index)?;
+    let mut acc = parallel::Accumulators::new(
+        parallel::shard_count(lanes, limits),
+        nodes.total,
+        stats.overlap_area_um2,
+    )?;
     let report = {
-        let Built {
-            nets,
-            runs,
-            pin_nodes,
-            ..
-        } = &mut built;
-        let runs: &[Run] = runs;
-        // Units in the original run order: routed runs, crossed virtual
-        // conductors, then retained passive conductors.
+        // Units in the original run order: wire bodies, pieces, crossed
+        // virtual conductors, then crossed retained passive conductors.
         let (offset, count) = (shapes.virtual_offset(), shapes.virtual_count());
-        let mut units = strip_units(runs, 0..routed_runs)
+        let mut units = (0..built.runs.len() as u32)
+            .map(strip::UnitRef::Body)
+            .chain((0..built.pieces.len() as u32).map(strip::UnitRef::Piece))
             .chain(
                 (0..count)
                     .filter(|&i| crossed[i / 64] & (1 << (i % 64)) != 0)
-                    .map(|i| strip::UnitRef::Virtual((offset + i) as u32)),
+                    .map(|i| strip::UnitRef::Conductor((offset + i) as u32)),
             )
-            .chain(strip_units(runs, routed_runs..runs.len()));
+            .chain(
+                built
+                    .passive_units
+                    .iter()
+                    .map(|&id| strip::UnitRef::Conductor(id)),
+            );
         let ctx = strip::Ctx::new(
             input,
             &shapes,
@@ -2000,45 +2042,79 @@ fn extract_with_queries(
             instances.as_ref(),
             &routing_layers,
             limits,
-            runs,
-            pin_nodes,
+            &built.runs,
+            (&built.pieces, built.piece_shape0),
+            &built.pin_nodes,
             &net_index,
+            &nodes,
         )?;
-        let commit = parallel::Commit::new(nets, &mut coupling, &mut stats, limits.max_couplings);
         match queries {
-            Queries::Indexed(bounds) => {
-                parallel::run(&ctx, &mut units, bounds, lanes, instance_count, commit)?
-            }
+            Queries::Indexed(bounds) => parallel::run(
+                &ctx,
+                &mut units,
+                bounds,
+                lanes,
+                instance_count,
+                &mut acc,
+                &mut stats,
+            )?,
             #[cfg(test)]
-            Queries::Reference => {
-                reference(&ctx, input, &shapes, &mut units, instance_count, commit)?
-            }
+            Queries::Reference => reference(
+                &ctx,
+                input,
+                &shapes,
+                &mut units,
+                instance_count,
+                parallel::Commit::new(&mut acc, &mut stats, limits.max_couplings),
+            )?,
         }
     };
     profile.phase(3);
     let grid_size = (grid.entries(), grid.bytes());
+    // Geometry is no longer needed: release it before the coupling list.
     drop(grid);
     drop(instances);
-
+    drop(shapes);
+    drop(crossed);
+    let Built {
+        mut nets,
+        runs,
+        pieces,
+        passive_units,
+        pin_nodes,
+        ..
+    } = built;
+    drop((runs, pieces, passive_units, pin_nodes));
+    stats.overlap_area_um2 = acc.area();
+    for (l, net) in nets.iter_mut().enumerate() {
+        for (node, ground) in net.ground.iter_mut().enumerate() {
+            *ground = acc.ground(nodes.local(l, node as u32));
+        }
+    }
+    let sorted = acc.into_sorted_couplings()?;
     let mut couplings = Vec::new();
-    for ((a, b), pf) in coupling {
+    for (key, pf) in sorted {
         if pf <= 0.0 {
             continue;
         }
+        let ((la, na), (lb, nb)) = (nodes.decode((key >> 32) as u32), nodes.decode(key as u32));
         if pf < limits.min_coupling_pf {
             // Each side keeps the full value to ground (Miller factor one);
             // a net's total capacitance is unchanged.
-            for (net, node) in [a, b] {
-                built.nets[net_index[&net]].ground[node as usize] += pf;
-            }
+            nets[la].ground[na as usize] += pf;
+            nets[lb].ground[nb as usize] += pf;
             stats.grounded_couplings += 1;
             continue;
         }
-        couplings.push(RcCoupling { a, b, pf });
+        couplings.push(RcCoupling {
+            a: (nets[la].net, na),
+            b: (nets[lb].net, nb),
+            pf,
+        });
     }
     stats.couplings = couplings.len();
     stats.coupling_pf = couplings.iter().map(|c| c.pf).sum();
-    stats.ground_pf = built.nets.iter().flat_map(|n| n.ground.iter()).sum();
+    stats.ground_pf = nets.iter().flat_map(|n| n.ground.iter()).sum();
     let elements = stats
         .resistors
         .checked_add(stats.nodes)
@@ -2051,7 +2127,7 @@ fn extract_with_queries(
     profile.phase(4);
     profile.report(&stats, &report, grid_size);
     Ok(RcNetwork {
-        nets: built.nets,
+        nets,
         couplings,
         stats,
     })
@@ -2083,19 +2159,9 @@ fn reference(
     let mut report = parallel::Report::default();
     let mut cands = Vec::new();
     for u in units {
-        let strips = match u {
-            strip::UnitRef::Body(i) => vec![ctx.runs[i as usize]],
-            strip::UnitRef::Pair(i) => vec![ctx.runs[i as usize], ctx.runs[i as usize + 1]],
-            strip::UnitRef::Virtual(id) => {
-                let shape = shapes.get(id);
-                vec![
-                    virtual_strip(id, shape, false),
-                    virtual_strip(id, shape, true),
-                ]
-            }
-        };
+        let (first, second) = strip::strips(ctx, u);
         report.units += 1;
-        for run in strips {
+        for run in std::iter::once(first).chain(second) {
             let w = ctx.window_dbu(run.layer)?;
             let (c0, c1) = (run.minus - w, run.plus + w);
             let q = if run.vertical {
@@ -2182,7 +2248,152 @@ mod tests {
         // Millions of strips and transcript records are resident at once.
         assert_eq!(size_of::<Run>(), 72);
         assert_eq!(size_of::<Shape>(), 48);
-        assert_eq!(size_of::<strip::Op>(), 32);
+        assert_eq!(size_of::<strip::Op>(), 16);
+        assert_eq!(size_of::<PieceInfo>(), 8);
+    }
+
+    #[test]
+    fn lazy_piece_and_conductor_strips_match_the_materialized_runs() {
+        // The original construction pushed these records (x strip, then y
+        // strip) per piece and per crossed retained passive conductor.
+        fn materialized(
+            r: Rect,
+            net: u32,
+            layer: u32,
+            shape: u32,
+            passive: Option<PassiveOwner>,
+            node: u32,
+        ) -> Vec<Run> {
+            let mut runs = Vec::new();
+            for vertical in [false, true] {
+                let (lo, hi, minus, plus) = if vertical {
+                    (r.ly, r.uy, r.lx, r.ux)
+                } else {
+                    (r.lx, r.ux, r.ly, r.uy)
+                };
+                runs.push(Run {
+                    net,
+                    layer,
+                    vertical,
+                    lo,
+                    hi,
+                    minus,
+                    plus,
+                    shape,
+                    piece: true,
+                    passive,
+                    node_lo: node,
+                    node_hi: node,
+                });
+            }
+            runs
+        }
+        let fields = |r: &Run| {
+            (
+                r.net,
+                r.layer,
+                r.vertical,
+                (r.lo, r.hi, r.minus, r.plus),
+                r.shape,
+                r.piece,
+                r.passive,
+                (r.node_lo, r.node_hi),
+                r.cross(),
+            )
+        };
+        let rects = [
+            Rect {
+                lx: -7,
+                ly: 3,
+                ux: 5,
+                uy: 4,
+            },
+            Rect {
+                lx: 100,
+                ly: -2_000_000,
+                ux: 101,
+                uy: 2_000_000,
+            },
+            Rect {
+                lx: 0,
+                ly: 0,
+                ux: 9,
+                uy: 9,
+            },
+        ];
+        for (i, &rect) in rects.iter().enumerate() {
+            let (id, layer) = (40 + i as u32, i as u32 % 3);
+            let info = PieceInfo {
+                net: 7 + i as u32,
+                node: 3 * i as u32,
+            };
+            let lazy = [false, true].map(|v| piece_strip(id, rect, layer, info, v));
+            let want = materialized(rect, info.net, layer, id, None, info.node);
+            assert_eq!(
+                lazy.map(|r| fields(&r)).to_vec(),
+                want.iter().map(fields).collect::<Vec<_>>()
+            );
+            for owner in [PassiveOwner::Ground, PassiveOwner::Pin { net: 9, pin: 11 }] {
+                let shape = Shape {
+                    layer,
+                    rect,
+                    owner: Owner::Passive(owner),
+                };
+                let lazy = [false, true].map(|v| conductor_strip(id, shape, v));
+                let net = match owner {
+                    PassiveOwner::Pin { net, .. } => net,
+                    PassiveOwner::Ground => u32::MAX,
+                };
+                let want = materialized(rect, net, layer, id, Some(owner), 0);
+                assert_eq!(
+                    lazy.map(|r| fields(&r)).to_vec(),
+                    want.iter().map(fields).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn global_node_ids_follow_net_then_node_order() {
+        let net = |net: u32, nodes: usize| RcNet {
+            net,
+            nodes: vec![RcNode::Internal(1); nodes],
+            ground: vec![0.0; nodes],
+            resistors: vec![],
+        };
+        // Local order differs from net ID order.
+        let nets = vec![net(30, 2), net(4, 3), net(17, 1), net(1_000_000, 2)];
+        let index: HashMap<u32, usize, BuildFx> =
+            nets.iter().enumerate().map(|(i, n)| (n.net, i)).collect();
+        let ids = NodeIds::new(&nets, &index).unwrap();
+        assert_eq!(ids.total, 8);
+        let mut all = Vec::new();
+        for (l, n) in nets.iter().enumerate() {
+            for node in 0..n.nodes.len() as u32 {
+                let g = ids.local(l, node);
+                assert_eq!(ids.of(&index, n.net, node), g);
+                assert_eq!(ids.decode(g), (l, node));
+                all.push(((n.net, node), g));
+            }
+        }
+        all.sort();
+        assert!(all.windows(2).all(|w| w[0].1 < w[1].1));
+        // Coupling keys sort like the original endpoint tuples.
+        let ends = [
+            ((30, 1), (4, 2)),
+            ((17, 0), (4, 2)),
+            ((4, 0), (1_000_000, 1)),
+        ];
+        let keys = ends.map(|(p, q)| {
+            strip::Op::couple(ids.of(&index, p.0, p.1), ids.of(&index, q.0, q.1), 1.0).key
+        });
+        let tuples = ends.map(|(p, q)| if p <= q { (p, q) } else { (q, p) });
+        for i in 0..3 {
+            assert!(keys[i] < strip::GROUND);
+            for j in 0..3 {
+                assert_eq!(keys[i].cmp(&keys[j]), tuples[i].cmp(&tuples[j]));
+            }
+        }
     }
 
     #[test]

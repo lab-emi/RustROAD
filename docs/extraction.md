@@ -142,24 +142,47 @@ ascending shape ID), per-layer dense context tables, reused buffers and packed
 event keys. `stats.work` counts index cells and entries actually scanned, so it is
 smaller than before; all other statistics are unchanged.
 
-Strips are computed on the `--threads` pool. Units (a wire body, or the strip pair
-of one rectangle) are taken from the run iterator in chunks of 64. Lanes compute
-chunks into bounded transcripts of ordered accumulations (every `ground[node] +=`,
-`coupling[key] +=` and overlap-area addition). Whichever lane finds the next chunk
-number ready commits it, then any later chunks already waiting, in run order:
-cumulative work, integer statistics, and every addition. A complete chunk's
-coupling additions are stably sorted by key in its lane, so the commit searches the
-coupling map once per distinct key while each key keeps its addition order (keys are
-independent accumulators). The coupling map is still the ordered map; the final
-coupling list, thresholding and grounding order are unchanged. Every accumulator
-therefore receives the identical sequence of f64 additions at any thread count and
-chunk size, and the SPEF bytes are identical.
+Only wire bodies are stored as strip records. A piece (end extension, via pad or
+patch piece) is its shape plus its net and node (8 bytes); a crossed retained
+passive conductor is its shape ID. Their x and y strips are generated from the
+shape when the unit is computed, with the same fields in the same order as the
+records the construction used to store (unit test
+`lazy_piece_and_conductor_strips_match_the_materialized_runs`). Units run in the
+original order: wire bodies, pieces in creation order, crossed virtual conductors,
+then crossed retained passive conductors.
 
-A unit a lane cannot finish within its parallel bounds (16,384 candidates, 65,536
-transcript records) or that fails, and any chunk whose committed work or coupling
-count could exceed its budget, is computed by the serial path at its place in run
-order from the committed state. Budget errors therefore carry the serial path's code
-and message. One pool thread runs the serial path directly. Lane scratch (candidate
+Every RC node has a global ID: nets in ascending net ID, then the net's local node
+order, so ID order is `(net, node)` order. An accumulation is a 16-byte record: a
+coupling between global nodes `a <= b` is keyed `a << 32 | b` (key order is the
+original endpoint order), ground at node `g` and the overlap-area statistic have
+reserved key ranges. The accumulators are split into shards (one on the serial
+path, otherwise the lane count rounded up to a power of two): ground nodes by
+`g mod shards`, coupling keys by a hash of the key, the area statistic in shard 0.
+Each shard holds a dense ground array and eight hash maps of coupling keys (16-byte
+entries; a rehash briefly doubles one small map, not the whole set).
+
+Strips are computed on the `--threads` pool. Units (a wire body, or the strip pair
+of one rectangle) are taken from the unit iterator in chunks of 64. Lanes compute
+chunks into bounded transcripts of ordered accumulations (every `ground[node] +=`,
+`coupling[key] +=` and overlap-area addition). A complete chunk's transcript is
+split by shard in its lane, and each shard's records are stably sorted by key, so
+every accumulator's additions stay in run order and are applied with one lookup per
+accumulator. A leader (whichever lane holds it) clears chunks strictly in run order:
+cumulative work and integer statistics, and a proof that no budget can fail inside
+the chunk (work, and an upper bound of the coupling count). Each shard then applies
+the cleared chunks for its own accumulators, in chunk order, on whichever lane is
+free; shards never touch each other's accumulators. At the end the coupling entries
+are sorted by key (keys are unique) and thresholded and grounded in that order, as
+before. Every accumulator therefore receives the identical sequence of f64
+additions at any thread count, chunk size and shard count, and the SPEF bytes are
+identical.
+
+A unit a lane cannot finish within its parallel bounds (16,384 candidates, 131,072
+transcript records) or that fails, and any chunk whose committed work or exact
+coupling count could exceed its budget, is committed at a barrier: every shard first
+applies all earlier chunks, then the serial path computes the chunk at its place in
+run order from the committed state. Budget errors therefore carry the serial path's
+code and message. One pool thread runs the serial path directly (one shard). Lane scratch (candidate
 buffers at the parallel cap, instance query marks, one chunk) plus 4 MiB of
 committed-pending chunks is admitted against the unused spatial-index allowance and
 the headroom below `--extract-memory-mib`; lanes are reduced, down to the serial
@@ -168,8 +191,8 @@ path, until it fits, and any excess over the unused allowance is added to
 `--extract-query-scratch-mib` are still accepted and validated (ceilings 16, 64 and
 64) for argument compatibility, and have no effect. A hidden `--extract-tile-units N`
 sets the chunk size (and forces the chunked path on one thread) for tests; results do
-not depend on it. `RUSTROAD_EXTRACT_PROFILE=1` prints phase timings, lanes, chunks and
-serially computed units to stderr.
+not depend on it. `RUSTROAD_EXTRACT_PROFILE=1` prints phase timings, lanes, shards,
+chunks, barriers and serially computed units to stderr.
 
 ## RC profile (`rustroad.rc-profile.v1`)
 
@@ -407,7 +430,8 @@ one thread (the extractor is deterministic at every thread count):
 * 8 M bin entries x 4 B, plus the map, < 128 MiB;
 * 500 k nodes (virtual cut nodes included) with keys and adjacency, about
   64 MiB;
-* 1 M couplings x about 64 B (BTreeMap) = 64 MiB;
+* 1 M couplings x about 40 B (hash-map entries with load slack, then one
+  16-byte sorted list) = 40 MiB;
 * SPEF model strings < 64 MiB; the file is streamed through a 256 KiB buffer;
 * the workspace read itself is under 16 MiB of `design.json`, about 200 MiB
   parsed.

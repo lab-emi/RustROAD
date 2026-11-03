@@ -1,26 +1,36 @@
-//! Strip computation on the `--threads` pool with an in-order commit.
+//! Strip computation on the `--threads` pool with an order-preserving,
+//! sharded commit.
 //!
 //! Units (a wire body, or the x/y strip pair of one rectangle) are taken from
-//! the lazy run iterator in numbered chunks. Lanes compute chunks
-//! concurrently into bounded transcripts of ordered accumulations and hand
-//! them to an ordered commit: whichever lane finds the next chunk number
-//! ready applies it, then any later chunks already waiting. A commit applies
-//! integer statistics, cumulative work, and every ground, coupling and
-//! overlap-area addition exactly as the serial loop performs them, in run
-//! order. Any unit that a lane did not finish (an error, the parallel
-//! candidate cap or a full transcript) is computed by the serial path at its
-//! place in run order, from the committed state, so budget errors carry the
-//! serial path's exact code and message. Results, statistics and errors are
-//! therefore identical at every thread count and chunk size.
-use super::strip::{self, Counts, Ctx, Flow, Op, Scratch, Sink, Stop, UnitRef};
-use super::{
-    CANDIDATE_SCRATCH_BYTES, CouplingKey, ExtractLimits, ExtractStats, RcNet, budget, guard_memory,
-    invalid,
-};
+//! the lazy unit iterator in numbered chunks. Lanes compute chunks
+//! concurrently into bounded transcripts of ordered accumulations.
+//!
+//! Every accumulator (the ground capacitance of one RC node, one coupling
+//! capacitor, the overlap-area statistic) belongs to exactly one shard.
+//! A complete chunk's transcript is split by shard, and within a shard it is
+//! stably grouped by accumulator, so each accumulator keeps the run order of
+//! its additions. A leader clears chunks strictly in run order: it applies
+//! integer statistics and cumulative work and proves that no budget can fail
+//! inside the chunk. Each shard then applies the cleared chunks' records for
+//! its own accumulators, in chunk order, on whichever lane is free. Shards
+//! never touch each other's accumulators, so every accumulator sees the
+//! identical sequence of f64 additions as the serial loop at any thread
+//! count, chunk size and shard count.
+//!
+//! A chunk the leader cannot clear (a unit a lane did not finish, or a work
+//! or coupling budget that could overflow inside it) is committed at a
+//! barrier: every shard first applies all earlier chunks, then the serial
+//! path computes the chunk's unfinished units at their place in run order
+//! from the committed state. Budget errors therefore carry the serial path's
+//! exact code and message.
+use super::strip::{self, AREA, Counts, Ctx, Flow, GROUND, Op, Scratch, Sink, Stop, UnitRef};
+use super::{CANDIDATE_SCRATCH_BYTES, ExtractLimits, ExtractStats, budget, guard_memory, invalid};
 use crate::{Error, Result};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 /// Units per chunk unless `--extract-tile-units` sets it.
 const CHUNK_UNITS: usize = 64;
@@ -29,6 +39,11 @@ const CHUNK_UNITS: usize = 64;
 const SPARE_BYTES: usize = 512 << 10;
 /// Hidden `--extract-tile-units` ceiling.
 pub const MAX_TILE_UNITS: usize = 1 << 20;
+/// Coupling maps per shard. Each map grows on its own, so a rehash briefly
+/// holds one small table twice instead of the whole coupling set.
+const SUBMAPS: usize = 8;
+/// Largest shard count (a power of two).
+const MAX_SHARDS: usize = 64;
 
 /// Parallel-only bounds. Units beyond them run serially at their commit;
 /// results never depend on them.
@@ -46,31 +61,200 @@ impl Default for Bounds {
     fn default() -> Self {
         Self {
             candidates: 16_384,
-            chunk_ops: 1 << 16,
+            chunk_ops: 1 << 17,
             pending_bytes: 4 << 20,
         }
     }
 }
 
-/// The network accumulators, mutated only in run order.
+/// Hasher of the coupling maps: one folded 64x64-bit multiply, so every key
+/// bit reaches the bucket index and the control tag.
+#[derive(Clone, Copy, Default)]
+pub(super) struct BuildKey;
+pub(super) struct KeyHasher(u64);
+impl std::hash::BuildHasher for BuildKey {
+    type Hasher = KeyHasher;
+    #[inline]
+    fn build_hasher(&self) -> KeyHasher {
+        KeyHasher(0)
+    }
+}
+impl std::hash::Hasher for KeyHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        let m = u128::from(self.0) * 0x9E37_79B9_7F4A_7C15;
+        (m as u64) ^ ((m >> 64) as u64)
+    }
+    #[inline]
+    fn write_u64(&mut self, v: u64) {
+        self.0 = v;
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = self.0.rotate_left(8) ^ u64::from(b);
+        }
+    }
+}
+
+/// Selector bits of a coupling key, independent of the map hash.
+#[inline]
+fn select(key: u64) -> u64 {
+    key.wrapping_mul(0xD6E8_FEB8_6659_FD93)
+}
+#[inline]
+fn submap(key: u64) -> usize {
+    (select(key) >> 61) as usize
+}
+/// Owning shard of an accumulator. `shift` is log2 of the shard count.
+#[inline]
+pub(super) fn shard_of(key: u64, shift: u32) -> usize {
+    if shift == 0 {
+        0
+    } else if key >= GROUND {
+        // Ground at global node g (the area statistic is shard 0's).
+        if key == AREA {
+            0
+        } else {
+            (key as u32 as usize) & ((1 << shift) - 1)
+        }
+    } else {
+        ((select(key) >> 32) as usize) & ((1 << shift) - 1)
+    }
+}
+
+/// Accumulators owned by one shard: ground at the global nodes `g` with
+/// `g % shards == s` (stored at `g / shards`), the coupling keys whose
+/// selector picks `s`, and in shard 0 the overlap-area statistic.
+pub(super) struct Shard {
+    ground: Vec<f64>,
+    maps: Vec<HashMap<u64, f64, BuildKey>>,
+    area: f64,
+    keys: usize,
+}
+impl Shard {
+    fn new(index: usize, shift: u32, nodes: usize) -> Result<Self> {
+        let count = (nodes + (1 << shift) - 1 - index) >> shift;
+        let mut ground = Vec::new();
+        ground
+            .try_reserve_exact(count)
+            .map_err(|_| budget("extraction ground accumulator allocation"))?;
+        ground.resize(count, 0.0);
+        Ok(Self {
+            ground,
+            maps: (0..SUBMAPS).map(|_| HashMap::default()).collect(),
+            area: 0.0,
+            keys: 0,
+        })
+    }
+    /// The coupling value of `key` (created at 0.0) and whether it is new.
+    #[inline]
+    fn coupling(&mut self, key: u64) -> (&mut f64, bool) {
+        match self.maps[submap(key)].entry(key) {
+            Entry::Occupied(e) => (e.into_mut(), false),
+            Entry::Vacant(e) => {
+                self.keys += 1;
+                (e.insert(0.0), true)
+            }
+        }
+    }
+    /// Applies one shard's grouped records (consecutive records of one
+    /// accumulator are in their run order). Returns the new coupling keys.
+    fn apply_grouped(&mut self, ops: &[Op], shift: u32) -> usize {
+        let mut fresh = 0;
+        let mut at = 0;
+        while at < ops.len() {
+            let key = ops[at].key;
+            let value = if key == AREA {
+                &mut self.area
+            } else if key >= GROUND {
+                &mut self.ground[(key as u32 as usize) >> shift]
+            } else {
+                let (value, new) = self.coupling(key);
+                fresh += usize::from(new);
+                value
+            };
+            while at < ops.len() && ops[at].key == key {
+                *value += ops[at].pf;
+                at += 1;
+            }
+        }
+        fresh
+    }
+}
+
+/// Every network accumulator of the strip phase, split into shards.
+pub(super) struct Accumulators {
+    shards: Vec<Shard>,
+    shift: u32,
+}
+impl Accumulators {
+    /// `shards` is rounded up to a power of two; `area` seeds the overlap
+    /// statistic.
+    pub(super) fn new(shards: usize, nodes: usize, area: f64) -> Result<Self> {
+        let count = shards.clamp(1, MAX_SHARDS).next_power_of_two();
+        let shift = count.trailing_zeros();
+        let mut out = Self {
+            shards: (0..count)
+                .map(|s| Shard::new(s, shift, nodes))
+                .collect::<Result<_>>()?,
+            shift,
+        };
+        out.shards[0].area = area;
+        Ok(out)
+    }
+    pub(super) fn keys(&self) -> usize {
+        self.shards.iter().map(|s| s.keys).sum()
+    }
+    pub(super) fn area(&self) -> f64 {
+        self.shards[0].area
+    }
+    /// Accumulated ground capacitance at global node `g`.
+    pub(super) fn ground(&self, g: u32) -> f64 {
+        let g = g as usize;
+        self.shards[g & ((1 << self.shift) - 1)].ground[g >> self.shift]
+    }
+    /// Every coupling `(key, pF)` in ascending key order. Maps are released
+    /// one at a time as they are moved out.
+    pub(super) fn into_sorted_couplings(self) -> Result<Vec<(u64, f64)>> {
+        let mut out = Vec::new();
+        out.try_reserve_exact(self.keys())
+            .map_err(|_| budget("extraction coupling list allocation"))?;
+        for shard in self.shards {
+            let Shard { ground, maps, .. } = shard;
+            drop(ground);
+            for map in maps {
+                out.extend(map);
+            }
+        }
+        // Keys are unique, so the unstable sort is deterministic.
+        use rayon::slice::ParallelSliceMut;
+        out.par_sort_unstable_by_key(|c| c.0);
+        Ok(out)
+    }
+}
+
+/// The serial sink: applies each record immediately, exactly like the
+/// original loop (budget check after every coupling insertion).
 pub(super) struct Commit<'n> {
-    nets: &'n mut [RcNet],
-    coupling: &'n mut BTreeMap<CouplingKey, f64>,
+    shards: Vec<&'n mut Shard>,
+    shift: u32,
     stats: &'n mut ExtractStats,
     max_couplings: usize,
+    keys: usize,
 }
 impl<'n> Commit<'n> {
     pub(super) fn new(
-        nets: &'n mut [RcNet],
-        coupling: &'n mut BTreeMap<CouplingKey, f64>,
+        acc: &'n mut Accumulators,
         stats: &'n mut ExtractStats,
         max_couplings: usize,
     ) -> Self {
+        let keys = acc.keys();
         Self {
-            nets,
-            coupling,
+            shift: acc.shift,
+            shards: acc.shards.iter_mut().collect(),
             stats,
             max_couplings,
+            keys,
         }
     }
     pub(super) fn stats(&mut self) -> &mut ExtractStats {
@@ -78,31 +262,19 @@ impl<'n> Commit<'n> {
     }
     #[inline]
     fn apply(&mut self, op: Op) -> Result<()> {
-        match op {
-            Op::Ground { net, node, pf } => self.nets[net as usize].ground[node as usize] += pf,
-            Op::Couple { key, pf } => {
-                *self.coupling.entry(key).or_insert(0.0) += pf;
-                if self.coupling.len() > self.max_couplings {
+        let shard = &mut *self.shards[shard_of(op.key, self.shift)];
+        if op.key == AREA {
+            shard.area += op.pf;
+        } else if op.key >= GROUND {
+            shard.ground[(op.key as u32 as usize) >> self.shift] += op.pf;
+        } else {
+            let (value, new) = shard.coupling(op.key);
+            *value += op.pf;
+            if new {
+                self.keys += 1;
+                if self.keys > self.max_couplings {
                     return Err(budget("extraction coupling capacitors"));
                 }
-            }
-            Op::Area(um2) => self.stats.overlap_area_um2 += um2,
-        }
-        Ok(())
-    }
-    /// Applies coupling additions grouped by key, each group in its original
-    /// order: one map search per distinct key, identical f64 sequences.
-    fn apply_grouped(&mut self, couples: &[(CouplingKey, f64)]) -> Result<()> {
-        let mut at = 0;
-        while at < couples.len() {
-            let key = couples[at].0;
-            let value = self.coupling.entry(key).or_insert(0.0);
-            while at < couples.len() && couples[at].0 == key {
-                *value += couples[at].1;
-                at += 1;
-            }
-            if self.coupling.len() > self.max_couplings {
-                return Err(budget("extraction coupling capacitors"));
             }
         }
         Ok(())
@@ -142,30 +314,36 @@ struct Meta {
 struct Chunk {
     index: u64,
     units: Vec<UnitRef>,
-    /// Ordered accumulations. In a complete chunk only the ground and area
-    /// additions remain here; its coupling additions are in `couples`.
+    /// Ordered accumulations in run order. Emptied once a complete chunk
+    /// is split into `buckets`.
     ops: Vec<Op>,
-    /// A complete chunk's coupling additions, stably sorted by key: each
-    /// key's additions keep their run order, and keys are independent.
-    couples: Vec<(CouplingKey, f64)>,
+    /// A complete chunk's records per shard, stably grouped by accumulator.
+    buckets: Vec<Vec<Op>>,
+    /// Distinct coupling keys per bucket (an upper bound of new keys).
+    distinct: Vec<usize>,
     /// Per computed unit: its record, or `None` when it was deferred to the
     /// serial path. A unit that failed ends the list (the serial path
     /// reproduces its error at commit).
     metas: Vec<Option<Meta>>,
     complete: bool,
+    /// Shards that have not applied this cleared chunk yet.
+    unapplied: AtomicUsize,
 }
 impl Chunk {
     fn bytes(&self) -> usize {
         self.ops.capacity() * size_of::<Op>()
-            + self.couples.capacity() * size_of::<(CouplingKey, f64)>()
+            + self
+                .buckets
+                .iter()
+                .map(|b| b.capacity() * size_of::<Op>())
+                .sum::<usize>()
             + self.metas.capacity() * size_of::<Option<Meta>>()
             + self.units.capacity() * size_of::<UnitRef>()
     }
     /// Computes units in order. A unit beyond a parallel bound is deferred;
-    /// an error ends the chunk.
-    fn compute(&mut self, ctx: &Ctx<'_, '_>, bounds: Bounds, sc: &mut Scratch) {
+    /// an error ends the chunk. A complete chunk is split by shard.
+    fn compute(&mut self, ctx: &Ctx<'_, '_>, bounds: Bounds, shift: u32, sc: &mut Scratch) {
         self.ops.clear();
-        self.couples.clear();
         self.metas.clear();
         self.complete = false;
         let cap = ctx.limits.max_candidates.min(bounds.candidates);
@@ -194,24 +372,35 @@ impl Chunk {
         }
         self.complete = self.metas.iter().all(Option::is_some);
         if self.complete {
-            let couples = &mut self.couples;
-            self.ops.retain(|op| match *op {
-                Op::Couple { key, pf } => {
-                    couples.push((key, pf));
-                    false
-                }
-                _ => true,
-            });
-            couples.sort_by_key(|c| c.0);
+            let shards = 1usize << shift;
+            self.buckets.resize_with(shards, Vec::new);
+            self.distinct.clear();
+            self.distinct.resize(shards, 0);
+            for b in &mut self.buckets {
+                b.clear();
+            }
+            for &op in &self.ops {
+                self.buckets[shard_of(op.key, shift)].push(op);
+            }
+            self.ops.clear();
+            for (bucket, distinct) in self.buckets.iter_mut().zip(&mut self.distinct) {
+                // Stable: each accumulator's records keep their run order.
+                bucket.sort_by_key(|op| op.key);
+                *distinct = bucket
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, op)| op.key < GROUND && (i == 0 || bucket[i - 1].key != op.key))
+                    .count();
+            }
         }
     }
 }
 
 /// Upper bound of one chunk's transcript (with vector growth, plus the
-/// sorted coupling copy) and metadata.
+/// split copy) and metadata.
 fn chunk_bytes(bounds: Bounds, units: usize) -> u64 {
     (bounds.chunk_ops as u64)
-        .saturating_mul((2 * size_of::<Op>() + 2 * size_of::<(CouplingKey, f64)>()) as u64)
+        .saturating_mul(4 * size_of::<Op>() as u64)
         .saturating_add(
             (units as u64)
                 .saturating_mul((size_of::<Option<Meta>>() + size_of::<UnitRef>()) as u64),
@@ -259,14 +448,26 @@ pub(super) fn parallel_bytes(
         .saturating_mul(lane_bytes(bounds, limits, instances))
         .saturating_add(bounds.pending_bytes as u64)
 }
+/// Accumulator shards for `lanes`: one for the serial path, otherwise the
+/// lane count rounded up to a power of two.
+pub(super) fn shard_count(lanes: usize, limits: &ExtractLimits) -> usize {
+    if lanes <= 1 && limits.tile_units == 0 {
+        1
+    } else {
+        lanes.clamp(1, MAX_SHARDS).next_power_of_two()
+    }
+}
 
 /// Phase timings and unit counts for the private profile.
 #[derive(Default)]
 pub(super) struct Report {
     pub lanes: usize,
+    pub shards: usize,
     pub chunks: u64,
     pub units: usize,
     pub serial_units: usize,
+    /// Chunks committed at a barrier.
+    pub barriers: usize,
     pub ops: usize,
     pub compute_ns: u128,
     pub commit_ns: u128,
@@ -306,84 +507,272 @@ struct Source<I> {
     done: bool,
 }
 struct Pending {
-    chunks: BTreeMap<u64, Chunk>,
+    chunks: BTreeMap<u64, Arc<Chunk>>,
     bytes: usize,
     spare: Vec<Chunk>,
 }
-struct Accum<'n> {
-    commit: Commit<'n>,
+/// One shard's accumulators and the next chunk it applies.
+struct Slot<'n> {
+    acc: &'n mut Shard,
     turn: u64,
+}
+/// In-order chunk clearance: statistics, cumulative work and budgets.
+struct Leader<'n> {
+    stats: &'n mut ExtractStats,
+    /// Next chunk to clear.
+    turn: u64,
+    /// Coupling keys after every cleared chunk is applied, plus `savings`:
+    /// `bound - savings` never undercounts the keys.
+    bound: usize,
     serial: Option<Scratch>,
     error: Option<Error>,
     report: Report,
-    instances: usize,
 }
-impl Accum<'_> {
-    /// Applies one chunk in run order; units it lacks run serially here.
-    fn apply(&mut self, ctx: &Ctx<'_, '_>, chunk: &Chunk) -> Result<()> {
+
+struct Shared<'s, 'n> {
+    shift: u32,
+    max_couplings: usize,
+    instances: usize,
+    shards: Vec<Mutex<Slot<'n>>>,
+    /// Lock-free copies of each shard's turn.
+    turns: Vec<AtomicU64>,
+    /// Chunks below this are cleared (or committed at a barrier).
+    cleared: AtomicU64,
+    /// Over applied shard records: distinct keys minus new keys.
+    savings: AtomicUsize,
+    leader: Mutex<Leader<'n>>,
+    pending: &'s Mutex<Pending>,
+    space: &'s Condvar,
+    failed: &'s AtomicBool,
+    commit_ns: AtomicUsize,
+}
+
+/// The leader's serial scratch, allocated on first use.
+fn scratch(serial: &mut Option<Scratch>, instances: usize) -> Result<&mut Scratch> {
+    Ok(match serial {
+        Some(sc) => sc,
+        None => serial.insert(Scratch::new(instances)?),
+    })
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl<'n> Shared<'_, 'n> {
+    /// Applies chunk `slot.turn` to shard `s`; the last shard releases it.
+    fn apply_next(&self, s: usize, slot: &mut Slot<'n>) {
+        let index = slot.turn;
+        let chunk = lock(self.pending)
+            .chunks
+            .get(&index)
+            .cloned()
+            .expect("a cleared chunk stays pending until every shard applied it");
+        let fresh = slot.acc.apply_grouped(&chunk.buckets[s], self.shift);
+        self.savings
+            .fetch_add(chunk.distinct[s] - fresh, Ordering::AcqRel);
+        slot.turn += 1;
+        self.turns[s].store(slot.turn, Ordering::Release);
+        let last = chunk.unapplied.fetch_sub(1, Ordering::AcqRel) == 1;
+        drop(chunk);
+        if last {
+            self.release(index);
+        }
+    }
+    /// Removes a fully committed chunk, keeping a small buffer for reuse.
+    fn release(&self, index: u64) {
+        let mut p = lock(self.pending);
+        if let Some(c) = p.chunks.remove(&index) {
+            p.bytes -= c.bytes();
+            if let Ok(c) = Arc::try_unwrap(c)
+                && p.spare.len() < self.shards.len().max(2)
+                && c.bytes() <= SPARE_BYTES
+            {
+                p.spare.push(c);
+            }
+        }
+        drop(p);
+        self.space.notify_all();
+    }
+    /// Applies every cleared chunk to shard `s` unless another lane holds
+    /// it. Whoever holds a shard re-checks after releasing it, so a chunk
+    /// cleared meanwhile is never left behind.
+    fn drain(&self, s: usize) {
+        loop {
+            if self.turns[s].load(Ordering::Acquire) >= self.cleared.load(Ordering::Acquire) {
+                return;
+            }
+            let Ok(mut slot) = self.shards[s].try_lock() else {
+                return;
+            };
+            let started = std::time::Instant::now();
+            while slot.turn < self.cleared.load(Ordering::Acquire) {
+                self.apply_next(s, &mut slot);
+            }
+            drop(slot);
+            self.commit_ns
+                .fetch_add(started.elapsed().as_nanos() as usize, Ordering::Relaxed);
+        }
+    }
+    /// Every shard applies every chunk below `upto`; the returned guards
+    /// hold all shards at that point.
+    fn barrier(&self, upto: u64) -> Vec<MutexGuard<'_, Slot<'n>>> {
+        let mut guards = Vec::with_capacity(self.shards.len());
+        for (s, m) in self.shards.iter().enumerate() {
+            let mut slot = lock(m);
+            while slot.turn < upto {
+                self.apply_next(s, &mut slot);
+            }
+            guards.push(slot);
+        }
+        guards
+    }
+    /// Clears every pending chunk in order unless another lane leads.
+    fn lead(&self, ctx: &Ctx<'_, '_>) {
+        loop {
+            let Ok(mut leader) = self.leader.try_lock() else {
+                return;
+            };
+            let started = std::time::Instant::now();
+            while leader.error.is_none() {
+                let turn = leader.turn;
+                let Some(chunk) = lock(self.pending).chunks.get(&turn).cloned() else {
+                    break;
+                };
+                if let Err(e) = self.clear(ctx, &mut leader, chunk) {
+                    leader.error = Some(e);
+                    self.failed.store(true, Ordering::Release);
+                    self.space.notify_all();
+                }
+            }
+            drop(leader);
+            self.commit_ns
+                .fetch_add(started.elapsed().as_nanos() as usize, Ordering::Relaxed);
+            let next = self.cleared.load(Ordering::Acquire);
+            if self.failed.load(Ordering::Acquire) || !lock(self.pending).chunks.contains_key(&next)
+            {
+                return;
+            }
+        }
+    }
+    /// Clears chunk `leader.turn`, or commits it at a barrier.
+    fn clear(&self, ctx: &Ctx<'_, '_>, leader: &mut Leader<'n>, chunk: Arc<Chunk>) -> Result<()> {
         let limits = ctx.limits;
+        let before = leader.report.units;
         if chunk.complete {
-            // Grouped coupling additions are exact when no budget can fail
-            // inside the chunk; otherwise the serial path recomputes every
-            // unit, failing at the exact serial point.
+            leader.report.units += chunk.units.len();
+            if before / 4096 != leader.report.units / 4096 || before == 0 {
+                guard_memory(limits)?;
+            }
+            // Grouped records are exact when no budget can fail inside the
+            // chunk; otherwise the serial path recomputes every unit,
+            // failing at the exact serial point.
             let work = chunk
                 .metas
                 .iter()
                 .flatten()
-                .try_fold(self.commit.stats().work, |w, m| w.checked_add(m.work))
+                .try_fold(leader.stats.work, |w, m| w.checked_add(m.work))
                 .filter(|&w| w <= limits.max_work);
-            let fits = self
-                .commit
-                .coupling
-                .len()
-                .checked_add(chunk.couples.len())
-                .is_some_and(|n| n <= self.commit.max_couplings);
-            let before = self.report.units;
-            self.report.units += chunk.units.len();
-            if before / 4096 != self.report.units / 4096 || before == 0 {
-                guard_memory(limits)?;
-            }
-            if let (Some(work), true) = (work, fits) {
-                for &op in &chunk.ops {
-                    self.commit.apply(op)?;
-                }
-                self.commit.apply_grouped(&chunk.couples)?;
-                self.commit.stats().work = work;
+            let distinct: usize = chunk.distinct.iter().sum();
+            let fits = |keys: usize| {
+                keys.checked_add(distinct)
+                    .is_some_and(|n| n <= self.max_couplings)
+            };
+            let estimate = leader
+                .bound
+                .saturating_sub(self.savings.load(Ordering::Acquire));
+            let mut guards = None;
+            let clear = work.is_some()
+                && (fits(estimate) || {
+                    // Exact count once every earlier chunk is applied.
+                    let g = self.barrier(leader.turn);
+                    let exact = leader
+                        .bound
+                        .saturating_sub(self.savings.load(Ordering::Acquire));
+                    guards = Some(g);
+                    fits(exact)
+                });
+            if let (true, Some(work)) = (clear, work) {
+                drop(guards);
+                leader.stats.work = work;
                 for meta in chunk.metas.iter().flatten() {
-                    meta.counts.add_to(self.commit.stats());
+                    meta.counts.add_to(leader.stats);
                 }
-                self.report.ops += chunk.ops.len() + chunk.couples.len();
+                leader.report.ops += chunk.buckets.iter().map(Vec::len).sum::<usize>();
+                leader.bound += distinct;
+                chunk.unapplied.store(self.shards.len(), Ordering::Release);
+                drop(chunk);
+                leader.turn += 1;
+                self.cleared.store(leader.turn, Ordering::Release);
                 return Ok(());
             }
+            let mut guards = match guards {
+                Some(g) => g,
+                None => self.barrier(leader.turn),
+            };
+            leader.report.barriers += 1;
+            let keys = self.serial_chunk(ctx, leader, &mut guards, &chunk, true)?;
+            return self.finish_barrier(leader, guards, chunk, keys);
+        }
+        let mut guards = self.barrier(leader.turn);
+        leader.report.barriers += 1;
+        let keys = self.serial_chunk(ctx, leader, &mut guards, &chunk, false)?;
+        self.finish_barrier(leader, guards, chunk, keys)
+    }
+    /// Commits a chunk with every shard held: a complete chunk is recomputed
+    /// unit by unit (a budget may fail inside it); otherwise lane records
+    /// are applied unit by unit and unfinished units are computed here.
+    fn serial_chunk(
+        &self,
+        ctx: &Ctx<'_, '_>,
+        leader: &mut Leader<'n>,
+        guards: &mut [MutexGuard<'_, Slot<'n>>],
+        chunk: &Chunk,
+        recompute: bool,
+    ) -> Result<usize> {
+        let limits = ctx.limits;
+        let keys = leader
+            .bound
+            .saturating_sub(self.savings.load(Ordering::Acquire));
+        let Leader {
+            stats,
+            serial,
+            report,
+            ..
+        } = leader;
+        let mut commit = Commit {
+            shards: guards.iter_mut().map(|g| &mut *g.acc).collect(),
+            shift: self.shift,
+            stats,
+            max_couplings: self.max_couplings,
+            keys,
+        };
+        debug_assert_eq!(
+            commit.keys,
+            commit.shards.iter().map(|s| s.keys).sum::<usize>()
+        );
+        let instances = self.instances;
+        if recompute {
             for &u in &chunk.units {
-                self.report.serial_units += 1;
-                let sc = match &mut self.serial {
-                    Some(sc) => sc,
-                    None => self.serial.insert(Scratch::new(self.instances)?),
-                };
-                serial_unit(ctx, u, sc, &mut self.commit)?;
+                report.serial_units += 1;
+                serial_unit(ctx, u, scratch(serial, instances)?, &mut commit)?;
             }
-            return Ok(());
+            return Ok(commit.keys);
         }
         let mut from = 0;
         for (j, &u) in chunk.units.iter().enumerate() {
-            if self.report.units.is_multiple_of(4096) {
+            if report.units.is_multiple_of(4096) {
                 guard_memory(limits)?;
             }
-            self.report.units += 1;
+            report.units += 1;
             let Some(meta) = chunk.metas.get(j).copied().flatten() else {
                 // Not finished by its lane: the serial path reproduces an
                 // error exactly, or completes a deferred unit.
-                self.report.serial_units += 1;
-                let sc = match &mut self.serial {
-                    Some(sc) => sc,
-                    None => self.serial.insert(Scratch::new(self.instances)?),
-                };
-                serial_unit(ctx, u, sc, &mut self.commit)?;
+                report.serial_units += 1;
+                serial_unit(ctx, u, scratch(serial, instances)?, &mut commit)?;
                 continue;
             };
-            let total = self
-                .commit
+            let total = commit
                 .stats
                 .work
                 .checked_add(meta.work)
@@ -392,27 +781,48 @@ impl Accum<'_> {
                 // Cumulative work overflows inside this unit: replay it
                 // serially from the committed work to fail at the exact
                 // serial charge.
-                let sc = match &mut self.serial {
-                    Some(sc) => sc,
-                    None => self.serial.insert(Scratch::new(self.instances)?),
-                };
-                serial_unit(ctx, u, sc, &mut self.commit)?;
+                serial_unit(ctx, u, scratch(serial, instances)?, &mut commit)?;
                 return Err(invalid("strip work overflow did not reproduce serially"));
             };
-            self.commit.stats().work = total;
+            commit.stats.work = total;
             for &op in &chunk.ops[from..meta.ops_end] {
-                self.commit.apply(op)?;
+                commit.apply(op)?;
             }
-            self.report.ops += meta.ops_end - from;
+            report.ops += meta.ops_end - from;
             from = meta.ops_end;
-            meta.counts.add_to(self.commit.stats());
+            meta.counts.add_to(commit.stats);
         }
+        Ok(commit.keys)
+    }
+    /// Advances every shard past a chunk committed at a barrier.
+    fn finish_barrier(
+        &self,
+        leader: &mut Leader<'n>,
+        guards: Vec<MutexGuard<'_, Slot<'n>>>,
+        chunk: Arc<Chunk>,
+        keys: usize,
+    ) -> Result<()> {
+        let next = leader.turn + 1;
+        for (s, mut g) in guards.into_iter().enumerate() {
+            g.turn = next;
+            self.turns[s].store(next, Ordering::Release);
+        }
+        leader.bound = keys.saturating_add(self.savings.load(Ordering::Acquire));
+        let index = chunk.index;
+        drop(chunk);
+        leader.turn = next;
+        self.cleared.store(next, Ordering::Release);
+        self.release(index);
         Ok(())
     }
-}
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+    /// Commit work any lane can do: clear chunks, then apply shards.
+    fn help(&self, ctx: &Ctx<'_, '_>, first: usize) {
+        self.lead(ctx);
+        let n = self.shards.len();
+        for k in 0..n {
+            self.drain((first + k) % n);
+        }
+    }
 }
 
 /// Computes and commits every unit. `lanes <= 1` without a forced chunk
@@ -423,13 +833,15 @@ pub(super) fn run(
     bounds: Bounds,
     lanes: usize,
     instances: usize,
-    commit: Commit<'_>,
+    acc: &mut Accumulators,
+    stats: &mut ExtractStats,
 ) -> Result<Report> {
     let limits = ctx.limits;
     if lanes <= 1 && limits.tile_units == 0 {
-        let mut commit = commit;
+        let mut commit = Commit::new(acc, stats, limits.max_couplings);
         let mut report = Report {
             lanes: 1,
+            shards: commit.shards.len(),
             ..Default::default()
         };
         let mut sc = Scratch::new(instances)?;
@@ -447,6 +859,7 @@ pub(super) fn run(
     }
     let lanes = lanes.max(1);
     let per_chunk = chunk_units(limits);
+    let shift = acc.shift;
     let mut scratch = Vec::with_capacity(lanes);
     for _ in 0..lanes {
         scratch.push(Scratch::new(instances)?);
@@ -462,67 +875,42 @@ pub(super) fn run(
         spare: Vec::new(),
     });
     let space = Condvar::new();
-    let accum = Mutex::new(Accum {
-        commit,
-        turn: 0,
-        serial: None,
-        error: None,
-        report: Report {
-            lanes,
-            ..Default::default()
-        },
-        instances,
-    });
-    let turn = AtomicU64::new(0);
     let failed = AtomicBool::new(false);
     let compute_ns = AtomicUsize::new(0);
-    let commit_ns = AtomicUsize::new(0);
-    // Commit every ready chunk in order. Whoever holds the accumulators
-    // re-checks after releasing them, so a chunk deposited meanwhile (whose
-    // depositor found them busy) is never left behind.
-    let commit_ready = || {
-        loop {
-            let Ok(mut acc) = accum.try_lock() else {
-                return;
-            };
-            let started = std::time::Instant::now();
-            while acc.error.is_none() {
-                let chunk = {
-                    let mut p = lock(&pending);
-                    let chunk = p.chunks.remove(&acc.turn);
-                    if let Some(c) = &chunk {
-                        p.bytes -= c.bytes();
-                    }
-                    chunk
-                };
-                let Some(chunk) = chunk else {
-                    break;
-                };
-                space.notify_all();
-                if let Err(e) = acc.apply(ctx, &chunk) {
-                    acc.error = Some(e);
-                    failed.store(true, Ordering::Release);
-                    space.notify_all();
-                }
-                acc.turn += 1;
-                turn.store(acc.turn, Ordering::Release);
-                let mut p = lock(&pending);
-                if p.spare.len() < lanes && chunk.bytes() <= SPARE_BYTES {
-                    p.spare.push(chunk);
-                }
-            }
-            commit_ns.fetch_add(started.elapsed().as_nanos() as usize, Ordering::Relaxed);
-            drop(acc);
-            let t = turn.load(Ordering::Acquire);
-            if failed.load(Ordering::Acquire) || !lock(&pending).chunks.contains_key(&t) {
-                return;
-            }
-        }
+    let shard_count = acc.shards.len();
+    let shared = Shared {
+        shift,
+        max_couplings: limits.max_couplings,
+        instances,
+        shards: acc
+            .shards
+            .iter_mut()
+            .map(|acc| Mutex::new(Slot { acc, turn: 0 }))
+            .collect(),
+        turns: (0..shard_count).map(|_| AtomicU64::new(0)).collect(),
+        cleared: AtomicU64::new(0),
+        savings: AtomicUsize::new(0),
+        leader: Mutex::new(Leader {
+            stats,
+            turn: 0,
+            bound: 0,
+            serial: None,
+            error: None,
+            report: Report {
+                lanes,
+                shards: shard_count,
+                ..Default::default()
+            },
+        }),
+        pending: &pending,
+        space: &space,
+        failed: &failed,
+        commit_ns: AtomicUsize::new(0),
     };
     rayon::scope(|s| {
-        for sc in scratch.iter_mut() {
+        for (lane, sc) in scratch.iter_mut().enumerate() {
             let (source, pending, space, failed) = (&source, &pending, &space, &failed);
-            let (commit_ready, compute_ns) = (&commit_ready, &compute_ns);
+            let (shared, compute_ns) = (&shared, &compute_ns);
             s.spawn(move |_| {
                 // A panicking lane must not leave the others waiting for
                 // its chunk.
@@ -537,16 +925,23 @@ pub(super) fn run(
                 }
                 let _abort = Abort(failed, space);
                 loop {
-                    let mut chunk = {
-                        let mut p = lock(pending);
-                        while p.bytes > bounds.pending_bytes && !failed.load(Ordering::Acquire) {
-                            p = space.wait(p).unwrap_or_else(|e| e.into_inner());
+                    // Wait for room, committing whatever is ready meanwhile.
+                    loop {
+                        if failed.load(Ordering::Acquire) {
+                            return;
                         }
-                        p.spare.pop().unwrap_or_default()
-                    };
-                    if failed.load(Ordering::Acquire) {
-                        return;
+                        if lock(pending).bytes <= bounds.pending_bytes {
+                            break;
+                        }
+                        shared.help(ctx, lane);
+                        let p = lock(pending);
+                        if p.bytes > bounds.pending_bytes && !failed.load(Ordering::Acquire) {
+                            let _ = space
+                                .wait_timeout(p, std::time::Duration::from_millis(1))
+                                .unwrap_or_else(|e| e.into_inner());
+                        }
                     }
+                    let mut chunk = lock(pending).spare.pop().unwrap_or_default();
                     {
                         let mut src = lock(source);
                         if src.done {
@@ -564,79 +959,170 @@ pub(super) fn run(
                         src.next += 1;
                     }
                     let started = std::time::Instant::now();
-                    chunk.compute(ctx, bounds, sc);
+                    chunk.compute(ctx, bounds, shift, sc);
                     compute_ns.fetch_add(started.elapsed().as_nanos() as usize, Ordering::Relaxed);
                     {
                         let mut p = lock(pending);
                         p.bytes += chunk.bytes();
-                        p.chunks.insert(chunk.index, chunk);
+                        p.chunks.insert(chunk.index, Arc::new(chunk));
                     }
-                    commit_ready();
+                    shared.help(ctx, lane);
                 }
             });
         }
     });
     let chunks = source.into_inner().unwrap_or_else(|e| e.into_inner()).next;
-    let acc = accum.into_inner().unwrap_or_else(|e| e.into_inner());
-    if let Some(e) = acc.error {
+    // Clear and apply whatever the lanes left (normally nothing).
+    if !failed.load(Ordering::Acquire) {
+        shared.lead(ctx);
+        drop(shared.barrier(shared.cleared.load(Ordering::Acquire)));
+    }
+    let turns: Vec<u64> = shared
+        .turns
+        .iter()
+        .map(|t| t.load(Ordering::Acquire))
+        .collect();
+    let commit_ns = shared.commit_ns.load(Ordering::Relaxed);
+    let leader = shared
+        .leader
+        .into_inner()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(e) = leader.error {
         return Err(e);
     }
-    if acc.turn != chunks {
+    if leader.turn != chunks || turns.iter().any(|&t| t != chunks) {
         return Err(invalid("extraction chunks left uncommitted"));
     }
-    let mut report = acc.report;
+    let mut report = leader.report;
     report.chunks = chunks;
     report.compute_ns = compute_ns.into_inner() as u128;
-    report.commit_ns = commit_ns.into_inner() as u128;
+    report.commit_ns = commit_ns as u128;
     Ok(report)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extract::RcNet;
 
-    #[test]
-    fn grouped_coupling_additions_match_ordered_updates_bit_for_bit() {
-        // A skewed key stream (hot and cold keys) with non-associative
-        // values: grouping by key with a stable sort keeps every key's
-        // addition order, so every accumulator ends with identical bits.
+    /// A skewed stream of ground, coupling and area records with
+    /// non-associative values (hot and cold accumulators).
+    fn stream(n: usize, nodes: u32) -> Vec<Op> {
         let mut seed = 11u64;
-        let mut next = || {
+        let mut next = move || {
             seed = seed
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1_442_695_040_888_963_407);
             seed >> 33
         };
-        let ops: Vec<(CouplingKey, f64)> = (0..20_000)
+        (0..n)
             .map(|i| {
                 let r = next();
-                let k = if i % 3 == 0 { r % 7 } else { r % 400 } as u32;
-                (
-                    ((k, k % 5), (k + 1, 3)),
-                    (r % 1000) as f64 * 1.000_000_1e-3 + 1e-17,
-                )
+                let pf = (r % 1000) as f64 * 1.000_000_1e-3 + 1e-17;
+                match r % 7 {
+                    0 | 1 => Op::ground((r >> 3) as u32 % nodes, pf),
+                    2 => Op::area(pf),
+                    _ => {
+                        let k = if i % 3 == 0 { r % 7 } else { r % 400 } as u32;
+                        Op::couple(k % nodes, (k * 7 + 1) % nodes, pf)
+                    }
+                }
             })
+            .collect()
+    }
+    /// The original accumulators: a `BTreeMap` keyed in run order.
+    fn reference(ops: &[Op], nodes: usize) -> (Vec<u64>, Vec<(u64, u64)>, u64) {
+        let mut ground = vec![0.0f64; nodes];
+        let mut coupling = BTreeMap::<u64, f64>::new();
+        let mut area = 0.0f64;
+        for op in ops {
+            if op.key == AREA {
+                area += op.pf;
+            } else if op.key >= GROUND {
+                ground[op.key as u32 as usize] += op.pf;
+            } else {
+                *coupling.entry(op.key).or_insert(0.0) += op.pf;
+            }
+        }
+        (
+            ground.iter().map(|v| v.to_bits()).collect(),
+            coupling.iter().map(|(k, v)| (*k, v.to_bits())).collect(),
+            area.to_bits(),
+        )
+    }
+    fn bits(acc: Accumulators, nodes: usize) -> (Vec<u64>, Vec<(u64, u64)>, u64) {
+        let ground = (0..nodes as u32).map(|g| acc.ground(g).to_bits()).collect();
+        let area = acc.area().to_bits();
+        let couplings = acc
+            .into_sorted_couplings()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (*k, v.to_bits()))
             .collect();
-        let mut direct = BTreeMap::new();
-        for &(key, pf) in &ops {
-            *direct.entry(key).or_insert(0.0) += pf;
+        (ground, couplings, area)
+    }
+
+    #[test]
+    fn sharded_records_match_ordered_updates_bit_for_bit() {
+        let nodes = 97usize;
+        let ops = stream(30_000, nodes as u32);
+        let want = reference(&ops, nodes);
+        let mut stats = ExtractStats::default();
+        // The serial sink, one record at a time, at every shard count.
+        for shards in [1, 2, 4, 8] {
+            let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
+            let mut commit = Commit::new(&mut acc, &mut stats, usize::MAX);
+            for &op in &ops {
+                commit.apply(op).unwrap();
+            }
+            assert_eq!(acc.keys(), want.1.len());
+            assert_eq!(bits(acc, nodes), want);
         }
-        // Applied in chunks, like committed transcripts.
-        let mut grouped = BTreeMap::new();
-        let (mut nets, mut stats): (Vec<RcNet>, _) = (Vec::new(), ExtractStats::default());
-        let mut commit = Commit::new(&mut nets, &mut grouped, &mut stats, usize::MAX);
-        for chunk in ops.chunks(777) {
-            let mut sorted = chunk.to_vec();
-            sorted.sort_by_key(|c| c.0);
-            commit.apply_grouped(&sorted).unwrap();
+        // Chunks split by shard and grouped by accumulator, applied shard
+        // by shard in chunk order (shards progress independently).
+        for shift in 0..4u32 {
+            let mut acc = Accumulators::new(1 << shift, nodes, 0.0).unwrap();
+            let chunks: Vec<Vec<Vec<Op>>> = ops
+                .chunks(777)
+                .map(|chunk| {
+                    let mut buckets = vec![Vec::new(); 1 << shift];
+                    for &op in chunk {
+                        buckets[shard_of(op.key, shift)].push(op);
+                    }
+                    for b in &mut buckets {
+                        b.sort_by_key(|op| op.key);
+                    }
+                    buckets
+                })
+                .collect();
+            for (s, shard) in acc.shards.iter_mut().enumerate().rev() {
+                for chunk in &chunks {
+                    shard.apply_grouped(&chunk[s], shift);
+                }
+            }
+            assert_eq!(bits(acc, nodes), want);
         }
-        let bits = |m: &BTreeMap<CouplingKey, f64>| {
-            m.iter().map(|(k, v)| (*k, v.to_bits())).collect::<Vec<_>>()
-        };
-        assert_eq!(bits(&direct), bits(&grouped));
-        let summed: f64 = ops.iter().map(|o| o.1).sum();
-        assert!(direct.values().sum::<f64>() > 0.99 * summed);
+    }
+
+    #[test]
+    fn coupling_budget_fails_at_the_first_excess_key() {
+        let nodes = 50usize;
+        let ops = stream(5_000, nodes as u32);
+        let keys = reference(&ops, nodes).1.len();
+        for shards in [1, 4] {
+            let mut stats = ExtractStats::default();
+            let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
+            let mut commit = Commit::new(&mut acc, &mut stats, keys - 1);
+            let failed = ops.iter().position(|&op| commit.apply(op).is_err());
+            // The first record that creates key number `keys`.
+            let mut seen = std::collections::HashSet::new();
+            let last_new = ops
+                .iter()
+                .enumerate()
+                .filter(|(_, op)| op.key < GROUND && seen.insert(op.key))
+                .map(|(i, _)| i)
+                .last();
+            assert_eq!(failed, last_new);
+        }
     }
 
     #[test]
@@ -664,5 +1150,26 @@ mod tests {
         assert_eq!(admit(b, 64, 1 << 40, &limits, usize::MAX), 1);
         assert_eq!(admit(b, 64, u64::MAX, &limits, usize::MAX), 64);
         assert!(need(4) < 64 << 20);
+    }
+
+    #[test]
+    fn shard_counts_are_powers_of_two_and_serial_uses_one() {
+        let serial = ExtractLimits::default();
+        let forced = ExtractLimits {
+            tile_units: 7,
+            ..Default::default()
+        };
+        assert_eq!(shard_count(1, &serial), 1);
+        assert_eq!(shard_count(1, &forced), 1);
+        assert_eq!(shard_count(3, &serial), 4);
+        assert_eq!(shard_count(4, &serial), 4);
+        assert_eq!(shard_count(1000, &serial), MAX_SHARDS);
+        for shift in 0..6u32 {
+            for key in [0u64, 7, 1 << 40, GROUND | 5, GROUND | 0xFFFF_FFFE, AREA] {
+                assert!(shard_of(key, shift) < 1 << shift);
+            }
+            assert_eq!(shard_of(AREA, shift), 0);
+            assert_eq!(shard_of(GROUND | 13, shift), 13 & ((1 << shift) - 1));
+        }
     }
 }
