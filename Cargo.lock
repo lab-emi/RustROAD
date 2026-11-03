@@ -329,6 +329,7 @@ dependencies = [
  "fs2",
  "libc",
  "memmap2",
+ "rayon",
  "rustroad-core",
  "rustroad-formats",
  "serde",

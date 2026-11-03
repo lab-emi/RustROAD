@@ -302,8 +302,28 @@ pub(crate) fn write_route_table(routes: &Routes, path: &Path) -> Result<RoutesTa
         nets: routes.nets.len(),
     })
 }
-/// Decode a schema 6 route table; every count must match `table`.
-pub(crate) fn decode_route_table(bytes: &[u8], table: &RoutesTable) -> Result<Routes> {
+/// Lowercase hex SHA-256 (the `RoutesTable::sha256` form).
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
+/// How `decode_route_table_with` establishes the table's SHA-256 identity.
+pub(crate) enum RouteSha {
+    /// Hash the bytes now.
+    Compute,
+    /// SHA-256 already computed over exactly these bytes.
+    Known(String),
+    /// The bytes are bound by a matching validation receipt (XXH3-128 of the
+    /// file that passed full validation, whose design.json pins the SHA-256).
+    Receipt,
+}
+/// Decode a schema 6 route table; every count must match `table`. `sha`
+/// says how the table's SHA-256 identity is established.
+pub(crate) fn decode_route_table_with(
+    bytes: &[u8],
+    table: &RoutesTable,
+    sha: RouteSha,
+) -> Result<Routes> {
     let bad = |s: &str| Error::Invalid(format!("route table: {s}"));
     if bytes.len() as u64 != table.bytes
         || !bytes.len().is_multiple_of(64)
@@ -311,8 +331,12 @@ pub(crate) fn decode_route_table(bytes: &[u8], table: &RoutesTable) -> Result<Ro
     {
         return Err(bad("length"));
     }
-    use sha2::{Digest, Sha256};
-    if format!("{:x}", Sha256::digest(bytes)) != table.sha256 {
+    let digest = match sha {
+        RouteSha::Compute => Some(sha256_hex(bytes)),
+        RouteSha::Known(hex) => Some(hex),
+        RouteSha::Receipt => None,
+    };
+    if digest.is_some_and(|hex| hex != table.sha256) {
         return Err(bad("sha256 differs from design.json"));
     }
     let count = [
@@ -1732,7 +1756,12 @@ pub fn route_eco(
 pub(crate) fn revision_bytes(path: &Path, revision: &str) -> Result<u64> {
     let mut total = 0u64;
     for entry in std::fs::read_dir(path.join("revisions").join(revision))? {
-        let meta = entry?.metadata()?;
+        let entry = entry?;
+        // The validation receipt is not loaded; memory estimates exclude it.
+        if entry.file_name() == crate::RECEIPT_FILE {
+            continue;
+        }
+        let meta = entry.metadata()?;
         if meta.is_file() {
             total = total.saturating_add(meta.len());
         }
@@ -1769,6 +1798,23 @@ pub(crate) fn validate_state(
             return Err(fail("routing technology names changed"));
         }
         routing::validate(&input, &state.routes, &state.config.limits)?;
+    }
+    Ok(())
+}
+/// Receipt-backed read: the O(n) index bounds later code relies on (layer,
+/// via kind). Geometry, connectivity and rules were validated at commit.
+pub(crate) fn validate_bounds(state: &RoutingState) -> Result<()> {
+    let layers = state.layers.len();
+    let kinds = state.via_names.len();
+    let r = &state.routes;
+    if state.via_lower_layers.len() != kinds
+        || state.via_lower_layers.iter().any(|&l| l as usize >= layers)
+        || r.wires.iter().any(|w| w.layer as usize >= layers)
+        || r.vias.iter().any(|v| v.kind as usize >= kinds)
+        || r.access.iter().any(|a| a.layer as usize >= layers)
+        || r.patches.iter().any(|p| p.layer as usize >= layers)
+    {
+        return Err(fail("stored route index out of range"));
     }
     Ok(())
 }

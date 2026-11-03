@@ -148,6 +148,15 @@ pub struct Scale {
 }
 impl Scale {
     pub fn coord(self, value: i64, what: &str) -> Result<i32> {
+        if self.divisor == 1 {
+            // Same result as the general path: every value divides exactly.
+            return i32::try_from(value).map_err(|_| {
+                fail(
+                    "GDS_COORDINATE_RANGE",
+                    format!("{what}: coordinate {value} exceeds the GDSII 32-bit range"),
+                )
+            });
+        }
         if value % self.divisor != 0 {
             return Err(fail(
                 "GDS_ODD_COORDINATE",
@@ -175,6 +184,50 @@ impl Scale {
             self.coord(r.ux, what)?,
             self.coord(r.uy, what)?,
         ])
+    }
+    /// `point` whose context string is only built on failure (same error).
+    fn point_lazy(self, p: [i64; 2], what: impl Fn() -> String) -> Result<[i32; 2]> {
+        self.point(p, "").or_else(|_| self.point(p, &what()))
+    }
+    /// `rect` whose context string is only built on failure (same error).
+    fn rect_lazy(self, r: Rect, what: impl Fn() -> String) -> Result<[i32; 4]> {
+        self.rect(r, "").or_else(|_| self.rect(r, &what()))
+    }
+}
+
+/// Items grouped by exported net in input order (compressed rows):
+/// `items[offsets[n]..offsets[n + 1]]` belong to net `n`. Items whose net is
+/// outside `0..nets` are dropped, as the per-net emission never visits them.
+struct ByNet<'a, T> {
+    offsets: Vec<u32>,
+    items: Vec<&'a T>,
+}
+impl<'a, T> ByNet<'a, T> {
+    fn new(nets: usize, source: &'a [T], net_of: &[u32]) -> Self {
+        let mut offsets = vec![0u32; nets + 1];
+        for &n in net_of {
+            if (n as usize) < nets {
+                offsets[n as usize + 1] += 1;
+            }
+        }
+        for i in 1..offsets.len() {
+            offsets[i] += offsets[i - 1];
+        }
+        let mut cursor = offsets[..nets].to_vec();
+        let mut items: Vec<Option<&T>> = vec![None; offsets[nets] as usize];
+        for (item, &n) in source.iter().zip(net_of) {
+            if (n as usize) < nets {
+                items[cursor[n as usize] as usize] = Some(item);
+                cursor[n as usize] += 1;
+            }
+        }
+        Self {
+            offsets,
+            items: items.into_iter().map(|i| i.expect("filled")).collect(),
+        }
+    }
+    fn of(&self, net: usize) -> &[&'a T] {
+        &self.items[self.offsets[net] as usize..self.offsets[net + 1] as usize]
     }
 }
 
@@ -439,6 +492,17 @@ fn wire_rect(start: [i64; 2], end: [i64; 2], width: i64) -> Result<Rect> {
 /// Stream the current revision. Read-only: takes the shared workspace lock.
 pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) -> Result<GdsReport> {
     let snapshot = crate::read(workspace, limits)?;
+    export_snapshot(workspace, &snapshot, options)
+}
+
+/// Stream a snapshot read from `workspace` (`crate::read`, under its shared
+/// lock, which the caller keeps for the duration).
+pub fn export_snapshot(
+    workspace: &Path,
+    snapshot: &crate::Snapshot,
+    options: &ExportOptions,
+) -> Result<GdsReport> {
+    snapshot.require_routes()?;
     let meta = snapshot.metadata();
     if meta.stage != Stage::Placed {
         return Err(fail("GDS_UNPLACED", "place the design before GDS export"));
@@ -628,17 +692,17 @@ pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) ->
     w.begin_structure(top, &FIXED_DATES)?;
     for (i, p) in placed.iter().enumerate() {
         let master = &model.masters[model.instance_masters[i] as usize];
-        let what = format!("instance {}", design.cells[i].name);
+        let what = || format!("instance {}", design.cells[i].name);
         match rustroad_core::placed_orientation_for(design, &design.cells[i], p)? {
-            Orientation::N => w.sref(&master.name, None, scale.point([p.x, p.y], &what)?)?,
+            Orientation::N => w.sref(&master.name, None, scale.point_lazy([p.x, p.y], what)?)?,
             Orientation::FS => {
                 let y =
                     p.y.checked_add(p.height)
-                        .ok_or_else(|| fail("GDS_COORDINATE_RANGE", what.clone()))?;
+                        .ok_or_else(|| fail("GDS_COORDINATE_RANGE", what()))?;
                 w.sref(
                     &master.name,
                     Some(&Strans::reflect_x()),
-                    scale.point([p.x, y], &what)?,
+                    scale.point_lazy([p.x, y], what)?,
                 )?
             }
         }
@@ -651,9 +715,6 @@ pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) ->
         // patches on the routing layer's net purpose.
         let runs = crate::routing::export_runs(bundle, r)
             .map_err(|e| fail("GDS_GEOMETRY", e.to_string()))?;
-        let mut wires: HashMap<u32, Vec<&Wire>> = HashMap::new();
-        let mut routed: HashMap<u32, Vec<&routing::Via>> = HashMap::new();
-        let mut patches: HashMap<u32, Vec<&routing::Patch>> = HashMap::new();
         // Rail ties are drawn with their supply net (net purpose, as DEF NETS).
         let export = crate::routing::ExportNets::new(bundle);
         let net_of = |n: u32| {
@@ -661,15 +722,23 @@ pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) ->
                 .of(n)
                 .map_err(|e| fail("GDS_GEOMETRY", e.to_string()))
         };
-        for wire in &runs {
-            wires.entry(net_of(wire.net)?).or_default().push(wire);
-        }
-        for via in &r.routes.vias {
-            routed.entry(net_of(via.net)?).or_default().push(via);
-        }
-        for patch in &r.routes.patches {
-            patches.entry(net_of(patch.net)?).or_default().push(patch);
-        }
+        // Exported net of every item, resolved in input order (wires, vias,
+        // patches) so the first unmapped net is reported as before.
+        let wire_nets = runs
+            .iter()
+            .map(|w| net_of(w.net))
+            .collect::<Result<Vec<_>>>()?;
+        let via_nets = (r.routes.vias.iter())
+            .map(|v| net_of(v.net))
+            .collect::<Result<Vec<_>>>()?;
+        let patch_nets = (r.routes.patches.iter())
+            .map(|p| net_of(p.net))
+            .collect::<Result<Vec<_>>>()?;
+        let nets = model.nets.len();
+        let wires = ByNet::new(nets, &runs, &wire_nets);
+        let routed = ByNet::new(nets, &r.routes.vias, &via_nets);
+        let patches = ByNet::new(nets, &r.routes.patches, &patch_nets);
+        drop((wire_nets, via_nets, patch_nets));
         counts.stored_wire_records = r.routes.wires.len();
         // Resolve each routing layer's targets and DEF default width once.
         let mut resolved: HashMap<u32, (&[GdsLayer], i64)> = HashMap::new();
@@ -685,27 +754,36 @@ pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) ->
             resolved.insert(layer, v);
             Ok(v)
         };
+        let via_cell: Vec<&str> = r
+            .via_names
+            .iter()
+            .map(|name| via_cells.get(name.as_str()).map_or("", String::as_str))
+            .collect();
         for (ni, net) in model.nets.iter().enumerate() {
-            let what = format!("net {}", net.name);
-            for wire in wires.get(&(ni as u32)).map_or(&[][..], Vec::as_slice) {
+            let what = || format!("net {}", net.name);
+            for wire in wires.of(ni) {
                 let (targets, width) = resolve(wire.layer)?;
-                let rect = scale.rect(wire_rect(wire.start, wire.end, width)?, &what)?;
+                let rect = scale.rect_lazy(wire_rect(wire.start, wire.end, width)?, what)?;
                 for t in targets {
                     w.rectangle(t.0, t.1, rect)?;
                 }
                 counts.routed_wires += 1;
             }
-            for via in routed.get(&(ni as u32)).map_or(&[][..], Vec::as_slice) {
+            for via in routed.of(ni) {
                 let name = &r.via_names[via.kind as usize];
-                w.sref(&via_cells[name.as_str()], None, scale.point(via.at, &what)?)?;
+                let cell = match via_cell[via.kind as usize] {
+                    "" => via_cells[name.as_str()].as_str(),
+                    cell => cell,
+                };
+                w.sref(cell, None, scale.point_lazy(via.at, what)?)?;
                 counts.routed_vias += 1;
             }
-            for patch in patches.get(&(ni as u32)).map_or(&[][..], Vec::as_slice) {
+            for patch in patches.of(ni) {
                 let (targets, _) = resolve(patch.layer)?;
                 if !(patch.rect.lx < patch.rect.ux && patch.rect.ly < patch.rect.uy) {
-                    return Err(fail("GDS_GEOMETRY", format!("{what}: empty patch")));
+                    return Err(fail("GDS_GEOMETRY", format!("{}: empty patch", what())));
                 }
-                let rect = scale.rect(patch.rect, &what)?;
+                let rect = scale.rect_lazy(patch.rect, what)?;
                 for t in targets {
                     w.rectangle(t.0, t.1, rect)?;
                 }

@@ -2687,14 +2687,21 @@ pub(super) fn export_verilog_legacy(
     Ok(())
 }
 
+/// DEF of a loaded snapshot. The arguments must come from a `Snapshot`
+/// (`Snapshot::export_def` is the only caller): the load already validated
+/// the prepared layout (`validate_state`) and the routing geometry, either
+/// directly or through a matching commit-time validation receipt, so they are
+/// not re-derived here.
 pub(super) fn export_def(
     design: &Design,
     placed: &[Placed],
     bundle: &PhysicalBundle,
     output: &mut impl Write,
 ) -> Result<()> {
-    validate_state(design, bundle, placed)?;
-    let state = bundle.state.as_ref().unwrap();
+    let state = bundle
+        .state
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("prepared placement state absent".into()))?;
     let model = &bundle.connectivity;
     rustroad_core::write_def_components(design, placed, output)?;
     let aliases: HashMap<_, _> = model
@@ -2760,10 +2767,7 @@ pub(super) fn export_def(
     // per stored lattice edge: per-edge paths each carry their own end
     // extension, which reference extractors count again.
     let runs = match &bundle.routing {
-        Some(routing) => {
-            crate::routing::validate_state(design, bundle, placed)?;
-            crate::routing::export_runs(bundle, routing)?
-        }
+        Some(routing) => crate::routing::export_runs(bundle, routing)?,
         None => Vec::new(),
     };
     // Rail ties are supply metal: their regular wiring is written under

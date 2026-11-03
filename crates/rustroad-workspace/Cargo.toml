@@ -15,6 +15,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 fs2.workspace = true
 memmap2.workspace = true
+rayon.workspace = true
 # The timing engine records source files by xxh3-64 (hold-eco provenance).
 xxhash-rust = { version = "=0.8.19", default-features = false, features = ["xxh3"] }
 

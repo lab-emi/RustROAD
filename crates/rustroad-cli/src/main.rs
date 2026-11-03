@@ -26,6 +26,10 @@ struct Cli {
     max_pins: usize,
     #[arg(long, global = true, default_value_t = 500_000)]
     max_aliases: usize,
+    /// Ignore commit-time validation receipts: every workspace load re-runs
+    /// the full validation (also `RUSTROAD_FORCE_VALIDATE=1`).
+    #[arg(long, global = true)]
+    verify_workspace: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -197,6 +201,13 @@ enum Command {
     },
     /// Read the current revision and honest analysis coverage.
     Inspect,
+    /// Fully validate the HEAD revision, ignoring its validation receipt;
+    /// with --write-receipt, stamp it so later reads skip re-validation.
+    VerifyWorkspace {
+        /// Write (or refresh) `revisions/<HEAD>/validated.json` after the check.
+        #[arg(long)]
+        write_receipt: bool,
+    },
     /// Write placed DEF, including imported PINS/NETS when present.
     ExportDef,
     /// Write a bounded, read-only seed for `place --seed` in a fresh workspace.
@@ -975,14 +986,27 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 &limits,
             )?)
         }
-        Command::Inspect => emit(&rustroad_workspace::read(&workspace, &limits)?.summary()),
+        Command::Inspect => {
+            let snapshot = rustroad_workspace::read_with(
+                &workspace,
+                &limits,
+                rustroad_workspace::ReadOptions { routes: false },
+            )?;
+            emit(&snapshot.summary())?;
+            finish(snapshot)
+        }
+        Command::VerifyWorkspace { write_receipt } => emit(&rustroad_workspace::verify_workspace(
+            &workspace,
+            &limits,
+            write_receipt,
+        )?),
         Command::ExportDef => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
             let stdout = io::stdout();
             let mut output = io::BufWriter::with_capacity(256 * 1024, stdout.lock());
             snapshot.export_def(&mut output)?;
             output.flush()?;
-            Ok(())
+            finish(snapshot)
         }
         Command::ExportPlacementSeed => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
@@ -996,7 +1020,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             export_memory_mib,
             max_export_work,
         } => {
-            let snapshot = rustroad_workspace::read(&workspace, &limits)?;
+            let snapshot = rustroad_workspace::read_with(
+                &workspace,
+                &limits,
+                rustroad_workspace::ReadOptions { routes: false },
+            )?;
             let stdout = io::stdout();
             let mut output = io::BufWriter::with_capacity(256 * 1024, stdout.lock());
             let mut syntax = parser_limits.clone();
@@ -1015,7 +1043,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 &mut output,
             )?;
             output.flush()?;
-            Ok(())
+            drop(output);
+            finish(snapshot)
         }
         Command::ExportConnectivity => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
@@ -1036,9 +1065,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             options.cell_lef = cell_lef;
             options.max_output_bytes = max_gds_bytes;
             options.max_output_records = max_gds_records;
-            emit(&rustroad_workspace::gds::export_gds(
-                &workspace, &options, &limits,
-            )?)
+            let snapshot = rustroad_workspace::read(&workspace, &limits)?;
+            emit(&rustroad_workspace::gds::export_snapshot(
+                &workspace, &snapshot, &options,
+            )?)?;
+            finish(snapshot)
         }
         Command::Extract {
             rc_profile,
@@ -1193,8 +1224,18 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+/// End of a read-only command whose output is complete and flushed: the
+/// snapshot's large owned IR is released by process exit instead of being
+/// freed object by object (its shared lock closes with the process).
+fn finish(snapshot: rustroad_workspace::Snapshot) -> Result<(), Box<dyn std::error::Error>> {
+    io::stdout().lock().flush()?;
+    std::mem::forget(snapshot);
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
+    rustroad_workspace::set_force_validate(cli.verify_workspace);
     if matches!(&cli.command, Command::PlaceP1Diagnose { .. }) && cli.threads > 4 {
         let _ = writeln!(
             io::stderr().lock(),
