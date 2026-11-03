@@ -26,7 +26,7 @@
 use crate::route_rules;
 use crate::routing::{
     Blockage, RouteInput, RouteLimits, Routes, Spatial, Via, Wire, budget, distance, invalid,
-    wire_rect,
+    shifted, wire_rect,
 };
 use crate::{Rect, Result};
 use serde::{Deserialize, Serialize};
@@ -154,6 +154,34 @@ pub struct JumperPlanner<'a> {
     /// Per net: (pin id, routing-layer shapes) of every terminal.
     terminals: HashMap<u32, NetTerminals>,
     rule_work: usize,
+    /// Present on a planner kept across repair attempts (`persistent`).
+    order: Option<Order>,
+}
+
+/// Placeholder shape id of a record added by `splice`, indexed by `rebase`.
+const PENDING: u32 = u32::MAX;
+/// Keys of shapes `commit` adds during an attempt: after every routed key.
+const ATTEMPT_KEYS: u64 = 1 << 62;
+
+/// Bookkeeping that keeps a persistent planner's index equal to a fresh
+/// `JumperPlanner::new` over the current routes at every attempt start:
+/// the shape ids of each wire, via and patch record, every added shape's
+/// position in the fresh insertion order, and the shapes to drop.
+struct Order {
+    /// Spatial work right after construction (the instance index build).
+    base_work: usize,
+    /// Fresh insertion position + 1 (obstacles: 0) per added shape offset.
+    keys: Vec<u64>,
+    wire_ids: Vec<u32>,
+    /// First shape id of each via (its shapes have consecutive ids).
+    via_ids: Vec<u32>,
+    patch_ids: Vec<u32>,
+    /// Shapes `commit` appended during the current attempt.
+    attempt: Vec<usize>,
+    /// Shapes of wires cut by spliced jumpers, unlinked on `rebase`.
+    cut: Vec<usize>,
+    /// Shapes unlinked so far (ids are never reused).
+    dead: usize,
 }
 
 impl<'a> JumperPlanner<'a> {
@@ -192,7 +220,191 @@ impl<'a> JumperPlanner<'a> {
             pins,
             terminals,
             rule_work: 0,
+            order: None,
         })
+    }
+
+    /// A planner kept across repair attempts. Each attempt starts with
+    /// `begin`; jumpers applied to the routes are reported with `splice` and
+    /// `rebase` then makes the index (bin chain order included, so probe work
+    /// and with it every budget decision) and work counters equal to a fresh
+    /// `new` over the edited routes.
+    pub fn persistent(
+        input: &'a RouteInput,
+        routes: &Routes,
+        limits: &'a RouteLimits,
+    ) -> Result<Self> {
+        let mut planner = Self::new(input, routes, limits)?;
+        let base = input.obstacles.len();
+        let shapes = planner.spatial.len() - base;
+        let mut keys = Vec::with_capacity(shapes);
+        keys.extend(1..=shapes as u64);
+        let mut next = base as u32;
+        let mut take = |n: usize| {
+            let id = next;
+            next += n as u32;
+            id
+        };
+        let wire_ids = routes.wires.iter().map(|_| take(1)).collect();
+        let via_ids = routes
+            .vias
+            .iter()
+            .map(|v| take(input.vias[v.kind as usize].shapes.len()))
+            .collect();
+        let patch_ids = routes.patches.iter().map(|_| take(1)).collect();
+        if next as usize != planner.spatial.len() || planner.spatial.len() >= PENDING as usize {
+            return Err(invalid("jumper: persistent planner shape count"));
+        }
+        planner.order = Some(Order {
+            base_work: planner.spatial.charged(),
+            keys,
+            wire_ids,
+            via_ids,
+            patch_ids,
+            attempt: Vec::new(),
+            cut: Vec::new(),
+            dead: 0,
+        });
+        Ok(planner)
+    }
+
+    /// Start an attempt with the work counters of a fresh planner.
+    pub fn begin(&mut self) -> Result<()> {
+        let order = self
+            .order
+            .as_ref()
+            .ok_or_else(|| invalid("jumper: begin needs a persistent planner"))?;
+        if !order.attempt.is_empty() || !order.cut.is_empty() {
+            return Err(invalid("jumper: attempt not rebased"));
+        }
+        self.spatial.reset_work(order.base_work);
+        self.rule_work = 0;
+        Ok(())
+    }
+
+    /// Record that `apply_in_place` applied a jumper with this splice to the
+    /// routes this planner tracks (its index changes on `rebase`).
+    pub fn splice(&mut self, splice: &Splice) -> Result<()> {
+        let order = self
+            .order
+            .as_mut()
+            .ok_or_else(|| invalid("jumper: splice needs a persistent planner"))?;
+        let mut wires = Vec::with_capacity(order.wire_ids.len() + splice.cuts.len() + 1);
+        let mut from = 0;
+        for &(index, pieces) in &splice.cuts {
+            let id = *order
+                .wire_ids
+                .get(index)
+                .ok_or_else(|| invalid("jumper: splice outside the tracked wires"))?;
+            wires.extend_from_slice(&order.wire_ids[from..index]);
+            if id != PENDING {
+                order.cut.push(id as usize);
+            }
+            wires.extend(std::iter::repeat_n(PENDING, pieces as usize));
+            from = index + 1;
+        }
+        wires.extend_from_slice(&order.wire_ids[from..]);
+        wires.push(PENDING);
+        order.wire_ids = wires;
+        order.via_ids.extend([PENDING, PENDING]);
+        Ok(())
+    }
+
+    /// End an attempt: drop the shapes `commit` appended and the cut wires,
+    /// and index the spliced records of `routes` at their fresh positions.
+    pub fn rebase(&mut self, routes: &Routes) -> Result<()> {
+        let order = self
+            .order
+            .as_mut()
+            .ok_or_else(|| invalid("jumper: rebase needs a persistent planner"))?;
+        if order.wire_ids.len() != routes.wires.len()
+            || order.via_ids.len() != routes.vias.len()
+            || order.patch_ids.len() != routes.patches.len()
+        {
+            return Err(invalid("jumper: rebase routes differ from the splices"));
+        }
+        for id in order.attempt.drain(..).chain(order.cut.drain(..)) {
+            self.spatial.unlink(id)?;
+            order.dead += 1;
+        }
+        // Fresh insertion positions of the surviving shapes (relative order
+        // is unchanged by splicing, so every bin chain stays sorted).
+        let base = self.input.obstacles.len();
+        let mut position = 0u64;
+        let mut pending = Vec::new();
+        for (i, &id) in order.wire_ids.iter().enumerate() {
+            position += 1;
+            if id == PENDING {
+                pending.push((position, Shape::Wire(i)));
+            } else {
+                order.keys[id as usize - base] = position;
+            }
+        }
+        for (i, &id) in order.via_ids.iter().enumerate() {
+            let shapes = self.input.vias[routes.vias[i].kind as usize].shapes.len();
+            if id == PENDING {
+                pending.push((position + 1, Shape::Via(i)));
+            } else {
+                for s in 0..shapes {
+                    order.keys[id as usize - base + s] = position + 1 + s as u64;
+                }
+            }
+            position += shapes as u64;
+        }
+        for &id in &order.patch_ids {
+            position += 1;
+            order.keys[id as usize - base] = position;
+        }
+        for (key, shape) in pending {
+            let keys = &order.keys;
+            let key_of = |id: usize| if id < base { 0 } else { keys[id - base] };
+            match shape {
+                Shape::Wire(i) => {
+                    let w = &routes.wires[i];
+                    let b = Blockage {
+                        layer: w.layer,
+                        rect: wire_rect(w, self.input.layers[w.layer as usize].width)?,
+                        net: Some(w.net),
+                    };
+                    let id = self.spatial.insert_ordered(b, key, &key_of, order.dead)?;
+                    order.wire_ids[i] = id as u32;
+                    order.keys.push(key);
+                }
+                Shape::Via(i) => {
+                    let v = &routes.vias[i];
+                    for (s, shape) in self.input.vias[v.kind as usize].shapes.iter().enumerate() {
+                        let keys = &order.keys;
+                        let key_of = |id: usize| if id < base { 0 } else { keys[id - base] };
+                        let b = Blockage {
+                            layer: shape.layer,
+                            rect: shifted(shape.rect, v.at)?,
+                            net: Some(v.net),
+                        };
+                        let id =
+                            self.spatial
+                                .insert_ordered(b, key + s as u64, &key_of, order.dead)?;
+                        if s == 0 {
+                            order.via_ids[i] = id as u32;
+                        }
+                        order.keys.push(key + s as u64);
+                    }
+                }
+            }
+        }
+        if self.spatial.len() >= PENDING as usize {
+            return Err(budget("jumper: persistent planner shape ids"));
+        }
+        Ok(())
+    }
+
+    /// Does this planner's index equal a fresh `new` over `routes` (every bin
+    /// chain in order, entry count and starting work)? A diagnostic for
+    /// persistent planners right after `rebase`; cost O(routes).
+    pub fn matches_fresh(&self, routes: &Routes) -> Result<bool> {
+        let fresh = Self::new(self.input, routes, self.limits)?;
+        let base = self.order.as_ref().map(|o| o.base_work);
+        Ok(self.spatial.dump_bins() == fresh.spatial.dump_bins()
+            && base.is_none_or(|w| w == fresh.spatial.charged()))
     }
 
     /// Spatial and rule-check work charged so far.
@@ -685,20 +897,68 @@ impl<'a> JumperPlanner<'a> {
 
     /// Record an accepted jumper's new shapes for later probes.
     pub fn commit(&mut self, j: &Jumper) -> Result<()> {
-        for at in [j.gate_side, j.far_side] {
-            self.spatial.add_via(&Via {
+        let Some(order) = &mut self.order else {
+            for at in [j.gate_side, j.far_side] {
+                self.spatial.add_via(&Via {
+                    net: j.net,
+                    kind: j.via,
+                    at,
+                })?;
+            }
+            return self.spatial.add_wire(&Wire {
                 net: j.net,
-                kind: j.via,
-                at,
-            })?;
+                layer: j.upper,
+                start: j.gate_side,
+                end: j.far_side,
+            });
+        };
+        // Appended after every routed shape, as a fresh planner's `add` does;
+        // the cut wire stays indexed until `rebase`, as it did there.
+        let base = self.input.obstacles.len();
+        let mut shapes: Vec<Blockage> = Vec::new();
+        for at in [j.gate_side, j.far_side] {
+            for s in &self.input.vias[j.via as usize].shapes {
+                shapes.push(Blockage {
+                    layer: s.layer,
+                    rect: shifted(s.rect, at)?,
+                    net: Some(j.net),
+                });
+            }
         }
-        self.spatial.add_wire(&Wire {
-            net: j.net,
+        shapes.push(Blockage {
             layer: j.upper,
-            start: j.gate_side,
-            end: j.far_side,
-        })
+            rect: wire_rect(
+                &Wire {
+                    net: j.net,
+                    layer: j.upper,
+                    start: j.gate_side,
+                    end: j.far_side,
+                },
+                self.input.layers[j.upper as usize].width,
+            )?,
+            net: Some(j.net),
+        });
+        for b in shapes {
+            let key = ATTEMPT_KEYS + order.attempt.len() as u64;
+            let keys = &order.keys;
+            let key_of = |id: usize| if id < base { 0 } else { keys[id - base] };
+            let id = self.spatial.insert_ordered(b, key, &key_of, order.dead)?;
+            order.keys.push(key);
+            order.attempt.push(id);
+        }
+        Ok(())
     }
+}
+
+enum Shape {
+    Wire(usize),
+    Via(usize),
+}
+
+/// Wire records a jumper replaced: (index before the edit, pieces kept).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Splice {
+    pub cuts: Vec<(usize, u8)>,
 }
 
 /// The routes of one net (no access records; rule checks only).
@@ -717,6 +977,14 @@ fn net_only(r: &Routes, net: u32) -> Routes {
 /// the jumper's line lose the open interval between the via points; the two
 /// vias and the bridge are appended. Telemetry wire length is recomputed.
 pub fn apply(input: &RouteInput, routes: &Routes, j: &Jumper) -> Result<Routes> {
+    let mut out = routes.clone();
+    apply_in_place(input, &mut out, j)?;
+    Ok(out)
+}
+
+/// `apply` without copying the other records: the same edit, made in place
+/// (unchanged on error), with the replaced wire records.
+pub fn apply_in_place(input: &RouteInput, routes: &mut Routes, j: &Jumper) -> Result<Splice> {
     let horizontal = j.gate_side[1] == j.far_side[1];
     if horizontal == (j.gate_side[0] == j.far_side[0]) {
         return Err(invalid("jumper: via points must differ along one axis"));
@@ -735,16 +1003,10 @@ pub fn apply(input: &RouteInput, routes: &Routes, j: &Jumper) -> Result<Routes> 
         return Err(invalid("jumper: via kind does not join the jumper layers"));
     }
     let point = |t: i64| -> [i64; 2] { if horizontal { [t, cross] } else { [cross, t] } };
-    let mut out = Routes {
-        wires: Vec::with_capacity(routes.wires.len() + 2),
-        vias: routes.vias.clone(),
-        access: routes.access.clone(),
-        patches: routes.patches.clone(),
-        nets: routes.nets.clone(),
-        stats: routes.stats.clone(),
-    };
+    let mut splice = Splice::default();
+    let mut wires: Vec<Wire> = Vec::with_capacity(routes.wires.len() + 2);
     let mut removed = 0i64;
-    for w in &routes.wires {
+    for (index, w) in routes.wires.iter().enumerate() {
         let on_line = w.net == j.net
             && w.layer == j.layer
             && if horizontal {
@@ -758,46 +1020,43 @@ pub fn apply(input: &RouteInput, routes: &Routes, j: &Jumper) -> Result<Routes> 
             (w.start[1].min(w.end[1]), w.start[1].max(w.end[1]))
         };
         if !on_line || e <= lo || s >= hi {
-            out.wires.push(w.clone());
+            wires.push(w.clone());
             continue;
         }
         removed += e.min(hi) - s.max(lo);
+        let mut pieces = 0u8;
         if s < lo {
-            out.wires.push(Wire {
+            wires.push(Wire {
                 net: w.net,
                 layer: w.layer,
                 start: point(s),
                 end: point(lo),
             });
+            pieces += 1;
         }
         if e > hi {
-            out.wires.push(Wire {
+            wires.push(Wire {
                 net: w.net,
                 layer: w.layer,
                 start: point(hi),
                 end: point(e),
             });
+            pieces += 1;
         }
+        splice.cuts.push((index, pieces));
     }
     if removed < hi - lo {
         return Err(invalid(
             "jumper: the cut interval is not covered by the net's wire",
         ));
     }
-    for at in [j.gate_side, j.far_side] {
-        out.vias.push(Via {
-            net: j.net,
-            kind: j.via,
-            at,
-        });
-    }
-    out.wires.push(Wire {
+    wires.push(Wire {
         net: j.net,
         layer: j.upper,
         start: j.gate_side,
         end: j.far_side,
     });
-    out.stats.wire_length_dbu = out.wires.iter().try_fold(0u64, |n, w| {
+    let length = wires.iter().try_fold(0u64, |n, w| {
         n.checked_add(distance(w.start, w.end)?)
             .ok_or_else(|| budget("wire length overflow"))
     })?;
@@ -809,7 +1068,20 @@ pub fn apply(input: &RouteInput, routes: &Routes, j: &Jumper) -> Result<Routes> 
     {
         return Err(invalid("jumper: via point off the manufacturing grid"));
     }
-    Ok(out)
+    routes
+        .vias
+        .try_reserve(2)
+        .map_err(|_| budget("jumper via allocation"))?;
+    for at in [j.gate_side, j.far_side] {
+        routes.vias.push(Via {
+            net: j.net,
+            kind: j.via,
+            at,
+        });
+    }
+    routes.wires = wires;
+    routes.stats.wire_length_dbu = length;
+    Ok(splice)
 }
 
 #[cfg(test)]
@@ -899,6 +1171,125 @@ mod tests {
             }
         }
         out
+    }
+
+    /// Nets 0..n on M1 rows: driver pin at x0 + 10, gate pin at x0 + 90,
+    /// hand-made straight routes with access points; `obstacles` far away
+    /// M2 squares select the paged bin mode on a large die.
+    fn rows(die: i64, nets: u32, obstacles: usize) -> (RouteInput, Routes) {
+        let mut input = input(None);
+        input.die = rect(0, 0, die, die);
+        input.terminals.clear();
+        let mut routes = Routes {
+            wires: Vec::new(),
+            vias: Vec::new(),
+            access: Vec::new(),
+            patches: Vec::new(),
+            nets: (0..nets).collect(),
+            stats: Default::default(),
+        };
+        for net in 0..nets {
+            let (x0, y) = (i64::from(net % 3) * 120, 20 + i64::from(net / 3) * 30);
+            for (k, x) in [(0, x0 + 10), (1, x0 + 90)] {
+                let pin = net * 2 + k;
+                input.terminals.push(Terminal {
+                    pin,
+                    net,
+                    driver: k == 0,
+                    shapes: vec![LayerRect {
+                        layer: 0,
+                        rect: rect(x - 1, y - 1, x + 1, y + 1),
+                    }],
+                    class: None,
+                });
+                routes.access.push(crate::routing::Access {
+                    pin,
+                    net,
+                    layer: 0,
+                    at: [x, y],
+                });
+            }
+            // Two collinear records (a later cut may hit either).
+            routes.wires.push(Wire {
+                net,
+                layer: 0,
+                start: [x0 + 10, y],
+                end: [x0 + 50, y],
+            });
+            routes.wires.push(Wire {
+                net,
+                layer: 0,
+                start: [x0 + 50, y],
+                end: [x0 + 90, y],
+            });
+        }
+        for i in 0..obstacles {
+            let x = die - 50 - (i as i64 % 100) * 40;
+            let y = die - 50 - (i as i64 / 100) * 40;
+            input.obstacles.push(Blockage {
+                layer: 1,
+                rect: rect(x, y, x + 4, y + 4),
+                net: Some(1000),
+            });
+        }
+        routes.stats.wire_length_dbu = routes
+            .wires
+            .iter()
+            .map(|w| distance(w.start, w.end).unwrap())
+            .sum();
+        (input, routes)
+    }
+
+    /// A persistent planner reproduces a fresh per-attempt planner exactly:
+    /// candidates and charged work within attempts (with commits), and an
+    /// index equal to a fresh build after every rebase, in all bin modes.
+    #[test]
+    fn persistent_planner_matches_a_fresh_planner_every_attempt() {
+        let limits = RouteLimits::default();
+        // Dense bins; sparse bins (large die); paged bins (plus obstacles).
+        for (die, obstacles) in [(400, 0), (200_000, 0), (200_000, 1100)] {
+            let (input, mut routes) = rows(die, 9, obstacles);
+            let mut persistent = JumperPlanner::persistent(&input, &routes, &limits).unwrap();
+            assert!(persistent.matches_fresh(&routes).unwrap());
+            let jl = JumperLimits {
+                max_gap_pitches: 1,
+                ..JumperLimits::default()
+            };
+            for attempt in 0..4u32 {
+                persistent.begin().unwrap();
+                let mut fresh = JumperPlanner::new(&input, &routes, &limits).unwrap();
+                let mut trial = routes.clone();
+                let mut accepted = Vec::new();
+                for k in 0..3u32 {
+                    let net = (attempt * 2 + k) % 9;
+                    let gate = [net * 2 + 1];
+                    let a = persistent.candidates(&trial, net, 0, &gate, &jl).unwrap();
+                    let b = fresh.candidates(&trial, net, 0, &gate, &jl).unwrap();
+                    assert_eq!(a, b, "die {die} attempt {attempt} net {net}");
+                    assert_eq!(persistent.work(), fresh.work());
+                    // Commit one jumper per net; twice on the first net.
+                    for c in a.iter().take(if k == 0 { 2 } else { 1 }) {
+                        let Ok(next) = apply(&input, &trial, c) else {
+                            continue;
+                        };
+                        persistent.commit(c).unwrap();
+                        fresh.commit(c).unwrap();
+                        trial = next;
+                        accepted.push(c.clone());
+                    }
+                }
+                assert!(!accepted.is_empty());
+                for c in &accepted {
+                    let splice = apply_in_place(&input, &mut routes, c).unwrap();
+                    persistent.splice(&splice).unwrap();
+                }
+                assert_eq!(routes.wires, trial.wires);
+                assert_eq!(routes.vias, trial.vias);
+                assert_eq!(routes.stats.wire_length_dbu, trial.stats.wire_length_dbu);
+                persistent.rebase(&routes).unwrap();
+                assert!(persistent.matches_fresh(&routes).unwrap(), "die {die}");
+            }
+        }
     }
 
     #[test]

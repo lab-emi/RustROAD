@@ -841,6 +841,8 @@ pub fn cleanup_replay(
     })
 }
 
+mod spatial_order;
+
 pub(crate) fn budget(s: &str) -> Error {
     Error::Budget(s.into())
 }
