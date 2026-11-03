@@ -284,6 +284,8 @@ pub(super) struct Scratch {
     layered: Vec<(u32, i64, i64, u32)>,
     contributions: Vec<(u32, f64, f64)>,
     face: FaceScratch,
+    probes: Vec<Probe>,
+    samples: SampleCache,
 }
 impl Scratch {
     pub(super) fn new(instances: usize) -> Result<Self> {
@@ -297,6 +299,8 @@ impl Scratch {
             layered: Vec::new(),
             contributions: Vec::new(),
             face: FaceScratch::default(),
+            probes: Vec::new(),
+            samples: SampleCache::default(),
         })
     }
 }
@@ -419,13 +423,14 @@ fn visit_layer(
     mut take: impl FnMut(Cand, u8) -> bool,
 ) -> Result<bool> {
     let shapes = ctx.shapes;
-    if !ctx.grid.visit(layer, q, ctx.limits, work, |id, rect| {
+    let grid = ctx.grid;
+    if !grid.visit(layer, q, ctx.limits, work, |id, rect| {
         Ok(match filter(id, rect) {
             0 => true,
             flags => take(
                 Cand {
                     id,
-                    shape: shapes.get(id),
+                    shape: grid.shape(shapes, id, layer, rect),
                 },
                 flags,
             ),
@@ -813,6 +818,52 @@ fn face_portions(
     }
 }
 
+/// A candidate seen from one strip: its extent along the strip (`a0..a1`)
+/// and across it (`x0..x1`), and its layer's calibration metal (`OWN` on
+/// the strip's own layer, `NO_MODEL` when its layer has no RC model).
+#[derive(Clone, Copy)]
+struct Probe {
+    a0: i64,
+    a1: i64,
+    x0: i64,
+    x1: i64,
+    metal: u32,
+}
+const OWN: u32 = u32::MAX;
+const NO_MODEL: u32 = u32::MAX - 1;
+
+/// Memo of `sample(rows, spacing)`, a pure function of the (immutable)
+/// calibration rows and the spacing, direct-mapped by both.
+struct SampleCache {
+    entries: [(usize, u64, (f64, f64)); SAMPLE_SLOTS],
+}
+const SAMPLE_SLOTS: usize = 64;
+impl Default for SampleCache {
+    fn default() -> Self {
+        Self {
+            entries: [(0, 0, (0.0, 0.0)); SAMPLE_SLOTS],
+        }
+    }
+}
+impl SampleCache {
+    #[inline]
+    fn get(&mut self, rows: &[[f64; 3]], spacing: Option<f64>) -> (f64, f64) {
+        let at = rows.as_ptr() as usize;
+        // NaN never occurs (spacings are finite); `None` keeps its own key.
+        let key = spacing.map_or(u64::MAX, f64::to_bits);
+        let slot = (at as u64 ^ key.wrapping_mul(0x9E37_79B9_7F4A_7C15))
+            .wrapping_mul(0xD6E8_FEB8_6659_FD93)
+            >> 58;
+        let e = &mut self.entries[slot as usize % SAMPLE_SLOTS];
+        if e.0 == at && e.1 == key {
+            return e.2;
+        }
+        let v = sample(rows, spacing);
+        *e = (at, key, v);
+        v
+    }
+}
+
 /// The original per-strip interval sweep over ID-sorted candidates.
 fn numeric<S: Sink>(
     ctx: &Ctx<'_, '_>,
@@ -829,6 +880,8 @@ fn numeric<S: Sink>(
         layered,
         contributions,
         face,
+        probes,
+        samples,
         ..
     } = sc;
     let tech = ctx.tech;
@@ -838,13 +891,26 @@ fn numeric<S: Sink>(
     let window_dbu = info.window_dbu;
     let (edge_minus, edge_plus) = (run.minus, run.plus);
     events.clear();
+    probes.clear();
     for (k, c) in cands.iter().enumerate() {
         let r = c.shape.rect;
-        let (a0, a1) = if run.vertical {
-            (r.ly, r.uy)
+        let (a0, a1, x0, x1) = if run.vertical {
+            (r.ly, r.uy, r.lx, r.ux)
         } else {
-            (r.lx, r.ux)
+            (r.lx, r.ux, r.ly, r.uy)
         };
+        let metal = if c.shape.layer == run.layer {
+            OWN
+        } else {
+            ctx.info(c.shape.layer).map_or(NO_MODEL, |i| i.model.metal)
+        };
+        probes.push(Probe {
+            a0,
+            a1,
+            x0,
+            x1,
+            metal,
+        });
         events.push(event(a0.max(run.lo), k, true));
         events.push(event(a1.min(run.hi), k, false));
     }
@@ -928,18 +994,18 @@ fn numeric<S: Sink>(
         let (mut covered_plus, mut covered_minus) = (false, false);
         layered.clear();
         for k in Bits::new(active) {
-            let sh = &cands[k].shape;
-            let r = sh.rect;
-            let (a0, a1, x0, x1) = if run.vertical {
-                (r.ly, r.uy, r.lx, r.ux)
-            } else {
-                (r.lx, r.ux, r.ly, r.uy)
-            };
+            let Probe {
+                a0,
+                a1,
+                x0,
+                x1,
+                metal,
+            } = probes[k];
             if a0 > t0 || a1 < t1 {
                 continue;
             }
             let k = k as u32;
-            if sh.layer == run.layer {
+            if metal == OWN {
                 if x0 >= edge_plus {
                     let gap = x0 - edge_plus;
                     if gap < window_dbu && plus.is_none_or(|p| (gap, k) < p) {
@@ -950,7 +1016,7 @@ fn numeric<S: Sink>(
                     if gap < window_dbu && minus.is_none_or(|p| (gap, k) < p) {
                         minus = Some((gap, k));
                     }
-                } else if !same_metal(sh) {
+                } else if !same_metal(&cands[k as usize].shape) {
                     if run.passive.is_none() {
                         counts.foreign_overlaps += 1;
                     }
@@ -961,7 +1027,9 @@ fn numeric<S: Sink>(
                     covered_minus |= x0 < edge_minus;
                 }
             } else {
-                let metal = ctx.info(sh.layer)?.model.metal;
+                if metal == NO_MODEL {
+                    return Err(invalid("routing layer has no RC profile entry").into());
+                }
                 let overlap = x1.min(edge_plus) - x0.max(edge_minus);
                 if overlap <= 0 {
                     continue;
@@ -1044,8 +1112,8 @@ fn numeric<S: Sink>(
             if touching_same {
                 continue;
             }
-            let (cc, cg) = sample(rows, spacing);
-            let (_, cg_sub) = sample(sub, spacing);
+            let (cc, cg) = samples.get(rows, spacing);
+            let (_, cg_sub) = samples.get(sub, spacing);
             // Split this side's context value between the substrate and
             // the planes. A conductor below is the plate of an OVER
             // context: it shields the substrate, so the whole OVER value
@@ -1054,7 +1122,9 @@ fn numeric<S: Sink>(
             let cg = cg.max(0.0);
             let (g, d_below, d_above) = match plane_split {
                 (true, true) => {
-                    let down = below_only.map_or(cg_sub, |r| sample(r, spacing).1).min(cg);
+                    let down = below_only
+                        .map_or(cg_sub, |r| samples.get(r, spacing).1)
+                        .min(cg);
                     (0.0, down, cg - down)
                 }
                 (true, false) => (0.0, cg, 0.0),

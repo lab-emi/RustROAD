@@ -51,6 +51,9 @@ pub(super) struct Bounds {
     pub chunk_ops: usize,
     /// Computed chunks waiting for their commit; lanes pause above this.
     pub pending_bytes: usize,
+    /// Index virtual cell shapes in the per-layer grids when they fit (no
+    /// instance queries); `false` keeps the instance-index path (tests).
+    pub virtual_grid: bool,
 }
 impl Default for Bounds {
     fn default() -> Self {
@@ -58,6 +61,7 @@ impl Default for Bounds {
             candidates: 16_384,
             chunk_ops: 1 << 17,
             pending_bytes: 4 << 20,
+            virtual_grid: true,
         }
     }
 }

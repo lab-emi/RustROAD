@@ -126,6 +126,17 @@ each strictly intersecting entry exactly once, from the first query cell it occu
 Grid entries are capped by `--max-extract-bin-entries`. Passive conductors find
 their crossing routed metal through the grid, and the same strict predicate.
 
+When the virtual cell shapes on routing layers are no more numerous than the
+retained shapes, have positive area and fit the entry cap and the allowance (with
+a pin bitset, a rank table and the `(net, pin)` of each signal pin), they are
+indexed in the same grids. Strip queries then take cell geometry from the grid
+instead of visiting instances and transforming their templates: the strict
+intersection with the query reports exactly the conductors the instance query plus
+the acceptance predicate reported, so candidates, interval boundaries and the SPEF
+are unchanged (`stats.work` counts the cells and entries scanned). The instance
+index computes the virtual crossing marks and is then released. Otherwise cell
+geometry stays virtual and is queried per instance, as before.
+
 ## Strips and parallel computation
 
 Each strip's candidates are the conductors that overlap it along its axis and lie
@@ -139,7 +150,9 @@ is tested with each strip's own predicate). Virtual cell shapes are decoded once
 query and travel with the candidate; no design-sized decoded-shape cache is kept.
 The interval sweep uses a bitset of candidate positions (ascending position is
 ascending shape ID), per-layer dense context tables, reused buffers and packed
-event keys. `stats.work` counts index cells and entries actually scanned, so it is
+event keys; each candidate's extents along and across the strip and its layer's
+calibration metal are computed once per strip, and calibration-row samples are
+memoized by `(rows, spacing)` (a pure function). `stats.work` counts index cells and entries actually scanned, so it is
 smaller than before; all other statistics are unchanged.
 
 Only wire bodies are stored as strip records. A piece (end extension, via pad or

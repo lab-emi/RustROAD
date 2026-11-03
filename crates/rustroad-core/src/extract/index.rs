@@ -9,7 +9,7 @@
 //! otherwise absolutely. A query reports every entry that strictly
 //! intersects it exactly once, from the first query cell the entry occupies.
 //! Report order has no electrical meaning: callers sort the accepted IDs.
-use super::{ExtractLimits, Shapes, budget, invalid};
+use super::{ExtractLimits, Owner, PassiveOwner, Shape, Shapes, budget, invalid};
 use crate::{Rect, Result};
 
 /// Spans at or above this use a single cell, so no cell arithmetic can
@@ -208,9 +208,49 @@ pub(super) struct GridIndex {
     layers: Vec<Option<LayerGrid>>,
     bytes: u64,
     entries: usize,
+    /// Virtual shape IDs `virtual_ids` are indexed too (on the layers given
+    /// at build). By virtual offset: a bit per signal-pin shape, the pin
+    /// count before each 64-shape word, and `(net, pin)` per pin in order;
+    /// every other virtual shape is ground.
+    virtual_ids: std::ops::Range<u32>,
+    pin_bits: Vec<u64>,
+    pin_rank: Vec<u32>,
+    pins: Vec<(u32, u32)>,
 }
 
-fn fill<E: Entry>(shapes: &Shapes<'_>, layer: u32, g: &LayerGrid, total: usize) -> Result<Vec<E>> {
+/// Every indexed `(id, layer, rect)` in ascending ID: retained shapes below
+/// the virtual range, virtual shapes on `virtual_layers`, then the
+/// remaining retained shapes.
+fn indexed<'s>(
+    shapes: &'s Shapes<'_>,
+    virtual_layers: Option<&'s [bool]>,
+) -> impl Iterator<Item = (u32, u32, Rect)> + 's {
+    let (front, count) = (shapes.virtual_offset(), shapes.virtual_count());
+    let retained = shapes.retained();
+    let head = retained[..front.min(retained.len())]
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (i as u32, s.layer, s.rect));
+    let tail = retained[front.min(retained.len())..]
+        .iter()
+        .enumerate()
+        .map(move |(i, s)| ((front + count + i) as u32, s.layer, s.rect));
+    let virt = virtual_layers.into_iter().flat_map(move |layers| {
+        shapes
+            .virtual_shapes()
+            .filter(move |(_, s)| layers.get(s.layer as usize).copied().unwrap_or(false))
+            .map(|(id, s)| (id, s.layer, s.rect))
+    });
+    head.chain(virt).chain(tail)
+}
+
+fn fill<E: Entry>(
+    shapes: &Shapes<'_>,
+    virtual_layers: Option<&[bool]>,
+    layer: u32,
+    g: &LayerGrid,
+    total: usize,
+) -> Result<Vec<E>> {
     let mut entries: Vec<E> = Vec::new();
     entries
         .try_reserve_exact(total)
@@ -229,12 +269,12 @@ fn fill<E: Entry>(shapes: &Shapes<'_>, layer: u32, g: &LayerGrid, total: usize) 
     entries.resize(total, blank);
     let mut cursor = g.offsets[..g.offsets.len() - 1].to_vec();
     // Ascending shape ID: entries of a cell stay ID-ordered.
-    for (id, s) in shapes.owned().filter(|(_, s)| s.layer == layer) {
-        let (x0, x1, y0, y1) = g.cells(s.rect);
+    for (id, _, rect) in indexed(shapes, virtual_layers).filter(|&(_, l, _)| l == layer) {
+        let (x0, x1, y0, y1) = g.cells(rect);
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let at = &mut cursor[(y * g.nx + x) as usize];
-                entries[*at as usize] = E::new(s.rect, id, g.x0, g.y0);
+                entries[*at as usize] = E::new(rect, id, g.x0, g.y0);
                 *at += 1;
             }
         }
@@ -250,6 +290,38 @@ impl GridIndex {
     pub(super) fn entries(&self) -> usize {
         self.entries
     }
+    /// Whether virtual shapes are indexed (instance queries are then
+    /// unnecessary on every routing layer).
+    pub(super) fn has_virtual(&self) -> bool {
+        !self.virtual_ids.is_empty()
+    }
+    #[inline]
+    pub(super) fn is_virtual(&self, id: u32) -> bool {
+        self.virtual_ids.contains(&id)
+    }
+    /// The conductor shape of an entry reported by `visit` on `layer`.
+    #[inline]
+    pub(super) fn shape(&self, shapes: &Shapes<'_>, id: u32, layer: u32, rect: Rect) -> Shape {
+        if self.virtual_ids.contains(&id) {
+            let k = (id - self.virtual_ids.start) as usize;
+            let word = self.pin_bits[k / 64];
+            let bit = 1u64 << (k % 64);
+            let owner = if word & bit == 0 {
+                PassiveOwner::Ground
+            } else {
+                let rank = self.pin_rank[k / 64] + (word & (bit - 1)).count_ones();
+                let (net, pin) = self.pins[rank as usize];
+                PassiveOwner::Pin { net, pin }
+            };
+            Shape {
+                layer,
+                rect,
+                owner: Owner::Passive(owner),
+            }
+        } else {
+            shapes.get(id)
+        }
+    }
 
     /// Builds one grid per populated layer. `base_cell[layer]` is the
     /// smallest cell side (DBU); populated layers beyond it use one DBU.
@@ -263,20 +335,117 @@ impl GridIndex {
         allowance: u64,
         work: &mut usize,
     ) -> Result<Self> {
+        Self::build_with(
+            shapes,
+            None,
+            layer_count,
+            base_cell,
+            limits,
+            allowance,
+            work,
+        )
+    }
+
+    /// `build` that also indexes the virtual shapes on `virtual_layers`
+    /// (with their owners). `None` when they outnumber the retained shapes
+    /// (cell geometry then stays virtual and is queried per instance), do
+    /// not fit the entry cap or the allowance, or a virtual rectangle is
+    /// degenerate: the caller then builds the retained-only grid. Nothing
+    /// is charged to `work` then.
+    pub(super) fn build_virtual(
+        shapes: &Shapes<'_>,
+        virtual_layers: &[bool],
+        layer_count: usize,
+        base_cell: &[i64],
+        limits: &ExtractLimits,
+        allowance: u64,
+        work: &mut usize,
+    ) -> Option<Self> {
+        if shapes.virtual_count() == 0 {
+            return None;
+        }
+        let mut indexed_virtual = 0usize;
+        for (_, s) in shapes.virtual_shapes() {
+            if virtual_layers
+                .get(s.layer as usize)
+                .copied()
+                .unwrap_or(false)
+            {
+                if !s.rect.valid() {
+                    return None;
+                }
+                indexed_virtual += 1;
+            }
+        }
+        if indexed_virtual > shapes.retained_len() {
+            return None;
+        }
+        let words = shapes.virtual_count().div_ceil(64);
+        let pin_count = shapes
+            .virtual_shapes()
+            .filter(|(_, s)| matches!(s.owner, Owner::Passive(PassiveOwner::Pin { .. })))
+            .count();
+        let owners = (words as u64)
+            .saturating_mul(12)
+            .saturating_add((pin_count as u64).saturating_mul(8));
+        let mut attempt = *work;
+        let mut grid = Self::build_with(
+            shapes,
+            Some(virtual_layers),
+            layer_count,
+            base_cell,
+            limits,
+            allowance.checked_sub(owners)?,
+            &mut attempt,
+        )
+        .ok()?;
+        let (mut pin_bits, mut pin_rank, mut pins) = (Vec::new(), Vec::new(), Vec::new());
+        pin_bits.try_reserve_exact(words).ok()?;
+        pin_rank.try_reserve_exact(words).ok()?;
+        pins.try_reserve_exact(pin_count).ok()?;
+        pin_bits.resize(words, 0u64);
+        for (k, (_, s)) in shapes.virtual_shapes().enumerate() {
+            if let Owner::Passive(PassiveOwner::Pin { net, pin }) = s.owner {
+                pin_bits[k / 64] |= 1 << (k % 64);
+                pins.push((net, pin));
+            }
+        }
+        let mut rank = 0u32;
+        for w in &pin_bits {
+            pin_rank.push(rank);
+            rank += w.count_ones();
+        }
+        let start = shapes.virtual_offset() as u32;
+        grid.virtual_ids = start..start + shapes.virtual_count() as u32;
+        (grid.pin_bits, grid.pin_rank, grid.pins) = (pin_bits, pin_rank, pins);
+        grid.bytes = grid.bytes.saturating_add(owners);
+        *work = attempt;
+        Some(grid)
+    }
+
+    fn build_with(
+        shapes: &Shapes<'_>,
+        virtual_layers: Option<&[bool]>,
+        layer_count: usize,
+        base_cell: &[i64],
+        limits: &ExtractLimits,
+        allowance: u64,
+        work: &mut usize,
+    ) -> Result<Self> {
         let mut bounds: Vec<Option<(Rect, u64)>> = vec![None; layer_count];
-        for (_, s) in shapes.owned() {
-            if s.layer as usize >= layer_count || !s.rect.valid() {
+        for (_, layer, rect) in indexed(shapes, virtual_layers) {
+            if layer as usize >= layer_count || !rect.valid() {
                 return Err(invalid("invalid retained shape-index geometry"));
             }
-            let item = &mut bounds[s.layer as usize];
+            let item = &mut bounds[layer as usize];
             *item = Some(match *item {
-                None => (s.rect, 1),
+                None => (rect, 1),
                 Some((b, n)) => (
                     Rect {
-                        lx: b.lx.min(s.rect.lx),
-                        ly: b.ly.min(s.rect.ly),
-                        ux: b.ux.max(s.rect.ux),
-                        uy: b.uy.max(s.rect.uy),
+                        lx: b.lx.min(rect.lx),
+                        ly: b.ly.min(rect.ly),
+                        ux: b.ux.max(rect.ux),
+                        uy: b.uy.max(rect.uy),
                     },
                     n + 1,
                 ),
@@ -319,17 +488,17 @@ impl GridIndex {
         // Count pass: entries per cell, capped before any entry allocation.
         let mut total = 0usize;
         let mut per_layer = vec![0usize; layer_count];
-        for (_, s) in shapes.owned() {
-            let g = layers[s.layer as usize]
+        for (_, layer, rect) in indexed(shapes, virtual_layers) {
+            let g = layers[layer as usize]
                 .as_mut()
                 .expect("planned populated layer");
-            let (x0, x1, y0, y1) = g.cells(s.rect);
+            let (x0, x1, y0, y1) = g.cells(rect);
             let n = ((x1 - x0 + 1) as usize).saturating_mul((y1 - y0 + 1) as usize);
             total = total
                 .checked_add(n)
                 .filter(|&t| t <= limits.max_bin_entries && t < u32::MAX as usize)
                 .ok_or_else(|| budget("extraction spatial-bin entries"))?;
-            per_layer[s.layer as usize] += n;
+            per_layer[layer as usize] += n;
             for y in y0..=y1 {
                 for x in x0..=x1 {
                     g.offsets[(y * g.nx + x) as usize + 1] += 1;
@@ -356,9 +525,9 @@ impl GridIndex {
                 g.offsets[i] += g.offsets[i - 1];
             }
             g.entries = if p.compact() {
-                Entries::Compact(fill(shapes, l as u32, g, per_layer[l])?)
+                Entries::Compact(fill(shapes, virtual_layers, l as u32, g, per_layer[l])?)
             } else {
-                Entries::Wide(fill(shapes, l as u32, g, per_layer[l])?)
+                Entries::Wide(fill(shapes, virtual_layers, l as u32, g, per_layer[l])?)
             };
         }
         // Report the resident tables (the fill cursors are released).
@@ -377,6 +546,10 @@ impl GridIndex {
             layers,
             bytes: resident,
             entries: total,
+            virtual_ids: 0..0,
+            pin_bits: Vec::new(),
+            pin_rank: Vec::new(),
+            pins: Vec::new(),
         })
     }
 

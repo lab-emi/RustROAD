@@ -68,6 +68,10 @@ impl<'a> Shapes<'a> {
     pub(super) fn push(&mut self, shape: Shape) {
         self.values.push(shape);
     }
+    /// Releases growth slack once every retained shape exists.
+    pub(super) fn shrink_to_fit(&mut self) {
+        self.values.shrink_to_fit();
+    }
     pub(super) fn virtual_count(&self) -> usize {
         self.virtual_count
     }

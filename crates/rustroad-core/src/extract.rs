@@ -1917,7 +1917,7 @@ fn add_passive_strips(
         let mut crossed = false;
         for &layer in routing.iter().filter(|&&l| l != sh.layer) {
             grid.visit(layer, r, limits, &mut stats.work, |id, _| {
-                crossed = shapes.get(id).routed();
+                crossed = !grid.is_virtual(id) && shapes.get(id).routed();
                 Ok(!crossed)
             })?;
             if crossed {
@@ -1945,6 +1945,7 @@ fn add_passive_strips(
 /// reproduced exactly by the serial scan from the original work count.
 fn virtual_crossings(
     shapes: &Shapes<'_>,
+    grid: &index::GridIndex,
     instances: Option<&InstanceGeometry<'_>>,
     layers: &[u32],
     limits: &ExtractLimits,
@@ -1952,11 +1953,15 @@ fn virtual_crossings(
 ) -> Result<Vec<u64>> {
     use rayon::prelude::*;
     let words = shapes.virtual_count().div_ceil(64);
-    let Some(geometry) = instances else {
-        return Ok(vec![0u64; words]);
+    let geometry = match instances {
+        Some(g) => Some(g),
+        None if grid.has_virtual() => None,
+        None => return Ok(vec![0u64; words]),
     };
     let instance_count = shapes.source.map_or(0, |s| s.geometry.len());
     let offset = shapes.virtual_offset();
+    // Virtual shapes strictly overlapping a routed shape on another layer,
+    // from the grid (strict intersection) or the instance index.
     let scan = |part: &[Shape],
                 sc: &mut InstanceQueryScratch,
                 marked: &mut [u64],
@@ -1964,14 +1969,36 @@ fn virtual_crossings(
      -> Result<()> {
         for shape in part.iter().filter(|s| s.routed()) {
             for &layer in layers.iter().filter(|&&l| l != shape.layer) {
-                geometry.visit_shared(sc, shapes, layer, shape.rect, work, |id, other| {
-                    let (a, b) = (shape.rect, other.rect);
+                let mut mark = |id: u32, b: Rect| {
+                    let a = shape.rect;
                     if a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy {
                         let k = id as usize - offset;
                         marked[k / 64] |= 1 << (k % 64);
                     }
-                    Ok(true)
-                })?;
+                };
+                match geometry {
+                    Some(geometry) => {
+                        geometry.visit_shared(
+                            sc,
+                            shapes,
+                            layer,
+                            shape.rect,
+                            work,
+                            |id, other| {
+                                mark(id, other.rect);
+                                Ok(true)
+                            },
+                        )?;
+                    }
+                    None => {
+                        grid.visit(layer, shape.rect, limits, work, |id, rect| {
+                            if grid.is_virtual(id) {
+                                mark(id, rect);
+                            }
+                            Ok(true)
+                        })?;
+                    }
+                }
             }
         }
         Ok(())
@@ -1989,7 +2016,12 @@ fn virtual_crossings(
                                 marked = vec![0u64; words];
                             }
                             if sc.is_none() {
-                                sc = InstanceQueryScratch::new(instance_count).ok();
+                                sc = InstanceQueryScratch::new(if geometry.is_some() {
+                                    instance_count
+                                } else {
+                                    0
+                                })
+                                .ok();
                             }
                             failed = match sc.as_mut() {
                                 Some(sc) => scan(part, sc, &mut marked, &mut work).is_err(),
@@ -2029,7 +2061,11 @@ fn virtual_crossings(
         }
         None => {
             let mut marked = vec![0u64; words];
-            let mut sc = InstanceQueryScratch::new(instance_count)?;
+            let mut sc = InstanceQueryScratch::new(if geometry.is_some() {
+                instance_count
+            } else {
+                0
+            })?;
             scan(retained, &mut sc, &mut marked, &mut stats.work)?;
             marked
         }
@@ -2217,8 +2253,10 @@ fn extract_with_queries(
             &mut stats,
         )?;
     }
-    // Via pads are fully converted into pieces.
+    // Via pads are fully converted into pieces; release growth slack.
     built.pads = Vec::new();
+    built.pieces.shrink_to_fit();
+    shapes.shrink_to_fit();
     profile.phase(2);
     // Grid cells: at least 2 um and the layer's lateral window, so a strip
     // query spans few cells on every layer.
@@ -2237,24 +2275,57 @@ fn extract_with_queries(
             })
         })
         .collect();
-    let grid = index::GridIndex::build(
-        &shapes,
-        input.layers.len(),
-        &base_cell,
-        limits,
-        index_budget,
-        &mut stats.work,
-    )?;
+    // Virtual cell shapes on routing layers join the grid when it fits:
+    // strip and crossing queries then need no instance-index traversal.
+    let virtual_grid = match queries {
+        Queries::Indexed(bounds) => bounds.virtual_grid,
+        #[cfg(test)]
+        Queries::Reference => true,
+    };
+    let routing_mask: Vec<bool> = tech.layers.iter().map(Option::is_some).collect();
+    let grid = match (virtual_grid && instances.is_some())
+        .then(|| {
+            index::GridIndex::build_virtual(
+                &shapes,
+                &routing_mask,
+                input.layers.len(),
+                &base_cell,
+                limits,
+                index_budget,
+                &mut stats.work,
+            )
+        })
+        .flatten()
+    {
+        Some(grid) => grid,
+        None => index::GridIndex::build(
+            &shapes,
+            input.layers.len(),
+            &base_cell,
+            limits,
+            index_budget,
+            &mut stats.work,
+        )?,
+    };
     profile.phase(3);
     add_passive_strips(input, limits, &mut built, &shapes, &grid, &mut stats)?;
     profile.phase(4);
     let crossed = virtual_crossings(
         &shapes,
+        &grid,
         instances.as_ref(),
         &routing_layers,
         limits,
         &mut stats,
     )?;
+    // After the crossings, the instance index serves only the strip queries
+    // the grid does not cover (the test oracle keeps its own).
+    #[cfg(test)]
+    let keep = !grid.has_virtual() || matches!(queries, Queries::Reference);
+    #[cfg(not(test))]
+    let keep = !grid.has_virtual();
+    let instances = instances.filter(|_| keep);
+    let cell_index = instances.as_ref().filter(|_| !grid.has_virtual());
     stats.wire_runs = built.runs.len();
     stats.shapes = shapes.len();
     if shapes.retained_len() > limits.max_shapes {
@@ -2315,7 +2386,7 @@ fn extract_with_queries(
             input,
             &shapes,
             &grid,
-            instances.as_ref(),
+            cell_index,
             &routing_layers,
             limits,
             &built.runs,
@@ -2338,6 +2409,7 @@ fn extract_with_queries(
             Queries::Reference => reference(
                 &ctx,
                 input,
+                instances.as_ref(),
                 &shapes,
                 &mut units,
                 instance_count,
@@ -2416,6 +2488,7 @@ fn extract_with_queries(
 fn reference(
     ctx: &strip::Ctx<'_, '_>,
     input: &ExtractInput<'_>,
+    geometry: Option<&InstanceGeometry<'_>>,
     shapes: &Shapes<'_>,
     units: &mut impl Iterator<Item = strip::UnitRef>,
     instances: usize,
@@ -2468,7 +2541,7 @@ fn reference(
                         }
                     }
                 }
-                if let Some(geometry) = ctx.instances {
+                if let Some(geometry) = geometry {
                     geometry.visit_shared(
                         &mut sc.instances,
                         shapes,
@@ -2987,11 +3060,18 @@ mod tests {
         };
         assert_eq!(clean(&a.stats), clean(&b.stats));
     }
-    fn pool(threads: usize) -> rayon::ThreadPool {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap()
+    /// One shared pool per size: fresh pools per call would spread test
+    /// allocations over new threads' malloc arenas, raising the process
+    /// peak resident set that other tests' runtime guards observe.
+    fn pool(threads: usize) -> &'static rayon::ThreadPool {
+        static POOLS: [std::sync::OnceLock<rayon::ThreadPool>; 5] =
+            [const { std::sync::OnceLock::new() }; 5];
+        POOLS[threads].get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+        })
     }
     /// The serial path: one pool thread, no forced tiles.
     fn serial(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<RcNetwork> {
@@ -3012,6 +3092,7 @@ mod tests {
             candidates: 2,
             chunk_ops: 24,
             pending_bytes: 1,
+            virtual_grid: true,
         }
     }
     /// Every pool size and tile size, with default and tight parallel
@@ -3022,12 +3103,21 @@ mod tests {
                 tile_units: tile,
                 ..limits.clone()
             };
-            for bounds in [parallel::Bounds::default(), tight_bounds()] {
-                let parallel = pool(threads)
+            let instance_path = parallel::Bounds {
+                virtual_grid: false,
+                ..tight_bounds()
+            };
+            for bounds in [parallel::Bounds::default(), tight_bounds(), instance_path] {
+                let mut parallel = pool(threads)
                     .install(|| extract_with_queries(input, &limits, Queries::Indexed(bounds)))
                     .unwrap();
+                if bounds.virtual_grid {
+                    assert_eq!(serial.stats.work, parallel.stats.work);
+                } else {
+                    // The instance-index path scans other index cells.
+                    parallel.stats.work = serial.stats.work;
+                }
                 assert_network_exact(serial, &parallel);
-                assert_eq!(serial.stats.work, parallel.stats.work);
                 let memory = parallel.stats.memory.unwrap();
                 assert!(memory.estimate_bytes <= memory.limit_bytes);
             }
