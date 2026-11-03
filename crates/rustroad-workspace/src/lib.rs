@@ -1285,8 +1285,15 @@ fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> 
             crate::physical::write_table(state, &directory.join("physical.rbin"))?;
         }
     }
-    if placed.is_ok() {
-        receipt::write_new(&directory, &receipt::build(&directory, metadata)?)?;
+    // The receipt is a cache: failing to write it only costs a later read
+    // its full validation, so it never fails the commit (a partial file is
+    // removed; an unreadable one is ignored by readers).
+    if placed.is_ok()
+        && receipt::build(&directory, metadata)
+            .and_then(|r| receipt::write_new(&directory, &r))
+            .is_err()
+    {
+        let _ = fs::remove_file(directory.join(RECEIPT_FILE));
     }
     sync_directory(&directory)?;
     sync_directory(&path.join("revisions"))?;
