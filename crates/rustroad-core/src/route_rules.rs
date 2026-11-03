@@ -942,6 +942,86 @@ pub(crate) fn check(
     let mut out = Vec::new();
     let mut diagnostic_shapes = 0;
     for &net in index.nets() {
+        check_net(
+            input,
+            routes,
+            &index,
+            net,
+            limits,
+            work,
+            &mut out,
+            &mut diagnostic_shapes,
+        )?;
+    }
+    Ok(out)
+}
+
+/// Whether the stored geometry has no same-net rule violation, decided net
+/// by net on the rayon pool. `Some(work)` when every net is clean, with the
+/// work `check` would charge after `start` (nets are independent and every
+/// charge is `work <= cap`, so `check` succeeds exactly when this total fits);
+/// `None` when a net has a violation or fails, so the caller must run `check`
+/// for the canonical result.
+pub(crate) fn clean_parallel(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    start: usize,
+) -> Option<usize> {
+    use rayon::prelude::*;
+    let cap = limits.max_comparisons;
+    let mut work = start;
+    let index = crate::rule_index::RuleIndex::new(input, routes, &mut work, cap).ok()?;
+    let nets = index.nets();
+    let parts: Vec<Option<usize>> = nets
+        .par_chunks(nets.len().div_ceil(rayon::current_num_threads() * 8).max(1))
+        .map(|chunk| {
+            let mut total = 0usize;
+            let (mut out, mut shapes) = (Vec::new(), 0);
+            for &net in chunk {
+                let mut w = 0;
+                check_net(
+                    input,
+                    routes,
+                    &index,
+                    net,
+                    limits,
+                    &mut w,
+                    &mut out,
+                    &mut shapes,
+                )
+                .ok()?;
+                if !out.is_empty() {
+                    return None;
+                }
+                total = total.saturating_add(w);
+            }
+            Some(total)
+        })
+        .collect();
+    parts
+        .into_iter()
+        .try_fold(work, |sum, part| part.map(|w| sum.saturating_add(w)))
+        .filter(|&total| total <= cap)
+}
+
+/// The same-net rule checks of one net (all of its routing layers).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "shared counters of the sequential pass stay explicit"
+)]
+fn check_net(
+    input: &RouteInput,
+    routes: &Routes,
+    index: &crate::rule_index::RuleIndex,
+    net: u32,
+    limits: &RouteLimits,
+    work: &mut usize,
+    out: &mut Vec<Violation>,
+    diagnostic_shapes: &mut usize,
+) -> Result<()> {
+    let cap = limits.max_comparisons;
+    {
         let groups = index.collect(input, routes, net, limits, work)?;
         for (&(net, layer), shapes) in &groups {
             let rule = &input.layers[layer as usize];
@@ -973,8 +1053,8 @@ pub(crate) fn check(
                                 });
                                 if !closed {
                                     push_violation(
-                                        &mut out,
-                                        &mut diagnostic_shapes,
+                                        out,
+                                        diagnostic_shapes,
                                         Violation::Neck {
                                             net,
                                             layer,
@@ -1015,8 +1095,8 @@ pub(crate) fn check(
                             };
                             if !near_ok(a.rect, b.rect, rest, work, cap)? {
                                 push_violation(
-                                    &mut out,
-                                    &mut diagnostic_shapes,
+                                    out,
+                                    diagnostic_shapes,
                                     Violation::Spacing {
                                         net,
                                         layer,
@@ -1040,8 +1120,8 @@ pub(crate) fn check(
                 if !route {
                     if let Some(&i) = list.iter().find(|&&i| shapes[i].origin == Origin::Patch) {
                         push_violation(
-                            &mut out,
-                            &mut diagnostic_shapes,
+                            out,
+                            diagnostic_shapes,
                             Violation::Floating {
                                 net,
                                 layer,
@@ -1064,8 +1144,8 @@ pub(crate) fn check(
                         let a = i128::from(h.ux - h.lx) * i128::from(h.uy - h.ly);
                         if a < 4 * i128::from(min) {
                             push_violation(
-                                &mut out,
-                                &mut diagnostic_shapes,
+                                out,
+                                diagnostic_shapes,
                                 Violation::Hole {
                                     net,
                                     layer,
@@ -1080,8 +1160,8 @@ pub(crate) fn check(
                     let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
                     if let Some(area) = area_violation(&rects, i128::from(min), work, cap)? {
                         push_violation(
-                            &mut out,
-                            &mut diagnostic_shapes,
+                            out,
+                            diagnostic_shapes,
                             Violation::Area {
                                 net,
                                 layer,
@@ -1095,7 +1175,7 @@ pub(crate) fn check(
             }
         }
     }
-    Ok(out)
+    Ok(())
 }
 
 fn flip_y(r: Rect) -> Rect {
