@@ -43,6 +43,20 @@ const PAGE_BITS: u32 = 9;
 const PAGE: usize = 1 << PAGE_BITS;
 /// Direct page tables up to 2^31 nodes (at most 16 MiB, grown on demand).
 const DIRECT_PAGES: usize = 1 << (31 - PAGE_BITS);
+/// Page storage one search may hold, per record of its distinct-node limit:
+/// half of the 64 bytes per record the route memory estimate charges for
+/// sparse search records, so scattered records (one per page, 12 KiB each)
+/// cannot outgrow the estimate.
+const POOL_BYTES_PER_RECORD: usize = 32;
+const PAGE_BYTES: usize = PAGE * std::mem::size_of::<Tagged>();
+
+/// Pages one search may map: the pool budget for `limit` records (at least
+/// one page), never more than the graph has.
+fn page_budget(nodes: usize, limit: usize) -> usize {
+    (limit.saturating_mul(POOL_BYTES_PER_RECORD) / PAGE_BYTES)
+        .max(1)
+        .min(nodes.div_ceil(PAGE))
+}
 
 enum PageTable {
     Direct(Vec<u32>),
@@ -51,9 +65,12 @@ enum PageTable {
 
 /// Sparse search records of a large implicit graph: epoch-tagged pages of
 /// `PAGE` consecutive node ids, mapped on first touch. A search maps at most
-/// the pages it touches; `begin` unmaps them and keeps their storage for the
-/// next search, whose fresh epoch invalidates every stale record without a
-/// clear. Same semantics as the former hash map: one record per node, the
+/// the pages it touches, up to `max_pages` (`page_budget`); records on
+/// further pages of that search go to a hash map, the former layout, so a
+/// search whose records scatter over many pages stays within the memory
+/// estimate. `begin` unmaps the pages and keeps their storage for the next
+/// search, whose fresh epoch invalidates every stale record without a clear.
+/// Same semantics as the former hash map: one record per node, the
 /// distinct-node count bounded by `limit`.
 struct Paged {
     table: PageTable,
@@ -62,11 +79,15 @@ struct Paged {
     /// Page index of every mapped slot (to unmap on `begin`).
     mapped: Vec<u32>,
     used: usize,
+    max_pages: usize,
+    /// Records of this search on pages beyond `max_pages` (an id's page is
+    /// either mapped or not for the whole search once overflow starts).
+    overflow: HashMap<u32, Tagged, BuildFx>,
     count: usize,
     epoch: u32,
 }
 impl Paged {
-    fn new(nodes: usize) -> Self {
+    fn new(nodes: usize, limit: usize) -> Self {
         Self {
             table: if nodes.div_ceil(PAGE) <= DIRECT_PAGES {
                 PageTable::Direct(Vec::new())
@@ -76,6 +97,8 @@ impl Paged {
             pool: Vec::new(),
             mapped: Vec::new(),
             used: 0,
+            max_pages: page_budget(nodes, limit),
+            overflow: HashMap::with_hasher(BuildFx),
             count: 0,
             epoch: 1,
         }
@@ -90,6 +113,7 @@ impl Paged {
             PageTable::Hashed(table) => table.clear(),
         }
         self.mapped.clear();
+        self.overflow.clear();
         self.used = 0;
         self.count = 0;
         if self.epoch == u32::MAX {
@@ -110,15 +134,43 @@ impl Paged {
     }
     #[inline]
     fn current(&self, id: u32) -> Option<&Tagged> {
-        let r = &self.pool[self.slot(id)?];
-        (r.epoch == self.epoch).then_some(r)
+        match self.slot(id) {
+            Some(at) => {
+                let r = &self.pool[at];
+                (r.epoch == self.epoch).then_some(r)
+            }
+            None if self.overflow.is_empty() => None,
+            None => self.overflow.get(&id),
+        }
     }
     #[inline]
     fn current_mut(&mut self, id: u32) -> Option<&mut Tagged> {
-        let at = self.slot(id)?;
-        let epoch = self.epoch;
-        let r = &mut self.pool[at];
-        (r.epoch == epoch).then_some(r)
+        match self.slot(id) {
+            Some(at) => {
+                let epoch = self.epoch;
+                let r = &mut self.pool[at];
+                (r.epoch == epoch).then_some(r)
+            }
+            None if self.overflow.is_empty() => None,
+            None => self.overflow.get_mut(&id),
+        }
+    }
+    /// Store a new record of this search: on its mapped page, on a newly
+    /// mapped page while the budget allows, else in the overflow map.
+    fn insert(&mut self, id: u32, record: Tagged) -> Result<()> {
+        let at = match self.slot(id) {
+            Some(at) => at,
+            None if self.used < self.max_pages => self.map(id)? | (id as usize & (PAGE - 1)),
+            None => {
+                self.overflow
+                    .try_reserve(1)
+                    .map_err(|_| Error::Budget("routing visited-state allocation".into()))?;
+                self.overflow.insert(id, record);
+                return Ok(());
+            }
+        };
+        self.pool[at] = record;
+        Ok(())
     }
     /// Map the page of `id` (allocating storage only beyond earlier peaks).
     fn map(&mut self, id: u32) -> Result<usize> {
@@ -145,14 +197,26 @@ impl Paged {
         }
         self.mapped.try_reserve(1).map_err(|_| fail())?;
         self.mapped.push(page);
-        if self.pool.len() < (self.used + 1) * PAGE {
-            self.pool.try_reserve(PAGE).map_err(|_| fail())?;
-            self.pool.resize((self.used + 1) * PAGE, EMPTY);
+        let need = (self.used + 1) * PAGE;
+        if self.pool.len() < need {
+            if self.pool.capacity() < need {
+                // Amortized growth, capped at the page budget.
+                let target = self
+                    .pool
+                    .capacity()
+                    .saturating_mul(2)
+                    .max(need)
+                    .min(self.max_pages * PAGE);
+                self.pool
+                    .try_reserve_exact(target - self.pool.len())
+                    .map_err(|_| fail())?;
+            }
+            self.pool.resize(need, EMPTY);
         }
         self.used += 1;
         Ok((slot as usize) << PAGE_BITS)
     }
-    /// Current-epoch records in node order.
+    /// Current-epoch records (paged ones, then the overflow; unordered).
     fn records(&self) -> impl Iterator<Item = (u32, &Tagged)> {
         self.mapped
             .iter()
@@ -164,6 +228,7 @@ impl Paged {
                     .filter(|(_, r)| r.epoch == self.epoch)
                     .map(move |(i, r)| ((page << PAGE_BITS) | i as u32, r))
             })
+            .chain(self.overflow.iter().map(|(&id, r)| (id, r)))
     }
 }
 
@@ -230,7 +295,7 @@ impl Search {
             values.resize(nodes, EMPTY);
             Records::Dense(values)
         } else {
-            Records::Sparse(Paged::new(nodes))
+            Records::Sparse(Paged::new(nodes, limit))
         };
         Ok(Self {
             records,
@@ -299,15 +364,12 @@ impl Search {
                 if records.count >= self.limit {
                     return Err(Error::Budget("routing visited-state limit".into()));
                 }
-                let at = match records.slot(id) {
-                    Some(at) => at,
-                    None => records.map(id)? | (id as usize & (PAGE - 1)),
-                };
-                records.pool[at] = Tagged {
+                let record = Tagged {
                     state,
                     epoch: records.epoch,
                     flags: NO_POSITION,
                 };
+                records.insert(id, record)?;
                 records.count += 1;
             }
         }
@@ -652,8 +714,13 @@ mod tests {
     #[test]
     fn paged_records_match_a_reference_map() {
         use std::collections::BTreeMap;
-        for nodes in [3_000_000usize, 3_000_000_000] {
-            let limit = 300;
+        // Limit 300 maps one page and keeps the rest in the overflow map;
+        // limit 6,000 maps up to 15 pages before overflowing.
+        for (nodes, limit) in [
+            (3_000_000usize, 300usize),
+            (3_000_000_000, 300),
+            (3_000_000, 6_000),
+        ] {
             let mut search = Search::new(nodes, limit).unwrap();
             let mut reference: BTreeMap<u32, (u64, bool, Option<usize>)> = BTreeMap::new();
             let mut random = 0x5eed_u64;
@@ -727,6 +794,58 @@ mod tests {
                 let ids: Vec<u32> = rows.iter().map(|r| r.0).collect();
                 assert_eq!(ids, reference.keys().copied().collect::<Vec<_>>());
             }
+        }
+    }
+
+    /// Scattered records (one per page, the paged layout's worst case) never
+    /// grow the page pool past its budget, half of the 64 bytes per record the
+    /// route memory estimate charges; the records beyond it stay readable in
+    /// the overflow map (direct and hashed page tables). Small node counts
+    /// keep this test process's peak RSS low (other tests compare it with
+    /// `memory_mib`).
+    #[test]
+    fn scattered_records_stay_within_the_page_budget() {
+        for (nodes, limit) in [
+            (40_000usize, 1_000usize),
+            (400_000, 600),
+            (3_000_000_000, 600),
+        ] {
+            let mut search = Search {
+                records: Records::Sparse(Paged::new(nodes, limit)),
+                epoch: 0,
+                limit,
+            };
+            let pages = nodes.div_ceil(PAGE);
+            let records = limit.min(pages);
+            for epoch in 1..=3u32 {
+                search.begin(epoch);
+                let stride = pages / records;
+                let id =
+                    |k: usize| u32::try_from((k * stride + epoch as usize) % pages * PAGE).unwrap();
+                for k in 0..records {
+                    let state = State {
+                        cost: k as u64,
+                        parent: NONE,
+                        kind: NONE,
+                    };
+                    search.set(id(k), state).unwrap();
+                }
+                for k in 0..records {
+                    assert_eq!(search.get(id(k)).map(|s| s.cost), Some(k as u64));
+                }
+                assert_eq!(search.current_count(), records);
+            }
+            let Records::Sparse(paged) = &search.records else {
+                panic!("sparse records expected");
+            };
+            let budget = page_budget(nodes, limit);
+            assert!(paged.used <= budget);
+            assert_eq!(paged.used + paged.overflow.len(), records);
+            let pool = paged.pool.capacity() * std::mem::size_of::<Tagged>();
+            assert!(
+                pool <= (limit * POOL_BYTES_PER_RECORD).max(PAGE_BYTES),
+                "{nodes} {limit}: pool {pool}"
+            );
         }
     }
 

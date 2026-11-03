@@ -801,6 +801,9 @@ fn memory_estimate_limited(
         search: (if nodes <= crate::route_search::DENSE_NODES {
             (nodes as u64).saturating_mul(NODE_BYTES)
         } else {
+            // Paged records keep at most 32 B per record of page storage
+            // (`route_search::page_budget`); records beyond it overflow to a
+            // hash map, as all sparse records did before pages.
             (nodes.min(limits.max_search_expansions.saturating_add(limits.max_heap)) as u64)
                 .saturating_mul(64)
         })
