@@ -937,8 +937,24 @@ pub(crate) fn check(
     limits: &RouteLimits,
     work: &mut usize,
 ) -> Result<Vec<Violation>> {
+    check_with(input, routes, limits, work, None)
+}
+
+/// `check`, reusing the input's terminal order (same result and work).
+pub(crate) fn check_with(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    work: &mut usize,
+    terminals: Option<&crate::rule_index::TerminalOrder>,
+) -> Result<Vec<Violation>> {
     let cap = limits.max_comparisons;
-    let index = crate::rule_index::RuleIndex::new(input, routes, work, cap)?;
+    let index = match terminals {
+        Some(terminals) => {
+            crate::rule_index::RuleIndex::with_terminals(input, routes, work, cap, terminals)?
+        }
+        None => crate::rule_index::RuleIndex::new(input, routes, work, cap)?,
+    };
     let mut out = Vec::new();
     let mut diagnostic_shapes = 0;
     for &net in index.nets() {

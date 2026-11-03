@@ -154,6 +154,8 @@ pub struct JumperPlanner<'a> {
     /// Per net: (pin id, routing-layer shapes) of every terminal.
     terminals: HashMap<u32, NetTerminals>,
     rule_work: usize,
+    /// The input's terminal order for the per-candidate rule checks.
+    terminal_order: crate::rule_index::TerminalOrder,
     /// Present on a planner kept across repair attempts (`persistent`).
     order: Option<Order>,
 }
@@ -220,6 +222,7 @@ impl<'a> JumperPlanner<'a> {
             pins,
             terminals,
             rule_work: 0,
+            terminal_order: crate::rule_index::TerminalOrder::new(input)?,
             order: None,
         })
     }
@@ -692,7 +695,13 @@ impl<'a> JumperPlanner<'a> {
         let before_net = net_only(routes, net);
         let before: BTreeSet<String> = if self.input.rules {
             let mut work = 0usize;
-            let v = route_rules::check(self.input, &before_net, self.limits, &mut work)?;
+            let v = route_rules::check_with(
+                self.input,
+                &before_net,
+                self.limits,
+                &mut work,
+                Some(&self.terminal_order),
+            )?;
             self.charge(work)?;
             v.iter().map(|v| v.describe()).collect()
         } else {
@@ -885,7 +894,13 @@ impl<'a> JumperPlanner<'a> {
         }
         let after_net = apply(input, before_net, j)?;
         let mut work = 0usize;
-        let after = route_rules::check(input, &after_net, self.limits, &mut work)?;
+        let after = route_rules::check_with(
+            input,
+            &after_net,
+            self.limits,
+            &mut work,
+            Some(&self.terminal_order),
+        )?;
         self.charge(work)?;
         if trace {
             for v in after.iter().filter(|v| !before.contains(&v.describe())) {
@@ -1238,6 +1253,38 @@ mod tests {
             .map(|w| distance(w.start, w.end).unwrap())
             .sum();
         (input, routes)
+    }
+
+    /// Rule checks with the planner's cached terminal order return the same
+    /// violations, work and budget errors as recomputing the order.
+    #[test]
+    fn cached_terminal_order_charges_like_a_fresh_order() {
+        let (mut input, routes) = rows(400, 9, 0);
+        for reversed in [false, true] {
+            if reversed {
+                input.terminals.reverse();
+            }
+            let order = crate::rule_index::TerminalOrder::new(&input).unwrap();
+            for net in [0, 4, 8] {
+                let local = net_only(&routes, net);
+                for cap in [1, 10, 37, 60, 100, 1_000, 1_000_000] {
+                    let limits = RouteLimits {
+                        max_comparisons: cap,
+                        ..RouteLimits::default()
+                    };
+                    let (mut a, mut b) = (0, 0);
+                    let fresh = route_rules::check(&input, &local, &limits, &mut a)
+                        .map(|v| v.iter().map(|v| v.describe()).collect::<Vec<_>>())
+                        .map_err(|e| e.to_string());
+                    let cached =
+                        route_rules::check_with(&input, &local, &limits, &mut b, Some(&order))
+                            .map(|v| v.iter().map(|v| v.describe()).collect::<Vec<_>>())
+                            .map_err(|e| e.to_string());
+                    assert_eq!(fresh, cached, "net {net} cap {cap} reversed {reversed}");
+                    assert_eq!(a, b, "net {net} cap {cap} reversed {reversed}");
+                }
+            }
+        }
     }
 
     /// A persistent planner reproduces a fresh per-attempt planner exactly:
