@@ -3,8 +3,10 @@
 //! A receipt written by one build is trusted only by a build whose validator
 //! sources are byte-identical: the digest covers every Rust source of the
 //! crates that define read-time validation semantics (core geometry/rules,
-//! workspace loading/storage, format parsers) and the dependency lock file.
-//! Uses only `std`, so the lock file and dependency graph are unchanged.
+//! workspace loading/storage, format parsers), the dependency lock file, the
+//! compiler version and the build profile (debug assertions and overflow
+//! checks change what a validator does on the same sources). Uses only
+//! `std`, so the lock file and dependency graph are unchanged.
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -69,6 +71,32 @@ fn main() {
         digest.update(rel.as_bytes());
         digest.update(&(bytes.len() as u64).to_le_bytes());
         digest.update(&bytes);
+    }
+    // Compiler and profile: a receipt from a debug build is not trusted by a
+    // release build of the same sources (and vice versa).
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let version = std::process::Command::new(rustc)
+        .arg("-vV")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map_or_else(|| b"unknown".to_vec(), |o| o.stdout);
+    digest.update(b"rustc");
+    digest.update(&(version.len() as u64).to_le_bytes());
+    digest.update(&version);
+    for key in [
+        "TARGET",
+        "PROFILE",
+        "OPT_LEVEL",
+        "DEBUG",
+        "CARGO_CFG_DEBUG_ASSERTIONS",
+        "CARGO_CFG_OVERFLOW_CHECKS",
+        "CARGO_CFG_PANIC",
+    ] {
+        let value = std::env::var(key).unwrap_or_else(|_| "<unset>".into());
+        digest.update(key.as_bytes());
+        digest.update(&(value.len() as u64).to_le_bytes());
+        digest.update(value.as_bytes());
     }
     println!(
         "cargo:rustc-env=RUSTROAD_VALIDATOR_DIGEST={:016x}{:016x}",
