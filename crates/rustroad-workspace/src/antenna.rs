@@ -50,10 +50,12 @@ use std::sync::Arc;
 
 mod batch;
 mod inventory;
+mod net_index;
 mod repair_groups;
 mod report;
 pub use batch::{CheckBatchPlan, CheckBatchSummary, check_antenna_batch, read_check_batch_plan};
 pub use inventory::{InventoryBounds, InventoryEntry, InventoryReport, antenna_inventory};
+use net_index::NetIndex;
 pub use repair_groups::{
     GroupRepairPlan, GroupRepairPolicy, GroupRepairSummary, read_group_repair_plan,
     repair_antenna_groups,
@@ -302,6 +304,10 @@ pub struct AntennaReport {
     pub stats: AntennaStats,
     pub violations: usize,
     pub nets: Vec<NetWorst>,
+    /// Which rows `checks` holds when not all: `violated` (every violated
+    /// row; `selection.coverage[].rows` still counts all evaluated rows).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check_rows: Option<&'static str>,
     pub checks: Vec<CheckRow>,
     pub unsupported: Vec<lef::AntennaUnsupported>,
     pub diagnostics: Vec<String>,
@@ -420,6 +426,7 @@ fn union_area_perimeter(
     Ok((area, perimeter))
 }
 
+#[derive(Debug, PartialEq, Eq)]
 struct Shape {
     layer: u32,
     rect: Rect,
@@ -1346,12 +1353,42 @@ fn evaluate_all(
     selected: Option<&BTreeSet<u32>>,
     memory: Option<&ReportMemory>,
     mut coverage: Option<&mut Vec<NetCoverage>>,
+    index: Option<&NetIndex>,
 ) -> Result<(Rows, BTreeMap<String, (f64, bool)>)> {
     let routed = logical_routed(routes, model.nets.len() as u32);
     charge_shape_scan(prep, routes, request, stats)?;
     // Only the new explicit report path changes retention; legacy repair behavior stays.
     let early_selection = memory.and(selected);
-    let mut per_net = net_shapes(prep, routes, &routed, None, early_selection, request)?;
+    // The per-net index yields the scan's map for the selected routed nets
+    // unless a shape budget would trip (the scan then reports it).
+    let indexed = match (index, early_selection) {
+        (Some(index), Some(nets)) => {
+            let nets: Vec<u32> = nets
+                .iter()
+                .copied()
+                .filter(|n| routed.contains(n))
+                .collect();
+            index.net_shapes(
+                prep,
+                routes,
+                &nets,
+                request.max_shapes_per_net,
+                request.max_total_shapes,
+            )?
+        }
+        _ => None,
+    };
+    let mut per_net = match indexed {
+        Some(per_net) => {
+            if std::env::var_os("RUSTROAD_ANTENNA_PARANOID").is_some()
+                && per_net != net_shapes(prep, routes, &routed, None, early_selection, request)?
+            {
+                return Err(fail("ANTENNA_INDEX", "indexed shapes differ from the scan"));
+            }
+            per_net
+        }
+        None => net_shapes(prep, routes, &routed, None, early_selection, request)?,
+    };
     let total: usize = per_net.values().map(Vec::len).sum();
     if extra.len() > request.max_total_shapes.saturating_sub(total) {
         return Err(Error::Budget("ANTENNA: max_total_shapes".into()));
@@ -1378,12 +1415,27 @@ fn evaluate_all(
             prep.input.terminals.len(),
             request.max_work,
         )?;
-        for (ti, terminal) in prep.input.terminals.iter().enumerate() {
-            if per_net.contains_key(&terminal.net) {
-                let (gate, _, partial) = terminal_area(prep, model, ti, None);
-                let entry = gate_info.entry(terminal.net).or_default();
-                entry.0 += usize::from(gate > 0);
-                entry.1 |= partial;
+        let mut note = |ti: usize, net: u32| {
+            let (gate, _, partial) = terminal_area(prep, model, ti, None);
+            let entry = gate_info.entry(net).or_default();
+            entry.0 += usize::from(gate > 0);
+            entry.1 |= partial;
+        };
+        match index {
+            // Same per-net sums from each net's own terminals.
+            Some(index) => {
+                for &net in per_net.keys() {
+                    for &ti in index.terminals(net) {
+                        note(ti as usize, net);
+                    }
+                }
+            }
+            None => {
+                for (ti, terminal) in prep.input.terminals.iter().enumerate() {
+                    if per_net.contains_key(&terminal.net) {
+                        note(ti, terminal.net);
+                    }
+                }
             }
         }
     }
@@ -1520,7 +1572,7 @@ pub fn check_antenna(
         .ok_or_else(|| fail("NO_ROUTING", "route before the antenna check"))?;
     let placed: Vec<_> = snapshot.records().collect();
     let prep = prepare(design, bundle, &placed, state)?;
-    check_prepared(metadata, &placed, &prep, request, None)
+    check_prepared(metadata, &placed, &prep, request, None, None)
 }
 
 fn check_prepared(
@@ -1529,6 +1581,7 @@ fn check_prepared(
     prep: &Prepared,
     request: &AntennaRequest,
     source_sha256: Option<&str>,
+    index: Option<&NetIndex>,
 ) -> Result<AntennaReport> {
     let design = &metadata.design;
     // Both callers validated these fields while preparing the same snapshot.
@@ -1638,6 +1691,7 @@ fn check_prepared(
         selected.as_ref(),
         memory.as_ref(),
         selected.as_ref().map(|_| &mut coverage),
+        index,
     )?;
     if qualified {
         partial = true;
@@ -1735,6 +1789,7 @@ fn check_prepared(
                 violated: v,
             })
             .collect(),
+        check_rows: None,
         checks: rows,
         unsupported: prep.unsupported.clone(),
         diagnostics,
@@ -2037,55 +2092,170 @@ pub fn repair_antenna(
         .as_ref()
         .ok_or_else(|| fail("NO_ROUTING", "route before the antenna repair"))?;
     let prep = prepare(&metadata.design, bundle, &placed, state)?;
-    repair_prepared(path, base_rev, request, &mut metadata, &placed, &prep)
+    repair_prepared(path, base_rev, request, &mut metadata, &placed, &prep, None)
 }
 
-fn repair_prepared(
+/// One `repair-antenna-groups` session's state for a selected repair: the
+/// selected check of the current routes (in memory, as written), the routes'
+/// per-net index and physical-source fingerprint, and the persistent jumper
+/// planner. The edited routes stay in memory; nothing is committed.
+struct RepairSession<'s, 'a> {
+    before: &'s AntennaReport,
+    /// Bytes of `before` as written (charged like a read report).
+    before_bytes: usize,
+    source: &'s str,
+    index: &'s mut NetIndex,
+    planner: &'s mut Option<rustroad_core::jumper::JumperPlanner<'a>>,
+    planner_limits: &'a core_routing::RouteLimits,
+    /// Run the full routing validation after every edit (the former check).
+    paranoid: bool,
+}
+
+/// The jumper planner's cap: the route comparison limit, the antenna work
+/// cap and the optional planner cap.
+fn planner_limits(
+    route_limits: &core_routing::RouteLimits,
+    max_work: usize,
+    max_planner_work: Option<usize>,
+) -> core_routing::RouteLimits {
+    let mut limits = route_limits.clone();
+    limits.max_comparisons = limits
+        .max_comparisons
+        .min(max_work)
+        .min(max_planner_work.unwrap_or(usize::MAX));
+    limits
+}
+
+/// Full scan count `charge_shape_scan` charges for routes with these counts.
+fn charge_counts(
+    prep: &Prepared,
+    counts: [usize; 3],
+    request: &AntennaRequest,
+    stats: &mut AntennaStats,
+) -> Result<()> {
+    let count = counts[0]
+        .saturating_add(counts[1])
+        .saturating_add(counts[2])
+        .saturating_add(prep.input.terminals.len());
+    charge_work(&mut stats.work, count, request.max_work)
+}
+fn record_counts(r: &core_routing::Routes) -> [usize; 3] {
+    [r.wires.len(), r.vias.len(), r.patches.len()]
+}
+
+/// The planner operations a repair uses (a session's persistent planner or a
+/// one-shot one, behind one reference type).
+trait Planner {
+    fn upper_of(&self, layer: u32) -> Option<(u32, Vec<u32>)>;
+    fn candidates(
+        &mut self,
+        routes: &core_routing::Routes,
+        net: u32,
+        layer: u32,
+        gate_pins: &[u32],
+        limits: &rustroad_core::jumper::JumperLimits,
+    ) -> rustroad_core::Result<Vec<rustroad_core::jumper::Jumper>>;
+    fn commit(&mut self, jumper: &rustroad_core::jumper::Jumper) -> rustroad_core::Result<()>;
+    fn work(&self) -> usize;
+}
+impl Planner for rustroad_core::jumper::JumperPlanner<'_> {
+    fn upper_of(&self, layer: u32) -> Option<(u32, Vec<u32>)> {
+        Self::upper_of(self, layer)
+    }
+    fn candidates(
+        &mut self,
+        routes: &core_routing::Routes,
+        net: u32,
+        layer: u32,
+        gate_pins: &[u32],
+        limits: &rustroad_core::jumper::JumperLimits,
+    ) -> rustroad_core::Result<Vec<rustroad_core::jumper::Jumper>> {
+        Self::candidates(self, routes, net, layer, gate_pins, limits)
+    }
+    fn commit(&mut self, jumper: &rustroad_core::jumper::Jumper) -> rustroad_core::Result<()> {
+        Self::commit(self, jumper)
+    }
+    fn work(&self) -> usize {
+        Self::work(self)
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn repair_prepared<'a>(
     path: &Path,
     base_rev: &str,
     request: &RepairRequest,
     metadata: &mut crate::Metadata,
     placed: &[rustroad_core::Placed],
-    prep: &Prepared,
+    prep: &'a Prepared,
+    session: Option<RepairSession<'_, 'a>>,
 ) -> Result<RepairReport> {
-    use rustroad_core::jumper::{Jumper, JumperPlanner, apply};
+    use rustroad_core::jumper::{Jumper, JumperPlanner, apply, apply_in_place};
+    let in_session = session.is_some();
+    let (in_memory, mut session_index, mut session_planner, paranoid) = match session {
+        Some(RepairSession {
+            before,
+            before_bytes,
+            source,
+            index,
+            planner,
+            planner_limits,
+            paranoid,
+        }) => (
+            Some((before, before_bytes, source)),
+            Some(index),
+            Some((planner, planner_limits)),
+            paranoid,
+        ),
+        None => (None, None, None, false),
+    };
     let mut antenna = request.antenna.clone();
     if antenna.selected_nets.is_some()
         || (request.selected_report.is_some() && request.report.is_some())
         || (request.selected_report.is_some()
             && matches!(request.scope, RepairScope::CompleteDesign))
+        || (in_session
+            && (request.selected_report.is_some()
+                || request.report.is_some()
+                || matches!(request.scope, RepairScope::CompleteDesign)))
     {
         return Err(fail(
             "INVALID_ARGUMENT",
             "selected-report needs an explicit repair scope and no legacy report",
         ));
     }
-    let memory = request
-        .selected_report
-        .as_ref()
-        .map(|_| ReportMemory::new(MAX_REPORT_MEMORY_BYTES));
+    let memory = (request.selected_report.is_some() || in_session)
+        .then(|| ReportMemory::new(MAX_REPORT_MEMORY_BYTES));
     let selected_input = match (&request.selected_report, &memory) {
         (Some(path), Some(memory)) => Some(report::SelectedInput::load(path, memory)?),
         _ => None,
     };
+    let input_limits = match (&selected_input, &in_memory) {
+        (Some(input), _) => Some(&input.analysis.limits),
+        (None, Some((before, _, _))) => Some(
+            &before
+                .selection
+                .as_ref()
+                .ok_or_else(|| fail("STALE_REPORT", "the selected check has no selection"))?
+                .limits,
+        ),
+        (None, None) => None,
+    };
     if let Some(rows) = request.max_rows {
         antenna.max_rows = rows;
-    } else if let Some(input) = &selected_input {
+    } else if let Some(limits) = input_limits {
         if antenna.max_rows != AntennaRequest::default().max_rows
-            && antenna.max_rows != input.analysis.limits.max_rows
+            && antenna.max_rows != limits.max_rows
         {
             return Err(fail(
                 "REPORT_LIMIT_MISMATCH",
                 "typed row bound conflicts with the selected report",
             ));
         }
-        antenna.max_rows = input.analysis.limits.max_rows;
+        antenna.max_rows = limits.max_rows;
     }
     check_budgets(&antenna)?;
-    if selected_input
-        .as_ref()
-        .is_some_and(|input| input.analysis.limits != AnalysisLimits::from(&antenna))
-    {
+    if input_limits.is_some_and(|limits| *limits != AnalysisLimits::from(&antenna)) {
         return Err(fail(
             "REPORT_LIMIT_MISMATCH",
             "selected check and repair limits differ",
@@ -2114,358 +2284,444 @@ fn repair_prepared(
         ));
     }
     request.jumper.validate()?;
-    let current = crate::head(path)?;
+    // A session holds the exclusive lock and edits logical revisions in
+    // memory; the workspace HEAD stays at its materialized base.
+    let current = if in_session {
+        metadata.revision.clone()
+    } else {
+        crate::head(path)?
+    };
     crate::check_base(base_rev, &current)?;
     crate::check_base(base_rev, &metadata.revision)?;
-    let design = metadata.design.clone();
-    let bundle = metadata
-        .physical
-        .as_ref()
-        .ok_or_else(|| fail("NO_PHYSICAL", "import a PDK design first"))?;
-    let state = bundle
-        .routing
-        .as_ref()
-        .ok_or_else(|| fail("NO_ROUTING", "route before the antenna repair"))?;
-    let model = &bundle.connectivity;
-    let route_limits = state.config.limits.clone();
-    let mut planner_limits = route_limits.clone();
-    planner_limits.max_comparisons = planner_limits
-        .max_comparisons
-        .min(antenna.max_work)
-        .min(request.max_planner_work.unwrap_or(usize::MAX));
-    let routing_scope = match state.scope {
-        crate::routing::RouteScope::All => "all_signal_nets",
-        crate::routing::RouteScope::Clock => "clock_nets_only",
-    };
-    let selected_names = match &request.scope {
-        RepairScope::CompleteDesign => Vec::new(),
-        RepairScope::SelectedSupportedNets(nets) => {
-            validate_selection(nets)?;
-            nets.clone()
-        }
-    };
-    let selected = match &request.scope {
-        RepairScope::CompleteDesign => None,
-        RepairScope::SelectedSupportedNets(nets) => {
-            let by_name: HashMap<&str, u32> = model
-                .nets
-                .iter()
-                .enumerate()
-                .map(|(i, net)| (net.name.as_str(), i as u32))
-                .collect();
-            let routed = logical_routed(&state.routes, model.nets.len() as u32);
-            let mut selected = BTreeSet::new();
-            for name in nets {
-                let net = *by_name
-                    .get(name.as_str())
-                    .ok_or_else(|| fail("ANTENNA_SELECTION", format!("net {name} absent")))?;
-                if !routed.contains(&net) {
-                    return Err(fail(
-                        "ANTENNA_SELECTION",
-                        format!("net {name} has no routed geometry"),
-                    ));
-                }
-                selected.insert(net);
-            }
-            Some(selected)
-        }
-    };
-    if prep.model_partial || (selected.is_none() && state.scope != crate::routing::RouteScope::All)
-    {
-        return Err(fail(
-            "ANTENNA_UNMODELED",
-            "complete repair requires all-signal routing and a supported model; an explicit supported-net selection is required for a partial route",
-        ));
-    }
+    let routing_scope;
+    let selected_names;
+    let selected;
+    let before;
+    let analysis;
     let mut stats = AntennaStats::default();
-    if let Some(input) = &selected_input {
-        charge_work(&mut stats.work, input.input_bytes(), antenna.max_work)?;
-    }
-    if selected.is_some()
-        && let Some(report) = &request.report
+    let mut qualified = false;
+    let (len0, wires0, vias0);
+    let mut jumpers = Vec::new();
+    let mut accepted: Vec<Jumper> = Vec::new();
+    let mut unrepaired = Vec::new();
+    let mut evaluated = 0usize;
+    let mut planner_work = 0usize;
+    let route_limits;
+    let one_shot_limits;
+    let mut built_index = None;
     {
-        // A supplied checker report describes the full routed scope. Bind it
-        // before selecting, even if unselected macro histories remain partial.
-        let (all_rows, _) = evaluate_all(
+        let design = &metadata.design;
+        let bundle = metadata
+            .physical
+            .as_ref()
+            .ok_or_else(|| fail("NO_PHYSICAL", "import a PDK design first"))?;
+        let state = bundle
+            .routing
+            .as_ref()
+            .ok_or_else(|| fail("NO_ROUTING", "route before the antenna repair"))?;
+        let model = &bundle.connectivity;
+        route_limits = state.config.limits.clone();
+        one_shot_limits = planner_limits(&route_limits, antenna.max_work, request.max_planner_work);
+        routing_scope = match state.scope {
+            crate::routing::RouteScope::All => "all_signal_nets",
+            crate::routing::RouteScope::Clock => "clock_nets_only",
+        };
+        selected_names = match &request.scope {
+            RepairScope::CompleteDesign => Vec::new(),
+            RepairScope::SelectedSupportedNets(nets) => {
+                validate_selection(nets)?;
+                nets.clone()
+            }
+        };
+        selected = match &request.scope {
+            RepairScope::CompleteDesign => None,
+            RepairScope::SelectedSupportedNets(nets) => {
+                let by_name: HashMap<&str, u32> = model
+                    .nets
+                    .iter()
+                    .enumerate()
+                    .map(|(i, net)| (net.name.as_str(), i as u32))
+                    .collect();
+                let routed = logical_routed(&state.routes, model.nets.len() as u32);
+                let mut selected = BTreeSet::new();
+                for name in nets {
+                    let net = *by_name
+                        .get(name.as_str())
+                        .ok_or_else(|| fail("ANTENNA_SELECTION", format!("net {name} absent")))?;
+                    if !routed.contains(&net) {
+                        return Err(fail(
+                            "ANTENNA_SELECTION",
+                            format!("net {name} has no routed geometry"),
+                        ));
+                    }
+                    selected.insert(net);
+                }
+                Some(selected)
+            }
+        };
+        if prep.model_partial
+            || (selected.is_none() && state.scope != crate::routing::RouteScope::All)
+        {
+            return Err(fail(
+                "ANTENNA_UNMODELED",
+                "complete repair requires all-signal routing and a supported model; an explicit supported-net selection is required for a partial route",
+            ));
+        }
+        if let Some(input) = &selected_input {
+            charge_work(&mut stats.work, input.input_bytes(), antenna.max_work)?;
+        }
+        if let Some((_, bytes, _)) = &in_memory {
+            charge_work(&mut stats.work, *bytes, antenna.max_work)?;
+        }
+        if selected.is_some()
+            && let Some(report) = &request.report
+        {
+            // A supplied checker report describes the full routed scope. Bind it
+            // before selecting, even if unselected macro histories remain partial.
+            let (all_rows, _) = evaluate_all(
+                prep,
+                design,
+                model,
+                &state.routes,
+                &antenna,
+                &mut stats,
+                &mut false,
+                Vec::new(),
+                None,
+                None,
+                None,
+                None,
+            )?;
+            bind_report(report, &current, antenna.safety_margin, &all_rows.data)?;
+        }
+        let index: &NetIndex = match &session_index {
+            Some(index) => {
+                index.check(&state.routes)?;
+                index
+            }
+            None => built_index.insert(NetIndex::new(prep, &state.routes)?),
+        };
+        let mut coverage = Vec::new();
+        let (rows_before, _) = evaluate_all(
             prep,
-            &design,
+            design,
             model,
             &state.routes,
             &antenna,
             &mut stats,
-            &mut false,
+            &mut qualified,
             Vec::new(),
-            None,
-            None,
-            None,
+            selected.as_ref(),
+            memory.as_ref(),
+            (selected_input.is_some() || in_session).then_some(&mut coverage),
+            Some(index),
         )?;
-        bind_report(report, &current, antenna.safety_margin, &all_rows.data)?;
-    }
-    let mut qualified = false;
-    let mut coverage = Vec::new();
-    let (rows_before, _) = evaluate_all(
-        prep,
-        &design,
-        model,
-        &state.routes,
-        &antenna,
-        &mut stats,
-        &mut qualified,
-        Vec::new(),
-        selected.as_ref(),
-        memory.as_ref(),
-        selected_input.as_ref().map(|_| &mut coverage),
-    )?;
-    if qualified {
-        return Err(fail(
-            "ANTENNA_UNMODELED",
-            "repair requires a complete native antenna model; use independent foundry checking for hierarchical pin histories",
-        ));
-    }
-    if selected.is_none()
-        && let Some(report) = &request.report
-    {
-        bind_report(report, &current, antenna.safety_margin, &rows_before.data)?;
-    }
-    let selected_analysis = if let (Some(input), Some(memory)) = (&selected_input, &memory) {
-        let fresh = selected_analysis(
-            prep,
-            &design,
-            model,
-            placed,
-            state,
-            &antenna,
-            &selected_names,
-            coverage,
-            None,
-        )?;
-        input.bind(
-            &current,
-            antenna.safety_margin,
-            &design.name,
-            prep.dbu,
-            routing_scope,
-            &prep.sources,
-            &fresh,
-            &rows_before.data,
-            memory,
-        )?;
-        Some(fresh)
-    } else {
-        None
-    };
-    drop(selected_input);
-    if selected.is_some() {
-        let observed: BTreeSet<&str> = rows_before
-            .data
-            .iter()
-            .map(|row| row.net.as_str())
-            .collect();
-        if let Some(name) = selected_names
-            .iter()
-            .find(|name| !observed.contains(name.as_str()))
-        {
+        if qualified {
             return Err(fail(
-                "ANTENNA_SELECTION",
-                format!("net {name} has no native gate/rule observation"),
+                "ANTENNA_UNMODELED",
+                "repair requires a complete native antenna model; use independent foundry checking for hierarchical pin histories",
             ));
         }
-    }
-    let before = count(&rows_before.data);
-    let mut routes = state.routes.clone();
-    let wire_stats =
-        |r: &core_routing::Routes| (r.stats.wire_length_dbu, r.wires.len(), r.vias.len());
-    let (len0, wires0, vias0) = wire_stats(&routes);
-    let mut jumpers = Vec::new();
-    let mut unrepaired = Vec::new();
-    let mut evaluated = 0usize;
-    let mut planner_work = 0usize;
-    if !before.nets.is_empty() {
-        let input = &prep.input;
-        let routed = logical_routed(&routes, model.nets.len() as u32);
-        let mut planner = JumperPlanner::new(input, &routes, &planner_limits)?;
-        let trace = std::env::var_os("RUSTROAD_JUMPER_TRACE").is_some();
-        let name_of = |l: u32| input.layers[l as usize].name.clone();
-        let layer_id = |name: &str| -> Option<u32> {
-            input
-                .layers
-                .iter()
-                .position(|l| l.name == name)
-                .map(|i| i as u32)
-        };
-        let rank: HashMap<u32, usize> = prep
-            .order
-            .iter()
-            .enumerate()
-            .map(|(i, &l)| (l, i))
-            .collect();
-        // Once the planner's work budget is spent, every remaining selected net
-        // is reported unrepaired (its worst before-row) instead of aborting.
-        let mut exhausted = false;
-        for net_name in &before.nets {
-            if exhausted {
-                if let Some(row) = rows_before
-                    .data
-                    .iter()
-                    .filter(|r| r.violated && &r.net == net_name)
-                    .min_by_key(|r| layer_id(&r.layer).and_then(|l| rank.get(&l)).copied())
-                {
-                    if let Some(hold) = &mut output_hold {
-                        hold.grow(
-                            2 * mem::size_of::<Unrepaired>()
-                                + net_name.len()
-                                + row.layer.len()
-                                + PLANNER_BUDGET.len()
-                                + 256,
-                        )?;
-                    }
-                    unrepaired.push(Unrepaired {
-                        net: net_name.clone(),
-                        layer: row.layer.clone(),
-                        ratio: row.ratio,
-                        effective_limit: row.effective_limit,
-                        reason: PLANNER_BUDGET.into(),
-                    });
-                }
-                continue;
+        if selected.is_none()
+            && let Some(report) = &request.report
+        {
+            bind_report(report, &current, antenna.safety_margin, &rows_before.data)?;
+        }
+        analysis = if let (Some(memory), true) = (&memory, selected_input.is_some() || in_session) {
+            let fresh = selected_analysis(
+                prep,
+                design,
+                model,
+                placed,
+                state,
+                &antenna,
+                &selected_names,
+                coverage,
+                in_memory.map(|(_, _, source)| source),
+            )?;
+            if let Some(input) = &selected_input {
+                input.bind(
+                    &current,
+                    antenna.safety_margin,
+                    &design.name,
+                    prep.dbu,
+                    routing_scope,
+                    &prep.sources,
+                    &fresh,
+                    &rows_before.data,
+                    memory,
+                )?;
             }
-            let net = model
-                .nets
+            if let Some((before, _, _)) = &in_memory {
+                report::bind_in_memory(
+                    before,
+                    &current,
+                    antenna.safety_margin,
+                    &design.name,
+                    prep.dbu,
+                    routing_scope,
+                    &prep.sources,
+                    &fresh,
+                    &rows_before.data,
+                )?;
+            }
+            Some(fresh)
+        } else {
+            None
+        };
+        drop(selected_input);
+        if selected.is_some() {
+            let observed: BTreeSet<&str> = rows_before
+                .data
                 .iter()
-                .position(|n| &n.name == net_name)
-                .ok_or_else(|| fail("ANTENNA_REPAIR", format!("net {net_name} absent")))?
-                as u32;
-            let gate_names: Vec<(String, u32)> = input
-                .terminals
+                .map(|row| row.net.as_str())
+                .collect();
+            if let Some(name) = selected_names
+                .iter()
+                .find(|name| !observed.contains(name.as_str()))
+            {
+                return Err(fail(
+                    "ANTENNA_SELECTION",
+                    format!("net {name} has no native gate/rule observation"),
+                ));
+            }
+        }
+        before = count(&rows_before.data);
+        let routes = &state.routes;
+        (len0, wires0, vias0) = (
+            routes.stats.wire_length_dbu,
+            routes.wires.len(),
+            routes.vias.len(),
+        );
+        if !before.nets.is_empty() {
+            let input = &prep.input;
+            // A session keeps one planner whose index equals a fresh build
+            // over the current routes at every attempt start.
+            let mut one_shot = None;
+            let planner: &mut dyn Planner = match &mut session_planner {
+                Some((slot, limits)) => {
+                    if limits.max_comparisons != one_shot_limits.max_comparisons {
+                        return Err(fail("ANTENNA_REPAIR", "session planner limits differ"));
+                    }
+                    if slot.is_none() {
+                        **slot = Some(JumperPlanner::persistent(input, routes, limits)?);
+                    }
+                    let planner = slot.as_mut().unwrap();
+                    planner.begin()?;
+                    planner
+                }
+                None => one_shot.insert(JumperPlanner::new(input, routes, &one_shot_limits)?),
+            };
+            let trace = std::env::var_os("RUSTROAD_JUMPER_TRACE").is_some();
+            let name_of = |l: u32| input.layers[l as usize].name.clone();
+            let layer_id = |name: &str| -> Option<u32> {
+                input
+                    .layers
+                    .iter()
+                    .position(|l| l.name == name)
+                    .map(|i| i as u32)
+            };
+            let rank: HashMap<u32, usize> = prep
+                .order
                 .iter()
                 .enumerate()
-                .filter(|(_, t)| t.net == net)
-                .filter_map(|(ti, t)| {
-                    let (name, gate, _, _) = terminal_info(prep, &design, model, ti, None);
-                    (gate > 0).then_some((name, t.pin))
-                })
+                .map(|(i, &l)| (l, i))
                 .collect();
-            let eval = |r: &core_routing::Routes, scratch: &mut AntennaStats| -> Result<Rows> {
-                charge_shape_scan(prep, r, &antenna, scratch)?;
-                let shapes = net_shapes(prep, r, &routed, Some(net), None, &antenna)?;
-                let empty = Vec::new();
-                evaluate_net(
-                    prep,
-                    &design,
-                    model,
-                    net,
-                    shapes.get(&net).unwrap_or(&empty),
-                    &antenna,
-                    scratch,
-                    &mut false,
-                    memory.as_ref(),
-                )
-            };
-            let mut inserted = 0usize;
-            loop {
-                let rows = eval(&routes, &mut stats)?;
-                let bad: Vec<&CheckRow> = rows.data.iter().filter(|r| r.violated).collect();
-                let Some(row) = bad
-                    .iter()
-                    .min_by_key(|r| layer_id(&r.layer).and_then(|l| rank.get(&l)).copied())
-                    .copied()
-                else {
-                    break;
-                };
-                let mut stop = |reason: &str| -> Result<Unrepaired> {
-                    if let Some(hold) = &mut output_hold {
-                        hold.grow(
-                            2 * mem::size_of::<Unrepaired>()
-                                + net_name.len()
-                                + row.layer.len()
-                                + reason.len()
-                                + 256,
-                        )?;
+            // Record counts of the full routes with every jumper accepted so
+            // far; candidate evaluation charges the full scan it replaced.
+            let mut full = record_counts(routes);
+            // Once the planner's work budget is spent, every remaining selected net
+            // is reported unrepaired (its worst before-row) instead of aborting.
+            let mut exhausted = false;
+            for net_name in &before.nets {
+                if exhausted {
+                    if let Some(row) = rows_before
+                        .data
+                        .iter()
+                        .filter(|r| r.violated && &r.net == net_name)
+                        .min_by_key(|r| layer_id(&r.layer).and_then(|l| rank.get(&l)).copied())
+                    {
+                        if let Some(hold) = &mut output_hold {
+                            hold.grow(
+                                2 * mem::size_of::<Unrepaired>()
+                                    + net_name.len()
+                                    + row.layer.len()
+                                    + PLANNER_BUDGET.len()
+                                    + 256,
+                            )?;
+                        }
+                        unrepaired.push(Unrepaired {
+                            net: net_name.clone(),
+                            layer: row.layer.clone(),
+                            ratio: row.ratio,
+                            effective_limit: row.effective_limit,
+                            reason: PLANNER_BUDGET.into(),
+                        });
                     }
-                    Ok(Unrepaired {
-                        net: net_name.clone(),
-                        layer: row.layer.clone(),
-                        ratio: row.ratio,
-                        effective_limit: row.effective_limit,
-                        reason: reason.into(),
+                    continue;
+                }
+                let net = model
+                    .nets
+                    .iter()
+                    .position(|n| &n.name == net_name)
+                    .ok_or_else(|| fail("ANTENNA_REPAIR", format!("net {net_name} absent")))?
+                    as u32;
+                let gate_names: Vec<(String, u32)> = index
+                    .terminals(net)
+                    .iter()
+                    .filter_map(|&ti| {
+                        let (name, gate, _, _) =
+                            terminal_info(prep, design, model, ti as usize, None);
+                        (gate > 0).then_some((name, input.terminals[ti as usize].pin))
                     })
+                    .collect();
+                // This net's records: jumpers and their rule checks touch only
+                // them, so a net view gives the full routes' answers.
+                let mut routes_net = index.local(routes, net)?;
+                let eval = |r: &core_routing::Routes,
+                            current: &core_routing::Routes,
+                            full: [usize; 3],
+                            scratch: &mut AntennaStats|
+                 -> Result<Rows> {
+                    let (a, b) = (record_counts(r), record_counts(current));
+                    let counts = [0, 1, 2].map(|k| full[k] - b[k] + a[k]);
+                    charge_counts(prep, counts, &antenna, scratch)?;
+                    let shapes = net_index::local_shapes(prep, index, r, net)?;
+                    let cap = antenna.max_shapes_per_net.min(antenna.max_total_shapes);
+                    if shapes.len() > cap {
+                        return Err(Error::Budget(
+                            if antenna.max_total_shapes <= antenna.max_shapes_per_net {
+                                "ANTENNA: max_total_shapes"
+                            } else {
+                                "ANTENNA: max_shapes_per_net"
+                            }
+                            .into(),
+                        ));
+                    }
+                    evaluate_net(
+                        prep,
+                        design,
+                        model,
+                        net,
+                        &shapes,
+                        &antenna,
+                        scratch,
+                        &mut false,
+                        memory.as_ref(),
+                    )
                 };
-                if inserted >= request.max_jumpers_per_net || jumpers.len() >= request.max_jumpers {
-                    unrepaired.push(stop("jumper budget reached")?);
-                    break;
-                }
-                let layer = layer_id(&row.layer)
-                    .ok_or_else(|| fail("ANTENNA_REPAIR", "row layer is not a route layer"))?;
-                if input.layers[layer as usize].vertical.is_none() {
-                    unrepaired.push(stop(
-                        "cut-layer rule: a jumper cannot shorten a via partial net",
-                    )?);
-                    break;
-                }
-                if planner.upper_of(layer).is_none() {
-                    unrepaired.push(stop("no routing layer above the violating layer")?);
-                    break;
-                }
-                let excess0 = excess_by_layer(&rows.data);
-                charge_work(
-                    &mut stats.work,
-                    rows.data.iter().map(|r| r.gates.len()).sum(),
-                    antenna.max_work,
-                )?;
-                let violated0 = violated_gates(&rows.data);
-                let x0 = excess0[&row.layer].0;
-                let tried = evaluated;
-                // (layer excess after, clean, edited routes, jumpers, rows)
-                type Choice = (f64, bool, core_routing::Routes, Vec<Jumper>, Rows);
-                let judge = |trial: core_routing::Routes,
-                             chosen: Vec<Jumper>,
-                             scratch: &mut AntennaStats|
-                 -> Result<Option<Choice>> {
-                    let after = eval(&trial, scratch)?;
+                let mut inserted = 0usize;
+                loop {
+                    let rows = eval(&routes_net, &routes_net, full, &mut stats)?;
+                    let bad: Vec<&CheckRow> = rows.data.iter().filter(|r| r.violated).collect();
+                    let Some(row) = bad
+                        .iter()
+                        .min_by_key(|r| layer_id(&r.layer).and_then(|l| rank.get(&l)).copied())
+                        .copied()
+                    else {
+                        break;
+                    };
+                    let mut stop = |reason: &str| -> Result<Unrepaired> {
+                        if let Some(hold) = &mut output_hold {
+                            hold.grow(
+                                2 * mem::size_of::<Unrepaired>()
+                                    + net_name.len()
+                                    + row.layer.len()
+                                    + reason.len()
+                                    + 256,
+                            )?;
+                        }
+                        Ok(Unrepaired {
+                            net: net_name.clone(),
+                            layer: row.layer.clone(),
+                            ratio: row.ratio,
+                            effective_limit: row.effective_limit,
+                            reason: reason.into(),
+                        })
+                    };
+                    if inserted >= request.max_jumpers_per_net
+                        || jumpers.len() >= request.max_jumpers
+                    {
+                        unrepaired.push(stop("jumper budget reached")?);
+                        break;
+                    }
+                    let layer = layer_id(&row.layer)
+                        .ok_or_else(|| fail("ANTENNA_REPAIR", "row layer is not a route layer"))?;
+                    if input.layers[layer as usize].vertical.is_none() {
+                        unrepaired.push(stop(
+                            "cut-layer rule: a jumper cannot shorten a via partial net",
+                        )?);
+                        break;
+                    }
+                    if planner.upper_of(layer).is_none() {
+                        unrepaired.push(stop("no routing layer above the violating layer")?);
+                        break;
+                    }
+                    let excess0 = excess_by_layer(&rows.data);
                     charge_work(
-                        &mut scratch.work,
-                        after.data.iter().map(|r| r.gates.len()).sum(),
+                        &mut stats.work,
+                        rows.data.iter().map(|r| r.gates.len()).sum(),
                         antenna.max_work,
                     )?;
-                    let fresh = new_gate_violation(&after.data, &violated0);
-                    let x = excess_by_layer(&after.data)
-                        .get(&row.layer)
-                        .map_or(0.0, |e| e.0);
-                    if trace {
-                        eprintln!(
-                            "[jumper] {net_name} {} x0 {x0:.3} -> {x:.3} fresh {fresh} jumpers {:?}",
-                            row.layer,
-                            chosen
-                                .iter()
-                                .map(|c| (c.gate_side, c.far_side))
-                                .collect::<Vec<_>>()
-                        );
-                    }
-                    if fresh || x >= x0 {
-                        return Ok(None);
-                    }
-                    let clean = !after.data.iter().any(|r| r.violated);
-                    Ok(Some((x, clean, trial, chosen, after)))
-                };
-                let better = |a: &Choice, b: &Option<Choice>| -> bool {
-                    b.as_ref()
-                        .is_none_or(|b| (a.1 && !b.1) || (a.1 == b.1 && a.0 < b.0))
-                };
-                // A: one jumper on the longest runs of the gates' partial
-                // net; the first that clears the net, else the largest drop.
-                // Seeds: the gates of the violating partial nets of this layer.
-                let row_gates: BTreeSet<&String> = bad
-                    .iter()
-                    .filter(|r| r.layer == row.layer)
-                    .flat_map(|r| r.gates.iter())
-                    .collect();
-                let seeds: Vec<u32> = gate_names
-                    .iter()
-                    .filter(|(n, _)| row_gates.contains(n))
-                    .map(|(_, p)| *p)
-                    .collect();
-                let candidates =
-                    match planner.candidates(&routes, net, layer, &seeds, &request.jumper) {
+                    let violated0 = violated_gates(&rows.data);
+                    let x0 = excess0[&row.layer].0;
+                    let tried = evaluated;
+                    // (layer excess after, clean, edited net routes, jumpers, rows)
+                    type Choice = (f64, bool, core_routing::Routes, Vec<Jumper>, Rows);
+                    let judge = |trial: core_routing::Routes,
+                                 chosen: Vec<Jumper>,
+                                 scratch: &mut AntennaStats|
+                     -> Result<Option<Choice>> {
+                        let after = eval(&trial, &routes_net, full, scratch)?;
+                        charge_work(
+                            &mut scratch.work,
+                            after.data.iter().map(|r| r.gates.len()).sum(),
+                            antenna.max_work,
+                        )?;
+                        let fresh = new_gate_violation(&after.data, &violated0);
+                        let x = excess_by_layer(&after.data)
+                            .get(&row.layer)
+                            .map_or(0.0, |e| e.0);
+                        if trace {
+                            eprintln!(
+                                "[jumper] {net_name} {} x0 {x0:.3} -> {x:.3} fresh {fresh} jumpers {:?}",
+                                row.layer,
+                                chosen
+                                    .iter()
+                                    .map(|c| (c.gate_side, c.far_side))
+                                    .collect::<Vec<_>>()
+                            );
+                        }
+                        if fresh || x >= x0 {
+                            return Ok(None);
+                        }
+                        let clean = !after.data.iter().any(|r| r.violated);
+                        Ok(Some((x, clean, trial, chosen, after)))
+                    };
+                    let better = |a: &Choice, b: &Option<Choice>| -> bool {
+                        b.as_ref()
+                            .is_none_or(|b| (a.1 && !b.1) || (a.1 == b.1 && a.0 < b.0))
+                    };
+                    // A: one jumper on the longest runs of the gates' partial
+                    // net; the first that clears the net, else the largest drop.
+                    // Seeds: the gates of the violating partial nets of this layer.
+                    let row_gates: BTreeSet<&String> = bad
+                        .iter()
+                        .filter(|r| r.layer == row.layer)
+                        .flat_map(|r| r.gates.iter())
+                        .collect();
+                    let seeds: Vec<u32> = gate_names
+                        .iter()
+                        .filter(|(n, _)| row_gates.contains(n))
+                        .map(|(_, p)| *p)
+                        .collect();
+                    let candidates = match planner.candidates(
+                        &routes_net,
+                        net,
+                        layer,
+                        &seeds,
+                        &request.jumper,
+                    ) {
                         // Only the planner's own work and spatial limits are charged here.
                         Err(rustroad_core::Error::Budget(m)) => {
                             if trace {
@@ -2477,115 +2733,161 @@ fn repair_prepared(
                         }
                         other => other?,
                     };
-                let mut best: Option<Choice> = None;
-                for c in candidates {
-                    evaluated += 1;
-                    let trial = apply(input, &routes, &c)?;
-                    if let Some(choice) = judge(trial, vec![c], &mut stats)?
-                        && better(&choice, &best)
-                    {
-                        let clean = choice.1;
-                        best = Some(choice);
-                        if clean {
-                            break;
-                        }
-                    }
-                }
-                // B: isolate every gate of the violating partial net with a
-                // jumper on its nearest run (multi-sink trees: the trunk
-                // keeps no gate once each sink is cut off).
-                if !best.as_ref().is_some_and(|b| b.1) {
-                    let nearest = rustroad_core::jumper::JumperLimits {
-                        nearest_first: true,
-                        per_run: 1,
-                        ..request.jumper.clone()
-                    };
-                    let mut trial = routes.clone();
-                    let mut chosen = Vec::new();
-                    for (name, pin) in &gate_names {
-                        if !row_gates.contains(name)
-                            || inserted + chosen.len() >= request.max_jumpers_per_net
+                    let mut best: Option<Choice> = None;
+                    for c in candidates {
+                        evaluated += 1;
+                        let trial = apply(input, &routes_net, &c)?;
+                        if let Some(choice) = judge(trial, vec![c], &mut stats)?
+                            && better(&choice, &best)
                         {
-                            continue;
-                        }
-                        let c = match planner.candidates(&trial, net, layer, &[*pin], &nearest) {
-                            Err(rustroad_core::Error::Budget(m)) => {
-                                if trace {
-                                    eprintln!("[jumper] {net_name}: {m}");
-                                }
-                                exhausted = true;
+                            let clean = choice.1;
+                            best = Some(choice);
+                            if clean {
                                 break;
                             }
-                            other => other?,
-                        };
-                        if let Some(c) = c.into_iter().next() {
-                            evaluated += 1;
-                            trial = apply(input, &trial, &c)?;
-                            chosen.push(c);
                         }
                     }
-                    if exhausted {
-                        unrepaired.push(stop(PLANNER_BUDGET)?);
+                    // B: isolate every gate of the violating partial net with a
+                    // jumper on its nearest run (multi-sink trees: the trunk
+                    // keeps no gate once each sink is cut off).
+                    if !best.as_ref().is_some_and(|b| b.1) {
+                        let nearest = rustroad_core::jumper::JumperLimits {
+                            nearest_first: true,
+                            per_run: 1,
+                            ..request.jumper.clone()
+                        };
+                        let mut trial = routes_net.clone();
+                        let mut chosen = Vec::new();
+                        for (name, pin) in &gate_names {
+                            if !row_gates.contains(name)
+                                || inserted + chosen.len() >= request.max_jumpers_per_net
+                            {
+                                continue;
+                            }
+                            let c = match planner.candidates(&trial, net, layer, &[*pin], &nearest)
+                            {
+                                Err(rustroad_core::Error::Budget(m)) => {
+                                    if trace {
+                                        eprintln!("[jumper] {net_name}: {m}");
+                                    }
+                                    exhausted = true;
+                                    break;
+                                }
+                                other => other?,
+                            };
+                            if let Some(c) = c.into_iter().next() {
+                                evaluated += 1;
+                                trial = apply(input, &trial, &c)?;
+                                chosen.push(c);
+                            }
+                        }
+                        if exhausted {
+                            unrepaired.push(stop(PLANNER_BUDGET)?);
+                            break;
+                        }
+                        if !chosen.is_empty()
+                            && let Some(choice) = judge(trial, chosen, &mut stats)?
+                            && better(&choice, &best)
+                        {
+                            best = Some(choice);
+                        }
+                    }
+                    let Some((_, _, trial, chosen, after)) = best else {
+                        unrepaired.push(stop(if evaluated == tried {
+                            "no legal jumper position on the gates' partial net"
+                        } else {
+                            "no jumper candidate lowers the partial-net ratio"
+                        })?);
                         break;
+                    };
+                    let e1 = excess_by_layer(&after.data);
+                    let (_, r0, lim) = excess0[&row.layer];
+                    for c in &chosen {
+                        planner.commit(c)?;
+                        if let Some(hold) = &mut output_hold {
+                            hold.grow(
+                                2 * mem::size_of::<JumperRecord>()
+                                    + net_name.len()
+                                    + input.layers[c.layer as usize].name.len()
+                                    + input.layers[c.upper as usize].name.len()
+                                    + input.vias[c.via as usize].name.len()
+                                    + 256,
+                            )?;
+                        }
+                        jumpers.push(JumperRecord {
+                            net: net_name.clone(),
+                            layer: name_of(c.layer),
+                            upper: name_of(c.upper),
+                            via: input.vias[c.via as usize].name.clone(),
+                            gate_side: c.gate_side,
+                            far_side: c.far_side,
+                            gate_distance_um: c.gate_distance as f64 / f64::from(prep.dbu),
+                            run_length_um: c.run_length as f64 / f64::from(prep.dbu),
+                            ratio_before: r0,
+                            ratio_after: e1.get(&row.layer).map_or(0.0, |e| e.1),
+                            effective_limit: lim,
+                        });
                     }
-                    if !chosen.is_empty()
-                        && let Some(choice) = judge(trial, chosen, &mut stats)?
-                        && better(&choice, &best)
-                    {
-                        best = Some(choice);
-                    }
+                    let (a, b) = (record_counts(&trial), record_counts(&routes_net));
+                    full = [0, 1, 2].map(|k| full[k] - b[k] + a[k]);
+                    accepted.extend(chosen.iter().cloned());
+                    routes_net = trial;
+                    inserted += chosen.len();
                 }
-                let Some((_, _, trial, chosen, after)) = best else {
-                    unrepaired.push(stop(if evaluated == tried {
-                        "no legal jumper position on the gates' partial net"
-                    } else {
-                        "no jumper candidate lowers the partial-net ratio"
-                    })?);
-                    break;
-                };
-                let e1 = excess_by_layer(&after.data);
-                let (_, r0, lim) = excess0[&row.layer];
-                for c in &chosen {
-                    planner.commit(c)?;
-                    if let Some(hold) = &mut output_hold {
-                        hold.grow(
-                            2 * mem::size_of::<JumperRecord>()
-                                + net_name.len()
-                                + input.layers[c.layer as usize].name.len()
-                                + input.layers[c.upper as usize].name.len()
-                                + input.vias[c.via as usize].name.len()
-                                + 256,
-                        )?;
-                    }
-                    jumpers.push(JumperRecord {
-                        net: net_name.clone(),
-                        layer: name_of(c.layer),
-                        upper: name_of(c.upper),
-                        via: input.vias[c.via as usize].name.clone(),
-                        gate_side: c.gate_side,
-                        far_side: c.far_side,
-                        gate_distance_um: c.gate_distance as f64 / f64::from(prep.dbu),
-                        run_length_um: c.run_length as f64 / f64::from(prep.dbu),
-                        ratio_before: r0,
-                        ratio_after: e1.get(&row.layer).map_or(0.0, |e| e.1),
-                        effective_limit: lim,
-                    });
-                }
-                routes = trial;
-                inserted += chosen.len();
+            }
+            planner_work = planner.work();
+        }
+        drop(rows_before);
+    }
+    // Apply the accepted jumpers to the full routes in acceptance order (the
+    // same edits `apply` made one by one) and re-index them.
+    if !accepted.is_empty() {
+        let bundle = metadata.physical.as_mut().unwrap();
+        let routes = &mut bundle.routing.as_mut().unwrap().routes;
+        for c in &accepted {
+            let splice = apply_in_place(&prep.input, routes, c)?;
+            if let Some((Some(planner), _)) = &mut session_planner {
+                planner.splice(&splice)?;
             }
         }
-        planner_work = planner.work();
+        match &mut session_index {
+            Some(index) => **index = NetIndex::new(prep, routes)?,
+            None => built_index = Some(NetIndex::new(prep, routes)?),
+        }
     }
-    let rows_after = if jumpers.is_empty() {
-        rows_before
+    if let Some((Some(planner), _)) = &mut session_planner {
+        let routes = &metadata
+            .physical
+            .as_ref()
+            .unwrap()
+            .routing
+            .as_ref()
+            .unwrap()
+            .routes;
+        planner.rebase(routes)?;
+        if paranoid && !planner.matches_fresh(routes)? {
+            return Err(fail(
+                "ANTENNA_REPAIR",
+                "persistent jumper planner index differs from a fresh build",
+            ));
+        }
+    }
+    let design = &metadata.design;
+    let bundle = metadata.physical.as_ref().unwrap();
+    let state = bundle.routing.as_ref().unwrap();
+    let routes = &state.routes;
+    let after = if jumpers.is_empty() {
+        before.clone()
     } else {
-        drop(rows_before);
-        evaluate_all(
+        let index = match &session_index {
+            Some(index) => &**index,
+            None => built_index.as_ref().unwrap(),
+        };
+        let rows = evaluate_all(
             prep,
-            &design,
-            model,
-            &routes,
+            design,
+            &bundle.connectivity,
+            routes,
             &antenna,
             &mut stats,
             &mut qualified,
@@ -2593,12 +2895,16 @@ fn repair_prepared(
             selected.as_ref(),
             memory.as_ref(),
             None,
+            Some(index),
         )?
-        .0
+        .0;
+        count(&rows.data)
     };
-    let after = count(&rows_after.data);
-    drop(rows_after);
-    let (len1, wires1, vias1) = wire_stats(&routes);
+    let (len1, wires1, vias1) = (
+        routes.stats.wire_length_dbu,
+        routes.wires.len(),
+        routes.vias.len(),
+    );
     let status = if selected.is_some() {
         if before.violations == 0 {
             "subset_clean"
@@ -2619,17 +2925,17 @@ fn repair_prepared(
         "partial"
     };
     let mut revision = current.clone();
-    if !jumpers.is_empty() {
-        core_routing::validate_with_work_limit(
+    if !jumpers.is_empty() && (!in_session || paranoid) {
+        let token = crate::routing::validate_with_token(
             &prep.input,
-            &routes,
+            routes,
             &route_limits,
             antenna.max_work,
         )?;
-        let bundle = metadata.physical.as_mut().unwrap();
-        bundle.routing.as_mut().unwrap().routes = routes;
-        metadata.parent_revision = current.clone();
-        revision = crate::commit_in_place(path, metadata, placed)?.revision;
+        if !in_session {
+            metadata.parent_revision = current.clone();
+            revision = crate::commit_validated(path, metadata, placed, &token)?.revision;
+        }
     }
     Ok(RepairReport {
         schema: REPAIR_SCHEMA,
@@ -2638,7 +2944,7 @@ fn repair_prepared(
                  bridged on the next routing layer up (two vias and a short wire); candidates \
                  are accepted only when the native partial-net ratio of the net drops without a \
                  new violated row; netlist and placement unchanged",
-        design: design.name.clone(),
+        design: metadata.design.name.clone(),
         base_revision: current,
         revision,
         routing_scope,
@@ -2674,7 +2980,7 @@ fn repair_prepared(
         } else {
             "native_only"
         },
-        selected_analysis,
+        selected_analysis: analysis,
         _report_hold: output_hold.map(Arc::new),
     })
 }

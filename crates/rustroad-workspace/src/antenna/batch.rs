@@ -189,7 +189,7 @@ pub fn check_antenna_batch(
             ));
         }
         request.selected_nets = Some(names.clone());
-        let report = check_prepared(metadata, &placed, &prep, &request, Some(&source))?;
+        let report = check_prepared(metadata, &placed, &prep, &request, Some(&source), None)?;
         work = work
             .checked_add(report.stats.work)
             .filter(|&n| n <= plan.max_work)

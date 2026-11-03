@@ -1,8 +1,17 @@
 //! Bounded ordered repair rounds sharing one decoded and exclusively locked state.
+//!
+//! The session keeps the routes in memory. Each repair that inserts jumpers
+//! creates the next logical revision (the name a per-attempt commit would
+//! have published); only the last one is validated and committed, once, with
+//! the original base as its parent, so a session writes one revision instead
+//! of one per attempt. Reports carry the logical revision names and the
+//! physical-source fingerprint of each state.
+use super::net_index::NetIndex;
+use super::report::SourceDigest;
 use super::{
     AntennaReport, AntennaRequest, InventoryBounds, InventoryReport, NetObservation, Prepared,
-    RepairReport, RepairRequest, RepairScope, check_prepared, inventory, prepare, repair_prepared,
-    source_fingerprint,
+    RepairReport, RepairRequest, RepairScope, RepairSession, check_prepared, inventory,
+    planner_limits, prepare, repair_prepared, source_fingerprint,
 };
 use crate::{Error, Metadata, Result, SnapshotCaps};
 use rustroad_core::{Limits, Placed, connectivity::PinOwner};
@@ -12,6 +21,12 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+fn trace(message: impl FnOnce() -> String) {
+    if std::env::var_os("RUSTROAD_ANTENNA_TRACE").is_some() {
+        eprintln!("[antenna-session] {}", message());
+    }
+}
 
 /// Hard-capped grouped-runner policy; smaller bounds support bounded experiments.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -48,6 +63,10 @@ pub struct GroupRepairPlan {
     pub max_rounds: usize,
     pub deadline_seconds: u64,
     pub policy: GroupRepairPolicy,
+    /// Write every check row (default: violated rows only; coverage still
+    /// counts all evaluated rows).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub full_rows: bool,
 }
 impl GroupRepairPlan {
     /// Use the frozen native grouped-runner's round, deadline and budget policy.
@@ -59,6 +78,7 @@ impl GroupRepairPlan {
             max_rounds: 3,
             deadline_seconds: 1800,
             policy: GroupRepairPolicy::default(),
+            full_rows: false,
         }
     }
     fn validate(&self) -> Result<()> {
@@ -110,6 +130,13 @@ pub struct GroupRepairSummary {
     pub status: &'static str,
     pub initial_revision: String,
     pub final_revision: String,
+    /// Logical revisions created by repairs; only the last is materialized.
+    pub logical_revisions: usize,
+    /// The one revision this session committed (its parent is the initial
+    /// revision), if any repair inserted jumpers.
+    pub committed_revision: Option<String>,
+    /// Which rows check reports hold: `violated` or `all`.
+    pub check_rows: &'static str,
     pub scope: &'static str,
     pub route_scope: &'static str,
     pub inventory_status: &'static str,
@@ -161,7 +188,41 @@ impl<W: Write> Write for CappedWriter<W> {
     }
 }
 impl Output {
-    fn write(&mut self, name: &str, value: &impl Serialize, pretty: bool) -> Result<PathBuf> {
+    /// A check report: compact, with only its violated rows unless `full`.
+    fn write_check(&mut self, name: &str, report: &mut AntennaReport, full: bool) -> Result<u64> {
+        if full {
+            return self.write(name, report, false).map(|(_, bytes)| bytes);
+        }
+        let rows = std::mem::take(&mut report.checks);
+        report.checks = rows.iter().filter(|row| row.violated).cloned().collect();
+        report.check_rows = Some("violated");
+        let written = self.write(name, report, false);
+        report.checks = rows;
+        report.check_rows = None;
+        written.map(|(_, bytes)| bytes)
+    }
+    /// Publish `name` as a hard link of an identical earlier report (counted
+    /// like a written one); falls back to writing `value`.
+    fn link(&mut self, name: &str, from: &Path, value: &impl Serialize) -> Result<u64> {
+        if self.count >= self.max_count {
+            return Err(Error::Budget("ANTENNA_GROUP_REPAIR: report count".into()));
+        }
+        let path = self.directory.join(format!("{name}.json"));
+        let bytes = fs::metadata(from)?.len();
+        if bytes <= self.max_bytes.saturating_sub(self.bytes) && fs::hard_link(from, &path).is_ok()
+        {
+            self.bytes += bytes;
+            self.count += 1;
+            return Ok(bytes);
+        }
+        self.write(name, value, false).map(|(_, bytes)| bytes)
+    }
+    fn write(
+        &mut self,
+        name: &str,
+        value: &impl Serialize,
+        pretty: bool,
+    ) -> Result<(PathBuf, u64)> {
         if self.count >= self.max_count {
             return Err(Error::Budget("ANTENNA_GROUP_REPAIR: report count".into()));
         }
@@ -197,7 +258,7 @@ impl Output {
         output.flush()?;
         self.bytes += output.bytes;
         self.count += 1;
-        Ok(path)
+        Ok((path, output.bytes))
     }
 }
 
@@ -206,13 +267,22 @@ struct Session {
     _lock: File,
     metadata: Metadata,
     placed: Vec<Placed>,
-    prep: Prepared,
+    /// Physical-source fingerprint of the current (logical) state.
     source: String,
+    digest: SourceDigest,
+    index: NetIndex,
+    /// The materialized base revision and its number.
+    base_revision: String,
+    base_number: u64,
+    /// Logical revisions created so far.
+    logical: u64,
+    paranoid: bool,
 }
 impl Session {
-    fn open(path: &Path, base_rev: &str, limits: &Limits) -> Result<Self> {
+    fn open(path: &Path, base_rev: &str, limits: &Limits) -> Result<(Self, Prepared)> {
         let lock = crate::lock(path, false, true)?;
         crate::check_base(base_rev, &crate::head(path)?)?;
+        let base_number = crate::revision_number(base_rev)?;
         let snapshot = crate::load_capped(
             path,
             lock,
@@ -244,21 +314,55 @@ impl Session {
         // Preparation depends on static placement/PDN/LEF/config, not signal routes.
         // The selected jumper worker changes only signal routes and revision fields.
         let prep = prepare(&metadata.design, bundle, &placed, state)?;
-        let source = source_fingerprint(
+        let digest = SourceDigest::new(
             &metadata.design,
             &bundle.connectivity,
             &placed,
             state,
             &prep.sources,
         )?;
-        Ok(Self {
-            path: path.to_owned(),
-            _lock,
-            metadata,
-            placed,
+        let source = digest.fingerprint(&state.routes)?;
+        let paranoid = std::env::var_os("RUSTROAD_ANTENNA_PARANOID").is_some();
+        if paranoid
+            && source
+                != source_fingerprint(
+                    &metadata.design,
+                    &bundle.connectivity,
+                    &placed,
+                    state,
+                    &prep.sources,
+                )?
+        {
+            return Err(super::fail(
+                "ANTENNA_GROUP_REPAIR",
+                "incremental source fingerprint differs",
+            ));
+        }
+        let index = NetIndex::new(&prep, &state.routes)?;
+        Ok((
+            Self {
+                path: path.to_owned(),
+                _lock,
+                metadata,
+                placed,
+                source,
+                digest,
+                index,
+                base_revision: base_rev.to_owned(),
+                base_number,
+                logical: 0,
+                paranoid,
+            },
             prep,
-            source,
-        })
+        ))
+    }
+    fn routes(&self) -> Result<&rustroad_core::routing::Routes> {
+        self.metadata
+            .physical
+            .as_ref()
+            .and_then(|p| p.routing.as_ref())
+            .map(|r| &r.routes)
+            .ok_or_else(|| super::fail("NO_ROUTING", "missing routing state"))
     }
     fn inventory(&self) -> Result<InventoryReport> {
         inventory::from_prepared(
@@ -268,7 +372,7 @@ impl Session {
             Some(&self.source),
         )
     }
-    fn check(&self, names: &[String]) -> Result<AntennaReport> {
+    fn check(&self, prep: &Prepared, names: &[String]) -> Result<AntennaReport> {
         let request = AntennaRequest {
             selected_nets: Some(names.to_vec()),
             ..AntennaRequest::default()
@@ -276,50 +380,100 @@ impl Session {
         check_prepared(
             &self.metadata,
             &self.placed,
-            &self.prep,
+            prep,
             &request,
             Some(&self.source),
+            Some(&self.index),
         )
     }
-    fn repair(
+    #[allow(clippy::too_many_arguments)]
+    fn repair<'a>(
         &mut self,
+        prep: &'a Prepared,
+        planner: &mut Option<rustroad_core::jumper::JumperPlanner<'a>>,
+        planner_limits: &'a rustroad_core::routing::RouteLimits,
         names: &[String],
-        report: PathBuf,
+        before: &AntennaReport,
+        before_bytes: u64,
         remaining: usize,
     ) -> Result<RepairReport> {
         let base = self.metadata.revision.clone();
-        let result = repair_prepared(
+        let mut result = repair_prepared(
             &self.path,
             &base,
             &RepairRequest {
-                selected_report: Some(report),
                 scope: RepairScope::SelectedSupportedNets(names.to_vec()),
                 max_jumpers: remaining,
                 ..RepairRequest::default()
             },
             &mut self.metadata,
             &self.placed,
-            &self.prep,
+            prep,
+            Some(RepairSession {
+                before,
+                before_bytes: usize::try_from(before_bytes)
+                    .map_err(|_| Error::Budget("ANTENNA: report input bytes".into()))?,
+                source: &self.source,
+                index: &mut self.index,
+                planner,
+                planner_limits,
+                paranoid: self.paranoid,
+            }),
         )?;
-        if result.revision != base {
-            let bundle = self
-                .metadata
-                .physical
-                .as_ref()
-                .ok_or_else(|| super::fail("NO_PHYSICAL", "repair lost physical state"))?;
-            let state = bundle
-                .routing
-                .as_ref()
-                .ok_or_else(|| super::fail("NO_ROUTING", "repair lost routing state"))?;
-            self.source = source_fingerprint(
-                &self.metadata.design,
-                &bundle.connectivity,
-                &self.placed,
-                state,
-                &self.prep.sources,
-            )?;
+        if !result.jumpers.is_empty() {
+            // The revision a per-attempt commit would have published.
+            self.logical += 1;
+            let number = self
+                .base_number
+                .checked_add(self.logical)
+                .ok_or_else(|| Error::Budget("revision number exhausted".into()))?;
+            self.metadata.parent_revision = base;
+            self.metadata.revision = format!("rev{number}");
+            result.revision.clone_from(&self.metadata.revision);
+            self.source = self.digest.fingerprint(self.routes()?)?;
         }
         Ok(result)
+    }
+    /// Validate the final routes once and commit them as the last logical
+    /// revision, whose parent is the materialized base.
+    fn commit(&mut self, prep: &Prepared) -> Result<Option<String>> {
+        if self.logical == 0 {
+            return Ok(None);
+        }
+        let routes = self.routes()?;
+        let limits = &self
+            .metadata
+            .physical
+            .as_ref()
+            .and_then(|p| p.routing.as_ref())
+            .ok_or_else(|| super::fail("NO_ROUTING", "missing routing state"))?
+            .config
+            .limits;
+        let token = crate::routing::validate_with_token(
+            &prep.input,
+            routes,
+            limits,
+            AntennaRequest::default().max_work,
+        )?;
+        let logical = self.metadata.revision.clone();
+        self.metadata
+            .parent_revision
+            .clone_from(&self.base_revision);
+        let number = self.base_number + self.logical;
+        let summary = crate::commit_validated_as(
+            &self.path,
+            &mut self.metadata,
+            &self.placed,
+            &token,
+            number,
+        )?;
+        if summary.revision != logical {
+            return Err(super::fail(
+                "ANTENNA_GROUP_REPAIR",
+                "committed revision differs from the logical revision",
+            ));
+        }
+        Ok(Some(summary.revision))
     }
     fn model(&self) -> Result<&rustroad_core::connectivity::ConnectedDesign> {
         self.metadata
@@ -390,14 +544,17 @@ fn charge(work: &mut usize, add: usize, cap: usize) -> Result<()> {
 
 /// Reproduce bounded grouped jumper decisions in one daemonless native process.
 ///
-/// Preserve each real revision and all legacy per-operation checks and budgets.
-/// Reports use the legacy formatting so selected-report input work stays identical.
-/// The output directory must not exist. Failure preserves completed revisions and
-/// partial evidence; only a successfully written summary completes the operation.
+/// Preserve every repair decision, legacy per-operation check and budget.
+/// Repairs edit the routes in memory as logical revisions; the final state is
+/// validated in full and committed once (see the module notes). Reports are
+/// compact JSON and hold the violated rows unless the plan asks for all. The
+/// output directory must not exist. Failure commits nothing and leaves partial
+/// evidence; only a successfully written summary completes the operation.
 ///
 /// # Errors
 /// Fails on a base-revision conflict, invalid plan, stale sources, model/geometry
 /// limits, aggregate budgets, or I/O errors. Foundry signoff is never inferred.
+#[allow(clippy::too_many_lines)]
 pub fn repair_antenna_groups(
     workspace: &Path,
     base_rev: &str,
@@ -406,9 +563,25 @@ pub fn repair_antenna_groups(
 ) -> Result<GroupRepairSummary> {
     plan.validate()?;
     let started = Instant::now();
-    let mut session = Session::open(workspace, base_rev, limits)?;
+    let (mut session, prep) = Session::open(workspace, base_rev, limits)?;
+    trace(|| format!("open {:.3}s", started.elapsed().as_secs_f64()));
+    let per_work = AntennaRequest::default().max_work;
+    let session_limits = planner_limits(
+        &session
+            .metadata
+            .physical
+            .as_ref()
+            .and_then(|p| p.routing.as_ref())
+            .ok_or_else(|| super::fail("NO_ROUTING", "route first"))?
+            .config
+            .limits,
+        per_work,
+        RepairRequest::default().max_planner_work,
+    );
+    let mut planner = None;
     fs::create_dir(&plan.output)?;
     let p = &plan.policy;
+    let full_rows = plan.full_rows;
     // Reserve bounded summary/selection metadata in the aggregate output budget.
     let mut output = Output {
         directory: plan.output.clone(),
@@ -433,7 +606,7 @@ pub fn repair_antenna_groups(
         ));
     }
     let tick = Instant::now();
-    output.write("model-initial", session.model()?, true)?;
+    let (initial_model_path, _) = output.write("model-initial", session.model()?, false)?;
     let initial_model = super::report::fingerprint(session.model()?)?;
     let model_seconds = tick.elapsed().as_secs_f64();
     let touches = macro_touches(&session)?;
@@ -451,7 +624,7 @@ pub fn repair_antenna_groups(
     let mut stop = None;
     let mut check_seconds = 0.0f64;
     let mut attempt_seconds = 0.0f64;
-    let per_work = AntennaRequest::default().max_work;
+    let (mut checks_total, mut repairs_total) = (0.0f64, 0.0f64);
     let remaining = || plan.deadline_seconds as f64 - started.elapsed().as_secs_f64();
     let reserve = |seconds: f64| {
         1.5 * (inventory_seconds + model_seconds + groups.len() as f64 * seconds) + 60.0
@@ -469,11 +642,16 @@ pub fn repair_antenna_groups(
                 ));
             }
             let tick = Instant::now();
-            let report = session.check(names)?;
-            output.write(&format!("round-{round}-group-{group}"), &report, true)?;
+            let mut report = session.check(&prep, names)?;
+            output.write_check(
+                &format!("round-{round}-group-{group}"),
+                &mut report,
+                full_rows,
+            )?;
             charge(&mut work, report.stats.work, p.max_cumulative_work)?;
             reported_work += report.stats.work;
             check_seconds = check_seconds.max(tick.elapsed().as_secs_f64());
+            checks_total += tick.elapsed().as_secs_f64();
             let selected = eligible(&report, &touches);
             drop(report);
             if selected.is_empty() {
@@ -500,7 +678,7 @@ pub fn repair_antenna_groups(
                 break;
             }
             let tick = Instant::now();
-            let before = session.check(&selected)?;
+            let mut before = session.check(&prep, &selected)?;
             if eligible(&before, &touches) != selected || violating(&before).len() != selected.len()
             {
                 return Err(super::fail(
@@ -508,20 +686,41 @@ pub fn repair_antenna_groups(
                     "fresh supported obligations changed",
                 ));
             }
-            let before_path =
-                output.write(&format!("repair-{}-before", attempts.len()), &before, true)?;
+            let before_bytes = output.write_check(
+                &format!("repair-{}-before", attempts.len()),
+                &mut before,
+                full_rows,
+            )?;
             charge(&mut work, before.stats.work, p.max_cumulative_work)?;
             reported_work += before.stats.work;
-            drop(before);
             if 4 * per_work > p.max_cumulative_work.saturating_sub(work) {
                 return Err(Error::Budget(
                     "ANTENNA_GROUP_REPAIR: repair work admission".into(),
                 ));
             }
             let base = session.metadata.revision.clone();
-            let repair =
-                session.repair(&selected, before_path, p.max_total_jumpers - total_jumpers)?;
-            output.write(&format!("repair-{}", attempts.len()), &repair, true)?;
+            let repair_tick = Instant::now();
+            let repair = session.repair(
+                &prep,
+                &mut planner,
+                &session_limits,
+                &selected,
+                &before,
+                before_bytes,
+                p.max_total_jumpers - total_jumpers,
+            )?;
+            drop(before);
+            repairs_total += repair_tick.elapsed().as_secs_f64();
+            trace(|| {
+                format!(
+                    "repair {} {:.3}s jumpers {} planner_work {}",
+                    attempts.len(),
+                    repair_tick.elapsed().as_secs_f64(),
+                    repair.jumpers.len(),
+                    repair.stats.planner_work
+                )
+            });
+            output.write(&format!("repair-{}", attempts.len()), &repair, false)?;
             let reported = repair
                 .stats
                 .antenna_work
@@ -557,6 +756,12 @@ pub fn repair_antenna_groups(
             break;
         }
     }
+    trace(|| {
+        format!(
+            "rounds done {:.3}s (checks {checks_total:.3}s repairs {repairs_total:.3}s)",
+            started.elapsed().as_secs_f64()
+        )
+    });
     let final_inventory = session.inventory()?;
     if final_inventory.nets != initial.nets
         || final_inventory.excluded_nonlogical_supply_tie_count
@@ -574,41 +779,64 @@ pub fn repair_antenna_groups(
             "logical connectivity changed",
         ));
     }
-    output.write("model-final", session.model()?, true)?;
+    // The connectivity model is unchanged (fingerprint above): same bytes.
+    output.link("model-final", &initial_model_path, session.model()?)?;
     let mut violations = BTreeSet::new();
     let mut partial = false;
     let mut observations = BTreeMap::new();
-    for (group, names) in groups.iter().enumerate() {
-        if per_work > p.max_cumulative_work.saturating_sub(work) {
-            return Err(Error::Budget(
-                "ANTENNA_GROUP_REPAIR: final check work admission".into(),
-            ));
-        }
-        let report = session.check(names)?;
-        output.write(&format!("final-group-{group}"), &report, true)?;
-        charge(&mut work, report.stats.work, p.max_cumulative_work)?;
-        reported_work += report.stats.work;
-        violations.extend(violating(&report));
-        if let Some(selection) = &report.selection {
-            partial |= !report.unsupported.is_empty() || report.status == "subset_partial";
-            for net in &selection.coverage {
-                partial |= net.model_partial || net.observation != NetObservation::Observed;
-                let key = match net.observation {
-                    NetObservation::Observed => "observed",
-                    NetObservation::NoGeometry => "no_geometry",
-                    NetObservation::NoGateArea => "no_gate_area",
-                    NetObservation::NoApplicableRuleObservation => "no_applicable_rule_observation",
-                };
-                *observations.entry(key.to_owned()).or_insert(0) += 1;
+    let tick = Instant::now();
+    // Final checks of one state are independent: evaluate a batch of groups
+    // on the pool, then account and write them in group order.
+    let batch = rayon::current_num_threads().clamp(1, 16) * 2;
+    for (first, chunk) in groups
+        .chunks(batch)
+        .enumerate()
+        .map(|(i, c)| (i * batch, c))
+    {
+        use rayon::prelude::*;
+        let reports: Vec<Result<AntennaReport>> = chunk
+            .par_iter()
+            .map(|names| session.check(&prep, names))
+            .collect();
+        for (offset, report) in reports.into_iter().enumerate() {
+            let group = first + offset;
+            if per_work > p.max_cumulative_work.saturating_sub(work) {
+                return Err(Error::Budget(
+                    "ANTENNA_GROUP_REPAIR: final check work admission".into(),
+                ));
+            }
+            let mut report = report?;
+            output.write_check(&format!("final-group-{group}"), &mut report, full_rows)?;
+            charge(&mut work, report.stats.work, p.max_cumulative_work)?;
+            reported_work += report.stats.work;
+            violations.extend(violating(&report));
+            if let Some(selection) = &report.selection {
+                partial |= !report.unsupported.is_empty() || report.status == "subset_partial";
+                for net in &selection.coverage {
+                    partial |= net.model_partial || net.observation != NetObservation::Observed;
+                    let key = match net.observation {
+                        NetObservation::Observed => "observed",
+                        NetObservation::NoGeometry => "no_geometry",
+                        NetObservation::NoGateArea => "no_gate_area",
+                        NetObservation::NoApplicableRuleObservation => {
+                            "no_applicable_rule_observation"
+                        }
+                    };
+                    *observations.entry(key.to_owned()).or_insert(0) += 1;
+                }
             }
         }
     }
+    trace(|| format!("final checks {:.3}s", tick.elapsed().as_secs_f64()));
     if started.elapsed().as_secs() > plan.deadline_seconds {
         return Err(super::fail("ANTENNA_GROUP_REPAIR", "deadline exceeded"));
     }
+    let tick = Instant::now();
+    let committed = session.commit(&prep)?;
+    trace(|| format!("validate + commit {:.3}s", tick.elapsed().as_secs_f64()));
     let unresolved: Vec<_> = violations.difference(&touches).cloned().collect();
     let summary = GroupRepairSummary {
-        schema: "rustroad.antenna-group-repair-result.v1",
+        schema: "rustroad.antenna-group-repair-result.v2",
         status: if unresolved.is_empty() {
             "complete"
         } else {
@@ -616,6 +844,9 @@ pub fn repair_antenna_groups(
         },
         initial_revision: base_rev.to_owned(),
         final_revision: session.metadata.revision.clone(),
+        logical_revisions: session.logical as usize,
+        committed_revision: committed,
+        check_rows: if full_rows { "all" } else { "violated" },
         scope: "supported_standard_cell_subset",
         route_scope: "all_signal_nets",
         inventory_status: "complete",
@@ -650,5 +881,6 @@ pub fn repair_antenna_groups(
     // Final lineage metadata does not consume the legacy operation counter.
     output.max_count += 1;
     output.write("summary", &summary, true)?;
+    trace(|| format!("done {:.3}s", started.elapsed().as_secs_f64()));
     Ok(summary)
 }

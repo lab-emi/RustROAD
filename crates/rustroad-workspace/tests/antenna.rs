@@ -1569,6 +1569,29 @@ fn batch_holds_shared_workspace_lock_through_writer_flush() {
         .expect("batch releases lock after successful flush");
 }
 
+/// A copy of a fixture workspace (every revision) under `root/name`.
+fn copy_workspace(f: &Fixture, name: &str) -> PathBuf {
+    let copy = f.root.join(name);
+    fs::create_dir(&copy).unwrap();
+    for name in ["HEAD", "workspace.lock"] {
+        fs::copy(f.workspace.join(name), copy.join(name)).unwrap();
+    }
+    fs::create_dir(copy.join("revisions")).unwrap();
+    let mut file_count = 0;
+    for revision in fs::read_dir(f.workspace.join("revisions")).unwrap() {
+        let revision = revision.unwrap();
+        let target = copy.join("revisions").join(revision.file_name());
+        fs::create_dir(&target).unwrap();
+        for entry in fs::read_dir(revision.path()).unwrap() {
+            let entry = entry.unwrap();
+            file_count += 1;
+            assert!(file_count <= 64, "fixture copy file budget");
+            fs::copy(entry.path(), target.join(entry.file_name())).unwrap();
+        }
+    }
+    copy
+}
+
 #[test]
 fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
     use rustroad_workspace::antenna::{
@@ -1579,24 +1602,8 @@ fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
         "ANTENNADIFFSIDEAREARATIO 20 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
     );
     let f = routed_with_technology(PLAIN, &tech);
-    let legacy = f.root.join("legacy-workspace");
-    fs::create_dir(&legacy).unwrap();
-    for name in ["HEAD", "workspace.lock"] {
-        fs::copy(f.workspace.join(name), legacy.join(name)).unwrap();
-    }
-    fs::create_dir(legacy.join("revisions")).unwrap();
-    let mut file_count = 0;
-    for revision in fs::read_dir(f.workspace.join("revisions")).unwrap() {
-        let revision = revision.unwrap();
-        let target = legacy.join("revisions").join(revision.file_name());
-        fs::create_dir(&target).unwrap();
-        for entry in fs::read_dir(revision.path()).unwrap() {
-            let entry = entry.unwrap();
-            file_count += 1;
-            assert!(file_count <= 64, "fixture copy file budget");
-            fs::copy(entry.path(), target.join(entry.file_name())).unwrap();
-        }
-    }
+    let legacy = copy_workspace(&f, "legacy-workspace");
+    let full_rows = copy_workspace(&f, "full-rows-workspace");
     let inventory = antenna_inventory(&legacy, &InventoryBounds::default(), &limits()).unwrap();
     let base = inventory.workspace_revision.clone();
     let names: Vec<_> = inventory
@@ -1633,6 +1640,10 @@ fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
         &limits(),
     )
     .unwrap();
+    assert!(
+        before.checks.iter().any(|row| !row.violated),
+        "the fixture must have rows the compact report leaves out"
+    );
     let report_path = f.root.join("legacy-before.json");
     let mut before_bytes = serde_json::to_vec_pretty(&before).unwrap();
     before_bytes.push(b'\n');
@@ -1656,15 +1667,44 @@ fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
     assert_eq!(grouped.total_jumpers, repaired.jumpers.len());
     assert_eq!(grouped.final_revision, repaired.revision);
     assert_eq!(
-        fs::read(plan.output.join("repair-0-before.json")).unwrap(),
-        before_bytes
+        grouped.committed_revision.as_ref(),
+        Some(&repaired.revision)
     );
-    let mut repair_bytes = serde_json::to_vec_pretty(&repaired).unwrap();
-    repair_bytes.push(b'\n');
+    assert_eq!(grouped.logical_revisions, 1);
+    assert_eq!(grouped.check_rows, "violated");
+    // The compact report is the legacy one with exactly its violated rows.
+    let read = |path: PathBuf| -> serde_json::Value {
+        serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+    };
+    let mut expected: serde_json::Value = serde_json::from_slice(&before_bytes).unwrap();
+    let rows = expected["checks"].as_array().unwrap().clone();
+    expected["checks"] = rows
+        .iter()
+        .filter(|row| row["violated"] == true)
+        .cloned()
+        .collect();
+    expected["check_rows"] = "violated".into();
+    let written = fs::read(plan.output.join("repair-0-before.json")).unwrap();
     assert_eq!(
-        fs::read(plan.output.join("repair-0.json")).unwrap(),
-        repair_bytes
+        written.iter().filter(|&&b| b == b'\n').count(),
+        1,
+        "compact report"
     );
+    assert_eq!(read(plan.output.join("repair-0-before.json")), expected);
+    // The repair report equals the legacy one; only the byte-based charge of
+    // the (smaller) bound report input and its memory telemetry differ.
+    let mut legacy_repair = serde_json::to_value(&repaired).unwrap();
+    let mut grouped_repair = read(plan.output.join("repair-0.json"));
+    let charge = |value: &mut serde_json::Value, input: usize| -> u64 {
+        let stats = value["stats"].as_object_mut().unwrap();
+        assert!(stats.remove("report_memory").is_some());
+        stats.remove("antenna_work").unwrap().as_u64().unwrap() - input as u64
+    };
+    assert_eq!(
+        charge(&mut grouped_repair, written.len()),
+        charge(&mut legacy_repair, before_bytes.len())
+    );
+    assert_eq!(grouped_repair, legacy_repair);
     for entry in fs::read_dir(legacy.join("revisions").join(&repaired.revision)).unwrap() {
         let entry = entry.unwrap();
         assert_eq!(
@@ -1678,6 +1718,22 @@ fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
             .unwrap(),
             "revision side-table bytes"
         );
+    }
+    // The committed revision shares the parent's unchanged side tables.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let inode = |revision: &str| {
+            fs::metadata(
+                f.workspace
+                    .join("revisions")
+                    .join(revision)
+                    .join("instances.rbin"),
+            )
+            .unwrap()
+            .ino()
+        };
+        assert_eq!(inode(&repaired.revision), inode(&base));
     }
     let final_inventory =
         antenna_inventory(&legacy, &InventoryBounds::default(), &limits()).unwrap();
@@ -1693,6 +1749,22 @@ fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
         fs::read(plan.output.join("model-final.json")).unwrap()
     );
     assert_eq!(grouped.whole_layout_antenna_status, "unchecked");
+    // `full_rows` keeps every row: the same report as the legacy check.
+    let mut plan = GroupRepairPlan::new(f.root.join("group-repair-full"));
+    plan.max_rounds = 1;
+    plan.full_rows = true;
+    let full = repair_antenna_groups(&full_rows, &base, &plan, &limits()).unwrap();
+    assert_eq!(full.check_rows, "all");
+    assert_eq!(full.attempts.len(), 1);
+    let mut expected: serde_json::Value = serde_json::from_slice(&before_bytes).unwrap();
+    assert!(
+        expected
+            .as_object_mut()
+            .unwrap()
+            .remove("check_rows")
+            .is_none()
+    );
+    assert_eq!(read(plan.output.join("repair-0-before.json")), expected);
 }
 
 #[test]

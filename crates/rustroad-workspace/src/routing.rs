@@ -1768,10 +1768,115 @@ pub(crate) fn revision_bytes(path: &Path, revision: &str) -> Result<u64> {
     }
     Ok(total)
 }
+/// Routes that passed a full routing validation in this process. Only
+/// `validate_with_token` makes one; it binds an XXH3-128 digest of every
+/// route record, so a commit of exactly these routes may skip re-running the
+/// same validation (any other routes are validated in full).
+pub(crate) struct ValidatedRoutes {
+    digest: u128,
+}
+
+/// XXH3-128 over every route record field and the telemetry.
+pub(crate) fn routes_digest(routes: &Routes) -> u128 {
+    use xxhash_rust::xxh3::Xxh3;
+    let mut h = Xxh3::new();
+    let mut buffer = Vec::with_capacity(1 << 16);
+    let flush = |buffer: &mut Vec<u8>, h: &mut Xxh3, force: bool| {
+        if force || buffer.len() >= (1 << 16) - 64 {
+            h.update(buffer);
+            buffer.clear();
+        }
+    };
+    for (tag, n) in [
+        (0u8, routes.wires.len()),
+        (1, routes.vias.len()),
+        (2, routes.access.len()),
+        (3, routes.patches.len()),
+        (4, routes.nets.len()),
+    ] {
+        buffer.push(tag);
+        buffer.extend_from_slice(&(n as u64).to_le_bytes());
+    }
+    for w in &routes.wires {
+        buffer.extend_from_slice(&w.net.to_le_bytes());
+        buffer.extend_from_slice(&w.layer.to_le_bytes());
+        for v in [w.start[0], w.start[1], w.end[0], w.end[1]] {
+            buffer.extend_from_slice(&v.to_le_bytes());
+        }
+        flush(&mut buffer, &mut h, false);
+    }
+    for v in &routes.vias {
+        buffer.extend_from_slice(&v.net.to_le_bytes());
+        buffer.extend_from_slice(&v.kind.to_le_bytes());
+        buffer.extend_from_slice(&v.at[0].to_le_bytes());
+        buffer.extend_from_slice(&v.at[1].to_le_bytes());
+        flush(&mut buffer, &mut h, false);
+    }
+    for a in &routes.access {
+        buffer.extend_from_slice(&a.pin.to_le_bytes());
+        buffer.extend_from_slice(&a.net.to_le_bytes());
+        buffer.extend_from_slice(&a.layer.to_le_bytes());
+        buffer.extend_from_slice(&a.at[0].to_le_bytes());
+        buffer.extend_from_slice(&a.at[1].to_le_bytes());
+        flush(&mut buffer, &mut h, false);
+    }
+    for p in &routes.patches {
+        buffer.extend_from_slice(&p.net.to_le_bytes());
+        buffer.extend_from_slice(&p.layer.to_le_bytes());
+        for v in [p.rect.lx, p.rect.ly, p.rect.ux, p.rect.uy] {
+            buffer.extend_from_slice(&v.to_le_bytes());
+        }
+        flush(&mut buffer, &mut h, false);
+    }
+    for n in &routes.nets {
+        buffer.extend_from_slice(&n.to_le_bytes());
+        flush(&mut buffer, &mut h, false);
+    }
+    let s = &routes.stats;
+    for v in [
+        s.grid_nodes as u64,
+        s.expansions as u64,
+        s.comparisons as u64,
+        s.wire_length_dbu,
+    ] {
+        buffer.extend_from_slice(&v.to_le_bytes());
+    }
+    if let Some(owner) = &s.single_owner_repair {
+        buffer.extend_from_slice(format!("{owner:?}").as_bytes());
+    }
+    flush(&mut buffer, &mut h, true);
+    h.digest128()
+}
+
+/// `routing::validate_with_work_limit` (the stricter comparison cap of the
+/// antenna repair), returning the token for a commit of these routes.
+pub(crate) fn validate_with_token(
+    input: &routing::RouteInput,
+    routes: &Routes,
+    limits: &routing::RouteLimits,
+    max_validation_comparisons: usize,
+) -> Result<ValidatedRoutes> {
+    routing::validate_with_work_limit(input, routes, limits, max_validation_comparisons)?;
+    Ok(ValidatedRoutes {
+        digest: routes_digest(routes),
+    })
+}
+
 pub(crate) fn validate_state(
     design: &Design,
     bundle: &PhysicalBundle,
     placed: &[Placed],
+) -> Result<()> {
+    validate_state_with(design, bundle, placed, None)
+}
+
+/// `validate_state`; the geometry validation is skipped when `token` binds
+/// exactly the stored routes (the source and technology checks still run).
+pub(crate) fn validate_state_with(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    placed: &[Placed],
+    token: Option<&ValidatedRoutes>,
 ) -> Result<()> {
     if let Some(state) = &bundle.routing {
         if state.source.bytes > 1024 * 1024
@@ -1797,7 +1902,9 @@ pub(crate) fn validate_state(
         {
             return Err(fail("routing technology names changed"));
         }
-        routing::validate(&input, &state.routes, &state.config.limits)?;
+        if token.is_none_or(|t| t.digest != routes_digest(&state.routes)) {
+            routing::validate(&input, &state.routes, &state.config.limits)?;
+        }
     }
     Ok(())
 }
@@ -2438,5 +2545,87 @@ mod def_path_tests {
             at: [0, 0],
         }];
         assert!(emit(&[], &invalid, &RouteLimits::default()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod token_tests {
+    use super::*;
+    use rustroad_core::routing::{Access, Patch, RouteStats, Via, Wire};
+
+    /// Every record field and the telemetry move the token digest, so a
+    /// token never covers routes other than the validated ones.
+    #[test]
+    fn routes_digest_binds_every_field() {
+        let base = Routes {
+            wires: vec![Wire {
+                net: 1,
+                layer: 2,
+                start: [0, 4],
+                end: [8, 4],
+            }],
+            vias: vec![Via {
+                net: 1,
+                kind: 0,
+                at: [8, 4],
+            }],
+            access: vec![Access {
+                pin: 3,
+                net: 1,
+                layer: 0,
+                at: [0, 4],
+            }],
+            patches: vec![Patch {
+                net: 1,
+                layer: 2,
+                rect: Rect {
+                    lx: 0,
+                    ly: 0,
+                    ux: 2,
+                    uy: 2,
+                },
+            }],
+            nets: vec![1],
+            stats: RouteStats {
+                grid_nodes: 5,
+                expansions: 6,
+                comparisons: 7,
+                wire_length_dbu: 8,
+                single_owner_repair: None,
+            },
+        };
+        let digest = routes_digest(&base);
+        assert_eq!(digest, routes_digest(&base.clone()));
+        type Edit = Box<dyn Fn(&mut Routes)>;
+        let edits: Vec<Edit> = vec![
+            Box::new(|r| r.wires[0].end[0] += 2),
+            Box::new(|r| r.wires[0].net = 2),
+            Box::new(|r| r.vias[0].kind = 1),
+            Box::new(|r| r.vias[0].at[1] = 6),
+            Box::new(|r| r.access[0].pin = 4),
+            Box::new(|r| r.patches[0].rect.uy = 4),
+            Box::new(|r| r.nets.push(2)),
+            Box::new(|r| r.stats.comparisons += 1),
+            Box::new(|r| r.stats.wire_length_dbu += 1),
+            Box::new(|r| {
+                let w = r.wires.pop().unwrap();
+                r.patches.clear();
+                r.wires.push(w);
+            }),
+            Box::new(|r| {
+                // Moving a record between vectors changes the digest too.
+                r.access.clear();
+                r.vias.push(Via {
+                    net: 3,
+                    kind: 1,
+                    at: [0, 4],
+                });
+            }),
+        ];
+        for (i, edit) in edits.iter().enumerate() {
+            let mut routes = base.clone();
+            edit(&mut routes);
+            assert_ne!(routes_digest(&routes), digest, "edit {i}");
+        }
     }
 }

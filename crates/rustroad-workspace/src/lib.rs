@@ -5,7 +5,7 @@ use rustroad_core::{Design, Limits, Placed};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub mod access_test;
@@ -1166,6 +1166,55 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
 }
 
 fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> Result<Summary> {
+    commit_with(path, metadata, records, None, None)
+}
+
+/// Commit routes a full routing validation already passed in this process
+/// (`token`), skipping the identical second validation of the routes.
+pub(crate) fn commit_validated(
+    path: &Path,
+    metadata: &mut Metadata,
+    records: &[Placed],
+    token: &routing::ValidatedRoutes,
+) -> Result<Summary> {
+    commit_with(path, metadata, records, Some(token), None)
+}
+
+/// `commit_validated` under exactly `rev{number}` (a session's last logical
+/// revision); refused when that revision already exists.
+pub(crate) fn commit_validated_as(
+    path: &Path,
+    metadata: &mut Metadata,
+    records: &[Placed],
+    token: &routing::ValidatedRoutes,
+    number: u64,
+) -> Result<Summary> {
+    commit_with(path, metadata, records, Some(token), Some(number))
+}
+
+/// A side table of the new revision: a hard link to the parent revision's
+/// file when the bytes are identical (immutable revisions share it), else a
+/// new synced file.
+fn write_table(directory: &Path, parent: Option<&Path>, name: &str, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = parent {
+        let source = parent.join(name);
+        let same = fs::symlink_metadata(&source)
+            .is_ok_and(|m| m.file_type().is_file() && m.len() == bytes.len() as u64)
+            && fs::read(&source).is_ok_and(|old| old == bytes);
+        if same && fs::hard_link(&source, directory.join(name)).is_ok() {
+            return Ok(());
+        }
+    }
+    write_new(&directory.join(name), bytes)
+}
+
+fn commit_with(
+    path: &Path,
+    metadata: &mut Metadata,
+    records: &[Placed],
+    token: Option<&routing::ValidatedRoutes>,
+    number: Option<u64>,
+) -> Result<Summary> {
     metadata.format_version = storage::logical_version(metadata)?;
     if let Some(p) = &metadata.physical {
         metadata.format_version = if p
@@ -1193,18 +1242,29 @@ fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> 
     // failing revision is published exactly as before and fails on read).
     let (routing, placed) = rayon::join(
         || match &metadata.physical {
-            Some(p) => crate::routing::validate_state(&metadata.design, p, records),
+            Some(p) => crate::routing::validate_state_with(&metadata.design, p, records, token),
             None => Ok(()),
         },
         || placed_checks(metadata, records),
     );
     routing?;
     fs::create_dir_all(path.join("revisions"))?;
-    let first = revision_number(&metadata.parent_revision)?
-        .checked_add(1)
-        .ok_or_else(|| Error::Budget("revision number exhausted".into()))?;
+    let parent = revision_number(&metadata.parent_revision)
+        .ok()
+        .map(|_| path.join("revisions").join(&metadata.parent_revision))
+        .filter(|p| p.is_dir());
+    let first = match number {
+        Some(n) => n,
+        None => revision_number(&metadata.parent_revision)?
+            .checked_add(1)
+            .ok_or_else(|| Error::Budget("revision number exhausted".into()))?,
+    };
     let mut chosen: Option<PathBuf> = None;
-    for offset in 0..MAX_ORPHAN_SLOTS {
+    for offset in 0..if number.is_some() {
+        1
+    } else {
+        MAX_ORPHAN_SLOTS
+    } {
         let number = first
             .checked_add(offset)
             .ok_or_else(|| Error::Budget("revision number exhausted".into()))?;
@@ -1221,7 +1281,13 @@ fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> 
         }
     }
     let directory = chosen.ok_or_else(|| {
-        Error::Budget("too many orphan revisions; inspect workspace before recovery".into())
+        if number.is_some() {
+            Error::Invalid(format!(
+                "REVISION_CONFLICT: rev{first} already exists; inspect workspace before recovery"
+            ))
+        } else {
+            Error::Budget("too many orphan revisions; inspect workspace before recovery".into())
+        }
     })?;
     // Schema 6: move the route records out of design.json into routes.rbin.
     let mut held = None;
@@ -1252,27 +1318,27 @@ fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> 
         r.routes = routes;
     }
     write_new(&directory.join("design.json"), &bytes)?;
-    let file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(directory.join("instances.rbin"))?;
-    let mut table = BufWriter::with_capacity(256 * 1024, file);
+    let parent = parent.as_deref();
+    let mut table = Vec::new();
+    table
+        .try_reserve_exact(records.len().saturating_mul(40))
+        .map_err(|_| Error::Budget("instance table allocation".into()))?;
     for record in records {
-        table.write_all(&record.id.to_le_bytes())?;
-        table.write_all(&record.x.to_le_bytes())?;
-        table.write_all(&record.y.to_le_bytes())?;
-        table.write_all(&record.width.to_le_bytes())?;
-        table.write_all(&record.height.to_le_bytes())?;
+        table.extend_from_slice(&record.id.to_le_bytes());
+        table.extend_from_slice(&record.x.to_le_bytes());
+        table.extend_from_slice(&record.y.to_le_bytes());
+        table.extend_from_slice(&record.width.to_le_bytes());
+        table.extend_from_slice(&record.height.to_le_bytes());
     }
-    table.flush()?;
-    table.get_ref().sync_all()?;
+    write_table(&directory, parent, "instances.rbin", &table)?;
+    drop(table);
     if let Some(physical) = &metadata.physical {
         pdk::validate_bundle(
             physical,
             &metadata.design,
             &pdk::connection_limits(&metadata.design)?,
         )?;
-        write_connection_tables(&directory, &metadata.design, &physical.connectivity)?;
+        write_connection_tables(&directory, parent, &metadata.design, &physical.connectivity)?;
         if let Some(routing) = &physical.routing
             && routing.table.is_none()
         {
@@ -1282,7 +1348,12 @@ fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> 
             )?;
         }
         if let Some(state) = &physical.state {
-            crate::physical::write_table(state, &directory.join("physical.rbin"))?;
+            write_table(
+                &directory,
+                parent,
+                "physical.rbin",
+                &crate::physical::table_bytes(state)?,
+            )?;
         }
     }
     // The receipt is a cache: failing to write it only costs a later read
@@ -1320,43 +1391,28 @@ fn owner_record(pin: &rustroad_core::connectivity::Connection) -> [u32; 4] {
 }
 fn write_connection_tables(
     directory: &Path,
+    parent: Option<&Path>,
     design: &Design,
     model: &ConnectedDesign,
 ) -> Result<()> {
     let csr = model.lower_csr(design, &pdk::connection_limits(design)?)?;
-    let write_table =
-        |name: &str, produce: &mut dyn FnMut(&mut BufWriter<File>) -> Result<()>| -> Result<()> {
-            let file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(directory.join(name))?;
-            let mut out = BufWriter::with_capacity(256 * 1024, file);
-            produce(&mut out)?;
-            out.flush()?;
-            out.get_ref().sync_all()?;
-            Ok(())
-        };
-    write_table("pins.rbin", &mut |out| {
-        for pin in &model.pins {
-            for field in owner_record(pin) {
-                out.write_all(&field.to_le_bytes())?;
-            }
+    let mut bytes = Vec::new();
+    for pin in &model.pins {
+        for field in owner_record(pin) {
+            bytes.extend_from_slice(&field.to_le_bytes());
         }
-        Ok(())
-    })?;
-    write_table("net_offsets.rbin", &mut |out| {
-        for offset in &csr.offsets {
-            out.write_all(&offset.to_le_bytes())?;
-        }
-        Ok(())
-    })?;
-    write_table("net_pins.rbin", &mut |out| {
-        for pin in &csr.pin_indices {
-            out.write_all(&pin.to_le_bytes())?;
-        }
-        Ok(())
-    })?;
-    Ok(())
+    }
+    write_table(directory, parent, "pins.rbin", &bytes)?;
+    bytes.clear();
+    for offset in &csr.offsets {
+        bytes.extend_from_slice(&offset.to_le_bytes());
+    }
+    write_table(directory, parent, "net_offsets.rbin", &bytes)?;
+    bytes.clear();
+    for pin in &csr.pin_indices {
+        bytes.extend_from_slice(&pin.to_le_bytes());
+    }
+    write_table(directory, parent, "net_pins.rbin", &bytes)
 }
 fn map_table(path: &Path, bytes: usize) -> Result<Option<Mmap>> {
     if !fs::metadata(path)?.is_file() {

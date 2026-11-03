@@ -15,7 +15,6 @@ use rustroad_formats::{lef, verilog};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::Path;
 
 fn default_added() -> usize {
     250_000
@@ -2978,21 +2977,18 @@ fn table_records(state: &PhysicalState) -> impl Iterator<Item = [i64; 8]> + '_ {
         )
 }
 
-pub(super) fn write_table(state: &PhysicalState, path: &Path) -> Result<()> {
-    table_len(state)?;
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
-    let mut out = std::io::BufWriter::with_capacity(256 * 1024, file);
+/// The prepared geometry table as written to `physical.rbin`.
+pub(super) fn table_bytes(state: &PhysicalState) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(table_len(state)?)
+        .map_err(|_| Error::Budget("prepared geometry table allocation".into()))?;
     for record in table_records(state) {
         for value in record {
-            out.write_all(&value.to_le_bytes())?;
+            bytes.extend_from_slice(&value.to_le_bytes());
         }
     }
-    out.flush()?;
-    out.get_ref().sync_all()?;
-    Ok(())
+    Ok(bytes)
 }
 
 pub(super) fn validate_table(state: &PhysicalState, bytes: &[u8]) -> Result<()> {
