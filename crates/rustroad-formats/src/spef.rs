@@ -139,19 +139,183 @@ pub fn write(
     )
 }
 
-/// Serialize one generated net at a time. Names and instance first-use order
-/// are supplied without cloning a second design-sized graph of labeled nodes.
-/// The node resolver handles cross-net coupling endpoints independently of the
-/// transient Net. Callbacks are invoked only for bounded existing indices.
-pub fn write_streamed<'a>(
+/// Escaped name appended to `out` (same bytes as `escape`).
+fn escape_into(out: &mut Vec<u8>, name: &str) {
+    for c in name.chars() {
+        if !(c.is_ascii_alphanumeric() || matches!(c, '_' | '[' | ']')) {
+            out.push(b'\\');
+        }
+        let mut utf8 = [0u8; 4];
+        out.extend_from_slice(c.encode_utf8(&mut utf8).as_bytes());
+    }
+}
+
+/// The text of a resistance value (validated like `value`, not parsed back).
+fn value_text(v: f64) -> Result<String> {
+    if !v.is_finite() || v < 0.0 {
+        return Err(SpefError::Invalid(format!(
+            "non-finite or negative value {v}"
+        )));
+    }
+    Ok(if v == 0.0 {
+        "0".to_string()
+    } else {
+        format!("{v:.5e}")
+    })
+}
+
+/// Name map shared by every net of one document.
+struct NameMap<'a> {
+    nets: usize,
+    instances: std::collections::HashMap<&'a str, usize>,
+}
+impl NameMap<'_> {
+    fn node(&self, out: &mut Vec<u8>, ni: usize, n: &Node) -> Result<()> {
+        match n {
+            Node::Port(p) => escape_into(out, p),
+            Node::Pin { instance, pin } => {
+                let i = self
+                    .instances
+                    .get(instance.as_str())
+                    .ok_or_else(|| SpefError::Invalid("unlisted instance".into()))?;
+                write!(out, "*{i}:")?;
+                escape_into(out, pin);
+            }
+            Node::Internal(k) => write!(out, "*{}:{}", ni + 1, k)?,
+        }
+        Ok(())
+    }
+    fn other(&self, out: &mut Vec<u8>, net_index: usize, node: Node) -> Result<()> {
+        match node {
+            Node::Port(p) => escape_into(out, &p),
+            Node::Pin { instance, pin } => {
+                let i = self
+                    .instances
+                    .get(instance.as_str())
+                    .ok_or_else(|| SpefError::Invalid("unlisted coupling instance".into()))?;
+                write!(out, "*{i}:")?;
+                escape_into(out, &pin);
+            }
+            Node::Internal(k) => write!(out, "*{}:{}", net_index + 1, k)?,
+        }
+        Ok(())
+    }
+}
+
+/// Appends the `*D_NET` section of net `ni` to `out`, using `cap` as
+/// scratch. On error, `out` holds exactly the bytes the section had
+/// produced before the error (the streamed writer had written them).
+fn net_section(
+    names: &NameMap<'_>,
+    net_names: &[&str],
+    ni: usize,
+    net: &Net,
+    node_at: &mut impl FnMut(usize, u32) -> Result<Node>,
+    out: &mut Vec<u8>,
+    cap: &mut Vec<u8>,
+) -> Result<()> {
+    if net.name != net_names[ni] || net.ground.len() != net.nodes.len() {
+        return Err(SpefError::Invalid(
+            "generated net identity/ground length".into(),
+        ));
+    }
+    if net.nodes.len().checked_add(net.couplings.len()).is_none() {
+        return Err(SpefError::Invalid("capacitance record count".into()));
+    }
+    cap.clear();
+    let mut count = 0usize;
+    let mut total = 0.0f64;
+    for (i, g) in net.ground.iter().enumerate() {
+        let (text, parsed) = value(*g)?;
+        total += parsed;
+        count += 1;
+        write!(cap, "{count} ")?;
+        names.node(cap, ni, &net.nodes[i])?;
+        writeln!(cap, " {text}")?;
+    }
+    for &(node, other, other_node, pf) in &net.couplings {
+        if other == ni {
+            return Err(SpefError::Invalid("coupling within one net".into()));
+        }
+        let (text, parsed) = value(pf)?;
+        if parsed == 0.0 {
+            continue;
+        }
+        total += parsed;
+        let own = net
+            .nodes
+            .get(node as usize)
+            .ok_or_else(|| SpefError::Invalid("coupling node index".into()))?;
+        count += 1;
+        write!(cap, "{count} ")?;
+        names.node(cap, ni, own)?;
+        cap.push(b' ');
+        if other >= names.nets {
+            return Err(SpefError::Invalid("coupling net index".into()));
+        }
+        names.other(cap, other, node_at(other, other_node)?)?;
+        writeln!(cap, " {text}")?;
+    }
+    writeln!(out)?;
+    writeln!(out, "*D_NET *{} {:.9e}", ni + 1, total)?;
+    writeln!(out, "*CONN")?;
+    for c in &net.connections {
+        let node = net
+            .nodes
+            .get(c.node as usize)
+            .ok_or_else(|| SpefError::Invalid("connection node index".into()))?;
+        match node {
+            Node::Port(_) => {
+                out.extend_from_slice(b"*P ");
+                names.node(out, ni, node)?;
+                writeln!(out, " {}", c.direction.code())?;
+            }
+            Node::Pin { .. } => {
+                out.extend_from_slice(b"*I ");
+                names.node(out, ni, node)?;
+                write!(out, " {}", c.direction.code())?;
+                if let Some(cell) = &c.cell {
+                    out.extend_from_slice(b" *D ");
+                    escape_into(out, cell);
+                }
+                writeln!(out)?;
+            }
+            Node::Internal(_) => {
+                return Err(SpefError::Invalid("connection on an internal node".into()));
+            }
+        }
+    }
+    writeln!(out, "*CAP")?;
+    out.extend_from_slice(cap);
+    writeln!(out, "*RES")?;
+    for (i, &(a, b, ohm)) in net.resistors.iter().enumerate() {
+        let text = value_text(ohm)?;
+        let na = net
+            .nodes
+            .get(a as usize)
+            .ok_or_else(|| SpefError::Invalid("resistor node index".into()))?;
+        let nb = net
+            .nodes
+            .get(b as usize)
+            .ok_or_else(|| SpefError::Invalid("resistor node index".into()))?;
+        write!(out, "{} ", i + 1)?;
+        names.node(out, ni, na)?;
+        out.push(b' ');
+        names.node(out, ni, nb)?;
+        writeln!(out, " {text}")?;
+    }
+    writeln!(out, "*END")?;
+    Ok(())
+}
+
+/// Header, name map and ports; returns the name map for the nets.
+fn preamble<'a>(
     header: &Header,
     ports: &[(String, Direction)],
     net_names: &[&str],
     instance_names: impl IntoIterator<Item = &'a str>,
-    mut net_at: impl FnMut(usize) -> Result<Net>,
-    mut node_at: impl FnMut(usize, u32) -> Result<Node>,
     out: &mut impl Write,
-) -> Result<()> {
+) -> Result<NameMap<'a>> {
     if net_names.len() > 64_000_000 {
         return Err(SpefError::Invalid("net-name budget".into()));
     }
@@ -196,119 +360,90 @@ pub fn write_streamed<'a>(
     for (name, direction) in ports {
         writeln!(out, "{} {}", escape(name), direction.code())?;
     }
-    for (ni, name) in net_names.iter().enumerate() {
+    Ok(NameMap {
+        nets: net_names.len(),
+        instances: instance_index,
+    })
+}
+
+/// Serialize one generated net at a time. Names and instance first-use order
+/// are supplied without cloning a second design-sized graph of labeled nodes.
+/// The node resolver handles cross-net coupling endpoints independently of the
+/// transient Net. Callbacks are invoked only for bounded existing indices.
+pub fn write_streamed<'a>(
+    header: &Header,
+    ports: &[(String, Direction)],
+    net_names: &[&str],
+    instance_names: impl IntoIterator<Item = &'a str>,
+    mut net_at: impl FnMut(usize) -> Result<Net>,
+    mut node_at: impl FnMut(usize, u32) -> Result<Node>,
+    out: &mut impl Write,
+) -> Result<()> {
+    let names = preamble(header, ports, net_names, instance_names, out)?;
+    let (mut buf, mut cap) = (Vec::new(), Vec::new());
+    for ni in 0..net_names.len() {
         let net = net_at(ni)?;
-        if net.name != *name || net.ground.len() != net.nodes.len() {
-            return Err(SpefError::Invalid(
-                "generated net identity/ground length".into(),
-            ));
-        }
-        let node_name = |n: &Node| -> Result<String> {
-            Ok(match n {
-                Node::Port(p) => escape(p),
-                Node::Pin { instance, pin } => {
-                    let i = instance_index
-                        .get(instance.as_str())
-                        .ok_or_else(|| SpefError::Invalid("unlisted instance".into()))?;
-                    format!("*{i}:{}", escape(pin))
-                }
-                Node::Internal(k) => format!("*{}:{}", ni + 1, k),
+        buf.clear();
+        let section = net_section(
+            &names,
+            net_names,
+            ni,
+            &net,
+            &mut node_at,
+            &mut buf,
+            &mut cap,
+        );
+        out.write_all(&buf)?;
+        section?;
+    }
+    Ok(())
+}
+
+/// Nets serialized concurrently before each in-order write.
+const PARALLEL_NETS: usize = 256;
+
+/// `write_streamed` with nets serialized on the current Rayon pool in
+/// batches and written in net order. Each net's bytes depend only on that
+/// net and the name map, so the document is byte-identical to
+/// `write_streamed`, and the first error in net order is returned after the
+/// bytes the streamed writer would have written before it.
+pub fn write_streamed_parallel<'a>(
+    header: &Header,
+    ports: &[(String, Direction)],
+    net_names: &[&str],
+    instance_names: impl IntoIterator<Item = &'a str>,
+    net_at: impl Fn(usize) -> Result<Net> + Sync,
+    node_at: impl Fn(usize, u32) -> Result<Node> + Sync,
+    out: &mut impl Write,
+) -> Result<()> {
+    use rayon::prelude::*;
+    let names = preamble(header, ports, net_names, instance_names, out)?;
+    let mut start = 0;
+    while start < net_names.len() {
+        let end = net_names.len().min(start + PARALLEL_NETS);
+        let sections: Vec<(Vec<u8>, Result<()>)> = (start..end)
+            .into_par_iter()
+            .map_init(Vec::new, |cap, ni| {
+                let mut buf = Vec::new();
+                let section = net_at(ni).and_then(|net| {
+                    net_section(
+                        &names,
+                        net_names,
+                        ni,
+                        &net,
+                        &mut |n, p| node_at(n, p),
+                        &mut buf,
+                        cap,
+                    )
+                });
+                (buf, section)
             })
-        };
-        let mut other_name = |net_index: usize, node: u32| -> Result<String> {
-            if net_index >= net_names.len() {
-                return Err(SpefError::Invalid("coupling net index".into()));
-            }
-            Ok(match node_at(net_index, node)? {
-                Node::Port(p) => escape(&p),
-                Node::Pin { instance, pin } => {
-                    let i = instance_index
-                        .get(instance.as_str())
-                        .ok_or_else(|| SpefError::Invalid("unlisted coupling instance".into()))?;
-                    format!("*{i}:{}", escape(&pin))
-                }
-                Node::Internal(k) => format!("*{}:{}", net_index + 1, k),
-            })
-        };
-        let count = net
-            .nodes
-            .len()
-            .checked_add(net.couplings.len())
-            .ok_or_else(|| SpefError::Invalid("capacitance record count".into()))?;
-        let mut lines = Vec::with_capacity(count);
-        let mut total = 0.0f64;
-        for (i, g) in net.ground.iter().enumerate() {
-            let (text, parsed) = value(*g)?;
-            total += parsed;
-            lines.push(format!("{} {}", node_name(&net.nodes[i])?, text));
+            .collect();
+        for (buf, section) in sections {
+            out.write_all(&buf)?;
+            section?;
         }
-        for &(node, other, other_node, pf) in &net.couplings {
-            if other == ni {
-                return Err(SpefError::Invalid("coupling within one net".into()));
-            }
-            let (text, parsed) = value(pf)?;
-            if parsed == 0.0 {
-                continue;
-            }
-            total += parsed;
-            let own = net
-                .nodes
-                .get(node as usize)
-                .ok_or_else(|| SpefError::Invalid("coupling node index".into()))?;
-            lines.push(format!(
-                "{} {} {}",
-                node_name(own)?,
-                other_name(other, other_node)?,
-                text
-            ));
-        }
-        writeln!(out)?;
-        writeln!(out, "*D_NET *{} {:.9e}", ni + 1, total)?;
-        writeln!(out, "*CONN")?;
-        for c in &net.connections {
-            let node = net
-                .nodes
-                .get(c.node as usize)
-                .ok_or_else(|| SpefError::Invalid("connection node index".into()))?;
-            match node {
-                Node::Port(_) => writeln!(out, "*P {} {}", node_name(node)?, c.direction.code())?,
-                Node::Pin { .. } => {
-                    write!(out, "*I {} {}", node_name(node)?, c.direction.code())?;
-                    if let Some(cell) = &c.cell {
-                        write!(out, " *D {}", escape(cell))?;
-                    }
-                    writeln!(out)?;
-                }
-                Node::Internal(_) => {
-                    return Err(SpefError::Invalid("connection on an internal node".into()));
-                }
-            }
-        }
-        writeln!(out, "*CAP")?;
-        for (i, line) in lines.iter().enumerate() {
-            writeln!(out, "{} {}", i + 1, line)?;
-        }
-        writeln!(out, "*RES")?;
-        for (i, &(a, b, ohm)) in net.resistors.iter().enumerate() {
-            let (text, _) = value(ohm)?;
-            let na = net
-                .nodes
-                .get(a as usize)
-                .ok_or_else(|| SpefError::Invalid("resistor node index".into()))?;
-            let nb = net
-                .nodes
-                .get(b as usize)
-                .ok_or_else(|| SpefError::Invalid("resistor node index".into()))?;
-            writeln!(
-                out,
-                "{} {} {} {}",
-                i + 1,
-                node_name(na)?,
-                node_name(nb)?,
-                text
-            )?;
-        }
-        writeln!(out, "*END")?;
+        start = end;
     }
     Ok(())
 }
@@ -439,6 +574,89 @@ mod tests {
         assert!(write(&bad, &[], &sample(), &mut Vec::new()).is_err());
         assert_eq!(escape("x/y:z*"), "x\\/y\\:z\\*");
     }
+    #[test]
+    fn parallel_serialization_is_byte_identical_and_fails_like_the_stream() {
+        let header = Header {
+            design: "top".into(),
+            vendor: "v".into(),
+            program: "p".into(),
+            version: "1".into(),
+            date: "fixed".into(),
+        };
+        // Many nets so several batches are formatted concurrently.
+        let mut nets = Vec::new();
+        for k in 0..700usize {
+            let mut a = sample()[k % 2].clone();
+            a.name = format!("n{k}/x");
+            a.ground = a
+                .ground
+                .iter()
+                .map(|g| g * (1.0 + k as f64 / 7.0))
+                .collect();
+            a.couplings = vec![(0, (k + 1) % 700, 1, 1.25e-5 * k as f64)];
+            nets.push(a);
+        }
+        let names: Vec<_> = nets.iter().map(|n| n.name.as_str()).collect();
+        // First-use order of instances, as `write` derives it.
+        let instances = ["g0", "g0", "g0"];
+        let stream = |nets: &[Net]| {
+            let mut out = Vec::new();
+            let r = write_streamed(
+                &header,
+                &[("y".to_string(), Direction::Output)],
+                &names,
+                instances,
+                |i| Ok(nets[i].clone()),
+                |n, p| Ok(nets[n].nodes[p as usize].clone()),
+                &mut out,
+            );
+            (out, r.map_err(|e| e.to_string()))
+        };
+        let parallel = |nets: &[Net], threads: usize| {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            let mut out = Vec::new();
+            let r = pool.install(|| {
+                write_streamed_parallel(
+                    &header,
+                    &[("y".to_string(), Direction::Output)],
+                    &names,
+                    instances,
+                    |i| Ok(nets[i].clone()),
+                    |n, p| Ok(nets[n].nodes[p as usize].clone()),
+                    &mut out,
+                )
+            });
+            (out, r.map_err(|e| e.to_string()))
+        };
+        let want = stream(&nets);
+        assert!(want.1.is_ok());
+        let mut expected = Vec::new();
+        write(
+            &header,
+            &[("y".to_string(), Direction::Output)],
+            &nets,
+            &mut expected,
+        )
+        .unwrap();
+        assert_eq!(want.0, expected);
+        for threads in [1, 3] {
+            assert_eq!(parallel(&nets, threads), want);
+        }
+        // Errors mid-document: an invalid connection (after the section
+        // started) and an invalid resistor; the first in net order wins.
+        let mut bad = nets.clone();
+        bad[600].connections[0].node = 1;
+        bad[300].resistors[0].2 = f64::NAN;
+        let want = stream(&bad);
+        assert!(want.1.is_err());
+        for threads in [1, 4] {
+            assert_eq!(parallel(&bad, threads), want);
+        }
+    }
+
     #[test]
     fn generated_nets_are_requested_once_in_order_and_match_serialization() {
         let header = Header {

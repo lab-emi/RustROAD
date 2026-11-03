@@ -27,8 +27,6 @@ use super::strip::{self, AREA, Counts, Ctx, Flow, GROUND, Op, Scratch, Sink, Sto
 use super::{CANDIDATE_SCRATCH_BYTES, ExtractLimits, ExtractStats, budget, guard_memory, invalid};
 use crate::{Error, Result};
 use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
@@ -39,9 +37,6 @@ const CHUNK_UNITS: usize = 64;
 const SPARE_BYTES: usize = 512 << 10;
 /// Hidden `--extract-tile-units` ceiling.
 pub const MAX_TILE_UNITS: usize = 1 << 20;
-/// Coupling maps per shard. Each map grows on its own, so a rehash briefly
-/// holds one small table twice instead of the whole coupling set.
-const SUBMAPS: usize = 8;
 /// Largest shard count (a power of two).
 const MAX_SHARDS: usize = 64;
 
@@ -67,31 +62,130 @@ impl Default for Bounds {
     }
 }
 
-/// Hasher of the coupling maps: one folded 64x64-bit multiply, so every key
-/// bit reaches the bucket index and the control tag.
-#[derive(Clone, Copy, Default)]
-pub(super) struct BuildKey;
-pub(super) struct KeyHasher(u64);
-impl std::hash::BuildHasher for BuildKey {
-    type Hasher = KeyHasher;
+/// Entries per arena chunk of a coupling table (20 bytes each).
+const CHUNK_ENTRIES: usize = 1 << 15;
+const NIL: u32 = u32::MAX;
+
+/// One coupling accumulator: key and value bits in 32-bit halves (20
+/// bytes, 4-byte aligned) and the bucket chain link.
+#[derive(Clone, Copy)]
+struct Cell {
+    key: [u32; 2],
+    value: [u32; 2],
+    next: u32,
+}
+impl Cell {
     #[inline]
-    fn build_hasher(&self) -> KeyHasher {
-        KeyHasher(0)
+    fn key(&self) -> u64 {
+        u64::from(self.key[1]) << 32 | u64::from(self.key[0])
+    }
+    #[inline]
+    fn value(&self) -> f64 {
+        f64::from_bits(u64::from(self.value[1]) << 32 | u64::from(self.value[0]))
     }
 }
-impl std::hash::Hasher for KeyHasher {
+
+/// The coupling accumulators of one shard: a chained hash table whose
+/// entries live in fixed-size arena chunks. Growth appends a chunk and now
+/// and then rebuilds the 4-byte head array; entries are never moved, so
+/// the table never holds two generations of its entries.
+pub(super) struct Couplings {
+    heads: Vec<u32>,
+    bits: u32,
+    chunks: Vec<Vec<Cell>>,
+    len: usize,
+}
+impl Couplings {
+    const MIN_BITS: u32 = 10;
+    fn new() -> Self {
+        Self {
+            heads: vec![NIL; 1 << Self::MIN_BITS],
+            bits: Self::MIN_BITS,
+            chunks: Vec::new(),
+            len: 0,
+        }
+    }
     #[inline]
-    fn finish(&self) -> u64 {
-        let m = u128::from(self.0) * 0x9E37_79B9_7F4A_7C15;
+    fn hash(key: u64) -> u64 {
+        let m = u128::from(key) * 0x9E37_79B9_7F4A_7C15;
         (m as u64) ^ ((m >> 64) as u64)
     }
     #[inline]
-    fn write_u64(&mut self, v: u64) {
-        self.0 = v;
+    fn bucket(key: u64, bits: u32) -> usize {
+        (Self::hash(key) >> (64 - bits)) as usize
     }
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 = self.0.rotate_left(8) ^ u64::from(b);
+    #[inline]
+    fn slot(&self, i: u32) -> &Cell {
+        &self.chunks[i as usize / CHUNK_ENTRIES][i as usize % CHUNK_ENTRIES]
+    }
+    #[inline]
+    fn slot_mut(&mut self, i: u32) -> &mut Cell {
+        &mut self.chunks[i as usize / CHUNK_ENTRIES][i as usize % CHUNK_ENTRIES]
+    }
+    /// Index of `key`'s accumulator (created at 0.0) and whether it is new.
+    #[inline]
+    fn find_or_insert(&mut self, key: u64) -> (u32, bool) {
+        let mut i = self.heads[Self::bucket(key, self.bits)];
+        while i != NIL {
+            let slot = self.slot(i);
+            if slot.key() == key {
+                return (i, false);
+            }
+            i = slot.next;
+        }
+        if self.len >= 2 << self.bits {
+            self.grow();
+        }
+        let b = Self::bucket(key, self.bits);
+        let index = u32::try_from(self.len)
+            .ok()
+            .filter(|&i| i != NIL)
+            .expect("coupling count is bounded by max_couplings");
+        if self.len.is_multiple_of(CHUNK_ENTRIES) {
+            self.chunks.push(Vec::with_capacity(CHUNK_ENTRIES));
+        }
+        let zero = 0.0f64.to_bits();
+        self.chunks.last_mut().expect("chunk").push(Cell {
+            key: [key as u32, (key >> 32) as u32],
+            value: [zero as u32, (zero >> 32) as u32],
+            next: self.heads[b],
+        });
+        self.heads[b] = index;
+        self.len += 1;
+        (index, true)
+    }
+    #[inline]
+    fn get(&self, i: u32) -> f64 {
+        self.slot(i).value()
+    }
+    #[inline]
+    fn set(&mut self, i: u32, v: f64) {
+        let bits = v.to_bits();
+        self.slot_mut(i).value = [bits as u32, (bits >> 32) as u32];
+    }
+    /// Doubles the head array and relinks every entry in place.
+    fn grow(&mut self) {
+        self.bits += 1;
+        self.heads.clear();
+        self.heads.shrink_to_fit();
+        self.heads.resize(1 << self.bits, NIL);
+        let bits = self.bits;
+        let mut index = 0u32;
+        for chunk in &mut self.chunks {
+            for slot in chunk.iter_mut() {
+                let b = Self::bucket(slot.key(), bits);
+                slot.next = self.heads[b];
+                self.heads[b] = index;
+                index += 1;
+            }
+        }
+    }
+    /// Every `(key, value)`, releasing chunks as they are read.
+    fn drain_into(self, out: &mut Vec<(u64, f64)>) {
+        let Self { heads, chunks, .. } = self;
+        drop(heads);
+        for chunk in chunks {
+            out.extend(chunk.iter().map(|s| (s.key(), s.value())));
         }
     }
 }
@@ -100,10 +194,6 @@ impl std::hash::Hasher for KeyHasher {
 #[inline]
 fn select(key: u64) -> u64 {
     key.wrapping_mul(0xD6E8_FEB8_6659_FD93)
-}
-#[inline]
-fn submap(key: u64) -> usize {
-    (select(key) >> 61) as usize
 }
 /// Owning shard of an accumulator. `shift` is log2 of the shard count.
 #[inline]
@@ -127,7 +217,7 @@ pub(super) fn shard_of(key: u64, shift: u32) -> usize {
 /// selector picks `s`, and in shard 0 the overlap-area statistic.
 pub(super) struct Shard {
     ground: Vec<f64>,
-    maps: Vec<HashMap<u64, f64, BuildKey>>,
+    couplings: Couplings,
     area: f64,
     keys: usize,
 }
@@ -141,21 +231,19 @@ impl Shard {
         ground.resize(count, 0.0);
         Ok(Self {
             ground,
-            maps: (0..SUBMAPS).map(|_| HashMap::default()).collect(),
+            couplings: Couplings::new(),
             area: 0.0,
             keys: 0,
         })
     }
-    /// The coupling value of `key` (created at 0.0) and whether it is new.
+    /// `coupling[key] += pf` (created at 0.0); whether the key is new.
     #[inline]
-    fn coupling(&mut self, key: u64) -> (&mut f64, bool) {
-        match self.maps[submap(key)].entry(key) {
-            Entry::Occupied(e) => (e.into_mut(), false),
-            Entry::Vacant(e) => {
-                self.keys += 1;
-                (e.insert(0.0), true)
-            }
-        }
+    fn couple(&mut self, key: u64, pf: f64) -> bool {
+        let (i, new) = self.couplings.find_or_insert(key);
+        self.keys += usize::from(new);
+        let v = self.couplings.get(i) + pf;
+        self.couplings.set(i, v);
+        new
     }
     /// Applies one shard's grouped records (consecutive records of one
     /// accumulator are in their run order). Returns the new coupling keys.
@@ -164,14 +252,22 @@ impl Shard {
         let mut at = 0;
         while at < ops.len() {
             let key = ops[at].key;
+            if key < GROUND {
+                let (i, new) = self.couplings.find_or_insert(key);
+                self.keys += usize::from(new);
+                fresh += usize::from(new);
+                let mut v = self.couplings.get(i);
+                while at < ops.len() && ops[at].key == key {
+                    v += ops[at].pf;
+                    at += 1;
+                }
+                self.couplings.set(i, v);
+                continue;
+            }
             let value = if key == AREA {
                 &mut self.area
-            } else if key >= GROUND {
-                &mut self.ground[(key as u32 as usize) >> shift]
             } else {
-                let (value, new) = self.coupling(key);
-                fresh += usize::from(new);
-                value
+                &mut self.ground[(key as u32 as usize) >> shift]
             };
             while at < ops.len() && ops[at].key == key {
                 *value += ops[at].pf;
@@ -213,23 +309,56 @@ impl Accumulators {
         let g = g as usize;
         self.shards[g & ((1 << self.shift) - 1)].ground[g >> self.shift]
     }
-    /// Every coupling `(key, pF)` in ascending key order. Maps are released
-    /// one at a time as they are moved out.
-    pub(super) fn into_sorted_couplings(self) -> Result<Vec<(u64, f64)>> {
-        let mut out = Vec::new();
-        out.try_reserve_exact(self.keys())
-            .map_err(|_| budget("extraction coupling list allocation"))?;
-        for shard in self.shards {
-            let Shard { ground, maps, .. } = shard;
-            drop(ground);
-            for map in maps {
-                out.extend(map);
+    /// Every coupling `(key, pF)` in ascending key order (keys are unique).
+    /// Shards are drained and sorted in parallel, each map released as soon
+    /// as it is moved out; the sorted shard lists are merged lazily.
+    pub(super) fn into_sorted_couplings(self) -> Result<Sorted> {
+        use rayon::prelude::*;
+        let lists = self
+            .shards
+            .into_par_iter()
+            .map(|shard| -> Result<Vec<(u64, f64)>> {
+                let Shard {
+                    ground,
+                    couplings,
+                    keys,
+                    ..
+                } = shard;
+                drop(ground);
+                let mut list = Vec::new();
+                list.try_reserve_exact(keys)
+                    .map_err(|_| budget("extraction coupling list allocation"))?;
+                couplings.drain_into(&mut list);
+                list.sort_unstable_by_key(|c| c.0);
+                Ok(list)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Sorted {
+            heads: lists
+                .into_iter()
+                .map(|l| l.into_iter().peekable())
+                .collect(),
+        })
+    }
+}
+
+/// Ascending merge of per-shard sorted coupling lists.
+pub(super) struct Sorted {
+    heads: Vec<std::iter::Peekable<std::vec::IntoIter<(u64, f64)>>>,
+}
+impl Iterator for Sorted {
+    type Item = (u64, f64);
+    #[inline]
+    fn next(&mut self) -> Option<(u64, f64)> {
+        let mut best: Option<(usize, u64)> = None;
+        for (i, h) in self.heads.iter_mut().enumerate() {
+            if let Some(&(key, _)) = h.peek()
+                && best.is_none_or(|(_, k)| key < k)
+            {
+                best = Some((i, key));
             }
         }
-        // Keys are unique, so the unstable sort is deterministic.
-        use rayon::slice::ParallelSliceMut;
-        out.par_sort_unstable_by_key(|c| c.0);
-        Ok(out)
+        self.heads[best?.0].next()
     }
 }
 
@@ -268,8 +397,7 @@ impl<'n> Commit<'n> {
         } else if op.key >= GROUND {
             shard.ground[(op.key as u32 as usize) >> self.shift] += op.pf;
         } else {
-            let (value, new) = shard.coupling(op.key);
-            *value += op.pf;
+            let new = shard.couple(op.key, op.pf);
             if new {
                 self.keys += 1;
                 if self.keys > self.max_couplings {
@@ -1055,8 +1183,7 @@ mod tests {
         let couplings = acc
             .into_sorted_couplings()
             .unwrap()
-            .iter()
-            .map(|(k, v)| (*k, v.to_bits()))
+            .map(|(k, v)| (k, v.to_bits()))
             .collect();
         (ground, couplings, area)
     }

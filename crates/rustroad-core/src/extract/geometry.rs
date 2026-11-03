@@ -58,6 +58,10 @@ impl<'a> Shapes<'a> {
     pub(super) fn len(&self) -> usize {
         self.values.len() + self.virtual_count
     }
+    /// Retained shapes (wire bodies, passive shapes, pieces), in index order.
+    pub(super) fn retained(&self) -> &[Shape] {
+        &self.values
+    }
     pub(super) fn retained_len(&self) -> usize {
         self.values.len()
     }
@@ -216,38 +220,6 @@ impl<'a> InstanceGeometry<'a> {
                         .saturating_mul(8),
                 ),
         )
-    }
-    pub(super) fn visit(
-        &mut self,
-        shapes: &Shapes<'_>,
-        layer: u32,
-        query: Rect,
-        work: &mut usize,
-        mut visitor: impl FnMut(u32, Shape) -> Result<bool>,
-    ) -> Result<bool> {
-        let input = shapes.source.expect("indexed geometry has a source");
-        let query = Self::expanded_query(query)?;
-        self.index
-            .visit_cells(layer, query, work, &self.limits, |instance, work| {
-                input.geometry.visit_near(
-                    instance,
-                    layer,
-                    query,
-                    || {
-                        *work = work
-                            .checked_add(1)
-                            .filter(|&n| n <= self.limits.max_comparisons)
-                            .ok_or_else(|| super::budget("instance extraction work"))?;
-                        Ok(())
-                    },
-                    |ordinal, blockage, pin| {
-                        visitor(
-                            shapes.virtual_id(instance, ordinal),
-                            Shapes::passive_shape(input, blockage, pin),
-                        )
-                    },
-                )
-            })
     }
     fn expanded_query(query: Rect) -> Result<Rect> {
         Ok(Rect {

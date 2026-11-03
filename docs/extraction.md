@@ -158,8 +158,10 @@ original endpoint order), ground at node `g` and the overlap-area statistic have
 reserved key ranges. The accumulators are split into shards (one on the serial
 path, otherwise the lane count rounded up to a power of two): ground nodes by
 `g mod shards`, coupling keys by a hash of the key, the area statistic in shard 0.
-Each shard holds a dense ground array and eight hash maps of coupling keys (16-byte
-entries; a rehash briefly doubles one small map, not the whole set).
+Each shard holds a dense ground array and a chained hash table of coupling keys whose
+20-byte entries live in fixed 32,768-entry arena chunks: growth appends a chunk and
+rebuilds only the 4-byte head array (at most two entries per head), so the table
+never holds two copies of its entries.
 
 Strips are computed on the `--threads` pool. Units (a wire body, or the strip pair
 of one rectangle) are taken from the unit iterator in chunks of 64. Lanes compute
@@ -193,6 +195,26 @@ path, until it fits, and any excess over the unused allowance is added to
 sets the chunk size (and forces the chunked path on one thread) for tests; results do
 not depend on it. `RUSTROAD_EXTRACT_PROFILE=1` prints phase timings, lanes, shards,
 chunks, barriers and serially computed units to stderr.
+
+The phases around the strips also run on the `--threads` pool, each with an
+ordered result. Net trees are computed in batches of 2,048 nets and merged in net
+order; the serial loop's cumulative budgets (graph nodes, wire length, RC nodes) are
+replayed at the checkpoint each net reached, so errors are those of the serial loop.
+The virtual-conductor crossing marks are a set (OR-merged per-thread bitsets) and
+their work total is order-independent; any query error or a work total over the
+budget reruns the serial scan for the exact error. At the end each shard drains and
+sorts its coupling entries in parallel and the sorted lists are merged while
+couplings are thresholded and grounded in key order. Geometry, strip records and
+the passive copy are released before the SPEF is written. The SPEF writer
+serializes batches of 256 nets on the pool and writes them in net order (each net's
+bytes depend only on that net and the name map), with the same byte cap, hash and
+error precedence as the streamed writer.
+
+When the routing table contains rail-tie (supply) nets, the workspace passes the
+signal-net mask as `ExtractInput::nets` instead of a filtered copy of the routing
+table and terminals: the extractor ignores every routed record and terminal of the
+other nets, exactly as the copy did, and the tie metal is passed as grounded
+passive shapes as before.
 
 ## RC profile (`rustroad.rc-profile.v1`)
 
@@ -430,8 +452,8 @@ one thread (the extractor is deterministic at every thread count):
 * 8 M bin entries x 4 B, plus the map, < 128 MiB;
 * 500 k nodes (virtual cut nodes included) with keys and adjacency, about
   64 MiB;
-* 1 M couplings x about 40 B (hash-map entries with load slack, then one
-  16-byte sorted list) = 40 MiB;
+* 1 M couplings x about 30 B (20-byte arena entries plus heads, then one
+  16-byte sorted list per shard) = 30 MiB;
 * SPEF model strings < 64 MiB; the file is streamed through a 256 KiB buffer;
 * the workspace read itself is under 16 MiB of `design.json`, about 200 MiB
   parsed.

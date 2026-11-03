@@ -15,6 +15,7 @@ mod geometry;
 mod index;
 mod parallel;
 mod strip;
+use crate::routing::InstanceQueryScratch;
 use geometry::{InstanceGeometry, Shapes};
 pub use parallel::MAX_TILE_UNITS;
 
@@ -72,6 +73,11 @@ pub struct ExtractInput<'a> {
     pub layers: &'a [RouteLayer],
     pub vias: &'a [RouteVia],
     pub routes: &'a Routes,
+    /// When set, only the routed records (wires, vias, access points,
+    /// patches, route nets) and terminals of nets `n` with `nets[n]` are
+    /// extracted; every other routed record is ignored, exactly as if the
+    /// caller had removed it (it passes that metal as passive shapes).
+    pub nets: Option<&'a [bool]>,
     pub terminals: &'a [Terminal],
     pub passive: &'a [PassiveShape],
     /// Shared cell pin/obstruction geometry, decoded only for local queries.
@@ -310,6 +316,15 @@ pub struct ExtractMemory {
     pub instance_query_bin_dbu: i64,
 }
 
+impl ExtractInput<'_> {
+    /// Whether routed records of `net` are extracted.
+    #[inline]
+    fn extracts(&self, net: u32) -> bool {
+        self.nets
+            .is_none_or(|m| m.get(net as usize).copied().unwrap_or(false))
+    }
+}
+
 fn extraction_bin(input: &ExtractInput<'_>) -> Result<i64> {
     let window = input
         .tech
@@ -389,14 +404,14 @@ fn conductor_bounds(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<
         });
         Ok(())
     };
-    for wire in &input.routes.wires {
+    for wire in input.routes.wires.iter().filter(|w| input.extracts(w.net)) {
         let layer = input
             .layers
             .get(wire.layer as usize)
             .ok_or_else(|| invalid("extraction wire layer"))?;
         include(wire.layer, crate::routing::wire_rect(wire, layer.width)?)?;
     }
-    for via in &input.routes.vias {
+    for via in input.routes.vias.iter().filter(|v| input.extracts(v.net)) {
         let kind = input
             .vias
             .get(via.kind as usize)
@@ -405,7 +420,12 @@ fn conductor_bounds(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<
             include(shape.layer, crate::routing::shifted(shape.rect, via.at)?)?;
         }
     }
-    for patch in &input.routes.patches {
+    for patch in input
+        .routes
+        .patches
+        .iter()
+        .filter(|p| input.extracts(p.net))
+    {
         include(patch.layer, patch.rect)?;
     }
     for shape in input.passive {
@@ -447,7 +467,15 @@ fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<E
         .saturating_add((limits.max_couplings as u64).saturating_mul(128))
         .saturating_add(index_allowance(limits))
         .saturating_add(populated.saturating_mul(96))
-        .saturating_add((input.routes.nets.len() as u64).saturating_mul(192))
+        .saturating_add(
+            (input
+                .routes
+                .nets
+                .iter()
+                .filter(|&&n| input.extracts(n))
+                .count() as u64)
+                .saturating_mul(192),
+        )
         .saturating_add(limits.candidate_scratch_bytes() as u64);
     let mut geometry =
         InstanceGeometry::estimated_bytes(input.instances, bin, input.layers.len(), limits)?;
@@ -534,8 +562,19 @@ struct PhaseProfile {
     enabled: bool,
     start: std::time::Instant,
     mark: std::time::Instant,
-    ns: [u128; 5],
+    ns: [u128; STAGES.len()],
 }
+/// Profile stage names, in order.
+const STAGES: [&str; 8] = [
+    "preflight_and_trees",
+    "shapes_and_instance_index",
+    "metal_construction",
+    "grid",
+    "passive_strips",
+    "virtual_crossings",
+    "strips",
+    "finalization",
+];
 impl PhaseProfile {
     fn new() -> Self {
         let now = std::time::Instant::now();
@@ -543,7 +582,7 @@ impl PhaseProfile {
             enabled: std::env::var_os("RUSTROAD_EXTRACT_PROFILE").is_some(),
             start: now,
             mark: now,
-            ns: [0; 5],
+            ns: [0; STAGES.len()],
         }
     }
     fn phase(&mut self, at: usize) {
@@ -561,13 +600,11 @@ impl PhaseProfile {
                     "schema": "rustroad.extract-phase-profile.v3",
                     "scope": "extraction core; strips computed on the --threads pool, accumulations committed in run order per sharded accumulator",
                     "elapsed_ns": self.start.elapsed().as_nanos(),
-                    "stage_ns": {
-                        "preflight_and_trees": self.ns[0],
-                        "metal_construction": self.ns[1],
-                        "grid_passive_strips_crossings": self.ns[2],
-                        "strips": self.ns[3],
-                        "finalization": self.ns[4],
-                    },
+                    "stage_ns": STAGES
+                        .iter()
+                        .zip(self.ns)
+                        .map(|(k, v)| ((*k).to_string(), serde_json::json!(v)))
+                        .collect::<serde_json::Map<_, _>>(),
                     "strip_phases_ns": {
                         "compute": strips.compute_ns,
                         "ordered_commit": strips.commit_ns,
@@ -739,8 +776,8 @@ struct NodeIds {
     base: Vec<u32>,
     /// By net ID (dense IDs only): the base of `net_index[net]`.
     by_net: Vec<u32>,
-    /// `(base, local net index)` ascending, for decoding.
-    sorted: Vec<(u32, u32)>,
+    /// By global ID: its local net index.
+    net_of: Vec<u32>,
     total: usize,
 }
 impl NodeIds {
@@ -748,17 +785,16 @@ impl NodeIds {
         let mut order: Vec<u32> = (0..nets.len() as u32).collect();
         order.sort_by_key(|&l| (nets[l as usize].net, l));
         let mut base = vec![0u32; nets.len()];
-        let mut sorted = Vec::with_capacity(nets.len());
-        let mut total = 0usize;
+        let mut net_of = Vec::new();
         for l in order {
-            let b = u32::try_from(total)
+            let b = u32::try_from(net_of.len())
                 .ok()
                 .filter(|&b| b < u32::MAX - 1)
                 .ok_or_else(|| budget("extraction RC node IDs"))?;
             base[l as usize] = b;
-            sorted.push((b, l));
-            total += nets[l as usize].nodes.len();
+            net_of.resize(net_of.len() + nets[l as usize].nodes.len(), l);
         }
+        let total = net_of.len();
         if total >= u32::MAX as usize - 1 {
             return Err(budget("extraction RC node IDs"));
         }
@@ -775,7 +811,7 @@ impl NodeIds {
         Ok(Self {
             base,
             by_net,
-            sorted,
+            net_of,
             total,
         })
     }
@@ -793,10 +829,10 @@ impl NodeIds {
         }
     }
     /// `(local net index, node)` of a global ID.
+    #[inline]
     fn decode(&self, g: u32) -> (usize, u32) {
-        let i = self.sorted.partition_point(|&(b, _)| b <= g) - 1;
-        let (b, l) = self.sorted[i];
-        (l as usize, g - b)
+        let l = self.net_of[g as usize] as usize;
+        (l, g - self.base[l])
     }
 }
 
@@ -870,26 +906,96 @@ fn um(tech: &RcTech, dbu: i64) -> f64 {
     dbu as f64 / tech.dbu_per_um
 }
 
+/// Where one net's tree computation stopped, relative to the cumulative
+/// budget checks of the serial loop (replayed in net order at merge).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum NetStage {
+    /// Before the graph-node budget.
+    #[default]
+    Start,
+    /// After the graph-node budget, before the wire-length sum.
+    Graph,
+    /// Inside the wire-length sum (`NetProbe::wire` is its prefix).
+    Wire,
+    /// After the wire-length sum, before the RC-node budget.
+    Tree,
+    /// After the RC-node budget.
+    Tail,
+}
+#[derive(Default)]
+struct NetProbe {
+    stage: NetStage,
+    keys: usize,
+    wire: u64,
+    nodes: usize,
+}
+/// Per-net statistics, added in net order at merge.
+#[derive(Default)]
+struct NetCounts {
+    duplicate_wire_edges: usize,
+    segment_cut_nodes: usize,
+    coincident_pin_links: usize,
+    opened_loop_resistors: usize,
+    resistors: usize,
+    resistance: f64,
+    lattice_wires: usize,
+    vias: usize,
+}
+/// One net's tree: its RC net, wire bodies (shape IDs assigned at merge),
+/// via pads and `(pin, local node)` pairs in node order.
+struct NetTree {
+    rc: RcNet,
+    runs: Vec<Run>,
+    pads: Vec<Pad>,
+    pins: Vec<(u32, u32)>,
+    counts: NetCounts,
+}
+/// Nets computed concurrently before each in-order merge.
+const TREE_BATCH: usize = 2048;
+
 /// Build per-net graphs, straight runs, the tree order and resistors.
+/// Nets are independent: batches are computed in parallel and merged in net
+/// order, replaying the serial loop's cumulative budget checks at the
+/// checkpoint each net reached, so results and errors are those of the
+/// serial loop.
 fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Built, ExtractStats)> {
+    use rayon::prelude::*;
     let routes = input.routes;
     let mut stats = ExtractStats::default();
-    let terminals: HashMap<u32, &Terminal> = input.terminals.iter().map(|t| (t.pin, t)).collect();
+    let terminals: HashMap<u32, &Terminal> = input
+        .terminals
+        .iter()
+        .filter(|t| input.extracts(t.net))
+        .map(|t| (t.pin, t))
+        .collect();
     let mut wires = BTreeMap::<u32, Vec<usize>>::new();
     let mut vias = BTreeMap::<u32, Vec<usize>>::new();
     let mut access = BTreeMap::<u32, Vec<usize>>::new();
     for (i, w) in routes.wires.iter().enumerate() {
-        wires.entry(w.net).or_default().push(i);
+        if input.extracts(w.net) {
+            wires.entry(w.net).or_default().push(i);
+        }
     }
     for (i, v) in routes.vias.iter().enumerate() {
+        if !input.extracts(v.net) {
+            continue;
+        }
         if v.kind as usize >= input.vias.len() {
             return Err(invalid("via kind outside routing input"));
         }
         vias.entry(v.net).or_default().push(i);
     }
     for (i, a) in routes.access.iter().enumerate() {
-        access.entry(a.net).or_default().push(i);
+        if input.extracts(a.net) {
+            access.entry(a.net).or_default().push(i);
+        }
     }
+    let route_nets: Vec<u32> = routes
+        .nets
+        .iter()
+        .copied()
+        .filter(|&n| input.extracts(n))
+        .collect();
     let mut out = Built {
         nets: Vec::new(),
         runs: Vec::new(),
@@ -899,457 +1005,542 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         pads: Vec::new(),
         pin_nodes: HashMap::default(),
     };
-    for (net_index, &net) in routes.nets.iter().enumerate() {
-        if net_index.is_multiple_of(4096) {
-            guard_memory(limits)?;
-        }
-        let net_wires = wires.get(&net).map(Vec::as_slice).unwrap_or(&[]);
-        let net_vias = vias.get(&net).map(Vec::as_slice).unwrap_or(&[]);
-        let net_access = access
-            .get(&net)
-            .ok_or_else(|| invalid("routed net without pin access"))?;
-        // Graph nodes in key order.
-        let mut keys: Vec<Key> = Vec::with_capacity(2 * (net_wires.len() + net_vias.len()) + 1);
-        for &i in net_wires {
-            let w = &routes.wires[i];
-            if w.start == w.end || (w.start[0] != w.end[0] && w.start[1] != w.end[1]) {
-                return Err(invalid("non-Manhattan or zero-length wire"));
-            }
-            layer_model(input, w.layer)?;
-            keys.push((w.layer, w.start[0], w.start[1]));
-            keys.push((w.layer, w.end[0], w.end[1]));
-        }
-        for &i in net_vias {
-            let v = &routes.vias[i];
-            let spec = &input.vias[v.kind as usize];
-            keys.push((spec.lower, v.at[0], v.at[1]));
-            keys.push((spec.upper, v.at[0], v.at[1]));
-        }
-        for &i in net_access {
-            let a = &routes.access[i];
-            keys.push((a.layer, a.at[0], a.at[1]));
-        }
-        keys.sort_unstable();
-        keys.dedup();
-        if stats.nodes + keys.len() > limits.max_nodes.saturating_mul(4) {
-            return Err(budget("extraction graph nodes"));
-        }
-        let id = |k: &Key| keys.binary_search(k).map(|i| i as u32);
-        let missing = |_| invalid("graph node lookup");
-        // A wire record may be one lattice edge or a longer collinear
-        // segment: split every record at each same-net node of its layer that
-        // lies strictly inside it, so the graph does not depend on how the
-        // router stored the metal.
-        let mut by_row = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, y) -> x
-        let mut by_col = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, x) -> y
-        for k in &keys {
-            by_row.entry((k.0, k.2)).or_default().push(k.1);
-            by_col.entry((k.0, k.1)).or_default().push(k.2);
-        }
-        for v in by_row.values_mut() {
-            v.sort_unstable();
-        }
-        let mut edges: Vec<(u32, u32, EdgeKind)> = Vec::new();
-        for &i in net_wires {
-            let w = &routes.wires[i];
-            let horizontal = w.start[1] == w.end[1];
-            let (fixed, a0, a1) = if horizontal {
-                (
-                    w.start[1],
-                    w.start[0].min(w.end[0]),
-                    w.start[0].max(w.end[0]),
-                )
-            } else {
-                (
-                    w.start[0],
-                    w.start[1].min(w.end[1]),
-                    w.start[1].max(w.end[1]),
-                )
-            };
-            let line = if horizontal {
-                &by_row[&(w.layer, fixed)]
-            } else {
-                &by_col[&(w.layer, fixed)]
-            };
-            let lo = line.partition_point(|&c| c < a0);
-            let hi = line.partition_point(|&c| c <= a1);
-            let at = |c: i64| -> Key {
-                if horizontal {
-                    (w.layer, c, fixed)
-                } else {
-                    (w.layer, fixed, c)
-                }
-            };
-            for pair in line[lo..hi].windows(2) {
-                let a = id(&at(pair[0])).map_err(missing)?;
-                let b = id(&at(pair[1])).map_err(missing)?;
-                edges.push((a.min(b), a.max(b), EdgeKind::Wire(w.layer)));
-            }
-            if edges.len() > limits.max_elements.saturating_mul(4) {
-                return Err(budget("extraction wire edges"));
-            }
-        }
-        // Overlapping records describe the same metal once.
-        let before = edges.len();
-        edges.sort_unstable_by_key(|e| (e.0, e.1));
-        edges.dedup_by_key(|e| (e.0, e.1));
-        stats.duplicate_wire_edges += before - edges.len();
-        for &i in net_vias {
-            let v = &routes.vias[i];
-            let spec = &input.vias[v.kind as usize];
-            let a = id(&(spec.lower, v.at[0], v.at[1])).map_err(missing)?;
-            let b = id(&(spec.upper, v.at[0], v.at[1])).map_err(missing)?;
-            edges.push((a.min(b), a.max(b), EdgeKind::Via(v.kind)));
-        }
-        let n = keys.len();
-        let mut incident = vec![Vec::<u32>::new(); n];
-        for (e, &(a, b, _)) in edges.iter().enumerate() {
-            incident[a as usize].push(e as u32);
-            incident[b as usize].push(e as u32);
-        }
-        // Pins: first pin (lowest index) names a node; others get links.
-        let mut pins: Vec<(u32, u32)> = Vec::new();
-        let mut driver = None;
-        for &i in net_access {
-            let a = &routes.access[i];
-            let t = terminals
-                .get(&a.pin)
-                .ok_or_else(|| invalid("pin access without terminal"))?;
-            if t.net != net {
-                return Err(invalid("pin access net mismatch"));
-            }
-            pins.push((a.pin, id(&(a.layer, a.at[0], a.at[1])).map_err(missing)?));
-            if t.driver {
-                if driver.is_some() {
-                    return Err(invalid("routed net has more than one driver"));
-                }
-                driver = Some(a.pin);
-            }
-        }
-        pins.sort_unstable();
-        let driver = driver.ok_or_else(|| invalid("routed net without driver"))?;
-        let mut pin_of = vec![None::<u32>; n];
-        let mut extra: Vec<(u32, u32)> = Vec::new(); // (pin, graph node)
-        for &(pin, node) in &pins {
-            if pin_of[node as usize].is_none() {
-                pin_of[node as usize] = Some(pin);
-            } else {
-                extra.push((pin, node));
-            }
-        }
-        // Junctions: everything but interior points of straight same-layer runs.
-        let point = |g: u32| keys[g as usize];
-        let mut virtual_keys: Vec<Key> = Vec::new();
-        let mut junction = vec![true; n];
-        for g in 0..n {
-            if pin_of[g].is_some() || incident[g].len() != 2 {
-                continue;
-            }
-            let (e0, e1) = (
-                edges[incident[g][0] as usize],
-                edges[incident[g][1] as usize],
-            );
-            if let (EdgeKind::Wire(l0), EdgeKind::Wire(l1)) = (e0.2, e1.2) {
-                let other = |e: (u32, u32, EdgeKind)| if e.0 as usize == g { e.1 } else { e.0 };
-                let (p, a, b) = (point(g as u32), point(other(e0)), point(other(e1)));
-                let collinear = (a.1 == p.1 && b.1 == p.1) || (a.2 == p.2 && b.2 == p.2);
-                // Straight-through only: the two neighbours lie on opposite sides.
-                let through = (a.1 - p.1).signum() * (b.1 - p.1).signum() <= 0
-                    && (a.2 - p.2).signum() * (b.2 - p.2).signum() <= 0;
-                if l0 == l1 && collinear && through {
-                    junction[g] = false;
-                }
-            }
-        }
-        // Straight runs between junctions, split at lattice nodes by length.
-        let mut used = vec![false; edges.len()];
-        let mut run_ends: Vec<(u32, u32, u32)> = Vec::new(); // (graph a, graph b, layer)
-        for e in 0..edges.len() {
-            let EdgeKind::Wire(layer) = edges[e].2 else {
-                continue;
-            };
-            if used[e] {
-                continue;
-            }
-            // Walk to one end of the straight chain.
-            let mut start = edges[e].0;
-            let mut via_edge = e as u32;
-            loop {
-                if junction[start as usize] {
-                    break;
-                }
-                let next_edge = *incident[start as usize]
-                    .iter()
-                    .find(|&&x| x != via_edge)
-                    .ok_or_else(|| invalid("chain walk"))?;
-                let (a, b, _) = edges[next_edge as usize];
-                start = if a == start { b } else { a };
-                via_edge = next_edge;
-                if start == edges[e].0 {
-                    return Err(invalid("closed straight chain"));
-                }
-            }
-            // Collect nodes from that end through the chain.
-            let mut chain = vec![start];
-            let mut current = start;
-            let mut from_edge = u32::MAX;
-            loop {
-                let candidates: Vec<u32> = incident[current as usize]
-                    .iter()
-                    .copied()
-                    .filter(|&x| {
-                        x != from_edge
-                            && matches!(edges[x as usize].2, EdgeKind::Wire(l) if l == layer)
-                    })
-                    .collect();
-                let next_edge = if current == start {
-                    // Leave the start junction along the seed chain only.
-                    via_edge
-                } else if junction[current as usize] {
-                    break;
-                } else {
-                    *candidates.first().ok_or_else(|| invalid("chain step"))?
-                };
-                if used[next_edge as usize] {
-                    return Err(invalid("chain revisited"));
-                }
-                used[next_edge as usize] = true;
-                let (a, b, _) = edges[next_edge as usize];
-                current = if a == current { b } else { a };
-                chain.push(current);
-                from_edge = next_edge;
-                if chain.len() > keys.len() + 1 {
-                    return Err(invalid("chain length"));
-                }
-                if junction[current as usize] {
-                    break;
-                }
-            }
-            // Split a run longer than the segment limit into equal pieces at
-            // exact coordinates (independent of where records start and end):
-            // n = ceil(L / limit) pieces; a cut point that is not a stored node
-            // becomes a virtual node.
-            let (ka, kb) = (point(start), point(current));
-            let horizontal = ka.2 == kb.2;
-            let (p0, p1) = if horizontal {
-                (ka.1, kb.1)
-            } else {
-                (ka.2, kb.2)
-            };
-            let length = (p1 - p0).abs();
-            let pieces = if length > limits.max_segment_length {
-                (length + limits.max_segment_length - 1) / limits.max_segment_length
-            } else {
-                1
-            };
-            let mut prev = start;
-            for i in 1..pieces {
-                let c = p0
-                    + (p1 - p0).signum()
-                        * ((i128::from(length) * i128::from(i) / i128::from(pieces)) as i64);
-                let key = if horizontal {
-                    (layer, c, ka.2)
-                } else {
-                    (layer, ka.1, c)
-                };
-                let node = match keys.binary_search(&key) {
-                    Ok(g) => {
-                        junction[g] = true;
-                        g as u32
-                    }
-                    Err(_) => {
-                        virtual_keys.push(key);
-                        (n + virtual_keys.len() - 1) as u32
-                    }
-                };
-                run_ends.push((prev, node, layer));
-                prev = node;
-            }
-            run_ends.push((prev, current, layer));
-        }
-        if used
-            .iter()
-            .zip(&edges)
-            .any(|(u, e)| !u && matches!(e.2, EdgeKind::Wire(_)))
-        {
-            return Err(invalid("wire not covered by a straight run"));
-        }
-        // Electrical elements over junction and virtual nodes plus extra pin
-        // nodes (graph nodes, then virtual cut nodes, then extra pins).
-        let node_count = n + virtual_keys.len();
-        stats.segment_cut_nodes += virtual_keys.len();
-        let point = |g: u32| -> Key {
-            if (g as usize) < n {
-                keys[g as usize]
-            } else {
-                virtual_keys[g as usize - n]
-            }
-        };
-        let mut elems: Vec<(u32, u32, f64)> = Vec::new();
-        for &(a, b, layer) in &run_ends {
-            let m = layer_model(input, layer)?;
-            let (ka, kb) = (point(a), point(b));
-            let length = (ka.1 - kb.1).abs() + (ka.2 - kb.2).abs();
-            let ohm = m.sheet_ohm * um(input.tech, length) / um(input.tech, m.width);
-            elems.push((a, b, ohm));
-            stats.wire_length_dbu = stats
-                .wire_length_dbu
-                .checked_add(length as u64)
-                .ok_or_else(|| budget("wire length"))?;
-        }
-        for (a, b, kind) in edges.iter().copied() {
-            if let EdgeKind::Via(k) = kind {
-                elems.push((a, b, input.tech.via_ohm[k as usize]));
-            }
-        }
-        let mut total_nodes = node_count as u32;
-        let mut extra_pin = Vec::new();
-        for &(pin, node) in &extra {
-            let v = total_nodes;
-            total_nodes += 1;
-            extra_pin.push((v, pin));
-            elems.push((node, v, 0.0));
-            stats.coincident_pin_links += 1;
-        }
-        let total = total_nodes as usize;
-        let mut adjacency = vec![Vec::<u32>::new(); total];
-        for (i, e) in elems.iter().enumerate() {
-            adjacency[e.0 as usize].push(i as u32);
-            adjacency[e.1 as usize].push(i as u32);
-        }
-        let mut pin_of_full = pin_of.clone();
-        pin_of_full.resize(total, None);
-        for &(v, pin) in &extra_pin {
-            pin_of_full[v as usize] = Some(pin);
-        }
-        let electrical: Vec<bool> = (0..total)
-            .map(|g| g >= n || junction[g] || pin_of_full[g].is_some())
-            .collect();
-        let sort_key = |g: u32| -> (u8, Key) {
-            if (g as usize) < node_count {
-                (0, point(g))
-            } else {
-                (1, (g, 0, 0))
-            }
-        };
-        let root = pins
-            .iter()
-            .find(|p| p.0 == driver)
-            .map(|p| p.1)
-            .ok_or_else(|| invalid("driver node"))?;
-        // Breadth-first tree order from the driver, deterministic by node key.
-        let mut local = vec![u32::MAX; total];
-        let mut order: Vec<u32> = vec![root];
-        local[root as usize] = 0;
-        let mut elem_done = vec![false; elems.len()];
-        let mut resistors = Vec::new();
-        let mut head = 0;
-        while head < order.len() {
-            let u = order[head];
-            head += 1;
-            let mut next: Vec<(u8, Key, u32)> = adjacency[u as usize]
-                .iter()
-                .map(|&e| {
-                    let (a, b, _) = elems[e as usize];
-                    let other = if a == u { b } else { a };
-                    let k = sort_key(other);
-                    (k.0, k.1, e)
-                })
-                .collect();
-            next.sort_unstable();
-            for (_, _, e) in next {
-                if elem_done[e as usize] {
-                    continue;
-                }
-                elem_done[e as usize] = true;
-                let (a, b, ohm) = elems[e as usize];
-                let other = if a == u { b } else { a };
-                if local[other as usize] != u32::MAX {
-                    stats.opened_loop_resistors += 1;
-                    continue;
-                }
-                local[other as usize] = order.len() as u32;
-                order.push(other);
-                resistors.push((local[u as usize], local[other as usize], ohm));
-            }
-        }
-        if (0..total).any(|g| electrical[g] && local[g] == u32::MAX) {
-            return Err(invalid(&format!("net {net} RC graph is disconnected")));
-        }
-        let mut counter = 0u32;
-        let nodes: Vec<RcNode> = order
-            .iter()
-            .map(|&g| match pin_of_full[g as usize] {
-                Some(pin) => RcNode::Pin(pin),
-                None => {
-                    counter += 1;
-                    RcNode::Internal(counter)
-                }
+    let maps = (&wires, &vias, &access);
+    for (b, batch) in route_nets.chunks(TREE_BATCH).enumerate() {
+        let trees: Vec<(Result<NetTree>, NetProbe)> = batch
+            .par_iter()
+            .map(|&net| {
+                let mut probe = NetProbe::default();
+                let tree = net_tree(input, limits, &terminals, maps, net, &mut probe);
+                (tree, probe)
             })
             .collect();
-        for (i, node) in nodes.iter().enumerate() {
-            if let RcNode::Pin(pin) = node {
-                out.pin_nodes.insert(*pin, (net, i as u32));
+        out.runs
+            .reserve_exact(trees.iter().flat_map(|t| &t.0).map(|t| t.runs.len()).sum());
+        for (k, (tree, probe)) in trees.into_iter().enumerate() {
+            if (b * TREE_BATCH + k).is_multiple_of(4096) {
+                guard_memory(limits)?;
             }
-        }
-        stats.nodes += nodes.len();
-        if stats.nodes > limits.max_nodes {
-            return Err(budget("extraction RC nodes"));
-        }
-        stats.resistors += resistors.len();
-        stats.resistance_ohm += resistors.iter().map(|r| r.2).sum::<f64>();
-        // Straight runs with tree-order end nodes.
-        for &(a, b, layer) in &run_ends {
-            let (ka, kb) = (point(a), point(b));
-            let vertical = ka.1 == kb.1;
-            let (pa, pb) = if vertical { (ka.2, kb.2) } else { (ka.1, kb.1) };
-            let (lo_node, hi_node) = if pa <= pb { (a, b) } else { (b, a) };
-            let cross = if vertical { ka.1 } else { ka.2 };
-            let half = input.layers[layer as usize].width / 2;
-            out.runs.push(Run {
-                net,
-                layer,
-                vertical,
-                lo: pa.min(pb),
-                hi: pa.max(pb),
-                minus: cross - half,
-                plus: cross + half,
-                shape: out.runs.len() as u32,
-                piece: false,
-                passive: None,
-                node_lo: local[lo_node as usize],
-                node_hi: local[hi_node as usize],
-            });
-        }
-        // Via landing-pad metal of this net, at the via's node on each layer.
-        for &i in net_vias {
-            let v = &routes.vias[i];
-            let spec = &input.vias[v.kind as usize];
-            for s in &spec.shapes {
-                if input.layers[s.layer as usize].vertical.is_none() {
-                    continue;
-                }
-                let g = id(&(s.layer, v.at[0], v.at[1])).map_err(missing)?;
-                out.pads.push(Pad {
-                    net,
-                    layer: s.layer,
-                    rect: crate::routing::shifted(s.rect, v.at)?,
-                    node: local[g as usize],
-                });
+            if probe.stage == NetStage::Start {
+                return Err(tree.err().unwrap_or_else(|| invalid("net tree stage")));
             }
+            if stats.nodes + probe.keys > limits.max_nodes.saturating_mul(4) {
+                return Err(budget("extraction graph nodes"));
+            }
+            if probe.stage == NetStage::Graph {
+                return Err(tree.err().unwrap_or_else(|| invalid("net tree stage")));
+            }
+            stats.wire_length_dbu = stats
+                .wire_length_dbu
+                .checked_add(probe.wire)
+                .ok_or_else(|| budget("wire length"))?;
+            if matches!(probe.stage, NetStage::Wire | NetStage::Tree) {
+                return Err(tree.err().unwrap_or_else(|| invalid("net tree stage")));
+            }
+            stats.nodes += probe.nodes;
+            if stats.nodes > limits.max_nodes {
+                return Err(budget("extraction RC nodes"));
+            }
+            let tree = tree?;
+            let c = &tree.counts;
+            stats.duplicate_wire_edges += c.duplicate_wire_edges;
+            stats.segment_cut_nodes += c.segment_cut_nodes;
+            stats.coincident_pin_links += c.coincident_pin_links;
+            stats.opened_loop_resistors += c.opened_loop_resistors;
+            for &(pin, node) in &tree.pins {
+                out.pin_nodes.insert(pin, (tree.rc.net, node));
+            }
+            stats.resistors += c.resistors;
+            stats.resistance_ohm += c.resistance;
+            for mut run in tree.runs {
+                run.shape = out.runs.len() as u32;
+                out.runs.push(run);
+            }
+            out.pads.extend(tree.pads);
+            stats.lattice_wires += c.lattice_wires;
+            stats.vias += c.vias;
+            out.nets.push(tree.rc);
         }
-        stats.lattice_wires += net_wires.len();
-        stats.vias += net_vias.len();
-        out.nets.push(RcNet {
-            net,
-            ground: vec![0.0; nodes.len()],
-            nodes,
-            resistors,
-        });
     }
     stats.nets = out.nets.len();
     stats.wire_runs = out.runs.len();
     Ok((out, stats))
+}
+
+type NetLists<'m> = (
+    &'m BTreeMap<u32, Vec<usize>>,
+    &'m BTreeMap<u32, Vec<usize>>,
+    &'m BTreeMap<u32, Vec<usize>>,
+);
+
+/// One net's graph, straight runs, tree order, resistors, runs and pads.
+/// `probe` records the serial loop's budget checkpoints this net reached.
+fn net_tree(
+    input: &ExtractInput<'_>,
+    limits: &ExtractLimits,
+    terminals: &HashMap<u32, &Terminal>,
+    (wires, vias, access): NetLists<'_>,
+    net: u32,
+    probe: &mut NetProbe,
+) -> Result<NetTree> {
+    let routes = input.routes;
+    let mut counts = NetCounts::default();
+    let net_wires = wires.get(&net).map(Vec::as_slice).unwrap_or(&[]);
+    let net_vias = vias.get(&net).map(Vec::as_slice).unwrap_or(&[]);
+    let net_access = access
+        .get(&net)
+        .ok_or_else(|| invalid("routed net without pin access"))?;
+    // Graph nodes in key order.
+    let mut keys: Vec<Key> = Vec::with_capacity(2 * (net_wires.len() + net_vias.len()) + 1);
+    for &i in net_wires {
+        let w = &routes.wires[i];
+        if w.start == w.end || (w.start[0] != w.end[0] && w.start[1] != w.end[1]) {
+            return Err(invalid("non-Manhattan or zero-length wire"));
+        }
+        layer_model(input, w.layer)?;
+        keys.push((w.layer, w.start[0], w.start[1]));
+        keys.push((w.layer, w.end[0], w.end[1]));
+    }
+    for &i in net_vias {
+        let v = &routes.vias[i];
+        let spec = &input.vias[v.kind as usize];
+        keys.push((spec.lower, v.at[0], v.at[1]));
+        keys.push((spec.upper, v.at[0], v.at[1]));
+    }
+    for &i in net_access {
+        let a = &routes.access[i];
+        keys.push((a.layer, a.at[0], a.at[1]));
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    // Checkpoint: the cumulative graph-node budget (checked at merge).
+    probe.keys = keys.len();
+    probe.stage = NetStage::Graph;
+    let id = |k: &Key| keys.binary_search(k).map(|i| i as u32);
+    let missing = |_| invalid("graph node lookup");
+    // A wire record may be one lattice edge or a longer collinear
+    // segment: split every record at each same-net node of its layer that
+    // lies strictly inside it, so the graph does not depend on how the
+    // router stored the metal.
+    let mut by_row = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, y) -> x
+    let mut by_col = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, x) -> y
+    for k in &keys {
+        by_row.entry((k.0, k.2)).or_default().push(k.1);
+        by_col.entry((k.0, k.1)).or_default().push(k.2);
+    }
+    for v in by_row.values_mut() {
+        v.sort_unstable();
+    }
+    let mut edges: Vec<(u32, u32, EdgeKind)> = Vec::new();
+    for &i in net_wires {
+        let w = &routes.wires[i];
+        let horizontal = w.start[1] == w.end[1];
+        let (fixed, a0, a1) = if horizontal {
+            (
+                w.start[1],
+                w.start[0].min(w.end[0]),
+                w.start[0].max(w.end[0]),
+            )
+        } else {
+            (
+                w.start[0],
+                w.start[1].min(w.end[1]),
+                w.start[1].max(w.end[1]),
+            )
+        };
+        let line = if horizontal {
+            &by_row[&(w.layer, fixed)]
+        } else {
+            &by_col[&(w.layer, fixed)]
+        };
+        let lo = line.partition_point(|&c| c < a0);
+        let hi = line.partition_point(|&c| c <= a1);
+        let at = |c: i64| -> Key {
+            if horizontal {
+                (w.layer, c, fixed)
+            } else {
+                (w.layer, fixed, c)
+            }
+        };
+        for pair in line[lo..hi].windows(2) {
+            let a = id(&at(pair[0])).map_err(missing)?;
+            let b = id(&at(pair[1])).map_err(missing)?;
+            edges.push((a.min(b), a.max(b), EdgeKind::Wire(w.layer)));
+        }
+        if edges.len() > limits.max_elements.saturating_mul(4) {
+            return Err(budget("extraction wire edges"));
+        }
+    }
+    // Overlapping records describe the same metal once.
+    let before = edges.len();
+    edges.sort_unstable_by_key(|e| (e.0, e.1));
+    edges.dedup_by_key(|e| (e.0, e.1));
+    counts.duplicate_wire_edges += before - edges.len();
+    for &i in net_vias {
+        let v = &routes.vias[i];
+        let spec = &input.vias[v.kind as usize];
+        let a = id(&(spec.lower, v.at[0], v.at[1])).map_err(missing)?;
+        let b = id(&(spec.upper, v.at[0], v.at[1])).map_err(missing)?;
+        edges.push((a.min(b), a.max(b), EdgeKind::Via(v.kind)));
+    }
+    let n = keys.len();
+    let mut incident = vec![Vec::<u32>::new(); n];
+    for (e, &(a, b, _)) in edges.iter().enumerate() {
+        incident[a as usize].push(e as u32);
+        incident[b as usize].push(e as u32);
+    }
+    // Pins: first pin (lowest index) names a node; others get links.
+    let mut pins: Vec<(u32, u32)> = Vec::new();
+    let mut driver = None;
+    for &i in net_access {
+        let a = &routes.access[i];
+        let t = terminals
+            .get(&a.pin)
+            .ok_or_else(|| invalid("pin access without terminal"))?;
+        if t.net != net {
+            return Err(invalid("pin access net mismatch"));
+        }
+        pins.push((a.pin, id(&(a.layer, a.at[0], a.at[1])).map_err(missing)?));
+        if t.driver {
+            if driver.is_some() {
+                return Err(invalid("routed net has more than one driver"));
+            }
+            driver = Some(a.pin);
+        }
+    }
+    pins.sort_unstable();
+    let driver = driver.ok_or_else(|| invalid("routed net without driver"))?;
+    let mut pin_of = vec![None::<u32>; n];
+    let mut extra: Vec<(u32, u32)> = Vec::new(); // (pin, graph node)
+    for &(pin, node) in &pins {
+        if pin_of[node as usize].is_none() {
+            pin_of[node as usize] = Some(pin);
+        } else {
+            extra.push((pin, node));
+        }
+    }
+    // Junctions: everything but interior points of straight same-layer runs.
+    let point = |g: u32| keys[g as usize];
+    let mut virtual_keys: Vec<Key> = Vec::new();
+    let mut junction = vec![true; n];
+    for g in 0..n {
+        if pin_of[g].is_some() || incident[g].len() != 2 {
+            continue;
+        }
+        let (e0, e1) = (
+            edges[incident[g][0] as usize],
+            edges[incident[g][1] as usize],
+        );
+        if let (EdgeKind::Wire(l0), EdgeKind::Wire(l1)) = (e0.2, e1.2) {
+            let other = |e: (u32, u32, EdgeKind)| if e.0 as usize == g { e.1 } else { e.0 };
+            let (p, a, b) = (point(g as u32), point(other(e0)), point(other(e1)));
+            let collinear = (a.1 == p.1 && b.1 == p.1) || (a.2 == p.2 && b.2 == p.2);
+            // Straight-through only: the two neighbours lie on opposite sides.
+            let through = (a.1 - p.1).signum() * (b.1 - p.1).signum() <= 0
+                && (a.2 - p.2).signum() * (b.2 - p.2).signum() <= 0;
+            if l0 == l1 && collinear && through {
+                junction[g] = false;
+            }
+        }
+    }
+    // Straight runs between junctions, split at lattice nodes by length.
+    let mut used = vec![false; edges.len()];
+    let mut run_ends: Vec<(u32, u32, u32)> = Vec::new(); // (graph a, graph b, layer)
+    for e in 0..edges.len() {
+        let EdgeKind::Wire(layer) = edges[e].2 else {
+            continue;
+        };
+        if used[e] {
+            continue;
+        }
+        // Walk to one end of the straight chain.
+        let mut start = edges[e].0;
+        let mut via_edge = e as u32;
+        loop {
+            if junction[start as usize] {
+                break;
+            }
+            let next_edge = *incident[start as usize]
+                .iter()
+                .find(|&&x| x != via_edge)
+                .ok_or_else(|| invalid("chain walk"))?;
+            let (a, b, _) = edges[next_edge as usize];
+            start = if a == start { b } else { a };
+            via_edge = next_edge;
+            if start == edges[e].0 {
+                return Err(invalid("closed straight chain"));
+            }
+        }
+        // Collect nodes from that end through the chain.
+        let mut chain = vec![start];
+        let mut current = start;
+        let mut from_edge = u32::MAX;
+        loop {
+            let candidates: Vec<u32> = incident[current as usize]
+                .iter()
+                .copied()
+                .filter(|&x| {
+                    x != from_edge && matches!(edges[x as usize].2, EdgeKind::Wire(l) if l == layer)
+                })
+                .collect();
+            let next_edge = if current == start {
+                // Leave the start junction along the seed chain only.
+                via_edge
+            } else if junction[current as usize] {
+                break;
+            } else {
+                *candidates.first().ok_or_else(|| invalid("chain step"))?
+            };
+            if used[next_edge as usize] {
+                return Err(invalid("chain revisited"));
+            }
+            used[next_edge as usize] = true;
+            let (a, b, _) = edges[next_edge as usize];
+            current = if a == current { b } else { a };
+            chain.push(current);
+            from_edge = next_edge;
+            if chain.len() > keys.len() + 1 {
+                return Err(invalid("chain length"));
+            }
+            if junction[current as usize] {
+                break;
+            }
+        }
+        // Split a run longer than the segment limit into equal pieces at
+        // exact coordinates (independent of where records start and end):
+        // n = ceil(L / limit) pieces; a cut point that is not a stored node
+        // becomes a virtual node.
+        let (ka, kb) = (point(start), point(current));
+        let horizontal = ka.2 == kb.2;
+        let (p0, p1) = if horizontal {
+            (ka.1, kb.1)
+        } else {
+            (ka.2, kb.2)
+        };
+        let length = (p1 - p0).abs();
+        let pieces = if length > limits.max_segment_length {
+            (length + limits.max_segment_length - 1) / limits.max_segment_length
+        } else {
+            1
+        };
+        let mut prev = start;
+        for i in 1..pieces {
+            let c = p0
+                + (p1 - p0).signum()
+                    * ((i128::from(length) * i128::from(i) / i128::from(pieces)) as i64);
+            let key = if horizontal {
+                (layer, c, ka.2)
+            } else {
+                (layer, ka.1, c)
+            };
+            let node = match keys.binary_search(&key) {
+                Ok(g) => {
+                    junction[g] = true;
+                    g as u32
+                }
+                Err(_) => {
+                    virtual_keys.push(key);
+                    (n + virtual_keys.len() - 1) as u32
+                }
+            };
+            run_ends.push((prev, node, layer));
+            prev = node;
+        }
+        run_ends.push((prev, current, layer));
+    }
+    if used
+        .iter()
+        .zip(&edges)
+        .any(|(u, e)| !u && matches!(e.2, EdgeKind::Wire(_)))
+    {
+        return Err(invalid("wire not covered by a straight run"));
+    }
+    // Electrical elements over junction and virtual nodes plus extra pin
+    // nodes (graph nodes, then virtual cut nodes, then extra pins).
+    let node_count = n + virtual_keys.len();
+    counts.segment_cut_nodes += virtual_keys.len();
+    let point = |g: u32| -> Key {
+        if (g as usize) < n {
+            keys[g as usize]
+        } else {
+            virtual_keys[g as usize - n]
+        }
+    };
+    let mut elems: Vec<(u32, u32, f64)> = Vec::new();
+    // Checkpoint: the cumulative wire length (its prefix is added at merge).
+    probe.stage = NetStage::Wire;
+    for &(a, b, layer) in &run_ends {
+        let m = layer_model(input, layer)?;
+        let (ka, kb) = (point(a), point(b));
+        let length = (ka.1 - kb.1).abs() + (ka.2 - kb.2).abs();
+        let ohm = m.sheet_ohm * um(input.tech, length) / um(input.tech, m.width);
+        elems.push((a, b, ohm));
+        probe.wire = probe
+            .wire
+            .checked_add(length as u64)
+            .ok_or_else(|| budget("wire length"))?;
+    }
+    probe.stage = NetStage::Tree;
+    for (a, b, kind) in edges.iter().copied() {
+        if let EdgeKind::Via(k) = kind {
+            elems.push((a, b, input.tech.via_ohm[k as usize]));
+        }
+    }
+    let mut total_nodes = node_count as u32;
+    let mut extra_pin = Vec::new();
+    for &(pin, node) in &extra {
+        let v = total_nodes;
+        total_nodes += 1;
+        extra_pin.push((v, pin));
+        elems.push((node, v, 0.0));
+        counts.coincident_pin_links += 1;
+    }
+    let total = total_nodes as usize;
+    let mut adjacency = vec![Vec::<u32>::new(); total];
+    for (i, e) in elems.iter().enumerate() {
+        adjacency[e.0 as usize].push(i as u32);
+        adjacency[e.1 as usize].push(i as u32);
+    }
+    let mut pin_of_full = pin_of.clone();
+    pin_of_full.resize(total, None);
+    for &(v, pin) in &extra_pin {
+        pin_of_full[v as usize] = Some(pin);
+    }
+    let electrical: Vec<bool> = (0..total)
+        .map(|g| g >= n || junction[g] || pin_of_full[g].is_some())
+        .collect();
+    let sort_key = |g: u32| -> (u8, Key) {
+        if (g as usize) < node_count {
+            (0, point(g))
+        } else {
+            (1, (g, 0, 0))
+        }
+    };
+    let root = pins
+        .iter()
+        .find(|p| p.0 == driver)
+        .map(|p| p.1)
+        .ok_or_else(|| invalid("driver node"))?;
+    // Breadth-first tree order from the driver, deterministic by node key.
+    let mut local = vec![u32::MAX; total];
+    let mut order: Vec<u32> = vec![root];
+    local[root as usize] = 0;
+    let mut elem_done = vec![false; elems.len()];
+    let mut resistors = Vec::new();
+    let mut head = 0;
+    while head < order.len() {
+        let u = order[head];
+        head += 1;
+        let mut next: Vec<(u8, Key, u32)> = adjacency[u as usize]
+            .iter()
+            .map(|&e| {
+                let (a, b, _) = elems[e as usize];
+                let other = if a == u { b } else { a };
+                let k = sort_key(other);
+                (k.0, k.1, e)
+            })
+            .collect();
+        next.sort_unstable();
+        for (_, _, e) in next {
+            if elem_done[e as usize] {
+                continue;
+            }
+            elem_done[e as usize] = true;
+            let (a, b, ohm) = elems[e as usize];
+            let other = if a == u { b } else { a };
+            if local[other as usize] != u32::MAX {
+                counts.opened_loop_resistors += 1;
+                continue;
+            }
+            local[other as usize] = order.len() as u32;
+            order.push(other);
+            resistors.push((local[u as usize], local[other as usize], ohm));
+        }
+    }
+    if (0..total).any(|g| electrical[g] && local[g] == u32::MAX) {
+        return Err(invalid(&format!("net {net} RC graph is disconnected")));
+    }
+    let mut counter = 0u32;
+    let nodes: Vec<RcNode> = order
+        .iter()
+        .map(|&g| match pin_of_full[g as usize] {
+            Some(pin) => RcNode::Pin(pin),
+            None => {
+                counter += 1;
+                RcNode::Internal(counter)
+            }
+        })
+        .collect();
+    let pins: Vec<(u32, u32)> = nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, node)| match node {
+            RcNode::Pin(pin) => Some((*pin, i as u32)),
+            RcNode::Internal(_) => None,
+        })
+        .collect();
+    // Checkpoint: the cumulative RC-node budget (checked at merge).
+    probe.nodes = nodes.len();
+    probe.stage = NetStage::Tail;
+    counts.resistors = resistors.len();
+    counts.resistance = resistors.iter().map(|r| r.2).sum::<f64>();
+    let mut runs = Vec::with_capacity(run_ends.len());
+    let mut pads = Vec::new();
+    // Straight runs with tree-order end nodes.
+    for &(a, b, layer) in &run_ends {
+        let (ka, kb) = (point(a), point(b));
+        let vertical = ka.1 == kb.1;
+        let (pa, pb) = if vertical { (ka.2, kb.2) } else { (ka.1, kb.1) };
+        let (lo_node, hi_node) = if pa <= pb { (a, b) } else { (b, a) };
+        let cross = if vertical { ka.1 } else { ka.2 };
+        let half = input.layers[layer as usize].width / 2;
+        runs.push(Run {
+            net,
+            layer,
+            vertical,
+            lo: pa.min(pb),
+            hi: pa.max(pb),
+            minus: cross - half,
+            plus: cross + half,
+            // Assigned at merge (the body's index).
+            shape: 0,
+            piece: false,
+            passive: None,
+            node_lo: local[lo_node as usize],
+            node_hi: local[hi_node as usize],
+        });
+    }
+    // Via landing-pad metal of this net, at the via's node on each layer.
+    for &i in net_vias {
+        let v = &routes.vias[i];
+        let spec = &input.vias[v.kind as usize];
+        for s in &spec.shapes {
+            if input.layers[s.layer as usize].vertical.is_none() {
+                continue;
+            }
+            let g = id(&(s.layer, v.at[0], v.at[1])).map_err(missing)?;
+            pads.push(Pad {
+                net,
+                layer: s.layer,
+                rect: crate::routing::shifted(s.rect, v.at)?,
+                node: local[g as usize],
+            });
+        }
+    }
+    counts.lattice_wires = net_wires.len();
+    counts.vias = net_vias.len();
+    Ok(NetTree {
+        rc: RcNet {
+            net,
+            ground: vec![0.0; nodes.len()],
+            nodes,
+            resistors,
+        },
+        runs,
+        pads,
+        pins,
+        counts,
+    })
 }
 
 /// Same-net conductors during metal construction: retained shape IDs and
@@ -1607,7 +1798,12 @@ fn add_patches(
     net_index: &HashMap<u32, usize, BuildFx>,
     stats: &mut ExtractStats,
 ) -> Result<()> {
-    for patch in &input.routes.patches {
+    for patch in input
+        .routes
+        .patches
+        .iter()
+        .filter(|p| input.extracts(p.net))
+    {
         let r = patch.rect;
         if !r.valid()
             || patch.layer as usize >= input.layers.len()
@@ -1742,31 +1938,102 @@ fn add_passive_strips(
 
 /// Mark only virtual conductors crossed by routed metal. One bit per virtual
 /// shape replaces a retained rectangle plus two passive-strip records.
+///
+/// Routed shapes are scanned in parallel chunks with private query scratch
+/// and bitsets that are OR-merged: the marked set and the total work are
+/// order-independent. Any query error or a work total over the budget is
+/// reproduced exactly by the serial scan from the original work count.
 fn virtual_crossings(
     shapes: &Shapes<'_>,
-    instances: Option<&mut InstanceGeometry<'_>>,
+    instances: Option<&InstanceGeometry<'_>>,
     layers: &[u32],
+    limits: &ExtractLimits,
     stats: &mut ExtractStats,
 ) -> Result<Vec<u64>> {
-    let mut marked = vec![0u64; shapes.virtual_count().div_ceil(64)];
-    let Some(instances) = instances else {
-        return Ok(marked);
+    use rayon::prelude::*;
+    let words = shapes.virtual_count().div_ceil(64);
+    let Some(geometry) = instances else {
+        return Ok(vec![0u64; words]);
     };
-    for (_, shape) in shapes.owned() {
-        if !shape.routed() {
-            continue;
+    let instance_count = shapes.source.map_or(0, |s| s.geometry.len());
+    let offset = shapes.virtual_offset();
+    let scan = |part: &[Shape],
+                sc: &mut InstanceQueryScratch,
+                marked: &mut [u64],
+                work: &mut usize|
+     -> Result<()> {
+        for shape in part.iter().filter(|s| s.routed()) {
+            for &layer in layers.iter().filter(|&&l| l != shape.layer) {
+                geometry.visit_shared(sc, shapes, layer, shape.rect, work, |id, other| {
+                    let (a, b) = (shape.rect, other.rect);
+                    if a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy {
+                        let k = id as usize - offset;
+                        marked[k / 64] |= 1 << (k % 64);
+                    }
+                    Ok(true)
+                })?;
+            }
         }
-        for &layer in layers.iter().filter(|&&l| l != shape.layer) {
-            instances.visit(shapes, layer, shape.rect, &mut stats.work, |id, other| {
-                let (a, b) = (shape.rect, other.rect);
-                if a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy {
-                    let k = id as usize - shapes.virtual_offset();
-                    marked[k / 64] |= 1 << (k % 64);
-                }
-                Ok(true)
-            })?;
+        Ok(())
+    };
+    let retained = shapes.retained();
+    let parallel = (rayon::current_num_threads() > 1)
+        .then(|| {
+            retained
+                .par_chunks(4096)
+                .fold(
+                    || (Vec::new(), None::<InstanceQueryScratch>, 0usize, false),
+                    |(mut marked, mut sc, mut work, mut failed), part| {
+                        if !failed {
+                            if marked.is_empty() {
+                                marked = vec![0u64; words];
+                            }
+                            if sc.is_none() {
+                                sc = InstanceQueryScratch::new(instance_count).ok();
+                            }
+                            failed = match sc.as_mut() {
+                                Some(sc) => scan(part, sc, &mut marked, &mut work).is_err(),
+                                None => true,
+                            };
+                        }
+                        (marked, sc, work, failed)
+                    },
+                )
+                .map(|(marked, _, work, failed)| (marked, work, failed))
+                .reduce(
+                    || (Vec::new(), 0usize, false),
+                    |(mut a, wa, fa), (b, wb, fb)| {
+                        if a.is_empty() {
+                            a = b;
+                        } else if !b.is_empty() {
+                            for (x, y) in a.iter_mut().zip(&b) {
+                                *x |= y;
+                            }
+                        }
+                        (a, wa.saturating_add(wb), fa || fb)
+                    },
+                )
+        })
+        .and_then(|(marked, work, failed)| {
+            let total = stats
+                .work
+                .checked_add(work)
+                .filter(|&n| !failed && n <= limits.max_work)?;
+            Some((marked, total))
+        });
+    let marked = match parallel {
+        Some((mut marked, total)) => {
+            stats.work = total;
+            marked.resize(words, 0);
+            marked
         }
-    }
+        None => {
+            let mut marked = vec![0u64; words];
+            let mut sc = InstanceQueryScratch::new(instance_count)?;
+            scan(retained, &mut sc, &mut marked, &mut stats.work)?;
+            marked
+        }
+    };
     stats.passive_strips = stats
         .passive_strips
         .checked_add(
@@ -1917,7 +2184,7 @@ fn extract_with_queries(
     let headroom = memory.limit_bytes.saturating_sub(memory.estimate_bytes);
     let index_budget = headroom.saturating_add(index_allowance(limits));
     // Cell geometry is indexed once, at the admitted query bin.
-    let mut instances = InstanceGeometry::new(
+    let instances = InstanceGeometry::new(
         &shapes,
         memory.instance_query_bin_dbu,
         input.layers.len(),
@@ -1929,6 +2196,7 @@ fn extract_with_queries(
         .enumerate()
         .map(|(i, n)| (n.net, i))
         .collect();
+    profile.phase(1);
     {
         let mut near = NetShapes::new(&shapes, &built, limits, index_budget)?;
         add_metal_pieces(
@@ -1951,7 +2219,7 @@ fn extract_with_queries(
     }
     // Via pads are fully converted into pieces.
     built.pads = Vec::new();
-    profile.phase(1);
+    profile.phase(2);
     // Grid cells: at least 2 um and the layer's lateral window, so a strip
     // query spans few cells on every layer.
     let min_cell = (2.0 * tech.dbu_per_um).ceil().max(1.0) as i64;
@@ -1977,14 +2245,22 @@ fn extract_with_queries(
         index_budget,
         &mut stats.work,
     )?;
+    profile.phase(3);
     add_passive_strips(input, limits, &mut built, &shapes, &grid, &mut stats)?;
-    let crossed = virtual_crossings(&shapes, instances.as_mut(), &routing_layers, &mut stats)?;
+    profile.phase(4);
+    let crossed = virtual_crossings(
+        &shapes,
+        instances.as_ref(),
+        &routing_layers,
+        limits,
+        &mut stats,
+    )?;
     stats.wire_runs = built.runs.len();
     stats.shapes = shapes.len();
     if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
-    profile.phase(2);
+    profile.phase(5);
     // Parallel lanes use the unused index allowance first, then headroom.
     let instance_count = input.instances.map_or(0, |i| i.geometry.len());
     let unused = index_allowance(limits).saturating_sub(grid.bytes());
@@ -2069,7 +2345,7 @@ fn extract_with_queries(
             )?,
         }
     };
-    profile.phase(3);
+    profile.phase(6);
     let grid_size = (grid.entries(), grid.bytes());
     // Geometry is no longer needed: release it before the coupling list.
     drop(grid);
@@ -2124,7 +2400,7 @@ fn extract_with_queries(
         return Err(budget("extraction RC elements"));
     }
     guard_memory(limits)?;
-    profile.phase(4);
+    profile.phase(7);
     profile.report(&stats, &report, grid_size);
     Ok(RcNetwork {
         nets,
@@ -2500,6 +2776,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &[],
             passive: &[],
             instances: Some(InstancedPassive {
@@ -2767,6 +3044,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: r,
+            nets: None,
             terminals: t,
             passive,
             held_bytes: 0,
@@ -2939,6 +3217,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             held_bytes: 0,
@@ -3077,6 +3356,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             tech: &tech(false),
@@ -3342,6 +3622,7 @@ mod tests {
                 layers: &wide_layers,
                 vias: &v,
                 routes: &r2,
+                nets: None,
                 terminals: &t2,
                 passive: &[],
                 tech: &wide,
@@ -3503,6 +3784,7 @@ mod tests {
                     layers: &l,
                     vias: &v,
                     routes: r,
+                    nets: None,
                     terminals: &t,
                     passive: &[],
                     tech: &tech,
@@ -3987,6 +4269,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             tech: &tk,
@@ -4128,6 +4411,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &passive,
             instances: None,
@@ -4202,6 +4486,103 @@ mod tests {
     }
 
     #[test]
+    fn parallel_net_trees_fail_at_the_serial_net_and_checkpoint() {
+        // Five nets of different sizes; budgets on graph and RC nodes fail at
+        // different nets, and a later net lacks its pin access. The batch of
+        // concurrently built trees must report the serial loop's first error.
+        let sizes = [3i64, 9, 2, 6, 4];
+        let wires: Vec<Wire> = sizes
+            .iter()
+            .enumerate()
+            .flat_map(|(n, &k)| straight(n as u32, n as i64 * 600, k))
+            .collect();
+        let access_for = |skip: Option<u32>| -> Vec<Access> {
+            sizes
+                .iter()
+                .enumerate()
+                .filter(|&(n, _)| Some(n as u32) != skip)
+                .flat_map(|(n, &k)| {
+                    let n = n as u32;
+                    [
+                        Access {
+                            pin: 2 * n,
+                            net: n,
+                            layer: 0,
+                            at: [0, i64::from(n) * 600],
+                        },
+                        Access {
+                            pin: 2 * n + 1,
+                            net: n,
+                            layer: 0,
+                            at: [k * 1000, i64::from(n) * 600],
+                        },
+                    ]
+                })
+                .collect()
+        };
+        let t: Vec<_> = (0..sizes.len() as u32)
+            .flat_map(|n| [terminal(2 * n, n, true), terminal(2 * n + 1, n, false)])
+            .collect();
+        let (l, v, tk) = (layers(), vias(), tech(false));
+        let nets: Vec<u32> = (0..sizes.len() as u32).collect();
+        let complete = routes(wires.clone(), vec![], access_for(None), nets.clone());
+        let broken = routes(wires, vec![], access_for(Some(3)), nets);
+        let mut errors = std::collections::BTreeSet::new();
+        for r in [&complete, &broken] {
+            let input = ExtractInput {
+                layers: &l,
+                vias: &v,
+                routes: r,
+                nets: None,
+                terminals: &t,
+                passive: &[],
+                instances: None,
+                held_bytes: 0,
+                tech: &tk,
+            };
+            let nodes = serial(
+                &complete_input(&input, &complete),
+                &ExtractLimits::default(),
+            )
+            .unwrap()
+            .stats
+            .nodes;
+            for max_nodes in [1, 2, 3, 5, nodes / 3, nodes / 2, nodes - 1, nodes] {
+                let limits = ExtractLimits {
+                    max_nodes,
+                    ..Default::default()
+                };
+                let a = serial(&input, &limits);
+                for threads in [2, 3, 4] {
+                    let b = pool(threads).install(|| extract_cpu_ref(&input, &limits));
+                    match (&a, b) {
+                        (Ok(a), Ok(b)) => assert_network_exact(a, &b),
+                        (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
+                        (a, b) => panic!("serial/parallel outcome differs: {a:?} / {b:?}"),
+                    }
+                }
+                if let Err(e) = a {
+                    errors.insert(e.to_string());
+                }
+            }
+        }
+        // Graph-node, RC-node and missing-access errors all occur.
+        assert!(
+            errors.iter().any(|e| e.contains("graph nodes")),
+            "{errors:?}"
+        );
+        assert!(errors.iter().any(|e| e.contains("RC nodes")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("pin access")),
+            "{errors:?}"
+        );
+    }
+    /// The same input over another routing table.
+    fn complete_input<'a>(input: &ExtractInput<'a>, routes: &'a Routes) -> ExtractInput<'a> {
+        ExtractInput { routes, ..*input }
+    }
+
+    #[test]
     fn disjoint_neighbours_use_bounded_active_interval_work() {
         let r = routes(
             vec![Wire {
@@ -4234,6 +4615,7 @@ mod tests {
             layers: &layers,
             vias: &vias,
             routes: &r,
+            nets: None,
             terminals: &terminals,
             passive: &passive,
             tech: &tech,
@@ -4351,6 +4733,7 @@ mod tests {
                 layers: &l,
                 vias: &v,
                 routes: &r,
+                nets: None,
                 terminals: &t,
                 passive: &[],
                 held_bytes: 0,
@@ -4368,6 +4751,7 @@ mod tests {
                 layers: &l,
                 vias: &v,
                 routes: &r,
+                nets: None,
                 terminals: &t,
                 passive: &[],
                 held_bytes: 0,
@@ -4485,6 +4869,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             held_bytes: 0,
@@ -4534,6 +4919,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             instances: None,
