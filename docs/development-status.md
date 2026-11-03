@@ -29,9 +29,9 @@ and stopped after 114 of 119 manifest steps at the `timing_accuracy` gate,
 where RustSTA and OpenSTA differ by 1.4052 ps on identical SPEF against a 1 ps
 tolerance. The remaining gates ran separately with the recipe's scripts. Neither
 flow passes every gate, so the receipt's end-to-end comparative ratios
-(speed-up, standard-cell area, wirelength) are null. The wire and via
-comparisons below are computed from the two layouts' measured values, which
-come from different netlists; they are not receipt ratios.
+(speed-up, standard-cell area, wirelength) are null. The wire and via values
+below are the two layouts' measured values from different netlists; no wire or
+via ratio is formed.
 
 ### Place, CTS and route against OpenROAD
 
@@ -65,9 +65,9 @@ the table. LibreLane's 39.92 s holds all of its resizer repair, including
 detailed routing. Its 68.98 s includes a 6.788 s antenna check that runs after
 detailed routing.
 
-**Routed wire and vias are the main gap.** Computed from the table, the native
-layout has about 73 % more routed signal wire and about 2.5× the vias. The two
-layouts come from different netlists and placements (16,208 against 15,191
+**Routed wire and vias are the main gap.** The native layout has
+1,679,076.6 µm of routed signal wire and 301,099 vias, against 969,571.6 µm and
+122,194; no wire or via ratio is formed. The two layouts come from different netlists and placements (16,208 against 15,191
 standard cells, 16,329 against 15,227 routed nets), so the gap is not the
 router's alone. Standard-cell area is likewise a whole-flow result of the
 different synthesized netlists and repair, and no area ratio is formed.

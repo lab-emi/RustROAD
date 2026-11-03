@@ -34,9 +34,9 @@ scripts checked both final layouts. **Both pass foundry main and antenna DRC
 with 0 violations and full-device LVS.** On the shared timing gate the native
 layout has zero setup, hold, slew, capacitance and fanout violations at TT and
 SS; the LibreLane layout keeps 28 (TT) and 24 (SS) capacitance and 30 fanout
-violations. **The native layout has about 73 % more routed signal wire and
-about 2.5× the vias**, computed from the table below for two layouts built
-from different netlists.
+violations. The two layouts come from different netlists; the table gives
+their routed wire and vias side by side, and no wirelength or via ratio is
+formed (the receipt's `wirelength_ratio` is null).
 
 | Ibex final layout | RustROAD, native recipe | OpenROAD 26Q3, LibreLane Classic |
 | --- | --- | --- |

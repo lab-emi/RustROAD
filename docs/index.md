@@ -25,8 +25,8 @@ In the RustEDA Ibex host campaign (IHP SG13G2 / EZ130 with two real SRAMs, on a
 implemented the same prepared design. **Both final layouts pass foundry main
 and antenna DRC with 0 violations and full-device LVS.** The native layout has
 233,909.2 µm² standard-cell area, 1,679,076.6 µm routed signal wire and
-301,099 vias, against 197,913.7 µm², 969,571.6 µm and 122,194 for OpenROAD:
-**about 73 % more wire and about 2.5× the vias, on different netlists.** Its
+301,099 vias, against 197,913.7 µm², 969,571.6 µm and 122,194 for OpenROAD,
+on different netlists. Its
 routing step took 389.63 s for global and detailed routing, followed by
 588.35 s of post-route and antenna repair; OpenROAD's detailed routing alone
 took 1,796.83 s. Each flow is a single timed sample and the netlists differ,
