@@ -914,13 +914,37 @@ fn old_route_limits_default_the_independent_active_topology_bound() {
 #[test]
 fn receipts_gate_trusted_reads_of_routed_revisions() {
     use rustroad_workspace::{
-        RECEIPT_FILE, ReadOptions, Validation, read_with, set_force_validate, verify_workspace,
+        ReadOptions, Validation, read_with, receipt_path, set_force_validate, verify_workspace,
     };
     let f = Fixture::new();
     let ws = f.flow("rc", "track.json").unwrap();
     let dir = head_dir(&ws);
-    let receipt = dir.join(RECEIPT_FILE);
+    let receipt = receipt_path(&ws, dir.file_name().unwrap().to_str().unwrap());
     assert!(receipt.is_file(), "commit writes the receipt");
+    // The receipt lives outside the revision: its directory keeps exactly
+    // the revision format's files, each an independent inode.
+    let mut names: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "design.json",
+            "instances.rbin",
+            "net_offsets.rbin",
+            "net_pins.rbin",
+            "physical.rbin",
+            "pins.rbin",
+            "routes.rbin"
+        ]
+    );
+    #[cfg(unix)]
+    for name in &names {
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(fs::metadata(dir.join(name)).unwrap().nlink(), 1, "{name}");
+    }
     let trusted = read(&ws, &limits()).unwrap();
     assert_eq!(trusted.validation(), &Validation::Receipt);
     let full_summary = serde_json::to_value(trusted.summary()).unwrap();

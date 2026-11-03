@@ -204,7 +204,7 @@ enum Command {
     /// Fully validate the HEAD revision, ignoring its validation receipt;
     /// with --write-receipt, stamp it so later reads skip re-validation.
     VerifyWorkspace {
-        /// Write (or refresh) `revisions/<HEAD>/validated.json` after the check.
+        /// Write (or refresh) `receipts/<HEAD>.json` after the check.
         #[arg(long)]
         write_receipt: bool,
     },

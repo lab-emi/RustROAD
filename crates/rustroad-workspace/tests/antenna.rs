@@ -1604,6 +1604,7 @@ fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
     let f = routed_with_technology(PLAIN, &tech);
     let legacy = copy_workspace(&f, "legacy-workspace");
     let full_rows = copy_workspace(&f, "full-rows-workspace");
+    let orphaned = copy_workspace(&f, "orphan-workspace");
     let inventory = antenna_inventory(&legacy, &InventoryBounds::default(), &limits()).unwrap();
     let base = inventory.workspace_revision.clone();
     let names: Vec<_> = inventory
@@ -1719,22 +1720,39 @@ fn grouped_repair_preserves_single_attempt_reports_and_real_revision_bytes() {
             "revision side-table bytes"
         );
     }
-    // The committed revision shares the parent's unchanged side tables.
+    // The committed revision's unchanged side tables are independent files
+    // (never hard links to the parent's): no inode is shared.
     #[cfg(unix)]
-    {
+    for entry in fs::read_dir(f.workspace.join("revisions").join(&repaired.revision)).unwrap() {
         use std::os::unix::fs::MetadataExt;
-        let inode = |revision: &str| {
-            fs::metadata(
-                f.workspace
-                    .join("revisions")
-                    .join(revision)
-                    .join("instances.rbin"),
-            )
-            .unwrap()
-            .ino()
-        };
-        assert_eq!(inode(&repaired.revision), inode(&base));
+        let entry = entry.unwrap();
+        assert_eq!(entry.metadata().unwrap().nlink(), 1, "{:?}", entry.path());
     }
+    // An orphan directory of an interrupted commit in the slot the logical
+    // revision would take is skipped exactly as a per-attempt commit skips
+    // it: the session names the next free slot and still publishes.
+    let number: u64 = base.strip_prefix("rev").unwrap().parse().unwrap();
+    fs::create_dir(
+        orphaned
+            .join("revisions")
+            .join(format!("rev{}", number + 1)),
+    )
+    .unwrap();
+    let mut orphan_plan = GroupRepairPlan::new(f.root.join("group-repair-orphan"));
+    orphan_plan.max_rounds = 1;
+    let skipped = repair_antenna_groups(&orphaned, &base, &orphan_plan, &limits()).unwrap();
+    let next = format!("rev{}", number + 2);
+    assert_eq!(skipped.final_revision, next);
+    assert_eq!(skipped.committed_revision.as_ref(), Some(&next));
+    assert_eq!(
+        fs::read_to_string(orphaned.join("HEAD")).unwrap(),
+        format!("{next}\n")
+    );
+    assert_eq!(
+        read(orphan_plan.output.join("repair-0.json"))["revision"],
+        next.as_str()
+    );
+    assert_eq!(skipped.total_jumpers, grouped.total_jumpers);
     let final_inventory =
         antenna_inventory(&legacy, &InventoryBounds::default(), &limits()).unwrap();
     let mut inventory_bytes = Vec::new();

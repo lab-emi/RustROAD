@@ -21,9 +21,6 @@ const FILES: [(&str, u64); 5] = [
     ("net_pins.rbin", 100_000 * 4),
     ("pins.rbin", 100_000 * 16),
 ];
-/// Optional commit-time validation receipt; the diagnostic ignores its
-/// verdict (the source is always fully validated) but inventories it.
-const RECEIPT_CAP: u64 = 64 * 1024;
 
 fn invalid(code: &str) -> Error {
     Error::Invalid(format!("P1_DIAGNOSTIC: {code}"))
@@ -218,7 +215,7 @@ fn inventory(revision: &Path) -> Result<BTreeMap<String, u64>> {
     let mut inodes = HashSet::new();
     for entry in fs::read_dir(revision)? {
         let entry = entry?;
-        if result.len() > FILES.len() {
+        if result.len() >= 5 {
             return Err(budget("revision file count"));
         }
         let name = entry
@@ -228,7 +225,6 @@ fn inventory(revision: &Path) -> Result<BTreeMap<String, u64>> {
         let cap = FILES
             .iter()
             .find_map(|(n, cap)| (*n == name).then_some(*cap))
-            .or_else(|| (name == crate::RECEIPT_FILE).then_some(RECEIPT_CAP))
             .ok_or_else(|| invalid("unknown revision file"))?;
         let m = regular(&entry.path(), cap, true)?;
         #[cfg(unix)]
@@ -241,7 +237,7 @@ fn inventory(revision: &Path) -> Result<BTreeMap<String, u64>> {
             .ok_or_else(|| budget("revision aggregate bytes"))?;
         result.insert(name, m.len());
     }
-    if FILES.iter().any(|(name, _)| !result.contains_key(*name)) {
+    if result.len() != 5 {
         return Err(invalid("incomplete revision inventory"));
     }
     Ok(result)
@@ -623,7 +619,8 @@ pub(super) fn open(
         memory_bytes: 768 << 20,
         inventory_bytes: 1 << 20,
     };
-    // Always the full validation, whatever receipt the revision carries.
+    // Always the full validation, whatever receipt the workspace holds for
+    // the source revision (receipts live outside the revision directory).
     let snapshot = crate::load_with(
         source,
         lock,
@@ -739,10 +736,11 @@ pub(super) fn recheck(proof: &SourceProof, io: &mut ByteLedger) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// A sealed source revision may carry the commit-time validation receipt
-    /// beside its five tables; nothing else is admitted.
+    /// A sealed source revision holds exactly its five tables: validation
+    /// receipts live outside revision directories, and nothing else (a
+    /// receipt-named file included) is admitted.
     #[test]
-    fn revision_inventory_admits_only_the_tables_and_an_optional_receipt() {
+    fn revision_inventory_admits_exactly_the_five_tables() {
         let dir =
             std::env::temp_dir().join(format!("rustroad-p1-inventory-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -758,11 +756,7 @@ mod tests {
             seal(name);
         }
         assert_eq!(inventory(&dir).unwrap().len(), 5);
-        seal(crate::RECEIPT_FILE);
-        let listed = inventory(&dir).unwrap();
-        assert_eq!(listed.len(), 6);
-        assert!(listed.contains_key(crate::RECEIPT_FILE));
-        seal("other.json");
+        seal("validated.json");
         assert!(inventory(&dir).is_err());
         let unseal = |name: &str| {
             let path = dir.join(name);
@@ -772,7 +766,8 @@ mod tests {
             fs::set_permissions(&path, permissions).unwrap();
             fs::remove_file(path).unwrap();
         };
-        unseal("other.json");
+        unseal("validated.json");
+        assert_eq!(inventory(&dir).unwrap().len(), 5);
         unseal("pins.rbin");
         assert!(inventory(&dir).is_err(), "a required table is missing");
         fs::remove_dir_all(&dir).unwrap();

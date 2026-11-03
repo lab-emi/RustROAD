@@ -2926,7 +2926,7 @@ fn repair_prepared<'a>(
     };
     let mut revision = current.clone();
     if !jumpers.is_empty() && (!in_session || paranoid) {
-        let token = crate::routing::validate_with_token(
+        core_routing::validate_with_work_limit(
             &prep.input,
             routes,
             &route_limits,
@@ -2934,7 +2934,7 @@ fn repair_prepared<'a>(
         )?;
         if !in_session {
             metadata.parent_revision = current.clone();
-            revision = crate::commit_validated(path, metadata, placed, &token)?.revision;
+            revision = crate::commit_in_place(path, metadata, placed)?.revision;
         }
     }
     Ok(RepairReport {

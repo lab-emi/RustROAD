@@ -5,9 +5,13 @@ exclusively locked, decoded workspace. It reuses static placement, PDN, LEF and
 routing configuration and refreshes the source fingerprint whenever routes change.
 Repairs edit the routes in memory. Each repair that inserts jumpers creates the
 next logical revision, under the name a per-attempt commit would have published
-(`rev5`, `rev6`, ...); every report carries these names and the physical-source
-fingerprint of its state. Only the last logical revision is materialized: the
-final routes get one full routing validation and one commit, with the session's
+(`rev5`, `rev6`, ...: the first slot after its parent with no directory, so an
+orphan directory left by an interrupted commit is skipped exactly as a
+per-attempt commit skips it); every report carries these names and the
+physical-source fingerprint of its state. Only the last logical revision is
+materialized: the final routes get the repair's own routing validation (its
+explicit-geometry input under the antenna work bound) and one commit, which
+runs the full read-time validation before it publishes, with the session's
 base revision as parent. Before each repair, it rechecks the exact eligible
 selection and binds it to that check (in memory, rows and identities compared).
 
@@ -68,8 +72,11 @@ Foundry antenna, DRC, LVS and timing signoff remain separate checks.
 Failure commits nothing; partial reports remain and a successful summary is
 required to accept the run. There is no background process or stdin protocol.
 The exclusive workspace lock covers decisions, the revision publication and the
-final evidence flush. A commit hard-links side tables (instances, pins, net
-offsets, net pins, prepared geometry) that are byte-identical to the parent's.
+final evidence flush. A commit writes every side table as its own file (no hard
+links to the parent's identical tables) and its validation receipt to
+`receipts/<rev>.json`, outside the revision directory. An orphan revision
+directory needs no manual cleanup before a rerun: it is skipped, and its slot
+is never reused.
 
 Session state persists across attempts without changing any decision. The jumper
 planner's spatial index is built once; after every attempt it is rebased (cut
@@ -99,11 +106,23 @@ inventory and model reports compare equal as described (every `planner_work`
 included); the committed `rev52` `routes.rbin` has SHA-256
 `695e2205a7e0cbfd2bcf5a14cb6d58cf1273671ce0437d344a11da9bbbdfa040` and
 `export-gds` of it reproduces the reference GDS. The command took 8.9-9.9 s wall
-and 11.2-13.2 s user CPU at 0.81-0.88 GB peak RSS and wrote 126 MB, against
+and 11.2-13.2 s user CPU at 0.81-0.88 GB peak RSS and wrote 126 MB (measured
+before the commit regained its read-time routing validation and stopped
+hard-linking side tables; see the re-measurement below), against
 360 s, 345 s user and 5.79 GB written for the per-attempt-commit runner (the
 lower user times are with a receipt-stamped base revision, whose read skips the
 full validation). Through the antenna_session wrapper the step took 11.7 s (from
 388 s) and its independent verifier 1.9 s (from 21.4 s). Reports are 31 MB
-instead of 780 MB, and the workspace grows by one revision (93 MB, the side
-tables hard-linked) instead of 48 (4.7 GB). The paranoid run gave identical
-reports and summary.
+instead of 780 MB, and the workspace grows by one revision instead of 48
+(4.7 GB). The paranoid run gave identical reports and summary.
+
+Re-measurement after the commit regained its read-time routing validation,
+writes independent side tables and keeps its receipt outside the revision
+(same host, interleaved with the previous build, unstamped base, load 4.5-6.3):
+11.8-12.7 s wall and 13.8-14.0 s user CPU at 0.79-0.84 GB peak RSS, 136 MB
+written, against 11.1-11.8 s, 12.6-13.1 s user and 126 MB for the previous
+build. All reports, the summary attempts, the committed `rev52` side tables and
+`routes.rbin` still match the producer run as described above. With an orphan
+`rev52` directory left in place, the rerun names its last logical revision
+`rev53` (exactly what the per-attempt runner would have published), commits it
+with the same routes and exits successfully.

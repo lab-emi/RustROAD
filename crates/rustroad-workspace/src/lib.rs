@@ -30,8 +30,8 @@ mod segmented_supply;
 mod storage;
 pub mod ties;
 pub use receipt::{
-    RECEIPT_FILE, Receipt, VALIDATION_EPOCH, Validation, build_identity, force_validate,
-    set_force_validate,
+    RECEIPT_DIR, Receipt, VALIDATION_EPOCH, Validation, build_identity, force_validate,
+    receipt_path, set_force_validate,
 };
 use rustroad_core::connectivity::{ConnectedDesign, PinOwner};
 
@@ -588,7 +588,7 @@ pub fn verify_workspace(path: &Path, limits: &Limits, write_receipt: bool) -> Re
     let current = head(path)?;
     let directory = path.join("revisions").join(&current);
     // Whether the receipt on disk (if any) still binds the current bytes.
-    let previous = receipt::read(&directory, &current).and_then(|existing| {
+    let previous = receipt::read(path, &current).and_then(|existing| {
         let maps = receipt::Premapped::open(&directory, &existing).ok_or("receipt_stale")?;
         let design = read_bounded(&directory.join("design.json"), MAX_METADATA_BYTES)
             .map_err(|_| "receipt_stale")?;
@@ -619,7 +619,7 @@ pub fn verify_workspace(path: &Path, limits: &Limits, write_receipt: bool) -> Re
     } else if previous_receipt == "current" {
         "current"
     } else {
-        receipt::replace(&directory, &fresh)?;
+        receipt::write(path, &fresh)?;
         "written"
     };
     drop(snapshot);
@@ -821,7 +821,7 @@ fn load_with(
     let mut candidate = None;
     let mut validation = Validation::Full("forced");
     if !(options.force || receipt::force_validate()) {
-        match receipt::read(&revision_dir, &current) {
+        match receipt::read(path, &current) {
             Ok(r) => match receipt::Premapped::open(&revision_dir, &r) {
                 Some(maps) => {
                     premapped = maps;
@@ -1166,53 +1166,47 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
 }
 
 fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> Result<Summary> {
-    commit_with(path, metadata, records, None, None)
+    commit_with(path, metadata, records, None)
 }
 
-/// Commit routes a full routing validation already passed in this process
-/// (`token`), skipping the identical second validation of the routes.
-pub(crate) fn commit_validated(
+/// `commit_in_place` under exactly `rev{number}` (a session's last logical
+/// revision, chosen by `next_free_revision`); refused when that revision
+/// already exists.
+pub(crate) fn commit_as(
     path: &Path,
     metadata: &mut Metadata,
     records: &[Placed],
-    token: &routing::ValidatedRoutes,
-) -> Result<Summary> {
-    commit_with(path, metadata, records, Some(token), None)
-}
-
-/// `commit_validated` under exactly `rev{number}` (a session's last logical
-/// revision); refused when that revision already exists.
-pub(crate) fn commit_validated_as(
-    path: &Path,
-    metadata: &mut Metadata,
-    records: &[Placed],
-    token: &routing::ValidatedRoutes,
     number: u64,
 ) -> Result<Summary> {
-    commit_with(path, metadata, records, Some(token), Some(number))
+    commit_with(path, metadata, records, Some(number))
 }
 
-/// A side table of the new revision: a hard link to the parent revision's
-/// file when the bytes are identical (immutable revisions share it), else a
-/// new synced file.
-fn write_table(directory: &Path, parent: Option<&Path>, name: &str, bytes: &[u8]) -> Result<()> {
-    if let Some(parent) = parent {
-        let source = parent.join(name);
-        let same = fs::symlink_metadata(&source)
-            .is_ok_and(|m| m.file_type().is_file() && m.len() == bytes.len() as u64)
-            && fs::read(&source).is_ok_and(|old| old == bytes);
-        if same && fs::hard_link(&source, directory.join(name)).is_ok() {
-            return Ok(());
+/// The revision number a commit whose parent is `rev{parent}` would take
+/// now: the first of `MAX_ORPHAN_SLOTS` slots after the parent with no
+/// directory entry (orphans of interrupted commits are skipped, never
+/// reused). A session that names its logical revisions with this, under the
+/// exclusive lock, names them exactly as per-attempt commits would.
+pub(crate) fn next_free_revision(path: &Path, parent: u64) -> Result<u64> {
+    let revisions = path.join("revisions");
+    for offset in 1..=MAX_ORPHAN_SLOTS {
+        let number = parent
+            .checked_add(offset)
+            .ok_or_else(|| Error::Budget("revision number exhausted".into()))?;
+        match fs::symlink_metadata(revisions.join(format!("rev{number}"))) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(number),
+            Err(error) => return Err(error.into()),
+            Ok(_) => {}
         }
     }
-    write_new(&directory.join(name), bytes)
+    Err(Error::Budget(
+        "too many orphan revisions; inspect workspace before recovery".into(),
+    ))
 }
 
 fn commit_with(
     path: &Path,
     metadata: &mut Metadata,
     records: &[Placed],
-    token: Option<&routing::ValidatedRoutes>,
     number: Option<u64>,
 ) -> Result<Summary> {
     metadata.format_version = storage::logical_version(metadata)?;
@@ -1242,17 +1236,13 @@ fn commit_with(
     // failing revision is published exactly as before and fails on read).
     let (routing, placed) = rayon::join(
         || match &metadata.physical {
-            Some(p) => crate::routing::validate_state_with(&metadata.design, p, records, token),
+            Some(p) => crate::routing::validate_state(&metadata.design, p, records),
             None => Ok(()),
         },
         || placed_checks(metadata, records),
     );
     routing?;
     fs::create_dir_all(path.join("revisions"))?;
-    let parent = revision_number(&metadata.parent_revision)
-        .ok()
-        .map(|_| path.join("revisions").join(&metadata.parent_revision))
-        .filter(|p| p.is_dir());
     let first = match number {
         Some(n) => n,
         None => revision_number(&metadata.parent_revision)?
@@ -1318,7 +1308,6 @@ fn commit_with(
         r.routes = routes;
     }
     write_new(&directory.join("design.json"), &bytes)?;
-    let parent = parent.as_deref();
     let mut table = Vec::new();
     table
         .try_reserve_exact(records.len().saturating_mul(40))
@@ -1330,7 +1319,10 @@ fn commit_with(
         table.extend_from_slice(&record.width.to_le_bytes());
         table.extend_from_slice(&record.height.to_le_bytes());
     }
-    write_table(&directory, parent, "instances.rbin", &table)?;
+    // Every table is an independent synced file (never a hard link to the
+    // parent's identical table): an in-place edit of one revision can never
+    // reach another, and snapshot tools that pin `st_nlink == 1` admit it.
+    write_new(&directory.join("instances.rbin"), &table)?;
     drop(table);
     if let Some(physical) = &metadata.physical {
         pdk::validate_bundle(
@@ -1338,7 +1330,7 @@ fn commit_with(
             &metadata.design,
             &pdk::connection_limits(&metadata.design)?,
         )?;
-        write_connection_tables(&directory, parent, &metadata.design, &physical.connectivity)?;
+        write_connection_tables(&directory, &metadata.design, &physical.connectivity)?;
         if let Some(routing) = &physical.routing
             && routing.table.is_none()
         {
@@ -1348,23 +1340,22 @@ fn commit_with(
             )?;
         }
         if let Some(state) = &physical.state {
-            write_table(
-                &directory,
-                parent,
-                "physical.rbin",
+            write_new(
+                &directory.join("physical.rbin"),
                 &crate::physical::table_bytes(state)?,
             )?;
         }
     }
     // The receipt is a cache: failing to write it only costs a later read
-    // its full validation, so it never fails the commit (a partial file is
-    // removed; an unreadable one is ignored by readers).
-    if placed.is_ok()
+    // its full validation, so it never fails the commit. Without a fresh
+    // receipt, any receipt left under this revision name by a removed
+    // orphan is dropped (it would not match these bytes anyway).
+    let stamped = placed.is_ok()
         && receipt::build(&directory, metadata)
-            .and_then(|r| receipt::write_new(&directory, &r))
-            .is_err()
-    {
-        let _ = fs::remove_file(directory.join(RECEIPT_FILE));
+            .and_then(|r| receipt::write(path, &r))
+            .is_ok();
+    if !stamped {
+        receipt::remove(path, &metadata.revision);
     }
     sync_directory(&directory)?;
     sync_directory(&path.join("revisions"))?;
@@ -1391,7 +1382,6 @@ fn owner_record(pin: &rustroad_core::connectivity::Connection) -> [u32; 4] {
 }
 fn write_connection_tables(
     directory: &Path,
-    parent: Option<&Path>,
     design: &Design,
     model: &ConnectedDesign,
 ) -> Result<()> {
@@ -1402,17 +1392,17 @@ fn write_connection_tables(
             bytes.extend_from_slice(&field.to_le_bytes());
         }
     }
-    write_table(directory, parent, "pins.rbin", &bytes)?;
+    write_new(&directory.join("pins.rbin"), &bytes)?;
     bytes.clear();
     for offset in &csr.offsets {
         bytes.extend_from_slice(&offset.to_le_bytes());
     }
-    write_table(directory, parent, "net_offsets.rbin", &bytes)?;
+    write_new(&directory.join("net_offsets.rbin"), &bytes)?;
     bytes.clear();
     for pin in &csr.pin_indices {
         bytes.extend_from_slice(&pin.to_le_bytes());
     }
-    write_table(directory, parent, "net_pins.rbin", &bytes)
+    write_new(&directory.join("net_pins.rbin"), &bytes)
 }
 fn map_table(path: &Path, bytes: usize) -> Result<Option<Mmap>> {
     if !fs::metadata(path)?.is_file() {
@@ -1687,7 +1677,12 @@ mod tests {
         init(&dir, "rev0", fixture(), &limits).unwrap();
         place(&dir, "rev1", &limits).unwrap();
         let revision = dir.join("revisions/rev2");
-        assert!(revision.join(RECEIPT_FILE).is_file());
+        assert!(receipt_path(&dir, "rev2").is_file());
+        assert_eq!(
+            fs::read_dir(&revision).unwrap().count(),
+            2,
+            "receipt kept outside"
+        );
         assert_eq!(
             load_with(
                 &dir,

@@ -271,9 +271,10 @@ struct Session {
     source: String,
     digest: SourceDigest,
     index: NetIndex,
-    /// The materialized base revision and its number.
+    /// The materialized base revision.
     base_revision: String,
-    base_number: u64,
+    /// Number of the current (logical) revision.
+    number: u64,
     /// Logical revisions created so far.
     logical: u64,
     paranoid: bool,
@@ -282,7 +283,7 @@ impl Session {
     fn open(path: &Path, base_rev: &str, limits: &Limits) -> Result<(Self, Prepared)> {
         let lock = crate::lock(path, false, true)?;
         crate::check_base(base_rev, &crate::head(path)?)?;
-        let base_number = crate::revision_number(base_rev)?;
+        let number = crate::revision_number(base_rev)?;
         let snapshot = crate::load_capped(
             path,
             lock,
@@ -349,7 +350,7 @@ impl Session {
                 digest,
                 index,
                 base_revision: base_rev.to_owned(),
-                base_number,
+                number,
                 logical: 0,
                 paranoid,
             },
@@ -421,21 +422,24 @@ impl Session {
             }),
         )?;
         if !result.jumpers.is_empty() {
-            // The revision a per-attempt commit would have published.
+            // The revision a per-attempt commit would have published: the
+            // next slot after its parent, skipping orphan directories of
+            // interrupted commits exactly as `commit_in_place` does (the
+            // session holds the exclusive lock, so the slots cannot change).
             self.logical += 1;
-            let number = self
-                .base_number
-                .checked_add(self.logical)
-                .ok_or_else(|| Error::Budget("revision number exhausted".into()))?;
+            self.number = crate::next_free_revision(&self.path, self.number)?;
             self.metadata.parent_revision = base;
-            self.metadata.revision = format!("rev{number}");
+            self.metadata.revision = format!("rev{}", self.number);
             result.revision.clone_from(&self.metadata.revision);
             self.source = self.digest.fingerprint(self.routes()?)?;
         }
         Ok(result)
     }
-    /// Validate the final routes once and commit them as the last logical
-    /// revision, whose parent is the materialized base.
+    /// Check the final routes once (the repair's own validation, on its
+    /// explicit-geometry input under the antenna work cap) and commit them as
+    /// the last logical revision, whose parent is the materialized base. The
+    /// commit then runs every check a full read runs, so the receipt it
+    /// writes certifies exactly what a later read would verify.
     fn commit(&mut self, prep: &Prepared) -> Result<Option<String>> {
         if self.logical == 0 {
             return Ok(None);
@@ -449,7 +453,7 @@ impl Session {
             .ok_or_else(|| super::fail("NO_ROUTING", "missing routing state"))?
             .config
             .limits;
-        let token = crate::routing::validate_with_token(
+        rustroad_core::routing::validate_with_work_limit(
             &prep.input,
             routes,
             limits,
@@ -459,14 +463,7 @@ impl Session {
         self.metadata
             .parent_revision
             .clone_from(&self.base_revision);
-        let number = self.base_number + self.logical;
-        let summary = crate::commit_validated_as(
-            &self.path,
-            &mut self.metadata,
-            &self.placed,
-            &token,
-            number,
-        )?;
+        let summary = crate::commit_as(&self.path, &mut self.metadata, &self.placed, self.number)?;
         if summary.revision != logical {
             return Err(super::fail(
                 "ANTENNA_GROUP_REPAIR",

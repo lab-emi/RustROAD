@@ -1,14 +1,21 @@
-//! Commit-time validation receipts (`revisions/<rev>/validated.json`).
+//! Commit-time validation receipts (`receipts/<rev>.json`).
 //!
 //! `commit_in_place` runs every check a full read would run (routing geometry,
 //! connectivity and rules, the bundle link, connection-table lowering, the
-//! placement and the prepared physical layout) and then records, next to the
-//! revision files it has just written, a receipt binding
+//! placement and the prepared physical layout) and then records a receipt
+//! binding
 //!
 //! * the validator identity: [`VALIDATION_EPOCH`] and the build identity
-//!   (package version plus a digest of the validator sources, see `build.rs`),
-//! * the exact bytes of every revision file (length and XXH3-128), and
+//!   (package version, a digest of the validator sources and the compiler
+//!   and profile, see `build.rs`),
+//! * the revision name and the exact bytes of every revision file (length
+//!   and XXH3-128), and
 //! * a digest of the technology, physical and routing configuration.
+//!
+//! The receipt lives beside the revisions, never inside one: a revision
+//! directory keeps exactly the files the revision format defines, so tools
+//! that pin that inventory (snapshot protocols, the P1 diagnostic) see the
+//! same seven files as before receipts existed.
 //!
 //! A read whose receipt matches all of these can skip the semantic
 //! re-derivations: the bytes are the ones that passed full validation under
@@ -18,19 +25,24 @@
 //! `--verify-workspace`) always validates fully.
 //!
 //! A receipt is an integrity cache, not an authenticity proof: whoever can
-//! write a revision directory can also write a receipt (exactly as they can
-//! replace the revision wholesale). `rustroad verify-workspace` re-validates.
+//! write a workspace can also write a receipt (exactly as they can replace
+//! the revision wholesale). `rustroad verify-workspace` re-validates.
 use crate::{Error, Metadata, Result};
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Receipt file name inside a revision directory.
-pub const RECEIPT_FILE: &str = "validated.json";
+/// Workspace directory holding one receipt per validated revision.
+pub const RECEIPT_DIR: &str = "receipts";
+
+/// Path of the receipt of `revision` in the workspace at `workspace`.
+pub fn receipt_path(workspace: &Path, revision: &str) -> PathBuf {
+    workspace.join(RECEIPT_DIR).join(format!("{revision}.json"))
+}
 const SCHEMA: &str = "rustroad.validation-receipt.v1";
 /// Bump whenever the semantics of a read-time validator change in a way the
 /// build identity would not capture (it already changes with every validator
@@ -145,8 +157,8 @@ pub(crate) fn config_digest(metadata: &Metadata) -> Result<String> {
     Ok(digest(&serde_json::to_vec(&view)?))
 }
 
-/// Names of the revision files a receipt must cover (every regular file but
-/// the receipt itself), sorted.
+/// Names of the revision files a receipt must cover (every directory entry),
+/// sorted.
 pub(crate) fn revision_files(directory: &Path) -> Result<Vec<String>> {
     let mut names = Vec::new();
     for entry in fs::read_dir(directory)? {
@@ -155,9 +167,6 @@ pub(crate) fn revision_files(directory: &Path) -> Result<Vec<String>> {
             .file_name()
             .into_string()
             .map_err(|_| Error::Invalid("non-UTF8 revision file name".into()))?;
-        if name == RECEIPT_FILE || name.starts_with(".validated.") {
-            continue;
-        }
         if names.len() >= MAX_REVISION_FILES {
             return Err(Error::Budget("revision file count".into()));
         }
@@ -213,17 +222,13 @@ pub(crate) fn build(directory: &Path, metadata: &Metadata) -> Result<Receipt> {
     })
 }
 
-/// Publish a receipt for a revision that is not visible yet (commit).
-pub(crate) fn write_new(directory: &Path, receipt: &Receipt) -> Result<()> {
-    crate::write_new(
-        &directory.join(RECEIPT_FILE),
-        &serde_json::to_vec_pretty(receipt)?,
-    )
-}
-
-/// Atomically (re)place the receipt of a published revision (stamping).
-pub(crate) fn replace(directory: &Path, receipt: &Receipt) -> Result<()> {
-    let temporary = directory.join(format!(".validated.{}.tmp", std::process::id()));
+/// Atomically (re)place the receipt of `receipt.revision`: a synced
+/// temporary file renamed over any previous receipt, then a synced directory.
+/// Commit writes it before HEAD moves; stamping holds the exclusive lock.
+pub(crate) fn write(workspace: &Path, receipt: &Receipt) -> Result<()> {
+    let directory = workspace.join(RECEIPT_DIR);
+    fs::create_dir_all(&directory)?;
+    let temporary = directory.join(format!(".{}.{}.tmp", receipt.revision, std::process::id()));
     let _ = fs::remove_file(&temporary);
     let mut file = OpenOptions::new()
         .write(true)
@@ -234,8 +239,8 @@ pub(crate) fn replace(directory: &Path, receipt: &Receipt) -> Result<()> {
         .and_then(|()| file.sync_all());
     drop(file);
     if let Err(error) = written.map_err(Error::from).and_then(|()| {
-        fs::rename(&temporary, directory.join(RECEIPT_FILE))?;
-        crate::sync_directory(directory)
+        fs::rename(&temporary, receipt_path(workspace, &receipt.revision))?;
+        crate::sync_directory(&directory)
     }) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
@@ -243,10 +248,16 @@ pub(crate) fn replace(directory: &Path, receipt: &Receipt) -> Result<()> {
     Ok(())
 }
 
+/// Best-effort removal of a receipt that must not be trusted any more (a
+/// stale one left by an earlier revision of the same name).
+pub(crate) fn remove(workspace: &Path, revision: &str) {
+    let _ = fs::remove_file(receipt_path(workspace, revision));
+}
+
 /// The receipt of `revision` if it is well-formed and from this validator;
 /// otherwise the reason it cannot be used.
-pub(crate) fn read(directory: &Path, revision: &str) -> std::result::Result<Receipt, &'static str> {
-    let path = directory.join(RECEIPT_FILE);
+pub(crate) fn read(workspace: &Path, revision: &str) -> std::result::Result<Receipt, &'static str> {
+    let path = receipt_path(workspace, revision);
     let bytes = match crate::read_bounded(&path, MAX_RECEIPT_BYTES) {
         Ok(bytes) => bytes,
         Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
