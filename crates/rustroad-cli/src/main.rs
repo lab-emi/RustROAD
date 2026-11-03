@@ -253,15 +253,22 @@ enum Command {
         /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 48 MiB of scratch).
         #[arg(long, default_value_t = 4096)]
         max_extract_candidates: usize,
-        /// Opt-in candidate-query workers, bounded by --threads and extraction memory.
+        /// Accepted for compatibility (1..=16); no effect. Strips are
+        /// computed on the global --threads pool.
         #[arg(long, default_value_t = 1)]
         extract_query_workers: usize,
-        /// Candidate queries held per tile (1..=64); interval arithmetic stays serial.
+        /// Accepted for compatibility (1..=64); no effect.
         #[arg(long, default_value_t = 8)]
         extract_query_batch_runs: usize,
-        /// Additional query scratch cap within --extract-memory-mib (1..=64 MiB).
+        /// Accepted for compatibility (1..=64 MiB); no effect. Parallel strip
+        /// scratch is admitted against --extract-memory-mib.
         #[arg(long, default_value_t = 32)]
         extract_query_scratch_mib: u64,
+        /// Test knob: strip units per parallel chunk (0 = default of 64); a
+        /// non-zero value also forces chunks on one thread. Output is
+        /// identical for every value.
+        #[arg(long, default_value_t = 0, hide = true)]
+        extract_tile_units: usize,
         /// Couplings below this value (fF) become ground capacitance at both
         /// nodes; 0 keeps every coupling capacitor.
         #[arg(long, default_value_t = 0.0)]
@@ -1059,6 +1066,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             extract_query_workers,
             extract_query_batch_runs,
             extract_query_scratch_mib,
+            extract_tile_units,
             min_coupling_ff,
         } => {
             if !(max_segment_um.is_finite() && (0.1..=10_000.0).contains(&max_segment_um)) {
@@ -1079,6 +1087,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 query_workers: extract_query_workers,
                 query_batch_runs: extract_query_batch_runs,
                 query_scratch_mib: extract_query_scratch_mib,
+                tile_units: extract_tile_units,
                 min_coupling_pf: min_coupling_ff / 1000.0,
             };
             emit(&rustroad_workspace::extract::extract_with_segment_um(

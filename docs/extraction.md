@@ -58,7 +58,8 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   were a fixed cap; they are a budget now. Per run the extractor holds the
   candidate list, interval events, ordered active set and plane list, with
   vector growth and hash/tree occupancy included: 256 B per candidate
-  (`CANDIDATE_SCRATCH_BYTES`), one run at a time. The ceiling is 48 MiB of
+  (`CANDIDATE_SCRATCH_BYTES`) for the serial path; parallel lanes are admitted
+  separately (see "Strips and parallel computation"). The ceiling is 48 MiB of
   that scratch, 196,608 candidates (`MAX_CANDIDATES_CEILING`). An interval sweep
   skips disjoint candidates while keeping shape-ID accumulation order. Index
   work and active-candidate comparisons debit `--max-extract-work`. The report states `max_candidates_per_run`,
@@ -81,10 +82,11 @@ allowances against `--extract-memory-mib`. Runtime peak RSS is checked during
 extraction. Larger object limits still fail when their combined estimate exceeds
 the memory allowance. `stats.memory` reports the estimate and cap. The CLI reads
 the workspace once, converting the segment length under the same snapshot lock.
-Owned-conductor bins use a shared insertion-ordered entry array and fixed
-headers. The estimate accounts for entry-vector reallocation and bounds header
-count by each routing layer's actual conductor extent. Virtual cell geometry
-keeps its separate index. Candidate order and per-bin work counts are preserved.
+The spatial-index allowance (24 bytes per `--max-extract-bin-entries` entry) is
+shared by structures that are never alive together: the same-net conductor lists
+during metal construction, then the retained-shape grid. Each is admitted against
+that allowance plus the headroom below `--extract-memory-mib` when it is built,
+with its exact size. Virtual cell geometry keeps its separate index.
 
 SPEF formatting retains the numeric RC network once and generates labeled nets one
 at a time. A compact coupling incidence table preserves record order; the name
@@ -98,26 +100,76 @@ Candidate queries use the lateral calibration window on the wire's own layer
 and its exact footprint on every other modelled layer. All accepted shape IDs
 and interval boundaries are retained, including shapes with no direct final
 capacitance contribution; removing such boundaries can change f64 rounding.
-Candidates are still processed in shape-ID order. The query change adds no
-per-run storage or worker concurrency: the run16 replay estimate is 3.46 GiB,
-including 16 MiB scratch (65,536 candidates at 256 bytes), one corner and one
-extraction worker. Builds and tests use two workers under a 4 GiB OS cap.
+Candidates are still processed in shape-ID order. The run16 replay estimate is
+3.46 GiB, including 16 MiB serial scratch (65,536 candidates at 256 bytes) and
+one corner. Builds and tests use two workers under a 4 GiB OS cap.
 
-After metal construction and crossing discovery, an immutable BVH indexes only
-the retained shape IDs. The mutable conductor bins are released first; virtual
-cell geometry stays separate. Admission takes the maximum of the old bin and
-new BVH allowances, including a bounded construction/query stack. For four
-million retained shapes and 15 layers the BVH allowance is about 112 MiB,
-below the existing 192 MiB bin-entry allowance. Build/query probes consume the
-original work budget; candidate and electrical accumulation order stay fixed.
+Metal construction (end extensions, via pads and patches minus same-net metal)
+looks up same-net conductors in per-`(net, layer)` lists of retained shape IDs and
+virtual signal-pin IDs; pieces are appended as they are added. The covering set is
+the same closed-overlap set in shape-ID order as before, so the pieces and their
+order are unchanged. Cell geometry is indexed once, at the admitted query bin: twice
+the smallest per-layer calibration window when it fits (the selection rule and the
+reported `stats.memory.instance_query_bin_dbu` are unchanged), otherwise the coarse
+bin. The extraction instance index caches every instance's world bounds and a
+per-instance layer mask (bounds plus mask: 48 bytes per instance, included in the
+geometry estimate); the router's index keeps its original per-visit bounds, so
+router work counts are unchanged. An instance without metal on the queried layer
+visits no template shape either way, so the mask changes no extraction work count.
 
-The final virtual-cell query index uses twice the smallest per-layer calibration
-window when it fits. Construction keeps the original index order until all metal
-tiling and crossing discovery are complete. Admission checks the exact proposed
-index storage and a conservative bound covering every later query, including
-the largest window and one-DBU margin. A tiny window, excessive query extent or
-insufficient memory retains the coarse index. The report records the selected
-`stats.memory.instance_query_bin_dbu`; the process memory cap stays unchanged.
+After all retained metal exists, one uniform grid per layer indexes the retained
+shape IDs. The cell side is at least 2 um and the layer's lateral calibration
+window, doubled until a layer has no more cells than shapes. Entries hold the
+rectangle relative to the layer origin in 32 bits plus the shape ID (20 bytes);
+a layer wider than 2^32 DBU stores absolute rectangles (40 bytes). A query reports
+each strictly intersecting entry exactly once, from the first query cell it occupies.
+Grid entries are capped by `--max-extract-bin-entries`. Passive conductors find
+their crossing routed metal through the grid, and the same strict predicate.
+
+## Strips and parallel computation
+
+Each strip's candidates are the conductors that overlap it along its axis and lie
+within the lateral calibration window on its own layer or under its face on every
+other modelled layer. They are processed in shape-ID order exactly as before, so
+interval boundaries and every f64 expression are unchanged. A piece or passive
+conductor contributes an x strip and a y strip of one rectangle; both accept exactly
+the conductors overlapping that rectangle on other layers, so the pair queries other
+layers once, and its own layer once for the union of both lateral windows (each hit
+is tested with each strip's own predicate). Virtual cell shapes are decoded once per
+query and travel with the candidate; no design-sized decoded-shape cache is kept.
+The interval sweep uses a bitset of candidate positions (ascending position is
+ascending shape ID), per-layer dense context tables, reused buffers and packed
+event keys. `stats.work` counts index cells and entries actually scanned, so it is
+smaller than before; all other statistics are unchanged.
+
+Strips are computed on the `--threads` pool. Units (a wire body, or the strip pair
+of one rectangle) are taken from the run iterator in chunks of 64. Lanes compute
+chunks into bounded transcripts of ordered accumulations (every `ground[node] +=`,
+`coupling[key] +=` and overlap-area addition). Whichever lane finds the next chunk
+number ready commits it, then any later chunks already waiting, in run order:
+cumulative work, integer statistics, and every addition. A complete chunk's
+coupling additions are stably sorted by key in its lane, so the commit searches the
+coupling map once per distinct key while each key keeps its addition order (keys are
+independent accumulators). The coupling map is still the ordered map; the final
+coupling list, thresholding and grounding order are unchanged. Every accumulator
+therefore receives the identical sequence of f64 additions at any thread count and
+chunk size, and the SPEF bytes are identical.
+
+A unit a lane cannot finish within its parallel bounds (16,384 candidates, 65,536
+transcript records) or that fails, and any chunk whose committed work or coupling
+count could exceed its budget, is computed by the serial path at its place in run
+order from the committed state. Budget errors therefore carry the serial path's code
+and message. One pool thread runs the serial path directly. Lane scratch (candidate
+buffers at the parallel cap, instance query marks, one chunk) plus 4 MiB of
+committed-pending chunks is admitted against the unused spatial-index allowance and
+the headroom below `--extract-memory-mib`; lanes are reduced, down to the serial
+path, until it fits, and any excess over the unused allowance is added to
+`stats.memory`. `--extract-query-workers`, `--extract-query-batch-runs` and
+`--extract-query-scratch-mib` are still accepted and validated (ceilings 16, 64 and
+64) for argument compatibility, and have no effect. A hidden `--extract-tile-units N`
+sets the chunk size (and forces the chunked path on one thread) for tests; results do
+not depend on it. `RUSTROAD_EXTRACT_PROFILE=1` prints phase timings, lanes, chunks and
+serially computed units to stderr.
 
 ## RC profile (`rustroad.rc-profile.v1`)
 
@@ -345,7 +397,7 @@ and `cell_internal_metal` describe the overlap-area term.
 ## Resources (Rule 9)
 
 Estimate made before implementation, at the default caps with one corner and
-one thread (the extractor is serial and deterministic):
+one thread (the extractor is deterministic at every thread count):
 
 * 2 M shapes x 56 B = 112 MiB (bodies, pieces and passive shapes share this
   cap; a run adds at most two end pieces and a via at most one pad per routing
@@ -727,43 +779,7 @@ with `feat/rtl2gds-scale`.
 * The field solver uses a homogeneous dielectric and idealised environments
   (infinite wires, periodic crossings); its factors are evidence, not model
   data.
-* Electrical arithmetic runs serially in `cpu_ref`; candidate queries can use bounded CPU workers. There is no GPU path.
+* Strips are computed on CPU threads and their electrical additions are committed
+  in the serial order (see "Strips and parallel computation"). There is no GPU path.
 
 
-## Bounded CPU candidate queries
-
-`extract --extract-query-workers N` opts into candidate-only concurrency (`1`
-by default, ceiling `16`). The effective worker count cannot exceed `--threads`,
-`--extract-query-batch-runs` (default `8`, ceiling `64`), or the workers admitted
-under both `--extract-memory-mib` and `--extract-query-scratch-mib` (default `32`,
-ceiling `64` MiB). If fewer than two workers fit, extraction uses the serial path.
-The original memory admission and instance-query bin selection happen first.
-The extra scratch is added to the reported working and total memory estimates.
-
-Each worker has bounded candidate deduplication and one generation-mark vector
-with one `u64` per physical instance. All workers borrow the same immutable
-retained-shape BVH, instance bins, templates and shape IDs. A tile holds at most
-`batch_runs * max_candidates` IDs, with exact reserved capacities and checked
-candidate caps; it never retains electrical contribution transcripts. Conservative
-admission is `workers * (64 * max_candidates + 8 * instances + 2 MiB)` plus
-`8 * batch_runs * max_candidates + 4096` bytes. The stack term covers active
-query workers; pool resources already exist before the original live-memory probe.
-
-The original run iterator stays lazy. Query results are consumed in its original
-order, and each candidate list is sorted by the original shape ID. All routing
-layers, including shapes without a direct electrical contribution, remain in the
-query. Interval formation, passive strip effects, individual ground/coupling
-additions, final threshold handling and statistical floating-point additions all
-run in the original serial order. Integer work charges and maxima are unchanged.
-
-A tile runs concurrently only when a conservative bound on every query,
-interval-index operation and active-interval comparison fits the remaining
-original `max_work`. A query visits each retained BVH node/ID at most once and
-each instance/virtual shape at most once per layer. For `n` candidates, there are
-at most `2*n` events and `2*n+1` intervals with at most `n` active IDs. Overflow
-or insufficient remaining work selects the original serial path, preserving its
-budget rejection order. Results and errors are consumed in run order.
-
-Opt-in receipts expose `stats.parallel_queries` with requested/admitted workers,
-original memory estimate, admitted scratch, tile bound, and parallel/serial tile
-counts. Default serial receipts keep their original shape.

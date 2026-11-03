@@ -1125,6 +1125,46 @@ pub(crate) struct InstanceIndex<'a> {
     generation: u64,
     entries: usize,
     mode: Option<InstanceIndexMode>,
+    /// Extraction-only per-instance world bounds and layer masks, computed
+    /// once at construction. Router indices keep `None` and their original
+    /// per-visit bounds computation.
+    cache: Option<InstanceCache>,
+}
+
+/// Immutable per-instance query filters. A layer mask bit is set for every
+/// template layer below 64; any layer at or above 64 sets every bit, so the
+/// mask never rejects an instance that has shapes on the queried layer.
+struct InstanceCache {
+    bounds: Vec<Option<Rect>>,
+    layers: Vec<u64>,
+}
+impl InstanceCache {
+    fn new(source: &InstanceObstacles) -> Result<Self> {
+        let mut bounds = Vec::new();
+        let mut layers = Vec::new();
+        bounds
+            .try_reserve_exact(source.len())
+            .map_err(|_| budget("instance bounds cache allocation"))?;
+        layers
+            .try_reserve_exact(source.len())
+            .map_err(|_| budget("instance layer-mask allocation"))?;
+        for i in 0..source.len() {
+            bounds.push(source.bounds(i)?);
+            layers.push(
+                source
+                    .instance_layers(i)
+                    .fold(0u64, |mask, layer| mask | layer_bit(layer)),
+            );
+        }
+        Ok(Self { bounds, layers })
+    }
+}
+fn layer_bit(layer: u32) -> u64 {
+    if layer < 64 { 1 << layer } else { u64::MAX }
+}
+/// Bytes of the extraction-only instance cache (bounds plus layer mask).
+pub(crate) fn instance_cache_bytes(instances: usize) -> u64 {
+    (instances as u64).saturating_mul((size_of::<Option<Rect>>() + size_of::<u64>()) as u64)
 }
 
 /// Bounded worker-private deduplication state for immutable instance queries.
@@ -1307,6 +1347,9 @@ impl<'a> InstanceIndex<'a> {
             input.tracks.as_ref().and_then(|p| p.instance_index),
         )
     }
+    /// Extraction index: shares the router's bins and work accounting, plus
+    /// cached instance bounds and a layer mask that skip instances without
+    /// metal on the queried layer before any template work is charged.
     pub(crate) fn for_geometry(
         source: &'a InstanceObstacles,
         die: Rect,
@@ -1314,7 +1357,9 @@ impl<'a> InstanceIndex<'a> {
         layer_count: usize,
         limits: &RouteLimits,
     ) -> Result<Self> {
-        Self::for_geometry_mode(source, die, bin, layer_count, limits, None)
+        let mut index = Self::for_geometry_mode(source, die, bin, layer_count, limits, None)?;
+        index.cache = Some(InstanceCache::new(source)?);
+        Ok(index)
     }
     fn for_geometry_mode(
         source: &'a InstanceObstacles,
@@ -1387,6 +1432,7 @@ impl<'a> InstanceIndex<'a> {
             generation: 0,
             entries,
             mode,
+            cache: None,
         })
     }
     fn visit(
@@ -1427,6 +1473,7 @@ impl<'a> InstanceIndex<'a> {
             self.bin,
             &self.bins,
             self.mode,
+            self.cache.as_ref(),
             &mut self.marks,
             &mut self.generation,
             layer,
@@ -1454,6 +1501,7 @@ impl<'a> InstanceIndex<'a> {
             self.bin,
             &self.bins,
             self.mode,
+            self.cache.as_ref(),
             &mut scratch.marks,
             &mut scratch.generation,
             layer,
@@ -1462,25 +1510,6 @@ impl<'a> InstanceIndex<'a> {
             limits,
             visitor,
         )
-    }
-    pub(crate) fn query_work_bound(
-        &self,
-        layer: u32,
-        query: Rect,
-        virtual_shapes: usize,
-    ) -> Option<usize> {
-        if !self.source.has_layer(layer) {
-            return Some(0);
-        }
-        let span = |lo: i64, hi: i64| {
-            i128::from(hi.div_euclid(self.bin)) - i128::from(lo.div_euclid(self.bin)) + 1
-        };
-        let extent = span(query.lx, query.ux).checked_mul(span(query.ly, query.uy))?;
-        // Each cell is visited once; each instance and template shape at most once.
-        usize::try_from(extent)
-            .ok()?
-            .checked_add(self.source.len())?
-            .checked_add(virtual_shapes)
     }
     #[expect(
         clippy::too_many_arguments,
@@ -1491,6 +1520,7 @@ impl<'a> InstanceIndex<'a> {
         bin: i64,
         bins: &BinGrid,
         mode: Option<InstanceIndexMode>,
+        cache: Option<&InstanceCache>,
         marks: &mut [u64],
         generation: &mut u64,
         layer: u32,
@@ -1515,6 +1545,7 @@ impl<'a> InstanceIndex<'a> {
         if extent > limits.max_bin_entries as i128 {
             return Err(budget("instance query extent"));
         }
+        let bit = layer_bit(layer);
         for x in x0..=x1 {
             for y in y0..=y1 {
                 *work = work
@@ -1530,7 +1561,16 @@ impl<'a> InstanceIndex<'a> {
                         .checked_add(1)
                         .filter(|&n| n <= limits.max_comparisons)
                         .ok_or_else(|| budget("instance query work"))?;
-                    if !source.bounds(i)?.is_some_and(|b| overlap(query, b)) {
+                    // Work is charged before either filter, so the cache and
+                    // layer mask change no work count: an instance without
+                    // the layer visits no template shape.
+                    if let Some(cache) = cache {
+                        if cache.layers[i] & bit == 0
+                            || !cache.bounds[i].is_some_and(|b| overlap(query, b))
+                        {
+                            continue;
+                        }
+                    } else if !source.bounds(i)?.is_some_and(|b| overlap(query, b)) {
                         continue;
                     }
                     let clear = visitor(i, work)?;
@@ -4111,6 +4151,33 @@ mod tests {
         };
         let limits = RouteLimits::default();
         for bin in [8, 64, 1000] {
+            // The extraction index (cached bounds + layer mask) must visit the
+            // same instances and charge the same work as the router form.
+            let mut cached = InstanceIndex::for_geometry(&source, die, bin, 8, &limits).unwrap();
+            let mut plain =
+                InstanceIndex::for_geometry_mode(&source, die, bin, 8, &limits, None).unwrap();
+            assert!(cached.cache.is_some() && plain.cache.is_none());
+            for layer in 0..9 {
+                for x in (-100..200).step_by(7) {
+                    let query = Rect {
+                        lx: x,
+                        ly: -10,
+                        ux: x + 23,
+                        uy: 20,
+                    };
+                    let gather = |index: &mut InstanceIndex<'_>| {
+                        let (mut work, mut hits) = (0, Vec::new());
+                        index
+                            .visit(layer, query, &mut work, &limits, |b| {
+                                hits.push((b.layer, b.rect.lx, b.rect.ly, b.rect.ux, b.rect.uy));
+                                Ok(true)
+                            })
+                            .unwrap();
+                        (work, hits)
+                    };
+                    assert_eq!(gather(&mut cached), gather(&mut plain));
+                }
+            }
             let mut old = InstanceIndex::for_geometry(&source, die, bin, 8, &limits).unwrap();
             let mut new = InstanceIndex::for_geometry_mode(
                 &source,

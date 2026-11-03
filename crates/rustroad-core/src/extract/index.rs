@@ -1,280 +1,427 @@
-//! Bounded, immutable spatial queries over retained conductor shape IDs.
+//! Bounded, immutable per-layer uniform grids over retained conductor shapes.
 //!
-//! Build only after the retained metal pieces have been added. Virtual cell
-//! geometry stays in `InstanceGeometry`; this index never materializes it.
-//! Traversal order has no electrical meaning: callers sort the accepted IDs.
-use super::{ExtractLimits, Shape, Shapes, budget, invalid};
+//! Build only after every retained shape (wire bodies, pieces, patches and
+//! passive conductors) exists. Virtual cell geometry stays in
+//! `InstanceGeometry`; this index never materializes it. Each layer's grid
+//! stores `(rect, id)` entries inline in CSR order: cell-major, ascending
+//! shape ID within a cell. Rectangles are stored relative to the layer's
+//! origin in 32 bits when the layer's extent allows (20 bytes per entry),
+//! otherwise absolutely. A query reports every entry that strictly
+//! intersects it exactly once, from the first query cell the entry occupies.
+//! Report order has no electrical meaning: callers sort the accepted IDs.
+use super::{ExtractLimits, Shapes, budget, invalid};
 use crate::{Rect, Result};
 
-const LEAF_SIZE: usize = 8;
-const LEAF_FLAG: u32 = 1 << 31;
-const NONE: u32 = u32::MAX;
-// At most 32 layer partitions, followed by bounded quarter/three-quarter
-// spatial partitions. The explicit cap also protects against future changes.
-const MAX_DEPTH: usize = 128;
-const BUILD_STACK_BYTES: usize = MAX_DEPTH * 1024;
+/// Spans at or above this use a single cell, so no cell arithmetic can
+/// overflow (`x0 + x * cell` stays inside the layer's own extent).
+const HUGE_SPAN: i128 = 1 << 62;
 
-#[derive(Clone, Copy)]
-struct Node {
-    bounds: Rect,
-    layer_lo: u32,
-    layer_hi: u32,
-    // Leaf: [a, a + (b & !LEAF_FLAG)) in ids. Branch: child indices a and b.
-    a: u32,
-    b: u32,
+/// One indexed shape relative to its layer origin.
+#[derive(Clone, Copy, Debug, Default)]
+struct Compact {
+    lx: u32,
+    ly: u32,
+    ux: u32,
+    uy: u32,
+    id: u32,
+}
+/// One indexed shape of a layer whose extent exceeds 32 bits.
+#[derive(Clone, Copy, Debug)]
+struct Wide {
+    rect: Rect,
+    id: u32,
 }
 
-/// A deterministic BVH whose leaves refer to existing retained shapes.
-/// Shape IDs and geometry must remain unchanged between build and queries.
-pub(super) struct ShapeIndex {
-    ids: Vec<u32>,
-    nodes: Vec<Node>,
-    layer_count: usize,
+trait Entry: Copy {
+    fn new(rect: Rect, id: u32, x0: i64, y0: i64) -> Self;
+    fn get(&self, x0: i64, y0: i64) -> (Rect, u32);
+}
+impl Entry for Compact {
+    #[inline]
+    fn new(r: Rect, id: u32, x0: i64, y0: i64) -> Self {
+        // The layer origin is the minimum corner and the span fits 32 bits.
+        Self {
+            lx: (r.lx - x0) as u32,
+            ly: (r.ly - y0) as u32,
+            ux: (r.ux - x0) as u32,
+            uy: (r.uy - y0) as u32,
+            id,
+        }
+    }
+    #[inline]
+    fn get(&self, x0: i64, y0: i64) -> (Rect, u32) {
+        (
+            Rect {
+                lx: x0 + i64::from(self.lx),
+                ly: y0 + i64::from(self.ly),
+                ux: x0 + i64::from(self.ux),
+                uy: y0 + i64::from(self.uy),
+            },
+            self.id,
+        )
+    }
+}
+impl Entry for Wide {
+    #[inline]
+    fn new(rect: Rect, id: u32, _: i64, _: i64) -> Self {
+        Self { rect, id }
+    }
+    #[inline]
+    fn get(&self, _: i64, _: i64) -> (Rect, u32) {
+        (self.rect, self.id)
+    }
 }
 
-fn charge(work: &mut usize, limits: &ExtractLimits) -> Result<()> {
-    *work = work
-        .checked_add(1)
-        .filter(|&n| n <= limits.max_work)
-        .ok_or_else(|| budget("extraction shape-index work"))?;
-    Ok(())
+enum Entries {
+    Compact(Vec<Compact>),
+    Wide(Vec<Wide>),
 }
 
-// Strict endpoint inequalities deliberately accept a zero-width query when
-// a positive-width shape straddles it, matching the extraction predicates.
+struct LayerGrid {
+    x0: i64,
+    y0: i64,
+    nx: i64,
+    ny: i64,
+    cell: i64,
+    /// `nx * ny + 1` CSR offsets into `entries`.
+    offsets: Vec<u32>,
+    entries: Entries,
+}
+impl LayerGrid {
+    /// Monotone cell column of `x`, clamped to the grid. Saturation keeps
+    /// the order of far-away query coordinates, so clamping stays exact.
+    #[inline]
+    fn cx(&self, x: i64) -> i64 {
+        x.saturating_sub(self.x0)
+            .div_euclid(self.cell)
+            .clamp(0, self.nx - 1)
+    }
+    #[inline]
+    fn cy(&self, y: i64) -> i64 {
+        y.saturating_sub(self.y0)
+            .div_euclid(self.cell)
+            .clamp(0, self.ny - 1)
+    }
+    fn cells(&self, r: Rect) -> (i64, i64, i64, i64) {
+        (self.cx(r.lx), self.cx(r.ux), self.cy(r.ly), self.cy(r.uy))
+    }
+    #[inline]
+    fn scan<E: Entry>(
+        &self,
+        entries: &[E],
+        query: Rect,
+        (qx0, qx1, qy0, qy1): (i64, i64, i64, i64),
+        local: &mut usize,
+        visitor: &mut impl FnMut(u32, Rect) -> Result<bool>,
+    ) -> Result<bool> {
+        for y in qy0..=qy1 {
+            // An entry is reported from its own first cell, or from the
+            // query's first row/column when it starts before the query.
+            let y_lo = self.y0 + y * self.cell;
+            for x in qx0..=qx1 {
+                let x_lo = self.x0 + x * self.cell;
+                let c = (y * self.nx + x) as usize;
+                let (a, b) = (self.offsets[c] as usize, self.offsets[c + 1] as usize);
+                *local += b - a;
+                for e in &entries[a..b] {
+                    let (r, id) = e.get(self.x0, self.y0);
+                    if (x == qx0 || r.lx >= x_lo)
+                        && (y == qy0 || r.ly >= y_lo)
+                        && intersects(r, query)
+                        && !visitor(id, r)?
+                    {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+}
+
+/// Strict endpoint inequalities deliberately accept a zero-width query when
+/// a positive-width shape straddles it, matching the extraction predicates.
+#[inline]
 fn intersects(a: Rect, b: Rect) -> bool {
     a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy
 }
 
-fn union(a: Rect, b: Rect) -> Rect {
-    Rect {
-        lx: a.lx.min(b.lx),
-        ly: a.ly.min(b.ly),
-        ux: a.ux.max(b.ux),
-        uy: a.uy.max(b.uy),
-    }
+/// Per-layer plan: bounds and the chosen cell.
+#[derive(Clone, Copy)]
+struct Plan {
+    bounds: Rect,
+    cell: i64,
+    nx: i64,
+    ny: i64,
 }
-
-fn center(r: Rect, vertical: bool) -> i128 {
-    // Doubled centers avoid both rounding and i64 coordinate overflow.
-    if vertical {
-        i128::from(r.ly) + i128::from(r.uy)
-    } else {
-        i128::from(r.lx) + i128::from(r.ux)
+impl Plan {
+    fn compact(&self) -> bool {
+        let fits = |lo: i64, hi: i64| i128::from(hi) - i128::from(lo) <= i128::from(u32::MAX);
+        fits(self.bounds.lx, self.bounds.ux) && fits(self.bounds.ly, self.bounds.uy)
     }
-}
-
-impl ShapeIndex {
-    fn node_bound(shapes: u64, layers: u64) -> u64 {
-        if shapes == 0 {
-            return 0;
+    fn entry_bytes(&self) -> u64 {
+        if self.compact() {
+            size_of::<Compact>() as u64
+        } else {
+            size_of::<Wide>() as u64
         }
-        // A single-layer leaf has >=4 IDs unless it is the layer's only
-        // leaf. Splitting layer ranges adds at most layers-1 branches, so
-        // leaves <= ceil(shapes/4)+layers, nodes < 2*leaves. Also every
-        // binary tree with nonempty leaves has <=2*shapes-1 nodes.
-        shapes
-            .saturating_mul(2)
-            .saturating_sub(1)
-            .min(shapes.div_ceil(4).saturating_add(layers).saturating_mul(2))
+    }
+}
+
+/// Cell side for a layer: at least `base`, doubled until the layer has no
+/// more cells than shapes. Cells therefore never outnumber entries, which
+/// bounds the offset table by the entry table.
+fn plan(bounds: Rect, shapes: u64, base: i64) -> Plan {
+    let span_x = i128::from(bounds.ux) - i128::from(bounds.lx);
+    let span_y = i128::from(bounds.uy) - i128::from(bounds.ly);
+    let single = Plan {
+        bounds,
+        cell: i64::MAX,
+        nx: 1,
+        ny: 1,
+    };
+    if span_x >= HUGE_SPAN || span_y >= HUGE_SPAN || i128::from(base) >= HUGE_SPAN {
+        return single;
+    }
+    let limit = i128::from(shapes.max(1));
+    let mut cell = i128::from(base.max(1));
+    loop {
+        let (nx, ny) = (span_x / cell + 1, span_y / cell + 1);
+        if nx * ny <= limit {
+            return Plan {
+                bounds,
+                cell: cell as i64,
+                nx: nx as i64,
+                ny: ny as i64,
+            };
+        }
+        if cell > span_x.max(span_y) {
+            return single;
+        }
+        cell *= 2;
+    }
+}
+
+/// Immutable per-layer grids. Shape IDs and geometry must remain unchanged
+/// between build and queries.
+pub(super) struct GridIndex {
+    layers: Vec<Option<LayerGrid>>,
+    bytes: u64,
+    entries: usize,
+}
+
+fn fill<E: Entry>(shapes: &Shapes<'_>, layer: u32, g: &LayerGrid, total: usize) -> Result<Vec<E>> {
+    let mut entries: Vec<E> = Vec::new();
+    entries
+        .try_reserve_exact(total)
+        .map_err(|_| budget("extraction grid entry allocation"))?;
+    let blank = E::new(
+        Rect {
+            lx: g.x0,
+            ly: g.y0,
+            ux: g.x0,
+            uy: g.y0,
+        },
+        0,
+        g.x0,
+        g.y0,
+    );
+    entries.resize(total, blank);
+    let mut cursor = g.offsets[..g.offsets.len() - 1].to_vec();
+    // Ascending shape ID: entries of a cell stay ID-ordered.
+    for (id, s) in shapes.owned().filter(|(_, s)| s.layer == layer) {
+        let (x0, x1, y0, y1) = g.cells(s.rect);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let at = &mut cursor[(y * g.nx + x) as usize];
+                entries[*at as usize] = E::new(s.rect, id, g.x0, g.y0);
+                *at += 1;
+            }
+        }
+    }
+    Ok(entries)
+}
+
+impl GridIndex {
+    /// Exact heap bytes of the built index (offsets plus entries).
+    pub(super) fn bytes(&self) -> u64 {
+        self.bytes
+    }
+    pub(super) fn entries(&self) -> usize {
+        self.entries
     }
 
-    /// Conservative additional peak allocation, including the fixed query
-    /// stack and Vec headers. Construction partitions in place without sort
-    /// buffers. Drop the old retained-shape bins before allocating this index.
-    pub(super) fn estimated_bytes(max_shapes: usize, layer_count: usize) -> u64 {
-        let n = max_shapes as u64;
-        n.saturating_mul(size_of::<u32>() as u64)
-            .saturating_add(
-                Self::node_bound(n, layer_count as u64).saturating_mul(size_of::<Node>() as u64),
-            )
-            .saturating_add(
-                (BUILD_STACK_BYTES + MAX_DEPTH * size_of::<u32>() + size_of::<Self>()) as u64,
-            )
-    }
-
-    /// Each node and retained ID can be charged at most once per query.
-    pub(super) fn query_work_bound(&self) -> usize {
-        self.nodes.len().saturating_add(self.ids.len())
-    }
-
+    /// Builds one grid per populated layer. `base_cell[layer]` is the
+    /// smallest cell side (DBU); populated layers beyond it use one DBU.
+    /// Entries are capped by `limits.max_bin_entries`, and the exact table
+    /// bytes must fit `allowance`. Every inserted entry is charged to `work`.
     pub(super) fn build(
         shapes: &Shapes<'_>,
         layer_count: usize,
+        base_cell: &[i64],
         limits: &ExtractLimits,
+        allowance: u64,
         work: &mut usize,
     ) -> Result<Self> {
-        let count = shapes.retained_len();
-        if count > limits.max_shapes || layer_count == 0 || layer_count > u32::MAX as usize {
-            return Err(budget("extraction shape-index extent"));
-        }
-        let capacity = usize::try_from(Self::node_bound(count as u64, layer_count as u64))
-            .map_err(|_| budget("extraction shape-index node capacity"))?;
-        if count >= LEAF_FLAG as usize || capacity >= LEAF_FLAG as usize {
-            return Err(budget("extraction shape-index ID capacity"));
-        }
-        let mut out = Self {
-            ids: Vec::new(),
-            nodes: Vec::new(),
-            layer_count,
-        };
-        out.ids
-            .try_reserve_exact(count)
-            .map_err(|_| budget("extraction shape-index ID allocation"))?;
-        out.nodes
-            .try_reserve_exact(capacity)
-            .map_err(|_| budget("extraction shape-index node allocation"))?;
-        for (id, shape) in shapes.owned() {
-            charge(work, limits)?;
-            if shape.layer as usize >= layer_count || !shape.rect.valid() {
+        let mut bounds: Vec<Option<(Rect, u64)>> = vec![None; layer_count];
+        for (_, s) in shapes.owned() {
+            if s.layer as usize >= layer_count || !s.rect.valid() {
                 return Err(invalid("invalid retained shape-index geometry"));
             }
-            out.ids.push(id);
+            let item = &mut bounds[s.layer as usize];
+            *item = Some(match *item {
+                None => (s.rect, 1),
+                Some((b, n)) => (
+                    Rect {
+                        lx: b.lx.min(s.rect.lx),
+                        ly: b.ly.min(s.rect.ly),
+                        ux: b.ux.max(s.rect.ux),
+                        uy: b.uy.max(s.rect.uy),
+                    },
+                    n + 1,
+                ),
+            });
         }
-        if count > 0 {
-            out.build_node(shapes, 0, count, 0, capacity, limits, work)?;
-        }
-        Ok(out)
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "recursion shares the immutable shapes, hard limits and charged work counter"
-    )]
-    fn build_node(
-        &mut self,
-        shapes: &Shapes<'_>,
-        start: usize,
-        end: usize,
-        depth: usize,
-        capacity: usize,
-        limits: &ExtractLimits,
-        work: &mut usize,
-    ) -> Result<u32> {
-        if depth >= MAX_DEPTH || self.nodes.len() >= capacity {
-            return Err(budget("extraction shape-index tree extent"));
-        }
-        charge(work, limits)?;
-        let first = shapes.get(self.ids[start]);
-        let mut bounds = first.rect;
-        let (mut layer_lo, mut layer_hi) = (first.layer, first.layer);
-        let (mut center_lo, mut center_hi) = (
-            [center(first.rect, false), center(first.rect, true)],
-            [center(first.rect, false), center(first.rect, true)],
-        );
-        for &id in &self.ids[start..end] {
-            charge(work, limits)?;
-            let shape = shapes.get(id);
-            bounds = union(bounds, shape.rect);
-            layer_lo = layer_lo.min(shape.layer);
-            layer_hi = layer_hi.max(shape.layer);
-            for axis in 0..2 {
-                let c = center(shape.rect, axis == 1);
-                center_lo[axis] = center_lo[axis].min(c);
-                center_hi[axis] = center_hi[axis].max(c);
+        let plans: Vec<Option<Plan>> = bounds
+            .iter()
+            .enumerate()
+            .map(|(l, b)| b.map(|(r, n)| plan(r, n, base_cell.get(l).copied().unwrap_or(1))))
+            .collect();
+        let mut layers: Vec<Option<LayerGrid>> = Vec::with_capacity(layer_count);
+        let mut bytes = 0u64;
+        for p in &plans {
+            let Some(p) = *p else {
+                layers.push(None);
+                continue;
+            };
+            let cells = usize::try_from(p.nx * p.ny + 1)
+                .map_err(|_| budget("extraction grid cell count"))?;
+            // The fill cursor duplicates the offsets while entries are placed.
+            bytes = bytes.saturating_add(2 * cells as u64 * size_of::<u32>() as u64);
+            if bytes > allowance {
+                return Err(budget("extraction grid index memory"));
             }
+            let mut offsets = Vec::new();
+            offsets
+                .try_reserve_exact(cells)
+                .map_err(|_| budget("extraction grid cell allocation"))?;
+            offsets.resize(cells, 0u32);
+            layers.push(Some(LayerGrid {
+                x0: p.bounds.lx,
+                y0: p.bounds.ly,
+                nx: p.nx,
+                ny: p.ny,
+                cell: p.cell,
+                offsets,
+                entries: Entries::Compact(Vec::new()),
+            }));
         }
-        let at = self.nodes.len() as u32;
-        self.nodes.push(Node {
-            bounds,
-            layer_lo,
-            layer_hi,
-            a: start as u32,
-            b: (end - start) as u32 | LEAF_FLAG,
-        });
-        let count = end - start;
-        if count <= LEAF_SIZE {
-            return Ok(at);
-        }
-        let vertical = center_hi[1] - center_lo[1] > center_hi[0] - center_lo[0];
-        let axis = usize::from(vertical);
-        let pivot = center_lo[axis] + (center_hi[axis] - center_lo[axis]) / 2;
-        let layer_pivot = layer_lo + (layer_hi - layer_lo) / 2;
-        let mut split = start;
-        if layer_lo != layer_hi || center_lo[axis] != center_hi[axis] {
-            for i in start..end {
-                charge(work, limits)?;
-                let shape = shapes.get(self.ids[i]);
-                let lower = if layer_lo != layer_hi {
-                    shape.layer <= layer_pivot
-                } else {
-                    center(shape.rect, vertical) <= pivot
-                };
-                if lower {
-                    self.ids.swap(i, split);
-                    split += 1;
+        // Count pass: entries per cell, capped before any entry allocation.
+        let mut total = 0usize;
+        let mut per_layer = vec![0usize; layer_count];
+        for (_, s) in shapes.owned() {
+            let g = layers[s.layer as usize]
+                .as_mut()
+                .expect("planned populated layer");
+            let (x0, x1, y0, y1) = g.cells(s.rect);
+            let n = ((x1 - x0 + 1) as usize).saturating_mul((y1 - y0 + 1) as usize);
+            total = total
+                .checked_add(n)
+                .filter(|&t| t <= limits.max_bin_entries && t < u32::MAX as usize)
+                .ok_or_else(|| budget("extraction spatial-bin entries"))?;
+            per_layer[s.layer as usize] += n;
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    g.offsets[(y * g.nx + x) as usize + 1] += 1;
                 }
             }
         }
-        let minimum_partition = (count / 4).max(4);
-        if layer_lo == layer_hi
-            && (split - start < minimum_partition || end - split < minimum_partition)
-        {
-            // An outlier or coincident centers must not make a linear chain.
-            split = start + count / 2;
+        *work = work
+            .checked_add(total)
+            .filter(|&n| n <= limits.max_work)
+            .ok_or_else(|| budget("extraction grid-index work"))?;
+        for (l, p) in plans.iter().enumerate() {
+            if let Some(p) = p {
+                bytes = bytes.saturating_add(per_layer[l] as u64 * p.entry_bytes());
+            }
         }
-        if split == start || split == end {
-            return Err(invalid("empty shape-index partition"));
+        if bytes > allowance {
+            return Err(budget("extraction grid index memory"));
         }
-        let left = self.build_node(shapes, start, split, depth + 1, capacity, limits, work)?;
-        let right = self.build_node(shapes, split, end, depth + 1, capacity, limits, work)?;
-        self.nodes[at as usize].a = left;
-        self.nodes[at as usize].b = right;
-        Ok(at)
+        for (l, g) in layers.iter_mut().enumerate() {
+            let (Some(g), Some(p)) = (g.as_mut(), plans[l]) else {
+                continue;
+            };
+            for i in 1..g.offsets.len() {
+                g.offsets[i] += g.offsets[i - 1];
+            }
+            g.entries = if p.compact() {
+                Entries::Compact(fill(shapes, l as u32, g, per_layer[l])?)
+            } else {
+                Entries::Wide(fill(shapes, l as u32, g, per_layer[l])?)
+            };
+        }
+        // Report the resident tables (the fill cursors are released).
+        let resident = layers
+            .iter()
+            .flatten()
+            .map(|g| {
+                g.offsets.len() as u64 * size_of::<u32>() as u64
+                    + match &g.entries {
+                        Entries::Compact(e) => (e.len() * size_of::<Compact>()) as u64,
+                        Entries::Wide(e) => (e.len() * size_of::<Wide>()) as u64,
+                    }
+            })
+            .sum();
+        Ok(Self {
+            layers,
+            bytes: resident,
+            entries: total,
+        })
     }
 
+    /// Visit every entry of `layer` strictly intersecting `query` once, as
+    /// `(shape ID, rectangle)`. The visitor returns `false` to stop early
+    /// (`Ok(false)` is then returned). Each scanned cell and entry is
+    /// charged to `work`.
+    #[inline]
     pub(super) fn visit(
         &self,
         layer: u32,
         query: Rect,
-        shapes: &Shapes<'_>,
         limits: &ExtractLimits,
         work: &mut usize,
-        mut visitor: impl FnMut(u32, Shape) -> Result<()>,
-    ) -> Result<()> {
-        if layer as usize >= self.layer_count || query.lx > query.ux || query.ly > query.uy {
+        mut visitor: impl FnMut(u32, Rect) -> Result<bool>,
+    ) -> Result<bool> {
+        if query.lx > query.ux || query.ly > query.uy {
             return Err(invalid("invalid shape-index query"));
         }
-        if self.nodes.is_empty() {
-            return Ok(());
+        let Some(g) = self.layers.get(layer as usize).and_then(Option::as_ref) else {
+            return Ok(true);
+        };
+        let range = g.cells(query);
+        let (qx0, qx1, qy0, qy1) = range;
+        let cells = (qx1 - qx0 + 1) as u64 * (qy1 - qy0 + 1) as u64;
+        if cells > limits.max_bin_entries as u64 {
+            return Err(budget("extraction query extent"));
         }
-        let mut stack = [NONE; MAX_DEPTH];
-        stack[0] = 0;
-        let mut pending = 1;
-        while pending > 0 {
-            pending -= 1;
-            let node = self.nodes[stack[pending] as usize];
-            charge(work, limits)?;
-            if layer < node.layer_lo || layer > node.layer_hi || !intersects(node.bounds, query) {
-                continue;
-            }
-            if node.b & LEAF_FLAG != 0 {
-                let start = node.a as usize;
-                let end = start + (node.b & !LEAF_FLAG) as usize;
-                for &id in &self.ids[start..end] {
-                    charge(work, limits)?;
-                    let shape = shapes.get(id);
-                    if shape.layer == layer && intersects(shape.rect, query) {
-                        visitor(id, shape)?;
-                    }
-                }
-            } else {
-                if pending + 2 > stack.len() {
-                    return Err(budget("extraction shape-index query depth"));
-                }
-                stack[pending] = node.b;
-                stack[pending + 1] = node.a;
-                pending += 2;
-            }
-        }
-        Ok(())
+        let mut local = cells as usize;
+        let result = match &g.entries {
+            Entries::Compact(e) => g.scan(e, query, range, &mut local, &mut visitor),
+            Entries::Wide(e) => g.scan(e, query, range, &mut local, &mut visitor),
+        };
+        *work = work
+            .checked_add(local)
+            .filter(|&n| n <= limits.max_work)
+            .ok_or_else(|| budget("extraction grid-index work"))?;
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extract::{Owner, PassiveOwner};
+    use crate::extract::{Owner, PassiveOwner, Shape};
 
     fn shapes(rects: impl IntoIterator<Item = (u32, Rect)>) -> Shapes<'static> {
         Shapes::new(
@@ -293,165 +440,221 @@ mod tests {
         .unwrap()
     }
 
-    fn check(shapes: &Shapes<'_>, layers: usize, queries: &[(u32, Rect)]) -> ShapeIndex {
+    fn build(shapes: &Shapes<'_>, layers: usize, cell: i64) -> GridIndex {
         let limits = ExtractLimits::default();
         let mut work = 0;
-        let index = ShapeIndex::build(shapes, layers, &limits, &mut work).unwrap();
-        let mut repeated_work = 0;
-        let repeated = ShapeIndex::build(shapes, layers, &limits, &mut repeated_work).unwrap();
-        assert_eq!(work, repeated_work);
-        assert_eq!(index.ids, repeated.ids);
-        assert!(
-            index.nodes.len()
-                <= ShapeIndex::node_bound(shapes.retained_len() as u64, layers as u64) as usize
-        );
-        for &(layer, query) in queries {
-            // Independent oracle: direct endpoint comparisons, no BVH helper.
-            let expected: Vec<u32> = shapes
-                .owned()
-                .filter(|(_, s)| {
-                    s.layer == layer
-                        && s.rect.ux > query.lx
-                        && s.rect.lx < query.ux
-                        && s.rect.uy > query.ly
-                        && s.rect.ly < query.uy
-                })
-                .map(|(id, _)| id)
-                .collect();
-            let mut actual = Vec::new();
-            index
-                .visit(layer, query, shapes, &limits, &mut work, |id, _| {
-                    actual.push(id);
-                    Ok(())
-                })
-                .unwrap();
-            actual.sort_unstable();
-            assert_eq!(actual, expected, "layer {layer}, query {query:?}");
-        }
+        GridIndex::build(
+            shapes,
+            layers,
+            &vec![cell; layers],
+            &limits,
+            u64::MAX,
+            &mut work,
+        )
+        .unwrap()
+    }
+
+    /// Independent oracle: direct endpoint comparisons, no grid helper.
+    fn brute(shapes: &Shapes<'_>, layer: u32, q: Rect) -> Vec<u32> {
+        shapes
+            .owned()
+            .filter(|(_, s)| {
+                s.layer == layer
+                    && s.rect.ux > q.lx
+                    && s.rect.lx < q.ux
+                    && s.rect.uy > q.ly
+                    && s.rect.ly < q.uy
+            })
+            .map(|(id, _)| id)
+            .collect()
+    }
+
+    fn query(index: &GridIndex, layer: u32, q: Rect) -> Vec<u32> {
+        let limits = ExtractLimits::default();
+        let mut found = Vec::new();
         index
+            .visit(layer, q, &limits, &mut 0, |id, _| {
+                found.push(id);
+                Ok(true)
+            })
+            .unwrap();
+        let reported = found.len();
+        found.sort_unstable();
+        found.dedup();
+        assert_eq!(found.len(), reported, "duplicate report for {q:?}");
+        found
+    }
+
+    /// Deterministic 64-bit LCG for reproducible random geometry.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self, n: i64) -> i64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((self.0 >> 33) % n as u64) as i64
+        }
     }
 
     #[test]
-    fn adversarial_boxes_match_brute_force_with_strict_boundaries() {
+    fn random_boxes_touching_edges_and_zero_width_queries_match_brute_force() {
+        let mut rng = Lcg(7);
         let mut input = Vec::new();
-        for i in 0..513i64 {
-            // Long rails, clustered rectangles, equal centroids, diagonal
-            // slivers and negative coordinates all coexist in each layer.
-            let rect = match i % 5 {
-                0 => Rect {
-                    lx: -1_000_000,
-                    ly: i - 260,
-                    ux: 1_000_000,
-                    uy: i - 259,
-                },
-                1 => Rect {
-                    lx: i % 11 - 5,
-                    ly: i % 7 - 3,
-                    ux: i % 11 - 3,
-                    uy: i % 7,
-                },
-                2 => Rect {
-                    lx: -10,
-                    ly: -10,
-                    ux: 10,
-                    uy: 10,
-                },
-                3 => Rect {
-                    lx: i * 97,
-                    ly: i * 83,
-                    ux: i * 97 + 1,
-                    uy: i * 83 + 1,
-                },
-                _ => Rect {
-                    lx: i64::MAX - 1024,
-                    ly: i64::MIN + 1,
-                    ux: i64::MAX,
-                    uy: i64::MIN + 1024,
-                },
+        for i in 0..1500 {
+            let layer = (i % 4) as u32;
+            // Snap to a coarse lattice so that many edges touch exactly and
+            // many shapes share cell boundaries.
+            let (x, y) = (rng.next(400) * 5 - 900, rng.next(400) * 5 - 700);
+            let (w, h) = match i % 7 {
+                0 => (rng.next(4000) + 1, 5),
+                1 => (5, rng.next(4000) + 1),
+                2 => (50, 50),
+                _ => (rng.next(60) + 1, rng.next(60) + 1),
             };
-            input.push(((i % 7) as u32, rect));
+            input.push((
+                layer,
+                Rect {
+                    lx: x,
+                    ly: y,
+                    ux: x + w,
+                    uy: y + h,
+                },
+            ));
         }
         let shapes = shapes(input);
         let mut queries = Vec::new();
-        for layer in 0..8 {
-            for i in -32..32i64 {
-                queries.push((
-                    layer,
-                    Rect {
-                        lx: i * 5,
-                        ly: i * 7,
-                        ux: i * 5 + 10,
-                        uy: i * 7 + 3,
-                    },
-                ));
+        for _ in 0..600 {
+            let (x, y) = (rng.next(500) * 5 - 1200, rng.next(500) * 5 - 1000);
+            let (w, h) = match rng.next(5) {
+                0 => (0, rng.next(200)),
+                1 => (rng.next(200), 0),
+                2 => (0, 0),
+                _ => (rng.next(300), rng.next(300)),
+            };
+            queries.push(Rect {
+                lx: x,
+                ly: y,
+                ux: x + w,
+                uy: y + h,
+            });
+        }
+        queries.push(Rect {
+            lx: i64::MIN,
+            ly: i64::MIN,
+            ux: i64::MAX,
+            uy: i64::MAX,
+        });
+        queries.push(Rect {
+            lx: 1 << 40,
+            ly: 1 << 40,
+            ux: (1 << 40) + 5,
+            uy: (1 << 40) + 5,
+        });
+        // A small base cell forces doubling; a huge one forces one cell.
+        for cell in [1, 7, 64, 1000, 1 << 50] {
+            let index = build(&shapes, 5, cell);
+            for &q in &queries {
+                for layer in 0..5 {
+                    assert_eq!(query(&index, layer, q), brute(&shapes, layer, q), "{q:?}");
+                }
             }
-            for rect in [
+        }
+    }
+
+    #[test]
+    fn extreme_coordinates_use_one_cell_and_stay_exact() {
+        let shapes = shapes([
+            (
+                0,
                 Rect {
-                    lx: -10,
-                    ly: -10,
-                    ux: 10,
-                    uy: 10,
+                    lx: i64::MIN + 1,
+                    ly: -1,
+                    ux: i64::MIN + 10,
+                    uy: 1,
                 },
+            ),
+            (
+                0,
                 Rect {
-                    lx: 10,
-                    ly: -10,
-                    ux: 11,
-                    uy: 10,
+                    lx: i64::MAX - 10,
+                    ly: -1,
+                    ux: i64::MAX,
+                    uy: 1,
                 },
-                Rect {
-                    lx: 0,
-                    ly: -5,
-                    ux: 0,
-                    uy: 5,
-                },
+            ),
+            (
+                0,
                 Rect {
                     lx: -5,
-                    ly: 0,
-                    ux: 5,
-                    uy: 0,
-                },
-                Rect {
-                    lx: i64::MIN,
                     ly: i64::MIN,
-                    ux: i64::MAX,
+                    ux: 5,
                     uy: i64::MAX,
                 },
-            ] {
-                queries.push((layer, rect));
-            }
+            ),
+        ]);
+        let index = build(&shapes, 1, 1);
+        for q in [
+            Rect {
+                lx: i64::MIN,
+                ly: 0,
+                ux: i64::MIN + 5,
+                uy: 0,
+            },
+            Rect {
+                lx: i64::MAX - 1,
+                ly: -2,
+                ux: i64::MAX,
+                uy: 2,
+            },
+            Rect {
+                lx: 0,
+                ly: 0,
+                ux: 0,
+                uy: 0,
+            },
+            Rect {
+                lx: 5,
+                ly: 0,
+                ux: 6,
+                uy: 1,
+            },
+        ] {
+            assert_eq!(query(&index, 0, q), brute(&shapes, 0, q), "{q:?}");
         }
-        check(&shapes, 8, &queries);
+        assert_eq!(index.entries(), 3);
     }
 
     #[test]
-    fn all_small_counts_and_skewed_layers_respect_allocation_bound() {
-        for count in 0..257 {
-            let shapes = shapes((0..count).map(|i| {
-                let x = if i % 13 == 0 { i64::MAX - 2 } else { i as i64 };
-                let layer = if i < 7 { i as u32 } else { 7 };
-                (
-                    layer,
-                    Rect {
-                        lx: x,
-                        ly: -1,
-                        ux: x + 1,
-                        uy: 1,
-                    },
-                )
-            }));
-            let index = check(&shapes, 8, &[]);
-            let allocated = index.ids.capacity() * size_of::<u32>()
-                + index.nodes.capacity() * size_of::<Node>()
-                + BUILD_STACK_BYTES
-                + MAX_DEPTH * size_of::<u32>()
-                + size_of::<ShapeIndex>();
-            assert!(allocated as u64 <= ShapeIndex::estimated_bytes(count, 8));
+    fn cells_never_outnumber_shapes_and_bytes_are_exact() {
+        let shapes = shapes((0..100i64).map(|i| {
+            (
+                (i % 2) as u32,
+                Rect {
+                    lx: i * 1000,
+                    ly: 0,
+                    ux: i * 1000 + 10,
+                    uy: 10,
+                },
+            )
+        }));
+        let index = build(&shapes, 3, 1);
+        let mut bytes = 0u64;
+        for g in index.layers.iter().flatten() {
+            assert!(g.offsets.len() - 1 <= 50, "{} cells", g.offsets.len() - 1);
+            let Entries::Compact(e) = &g.entries else {
+                panic!("small layers use compact entries")
+            };
+            bytes += (g.offsets.capacity() * 4 + e.capacity() * size_of::<Compact>()) as u64;
         }
-        assert_eq!(size_of::<Node>(), 48);
+        assert!(index.layers[2].is_none());
+        assert_eq!(bytes, index.bytes());
+        assert_eq!(size_of::<Compact>(), 20);
+        assert_eq!(size_of::<Wide>(), 40);
     }
 
     #[test]
-    fn build_and_query_budgets_fail_without_visiting_unbounded_candidates() {
+    fn budgets_fail_without_unbounded_scans() {
         let shapes = shapes((0..256).map(|i| {
             (
                 0,
@@ -463,44 +666,84 @@ mod tests {
                 },
             )
         }));
-        let mut limits = ExtractLimits {
-            max_work: 1,
-            ..Default::default()
-        };
-        assert!(ShapeIndex::build(&shapes, 1, &limits, &mut 0).is_err());
-        limits.max_work = 100_000;
+        let mut limits = ExtractLimits::default();
         let mut work = 0;
-        let index = ShapeIndex::build(&shapes, 1, &limits, &mut work).unwrap();
+        // Entry cap, memory allowance and construction work are enforced.
+        let capped = ExtractLimits {
+            max_bin_entries: 255,
+            ..limits.clone()
+        };
+        assert!(GridIndex::build(&shapes, 1, &[1], &capped, u64::MAX, &mut 0).is_err());
+        assert!(GridIndex::build(&shapes, 1, &[1], &limits, 1000, &mut 0).is_err());
+        let tight = ExtractLimits {
+            max_work: 10,
+            ..limits.clone()
+        };
+        assert!(GridIndex::build(&shapes, 1, &[1], &tight, u64::MAX, &mut 0).is_err());
+        let index = GridIndex::build(&shapes, 1, &[1], &limits, u64::MAX, &mut work).unwrap();
+        assert_eq!(work, index.entries());
+        assert!(index.entries() >= 256);
+        // A local query is charged a few cells, not the whole layer.
+        let mut local = 0;
+        index
+            .visit(
+                0,
+                Rect {
+                    lx: 100,
+                    ly: 0,
+                    ux: 101,
+                    uy: 1,
+                },
+                &limits,
+                &mut local,
+                |_, _| Ok(true),
+            )
+            .unwrap();
+        assert!(local < 16, "local query charged {local}");
         limits.max_work = work + 3;
-        let mut visits = 0;
+        let whole = Rect {
+            lx: -1,
+            ly: -1,
+            ux: 300,
+            uy: 2,
+        };
         assert!(
             index
-                .visit(
-                    0,
-                    Rect {
-                        lx: -1,
-                        ly: -1,
-                        ux: 300,
-                        uy: 2
-                    },
-                    &shapes,
-                    &limits,
-                    &mut work,
-                    |_, _| {
-                        visits += 1;
-                        Ok(())
-                    }
-                )
+                .visit(0, whole, &limits, &mut work, |_, _| Ok(true))
                 .is_err()
         );
-        assert!(visits <= 3);
-        limits.max_shapes = 255;
-        assert!(ShapeIndex::build(&shapes, 1, &limits, &mut 0).is_err());
-    }
-
-    #[test]
-    fn malformed_geometry_queries_and_visitor_failures_propagate() {
-        let bad = shapes([(
+        // Early stop, visitor errors and malformed queries propagate.
+        let limits = ExtractLimits::default();
+        let mut visits = 0;
+        assert!(
+            !index
+                .visit(0, whole, &limits, &mut 0, |_, _| {
+                    visits += 1;
+                    Ok(visits < 3)
+                })
+                .unwrap()
+        );
+        assert_eq!(visits, 3);
+        assert!(
+            index
+                .visit(0, whole, &limits, &mut 0, |_, _| Err(budget(
+                    "visitor control"
+                )))
+                .is_err()
+        );
+        assert!(
+            index
+                .visit(0, Rect { ux: -3, ..whole }, &limits, &mut 0, |_, _| Ok(
+                    true
+                ))
+                .is_err()
+        );
+        assert!(
+            index
+                .visit(9, whole, &limits, &mut 0, |_, _| Ok(true))
+                .unwrap()
+        );
+        let bad = self::shapes([(
             1,
             Rect {
                 lx: 0,
@@ -509,101 +752,7 @@ mod tests {
                 uy: 1,
             },
         )]);
-        let limits = ExtractLimits::default();
-        assert!(ShapeIndex::build(&bad, 1, &limits, &mut 0).is_err());
-        let bad = shapes([(
-            0,
-            Rect {
-                lx: 1,
-                ly: 0,
-                ux: 0,
-                uy: 1,
-            },
-        )]);
-        assert!(ShapeIndex::build(&bad, 1, &limits, &mut 0).is_err());
-        let shapes = shapes([(
-            0,
-            Rect {
-                lx: -1,
-                ly: -1,
-                ux: 1,
-                uy: 1,
-            },
-        )]);
-        let index = ShapeIndex::build(&shapes, 1, &limits, &mut 0).unwrap();
-        let query = Rect {
-            lx: -2,
-            ly: -2,
-            ux: 2,
-            uy: 2,
-        };
-        assert!(
-            index
-                .visit(1, query, &shapes, &limits, &mut 0, |_, _| Ok(()))
-                .is_err()
-        );
-        assert!(
-            index
-                .visit(0, query, &shapes, &limits, &mut 0, |_, _| Err(budget(
-                    "visitor control"
-                )))
-                .is_err()
-        );
-        assert!(
-            index
-                .visit(
-                    0,
-                    Rect { ux: -3, ..query },
-                    &shapes,
-                    &limits,
-                    &mut 0,
-                    |_, _| Ok(())
-                )
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn local_queries_do_not_scan_the_whole_retained_shape_universe() {
-        // Peak fixture allocation: 16,384 shapes (<1 MiB) plus <0.6 MiB
-        // of BVH buffers and two test workers; no materialized graph paths.
-        let shapes = shapes((0..16_384i64).map(|i| {
-            let x = i % 128 * 100;
-            let y = i / 128 * 100;
-            (
-                0,
-                Rect {
-                    lx: x,
-                    ly: y,
-                    ux: x + 1,
-                    uy: y + 1,
-                },
-            )
-        }));
-        let limits = ExtractLimits::default();
-        let index = ShapeIndex::build(&shapes, 1, &limits, &mut 0).unwrap();
-        let mut work = 0;
-        let mut found = Vec::new();
-        index
-            .visit(
-                0,
-                Rect {
-                    lx: 6399,
-                    ly: 6399,
-                    ux: 6402,
-                    uy: 6402,
-                },
-                &shapes,
-                &limits,
-                &mut work,
-                |id, _| {
-                    found.push(id);
-                    Ok(())
-                },
-            )
-            .unwrap();
-        assert_eq!(found, [64 * 128 + 64]);
-        assert!(work < 128, "local query charged {work} probes");
+        assert!(GridIndex::build(&bad, 1, &[1], &limits, u64::MAX, &mut 0).is_err());
     }
 
     #[test]
@@ -660,7 +809,8 @@ mod tests {
         .unwrap();
         shapes.push(shape);
         assert_eq!(shapes.virtual_count(), 1);
-        let index = check(&shapes, 1, &[(0, rect)]);
-        assert_eq!(index.ids, [0, 2, 3]);
+        let index = build(&shapes, 1, 1);
+        assert_eq!(query(&index, 0, rect), [0, 2, 3]);
+        assert_eq!(index.entries(), 3);
     }
 }
