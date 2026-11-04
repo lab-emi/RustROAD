@@ -88,6 +88,15 @@ strictly improved exact-target checkpoint retains that checkpoint for the
 common legalizer and final no-worse gate; a stall without it falls back. The iteration horizon is
 reported as a horizon, without a convergence-rate claim.
 
+Exhausting `max_evaluations` after such a checkpoint also retains the best
+exact-target checkpoint, reports `evaluation_horizon_after_checkpoint`, and
+leaves acceptance to the same legalizer and no-worse gate
+(`stop_at_evaluation_cap`, default `true`). On a real design the hard cap of
+512 evaluations is reached before the 200-iteration horizon (the Ibex
+temporary netlist stops after about 196 iterations), so the strict alternative
+discarded every improvement. `"stop_at_evaluation_cap": false` restores that
+strict baseline fallback; the default stays out of serialized configurations.
+
 The mathematical basis is the published formulation in
 [Lu et al., ePlace, TODAES 2015](https://doi.org/10.1145/2699873). This prototype
 uses its own fixed-grid discrete operator and differentiated deposition; it

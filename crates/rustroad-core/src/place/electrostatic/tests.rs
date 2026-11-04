@@ -391,7 +391,8 @@ fn late_stall_retains_checkpoint_but_hard_failure_keeps_baseline() {
     assert_eq!(report.status, "fallback_line_search");
     assert_eq!(report.counts.iterations, 0);
 
-    // A real accepted checkpoint must not hide a subsequent evaluation cap.
+    // By default an exhausted evaluation cap after a real checkpoint keeps
+    // the best exact-target checkpoint and says so; the integer gate decides.
     let capped = ElectrostaticConfig {
         max_iterations: 6,
         max_evaluations: 4,
@@ -399,9 +400,27 @@ fn late_stall_retains_checkpoint_but_hard_failure_keeps_baseline() {
         max_backtracks: 4,
         ..mode
     };
+    assert!(capped.stop_at_evaluation_cap);
     let config = PlaceConfig {
         electrostatic: Some(capped.clone()),
         ..base.clone()
+    };
+    let r = super::super::place(&p, &config, &limits).unwrap();
+    super::super::check_legal(&p, &r.positions).unwrap();
+    let report = r.electrostatic.unwrap();
+    assert_eq!(report.termination, "evaluation_horizon_after_checkpoint");
+    assert_eq!(report.counts.evaluations, 4);
+    assert!(report.counts.iterations > 0);
+    assert!(report.status == "accepted_no_worse" || report.status == "fallback_no_improvement");
+    assert!(r.hpwl <= legacy.hpwl);
+
+    // The explicit strict option must not hide that cap: baseline fallback.
+    let config = PlaceConfig {
+        electrostatic: Some(ElectrostaticConfig {
+            stop_at_evaluation_cap: false,
+            ..capped
+        }),
+        ..base
     };
     let r = super::super::place(&p, &config, &limits).unwrap();
     assert_eq!(r.positions, legacy.positions);
@@ -414,22 +433,6 @@ fn late_stall_retains_checkpoint_but_hard_failure_keeps_baseline() {
         "P1_HARD_CAP_AFTER_PROGRESS={}",
         serde_json::to_string(&report).unwrap()
     );
-
-    // Only the explicit option keeps that checkpoint, and it says so.
-    let config = PlaceConfig {
-        electrostatic: Some(ElectrostaticConfig {
-            stop_at_evaluation_cap: true,
-            ..capped
-        }),
-        ..base
-    };
-    let r = super::super::place(&p, &config, &limits).unwrap();
-    let report = r.electrostatic.unwrap();
-    assert_eq!(report.termination, "evaluation_horizon_after_checkpoint");
-    assert_eq!(report.counts.evaluations, 4);
-    assert!(report.counts.iterations > 0);
-    assert!(report.status == "accepted_no_worse" || report.status == "fallback_no_improvement");
-    assert!(r.hpwl <= legacy.hpwl);
 }
 
 #[test]
@@ -449,9 +452,22 @@ fn spacing_aware_density_deposits_the_gap_but_keeps_physical_edges_and_defaults_
         workers: 2,
         ..ElectrostaticConfig::default()
     };
-    // The options stay out of serialized configs unless explicitly enabled.
+    // Default values stay out of serialized configs: spacing-aware density is
+    // off and the evaluation-cap checkpoint is kept unless explicitly disabled.
     let text = serde_json::to_string(&mode).unwrap();
     assert!(!text.contains("spacing_aware_density") && !text.contains("stop_at_evaluation_cap"));
+    let parsed: ElectrostaticConfig = serde_json::from_str("{}").unwrap();
+    assert!(parsed.stop_at_evaluation_cap && !parsed.spacing_aware_density);
+    let strict = ElectrostaticConfig {
+        stop_at_evaluation_cap: false,
+        ..mode.clone()
+    };
+    let text = serde_json::to_string(&strict).unwrap();
+    assert!(text.contains("\"stop_at_evaluation_cap\":false"));
+    assert_eq!(
+        serde_json::from_str::<ElectrostaticConfig>(&text).unwrap(),
+        strict
+    );
     let enabled = ElectrostaticConfig {
         spacing_aware_density: true,
         ..mode.clone()

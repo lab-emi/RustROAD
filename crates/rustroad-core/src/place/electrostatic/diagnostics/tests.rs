@@ -225,6 +225,9 @@ fn observer_and_late_numerical_failure_never_become_baseline_success() {
         c.max_evaluations = 4;
         c.initial_step_milli = 1000;
         c.max_backtracks = 4;
+        // The strict option turns this evaluation cap after progress into a
+        // late budget failure (the default keeps the checkpoint instead).
+        c.stop_at_evaluation_cap = false;
         assert!(diagnose_cpu_ref(&p, &cfg, &limits, context(), &mut |_| Ok(())).is_err());
     });
 }
