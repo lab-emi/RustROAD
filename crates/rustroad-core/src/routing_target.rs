@@ -584,19 +584,25 @@ mod tests {
         use std::cmp::Reverse;
         use std::collections::BinaryHeap;
 
-        // 5 x 5 positions on 4 alternating layers (100 states), unit 40.
+        // 5 x 5 positions on 4 alternating layers (100 states), pitch 40 or
+        // 30, wire steps priced like the router's (`troute::scaled`, rounded
+        // up) while the bound scales whole distances down, so steps whose
+        // scaled cost is fractional (30 DBU at 1250 milli is 37.5) stay above it.
         let vertical = [false, true, false, true];
         let pairs = [(0usize, 1usize, 80u64), (1, 2, 120), (2, 3, 200)];
-        for milli in [
-            [1000u64; 4],
-            [1000, 1000, 1300, 1600],
-            [1000, 1200, 1500, 3000],
+        for (unit, milli) in [
+            (40u64, [1000u64; 4]),
+            (40, [1000, 1000, 1300, 1600]),
+            (40, [1000, 1200, 1500, 3000]),
+            (30, [1000; 4]),
+            (30, [1250; 4]),
+            (30, [1250, 1330, 1500, 1990]),
         ] {
             for wrong in [1u64, 4] {
                 let model = CostModel::weighted(&vertical, &pairs, wrong, &milli).unwrap();
                 let step = |layer: usize, preferred: bool| {
-                    let base = if preferred { 40 } else { 40 * wrong };
-                    base * milli[layer] / 1000
+                    let base = if preferred { unit } else { unit * wrong };
+                    crate::troute::scaled(base, milli[layer])
                 };
                 let neighbours = |id: usize| {
                     let (layer, x, y) = (id / 25, id % 5, id % 25 / 5);
@@ -625,8 +631,8 @@ mod tests {
                         .estimate(
                             start / 25,
                             goal / 25,
-                            (start % 5).abs_diff(goal % 5) as u64 * 40,
-                            (start % 25 / 5).abs_diff(goal % 25 / 5) as u64 * 40,
+                            (start % 5).abs_diff(goal % 5) as u64 * unit,
+                            (start % 25 / 5).abs_diff(goal % 25 / 5) as u64 * unit,
                         )
                         .unwrap()
                 };
@@ -648,13 +654,16 @@ mod tests {
                     for (start, &exact) in actual.iter().enumerate() {
                         let h = bound(start, goal);
                         // Admissible, and exact while every wire is at unit price.
-                        assert!(h <= exact, "{milli:?} {wrong} {start} {goal}");
+                        assert!(h <= exact, "{unit} {milli:?} {wrong} {start} {goal}");
                         if milli == [1000; 4] {
-                            assert_eq!(h, exact, "{wrong} {start} {goal}");
+                            assert_eq!(h, exact, "{unit} {wrong} {start} {goal}");
                         }
                         // Consistent: no step lowers the bound by more than it costs.
                         for (next, c) in neighbours(start) {
-                            assert!(h <= c + bound(next, goal), "{milli:?} {start} {next}");
+                            assert!(
+                                h <= c + bound(next, goal),
+                                "{unit} {milli:?} {start} {next}"
+                            );
                         }
                     }
                 }

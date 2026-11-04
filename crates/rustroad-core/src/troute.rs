@@ -4376,12 +4376,15 @@ fn pin_box(t: &Terminal) -> Rect {
     })
 }
 
-/// Wire-step cost at a layer multiplier in thousandths (1000 is exact).
-fn scaled(cost: u64, milli: u64) -> u64 {
+/// Wire-step cost at a layer multiplier in thousandths (1000 is exact),
+/// rounded up: the search bound scales whole distances and rounds down
+/// (`routing_target::CostModel`), so a path of several fractional steps never
+/// costs less than the bound charges for it.
+pub(crate) fn scaled(cost: u64, milli: u64) -> u64 {
     if milli == 1000 {
         cost
     } else {
-        cost.saturating_mul(milli) / 1000
+        cost.saturating_mul(milli).div_ceil(1000)
     }
 }
 

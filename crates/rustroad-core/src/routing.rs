@@ -420,14 +420,17 @@ pub struct TrackPlan {
 }
 
 /// Detailed-route quality controls of the track router (all optional; the
-/// defaults reproduce the legacy search exactly).
+/// defaults reproduce the legacy search and repair exactly).
 ///
 /// Every step cost stays at least its legacy value (multipliers are at
-/// least 1000 milli and the bend surcharge is non-negative) and the search
-/// lower bound charges the cheapest layer of each axis and the cheapest via
-/// chain between layers, so the bound stays admissible and consistent: it is
-/// the exact distance in an obstacle-free relaxation whose step costs never
-/// exceed the real ones.
+/// least 1000 milli, scaled wire steps are rounded up and the bend surcharge
+/// is non-negative) and the search lower bound charges the cheapest layer of
+/// each axis (scaled distances rounded down) and the cheapest via chain
+/// between layers, so the bound never exceeds the cost of a path and drops
+/// by at most a step's cost per step (admissible and consistent). A bend
+/// surcharge depends on the step that reached a node while search states
+/// are nodes, so with `bend_cost` even weight 1 is not guaranteed to find
+/// the cheapest path.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct RouteQor {
     /// Initial detailed routing joins a net's terminals in Prim order: the
@@ -460,8 +463,7 @@ pub struct RouteQor {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub via_cost_milli: Vec<u32>,
     /// Surcharge (DBU-equivalent) of a wire step that turns from the axis of
-    /// the preceding wire step on the same layer, and of a via that returns
-    /// to the layer the preceding via left (a two-via U-turn).
+    /// the wire step that reached its node on the same layer.
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub bend_cost: u64,
     /// Hard (non-rip-up) searches of nets with at most this many terminals

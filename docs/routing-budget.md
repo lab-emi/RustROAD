@@ -323,9 +323,16 @@ replay of the legacy Metal3-access configuration (no `qor`) writes a
 
 The search lower bound (`routing_target::CostModel`) prices each via pair at
 its own cost (Dijkstra over layer and covered directions instead of a hop
-count) and each axis at the cheapest layer multiplier, so it stays admissible
-and consistent; with unit wire multipliers it is exact on the obstacle-free
-relaxation (`weighted_bound_is_admissible_consistent_and_exact_for_unit_wires`).
+count) and each axis at the cheapest layer multiplier, scaling whole distances
+and rounding down, while the search rounds each scaled wire step up
+(`troute::scaled`). So the bound never exceeds the cost of a path and drops by
+at most a step's cost per step (admissible and consistent), also for steps
+whose scaled cost is fractional; with unit wire multipliers it is exact on the
+obstacle-free relaxation
+(`weighted_bound_is_admissible_consistent_and_exact_for_unit_wires`). The bend
+surcharge depends on the step that reached a node while search states are
+nodes, so with `bend_cost` the bound is still a lower bound but even weight 1
+is not guaranteed to find the cheapest path.
 
 Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
 remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared

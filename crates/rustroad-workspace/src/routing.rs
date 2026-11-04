@@ -159,7 +159,7 @@ pub struct RouteQorConfig {
     /// Via cost multiplier by the via's upper layer, thousandths (>= 1000).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub via_cost_milli: BTreeMap<String, u32>,
-    /// Surcharge of a same-layer turn and of a two-via U-turn (DBU-equivalent).
+    /// Surcharge of a same-layer turn (DBU-equivalent).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub bend_cost: u64,
     /// Hard searches of nets with at most this many terminals use
