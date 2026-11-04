@@ -148,7 +148,13 @@ values and derivatives and per-object deposition weights are computed in
 contiguous parallel ranges and gathered serially in stored order; each
 evaluation computes the deposition weights once and reuses them for the
 adjoint, whose per-object forces are independent. Every sum therefore has the
-same operands in the same order for any worker count.
+same operands in the same order for any worker count. Failures keep the serial
+order too: each range records its first failing net or object, and the serial
+gather charges the work meter object by object and reports the first failure
+in stored order, budget before an object's own numerical check, so the reason
+and the meter state at a failure do not depend on the worker count. The
+effective worker count is `workers` bounded by the caller's pool, so
+determinism evidence must vary `workers`, not only `--threads`.
 
 ## Qualification scope
 

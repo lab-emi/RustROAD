@@ -811,3 +811,148 @@ fn independent_fixture_probe() {
     }
     println!("P1_NUMERICAL_OUTPUT={}", serde_json::Value::Object(output));
 }
+/// Parallel wire and density ranges must report the failure, and leave the
+/// meter, exactly as the serial loops do, for any worker count, including
+/// uneven ranges (20 objects over 3 workers: 7/7/6; 21 nets over 4: 6/6/6/3)
+/// and failures in a later range than an earlier failure.
+#[test]
+fn parallel_ranges_report_the_serial_first_failure_and_meter_state() {
+    let p = problem();
+    let c = PlaceConfig {
+        electrostatic: Some(ElectrostaticConfig::default()),
+        ..PlaceConfig::default()
+    };
+    let domain = || {
+        Domain::new(crate::Rect {
+            lx: 0,
+            ly: 0,
+            ux: 1000,
+            uy: 400,
+        })
+        .unwrap()
+    };
+    let valid: Vec<[f64; 2]> = (0..20)
+        .map(|i| [0.03 + 0.047 * i as f64, 0.05 + 0.1 * (i % 4) as f64])
+        .collect();
+    let with = |edits: &[(usize, f64)]| {
+        let mut v = valid.clone();
+        for &(i, x) in edits {
+            v[i][0] = x;
+        }
+        v
+    };
+    // Wire: a NaN coordinate fails as `invalid_wa_input`; opposite huge
+    // coordinates on one net fail later in the WA gradient.
+    let wire_run = |workers: usize, positions: &[[f64; 2]]| {
+        let model = super::prepare_model(&p, &c, domain(), 42, workers).unwrap();
+        let mut gradient = vec![[0.0; 2]; positions.len()];
+        let mut scratch = wire::Scratch::default();
+        let cfg = ElectrostaticConfig::default();
+        let (result, pins) = run_meter(&cfg, |m| {
+            let r = wire::evaluate(&model, positions, 0.01, &mut gradient, &mut scratch, m);
+            (r, m.counts.pin_evaluations)
+        });
+        let result = result.map(f64::to_bits).map_err(|f| format!("{f:?}"));
+        let bits: Vec<[u64; 2]> = gradient.iter().map(|g| g.map(f64::to_bits)).collect();
+        (result, pins, bits)
+    };
+    let cases = [
+        // Net 9 (range 2 of 3) fails before net 17 (range 3 of 3).
+        (
+            with(&[(9, f64::NAN), (16, 1e308), (17, -1e308)]),
+            "invalid_wa_input",
+        ),
+        (
+            with(&[(9, 1e308), (10, -1e308), (17, f64::NAN)]),
+            "nonfinite_wa_gradient",
+        ),
+    ];
+    for (positions, reason) in &cases {
+        let (serial, pins, _) = wire_run(1, positions);
+        assert_eq!(serial, Err(format!("Numerical({reason:?})")));
+        for workers in 2..=5 {
+            let (r, n, _) = wire_run(workers, positions);
+            assert_eq!((&r, n), (&serial, pins), "wire workers {workers}");
+        }
+    }
+    let (serial, _, gradient) = wire_run(1, &valid);
+    assert!(serial.is_ok());
+    for workers in 2..=5 {
+        let (r, _, g) = wire_run(workers, &valid);
+        assert_eq!(
+            (r, g),
+            (serial.clone(), gradient.clone()),
+            "wire workers {workers}"
+        );
+    }
+    // Density: a NaN centre fails as `unsupported_kernel_extent`, a centre
+    // far outside the domain as `kernel_outside_domain`; the interaction
+    // budget is charged object by object before each object's work.
+    let model = super::prepare_model(&p, &c, domain(), 42, 1).unwrap();
+    let density_run = |workers: usize, positions: &[[f64; 2]], budget: u64| {
+        let cfg = ElectrostaticConfig {
+            max_density_interactions: budget,
+            ..ElectrostaticConfig::default()
+        };
+        let mut d = run_meter(&cfg, |m| density::Density::new(&model, m)).unwrap();
+        let mut gradient = vec![[0.0; 2]; positions.len()];
+        let (result, used) = run_meter(&cfg, |m| {
+            m.evaluation().unwrap();
+            let r = d.evaluate(&model.bodies, positions, 0.6, workers, &mut gradient, m);
+            (r.map(|v| v.energy.to_bits()), m.counts.density_interactions)
+        });
+        let bits: Vec<[u64; 2]> = gradient.iter().map(|g| g.map(f64::to_bits)).collect();
+        (result.map_err(|f| format!("{f:?}")), used, bits)
+    };
+    let full = u64::MAX;
+    // Interactions charged by objects 0..12 of the valid placement.
+    let (_, before_12, _) = density_run(1, &with(&[(12, f64::NAN)]), full);
+    let (ok, total, gradient) = density_run(1, &valid, full);
+    assert!(ok.is_ok() && before_12 > 0 && total > 2 * before_12);
+    let cases = [
+        (
+            with(&[(9, f64::NAN), (16, 1e3)]),
+            full,
+            "Numerical(\"unsupported_kernel_extent\")",
+        ),
+        (
+            with(&[(9, 1e3), (16, f64::NAN)]),
+            full,
+            "Numerical(\"kernel_outside_domain\")",
+        ),
+        // The forward budget runs out at object 12, after the failure at 5
+        // and before the one at 16.
+        (
+            with(&[(5, f64::NAN)]),
+            before_12,
+            "Numerical(\"unsupported_kernel_extent\")",
+        ),
+        (
+            with(&[(16, f64::NAN)]),
+            before_12,
+            "Budget(\"density_interactions\")",
+        ),
+        // The adjoint pass runs out of budget at object 12.
+        (
+            valid.clone(),
+            total / 2 + before_12,
+            "Budget(\"density_interactions\")",
+        ),
+    ];
+    for (positions, budget, expected) in &cases {
+        let (serial, used, _) = density_run(1, positions, *budget);
+        assert_eq!(serial, Err(expected.to_string()));
+        for workers in 2..=5 {
+            let (r, n, _) = density_run(workers, positions, *budget);
+            assert_eq!((&r, n), (&serial, used), "density workers {workers}");
+        }
+    }
+    for workers in 2..=5 {
+        let (r, n, g) = density_run(workers, &valid, full);
+        assert_eq!(
+            (r, n, g),
+            (ok.clone(), total, gradient.clone()),
+            "density workers {workers}"
+        );
+    }
+}

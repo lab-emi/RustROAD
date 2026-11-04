@@ -144,7 +144,8 @@ struct Weights {
     /// Per object: x length, y length.
     lengths: Vec<[u8; 2]>,
     failure: Option<(usize, Failure)>,
-    adjoint: Option<Failure>,
+    /// First object of the range whose adjoint force is not finite.
+    adjoint: Option<usize>,
 }
 fn weights(bodies: &[Body], positions: &[[f64; 2]], grid: &Grid, out: &mut Weights) {
     out.x.clear();
@@ -380,15 +381,17 @@ impl Density {
         }
         // This is the adjoint of the same normalized deposition operator.
         // The potential has zero mean, so the removed DC charge has no force.
-        // The adjoint visits are charged in object order as before; each
-        // object's force is then independent of every other.
-        for c in chunks {
-            for &[xl, yl] in &c.lengths {
-                meter.interactions(usize::from(xl) * usize::from(yl))?;
-            }
-        }
+        // Each object's force is independent of every other, so contiguous
+        // ranges compute them in parallel and record their first nonfinite
+        // object. The visits are then charged serially in object order and
+        // the first failure is reported exactly as the serial loop did: an
+        // object's visits are charged before its force is checked, so a
+        // budget overrun at a later object never hides an earlier nonfinite
+        // force, and the meter stops where the serial loop stopped. Computing
+        // the forces before charging can only spend one bounded adjoint pass
+        // (the forward deposit already admitted the same visits).
         let (phi, ny) = (&self.phi, self.grid.ny);
-        let force = |c: &Weights, out: &mut [[f64; 2]]| -> Result<(), Failure> {
+        let force = |c: &Weights, out: &mut [[f64; 2]]| -> Option<usize> {
             let (mut xo, mut yo) = (0usize, 0usize);
             for ((i, out), [xl, yl]) in c.objects.clone().zip(out).zip(&c.lengths) {
                 let (xl, yl) = (usize::from(*xl), usize::from(*yl));
@@ -403,14 +406,15 @@ impl Density {
                 let area = bodies[i].area;
                 *out = [area * gx, area * gy];
                 if out.iter().any(|v| !v.is_finite()) {
-                    return Err(Failure::Numerical("nonfinite_density_gradient"));
+                    return Some(i);
                 }
                 (xo, yo) = (xo + xl, yo + yl);
             }
-            Ok(())
+            None
         };
         if jobs == 1 {
-            force(&self.jobs[0], gradient)?;
+            let c = &mut self.jobs[0];
+            c.adjoint = force(c, gradient);
         } else {
             use rayon::prelude::*;
             gradient
@@ -418,10 +422,15 @@ impl Density {
                 .zip(self.jobs.par_iter_mut())
                 .for_each(|(out, c)| {
                     let n = c.objects.len();
-                    c.adjoint = force(c, &mut out[..n]).err();
+                    c.adjoint = force(c, &mut out[..n]);
                 });
-            if let Some(failure) = self.jobs.iter().find_map(|c| c.adjoint) {
-                return Err(failure);
+        }
+        for c in &self.jobs {
+            for (i, &[xl, yl]) in c.objects.clone().zip(&c.lengths) {
+                meter.interactions(usize::from(xl) * usize::from(yl))?;
+                if c.adjoint == Some(i) {
+                    return Err(Failure::Numerical("nonfinite_density_gradient"));
+                }
             }
         }
         Ok(Value {
