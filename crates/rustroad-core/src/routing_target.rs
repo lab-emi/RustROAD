@@ -1,42 +1,83 @@
 //! Bounded routing-tree distance including unavoidable layer changes and directional costs.
 use crate::routing::{budget, distance};
 use crate::{Rect, Result};
-use std::collections::VecDeque;
 
 // The relaxed graph ignores obstacles and minimum-area rules. Its layer walks
 // remember which preferred directions are available, so every physical route
 // costs at least one of the three displacement modes below.
 pub(crate) struct CostModel {
-    hops: Vec<Vec<[u16; 4]>>,
-    via: u64,
+    /// Cheapest via-chain cost from a layer to a layer whose walk covers the
+    /// required preferred directions (bit 1 horizontal, bit 2 vertical).
+    hops: Vec<Vec<[u64; 4]>>,
     wrong: u64,
+    /// Cheapest wire multiplier (thousandths) of each axis: x on a
+    /// horizontal layer, y on a vertical layer, and the wrong-way pair.
+    axis: Axis,
+}
+#[derive(Clone, Copy)]
+struct Axis {
+    x: u64,
+    y: u64,
+    x_wrong: u64,
+    y_wrong: u64,
 }
 impl CostModel {
+    #[cfg(test)]
     pub fn new(vertical: &[bool], edges: &[(usize, usize)], via: u64, wrong: u64) -> Result<Self> {
+        let weighted: Vec<_> = edges.iter().map(|&(a, b)| (a, b, via)).collect();
+        Self::weighted(vertical, &weighted, wrong, &vec![1000; vertical.len()])
+    }
+    /// Per-pair via costs and per-layer wire multipliers (thousandths, at
+    /// least 1000). The bound charges the cheapest via chain between the
+    /// layers and the cheapest multiplier of each axis, so it never exceeds
+    /// the cost of a real path whose steps use these prices; with uniform
+    /// prices it equals `new`.
+    pub fn weighted(
+        vertical: &[bool],
+        edges: &[(usize, usize, u64)],
+        wrong: u64,
+        layer_milli: &[u64],
+    ) -> Result<Self> {
         let n = vertical.len();
-        if n == 0 || n > 64 || edges.len() > 4096 || wrong == 0 || via == 0 {
+        if n == 0
+            || n > 64
+            || edges.len() > 4096
+            || wrong == 0
+            || layer_milli.len() != n
+            || edges.iter().any(|e| e.2 == 0)
+            || layer_milli.iter().any(|&m| m < 1000)
+        {
             return Err(budget("routing lower-bound layer graph"));
         }
         let bit = |i: usize| if vertical[i] { 2usize } else { 1usize };
         let mut adjacent = vec![Vec::new(); n];
-        for &(a, b) in edges {
+        for &(a, b, cost) in edges {
             if a >= n || b >= n {
                 return Err(budget("routing lower-bound layer index"));
             }
-            adjacent[a].push(b);
-            adjacent[b].push(a);
+            adjacent[a].push((b, cost));
+            adjacent[b].push((a, cost));
         }
-        let mut hops = vec![vec![[u16::MAX; 4]; n]; n];
+        let mut hops = vec![vec![[u64::MAX; 4]; n]; n];
         for source in 0..n {
-            let mut distance = vec![[u16::MAX; 4]; n];
+            // Dijkstra over (layer, covered directions); at most 4n states.
+            let mut distance = vec![[u64::MAX; 4]; n];
             distance[source][bit(source)] = 0;
-            let mut queue = VecDeque::from([(source, bit(source))]);
-            while let Some((at, seen)) = queue.pop_front() {
-                for &next in &adjacent[at] {
+            let mut heap = std::collections::BinaryHeap::from([std::cmp::Reverse((
+                0u64,
+                source,
+                bit(source),
+            ))]);
+            while let Some(std::cmp::Reverse((cost, at, seen))) = heap.pop() {
+                if cost != distance[at][seen] {
+                    continue;
+                }
+                for &(next, step) in &adjacent[at] {
                     let mask = seen | bit(next);
-                    if distance[next][mask] == u16::MAX {
-                        distance[next][mask] = distance[at][seen] + 1;
-                        queue.push_back((next, mask));
+                    let reached = cost.saturating_add(step);
+                    if reached < distance[next][mask] {
+                        distance[next][mask] = reached;
+                        heap.push(std::cmp::Reverse((reached, next, mask)));
                     }
                 }
             }
@@ -46,43 +87,70 @@ impl CostModel {
                         .iter()
                         .enumerate()
                         .filter(|(mask, _)| mask & required == required)
-                        .map(|(_, &n)| n)
+                        .map(|(_, &c)| c)
                         .min()
-                        .unwrap_or(u16::MAX);
+                        .unwrap_or(u64::MAX);
                 }
             }
         }
-        Ok(Self { hops, via, wrong })
+        let cheapest = |want_vertical: bool| {
+            (0..n)
+                .filter(|&i| vertical[i] == want_vertical)
+                .map(|i| layer_milli[i])
+                .min()
+                .unwrap_or(1000)
+        };
+        let axis = Axis {
+            x: cheapest(false),
+            y: cheapest(true),
+            x_wrong: cheapest(true),
+            y_wrong: cheapest(false),
+        };
+        Ok(Self { hops, wrong, axis })
     }
     fn estimate(&self, from: usize, to: usize, dx: u64, dy: u64) -> Option<u64> {
         let hops = self.hops.get(from)?.get(to)?;
         let cost = |mask: usize, x: u64, y: u64| {
-            (hops[mask] != u16::MAX).then_some(())?;
-            u64::from(hops[mask])
-                .checked_mul(self.via)?
-                .checked_add(x)?
-                .checked_add(y)
+            (hops[mask] != u64::MAX).then_some(())?;
+            hops[mask].checked_add(x)?.checked_add(y)
         };
+        let scale = |d: u64, milli: u64| {
+            if milli == 1000 {
+                Some(d)
+            } else {
+                d.checked_mul(milli).map(|v| v / 1000)
+            }
+        };
+        let a = self.axis;
+        let (x, y) = (scale(dx, a.x)?, scale(dy, a.y)?);
         match (dx == 0, dy == 0) {
             (true, true) => cost(0, 0, 0),
             (false, true) => [
-                cost(1, dx, 0),
-                dx.checked_mul(self.wrong).and_then(|x| cost(2, x, 0)),
+                cost(1, x, 0),
+                dx.checked_mul(self.wrong)
+                    .and_then(|v| scale(v, a.x_wrong))
+                    .and_then(|x| cost(2, x, 0)),
             ]
             .into_iter()
             .flatten()
             .min(),
             (true, false) => [
-                cost(2, 0, dy),
-                dy.checked_mul(self.wrong).and_then(|y| cost(1, 0, y)),
+                cost(2, 0, y),
+                dy.checked_mul(self.wrong)
+                    .and_then(|v| scale(v, a.y_wrong))
+                    .and_then(|y| cost(1, 0, y)),
             ]
             .into_iter()
             .flatten()
             .min(),
             (false, false) => [
-                cost(3, dx, dy),
-                dy.checked_mul(self.wrong).and_then(|y| cost(1, dx, y)),
-                dx.checked_mul(self.wrong).and_then(|x| cost(2, x, dy)),
+                cost(3, x, y),
+                dy.checked_mul(self.wrong)
+                    .and_then(|v| scale(v, a.y_wrong))
+                    .and_then(|y| cost(1, x, y)),
+                dx.checked_mul(self.wrong)
+                    .and_then(|v| scale(v, a.x_wrong))
+                    .and_then(|x| cost(2, x, y)),
             ]
             .into_iter()
             .flatten()
@@ -509,6 +577,102 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn weighted_bound_is_admissible_consistent_and_exact_for_unit_wires() {
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+
+        // 5 x 5 positions on 4 alternating layers (100 states), unit 40.
+        let vertical = [false, true, false, true];
+        let pairs = [(0usize, 1usize, 80u64), (1, 2, 120), (2, 3, 200)];
+        for milli in [
+            [1000u64; 4],
+            [1000, 1000, 1300, 1600],
+            [1000, 1200, 1500, 3000],
+        ] {
+            for wrong in [1u64, 4] {
+                let model = CostModel::weighted(&vertical, &pairs, wrong, &milli).unwrap();
+                let step = |layer: usize, preferred: bool| {
+                    let base = if preferred { 40 } else { 40 * wrong };
+                    base * milli[layer] / 1000
+                };
+                let neighbours = |id: usize| {
+                    let (layer, x, y) = (id / 25, id % 5, id % 25 / 5);
+                    let mut next = Vec::with_capacity(6);
+                    for (dx, dy) in [(-1isize, 0), (1, 0), (0, -1), (0, 1)] {
+                        let (Some(nx), Some(ny)) = (
+                            x.checked_add_signed(dx).filter(|&v| v < 5),
+                            y.checked_add_signed(dy).filter(|&v| v < 5),
+                        ) else {
+                            continue;
+                        };
+                        let preferred = vertical[layer] == (dy != 0);
+                        next.push((layer * 25 + ny * 5 + nx, step(layer, preferred)));
+                    }
+                    for &(a, b, via) in &pairs {
+                        if layer == a {
+                            next.push((b * 25 + y * 5 + x, via));
+                        } else if layer == b {
+                            next.push((a * 25 + y * 5 + x, via));
+                        }
+                    }
+                    next
+                };
+                let bound = |start: usize, goal: usize| {
+                    model
+                        .estimate(
+                            start / 25,
+                            goal / 25,
+                            (start % 5).abs_diff(goal % 5) as u64 * 40,
+                            (start % 25 / 5).abs_diff(goal % 25 / 5) as u64 * 40,
+                        )
+                        .unwrap()
+                };
+                for goal in 0..100 {
+                    let mut actual = vec![u64::MAX; 100];
+                    actual[goal] = 0;
+                    let mut heap = BinaryHeap::from([Reverse((0, goal))]);
+                    while let Some(Reverse((cost, id))) = heap.pop() {
+                        if actual[id] != cost {
+                            continue;
+                        }
+                        for (next, c) in neighbours(id) {
+                            if cost + c < actual[next] {
+                                actual[next] = cost + c;
+                                heap.push(Reverse((cost + c, next)));
+                            }
+                        }
+                    }
+                    for (start, &exact) in actual.iter().enumerate() {
+                        let h = bound(start, goal);
+                        // Admissible, and exact while every wire is at unit price.
+                        assert!(h <= exact, "{milli:?} {wrong} {start} {goal}");
+                        if milli == [1000; 4] {
+                            assert_eq!(h, exact, "{wrong} {start} {goal}");
+                        }
+                        // Consistent: no step lowers the bound by more than it costs.
+                        for (next, c) in neighbours(start) {
+                            assert!(h <= c + bound(next, goal), "{milli:?} {start} {next}");
+                        }
+                    }
+                }
+            }
+        }
+        // Uniform prices reproduce the legacy hop-count model exactly.
+        let edges = [(0usize, 1usize), (1, 2), (2, 3)];
+        let legacy = CostModel::new(&vertical, &edges, 80, 4).unwrap();
+        let weighted = edges.map(|(a, b)| (a, b, 80));
+        let same = CostModel::weighted(&vertical, &weighted, 4, &[1000; 4]).unwrap();
+        for (from, to, dx, dy) in [(0, 3, 0, 0), (3, 0, 400, 0), (1, 2, 0, 120), (2, 2, 40, 40)] {
+            assert_eq!(
+                legacy.estimate(from, to, dx, dy),
+                same.estimate(from, to, dx, dy)
+            );
+        }
+        // Multipliers below unit price would make the bound inadmissible.
+        assert!(CostModel::weighted(&vertical, &weighted, 4, &[999, 1000, 1000, 1000]).is_err());
     }
 
     #[test]

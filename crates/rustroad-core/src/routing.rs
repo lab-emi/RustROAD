@@ -413,6 +413,106 @@ pub struct TrackPlan {
     /// layer in every search, not only in strict re-routes after cleanup.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub area_stacks: bool,
+    /// Optional detailed-route quality controls. `None` keeps the legacy
+    /// terminal order, step costs and snapshot encoding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qor: Option<RouteQor>,
+}
+
+/// Detailed-route quality controls of the track router (all optional; the
+/// defaults reproduce the legacy search exactly).
+///
+/// Every step cost stays at least its legacy value (multipliers are at
+/// least 1000 milli and the bend surcharge is non-negative) and the search
+/// lower bound charges the cheapest layer of each axis and the cheapest via
+/// chain between layers, so the bound stays admissible and consistent: it is
+/// the exact distance in an obstacle-free relaxation whose step costs never
+/// exceed the real ones.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct RouteQor {
+    /// Initial detailed routing joins a net's terminals in Prim order: the
+    /// driver first, then repeatedly the terminal whose escape top is nearest
+    /// (L1) to an already joined escape top, ties by pin id. Repair keeps its
+    /// own centre-out order.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub prim_order: bool,
+    /// Once a net is routed, drop the upward-via envelopes ("portals") its
+    /// pin escapes reserved. They are search geometry only, and after the
+    /// net is joined they only wall other nets out of the lower layers above
+    /// every pin. Released once per terminal; never restored.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub release_portals: bool,
+    /// Drop every access portal once pin access and global routing are
+    /// done, before the first detailed search (implies `release_portals`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub drop_portals: bool,
+    /// Pin access of nets with at most eight terminals prefers, among legal
+    /// escape tops within two tracks of cost of the cheapest, the one
+    /// nearest the net's other terminals (so aligned pins share a track).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub net_aware_access: bool,
+    /// Wire-step cost multiplier per input layer in thousandths (indexed like
+    /// `RouteInput::layers`, at least 1000; empty means 1000 everywhere).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub layer_cost_milli: Vec<u32>,
+    /// Via cost multiplier by the via's upper layer in thousandths (same
+    /// indexing and range; empty means 1000 everywhere).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub via_cost_milli: Vec<u32>,
+    /// Surcharge (DBU-equivalent) of a wire step that turns from the axis of
+    /// the preceding wire step on the same layer, and of a via that returns
+    /// to the layer the preceding via left (a two-via U-turn).
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub bend_cost: u64,
+    /// Hard (non-rip-up) searches of nets with at most this many terminals
+    /// use `small_net_weight` instead of `heuristic_weight` (0 disables).
+    #[serde(skip_serializing_if = "is_zero_usize")]
+    pub small_net_terminals: usize,
+    /// Priority weight (1..=16) of those small-net hard searches; 1 is
+    /// admissible A*.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub small_net_weight: u64,
+}
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+}
+fn is_zero_usize(value: &usize) -> bool {
+    *value == 0
+}
+impl RouteQor {
+    /// Wire-step multiplier of an input layer (1000 when unset).
+    pub(crate) fn layer_milli(&self, layer: u32) -> u64 {
+        u64::from(
+            self.layer_cost_milli
+                .get(layer as usize)
+                .copied()
+                .unwrap_or(1000),
+        )
+    }
+    /// Via multiplier by the via's upper input layer (1000 when unset).
+    pub(crate) fn via_milli(&self, upper: u32) -> u64 {
+        u64::from(
+            self.via_cost_milli
+                .get(upper as usize)
+                .copied()
+                .unwrap_or(1000),
+        )
+    }
+    pub(crate) fn validate(&self, layers: usize) -> Result<()> {
+        let range = |v: &[u32]| {
+            (v.is_empty() || v.len() == layers) && v.iter().all(|m| (1000..=64_000).contains(m))
+        };
+        if !range(&self.layer_cost_milli)
+            || !range(&self.via_cost_milli)
+            || self.bend_cost > 1 << 40
+            || self.small_net_terminals > 1 << 20
+            || (self.small_net_terminals > 0) != (self.small_net_weight > 0)
+            || self.small_net_weight > 16
+        {
+            return Err(invalid("track router quality controls"));
+        }
+        Ok(())
+    }
 }
 
 /// Explicit bounds for one-owner trials. None in TrackPlan preserves legacy
@@ -5959,6 +6059,93 @@ mod tests {
         // Patches are never legal in legacy mode.
         input.rules = false;
         assert!(validate(&input, &floating, &RouteLimits::default()).is_err());
+    }
+    #[test]
+    fn stair_notch_is_bridged_when_the_robust_fill_touches_other_nets() {
+        // Same-net shapes a (upper) and b (lower) face over 4 DBU across a
+        // 9 DBU gap (width 10, spacing 11): the Metal2 access failure shape
+        // at 1/20 scale. Net 1 blocks the robust box and both legacy bars;
+        // only the stair bridge is clear.
+        let mut input = rules_input();
+        input.die = rect(0, 0, 300, 300);
+        input.layers[0].width = 10;
+        input.layers[0].spacing = 11;
+        // Track-router mode: robust fills, bridges and the neck rules.
+        input.tracks = Some(TrackPlan {
+            tracks: vec![Some((20, 0)), Some((20, 0)), None],
+            routing_layers: None,
+            gcell: 100,
+            global_iterations: 1,
+            capacity_percent: 80,
+            guide_margin: 1,
+            expand_margin: 1,
+            max_ripups_per_net: 1,
+            max_repair_rounds: 1,
+            via_cost: 40,
+            wrong_way_factor: 4,
+            heuristic_weight: 1,
+            repair_heuristic_weight: None,
+            single_owner_repair: None,
+            own_pin_index: None,
+            instance_index: None,
+            memory_mib: 64,
+            max_history_entries: DEFAULT_MAX_HISTORY_ENTRIES,
+            area_stacks: false,
+            qor: None,
+        });
+        input.terminals = vec![
+            terminal(0, true, vec![rect(59, 64, 63, 68)]),
+            terminal(1, false, vec![rect(53, 83, 57, 87)]),
+        ];
+        for r in [rect(20, 45, 45, 58), rect(71, 95, 80, 110)] {
+            input.obstacles.push(Blockage {
+                layer: 0,
+                rect: r,
+                net: Some(1),
+            });
+        }
+        let limits = RouteLimits::default();
+        // b: (56,40)-(66,71); a: (50,80)-(60,135); joined around the right.
+        let path = [
+            ([61, 66], [61, 45], 0),
+            ([61, 45], [150, 45], 0),
+            ([150, 45], [150, 130], 0),
+            ([150, 130], [55, 130], 0),
+            ([55, 130], [55, 85], 0),
+        ];
+        let build = |input: &RouteInput| {
+            let mut routes = manual(input, &path, &[]);
+            routes.access[0].at = [61, 66];
+            routes.access[1].at = [55, 85];
+            routes
+        };
+        let mut routes = build(&input);
+        let before = route_rules::check(&input, &routes, &limits, &mut 0).unwrap();
+        assert!(
+            before
+                .iter()
+                .any(|v| matches!(v, Violation::Spacing { layer: 0, .. })),
+            "{:?}",
+            before.iter().map(|v| v.describe()).collect::<Vec<_>>()
+        );
+        let (_, remaining) = cleanup_report(&input, &mut routes, &limits).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "{:?}",
+            remaining.iter().map(|v| v.describe()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            routes.patches,
+            vec![Patch {
+                net: 0,
+                layer: 0,
+                rect: rect(50, 71, 66, 81)
+            }]
+        );
+        // Deterministic: a second cleanup of the same input picks the same patch.
+        let mut again = build(&input);
+        cleanup_report(&input, &mut again, &limits).unwrap();
+        assert_eq!(again.patches, routes.patches);
     }
     #[test]
     fn min_area_cleanup_splits_the_stub_when_no_side_alone_has_room() {

@@ -581,28 +581,98 @@ pub(crate) fn bridges(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Rect>>
                 }),
             ]);
         }
-    } else if ox <= 0 {
-        for s in [a, b] {
-            let (y0, y1) = span(s.ly, s.uy);
-            out.push(vec![snap(Rect {
-                lx,
-                ly: y0,
-                ux,
-                uy: y1,
-            })]);
-        }
     } else {
-        for s in [a, b] {
-            let (x0, x1) = span(s.lx, s.ux);
-            out.push(vec![snap(Rect {
-                lx: x0,
-                ly,
-                ux: x1,
-                uy,
-            })]);
+        // Facing pair: work in (u, v) with the gap along v; `t` maps back.
+        let across_x = ox <= 0;
+        let t = |r: Rect| if across_x { transpose(r) } else { r };
+        let (ta, tb) = (t(a), t(b));
+        let overlap = if across_x { oy } else { ox };
+        if overlap < i128::from(width) {
+            out.push(vec![snap(t(stair_bridge(ta, tb, width)))]);
+        }
+        let (hull_lo, hull_hi) = (ta.ly.min(tb.ly), ta.uy.max(tb.uy));
+        let (gap_lo, gap_hi) = (ta.uy.min(tb.uy), ta.ly.max(tb.ly));
+        // Bars clipped to two widths past the gap first, then full length.
+        let (near_lo, near_hi) = (
+            (gap_lo - 2 * width).max(hull_lo),
+            (gap_hi + 2 * width).min(hull_hi),
+        );
+        if (near_lo, near_hi) != (hull_lo, hull_hi) {
+            for s in [ta, tb] {
+                let (u0, u1) = span(s.lx, s.ux);
+                out.push(vec![snap(t(Rect {
+                    lx: u0,
+                    ly: near_lo,
+                    ux: u1,
+                    uy: near_hi,
+                }))]);
+            }
+        }
+        for s in [ta, tb] {
+            let (u0, u1) = span(s.lx, s.ux);
+            out.push(vec![snap(t(Rect {
+                lx: u0,
+                ly: hull_lo,
+                ux: u1,
+                uy: hull_hi,
+            }))]);
         }
     }
     out
+}
+
+/// Stair bridge of two same-net shapes that face each other across a gap
+/// over a span narrower than the width (a stair-step notch, e.g. a via pad
+/// half a track beside its own escape): one bar across the gap that spans
+/// both shapes' extents along the facing axis (at most one width past the
+/// facing span) and is at least one width thick across the gap. The union is
+/// then a Z whose inner corners are at least `width` apart, so it has no
+/// sub-width neck, and the bar touches no metal beyond the two shapes' own
+/// extents plus one width. In (u, v) coordinates: the gap runs along v.
+fn stair_bridge(a: Rect, b: Rect, width: i64) -> Rect {
+    let (span_lo, span_hi) = (a.lx.max(b.lx), a.ux.min(b.ux));
+    let u0 = a.lx.min(b.lx).max(span_lo - width);
+    let u1 = a.ux.max(b.ux).min(span_hi + width);
+    let (gap_lo, gap_hi) = (a.uy.min(b.uy), a.ly.max(b.ly));
+    let grow = (width - (gap_hi - gap_lo)).max(0);
+    let (hull_lo, hull_hi) = (a.ly.min(b.ly), a.uy.max(b.uy));
+    Rect {
+        lx: u0,
+        ly: (gap_lo - grow / 2).max(hull_lo),
+        ux: u1,
+        uy: (gap_hi + grow - grow / 2).min(hull_hi),
+    }
+}
+
+/// Same-net fills for a near pair that stay within two widths of its gap:
+/// the robust box, then the bridges that fit in that window. These are the
+/// fills worth reserving room for when other nets block all of them.
+pub(crate) fn local_fills(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Rect>> {
+    let window = {
+        let g = gap_hull(a, b);
+        Rect {
+            lx: g.lx - 2 * width - grid,
+            ly: g.ly - 2 * width - grid,
+            ux: g.ux + 2 * width + grid,
+            uy: g.uy + 2 * width + grid,
+        }
+    };
+    let inside =
+        |r: &Rect| window.lx <= r.lx && r.ux <= window.ux && window.ly <= r.ly && r.uy <= window.uy;
+    let mut out = vec![vec![fill_for_robust(a, b, width, grid)]];
+    out.extend(bridges(a, b, width, grid));
+    out.retain(|rects| rects.iter().all(inside));
+    out.dedup();
+    out
+}
+
+fn transpose(r: Rect) -> Rect {
+    Rect {
+        lx: r.ly,
+        ly: r.lx,
+        ux: r.uy,
+        uy: r.ux,
+    }
 }
 
 /// Bounding boxes of holes enclosed by a rectangle union. Small planes use
@@ -1901,6 +1971,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn captured_metal2_stair_notch_gets_a_neck_free_bridge() {
+        // Metal2 access failure (net 12085): an upper pad and a lower escape
+        // face each other over 80 DBU across a 175 DBU gap (spacing 210,
+        // width 200). The robust box and the legacy bars touched other nets.
+        let a = r(496_550, 63_275, 496_750, 63_565);
+        let b = r(496_670, 62_480, 496_870, 63_100);
+        let (cap, mut w) = (1 << 30, 0);
+        assert_eq!(relation(a, b, 210), Relation::Near);
+        assert!(!local_ok(a, &[b], 210, &mut w, cap).unwrap());
+        let candidates = bridges(a, b, 200, 5);
+        assert_eq!(candidates[0].len(), 1, "{candidates:?}");
+        let bar = candidates[0][0];
+        // One bar over both shapes' extents, a width thick across the gap,
+        // snapped outward to the 5 DBU grid.
+        assert_eq!(bar, r(496_550, 63_085, 496_870, 63_290));
+        // Order-stable: swapped arguments give the same first candidate.
+        assert_eq!(bridges(b, a, 200, 5)[0], vec![bar]);
+        // The gap is covered and the bar meets both shapes: no near pair left.
+        for (x, rest) in [(a, [b, bar]), (b, [a, bar]), (bar, [a, b])] {
+            assert!(local_ok(x, &rest, 210, &mut w, cap).unwrap(), "{x:?}");
+        }
+        assert_eq!(relation(bar, a, 210), Relation::Connected);
+        assert_eq!(relation(bar, b, 210), Relation::Connected);
+        // No stair-step neck, and the Z's inner corners are a width apart.
+        for (x, y) in [(a, bar), (b, bar), (a, b)] {
+            assert!(neck(x, y, 200).is_none());
+        }
+        let (dx, dy) = (i128::from(a.ux - b.lx), i128::from(bar.uy - bar.ly));
+        assert!(dx * dx + dy * dy >= 200 * 200);
+        // It stays inside both shapes' extents (no metal past either end).
+        assert!(bar.lx >= a.lx.min(b.lx) && bar.ux <= a.ux.max(b.ux));
+        assert!(bar.ly >= b.ly && bar.uy <= a.uy);
+        // Side-by-side shapes get the transposed bar.
+        let t = |q: Rect| r(q.ly, q.lx, q.uy, q.ux);
+        assert_eq!(bridges(t(a), t(b), 200, 5)[0], vec![t(bar)]);
+    }
     #[test]
     fn notch_against_own_pin_leg_is_detected_and_covered_gap_is_not() {
         // Pad protrudes 5 DBU past a 375-wide leg; bar above at 222 < 230.

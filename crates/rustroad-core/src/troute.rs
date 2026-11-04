@@ -87,6 +87,11 @@ const SOFT_SCOUT_EXPANSIONS: usize = 250_000;
 const REUSE_ONLY_EXPANSIONS: usize = 10_000;
 /// Sorted window index plus construction headroom (one entry per terminal).
 const WINDOW_INDEX_BYTES: u64 = 32;
+/// Net-aware pin access: extra escape cost (DBU-equivalent) a top may have
+/// over the cheapest one and still be chosen for being nearer the net.
+const ACCESS_HINT_SLACK: u64 = 840;
+/// Net-aware pin access looks at nets of at most this many terminals.
+const ACCESS_HINT_TERMINALS: usize = 8;
 type AccessKey = (u32, Vec<(u32, [i64; 2])>);
 type AccessTables = BTreeMap<AccessKey, Vec<AccessEntry>>;
 
@@ -150,6 +155,56 @@ fn repair_terminal_order(
             t.pin,
         )
     });
+    Ok(())
+}
+
+/// Prim connection order for the initial detailed route (Prim 1957, "Shortest
+/// connection networks and some generalizations"): `group[0]` (the driver)
+/// stays first; every later position takes the remaining terminal whose
+/// point is nearest (L1) to any terminal already placed, ties broken by pin
+/// id. A sequential router that joins each sink to the tree built so far then
+/// grows a spanning tree close to the minimum one instead of zig-zagging in
+/// pin-id order. Pure function of the points and pin ids; O(k^2) work, charged.
+fn prim_terminal_order(
+    group: &mut [&Terminal],
+    point: impl Fn(&Terminal) -> [i64; 2],
+    work: &mut usize,
+    cap: usize,
+) -> Result<()> {
+    let k = group.len();
+    if k < 3 {
+        return Ok(());
+    }
+    *work = work
+        .checked_add(
+            k.checked_mul(k)
+                .ok_or_else(|| budget("prim terminal-order work"))?,
+        )
+        .filter(|&n| n <= cap)
+        .ok_or_else(|| budget("prim terminal-order work"))?;
+    let points: Vec<[i64; 2]> = group.iter().map(|t| point(t)).collect();
+    let l1 = |a: [i64; 2], b: [i64; 2]| a[0].abs_diff(b[0]).saturating_add(a[1].abs_diff(b[1]));
+    // order[i]: index into `group` of the terminal at position i.
+    let mut order: Vec<usize> = (0..k).collect();
+    let mut best: Vec<u64> = points.iter().map(|&p| l1(p, points[0])).collect();
+    for position in 1..k {
+        let mut pick = position;
+        for candidate in position + 1..k {
+            let (c, p) = (order[candidate], order[pick]);
+            if (best[c], group[c].pin) < (best[p], group[p].pin) {
+                pick = candidate;
+            }
+        }
+        order.swap(position, pick);
+        let joined = points[order[position]];
+        for &rest in &order[position + 1..] {
+            best[rest] = best[rest].min(l1(points[rest], joined));
+        }
+    }
+    let original: Vec<&Terminal> = group.to_vec();
+    for (slot, index) in group.iter_mut().zip(order) {
+        *slot = original[index];
+    }
     Ok(())
 }
 
@@ -657,6 +712,9 @@ pub(crate) fn check_plan(input: &RouteInput, plan: &TrackPlan) -> Result<()> {
     {
         return Err(invalid("track plan parameters"));
     }
+    if let Some(qor) = &plan.qor {
+        qor.validate(input.layers.len())?;
+    }
     for (l, t) in input.layers.iter().zip(&plan.tracks) {
         match (l.vertical, t) {
             (Some(_), Some((pitch, offset))) => {
@@ -1079,6 +1137,18 @@ struct Router<'a> {
     graph: Graph,
     access_hops: Vec<Vec<u16>>,
     target_costs: crate::routing_target::CostModel,
+    /// Wire-step multiplier per input layer, thousandths (1000 = legacy).
+    layer_milli: Vec<u64>,
+    /// Via step cost per graph via pair (legacy: `via_cost` for every pair).
+    pair_via: Vec<u64>,
+    /// Same-layer turn surcharge (0 = legacy).
+    bend_cost: u64,
+    /// Terminals whose access portals were released (`RouteQor::release_portals`).
+    portals_released: HashSet<u32, BuildFx>,
+    /// Pin access of the current terminal: where the net's other terminals
+    /// are (their escape tops once reserved, else their pin boxes). Empty
+    /// keeps the legacy cheapest-top choice.
+    access_hint: Vec<Rect>,
     cells: Cells,
     spatial: Spatial<'a>,
     pairs: Vec<ViaPair>,
@@ -1188,16 +1258,37 @@ impl<'a> Router<'a> {
         let n = graph.len;
         let gl = cells.len();
         let access_hops = graph.hop_distances()?;
-        let target_costs = crate::routing_target::CostModel::new(
+        // Step prices: legacy unit multipliers unless quality controls set them.
+        let layer_milli: Vec<u64> = (0..input.layers.len() as u32)
+            .map(|l| plan.qor.as_ref().map_or(1000, |q| q.layer_milli(l)))
+            .collect();
+        let pair_via: Vec<u64> = graph
+            .pairs
+            .iter()
+            .map(|p| {
+                let upper = graph.layers[p.upper].layer;
+                match plan.qor.as_ref().map(|q| q.via_milli(upper)) {
+                    None | Some(1000) => plan.via_cost,
+                    Some(milli) => plan.via_cost.saturating_mul(milli) / 1000,
+                }
+            })
+            .collect();
+        let target_costs = crate::routing_target::CostModel::weighted(
             &graph.layers.iter().map(|l| l.vertical).collect::<Vec<_>>(),
             &graph
                 .pairs
                 .iter()
-                .map(|p| (p.lower, p.upper))
+                .zip(&pair_via)
+                .map(|(p, &cost)| (p.lower, p.upper, cost))
                 .collect::<Vec<_>>(),
-            plan.via_cost,
             plan.wrong_way_factor,
+            &graph
+                .layers
+                .iter()
+                .map(|l| layer_milli[l.layer as usize])
+                .collect::<Vec<_>>(),
         )?;
+        let bend_cost = plan.qor.as_ref().map_or(0, |q| q.bend_cost);
         let mut r = Router {
             input,
             plan,
@@ -1224,6 +1315,11 @@ impl<'a> Router<'a> {
             graph,
             access_hops,
             target_costs,
+            layer_milli,
+            pair_via,
+            bend_cost,
+            portals_released: HashSet::with_hasher(BuildFx),
+            access_hint: Vec::new(),
             cells,
             spatial: Spatial::new(input, limits)?,
             pairs,
@@ -1279,6 +1375,33 @@ impl<'a> Router<'a> {
 
     fn width(&self, layer: u32) -> i64 {
         self.input.layers[layer as usize].width
+    }
+    /// Drop the access portals of a routed net's terminals (opt-in). Each
+    /// terminal is released once, so a shape slot reused after compaction is
+    /// never removed by a later release.
+    fn release_portals(&mut self, terminals: &[&Terminal], plans: &HashMap<u32, Plan>) {
+        if !self
+            .plan
+            .qor
+            .as_ref()
+            .is_some_and(|q| q.release_portals || q.drop_portals)
+        {
+            return;
+        }
+        for t in terminals {
+            let plan = &plans[&t.pin];
+            if plan.portal_shapes == 0 || !self.portals_released.insert(t.pin) {
+                continue;
+            }
+            for &id in plan
+                .shapes
+                .iter()
+                .rev()
+                .take(usize::from(plan.portal_shapes))
+            {
+                self.spatial.remove(id);
+            }
+        }
     }
     fn note_history(&mut self, node: u32) -> Result<()> {
         if let Some(pending) = &mut self.deferred_history {
@@ -1694,7 +1817,17 @@ impl<'a> Router<'a> {
         }
         let mut found = None;
         let mut search = 0usize;
-        while let Some(Reverse((_, cost, id))) = heap.pop() {
+        // Net-aware choice (opt-in): among the legal tops within
+        // `ACCESS_HINT_SLACK` of the cheapest, take the one nearest the net's
+        // other terminals (twice their L1 distance added to the cost), so
+        // two pins that can share a track land on it. Ties: cost, then id.
+        let hint = self.access_hint.clone();
+        let mut first_goal: Option<u64> = None;
+        let mut best_goal: Option<((u64, u64, u32), Option<usize>)> = None;
+        while let Some(Reverse((priority, cost, id))) = heap.pop() {
+            if first_goal.is_some_and(|c| priority > c.saturating_add(ACCESS_HINT_SLACK)) {
+                break;
+            }
             if visited[&id].0 != cost {
                 continue;
             }
@@ -1756,8 +1889,23 @@ impl<'a> Router<'a> {
                     None
                 };
                 if !needs_portal || portal.is_some() {
-                    found = Some((id, portal));
-                    break;
+                    if hint.is_empty() {
+                        found = Some((id, portal));
+                        break;
+                    }
+                    let near = hint
+                        .iter()
+                        .map(|r| {
+                            at[0].abs_diff(at[0].clamp(r.lx, r.ux))
+                                + at[1].abs_diff(at[1].clamp(r.ly, r.uy))
+                        })
+                        .min()
+                        .unwrap_or(0);
+                    let key = (cost.saturating_add(near.saturating_mul(2)), cost, id);
+                    if best_goal.is_none_or(|(b, _)| key < b) {
+                        best_goal = Some((key, portal));
+                    }
+                    first_goal.get_or_insert(cost);
                 }
             }
             self.tick(&mut search, "pin access", t.pin, t.net)?;
@@ -1996,6 +2144,9 @@ impl<'a> Router<'a> {
                 visited.insert(nid, (nc, id, kind));
                 heap.push(Reverse((nc.saturating_add(potential.cost(nid)?), nc, nid)));
             }
+        }
+        if found.is_none() {
+            found = best_goal.map(|((_, _, id), portal)| (id, portal));
         }
         let Some((top, portal)) = found else {
             if std::env::var("RUSTROAD_ROUTE_PIN_TRACE").is_ok_and(|filter| {
@@ -2236,6 +2387,13 @@ impl<'a> Router<'a> {
             })
             .collect::<Result<_>>()?;
         let mut queue: VecDeque<usize> = order.into_iter().map(|o| o.2).collect();
+        // Net members for net-aware access (opt-in); small nets only.
+        let mut by_net: HashMap<u32, Vec<usize>, BuildFx> = HashMap::with_hasher(BuildFx);
+        if self.plan.qor.as_ref().is_some_and(|q| q.net_aware_access) {
+            for (i, t) in terminals.iter().enumerate() {
+                by_net.entry(t.net).or_default().push(i);
+            }
+        }
         let mut plans: HashMap<u32, Plan> = HashMap::new();
         let mut plan_records = 0usize;
         let mut owner: BTreeMap<u32, usize> = BTreeMap::new();
@@ -2263,13 +2421,38 @@ impl<'a> Router<'a> {
                 );
             }
             let avoid = protect.remove(&i).unwrap_or_default();
+            let hint: Vec<Rect> = match by_net.get(&t.net) {
+                Some(members) if members.len() <= ACCESS_HINT_TERMINALS => members
+                    .iter()
+                    .filter(|&&j| j != i)
+                    .map(|&j| {
+                        let o = terminals[j];
+                        match plans.get(&o.pin) {
+                            Some(p) => {
+                                let at = self.graph.point(p.top).1;
+                                Rect {
+                                    lx: at[0],
+                                    ly: at[1],
+                                    ux: at[0],
+                                    uy: at[1],
+                                }
+                            }
+                            None => pin_box(o),
+                        }
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
             let mut plan = None;
             if !avoid.is_empty() {
+                self.access_hint.clone_from(&hint);
                 plan = self.escape_avoiding(t, &mut tables, &avoid)?;
             }
             if plan.is_none() {
+                self.access_hint.clone_from(&hint);
                 plan = self.escape(t, &mut tables)?;
             }
+            self.access_hint.clear();
             if let Some(plan) = plan {
                 plan_records = plan_records
                     .checked_add(plan.wires.len())
@@ -3024,7 +3207,16 @@ impl<'a> Router<'a> {
         rips: &BTreeMap<u32, usize>,
         round: usize,
     ) -> Result<Outcome> {
-        let heuristic_weight = self.detail_weight(soft);
+        let heuristic_weight = match self.plan.qor.as_ref() {
+            Some(q)
+                if !soft
+                    && self.heuristic_weight_override.is_none()
+                    && terminals.len() <= q.small_net_terminals =>
+            {
+                q.small_net_weight
+            }
+            _ => self.detail_weight(soft),
+        };
         let large_trace = (terminals.len() >= 1024
             && std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some())
         .then(std::time::Instant::now);
@@ -3291,6 +3483,21 @@ impl<'a> Router<'a> {
                     let (l, t_, s_) = self.graph.locate(id);
                     let layer = self.graph.layers[l].layer;
                     let p = self.graph.xy(l, t_, s_);
+                    let layer_milli = self.layer_milli[layer as usize];
+                    // Axis of the wire step that reached this node (None after
+                    // a via or at the start); only read for the bend surcharge.
+                    let incoming_vertical = if self.bend_cost != 0 && id != start {
+                        let state = self
+                            .search
+                            .get(id)
+                            .ok_or_else(|| invalid("missing routing parent state"))?;
+                        (state.kind == WIRE && state.parent != NONE)
+                            .then(|| self.graph.point(state.parent))
+                            .filter(|&(parent_layer, _)| parent_layer == layer)
+                            .map(|(_, at)| at[0] == p[0])
+                    } else {
+                        None
+                    };
                     let target_distance = target.bounds_distance(p);
                     let interior_distance = if target_distance == 0 {
                         // During this search the tree is fixed. A non-saturated
@@ -3397,11 +3604,19 @@ impl<'a> Router<'a> {
                             continue;
                         }
                         let mut step = match mv {
-                            Move::Along => distance(p, q)?,
-                            Move::Wrong => distance(p, q)?.saturating_mul(wrong),
-                            Move::Via(_) if escape_stack => via_cost.saturating_mul(3),
-                            Move::Via(_) => via_cost,
+                            Move::Along => scaled(distance(p, q)?, layer_milli),
+                            Move::Wrong => {
+                                scaled(distance(p, q)?.saturating_mul(wrong), layer_milli)
+                            }
+                            Move::Via(pi) if escape_stack => self.pair_via[pi].saturating_mul(3),
+                            Move::Via(pi) => self.pair_via[pi],
                         };
+                        if self.bend_cost != 0
+                            && !matches!(mv, Move::Via(_))
+                            && incoming_vertical.is_some_and(|v| v != (p[0] == q[0]))
+                        {
+                            step = step.saturating_add(self.bend_cost);
+                        }
                         if self
                             .search
                             .get(next)
@@ -4000,6 +4215,25 @@ impl<'a> Router<'a> {
     }
 }
 
+/// Bounding box of a terminal's pin shapes.
+fn pin_box(t: &Terminal) -> Rect {
+    t.shapes.iter().skip(1).fold(t.shapes[0].rect, |r, s| Rect {
+        lx: r.lx.min(s.rect.lx),
+        ly: r.ly.min(s.rect.ly),
+        ux: r.ux.max(s.rect.ux),
+        uy: r.uy.max(s.rect.uy),
+    })
+}
+
+/// Wire-step cost at a layer multiplier in thousandths (1000 is exact).
+fn scaled(cost: u64, milli: u64) -> u64 {
+    if milli == 1000 {
+        cost
+    } else {
+        cost.saturating_mul(milli) / 1000
+    }
+}
+
 fn trace(what: &str, start: std::time::Instant, extra: std::fmt::Arguments<'_>) {
     if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
         let mib = |b: Option<u64>| b.map_or_else(|| "-".into(), |b| format!("{}", b >> 20));
@@ -4259,6 +4493,16 @@ pub(crate) fn route_with_prior(
         ),
     );
     drop(all);
+    if r.plan.qor.as_ref().is_some_and(|q| q.prim_order) {
+        for group in groups.values_mut() {
+            prim_terminal_order(
+                group,
+                |t| r.graph.point(plans[&t.pin].top).1,
+                &mut r.spatial.work,
+                limits.max_comparisons,
+            )?;
+        }
+    }
     // Global routing over the escape tops.
     let nets: Vec<(u32, Vec<u32>)> = groups
         .iter()
@@ -4288,6 +4532,11 @@ pub(crate) fn route_with_prior(
         ),
     );
     drop(nets);
+    if r.plan.qor.as_ref().is_some_and(|q| q.drop_portals) {
+        for group in groups.values() {
+            r.release_portals(group, &plans);
+        }
+    }
     // Detailed routing: small nets first.
     let mut order: Vec<(usize, u32)> = guides.iter().map(|(n, g)| (g.len(), *n)).collect();
     order.sort_unstable();
@@ -4356,6 +4605,7 @@ pub(crate) fn route_with_prior(
             }
             match r.route_net(net, &groups[&net], &plans, false, false, &none, 0)? {
                 Outcome::Routed(route, _) => {
+                    r.release_portals(&groups[&net], &plans);
                     detour.record(net, &route);
                     retain_route(
                         &mut routed,
@@ -4409,6 +4659,8 @@ pub(crate) fn route_with_prior(
     // zones placed for them (bounded by `MAX_NOTCH_ZONES`).
     let mut rule_seen: BTreeMap<String, u8> = BTreeMap::new();
     let mut zone_count = 0usize;
+    // Same-net notch fills reserved as fixed metal (net, layer, rects).
+    let mut notch_reserved: BTreeSet<(u32, u32, Vec<[i64; 4]>)> = BTreeSet::new();
     // Directed rip counts (ripper, victim), at most `MAX_PAIR_RIPS` pairs. Two
     // nets that keep ripping each other rebuild the same pair of routes every
     // time (their rip prices grow together), so once both directions reach
@@ -4983,6 +5235,16 @@ pub(crate) fn route_with_prior(
             ),
         );
         r.guard("repair")?;
+        if r.plan
+            .qor
+            .as_ref()
+            .is_some_and(|q| q.release_portals || q.drop_portals)
+        {
+            let nets: Vec<u32> = routed.keys().copied().collect();
+            for net in nets {
+                r.release_portals(&groups[&net], &plans);
+            }
+        }
         let oriented = r.orient_vias(&mut routed)?;
         trace("orient", t0, format_args!("vias re-picked {oriented}"));
         let mut out = assemble(&r, &groups, &plans, &routed, input, limits, &via_layers)?;
@@ -5094,6 +5356,54 @@ pub(crate) fn route_with_prior(
                     }
                     zones.push(zone);
                     zone_count += 1;
+                }
+            }
+            // A same-net notch that survives a re-route and that cleanup could
+            // not fill is walled in by other nets' metal. Reserve the first
+            // fill (robust box, then the bridges, smallest first) that only
+            // routed metal blocks as fixed metal of this net, and re-route
+            // the nets in its way, so the next cleanup can place the patch.
+            // Candidates and victims are pure functions of the geometry
+            // (order-stable); each reservation is placed once.
+            if *seen >= 2
+                && zone_count < MAX_NOTCH_ZONES
+                && let route_rules::Violation::Spacing { layer, a, b, .. } = *v
+            {
+                let width = input.layers[layer as usize].width;
+                let candidates = route_rules::local_fills(a, b, width, input.grid);
+                'candidate: for rects in candidates {
+                    let mut victims = BTreeSet::new();
+                    for rect in &rects {
+                        match r.spatial.probe_soft(layer, *rect, n)? {
+                            Soft::Blocked => continue 'candidate,
+                            Soft::Clear { victims: v, .. } => victims.extend(v),
+                        }
+                    }
+                    victims.remove(&n);
+                    if victims.is_empty() {
+                        // Clear already: cleanup's own clearance test failed on
+                        // geometry this index does not hold; try the next.
+                        continue;
+                    }
+                    let key = rects.iter().map(|q| [q.lx, q.ly, q.ux, q.uy]).collect();
+                    if !notch_reserved.insert((n, layer, key)) {
+                        break;
+                    }
+                    for rect in rects {
+                        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                            eprintln!(
+                                "[troute] notch fill reserved net {n} layer {layer} {rect:?} victims {victims:?}"
+                            );
+                        }
+                        r.spatial.add_fixed(Blockage {
+                            layer,
+                            rect,
+                            net: Some(n),
+                        })?;
+                        zone_count += 1;
+                    }
+                    bad.extend(victims);
+                    break;
                 }
             }
             // A notch that survives a strict re-route lies between two parts of
@@ -5531,6 +5841,7 @@ mod tests {
             memory_mib: 64,
             max_history_entries: crate::routing::DEFAULT_MAX_HISTORY_ENTRIES,
             area_stacks: false,
+            qor: None,
         }
     }
     fn terminal(pin: u32, net: u32, driver: bool, r: Rect) -> Terminal {
@@ -6614,6 +6925,11 @@ mod tests {
                     plan.wrong_way_factor,
                 )
                 .unwrap(),
+                layer_milli: vec![1000; design.layers.len()],
+                pair_via: vec![plan.via_cost; graph.pairs.len()],
+                bend_cost: 0,
+                portals_released: HashSet::with_hasher(BuildFx),
+                access_hint: Vec::new(),
                 graph,
                 cells,
                 spatial: Spatial::new(&design, &limits).unwrap(),
@@ -8132,6 +8448,130 @@ mod tests {
         let mut bad = a.clone();
         bad.vias.pop();
         assert!(crate::routing::validate(&i, &bad, &limits()).is_err());
+    }
+
+    #[test]
+    fn prim_order_joins_the_nearest_terminal_first_and_ignores_input_order() {
+        // Driver at the origin; sinks on a line and one off to the side.
+        let at = |pin: u32, x: i64, y: i64, driver: bool| {
+            terminal(pin, 0, driver, rect(x - 5, y - 5, x + 5, y + 5))
+        };
+        let terminals = [
+            at(0, 0, 0, true),
+            at(1, 900, 0, false),
+            at(2, 300, 0, false),
+            at(3, 600, 0, false),
+            at(4, 300, 400, false),
+            at(5, 0, 300, false),
+        ];
+        let centre = |t: &Terminal| {
+            let r = t.shapes[0].rect;
+            [(r.lx + r.ux) / 2, (r.ly + r.uy) / 2]
+        };
+        let mut group: Vec<&Terminal> = terminals.iter().collect();
+        let mut work = 0;
+        prim_terminal_order(&mut group, centre, &mut work, 1_000).unwrap();
+        // Each step takes the smallest L1 distance to any joined terminal,
+        // ties by pin id: 2 (300 from 0, ties 5), 3 (300 from 2, ties 5),
+        // 1 (300 from 3, ties 5), 5 (300 from 0), 4 (400 from 2 or 5).
+        let order: Vec<u32> = group.iter().map(|t| t.pin).collect();
+        assert_eq!(order, vec![0, 2, 3, 1, 5, 4]);
+        assert_eq!(work, 36);
+        // Any input order of the sinks gives the same sequence.
+        let mut shuffled: Vec<&Terminal> = [0usize, 4, 1, 5, 3, 2]
+            .iter()
+            .map(|&i| &terminals[i])
+            .collect();
+        prim_terminal_order(&mut shuffled, centre, &mut 0, 1_000).unwrap();
+        assert_eq!(shuffled.iter().map(|t| t.pin).collect::<Vec<_>>(), order);
+        // Two-terminal groups are untouched; the work cap is enforced.
+        let mut pair: Vec<&Terminal> = vec![&terminals[0], &terminals[1]];
+        prim_terminal_order(&mut pair, centre, &mut 0, 0).unwrap();
+        assert!(prim_terminal_order(&mut group, centre, &mut 0, 35).is_err());
+    }
+
+    fn crossing_nets() -> RouteInput {
+        let mut t = Vec::new();
+        // A four-sink net, two crossing two-pin nets and a three-pin net.
+        let pins: [&[(i64, i64)]; 4] = [
+            &[(100, 500), (900, 520), (300, 900), (700, 100), (500, 500)],
+            &[(100, 100), (900, 900)],
+            &[(100, 900), (900, 100)],
+            &[(500, 100), (500, 900), (200, 300)],
+        ];
+        let mut pin = 0;
+        for (net, points) in pins.iter().enumerate() {
+            for (k, &(x, y)) in points.iter().enumerate() {
+                t.push(terminal(
+                    pin,
+                    net as u32,
+                    k == 0,
+                    rect(x - 10, y - 10, x + 10, y + 10),
+                ));
+                pin += 1;
+            }
+        }
+        input(t, Vec::new())
+    }
+
+    #[test]
+    fn default_quality_controls_reproduce_the_legacy_route() {
+        let legacy = crossing_nets();
+        let mut defaulted = crossing_nets();
+        defaulted.tracks.as_mut().unwrap().qor = Some(crate::routing::RouteQor::default());
+        let a = route_cpu_ref(&legacy, &limits()).unwrap();
+        let b = route_cpu_ref(&defaulted, &limits()).unwrap();
+        assert_eq!(a.wires, b.wires);
+        assert_eq!(a.vias, b.vias);
+        assert_eq!(a.access, b.access);
+        assert_eq!(a.patches, b.patches);
+    }
+
+    #[test]
+    fn quality_controls_route_validly_and_deterministically() {
+        let mut design = crossing_nets();
+        design.tracks.as_mut().unwrap().qor = Some(crate::routing::RouteQor {
+            prim_order: true,
+            release_portals: true,
+            drop_portals: true,
+            net_aware_access: true,
+            layer_cost_milli: vec![1000, 1000, 1300, 1000, 1000],
+            via_cost_milli: vec![1000, 1000, 1500, 1000, 1000],
+            bend_cost: 40,
+            small_net_terminals: 3,
+            small_net_weight: 1,
+        });
+        let a = route_cpu_ref(&design, &limits()).unwrap();
+        let b = route_cpu_ref(&design, &limits()).unwrap();
+        assert_eq!(a.wires, b.wires);
+        assert_eq!(a.vias, b.vias);
+        assert_eq!(a.access, b.access);
+        assert_eq!(a.nets, vec![0, 1, 2, 3]);
+        crate::routing::validate(&design, &a, &limits()).unwrap();
+        // Out-of-range controls are rejected before routing.
+        for bad in [
+            crate::routing::RouteQor {
+                layer_cost_milli: vec![999, 1000, 1000, 1000, 1000],
+                ..Default::default()
+            },
+            crate::routing::RouteQor {
+                via_cost_milli: vec![1000; 4],
+                ..Default::default()
+            },
+            crate::routing::RouteQor {
+                small_net_terminals: 4,
+                ..Default::default()
+            },
+            crate::routing::RouteQor {
+                small_net_terminals: 4,
+                small_net_weight: 17,
+                ..Default::default()
+            },
+        ] {
+            let mut d = crossing_nets();
+            d.tracks.as_mut().unwrap().qor = Some(bad);
+            assert!(route_cpu_ref(&d, &limits()).is_err());
+        }
     }
 
     #[test]
