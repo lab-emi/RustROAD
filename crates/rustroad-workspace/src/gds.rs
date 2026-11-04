@@ -79,8 +79,15 @@ pub struct ExportOptions {
     pub merge: MergeStyle,
     pub vias: ViaStyle,
 }
-/// Default top-level metal representation of `export-gds`.
-pub const DEFAULT_MERGE: MergeStyle = MergeStyle::Rectangles;
+/// Default top-level metal representation of `export-gds`: the DEF view
+/// (`Off`). With `DEFAULT_VIAS` it is byte-identical to the export before
+/// shape merging existed, which the structural harnesses rely on
+/// (`scripts/verify_gds.py` looks for every DEF patch as its own boundary and
+/// a deleted DEF path as a missing box; the rtl2gds `removed_via` control and
+/// `kl_plant.py` delete one `VIA_<name>` SREF). Flows that only feed the
+/// stream to geometry engines opt in to `Rectangles`/`Polygons` and
+/// `ViaStyle::Flat` (docs/gds-export.md, "Shape merging and flat vias").
+pub const DEFAULT_MERGE: MergeStyle = MergeStyle::Off;
 
 /// How routed and supply vias are written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,8 +117,9 @@ impl ViaStyle {
         }
     }
 }
-/// Default via representation of `export-gds`.
-pub const DEFAULT_VIAS: ViaStyle = ViaStyle::Flat;
+/// Default via representation of `export-gds`: via structures and SREFs
+/// (see `DEFAULT_MERGE`).
+pub const DEFAULT_VIAS: ViaStyle = ViaStyle::Cells;
 impl ExportOptions {
     pub fn new(cell_gds: PathBuf, layer_map: PathBuf, out: PathBuf) -> Self {
         Self {
@@ -554,12 +562,15 @@ fn add_metal(metal: &mut Metal, targets: &[GdsLayer], r: Rect) {
 }
 
 /// A flattened via's LEF shapes at `at`: rectangles join the net's metal
-/// (`via` targets of each layer); polygons (rare) are kept to be written as
-/// given, after the merged metal.
-fn add_via_shapes(
+/// (`via` targets of each layer, from `targets`); polygons are kept to be
+/// written as given, after the merged metal. Routing and supply vias are
+/// rectangular today (the router and the supply builder refuse POLYGON vias),
+/// so the polygon path mirrors the `VIA_<name>` structure writer for vias that
+/// reach a workspace by other means.
+fn add_via_shapes<'t>(
     metal: &mut Metal,
     polygons: &mut Vec<(GdsLayer, Vec<[i64; 2]>)>,
-    layers: &Layers,
+    targets: &dyn Fn(&str) -> Result<&'t [GdsLayer]>,
     via: &lef::LefVia,
     at: [i64; 2],
 ) -> Result<()> {
@@ -583,14 +594,14 @@ fn add_via_shapes(
                     ));
                 }
                 let r = rect_of([lo[0], lo[1], hi[0], hi[1]]);
-                add_metal(metal, layers.targets(layer, Purpose::Via)?, r);
+                add_metal(metal, targets(layer)?, r);
             }
             LefGeometry::Polygon { layer, points } => {
                 let xy = points
                     .iter()
                     .map(|p| shift(*p))
                     .collect::<Result<Vec<_>>>()?;
-                for t in layers.targets(layer, Purpose::Via)? {
+                for t in targets(layer)? {
                     polygons.push((*t, xy.clone()));
                 }
             }
@@ -705,6 +716,7 @@ pub fn export_snapshot(
         map: &map,
         technology: &bundle.technology,
     };
+    let via_targets = |name: &str| layers.targets(name, Purpose::Via);
 
     let cell_bytes = crate::read_bounded(&options.cell_gds, options.limits.max_bytes as u64)?;
     let cell_id = identity(&options.cell_gds, &cell_bytes);
@@ -971,13 +983,25 @@ pub fn export_snapshot(
                 if flat_vias {
                     for via in routed.of(ni) {
                         let name = r.via_names[via.kind as usize].as_str();
-                        add_via_shapes(&mut metal, &mut polygons, &layers, vias[name], via.at)?;
+                        add_via_shapes(
+                            &mut metal,
+                            &mut polygons,
+                            &via_targets,
+                            vias[name],
+                            via.at,
+                        )?;
                         counts.routed_vias += 1;
                     }
                     if let Some(polarity) = polarity {
                         for via in state.supply.vias.iter().filter(|x| x.polarity == polarity) {
                             let name = via.name.as_str();
-                            add_via_shapes(&mut metal, &mut polygons, &layers, vias[name], via.at)?;
+                            add_via_shapes(
+                                &mut metal,
+                                &mut polygons,
+                                &via_targets,
+                                vias[name],
+                                via.at,
+                            )?;
                             counts.supply_vias += 1;
                         }
                     }
@@ -1064,7 +1088,7 @@ pub fn export_snapshot(
             if flat_vias {
                 for via in state.supply.vias.iter().filter(|x| x.polarity == polarity) {
                     let name = via.name.as_str();
-                    add_via_shapes(&mut metal, &mut polygons, &layers, vias[name], via.at)?;
+                    add_via_shapes(&mut metal, &mut polygons, &via_targets, vias[name], via.at)?;
                     counts.supply_vias += 1;
                 }
             }
@@ -1241,6 +1265,147 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .starts_with("GDS_COORDINATE_RANGE")
+        );
+    }
+    #[test]
+    fn flat_via_rectangles_join_the_metal_and_polygons_are_written_closed() {
+        let via = lef::LefVia {
+            name: "VP".into(),
+            is_default: true,
+            geometries: vec![
+                LefGeometry::Rect {
+                    layer: "M1".into(),
+                    rect: [-50, -50, 50, 50],
+                },
+                LefGeometry::Polygon {
+                    layer: "M2".into(),
+                    points: vec![
+                        [-50, -50],
+                        [90, -50],
+                        [90, 10],
+                        [50, 10],
+                        [50, 50],
+                        [-50, 50],
+                    ],
+                },
+            ],
+        };
+        let m1 = [GdsLayer(1, 0)];
+        let m2 = [GdsLayer(2, 0), GdsLayer(2, 5)];
+        let targets = |name: &str| -> Result<&[GdsLayer]> {
+            match name {
+                "M1" => Ok(&m1[..]),
+                "M2" => Ok(&m2[..]),
+                other => Err(fail("GDS_LAYER_UNMAPPED", other.to_string())),
+            }
+        };
+        let mut metal = Metal::new();
+        let mut polygons = Vec::new();
+        add_via_shapes(&mut metal, &mut polygons, &targets, &via, [1000, 2000]).unwrap();
+        add_via_shapes(&mut metal, &mut polygons, &targets, &via, [1100, 2000]).unwrap();
+        // Rectangles join the metal on every via target of their layer.
+        assert_eq!(
+            metal,
+            Metal::from([(
+                (1, 0),
+                vec![[950, 1950, 1050, 2050], [1050, 1950, 1150, 2050]]
+            )])
+        );
+        // Polygons are kept per target, shifted, in via order.
+        let shifted = |dx: i64| {
+            vec![
+                [950 + dx, 1950],
+                [1090 + dx, 1950],
+                [1090 + dx, 2010],
+                [1050 + dx, 2010],
+                [1050 + dx, 2050],
+                [950 + dx, 2050],
+            ]
+        };
+        assert_eq!(
+            polygons,
+            vec![
+                (GdsLayer(2, 0), shifted(0)),
+                (GdsLayer(2, 5), shifted(0)),
+                (GdsLayer(2, 0), shifted(100)),
+                (GdsLayer(2, 5), shifted(100)),
+            ]
+        );
+        // Unmapped layers, empty rectangles and coordinate overflow fail.
+        let unmapped = lef::LefVia {
+            geometries: vec![LefGeometry::Rect {
+                layer: "M9".into(),
+                rect: [0, 0, 1, 1],
+            }],
+            ..via.clone()
+        };
+        let mut scratch = (Metal::new(), Vec::new());
+        assert!(
+            add_via_shapes(&mut scratch.0, &mut scratch.1, &targets, &unmapped, [0, 0])
+                .unwrap_err()
+                .to_string()
+                .starts_with("GDS_LAYER_UNMAPPED")
+        );
+        let empty = lef::LefVia {
+            geometries: vec![LefGeometry::Rect {
+                layer: "M1".into(),
+                rect: [0, 0, 0, 5],
+            }],
+            ..via.clone()
+        };
+        assert!(
+            add_via_shapes(&mut scratch.0, &mut scratch.1, &targets, &empty, [0, 0])
+                .unwrap_err()
+                .to_string()
+                .starts_with("GDS_GEOMETRY")
+        );
+        assert!(
+            add_via_shapes(
+                &mut scratch.0,
+                &mut scratch.1,
+                &targets,
+                &via,
+                [i64::MAX, 0]
+            )
+            .unwrap_err()
+            .to_string()
+            .starts_with("GDS_COORDINATE_RANGE")
+        );
+        // write_polygons closes each loop and writes one BOUNDARY per target.
+        let units = [
+            gds::Real8::from_f64(1e-3).unwrap(),
+            gds::Real8::from_f64(1e-9).unwrap(),
+        ];
+        let mut w = GdsWriter::new(Vec::new(), 1 << 20, 1 << 16);
+        w.begin_library(5, &FIXED_DATES, "t", units).unwrap();
+        w.begin_structure("T", &FIXED_DATES).unwrap();
+        write_polygons(&mut w, &polygons, Scale { divisor: 2 }, &|| "via VP".into()).unwrap();
+        w.end_structure().unwrap();
+        w.end_library().unwrap();
+        let bytes = w.into_inner().unwrap();
+        let library = gds::parse_library(&bytes, &GdsLimits::default(), true).unwrap();
+        let top = &library.structures[0];
+        assert_eq!(top.elements.len(), 4);
+        for (element, (target, points)) in top.elements.iter().zip(&polygons) {
+            assert_eq!(
+                (element.layer, element.datatype),
+                (Some(target.0), Some(target.1))
+            );
+            let mut want: Vec<[i32; 2]> = points
+                .iter()
+                .map(|p| [(p[0] / 2) as i32, (p[1] / 2) as i32])
+                .collect();
+            want.push(want[0]);
+            assert_eq!(element.xy, want);
+        }
+        // An odd coordinate under divisor 2 is the explicit error.
+        let mut w = GdsWriter::new(Vec::new(), 1 << 20, 1 << 16);
+        let odd = vec![(GdsLayer(2, 0), vec![[1, 0], [4, 0], [4, 4], [0, 4]])];
+        assert!(
+            write_polygons(&mut w, &odd, Scale { divisor: 2 }, &|| "via".into())
+                .unwrap_err()
+                .to_string()
+                .starts_with("GDS_ODD_COORDINATE")
         );
     }
     #[test]

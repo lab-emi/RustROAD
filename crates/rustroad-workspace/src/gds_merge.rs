@@ -35,6 +35,11 @@ use std::collections::BTreeMap;
 /// (2n - 1)^2 cells; Ibex nets stay far below (largest pieces ~10^3 cells).
 pub const MAX_PIECE_CELLS: usize = 1 << 22;
 
+/// Vertices one written polygon may have: a GDSII XY record holds at most
+/// (65535 - 4) / 8 = 8191 points, one of which closes the loop. A longer
+/// boundary keeps the piece's rectangle decomposition.
+pub const MAX_POLYGON_VERTICES: usize = 8190;
+
 /// How a merged piece is written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MergeStyle {
@@ -146,7 +151,7 @@ struct Grid {
     covered: Vec<bool>,
 }
 impl Grid {
-    fn new(rects: &[[i64; 4]]) -> Option<Self> {
+    fn new(rects: &[[i64; 4]], max_cells: usize) -> Option<Self> {
         let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r[0], r[2]]).collect();
         let mut ys: Vec<i64> = rects.iter().flat_map(|r| [r[1], r[3]]).collect();
         xs.sort_unstable();
@@ -154,7 +159,7 @@ impl Grid {
         ys.sort_unstable();
         ys.dedup();
         let (nx, ny) = (xs.len() - 1, ys.len() - 1);
-        if nx.checked_mul(ny).is_none_or(|c| c > MAX_PIECE_CELLS) {
+        if nx.checked_mul(ny).is_none_or(|c| c > max_cells) {
             return None;
         }
         // 2-D difference array over (ny + 1) x (nx + 1), then prefix sums.
@@ -350,6 +355,16 @@ fn simple(polygon: &[[i64; 2]]) -> bool {
 /// Exact cover of the union of `rects` in the requested style, in canonical
 /// order. Rectangles must have positive width and height.
 pub fn merge(rects: &[[i64; 4]], style: MergeStyle) -> Result<(Vec<Piece>, MergeStats)> {
+    merge_capped(rects, style, MAX_PIECE_CELLS)
+}
+
+/// `merge` with an explicit per-piece grid-cell cap (`MAX_PIECE_CELLS` in
+/// the exporter; tests lower it to reach the capped path).
+fn merge_capped(
+    rects: &[[i64; 4]],
+    style: MergeStyle,
+    max_cells: usize,
+) -> Result<(Vec<Piece>, MergeStats)> {
     if let Some(bad) = rects.iter().find(|r| !valid(r)) {
         return Err(Error::Gds {
             code: "GDS_GEOMETRY",
@@ -373,14 +388,14 @@ pub fn merge(rects: &[[i64; 4]], style: MergeStyle) -> Result<(Vec<Piece>, Merge
             out.push(Piece::Rect(piece[0]));
             continue;
         }
-        let Some(grid) = Grid::new(&piece) else {
+        let Some(grid) = Grid::new(&piece, max_cells) else {
             stats.capped_pieces += 1;
             out.extend(piece.iter().map(|r| Piece::Rect(*r)));
             continue;
         };
         if style == MergeStyle::Polygons {
             let loops = grid.loops();
-            if loops.len() == 1 && loops[0].len() <= 8190 && simple(&loops[0]) {
+            if loops.len() == 1 && loops[0].len() <= MAX_POLYGON_VERTICES && simple(&loops[0]) {
                 let polygon = loops.into_iter().next().expect("one loop");
                 if polygon.len() == 4 {
                     let xs = polygon.iter().map(|p| p[0]);
@@ -629,6 +644,87 @@ mod tests {
         for s in ["off", "rectangles", "polygons"] {
             assert_eq!(MergeStyle::parse(s).unwrap().name(), s);
         }
+    }
+
+    #[test]
+    fn pieces_over_the_grid_cap_keep_their_input_rectangles() {
+        // A connected staircase: 4 rectangles -> a 5 x 5 compressed grid.
+        let stairs = [
+            [0, 0, 200, 100],
+            [100, 50, 300, 150],
+            [200, 100, 400, 200],
+            [300, 150, 500, 250],
+        ];
+        let lone = [1000, 0, 1100, 100];
+        let mut input = stairs.to_vec();
+        input.push(lone);
+        input.push(stairs[1]); // an exact duplicate is still dropped
+        for style in [MergeStyle::Rectangles, MergeStyle::Polygons] {
+            let (out, stats) = merge_capped(&input, style, 24).unwrap();
+            assert_eq!(stats.capped_pieces, 1, "{style:?}");
+            assert_eq!(stats.input, 6);
+            let mut want: Vec<Piece> = stairs.iter().map(|r| Piece::Rect(*r)).collect();
+            want.push(Piece::Rect(lone));
+            want.sort_unstable();
+            assert_eq!(out, want, "{style:?}: input rectangles, canonical order");
+            assert_eq!(stats.rectangles, 5);
+            // The same rectangles are still an exact (if overlapping) cover.
+            let rects: Vec<[i64; 4]> = out
+                .iter()
+                .map(|p| match p {
+                    Piece::Rect(r) => *r,
+                    Piece::Polygon(_) => unreachable!(),
+                })
+                .collect();
+            assert_eq!(union_area(&rects), union_area(&input));
+            // At the cap the piece is merged as usual.
+            let (merged, stats) = merge_capped(&input, style, 25).unwrap();
+            assert_eq!(stats.capped_pieces, 0);
+            if style == MergeStyle::Polygons {
+                assert_eq!(
+                    merged.len(),
+                    2,
+                    "one staircase polygon and the lone rectangle"
+                );
+            }
+            check_exact(&input, style);
+        }
+    }
+
+    /// A bar with `teeth` teeth on top: one hole-free piece whose boundary
+    /// has 4 * teeth + 4 vertices.
+    fn comb(teeth: i64) -> Vec<[i64; 4]> {
+        let mut rects = vec![[0, 0, 20 * teeth, 10]];
+        rects.extend((0..teeth).map(|i| [20 * i + 5, 5, 20 * i + 15, 30]));
+        rects
+    }
+
+    #[test]
+    fn polygons_over_the_gds_vertex_limit_fall_back_to_rectangles() {
+        // 2046 teeth: 8188 vertices, one polygon.
+        let (out, stats) = merge(&comb(2046), MergeStyle::Polygons).unwrap();
+        assert_eq!((stats.polygons, stats.rectangles), (1, 0));
+        assert!(matches!(&out[..], [Piece::Polygon(p)] if p.len() == 8188));
+        // 2047 teeth: 8192 vertices exceed one XY record; exact slabs instead.
+        let input = comb(2047);
+        let (out, stats) = merge(&input, MergeStyle::Polygons).unwrap();
+        assert_eq!(stats.polygons, 0);
+        assert_eq!(stats.holed_pieces, 0);
+        let (slabs, _) = merge(&input, MergeStyle::Rectangles).unwrap();
+        assert_eq!(out, slabs);
+        assert_eq!(
+            out.len(),
+            2047 + 1,
+            "horizontal slabs: the bar and one per tooth"
+        );
+        let area: i128 = out
+            .iter()
+            .map(|p| match p {
+                Piece::Rect(r) => i128::from(r[2] - r[0]) * i128::from(r[3] - r[1]),
+                Piece::Polygon(_) => unreachable!(),
+            })
+            .sum();
+        assert_eq!(area, union_area(&input));
     }
 
     #[test]
