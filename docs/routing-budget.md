@@ -302,6 +302,38 @@ coverage is checked over the complete crossed GCell interval.
 Minimum-area checks accept a component as soon as one of its rectangles is
 large enough; exact union area is retained for every reported area violation.
 
+### Detailed-route quality controls (`track_router.qor`)
+
+All optional; omitted (or all defaults) routes exactly as before and leaves
+the serialized plan unchanged: `default_quality_controls_reproduce_the_legacy_route`
+compares `qor` omitted with all defaults, and on Ibex the dense-placement
+replay of the legacy Metal3-access configuration (no `qor`) writes a
+`routes.rbin` byte-identical to the one of the RustROAD `baff0ba` merged head.
+
+| Key | Effect |
+| --- | --- |
+| `prim_order` | The initial detailed route joins a net's terminals in Prim order (Prim 1957): the driver first, then repeatedly the terminal whose escape top is nearest (L1) to an already joined one, ties by pin id. O(k^2) work per net, charged. Repair keeps its centre-out order. |
+| `release_portals` | Once a net is routed, its pin escapes' upward-via envelopes (search geometry only) are removed, once per terminal. |
+| `drop_portals` | Every envelope is removed after pin access and global routing, before the first detailed search. Each envelope reserved a Via2 landing (Metal2 and Metal3 pads) above every pin for the whole detailed phase and walled other nets out of the lower layers. |
+| `net_aware_access` | Pin access of nets with at most 8 terminals picks, among legal escape tops within 840 DBU of cost of the cheapest, the one nearest (twice the L1 distance) to the net's other terminals: their escape tops once reserved, else their pin boxes. Two pins that can share a Metal2 track land on it, and the net needs no Metal3 jog. A terminal whose escape search failed, and every escape it displaced, take the cheapest top from then on; this removes the observed re-block livelock, but the other terminals keep their hinted tops, so the repair does not retrace the legacy one. If the hinted pass still leaves a pin without a legal escape (or hits the repair-round cap), pin access is redone from the same start state without hints, which gives exactly the legacy escapes: the control never makes pin access fail where the legacy access succeeds. |
+| `small_net_terminals`, `small_net_weight` | Hard detailed searches of nets with at most this many terminals use this weight (1 = admissible A*) instead of `heuristic_weight`; soft rip-up searches keep `repair_heuristic_weight`. |
+| `layer_cost_milli`, `via_cost_milli` | Per routing layer, wire-step multiplier and via multiplier (by the via's upper layer), thousandths, 1000..=64000. |
+| `bend_cost` | Surcharge of a same-layer wire step that turns from the axis of the step that reached the node. |
+| `notch_bridge` | Same-net notch repair for facing shapes: cleanup's bridges try the stair bridge and bars clipped to two widths past the gap before the legacy full-length bars, and a notch that repeats after a re-route with every fill blocked gets a reserved fill (repair rung 5 below). Off keeps the legacy bars and repair. Needed with `access_layer` Metal2 on Ibex. |
+
+The search lower bound (`routing_target::CostModel`) prices each via pair at
+its own cost (Dijkstra over layer and covered directions instead of a hop
+count) and each axis at the cheapest layer multiplier, scaling whole distances
+and rounding down, while the search rounds each scaled wire step up
+(`troute::scaled`). So the bound never exceeds the cost of a path and drops by
+at most a step's cost per step (admissible and consistent), also for steps
+whose scaled cost is fractional; with unit wire multipliers it is exact on the
+obstacle-free relaxation
+(`weighted_bound_is_admissible_consistent_and_exact_for_unit_wires`). The bend
+surcharge depends on the step that reached a node while search states are
+nodes, so with `bend_cost` the bound is still a lower bound but even weight 1
+is not guaranteed to find the cheapest path.
+
 Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
 remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared
 state into framed, hash-checked `model.rbin` records (16 GiB file bound,
@@ -508,7 +540,23 @@ with a structured diagnostic instead of looping silently:
    that walls the net in is dropped, and each direction is tried once. At most
    2^18 directed pairs are tracked, about 40 bytes each. Converging Ibex
    routes peak at 3–5 mutual rips, so they do not change.
-5. The rip-up cap (`max_ripups_per_net`), the repair-round cap and the 8
+5. With `qor.notch_bridge` only: a same-net notch that cleanup could not
+   fill (the robust box and every bridge touch other nets' metal) and that
+   repeats after a re-route gets a *reserved fill*: the first local fill
+   candidate (robust box, stair bridge, then bars clipped to two widths past
+   the gap) that only routed metal of other nets blocks is added as fixed
+   metal of the net, and the nets in its way are re-routed, so the next
+   cleanup can place the patch
+   (`notch_fill_reservation_takes_the_first_fill_only_routed_metal_blocks`).
+   A candidate blocked by fixed geometry is skipped; reservations are
+   order-stable, placed once each and share the 4,096-zone cap. With the flag,
+   cleanup's bridges also include the stair bridge: for two shapes that face
+   each other over less than a width, one bar over both shapes' extents (at
+   most one width past the facing span), at least a width thick across the
+   gap, so the union is a Z whose inner corners are a width apart. Fill
+   clearance (cleanup and reservation) checks the base spacing; a wide-metal
+   conflict of a fill is left to the rule check and repair.
+6. The rip-up cap (`max_ripups_per_net`), the repair-round cap and the 8
    rule passes bound everything. Exceeding any of them fails with `NO_ROUTE`
    or `ROUTING_RULE` and names the net and the violation.
 
@@ -521,3 +569,5 @@ These are the livelocks seen on Ibex and the rung that removes each one:
 | net 15647 | a same-net notch on a relaxed long net, identical for 8 passes | notch zone (`notch_zone_forbids_same_net_near_misses_only_inside_it`) |
 | fe18c 15954/7015 | cleanup merged a same-net notch into wide metal facing a fixed escape (235 nm < 240 nm) | notch zone |
 | fe22b 14972/13203 | two nets ripped each other 256 times in pass 1 | yield (`yielding_net_never_rips_its_protected_partner`); the full replay converges |
+| Metal2 access, net 12085 | a Metal2 pad 175 nm above its own escape, facing it over 80 nm; robust box and bars touched other nets for 8 passes | `notch_bridge`: stair bridge (`captured_metal2_stair_notch_gets_a_neck_free_bridge`, `stair_notch_is_bridged_when_the_robust_fill_touches_other_nets`) and reserved fill (`notch_fill_reservation_takes_the_first_fill_only_routed_metal_blocks`); the published-placement replay with Metal2 access completes |
+| flow placement, net 7237 pin 30742 | with `net_aware_access`, a failed pin's repair re-blocked it with the same net-nearer top of a neighbour 4 times (`has no legal access` after 14 s) | hinted terminals fall back to the cheapest top once they fail or are displaced (`net_aware_access_falls_back_to_the_cheapest_tops_after_a_failed_escape`: a row that livelocks without the fallback); a hinted pass that still fails is redone without hints (`failed_net_aware_access_is_redone_without_hints`) |
