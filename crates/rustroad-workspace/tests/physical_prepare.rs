@@ -226,6 +226,7 @@ fn clock_fixture(max_buffers: usize) -> Fixture {
         root_at_driver: false,
         clustering: Default::default(),
         regroup_prefixes: Vec::new(),
+        seed_from_placement: false,
     });
     Fixture::new(
         "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule",
@@ -388,6 +389,7 @@ fn internal_clock_tree_preserves_its_original_driver() {
         root_at_driver: false,
         clustering: Default::default(),
         regroup_prefixes: Vec::new(),
+        seed_from_placement: false,
     });
     let f = Fixture::new(
         "module chip(input a, output y, output h, output l); wire gated; BUF gate(.A(a),.Y(gated)); BUF b0(.A(gated),.Y(y)); BUF b1(.A(gated),.Y(h)); BUF b2(.A(gated),.Y(l)); endmodule",
@@ -491,6 +493,7 @@ fn input_trees_preserve_bus_bits_and_clock_ownership_after_replacement() {
             root_at_driver: false,
             clustering: Default::default(),
             regroup_prefixes: Vec::new(),
+            seed_from_placement: false,
         });
         let mut logic = format!(
             "module chip(input {range} a, input clk, output [30:0] y);\nwire rr_input_net_2;\n"
@@ -712,6 +715,7 @@ PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 2 2.1 ; END END
             root_at_driver: false,
             clustering: Default::default(),
             regroup_prefixes: Vec::new(),
+            seed_from_placement: false,
         });
         let f = Fixture::new(logic, &c);
         fs::write(
@@ -788,6 +792,7 @@ fn clock_level_fanout_narrows_upper_levels_only() {
             root_at_driver: false,
             clustering: Default::default(),
             regroup_prefixes: Vec::new(),
+            seed_from_placement: false,
         });
         let f = Fixture::new(&logic, &c);
         if levels == 0 {
@@ -836,6 +841,7 @@ PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 1 2.1 ; END END
         root_at_driver: false,
         clustering: Default::default(),
         regroup_prefixes: Vec::new(),
+        seed_from_placement: false,
     });
     let f = Fixture::new(
         "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); DIO d0(.D(a)); endmodule",
@@ -1631,6 +1637,7 @@ fn regroup_clock(clustering: ClockClustering, prefixes: &[&str]) -> ClockConfig 
         root_at_driver: false,
         clustering,
         regroup_prefixes: prefixes.iter().map(|p| p.to_string()).collect(),
+        seed_from_placement: false,
     }
 }
 
@@ -1836,6 +1843,89 @@ fn clock_tree_reuses_the_leaf_order_of_a_seed_over_the_same_sinks() {
     assert!(!tree(&fallback).0.seed_order);
     seed.clock_sinks.push(seed.clock_sinks[0].clone());
     assert!(seed.validate().is_err(), "repeated clock sink");
+}
+
+#[test]
+fn clock_tree_can_reuse_an_unseeded_placement_as_its_seed() {
+    // Five clock sinks, fan-out 2 (six buffers) on a 2 x 50-site fixture;
+    // three small workspaces, < 1 MiB each.
+    let mut cfg = config();
+    cfg.max_added_cells = 128;
+    cfg.placer = Some(Default::default());
+    cfg.clock = Some(ClockConfig {
+        max_fanout: 2,
+        max_buffers: 16,
+        ..regroup_clock(ClockClustering::Hilbert, &[])
+    });
+    let mut logic = String::from("module chip(input clk, output [4:0] y);\n");
+    for i in 0..5 {
+        logic.push_str(&format!("BUF s{i}(.A(clk),.Y(y[{i}]));\n"));
+    }
+    logic.push_str("endmodule\n");
+    // Positions of the given logical cells in a snapshot.
+    let at = |s: &rustroad_workspace::Snapshot,
+              names: &std::collections::BTreeMap<String, [i64; 2]>| {
+        let found: std::collections::BTreeMap<String, [i64; 2]> = s
+            .metadata()
+            .design
+            .cells
+            .iter()
+            .zip(s.records())
+            .filter(|(c, _)| names.contains_key(&c.name))
+            .map(|(c, r)| (c.name.clone(), [r.x, r.y]))
+            .collect();
+        assert_eq!(found.len(), names.len());
+        found
+    };
+    let run = |seed_from_placement: bool| {
+        let mut c = cfg.clone();
+        c.clock.as_mut().unwrap().seed_from_placement = seed_from_placement;
+        let f = Fixture::new(&logic, &c);
+        widen_input_fixture(&f);
+        f.import().unwrap();
+        place(&f.workspace, "rev1", &limits()).unwrap();
+        let s = read(&f.workspace, &limits()).unwrap();
+        // Placed logical cells without generated taps and fillers.
+        let before = rustroad_workspace::placement_seed::from_snapshot(&s)
+            .unwrap()
+            .cells;
+        assert!(before.len() >= 5);
+        drop(s);
+        rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+        let s = read(&f.workspace, &limits()).unwrap();
+        let after = at(&s, &before);
+        let bundle = s.metadata().physical.as_ref().unwrap();
+        // The internal seed is never persisted into the revision.
+        assert!(bundle.placement_seed.is_none());
+        let report = bundle.placement.clone().unwrap();
+        let buffers = bundle.clock_tree.as_ref().unwrap().buffers.len();
+        let text = serde_json::to_string(bundle.config.as_ref().unwrap()).unwrap();
+        assert_eq!(text.contains("seed_from_placement"), seed_from_placement);
+        (before, after, report, buffers)
+    };
+    let (before, after, report, buffers) = run(true);
+    assert_eq!(buffers, 6);
+    assert_eq!(report.mode, "seeded_eco_legalize");
+    let seed = report.seed.unwrap();
+    // Every logical cell is seeded at its placed position; the new buffers
+    // are the only unseeded cells and nothing in the seed is left unmatched.
+    assert_eq!(seed.seeded, before.len());
+    assert_eq!(seed.unseeded, buffers);
+    assert_eq!(seed.unmatched, 0);
+    let moved: i64 = before
+        .iter()
+        .map(|(n, p)| (p[0] - after[n][0]).abs() + (p[1] - after[n][1]).abs())
+        .sum();
+    assert_eq!(moved, seed.total_displacement_dbu);
+    // The default keeps the previous behaviour: a fresh unseeded placement.
+    let (_, _, plain, buffers) = run(false);
+    assert_eq!(buffers, 6);
+    assert_ne!(plain.mode, "seeded_eco_legalize");
+    assert!(plain.seed.is_none());
+    // Repeating the opt-in run is deterministic.
+    let (b2, a2, r2, _) = run(true);
+    assert_eq!((b2, a2), (before, after));
+    assert_eq!(r2.hpwl_dbu, report.hpwl_dbu);
 }
 
 #[test]

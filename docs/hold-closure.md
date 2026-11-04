@@ -261,6 +261,18 @@ its output net is a port, appears in an `assign`, or is used through a
 bit/part-select or concatenation. Connection work is capped at 4M. The
 regrouped names are listed in the clock report as `regrouped`.
 
+### Re-placement after buffer insertion
+
+`clock-tree` re-places the buffered netlist. With a placement seed
+(`place --seed`) it legalizes from that seed. Without one it normally repeats
+the whole unseeded global placement, which with the electrostatic placer
+(`placer.electrostatic`) costs a second full numerical run. The optional
+`clock.seed_from_placement` (default off, unchanged) instead seeds every placed
+logical cell at its current position, exactly as `place --seed` of the same
+revision would; new and regrouped buffers start from their pins' centroid as
+above. The internal seed is not stored in the revision; the placement report
+records the seeded mode and its displacement.
+
 ### CTS drive evaluation (`scripts/cts_drive_eval.py`)
 
 The script builds iteration 0 with alternative per-level clock-buffer
