@@ -95,6 +95,19 @@ const ACCESS_HINT_TERMINALS: usize = 8;
 type AccessKey = (u32, Vec<(u32, [i64; 2])>);
 type AccessTables = BTreeMap<AccessKey, Vec<AccessEntry>>;
 
+/// Inputs of one pin-access pass (`Router::reserve_pass`).
+#[derive(Clone, Copy)]
+struct AccessPass<'p, 'a> {
+    terminals: &'p [&'a Terminal],
+    /// Terminal indices, most constrained first.
+    order: &'p [usize],
+    /// Repair window of each terminal.
+    windows: &'p [Rect],
+    /// Net members for net-aware access (empty: cheapest tops only).
+    by_net: &'p HashMap<u32, Vec<usize>, BuildFx>,
+    started: std::time::Instant,
+}
+
 fn access_key(class: u32, origin: [i64; 2], points: &[(u32, [i64; 2])]) -> Result<AccessKey> {
     Ok((
         class,
@@ -1149,6 +1162,17 @@ struct Router<'a> {
     /// are (their escape tops once reserved, else their pin boxes). Empty
     /// keeps the legacy cheapest-top choice.
     access_hint: Vec<Rect>,
+    /// Tests only: hinted terminals keep their hints after a failed escape
+    /// (no fallback to the cheapest top), to reproduce the livelock the
+    /// fallback removes.
+    #[cfg(test)]
+    keep_hints_after_repair: bool,
+    /// Tests only: a failed net-aware access pass fails pin access instead
+    /// of being redone without hints.
+    #[cfg(test)]
+    no_access_retry: bool,
+    /// Net-aware pin-access passes that failed and were redone without hints.
+    access_retries: usize,
     cells: Cells,
     spatial: Spatial<'a>,
     pairs: Vec<ViaPair>,
@@ -1320,6 +1344,11 @@ impl<'a> Router<'a> {
             bend_cost,
             portals_released: HashSet::with_hasher(BuildFx),
             access_hint: Vec::new(),
+            #[cfg(test)]
+            keep_hints_after_repair: false,
+            #[cfg(test)]
+            no_access_retry: false,
+            access_retries: 0,
             cells,
             spatial: Spatial::new(input, limits)?,
             pairs,
@@ -2345,6 +2374,23 @@ impl<'a> Router<'a> {
         }))
     }
 
+    #[cfg(test)]
+    fn hints_survive_repair(&self) -> bool {
+        self.keep_hints_after_repair
+    }
+    #[cfg(not(test))]
+    fn hints_survive_repair(&self) -> bool {
+        false
+    }
+    #[cfg(test)]
+    fn access_retry_disabled(&self) -> bool {
+        self.no_access_retry
+    }
+    #[cfg(not(test))]
+    fn access_retry_disabled(&self) -> bool {
+        false
+    }
+
     /// Conflict-aware escapes for every terminal of a routed net.
     fn reserve(&mut self, terminals: &[&'a Terminal]) -> Result<HashMap<u32, Plan>> {
         let started = std::time::Instant::now();
@@ -2386,19 +2432,79 @@ impl<'a> Router<'a> {
                 expand(r, self.input.step.saturating_mul(4))
             })
             .collect::<Result<_>>()?;
-        let mut queue: VecDeque<usize> = order.into_iter().map(|o| o.2).collect();
-        // Net members for net-aware access (opt-in); small nets only. A
-        // terminal whose escape failed, and every escape it displaced, take
-        // the cheapest top from then on: the legacy repair then converges as
-        // before instead of re-blocking the same pin with a nearer top.
+        let order: Vec<usize> = order.into_iter().map(|o| o.2).collect();
+        // Net members for net-aware access (opt-in); small nets only.
         let mut by_net: HashMap<u32, Vec<usize>, BuildFx> = HashMap::with_hasher(BuildFx);
-        let mut unhinted: HashSet<usize, BuildFx> = HashSet::with_hasher(BuildFx);
         if self.plan.qor.as_ref().is_some_and(|q| q.net_aware_access) {
             for (i, t) in terminals.iter().enumerate() {
                 by_net.entry(t.net).or_default().push(i);
             }
         }
         let mut plans: HashMap<u32, Plan> = HashMap::new();
+        let mut window_index = None;
+        let pass = AccessPass {
+            terminals,
+            order: &order,
+            windows: &windows,
+            by_net: &by_net,
+            started,
+        };
+        let Some(failure) = self.reserve_pass(&pass, &mut tables, &mut window_index, &mut plans)?
+        else {
+            return Ok(plans);
+        };
+        if by_net.is_empty() || self.access_retry_disabled() {
+            return Err(failure);
+        }
+        // Net-aware access is a preference, never a reason to fail: if its
+        // pass cannot place every escape, drop it and redo pin access without
+        // hints (the legacy pass, from the same start state). Deterministic,
+        // and the shipped flows never take this path.
+        trace(
+            "access retry",
+            started,
+            format_args!("without net hints after: {failure}"),
+        );
+        for plan in plans.drain().map(|(_, plan)| plan) {
+            for id in plan.shapes {
+                self.spatial.remove(id);
+            }
+        }
+        self.access_retries += 1;
+        let empty = HashMap::with_hasher(BuildFx);
+        let pass = AccessPass {
+            by_net: &empty,
+            ..pass
+        };
+        match self.reserve_pass(&pass, &mut tables, &mut window_index, &mut plans)? {
+            None => Ok(plans),
+            Some(failure) => Err(failure),
+        }
+    }
+
+    /// One pin-access pass in `pass.order` with conflict repair. Escapes go
+    /// into `plans` (and the spatial index). `Ok(Some(error))` is an access
+    /// failure (a pin with no legal escape, or the repair-round cap) with
+    /// `plans` holding the escapes placed so far; `Err` is any other error.
+    fn reserve_pass(
+        &mut self,
+        pass: &AccessPass<'_, 'a>,
+        tables: &mut AccessTables,
+        window_index: &mut Option<WindowIndex>,
+        plans: &mut HashMap<u32, Plan>,
+    ) -> Result<Option<crate::Error>> {
+        let AccessPass {
+            terminals,
+            windows,
+            by_net,
+            started,
+            ..
+        } = *pass;
+        let mut queue: VecDeque<usize> = pass.order.iter().copied().collect();
+        // A terminal whose escape failed, and every escape it displaced, take
+        // the cheapest top from then on, so a repair cannot be re-blocked by
+        // the same nearer-to-the-net top of a neighbour on every attempt.
+        let mut unhinted: HashSet<usize, BuildFx> = HashSet::with_hasher(BuildFx);
         let mut plan_records = 0usize;
         let mut owner: BTreeMap<u32, usize> = BTreeMap::new();
         let mut attempts = vec![0usize; terminals.len()];
@@ -2406,11 +2512,10 @@ impl<'a> Router<'a> {
         // next escape first stays off them, so the displaced pins can land.
         let mut protect: HashMap<usize, Vec<LayerRect>> = HashMap::new();
         let mut rounds = 0usize;
-        let mut window_index = None;
         while let Some(i) = queue.pop_front() {
             rounds += 1;
             if rounds > terminals.len().saturating_mul(8) + 64 {
-                return Err(budget("pin access repair rounds"));
+                return Ok(Some(budget("pin access repair rounds")));
             }
             let t = terminals[i];
             if rounds.is_multiple_of(100_000) {
@@ -2454,11 +2559,11 @@ impl<'a> Router<'a> {
             let mut plan = None;
             if !avoid.is_empty() {
                 self.access_hint.clone_from(&hint);
-                plan = self.escape_avoiding(t, &mut tables, &avoid)?;
+                plan = self.escape_avoiding(t, tables, &avoid)?;
             }
             if plan.is_none() {
                 self.access_hint.clone_from(&hint);
-                plan = self.escape(t, &mut tables)?;
+                plan = self.escape(t, tables)?;
             }
             self.access_hint.clear();
             if let Some(plan) = plan {
@@ -2476,17 +2581,17 @@ impl<'a> Router<'a> {
             }
             attempts[i] += 1;
             if attempts[i] > 3 {
-                return Err(crate::Error::PinAccess {
+                return Ok(Some(crate::Error::PinAccess {
                     pin: t.pin,
                     net: t.net,
                     region: windows[i],
                     comparisons: self.spatial.work,
                     expansions: self.expansions,
-                });
+                }));
             }
             // Rip up escapes of terminals whose windows overlap this one.
             if window_index.is_none() {
-                window_index = Some(WindowIndex::new(
+                *window_index = Some(WindowIndex::new(
                     &windows,
                     &mut self.spatial.work,
                     self.limits.max_comparisons,
@@ -2496,7 +2601,7 @@ impl<'a> Router<'a> {
                 .as_ref()
                 .unwrap()
                 .overlapping(
-                    &windows,
+                    windows,
                     windows[i],
                     &mut self.spatial.work,
                     self.limits.max_comparisons,
@@ -2508,13 +2613,13 @@ impl<'a> Router<'a> {
             // Match the original ascending-pin repair order exactly.
             victims.sort_unstable();
             if victims.is_empty() {
-                return Err(crate::Error::PinAccess {
+                return Ok(Some(crate::Error::PinAccess {
                     pin: t.pin,
                     net: t.net,
                     region: windows[i],
                     comparisons: self.spatial.work,
                     expansions: self.expansions,
-                });
+                }));
             }
             let mut footprints = Vec::new();
             for &p in &victims {
@@ -2541,7 +2646,7 @@ impl<'a> Router<'a> {
                 }
                 back.push(owner.remove(&p).unwrap());
             }
-            if !by_net.is_empty() {
+            if !by_net.is_empty() && !self.hints_survive_repair() {
                 unhinted.insert(i);
                 unhinted.extend(back.iter().copied());
             }
@@ -2553,7 +2658,7 @@ impl<'a> Router<'a> {
             }
             queue.push_front(i);
         }
-        Ok(plans)
+        Ok(None)
     }
 
     // ---------------------------------------------------------------- global
@@ -6962,6 +7067,9 @@ mod tests {
                 bend_cost: 0,
                 portals_released: HashSet::with_hasher(BuildFx),
                 access_hint: Vec::new(),
+                keep_hints_after_repair: false,
+                no_access_retry: false,
+                access_retries: 0,
                 graph,
                 cells,
                 spatial: Spatial::new(&design, &limits).unwrap(),
@@ -8611,6 +8719,159 @@ mod tests {
         // Nothing to re-route: every fill is clear or blocked by fixed metal.
         assert_eq!(reserve(false, false, false), None);
         assert_eq!(reserve(true, false, false), None);
+    }
+
+    /// One EZ130-like 8-track standard-cell row: Metal1 pins (net, box)
+    /// between Metal1 rails, real Via1/Via2 pads and widths, Metal2 and
+    /// Metal3 minimum area, net-aware pin access on `access_layer`. Pin ids
+    /// follow the slice; the first pin of each net drives it.
+    fn access_row(width: i64, access_layer: u32, pins: &[(u32, Rect)]) -> RouteInput {
+        let mut seen = BTreeSet::new();
+        let terminals = pins
+            .iter()
+            .enumerate()
+            .map(|(pin, &(net, r))| terminal(pin as u32, net, seen.insert(net), r))
+            .collect();
+        let rails = [rect(0, 0, width, 120), rect(0, 3240, width, 3360)]
+            .map(|rect| Blockage {
+                layer: 0,
+                rect,
+                net: None,
+            })
+            .to_vec();
+        let mut design = input(terminals, rails);
+        design.die = rect(0, 0, width, 3360);
+        design.step = 420;
+        design.access_layer = access_layer;
+        for (i, layer) in design.layers.iter_mut().enumerate() {
+            layer.width = if i == 0 { 160 } else { 200 };
+            layer.spacing = if i == 0 { 180 } else { 210 };
+        }
+        design.layers[1].min_area = Some(144_000);
+        design.layers[2].min_area = Some(144_000);
+        let mut v1 = via("Via1", 0, 3, 1);
+        v1.shapes[0].rect = rect(-145, -100, 145, 100);
+        v1.shapes[1].rect = rect(-95, -95, 95, 95);
+        v1.shapes[2].rect = rect(-100, -145, 100, 145);
+        let mut v2 = via("Via2", 1, 4, 2);
+        v2.shapes[0].rect = rect(-100, -145, 100, 145);
+        v2.shapes[1].rect = rect(-95, -95, 95, 95);
+        v2.shapes[2].rect = rect(-145, -100, 145, 100);
+        design.vias = vec![v1, v2];
+        let plan = design.tracks.as_mut().unwrap();
+        plan.tracks = vec![Some((420, 0)), Some((420, 210)), Some((420, 0)), None, None];
+        plan.gcell = 1680;
+        plan.qor = Some(crate::routing::RouteQor {
+            net_aware_access: true,
+            ..Default::default()
+        });
+        design
+    }
+
+    /// Pin access only: (escapes as (access, top, wires, vias) by pin, or
+    /// the error; net-aware passes redone without hints).
+    #[allow(clippy::type_complexity)]
+    fn access_only(
+        design: &RouteInput,
+        keep_hints: bool,
+        no_retry: bool,
+    ) -> (
+        Result<BTreeMap<u32, (Access, u32, Vec<Wire>, Vec<Via>)>>,
+        usize,
+    ) {
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let mut router = Router::prepared(design, &limits, graph, cells).unwrap();
+        router.gmark.fill(1);
+        router.gepoch = 1;
+        router.keep_hints_after_repair = keep_hints;
+        router.no_access_retry = no_retry;
+        let terminals: Vec<_> = design.terminals.iter().collect();
+        let plans = router.reserve(&terminals).map(|plans| {
+            plans
+                .into_iter()
+                .map(|(pin, p)| (pin, (p.access, p.top, p.wires.into(), p.vias.into())))
+                .collect()
+        });
+        (plans, router.access_retries)
+    }
+
+    #[test]
+    fn net_aware_access_falls_back_to_the_cheapest_tops_after_a_failed_escape() {
+        // Smallest row of a seeded search over random EZ130-like rows (3,000
+        // rows; 140 behave like this) that reproduces the Ibex flow-placement
+        // livelock (pin 30742 net 7237): with the net-nearer tops kept after
+        // a repair, a displaced neighbour re-blocks the failed pin on every
+        // attempt and the hinted pass ends with "has no legal access"; the
+        // failed pin and the escapes it displaced falling back to their
+        // cheapest tops converges in the hinted pass itself.
+        let design = access_row(
+            2940,
+            1,
+            &[
+                (2, rect(1855, 1630, 2145, 1945)),
+                (0, rect(230, 1595, 520, 1910)),
+                (0, rect(2350, 830, 2640, 1145)),
+                (0, rect(885, 980, 1085, 1580)),
+                (1, rect(1220, 1780, 1510, 2095)),
+                (1, rect(1780, 570, 1980, 1170)),
+                (1, rect(1695, 2320, 1895, 2920)),
+                (2, rect(1130, 370, 1480, 630)),
+                (2, rect(2355, 2295, 2655, 2645)),
+            ],
+        );
+        let (fallback, retries) = access_only(&design, false, false);
+        assert_eq!(fallback.unwrap().len(), 9);
+        assert_eq!(retries, 0, "the hinted pass converges by itself");
+        let (kept, _) = access_only(&design, true, true);
+        match kept {
+            Err(crate::Error::PinAccess { .. }) => {}
+            other => panic!("kept hints must livelock: {:?}", other.map(|p| p.len())),
+        }
+        // With the whole-pass retry even kept hints end with legal access.
+        let (kept, retries) = access_only(&design, true, false);
+        assert_eq!(kept.unwrap().len(), 9);
+        assert_eq!(retries, 1);
+        // Deterministic.
+        assert_eq!(
+            access_only(&design, false, false).0.unwrap(),
+            access_only(&design, false, false).0.unwrap()
+        );
+    }
+
+    #[test]
+    fn failed_net_aware_access_is_redone_without_hints() {
+        // A row from the same search where the hinted pass fails even with
+        // the per-pin fallback (13 of 3,000 rows) while legacy access
+        // succeeds: pin access is redone without hints from the same start
+        // state, so the escapes equal the legacy ones exactly. With the retry
+        // every searched row whose legacy access succeeded also succeeded.
+        let pins = [
+            (0, rect(710, 1245, 870, 1945)),
+            (0, rect(1050, 730, 1400, 990)),
+            (2, rect(1370, 2540, 1810, 2905)),
+            (0, rect(2305, 1930, 2465, 2630)),
+            (1, rect(80, 1600, 240, 2300)),
+            (1, rect(1295, 1750, 1610, 2300)),
+            (1, rect(490, 2275, 930, 2640)),
+            (1, rect(2130, 640, 2430, 990)),
+            (2, rect(1175, 1235, 1525, 1495)),
+            (3, rect(55, 560, 345, 875)),
+            (2, rect(1795, 1550, 1995, 2150)),
+            (2, rect(525, 380, 725, 980)),
+        ];
+        let design = access_row(2520, 2, &pins);
+        let (aware, retries) = access_only(&design, false, false);
+        assert_eq!(retries, 1);
+        let (failed, _) = access_only(&design, false, true);
+        assert!(matches!(failed, Err(crate::Error::PinAccess { .. })));
+        let mut legacy = access_row(2520, 2, &pins);
+        legacy.tracks.as_mut().unwrap().qor = None;
+        let (legacy, retries) = access_only(&legacy, false, false);
+        assert_eq!(retries, 0);
+        assert_eq!(aware.unwrap(), legacy.unwrap());
     }
 
     fn crossing_nets() -> RouteInput {
