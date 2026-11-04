@@ -1090,12 +1090,26 @@ impl<'a> Parser<'a, '_> {
 
 /// Bounded record writer. Every record is length-checked; total bytes and
 /// records are capped. The caller owns buffering and atomic publication.
+///
+/// Rectangles and SREFs, the bulk of a streamed layout, are framed as one
+/// element buffer and written with one call when the whole element fits the
+/// caps; otherwise (or for an unencodable name) they take the record-by-record
+/// path, so every error keeps its code and byte offset. The bytes are the same
+/// either way (`element_encoding_matches_record_encoding`).
 pub struct GdsWriter<W: Write> {
     out: W,
     bytes: u64,
     records: u64,
     max_bytes: u64,
     max_records: u64,
+    element: Vec<u8>,
+}
+/// Append one framed record (fixed record types with valid lengths only).
+fn frame(buffer: &mut Vec<u8>, rtype: u8, dtype: u8, data: &[u8]) {
+    let length = data.len() + 4;
+    debug_assert!(length <= MAX_RECORD_BYTES && length.is_multiple_of(2));
+    buffer.extend_from_slice(&[(length >> 8) as u8, length as u8, rtype, dtype]);
+    buffer.extend_from_slice(data);
 }
 impl<W: Write> GdsWriter<W> {
     pub fn new(out: W, max_bytes: u64, max_records: u64) -> Self {
@@ -1105,7 +1119,25 @@ impl<W: Write> GdsWriter<W> {
             records: 0,
             max_bytes,
             max_records,
+            element: Vec::with_capacity(256),
         }
+    }
+    /// Whether an element of `bytes`/`records` fits both caps.
+    fn fits(&self, bytes: usize, records: u64) -> bool {
+        self.bytes
+            .checked_add(bytes as u64)
+            .is_some_and(|b| b <= self.max_bytes)
+            && self
+                .records
+                .checked_add(records)
+                .is_some_and(|r| r <= self.max_records)
+    }
+    /// Charge and write the framed element in `self.element`.
+    fn flush_element(&mut self, records: u64) -> Result<()> {
+        self.charge(self.element.len(), records)?;
+        self.out
+            .write_all(&self.element)
+            .map_err(|e| error("GDS_IO", self.bytes as usize, e.to_string()))
     }
     pub fn bytes_written(&self) -> u64 {
         self.bytes
@@ -1283,6 +1315,34 @@ impl<W: Write> GdsWriter<W> {
                 "rectangle must have positive width and height",
             ));
         }
+        // BOUNDARY, LAYER, DATATYPE, XY (5 points), ENDEL.
+        const BYTES: usize = 4 + 6 + 6 + 44 + 4;
+        if !self.fits(BYTES, 5) {
+            return self.rectangle_records(layer, datatype, r);
+        }
+        let mut xy = [0u8; 40];
+        for (chunk, v) in xy
+            .chunks_exact_mut(4)
+            .zip([r[0], r[1], r[2], r[1], r[2], r[3], r[0], r[3], r[0], r[1]])
+        {
+            chunk.copy_from_slice(&v.to_be_bytes());
+        }
+        self.element.clear();
+        frame(&mut self.element, rt::BOUNDARY, NO_DATA, &[]);
+        frame(&mut self.element, rt::LAYER, INT16, &layer.to_be_bytes());
+        frame(
+            &mut self.element,
+            rt::DATATYPE,
+            INT16,
+            &datatype.to_be_bytes(),
+        );
+        frame(&mut self.element, rt::XY, INT32, &xy);
+        frame(&mut self.element, rt::ENDEL, NO_DATA, &[]);
+        self.flush_element(5)
+    }
+    /// Record-by-record `rectangle` (exact cap/error offsets; the reference
+    /// encoding of the element path).
+    fn rectangle_records(&mut self, layer: i16, datatype: i16, r: [i32; 4]) -> Result<()> {
         self.boundary(
             layer,
             datatype,
@@ -1296,6 +1356,59 @@ impl<W: Write> GdsWriter<W> {
         )
     }
     pub fn sref(&mut self, name: &str, strans: Option<&Strans>, at: [i32; 2]) -> Result<()> {
+        let padded = name.len() + (name.len() & 1);
+        let records = 4 + strans.map_or(0, |s| {
+            1 + u64::from(s.mag.is_some()) + u64::from(s.angle.is_some())
+        });
+        let bytes = 4
+            + 4
+            + padded
+            + strans.map_or(0, |s| {
+                6 + if s.mag.is_some() { 12 } else { 0 } + if s.angle.is_some() { 12 } else { 0 }
+            })
+            + 12
+            + 4;
+        if name.is_empty()
+            || !name.bytes().all(|b| (0x21..=0x7e).contains(&b))
+            || padded + 4 > MAX_RECORD_BYTES
+            || !self.fits(bytes, records)
+        {
+            return self.sref_records(name, strans, at);
+        }
+        self.element.clear();
+        frame(&mut self.element, rt::SREF, NO_DATA, &[]);
+        let length = padded + 4;
+        self.element
+            .extend_from_slice(&[(length >> 8) as u8, length as u8, rt::SNAME, ASCII]);
+        self.element.extend_from_slice(name.as_bytes());
+        if padded != name.len() {
+            self.element.push(0);
+        }
+        if let Some(s) = strans {
+            frame(
+                &mut self.element,
+                rt::STRANS,
+                BIT_ARRAY,
+                &s.flags.to_be_bytes(),
+            );
+            if let Some(m) = s.mag {
+                frame(&mut self.element, rt::MAG, REAL8, &m.0);
+            }
+            if let Some(a) = s.angle {
+                frame(&mut self.element, rt::ANGLE, REAL8, &a.0);
+            }
+        }
+        let mut xy = [0u8; 8];
+        xy[..4].copy_from_slice(&at[0].to_be_bytes());
+        xy[4..].copy_from_slice(&at[1].to_be_bytes());
+        frame(&mut self.element, rt::XY, INT32, &xy);
+        frame(&mut self.element, rt::ENDEL, NO_DATA, &[]);
+        debug_assert_eq!(self.element.len(), bytes);
+        self.flush_element(records)
+    }
+    /// Record-by-record `sref` (exact cap/error offsets; the reference
+    /// encoding of the element path).
+    fn sref_records(&mut self, name: &str, strans: Option<&Strans>, at: [i32; 2]) -> Result<()> {
         self.emit(rt::SREF, &[])?;
         self.ascii(rt::SNAME, name, true)?;
         if let Some(s) = strans {
@@ -1441,6 +1554,87 @@ mod tests {
     use super::*;
 
     const DATES: [i16; 12] = [70, 1, 1, 0, 0, 0, 70, 1, 1, 0, 0, 0];
+
+    /// The single-buffer element encoding must equal the record-by-record
+    /// reference byte for byte, with identical byte/record counts.
+    #[test]
+    fn element_encoding_matches_record_encoding() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let names = ["V1", "VIA_M2_M1", "AND2X3", "x", "ab_cdefghij_klmno"];
+        let transforms = [
+            None,
+            Some(Strans::reflect_x()),
+            Some(Strans {
+                flags: Strans::REFLECT_X | Strans::ABSOLUTE_MAG,
+                mag: Some(Real8::from_f64(0.5).unwrap()),
+                angle: None,
+            }),
+            Some(Strans {
+                flags: Strans::ABSOLUTE_ANGLE,
+                mag: Some(Real8::from_f64(2.0).unwrap()),
+                angle: Some(Real8::from_f64(270.0).unwrap()),
+            }),
+        ];
+        let mut fast = GdsWriter::new(Vec::new(), u64::MAX, u64::MAX);
+        let mut reference = GdsWriter::new(Vec::new(), u64::MAX, u64::MAX);
+        for i in 0..4000 {
+            let v = |x: u64| (x as i64 - (1 << 31)) as i32;
+            if i % 3 == 0 {
+                let name = names[(next() % names.len() as u64) as usize];
+                let strans = transforms[(next() % 4) as usize].as_ref();
+                let at = [v(next() >> 32), v(next() >> 32)];
+                fast.sref(name, strans, at).unwrap();
+                reference.sref_records(name, strans, at).unwrap();
+            } else {
+                let (x0, y0) = (v(next() >> 33), v(next() >> 33));
+                let (w, h) = ((next() % 100_000 + 1) as i32, (next() % 100_000 + 1) as i32);
+                let r = [x0, y0, x0 + w, y0 + h];
+                let (layer, datatype) = ((next() % 256) as i16, (next() % 64) as i16 - 8);
+                fast.rectangle(layer, datatype, r).unwrap();
+                reference.rectangle_records(layer, datatype, r).unwrap();
+            }
+        }
+        assert_eq!(fast.bytes_written(), reference.bytes_written());
+        assert_eq!(fast.records_written(), reference.records_written());
+        assert_eq!(fast.into_inner().unwrap(), reference.into_inner().unwrap());
+    }
+
+    /// Caps hit inside an element still fail at the record the reference
+    /// path fails at (same code and byte offset, same bytes before it).
+    #[test]
+    fn element_caps_fail_like_records() {
+        for (max_bytes, max_records) in [(70, 100), (100, 7), (16, 100), (300, 3)] {
+            let mut fast = GdsWriter::new(Vec::new(), max_bytes, max_records);
+            let mut reference = GdsWriter::new(Vec::new(), max_bytes, max_records);
+            let a = (|| {
+                fast.rectangle(1, 0, [0, 0, 5, 5])?;
+                fast.sref("CELL", Some(&Strans::reflect_x()), [3, 4])
+            })();
+            let b = (|| {
+                reference.rectangle_records(1, 0, [0, 0, 5, 5])?;
+                reference.sref_records("CELL", Some(&Strans::reflect_x()), [3, 4])
+            })();
+            let (a, b) = (a.unwrap_err(), b.unwrap_err());
+            assert_eq!((a.code, a.offset), (b.code, b.offset));
+            assert_eq!(fast.into_inner().unwrap(), reference.into_inner().unwrap());
+        }
+        let mut fast = GdsWriter::new(Vec::new(), u64::MAX, u64::MAX);
+        let mut reference = GdsWriter::new(Vec::new(), u64::MAX, u64::MAX);
+        let (a, b) = (
+            fast.sref("bad name", None, [0, 0]).unwrap_err(),
+            reference
+                .sref_records("bad name", None, [0, 0])
+                .unwrap_err(),
+        );
+        assert_eq!((a.code, a.offset), (b.code, b.offset));
+        assert_eq!(fast.into_inner().unwrap(), reference.into_inner().unwrap());
+    }
     fn hex(s: &str) -> [u8; 8] {
         let v = u64::from_str_radix(s, 16).unwrap();
         v.to_be_bytes()

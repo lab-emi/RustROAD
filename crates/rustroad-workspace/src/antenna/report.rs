@@ -717,3 +717,253 @@ mod tests {
         assert_eq!(digest(&decoded).unwrap(), digest(&row).unwrap());
     }
 }
+
+/// `SelectedInput::bind` for the selected check this session computed and
+/// wrote itself: the same identities, flags and row multiset, compared in
+/// memory instead of re-reading and re-parsing the written report.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn bind_in_memory(
+    before: &super::AntennaReport,
+    revision: &str,
+    margin: f64,
+    design: &str,
+    dbu: u32,
+    routing_scope: &str,
+    sources: &[super::SourceCheck],
+    fresh: &SelectedAnalysis,
+    rows: &[CheckRow],
+) -> Result<()> {
+    let status = if rows.iter().any(|row| row.violated) {
+        "subset_violated"
+    } else if routing_scope != "all_signal_nets"
+        || fresh
+            .coverage
+            .iter()
+            .any(|net| net.model_partial || net.observation != NetObservation::Observed)
+    {
+        "subset_partial"
+    } else {
+        "subset_clean"
+    };
+    if before.schema != super::ANTENNA_SCHEMA
+        || before.status != status
+        || before.workspace_revision != revision
+        || before.design != design
+        || before.dbu_per_micron != dbu
+        || before.safety_margin.fraction != margin
+        || before.scope.extra_shapes != 0
+        || before.scope.routing_scope != routing_scope
+        || before.selection.as_ref() != Some(fresh)
+    {
+        return Err(stale(
+            "selected scope, limits, margin, source or revision differs",
+        ));
+    }
+    if before.sources != sources
+        || before.violations != rows.iter().filter(|r| r.violated).count()
+        || before.lef_violations != rows.iter().filter(|r| r.exceeds_lef_limit).count()
+        || before.checks.len() != rows.len()
+    {
+        return Err(stale(
+            "selected source identities or violation counts differ",
+        ));
+    }
+    let mut inventory = BTreeMap::new();
+    for row in rows {
+        *inventory.entry(digest(row)?).or_insert(0usize) += 1;
+    }
+    for row in &before.checks {
+        let n = inventory
+            .get_mut(&digest(row)?)
+            .filter(|n| **n > 0)
+            .ok_or_else(|| stale("selected row inventory differs"))?;
+        *n -= 1;
+    }
+    Ok(())
+}
+
+/// `source_fingerprint` with its routes-independent prefix hashed once: the
+/// SHA-256 state after `[schema,design,model,placed,scope,config,` is kept,
+/// and each new routes state is serialized (record chunks in parallel, the
+/// same compact JSON bytes) and hashed after it with `,sources]`.
+pub(super) struct SourceDigest {
+    prefix: Sha256,
+    suffix: Vec<u8>,
+}
+
+struct BufferedHash<'h>(&'h mut Sha256, Vec<u8>);
+impl Write for BufferedHash<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.1.extend_from_slice(bytes);
+        if self.1.len() >= 1 << 16 {
+            self.0.update(&self.1);
+            self.1.clear();
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.update(&self.1);
+        self.1.clear();
+        Ok(())
+    }
+}
+
+fn json_into(hash: &mut Sha256, value: &impl Serialize) -> Result<()> {
+    let mut writer = BufferedHash(hash, Vec::with_capacity(1 << 16));
+    serde_json::to_writer(&mut writer, value)?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// A JSON array of `items` exactly as serde_json writes a `Vec`, with the
+/// elements serialized in parallel chunks and hashed in order.
+fn json_array_into<T: Serialize + Sync>(hash: &mut Sha256, items: &[T]) -> Result<()> {
+    use rayon::prelude::*;
+    hash.update(b"[");
+    let mut first = true;
+    for batch in items.chunks(1 << 18) {
+        let parts = batch
+            .par_chunks(1 << 13)
+            .map(|chunk| -> Result<Vec<u8>> {
+                let mut buffer = Vec::with_capacity(chunk.len() * 48);
+                for (i, item) in chunk.iter().enumerate() {
+                    if i > 0 {
+                        buffer.push(b',');
+                    }
+                    serde_json::to_writer(&mut buffer, item)?;
+                }
+                Ok(buffer)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for part in parts {
+            if !first {
+                hash.update(b",");
+            }
+            first = false;
+            hash.update(&part);
+        }
+    }
+    hash.update(b"]");
+    Ok(())
+}
+
+impl SourceDigest {
+    pub(super) fn new(
+        design: &rustroad_core::Design,
+        model: &rustroad_core::connectivity::ConnectedDesign,
+        placed: &[rustroad_core::Placed],
+        state: &crate::routing::RoutingState,
+        sources: &[super::SourceCheck],
+    ) -> Result<Self> {
+        let mut prefix = Sha256::new();
+        prefix.update(b"[");
+        json_into(&mut prefix, &super::ANTENNA_SCHEMA)?;
+        prefix.update(b",");
+        json_into(&mut prefix, design)?;
+        prefix.update(b",");
+        json_into(&mut prefix, model)?;
+        prefix.update(b",");
+        json_into(&mut prefix, &placed)?;
+        prefix.update(b",");
+        json_into(&mut prefix, &state.scope)?;
+        prefix.update(b",");
+        json_into(&mut prefix, &state.config)?;
+        prefix.update(b",");
+        let mut suffix = b",".to_vec();
+        serde_json::to_writer(&mut suffix, &sources)?;
+        suffix.push(b']');
+        Ok(Self { prefix, suffix })
+    }
+
+    /// `source_fingerprint` of the prefix state with these routes.
+    pub(super) fn fingerprint(&self, routes: &rustroad_core::routing::Routes) -> Result<String> {
+        let mut hash = self.prefix.clone();
+        hash_routes(&mut hash, routes)?;
+        hash.update(&self.suffix);
+        let out: [u8; 32] = hash.finalize().into();
+        Ok(out.iter().map(|b| format!("{b:02x}")).collect())
+    }
+}
+
+/// The compact JSON of `routes` (as serde_json writes it) into `hash`.
+fn hash_routes(hash: &mut Sha256, routes: &rustroad_core::routing::Routes) -> Result<()> {
+    hash.update(b"{\"wires\":");
+    json_array_into(hash, &routes.wires)?;
+    hash.update(b",\"vias\":");
+    json_array_into(hash, &routes.vias)?;
+    hash.update(b",\"access\":");
+    json_array_into(hash, &routes.access)?;
+    if !routes.patches.is_empty() {
+        hash.update(b",\"patches\":");
+        json_array_into(hash, &routes.patches)?;
+    }
+    hash.update(b",\"nets\":");
+    json_array_into(hash, &routes.nets)?;
+    hash.update(b",\"stats\":");
+    json_into(hash, &routes.stats)?;
+    hash.update(b"}");
+    Ok(())
+}
+
+#[cfg(test)]
+mod digest_tests {
+    use super::*;
+    use rustroad_core::Rect;
+    use rustroad_core::routing::{Access, Patch, RouteStats, Routes, Via, Wire};
+
+    /// The parallel chunked serialization hashes exactly serde_json's bytes,
+    /// with and without patches, across several element batches.
+    #[test]
+    fn chunked_routes_json_matches_serde() {
+        for (wires, patches) in [(0usize, 0usize), (3, 0), (300_000, 2), (7, 9)] {
+            let routes = Routes {
+                wires: (0..wires)
+                    .map(|i| Wire {
+                        net: (i % 977) as u32,
+                        layer: (i % 5) as u32,
+                        start: [i as i64 * 3 - 7, -(i as i64)],
+                        end: [i as i64 * 3 + 5, -(i as i64)],
+                    })
+                    .collect(),
+                vias: (0..wires / 2 + 1)
+                    .map(|i| Via {
+                        net: i as u32,
+                        kind: 2,
+                        at: [i as i64, i64::MIN + i as i64],
+                    })
+                    .collect(),
+                access: vec![Access {
+                    pin: 4,
+                    net: 1,
+                    layer: 0,
+                    at: [10, 20],
+                }],
+                patches: (0..patches)
+                    .map(|i| Patch {
+                        net: i as u32,
+                        layer: 1,
+                        rect: Rect {
+                            lx: 0,
+                            ly: 1,
+                            ux: 2,
+                            uy: i as i64,
+                        },
+                    })
+                    .collect(),
+                nets: (0..wires.min(977) as u32).collect(),
+                stats: RouteStats {
+                    grid_nodes: 9,
+                    expansions: 8,
+                    comparisons: 7,
+                    wire_length_dbu: 6,
+                    single_owner_repair: None,
+                },
+            };
+            let mut chunked = Sha256::new();
+            hash_routes(&mut chunked, &routes).unwrap();
+            let mut whole = Sha256::new();
+            whole.update(serde_json::to_vec(&routes).unwrap());
+            assert_eq!(chunked.finalize(), whole.finalize(), "{wires} wires");
+        }
+    }
+}

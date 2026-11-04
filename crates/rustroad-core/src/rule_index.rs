@@ -39,6 +39,48 @@ pub(crate) fn order(
     Ok(indices)
 }
 
+/// The net order of an input's terminals, as `order` computes it, kept for
+/// many rule checks of that input (the jumper planner checks one net at a
+/// time, and ordering ~230k terminals dominated each check). Using it
+/// charges exactly the work `order` charges, so budgets see the same counts.
+pub(crate) struct TerminalOrder {
+    indices: Vec<u32>,
+    presorted: bool,
+}
+impl TerminalOrder {
+    pub(crate) fn new(input: &RouteInput) -> Result<Self> {
+        let net = |i: usize| input.terminals[i].net;
+        let n = input.terminals.len();
+        let indices = order(n, net, &mut 0, usize::MAX)?;
+        Ok(Self {
+            indices,
+            presorted: (1..n).all(|i| net(i - 1) <= net(i)),
+        })
+    }
+    /// `order` over these terminals: the same charges, then the indices.
+    fn order(&self, input: &RouteInput, work: &mut usize, cap: usize) -> Result<Vec<u32>> {
+        let n = input.terminals.len();
+        if n != self.indices.len() {
+            return Err(budget("terminal order of another input"));
+        }
+        charge(work, n.saturating_mul(2), cap)?;
+        if !self.presorted {
+            charge(
+                work,
+                n.saturating_mul(n.max(1).ilog2() as usize + 1)
+                    .saturating_mul(2),
+                cap,
+            )?;
+        }
+        let mut indices = Vec::new();
+        indices
+            .try_reserve_exact(n)
+            .map_err(|_| budget("same-net index allocation"))?;
+        indices.extend_from_slice(&self.indices);
+        Ok(indices)
+    }
+}
+
 pub(crate) fn range(indices: &[u32], net: u32, source_net: impl Fn(u32) -> u32) -> &[u32] {
     let lo = indices.partition_point(|&i| source_net(i) < net);
     let end = lo + indices[lo..].partition_point(|&i| source_net(i) == net);
@@ -56,10 +98,32 @@ pub(crate) struct RuleIndex {
 
 impl RuleIndex {
     pub fn new(input: &RouteInput, out: &Routes, work: &mut usize, cap: usize) -> Result<Self> {
+        Self::build(input, out, work, cap, None)
+    }
+    /// `new` with the input's terminal order computed once beforehand.
+    pub fn with_terminals(
+        input: &RouteInput,
+        out: &Routes,
+        work: &mut usize,
+        cap: usize,
+        terminals: &TerminalOrder,
+    ) -> Result<Self> {
+        Self::build(input, out, work, cap, Some(terminals))
+    }
+    fn build(
+        input: &RouteInput,
+        out: &Routes,
+        work: &mut usize,
+        cap: usize,
+        cached: Option<&TerminalOrder>,
+    ) -> Result<Self> {
         let wires = order(out.wires.len(), |i| out.wires[i].net, work, cap)?;
         let vias = order(out.vias.len(), |i| out.vias[i].net, work, cap)?;
         let patches = order(out.patches.len(), |i| out.patches[i].net, work, cap)?;
-        let terminals = order(input.terminals.len(), |i| input.terminals[i].net, work, cap)?;
+        let terminals = match cached {
+            Some(cached) => cached.order(input, work, cap)?,
+            None => order(input.terminals.len(), |i| input.terminals[i].net, work, cap)?,
+        };
         charge(work, out.nets.len().saturating_mul(32), cap)?;
         let mut selected = out.nets.clone();
         selected.sort_unstable();

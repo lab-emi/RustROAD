@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
-"""Replay the frozen grouped repair from an independent copied initial workspace.
+"""Replay a grouped repair from an independent copy of its initial revision.
 
-Upfront estimate: serial native session <1.5 GiB; Python controller <256 MiB
-while native runs, streaming SHA verification afterwards. Report/artifact count
-<=4096, report bytes <=8 GiB; no graph/path enumeration. A 4 GiB cgroup and
-wall-clock timeout are required. Preserve the original full revision ancestry.
+Upfront estimate: serial native session <1 GiB; Python controller <512 MiB
+(one report decoded at a time). Report/artifact count <=4096, report bytes
+<=8 GiB; no graph/path enumeration. A 4 GiB cgroup and wall-clock timeout are
+required. The session commits only its last logical revision (summary v2):
+reports are compared with the original per-attempt-commit evidence modulo the
+compact format (violated rows only) and its input-size work term.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import time
 
-REPORT = re.compile(r'(?:round-\d+-group-\d+|repair-\d+(?:-before)?|final-group-\d+|inventory-(?:initial|final)|model-(?:initial|final))\.json')
+CHECK = re.compile(r'(?:round-\d+-group-\d+|repair-\d+-before|final-group-\d+)\.json')
+REPAIR = re.compile(r'repair-(\d+)\.json')
+OTHER = re.compile(r'(?:inventory-(?:initial|final)|model-(?:initial|final))\.json')
 
 
 def identity(path):
@@ -33,31 +38,60 @@ def revision_files(path):
     return {p.name: identity(p) for p in entries}
 
 
+def load(path):
+    if path.stat().st_size > 128 << 20:
+        raise ValueError(f'report byte bound: {path.name}')
+    return json.loads(path.read_bytes())
+
+
+def compare_check(actual, expected, name):
+    a, b = load(actual), load(expected)
+    if a.get('check_rows') == 'violated':
+        b['checks'] = [row for row in b['checks'] if row['violated']]
+    elif a.get('check_rows') is not None:
+        raise ValueError(f'unknown check_rows: {name}')
+    a.pop('check_rows', None)
+    for report in (a, b):
+        report['stats'].pop('report_memory', None)
+    if a != b:
+        raise ValueError(f'check report differs: {name}')
+
+
+def compare_repair(actual, expected, number, reports, baseline):
+    a, b = load(actual), load(expected)
+    work = []
+    for report, directory in ((a, reports), (b, baseline)):
+        report['stats'].pop('report_memory', None)
+        size = (directory / f'repair-{number}-before.json').stat().st_size
+        work.append(report['stats'].pop('antenna_work') - size)
+    if a != b or work[0] != work[1]:
+        raise ValueError(f'repair report differs: repair-{number}.json')
+    return work[0]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', required=True, type=Path)
     parser.add_argument('--binary', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--threads', default='2')
     args = parser.parse_args()
     baseline, binary = args.baseline.resolve(strict=True), args.binary.resolve(strict=True)
     lineage = json.loads((baseline / 'lineage.json').read_bytes())
     source, initial = Path(lineage['workspace']), lineage['initial_revision']
     if re.fullmatch(r'rev[1-9][0-9]{0,3}', initial) is None:
         raise ValueError('unsafe initial revision')
-    initial_number = int(initial[3:])
-    if initial_number > 128 or len(lineage['attempts']) > 64:
-        raise ValueError('replay revision/attempt bound')
+    if len(lineage['attempts']) > 64:
+        raise ValueError('replay attempt bound')
+    original_reports = baseline / 'native-reports'
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     workspace = output / 'workspace'
     (workspace / 'revisions').mkdir(parents=True)
-    for number in range(1, initial_number + 1):
-        revision = f'rev{number}'
-        original = source / 'revisions' / revision
-        target = workspace / 'revisions' / revision
-        shutil.copytree(original, target)
-        if revision_files(original) != revision_files(target):
-            raise ValueError('initial copied revision differs')
+    original = source / 'revisions' / initial
+    shutil.copytree(original, workspace / 'revisions' / initial)
+    if revision_files(original) != revision_files(workspace / 'revisions' / initial):
+        raise ValueError('initial copied revision differs')
     (workspace / 'HEAD').write_text(initial + '\n')
     (workspace / 'workspace.lock').touch()
     plan = dict(schema='rustroad.antenna-group-repair.v1', output=str(output / 'reports'),
@@ -67,7 +101,7 @@ def main():
                     'max_cumulative_work')})
     plan_path = output / 'plan.json'
     plan_path.write_text(json.dumps(plan, indent=2) + '\n')
-    command = [str(binary), '--workspace', str(workspace), '--threads', '2',
+    command = [str(binary), '--workspace', str(workspace), '--threads', args.threads,
                '--max-expansions', '8000000', 'repair-antenna-groups', '--base-rev', initial,
                '--plan', str(plan_path)]
     tick = time.monotonic()
@@ -76,13 +110,15 @@ def main():
     wall_seconds = time.monotonic() - tick
     if result.returncode:
         raise ValueError(f'repair command failed: {result.returncode}; see {output / "stderr"}')
-    summary = json.loads((output / 'reports/summary.json').read_bytes())
+    reports = output / 'reports'
+    summary = json.loads((reports / 'summary.json').read_bytes())
+    if summary['schema'] != 'rustroad.antenna-group-repair-result.v2':
+        raise ValueError('summary schema')
     for key in ('status', 'initial_revision', 'final_revision', 'scope', 'route_scope',
                 'inventory_status', 'native_analysis_status', 'observations',
                 'whole_layout_antenna_status', 'excluded_macro_touch', 'unresolved_supported_nets',
                 'requires_full_revalidation', 'total_jumpers', 'stop_reason',
-                'skipped_futile_groups', 'reported_work', 'unreported_validation_work_upper_bound',
-                'work_budget_charge'):
+                'skipped_futile_groups', 'unreported_validation_work_upper_bound'):
         if summary[key] != lineage[key]:
             raise ValueError(f'group decision/accounting differs: {key}')
     if len(summary['attempts']) != len(lineage['attempts']):
@@ -94,35 +130,47 @@ def main():
         selected = json.loads(Path(expected['selected']['path']).read_bytes())
         if actual['selected_nets'] != selected:
             raise ValueError('selected repair decision differs')
-    paths = sorted(path for path in baseline.iterdir() if REPORT.fullmatch(path.name))
-    if not 1 <= len(paths) <= 4096 or sum(path.stat().st_size for path in paths) > 8 << 30:
-        raise ValueError('baseline report count/byte bound')
-    report_bindings = {}
-    for expected in paths:
-        actual = output / 'reports' / expected.name
-        report_bindings[expected.name] = identity(expected)
-        if identity(actual) != report_bindings[expected.name]:
-            raise ValueError(f'complete report bytes differ: {expected.name}')
-    revisions = {}
-    for revision in sorted({row['revision'] for row in summary['attempts']}):
-        actual = revision_files(workspace / 'revisions' / revision)
-        if actual != revision_files(source / 'revisions' / revision):
-            raise ValueError(f'revision side-table bytes differ: {revision}')
-        revisions[revision] = actual
-    if (workspace / 'HEAD').read_text() != lineage['final_revision'] + '\n':
+    names = sorted(p.name for p in original_reports.iterdir()
+                   if CHECK.fullmatch(p.name) or REPAIR.fullmatch(p.name) or OTHER.fullmatch(p.name))
+    if not 1 <= len(names) <= 4096:
+        raise ValueError('baseline report count bound')
+    if sorted(p.name for p in reports.iterdir() if p.name != 'summary.json') != names:
+        raise ValueError('report set differs')
+    input_free_work = 0
+    for name in names:
+        actual, expected = reports / name, original_reports / name
+        if CHECK.fullmatch(name):
+            compare_check(actual, expected, name)
+        elif match := REPAIR.fullmatch(name):
+            input_free_work += compare_repair(actual, expected, int(match.group(1)), reports,
+                                              original_reports)
+        elif load(actual) != load(expected):
+            raise ValueError(f'report differs: {name}')
+    final = summary['final_revision']
+    if (workspace / 'HEAD').read_text() != final + '\n' or summary['committed_revision'] not in (None, final):
         raise ValueError('final HEAD differs')
-    receipt = dict(schema='rustroad.antenna-group-repair-replay.v1', status='passed',
+    committed = revision_files(workspace / 'revisions' / final)
+    reference = revision_files(source / 'revisions' / final)
+    for name, record in reference.items():
+        if name != 'design.json' and committed.get(name) != record:
+            raise ValueError(f'final revision table differs: {name}')
+    design = [json.loads((root / 'revisions' / final / 'design.json').read_bytes())
+              for root in (workspace, source)]
+    parents = [d.pop('parent_revision') for d in design]
+    if final != initial and (parents[0] != initial or design[0] != design[1]):
+        raise ValueError('final design differs beyond its parent revision')
+    receipt = dict(schema='rustroad.antenna-group-repair-replay.v2', status='passed',
                    scope='complete_native_antenna_orchestration_replay', command=command,
                    binary=identity(binary), wall_seconds=wall_seconds,
-                   attempts=len(summary['attempts']), logical_changed_revisions=len(revisions),
-                   groups=summary['groups'], reports=report_bindings, revisions=revisions,
-                   final_design=identity(workspace / 'revisions' / lineage['final_revision'] / 'design.json'),
-                   final_inventory=identity(output / 'reports/inventory-final.json'),
-                   final_model=identity(output / 'reports/model-final.json'),
+                   attempts=len(summary['attempts']), logical_revisions=summary['logical_revisions'],
+                   groups=summary['groups'], reports=len(names), report_bytes=summary['report_bytes'],
+                   committed_revision=committed,
+                   final_inventory=identity(reports / 'inventory-final.json'),
+                   final_model=identity(reports / 'model-final.json'),
                    whole_layout_antenna_status='unchecked', full_flow_status='unchecked')
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(json.dumps({key: receipt[key] for key in ('status', 'scope', 'wall_seconds', 'attempts',
-                                                 'logical_changed_revisions', 'groups')}))
+                                                 'logical_revisions', 'groups')}))
 
 
 if __name__ == '__main__':

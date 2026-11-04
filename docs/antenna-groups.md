@@ -3,9 +3,17 @@
 `repair-antenna-groups` runs the native selected-check/jumper policy against one
 exclusively locked, decoded workspace. It reuses static placement, PDN, LEF and
 routing configuration and refreshes the source fingerprint whenever routes change.
-Every successful jumper attempt publishes the same real revision as the legacy
-runner, using the existing validation and commit paths. Before each repair, it
-rechecks the exact eligible selection and binds the complete legacy report.
+Repairs edit the routes in memory. Each repair that inserts jumpers creates the
+next logical revision, under the name a per-attempt commit would have published
+(`rev5`, `rev6`, ...: the first slot after its parent with no directory, so an
+orphan directory left by an interrupted commit is skipped exactly as a
+per-attempt commit skips it); every report carries these names and the
+physical-source fingerprint of its state. Only the last logical revision is
+materialized: the final routes get the repair's own routing validation (its
+explicit-geometry input under the antenna work bound) and one commit, which
+runs the full read-time validation before it publishes, with the session's
+base revision as parent. Before each repair, it rechecks the exact eligible
+selection and binds it to that check (in memory, rows and identities compared).
 
 ```sh
 rustroad --workspace road --threads 2 --max-expansions 8000000 \
@@ -30,7 +38,7 @@ rustroad --workspace road --threads 2 --max-expansions 8000000 \
 }
 ```
 
-The output directory must not exist. All fields are required. Budgets can be
+The output directory must not exist. All fields except `full_rows` are required. Budgets can be
 reduced but cannot exceed the shown hard ceilings. Per-operation checking and
 repair use the original 0.1 safety margin, 200-million work bound, 100,000 rows,
 128 MiB live report budget, 16 jumpers per net, 512 positions and 32 candidates.
@@ -47,53 +55,74 @@ stop repair; final inventory, model and complete group coverage still run. A che
 that cannot fit its existing work bound fails with an explicit budget diagnostic.
 The final model fingerprint and routed membership must match the initial state.
 
-Raw check/repair reports use exactly the legacy CLI formatting. This preserves the
-selected-report parser's byte-based work charge and provides directly comparable
-artifacts. A compact `summary.json` records actual attempts, budgets, unresolved
-nets and explicit unchecked signoff scope. An unresolved native result exits
+Reports are compact JSON. A check report holds every violated row (and so every
+row above the raw LEF limit) plus the per-net worst ratios and the complete
+selection coverage, whose `rows` still counts all evaluated rows; `check_rows:
+"violated"` marks it. The optional plan field `"full_rows": true` writes every
+row. A repair binds its selected check in memory and charges that report's
+written bytes as its input work, so `antenna_work` and the totals derived from it
+(`reported_work`, `work_budget_charge`) differ from the legacy runner by exactly
+the report-size term; report-memory telemetry differs likewise. `model-final` is a
+hard link of `model-initial` once their fingerprints match. The summary schema is
+`rustroad.antenna-group-repair-result.v2`: it adds `logical_revisions`,
+`committed_revision` and `check_rows`. An unresolved native result exits
 successfully with `status: "unresolved"`, matching the legacy pre-screen policy.
 Foundry antenna, DRC, LVS and timing signoff remain separate checks.
 
-Failure preserves completed real revisions and partial artifacts; a successful
-summary is required to accept the run. There is no background process or stdin
-protocol. The exclusive workspace lock covers decisions, revision publication
-and final evidence flush. Existing revision ancestry is retained instead of
-inventing headers to force a final design hash.
+Failure commits nothing; partial reports remain and a successful summary is
+required to accept the run. There is no background process or stdin protocol.
+The exclusive workspace lock covers decisions, the revision publication and the
+final evidence flush. A commit writes every side table as its own file (no hard
+links to the parent's identical tables) and its validation receipt to
+`receipts/<rev>.json`, outside the revision directory. An orphan revision
+directory needs no manual cleanup before a rerun: it is skipped, and its slot
+is never reused.
 
-`scripts/antenna_group_repair_replay.py` copies the initial real ancestry from
-immutable grouped-runner evidence into a new workspace, executes the command,
-and independently verifies every original operation report byte, selected
-attempt/order/work outcome, changed revision side-table, and final design,
-inventory and model. Run it under a 4 GiB resource scope, timeout and GNU time.
-The initial estimate is <1.5 GiB: one decoded/prepared state, original bounded
-planner copies, one 128 MiB report and <128 MiB bounded name/attempt/futile tables.
+Session state persists across attempts without changing any decision. The jumper
+planner's spatial index is built once; after every attempt it is rebased (cut
+wires removed, pieces, bridges and vias inserted at their fresh-build positions in
+every bin chain) so that probe order, and with it every work charge and the
+planner budget, equals a fresh per-attempt planner. Checks and candidate
+evaluation read per-net record lists instead of scanning all routes, and charge
+the same work. The source fingerprint keeps the SHA-256 state of its
+routes-independent prefix and serializes only the routes per change.
+`RUSTROAD_ANTENNA_PARANOID=1` re-runs, at every step, the full routing
+validation, a fresh planner comparison, the full shape scan and the fingerprint
+from scratch; it is a slow diagnostic (minutes, about 4 GiB peak) and must give
+identical outputs. `RUSTROAD_ANTENNA_TRACE=1` prints phase timings.
 
-This command introduces a new compact receipt protocol. Existing product flow
-recipes and their lineage qualifiers must explicitly adopt it; a standalone byte
-replay does not establish new public full-flow qualification or a speedup claim.
+`scripts/antenna_group_repair_replay.py` copies the initial revision from
+grouped-runner evidence into a new workspace, executes the command and compares
+every report with the original: check reports must equal the original with only
+its violated rows kept, repair reports must be equal apart from the input-size
+work term, the summary attempts must match exactly, and the committed revision's
+route table and side tables must equal the original final revision's (its
+`design.json` differs only in `parent_revision`).
 
-The frozen run16 replay passed with the final candidate: 64 attempts, 52 changed
-real revisions and 128 final groups. All 439 original raw operation reports,
-every changed revision side-table, final design, inventory and connectivity model
-matched byte for byte. Outcome, selection order, work charges and the
-`attempt_budget` stop reason also matched. The native command measured 181.257 s;
-copying and independent complete-file verification together measured 188.47 s,
-with 733,392 KiB peak process RSS in a 4 GiB scope. An earlier pre-polish candidate
-measured 218.349 s; these runs overlapped other work and are not a controlled
-speedup comparison. The historical antenna step was 858.0 s. The <=60 s target
-and new public full-flow qualification remain open.
+Ibex SG13G2 host replay (2026-11-03, rev4 of the native-final postroute
+workspace, `--threads 4`): all 64 attempts, 77 jumpers, the 225 unresolved nets
+and every repair's jumper list match the producer run; all 404 check, 64 repair,
+inventory and model reports compare equal as described (every `planner_work`
+included); the committed `rev52` `routes.rbin` has SHA-256
+`695e2205a7e0cbfd2bcf5a14cb6d58cf1273671ce0437d344a11da9bbbdfa040` and
+`export-gds` of it reproduces the reference GDS. The command took 8.9-9.9 s wall
+and 11.2-13.2 s user CPU at 0.81-0.88 GB peak RSS and wrote 126 MB (measured
+before the commit regained its read-time routing validation and stopped
+hard-linking side tables; see the re-measurement below), against
+360 s, 345 s user and 5.79 GB written for the per-attempt-commit runner (the
+lower user times are with a receipt-stamped base revision, whose read skips the
+full validation). Through the antenna_session wrapper the step took 11.7 s (from
+388 s) and its independent verifier 1.9 s (from 21.4 s). Reports are 31 MB
+instead of 780 MB, and the workspace grows by one revision instead of 48
+(4.7 GB). The paranoid run gave identical reports and summary.
 
-Final replay evidence is in the superproject's
-`.work/perf-20261030/antenna/full-replay-final/receipt.json`. The final candidate
-binary is retained by SHA-256 under
-`.work/perf-20261030/antenna/bin/47caec009e3a7121128e857c06660909b50bcd7e0e7c79072cb27bd0f380b468/rustroad`.
-The unchanged final design, inventory and model hashes are respectively
-`f34b3205d32b1bfef521974e2b9c241970496187c29d7f5089566785348427a3`,
-`88e02b6970310e58a3c05ef01f445bdf08fec5cff515c02dcdc818ef94c3d1cc`, and
-`8f8c9e89d2fc53944a707dc3f8cf2787c197750a7a9c05073f204d9ceaf38648`.
-
-Validation also passed 28 antenna integration tests, 46 existing workspace/storage
-unit tests, all-target workspace/CLI Clippy with warnings denied, and formatting.
-Independent review caught the reduced exact-fit operation-budget edge for summary
-publication; a regression test confirms that final lineage metadata consumes a
-separate bounded allowance, matching the legacy policy.
+Re-measurement after the commit regained its read-time routing validation,
+writes independent side tables and keeps its receipt outside the revision
+(same host, interleaved with the previous build, unstamped base, load 4.5-6.3):
+11.8-12.7 s wall and 13.8-14.0 s user CPU at 0.79-0.84 GB peak RSS, 136 MB
+written, against 11.1-11.8 s, 12.6-13.1 s user and 126 MB for the previous
+build. All reports, the summary attempts, the committed `rev52` side tables and
+`routes.rbin` still match the producer run as described above. With an orphan
+`rev52` directory left in place, the rerun names its last logical revision
+`rev53` (exactly what the per-attempt runner would have published), commits it
+with the same routes and exits successfully.

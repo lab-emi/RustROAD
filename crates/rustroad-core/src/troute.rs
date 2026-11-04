@@ -39,10 +39,10 @@ pub(crate) mod replay;
 use crate::route_rules;
 use crate::route_search::{History, Search, State};
 use crate::routing::{
-    Access, AccessEntry, Blockage, LayerRect, RouteInput, RouteLimits, RouteStats, Routes, Soft,
-    Spatial, Terminal, TrackPlan, Via, ViaPair, WIRE, Wire, access_table_at, budget, contains,
-    distance, expand, int, invalid, no_route, quartile_points, shifted, validate, via_pairs,
-    wire_rect,
+    Access, AccessEntry, Blockage, BuildFx, LayerRect, RouteInput, RouteLimits, RouteStats, Routes,
+    Soft, Spatial, Terminal, TrackPlan, Via, ViaPair, WIRE, Wire, access_table_at, budget,
+    contains, distance, expand, int, invalid, no_route, quartile_points, shifted, validate,
+    via_pairs, wire_rect,
 };
 use crate::{Rect, Result};
 use std::cmp::Reverse;
@@ -329,7 +329,7 @@ struct GPair {
 }
 struct Graph {
     layers: Vec<GLayer>,
-    slot: HashMap<u32, usize>,
+    slot: HashMap<u32, usize, BuildFx>,
     pairs: Vec<GPair>,
     len: usize,
 }
@@ -394,7 +394,7 @@ impl Graph {
     }
     fn new(input: &RouteInput, plan: &TrackPlan, limits: &RouteLimits) -> Result<Self> {
         let mut layers = Vec::new();
-        let mut slot = HashMap::new();
+        let mut slot = HashMap::with_hasher(BuildFx);
         for (i, l) in input.layers.iter().enumerate() {
             let Some(vertical) = l.vertical else {
                 continue;
@@ -801,6 +801,9 @@ fn memory_estimate_limited(
         search: (if nodes <= crate::route_search::DENSE_NODES {
             (nodes as u64).saturating_mul(NODE_BYTES)
         } else {
+            // Paged records keep at most 32 B per record of page storage
+            // (`route_search::page_budget`); records beyond it overflow to a
+            // hash map, as all sparse records did before pages.
             (nodes.min(limits.max_search_expansions.saturating_add(limits.max_heap)) as u64)
                 .saturating_mul(64)
         })
@@ -1662,7 +1665,7 @@ impl<'a> Router<'a> {
             .filter_map(|(l, p, _, k)| k.clone().map(|k| ((*l, *p), k)))
             .collect();
         let mut heap = BinaryHeap::new();
-        let mut visited = HashMap::<u32, (u64, u32, u32)>::new();
+        let mut visited = HashMap::<u32, (u64, u32, u32), BuildFx>::with_hasher(BuildFx);
         for (layer, at, cost, _) in &starts {
             let Some(&gs) = self.graph.slot.get(layer) else {
                 continue;
@@ -3050,9 +3053,10 @@ impl<'a> Router<'a> {
             root_point,
             self.limits.max_target_segments,
         )?;
-        let mut tree: HashSet<u32> = HashSet::from([root]);
+        let mut tree: HashSet<u32, BuildFx> = HashSet::with_hasher(BuildFx);
+        tree.insert(root);
         // Tree junctions remember whether an actual incident pad meets AREA.
-        let mut via_nodes: HashMap<u32, bool> = HashMap::new();
+        let mut via_nodes: HashMap<u32, bool, BuildFx> = HashMap::with_hasher(BuildFx);
         if plans[&terminals[0].pin].top_via {
             via_nodes.insert(root, self.escape_pad_ok(&plans[&terminals[0].pin]));
         }
@@ -3209,24 +3213,27 @@ impl<'a> Router<'a> {
                         kind: WIRE,
                     },
                 )?;
-                heap.offer((
-                    target
-                        .distance(
-                            self.graph.slot[&self.graph.point(start).0],
-                            self.graph.point(start).1,
-                            &self.target_costs,
-                            &mut self.spatial.work,
-                            self.limits.max_comparisons,
-                        )?
-                        .saturating_mul(pin_weight),
-                    Reverse(0u64),
-                    start,
-                ))?;
+                heap.offer(
+                    (
+                        target
+                            .distance(
+                                self.graph.slot[&self.graph.point(start).0],
+                                self.graph.point(start).1,
+                                &self.target_costs,
+                                &mut self.spatial.work,
+                                self.limits.max_comparisons,
+                            )?
+                            .saturating_mul(pin_weight),
+                        Reverse(0u64),
+                        start,
+                    ),
+                    &mut self.search,
+                )?;
                 limited = false;
                 touched_guide = false;
                 let mut projection_attempts = 0;
                 let mut search = 0usize;
-                while let Some((priority, Reverse(cost), id)) = heap.pop() {
+                while let Some((priority, Reverse(cost), id)) = heap.pop(&mut self.search) {
                     let close_nodes = self.close_expanded || (pin_weight > 1 && search >= 32_768);
                     if close_nodes && self.search.is_closed(id) {
                         continue;
@@ -3737,11 +3744,14 @@ impl<'a> Router<'a> {
                                 self.limits.max_comparisons,
                             )?,
                         };
-                        heap.offer((
-                            nc.saturating_add(remaining.saturating_mul(pin_weight)),
-                            Reverse(nc),
-                            next,
-                        ))
+                        heap.offer(
+                            (
+                                nc.saturating_add(remaining.saturating_mul(pin_weight)),
+                                Reverse(nc),
+                                next,
+                            ),
+                            &mut self.search,
+                        )
                         .map_err(|e| budget(&format!("{e}; pin {} net {net}", t.pin)))?;
                     }
                 }

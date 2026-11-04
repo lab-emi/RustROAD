@@ -905,3 +905,161 @@ fn old_route_limits_default_the_independent_active_topology_bound() {
     limits.max_active_nodes = 0;
     assert!(limits.validate_track().is_err());
 }
+
+/// Commit-time validation receipts: a routed (schema 6) revision is trusted
+/// only while every byte it binds is unchanged and the receipt comes from this
+/// validator; anything else falls back to full validation, which then reports
+/// what is wrong. All mode assertions live in this one test because the
+/// `--verify-workspace` switch (`set_force_validate`) is process-global.
+#[test]
+fn receipts_gate_trusted_reads_of_routed_revisions() {
+    use rustroad_workspace::{
+        ReadOptions, Validation, read_with, receipt_path, set_force_validate, verify_workspace,
+    };
+    let f = Fixture::new();
+    let ws = f.flow("rc", "track.json").unwrap();
+    let dir = head_dir(&ws);
+    let receipt = receipt_path(&ws, dir.file_name().unwrap().to_str().unwrap());
+    assert!(receipt.is_file(), "commit writes the receipt");
+    // The receipt lives outside the revision: its directory keeps exactly
+    // the revision format's files, each an independent inode.
+    let mut names: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "design.json",
+            "instances.rbin",
+            "net_offsets.rbin",
+            "net_pins.rbin",
+            "physical.rbin",
+            "pins.rbin",
+            "routes.rbin"
+        ]
+    );
+    #[cfg(unix)]
+    for name in &names {
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(fs::metadata(dir.join(name)).unwrap().nlink(), 1, "{name}");
+    }
+    let trusted = read(&ws, &limits()).unwrap();
+    assert_eq!(trusted.validation(), &Validation::Receipt);
+    let full_summary = serde_json::to_value(trusted.summary()).unwrap();
+    drop(trusted);
+    let trusted_def = def(&ws);
+
+    // Forced full validation gives identical outputs.
+    set_force_validate(true);
+    let forced = read(&ws, &limits()).unwrap();
+    assert_eq!(forced.validation(), &Validation::Full("forced"));
+    drop(forced);
+    assert_eq!(def(&ws), trusted_def);
+    set_force_validate(false);
+
+    // Route-free reads leave the records out but report the same summary;
+    // route consumers refuse such a snapshot.
+    let lean = read_with(&ws, &limits(), ReadOptions { routes: false }).unwrap();
+    assert_eq!(lean.validation(), &Validation::Receipt);
+    assert!(lean.routes_deferred());
+    assert_eq!(serde_json::to_value(lean.summary()).unwrap(), full_summary);
+    assert!(lean.export_def(&mut Vec::new()).is_err());
+    drop(lean);
+
+    // Same content, different bytes (trailing newline): not trusted, but valid.
+    let design = dir.join("design.json");
+    let original = fs::read(&design).unwrap();
+    let mut spaced = original.clone();
+    spaced.push(b'\n');
+    fs::write(&design, &spaced).unwrap();
+    let s = read(&ws, &limits()).unwrap();
+    assert_eq!(s.validation(), &Validation::Full("receipt_digest_mismatch"));
+    drop(s);
+    fs::write(&design, &original).unwrap();
+
+    // A consistent-looking tamper: shift a stored wire and re-pin its SHA-256
+    // in design.json. The old receipt no longer matches, so full validation
+    // runs and rejects the geometry.
+    let table = dir.join("routes.rbin");
+    let routes = fs::read(&table).unwrap();
+    let mut moved = routes.clone();
+    assert_eq!(
+        i64::from_le_bytes(moved[..8].try_into().unwrap()),
+        1,
+        "wire record"
+    );
+    for field in [3, 5] {
+        let at = field * 8;
+        let x = i64::from_le_bytes(moved[at..at + 8].try_into().unwrap());
+        moved[at..at + 8].copy_from_slice(&(x + 4000).to_le_bytes());
+    }
+    fs::write(&table, &moved).unwrap();
+    let mut meta: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    use sha2::Digest;
+    meta["physical"]["routing"]["table"]["sha256"] =
+        format!("{:x}", sha2::Sha256::digest(&moved)).into();
+    fs::write(&design, serde_json::to_vec(&meta).unwrap()).unwrap();
+    let error = read(&ws, &limits())
+        .err()
+        .expect("shifted wire is rejected");
+    assert!(
+        matches!(error, Error::Design(_) | Error::Invalid(_)),
+        "{error}"
+    );
+    // The route table alone (old design.json): the SHA-256 pin rejects it.
+    fs::write(&design, &original).unwrap();
+    assert!(matches!(read(&ws, &limits()), Err(Error::Invalid(_))));
+    fs::write(&table, &routes).unwrap();
+    assert_eq!(
+        read(&ws, &limits()).unwrap().validation(),
+        &Validation::Receipt
+    );
+
+    // A receipt from another validator build is ignored.
+    let stamp = fs::read(&receipt).unwrap();
+    let mut foreign: serde_json::Value = serde_json::from_slice(&stamp).unwrap();
+    foreign["build"] = "0.0.0+other".into();
+    fs::write(&receipt, serde_json::to_vec(&foreign).unwrap()).unwrap();
+    assert_eq!(
+        read(&ws, &limits()).unwrap().validation(),
+        &Validation::Full("receipt_other_validator")
+    );
+    // Missing receipt: full validation; stamping restores trust.
+    fs::remove_file(&receipt).unwrap();
+    assert_eq!(
+        read(&ws, &limits()).unwrap().validation(),
+        &Validation::Full("receipt_absent")
+    );
+    let checked = verify_workspace(&ws, &limits(), false).unwrap();
+    assert_eq!(
+        (checked.previous_receipt, checked.receipt),
+        ("receipt_absent", "not_requested")
+    );
+    assert!(!receipt.exists());
+    let stamped = verify_workspace(&ws, &limits(), true).unwrap();
+    assert_eq!(stamped.receipt, "written");
+    assert_eq!(
+        fs::read(&receipt).unwrap(),
+        stamp,
+        "stamp equals the commit receipt"
+    );
+    assert_eq!(
+        read(&ws, &limits()).unwrap().validation(),
+        &Validation::Receipt
+    );
+    assert_eq!(
+        verify_workspace(&ws, &limits(), true).unwrap().receipt,
+        "current"
+    );
+    // Stamping never writes a receipt for a revision that fails validation.
+    fs::write(&table, &moved).unwrap();
+    fs::write(&design, serde_json::to_vec(&meta).unwrap()).unwrap();
+    fs::remove_file(&receipt).unwrap();
+    assert!(verify_workspace(&ws, &limits(), true).is_err());
+    assert!(!receipt.exists());
+    fs::write(&table, &routes).unwrap();
+    fs::write(&design, &original).unwrap();
+    assert_eq!(def(&ws), trusted_def);
+}

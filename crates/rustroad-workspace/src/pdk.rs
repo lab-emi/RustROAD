@@ -247,6 +247,41 @@ fn input_preflight(sources: &ImportSources, netlist_bytes: usize) -> Result<()> 
     Ok(())
 }
 
+/// Receipt-backed read: the O(n) index bounds every later consumer
+/// dereferences (instance masters, pin owners and nets). The semantic link
+/// and comparison of `validate_bundle` ran before the receipt was written.
+pub(crate) fn validate_bundle_bounds(bundle: &PhysicalBundle, design: &Design) -> Result<()> {
+    let c = &bundle.connectivity;
+    if bundle.netlist.instances.len() != design.cells.len()
+        || c.instance_masters.len() != design.cells.len()
+        || c.layers.len() != bundle.technology.layers.len()
+    {
+        return Err(invalid("invalid physical import metadata"));
+    }
+    if c.instance_masters
+        .iter()
+        .any(|&m| m as usize >= c.masters.len())
+    {
+        return Err(invalid("invalid master index"));
+    }
+    for pin in &c.pins {
+        let owner = match pin.owner {
+            PinOwner::Instance { instance, terminal } => c
+                .instance_masters
+                .get(instance as usize)
+                .is_some_and(|&m| (terminal as usize) < c.masters[m as usize].pins.len()),
+            PinOwner::Port { port, bit } => c
+                .ports
+                .get(port as usize)
+                .is_some_and(|p| (bit as usize) < p.bits.len()),
+        };
+        if !owner || pin.net.is_some_and(|n| n as usize >= c.nets.len()) {
+            return Err(invalid("pin index out of range"));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_bundle(
     bundle: &PhysicalBundle,
     design: &Design,

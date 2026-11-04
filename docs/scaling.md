@@ -353,7 +353,12 @@ plus `table = {file: "routes.rbin", sha256, bytes, wires, vias, access,
 patches, nets}`. `routes.rbin` holds 64-byte i64 records (kinds 1-4 as in
 `routing.rbin`, plus kind 5 = routed net), at most 512 MiB. Loading reads
 it, checks length, sha256, record order and counts, and runs the full
-routing validation. Schemas 1-5 load as before (`routing.rbin` stays a
+routing validation, unless the revision's validation receipt matches
+(`architecture.md`): then the receipt's XXH3-128 binds the bytes and only
+index bounds are checked. The full validation first tries a parallel
+proof (frozen per-layer shape grid, per-net connectivity and rule checks
+on the rayon pool) and falls back to the sequential pass, which owns every
+error message. Schemas 1-5 load as before (`routing.rbin` stays a
 mirror there). `Routes.wires` keeps its meaning (axis-parallel segments of
 any length), so `export-def`, `export-gds`, `extract` and `check-antenna`
 work unchanged. A tampered or truncated `routes.rbin` is rejected
