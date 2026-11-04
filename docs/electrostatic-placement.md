@@ -143,7 +143,12 @@ process guard. No cell-by-bin matrix or per-iteration transcript is retained.
 
 Independent transform output jobs preserve fixed serial inner sums.
 Deposition and global scalar reductions use object/bin order. The caller's
-thread pool is bounded further to four active numerical jobs.
+thread pool is bounded further to four active numerical jobs. Per-net wire
+values and derivatives and per-object deposition weights are computed in
+contiguous parallel ranges and gathered serially in stored order; each
+evaluation computes the deposition weights once and reuses them for the
+adjoint, whose per-object forces are independent. Every sum therefore has the
+same operands in the same order for any worker count.
 
 ## Qualification scope
 

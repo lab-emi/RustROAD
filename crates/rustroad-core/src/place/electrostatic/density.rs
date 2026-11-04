@@ -14,8 +14,9 @@ struct AxisWeight {
     weight: f64,
     derivative: f64,
 }
+#[cfg(test)]
 struct Axis {
-    values: [AxisWeight; 64],
+    values: Vec<AxisWeight>,
     len: usize,
     retained: f64,
 }
@@ -53,7 +54,16 @@ fn averaged_hat(at: f64, width: f64, radius: f64) -> f64 {
     }
     value
 }
-fn axis(center: f64, width: f64, bins: usize, radius: f64) -> Result<Axis, Failure> {
+/// Appends one object's normalized axis weights to `out` and returns the
+/// retained (pre-normalization) kernel mass. Each bin boundary's averaged CDF
+/// and hat value is evaluated once and shared by the two bins it separates.
+fn axis(
+    center: f64,
+    width: f64,
+    bins: usize,
+    radius: f64,
+    out: &mut Vec<AxisWeight>,
+) -> Result<f64, Failure> {
     if !center.is_finite()
         || !width.is_finite()
         || width <= 0.0
@@ -70,48 +80,100 @@ fn axis(center: f64, width: f64, bins: usize, radius: f64) -> Result<Axis, Failu
     if first >= bins || first > last {
         return Err(Failure::Numerical("kernel_outside_domain"));
     }
-    let mut out = Axis {
-        values: [AxisWeight::default(); 64],
-        len: 0,
-        retained: 0.0,
-    };
+    let start = out.len();
     let (mut sum, mut derivative) = (0.0, 0.0);
+    let lo = first as f64 * radius - center;
+    let (mut cdf_lo, mut hat_lo) = (
+        averaged_cdf(lo, width, radius),
+        averaged_hat(lo, width, radius),
+    );
     for bin in first..=last {
-        let (lo, hi) = (
-            bin as f64 * radius - center,
-            (bin + 1) as f64 * radius - center,
+        let hi = (bin + 1) as f64 * radius - center;
+        let (cdf_hi, hat_hi) = (
+            averaged_cdf(hi, width, radius),
+            averaged_hat(hi, width, radius),
         );
-        let raw = averaged_cdf(hi, width, radius) - averaged_cdf(lo, width, radius);
-        let d = averaged_hat(lo, width, radius) - averaged_hat(hi, width, radius);
+        let raw = cdf_hi - cdf_lo;
+        let d = hat_lo - hat_hi;
+        (cdf_lo, hat_lo) = (cdf_hi, hat_hi);
         if !raw.is_finite() || !d.is_finite() || raw < -1e-12 {
+            out.truncate(start);
             return Err(Failure::Numerical("invalid_deposition_weight"));
         }
         let (raw, d) = if raw < 0.0 { (0.0, 0.0) } else { (raw, d) };
-        out.values[out.len] = AxisWeight {
+        out.push(AxisWeight {
             bin,
             weight: raw,
             derivative: d,
-        };
-        out.len += 1;
+        });
         sum += raw;
         derivative += d;
     }
-    if !sum.is_finite() || sum <= 1e-12 {
-        return Err(Failure::Numerical("zero_kernel_mass"));
+    if !sum.is_finite() || sum <= 1e-12 || sum > 1.0 + 1e-10 {
+        out.truncate(start);
+        return Err(Failure::Numerical(if !sum.is_finite() || sum <= 1e-12 {
+            "zero_kernel_mass"
+        } else {
+            "integrated_kernel_mass"
+        }));
     }
-    out.retained = sum;
-    if out.retained > 1.0 + 1e-10 {
-        return Err(Failure::Numerical("integrated_kernel_mass"));
-    }
-    for v in &mut out.values[..out.len] {
+    for v in &mut out[start..] {
         v.weight /= sum;
         v.derivative = (v.derivative - v.weight * derivative) / sum;
     }
-    Ok(out)
+    Ok(sum)
+}
+#[cfg(test)]
+fn axis_values(center: f64, width: f64, bins: usize, radius: f64) -> Result<Axis, Failure> {
+    let mut values = Vec::with_capacity(8);
+    let retained = axis(center, width, bins, radius, &mut values)?;
+    Ok(Axis {
+        len: values.len(),
+        values,
+        retained,
+    })
+}
+/// Compact deposition weights of one contiguous object range, computed once
+/// per evaluation and shared by the forward deposit and its adjoint. The
+/// buffers are sized in the calling thread from each object's bin bound, so
+/// numerical workers never allocate.
+struct Weights {
+    objects: std::ops::Range<usize>,
+    x: Vec<AxisWeight>,
+    y: Vec<AxisWeight>,
+    /// Per object: x length, y length.
+    lengths: Vec<[u8; 2]>,
+    failure: Option<(usize, Failure)>,
+    adjoint: Option<Failure>,
+}
+fn weights(bodies: &[Body], positions: &[[f64; 2]], grid: &Grid, out: &mut Weights) {
+    out.x.clear();
+    out.y.clear();
+    out.lengths.clear();
+    out.failure = None;
+    for i in out.objects.clone() {
+        let (body, position) = (bodies[i], positions[i]);
+        let (x0, y0) = (out.x.len(), out.y.len());
+        let axes = axis(position[0], body.width, grid.nx, grid.hx, &mut out.x)
+            .and_then(|_| axis(position[1], body.height, grid.ny, grid.hy, &mut out.y));
+        match axes {
+            // Axis lengths are at most 64 (the grid side) by construction.
+            Ok(_) => out
+                .lengths
+                .push([(out.x.len() - x0) as u8, (out.y.len() - y0) as u8]),
+            Err(failure) => {
+                out.failure = Some((i, failure));
+                break;
+            }
+        }
+    }
+}
+/// Bins one object can touch along one axis (the admission bound).
+fn axis_bound(extent: f64, step: f64, bins: usize) -> usize {
+    ((extent / step).ceil() as usize + 3).min(bins)
 }
 pub(super) fn interaction_bound(width: f64, height: f64, grid: &Grid) -> usize {
-    ((width / grid.hx).ceil() as usize + 3).min(grid.nx)
-        * ((height / grid.hy).ceil() as usize + 3).min(grid.ny)
+    axis_bound(width, grid.hx, grid.nx) * axis_bound(height, grid.hy, grid.ny)
 }
 pub(super) struct Density {
     pub grid: Grid,
@@ -121,6 +183,7 @@ pub(super) struct Density {
     phi: Vec<f64>,
     temp: Vec<f64>,
     spectral: Vec<f64>,
+    jobs: Vec<Weights>,
 }
 pub(super) struct Value {
     pub energy: f64,
@@ -195,6 +258,7 @@ impl Density {
             phi: vec![0.0; bins],
             temp: vec![0.0; bins],
             spectral: vec![0.0; bins],
+            jobs: Vec::new(),
         })
     }
     pub fn evaluate(
@@ -217,21 +281,71 @@ impl Density {
         meter.work((8 * self.grid.bins()) as u64)?;
         self.mass.fill(0.0);
         gradient.fill([0.0; 2]);
+        // Deposition weights depend only on each object's own position:
+        // contiguous object ranges compute them in parallel, once for both
+        // the forward deposit and its adjoint. Every sum below still runs
+        // serially in object order, so any worker count gives identical bits.
+        let objects = positions.len();
+        let jobs = workers.clamp(1, objects.max(1));
+        let size = objects.div_ceil(jobs).max(1);
+        let range = |w: usize| (w * size).min(objects)..((w + 1) * size).min(objects);
+        if self.jobs.len() != jobs
+            || self
+                .jobs
+                .iter()
+                .enumerate()
+                .any(|(w, j)| j.objects != range(w))
+        {
+            let grid = &self.grid;
+            self.jobs = (0..jobs)
+                .map(|w| {
+                    let objects = range(w);
+                    let (mut x, mut y) = (0, 0);
+                    // One spare bin per axis covers an exact integer extent.
+                    for b in &bodies[objects.clone()] {
+                        x += axis_bound(b.width, grid.hx, grid.nx) + 1;
+                        y += axis_bound(b.height, grid.hy, grid.ny) + 1;
+                    }
+                    Weights {
+                        x: Vec::with_capacity(x),
+                        y: Vec::with_capacity(y),
+                        lengths: Vec::with_capacity(objects.len()),
+                        objects,
+                        failure: None,
+                        adjoint: None,
+                    }
+                })
+                .collect();
+        }
+        let (grid, chunks) = (&self.grid, &mut self.jobs);
+        if jobs == 1 {
+            weights(bodies, positions, grid, &mut chunks[0]);
+        } else {
+            use rayon::prelude::*;
+            chunks
+                .par_iter_mut()
+                .for_each(|c| weights(bodies, positions, grid, c));
+        }
+        let chunks = &self.jobs;
         let mut mass = 0.0;
-        for (i, &position) in positions.iter().enumerate() {
-            let Body {
-                width,
-                height,
-                area,
-            } = bodies[i];
-            let x = axis(position[0], width, self.grid.nx, self.grid.hx)?;
-            let y = axis(position[1], height, self.grid.ny, self.grid.hy)?;
-            meter.interactions(x.len * y.len)?;
-            mass += area;
-            for a in &x.values[..x.len] {
-                for b in &y.values[..y.len] {
-                    self.mass[a.bin * self.grid.ny + b.bin] += area * a.weight * b.weight;
+        for c in chunks {
+            let (mut xo, mut yo) = (0usize, 0usize);
+            for (j, i) in c.objects.clone().enumerate() {
+                if let Some((at, failure)) = c.failure
+                    && at == i
+                {
+                    return Err(failure);
                 }
+                let [xl, yl] = c.lengths[j].map(usize::from);
+                meter.interactions(xl * yl)?;
+                let area = bodies[i].area;
+                mass += area;
+                for a in &c.x[xo..xo + xl] {
+                    for b in &c.y[yo..yo + yl] {
+                        self.mass[a.bin * self.grid.ny + b.bin] += area * a.weight * b.weight;
+                    }
+                }
+                (xo, yo) = (xo + xl, yo + yl);
             }
         }
         let deposited = self.mass.iter().sum::<f64>();
@@ -266,26 +380,48 @@ impl Density {
         }
         // This is the adjoint of the same normalized deposition operator.
         // The potential has zero mean, so the removed DC charge has no force.
-        for (i, (&position, out)) in positions.iter().zip(gradient).enumerate() {
-            let Body {
-                width,
-                height,
-                area,
-            } = bodies[i];
-            let x = axis(position[0], width, self.grid.nx, self.grid.hx)?;
-            let y = axis(position[1], height, self.grid.ny, self.grid.hy)?;
-            meter.interactions(x.len * y.len)?;
-            let (mut gx, mut gy) = (0.0, 0.0);
-            for a in &x.values[..x.len] {
-                for b in &y.values[..y.len] {
-                    let phi = self.phi[a.bin * self.grid.ny + b.bin];
-                    gx += phi * a.derivative * b.weight;
-                    gy += phi * a.weight * b.derivative;
-                }
+        // The adjoint visits are charged in object order as before; each
+        // object's force is then independent of every other.
+        for c in chunks {
+            for &[xl, yl] in &c.lengths {
+                meter.interactions(usize::from(xl) * usize::from(yl))?;
             }
-            *out = [area * gx, area * gy];
-            if out.iter().any(|v| !v.is_finite()) {
-                return Err(Failure::Numerical("nonfinite_density_gradient"));
+        }
+        let (phi, ny) = (&self.phi, self.grid.ny);
+        let force = |c: &Weights, out: &mut [[f64; 2]]| -> Result<(), Failure> {
+            let (mut xo, mut yo) = (0usize, 0usize);
+            for ((i, out), [xl, yl]) in c.objects.clone().zip(out).zip(&c.lengths) {
+                let (xl, yl) = (usize::from(*xl), usize::from(*yl));
+                let (mut gx, mut gy) = (0.0, 0.0);
+                for a in &c.x[xo..xo + xl] {
+                    for b in &c.y[yo..yo + yl] {
+                        let phi = phi[a.bin * ny + b.bin];
+                        gx += phi * a.derivative * b.weight;
+                        gy += phi * a.weight * b.derivative;
+                    }
+                }
+                let area = bodies[i].area;
+                *out = [area * gx, area * gy];
+                if out.iter().any(|v| !v.is_finite()) {
+                    return Err(Failure::Numerical("nonfinite_density_gradient"));
+                }
+                (xo, yo) = (xo + xl, yo + yl);
+            }
+            Ok(())
+        };
+        if jobs == 1 {
+            force(&self.jobs[0], gradient)?;
+        } else {
+            use rayon::prelude::*;
+            gradient
+                .par_chunks_mut(size)
+                .zip(self.jobs.par_iter_mut())
+                .for_each(|(out, c)| {
+                    let n = c.objects.len();
+                    c.adjoint = force(c, &mut out[..n]).err();
+                });
+            if let Some(failure) = self.jobs.iter().find_map(|c| c.adjoint) {
+                return Err(failure);
             }
         }
         Ok(Value {
@@ -312,6 +448,7 @@ impl Density {
             phi: vec![0.0; bins],
             temp: vec![0.0; bins],
             spectral: vec![0.0; bins],
+            jobs: Vec::new(),
         })
     }
     #[cfg(test)]
@@ -332,8 +469,8 @@ impl Density {
         let mut derivative_mass = Vec::new();
         let mut retained = Vec::new();
         for (body, p) in bodies.iter().zip(positions) {
-            let x = axis(p[0], body.width, grid.nx, grid.hx)?;
-            let y = axis(p[1], body.height, grid.ny, grid.hy)?;
+            let x = axis_values(p[0], body.width, grid.nx, grid.hx)?;
+            let y = axis_values(p[1], body.height, grid.ny, grid.hy)?;
             let (mut dx, mut dy) = (vec![0.0; grid.bins()], vec![0.0; grid.bins()]);
             for a in &x.values[..x.len] {
                 for b in &y.values[..y.len] {

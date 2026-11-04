@@ -25,13 +25,14 @@ fn evaluate(
     density: &mut density::Density,
     positions: &[[f64; 2]],
     gamma: f64,
-    gradients: (&mut [[f64; 2]], &mut [[f64; 2]]),
+    // Wire and density gradient outputs, and the reused wire buffers.
+    buffers: (&mut [[f64; 2]], &mut [[f64; 2]], &mut wire::Scratch),
     meter: &mut Meter<'_>,
     report: &mut ElectrostaticReport,
 ) -> Result<Value, Failure> {
-    let (wire_gradient, density_gradient) = gradients;
+    let (wire_gradient, density_gradient, scratch) = buffers;
     meter.evaluation()?;
-    let wire = wire::evaluate(model, positions, gamma, wire_gradient, meter)?;
+    let wire = wire::evaluate(model, positions, gamma, wire_gradient, scratch, meter)?;
     let d = density.evaluate(
         &model.bodies,
         positions,
@@ -105,6 +106,7 @@ pub(super) fn run(
     let mut at_y = vec![[0.0; 2]; n];
     let mut wire_gradient = vec![[0.0; 2]; n];
     let mut density_gradient = vec![[0.0; 2]; n];
+    let mut scratch = wire::Scratch::default();
     let mut best_cost = (
         report.baseline_hpwl_dbu,
         report
@@ -138,7 +140,7 @@ pub(super) fn run(
             density,
             &x,
             gamma,
-            (&mut wire_gradient, &mut density_gradient),
+            (&mut wire_gradient, &mut density_gradient, &mut scratch),
             meter,
             report,
         )?;
@@ -177,7 +179,7 @@ pub(super) fn run(
                     density,
                     $positions,
                     gamma,
-                    (&mut wire_gradient, &mut density_gradient),
+                    (&mut wire_gradient, &mut density_gradient, &mut scratch),
                     meter,
                     report,
                 ) {
