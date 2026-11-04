@@ -4227,6 +4227,40 @@ impl<'a> Router<'a> {
     }
 }
 
+/// Fill to reserve for a same-net notch between `a` and `b` on `layer` that
+/// survived a re-route and that cleanup could not fill
+/// (`RouteQor::notch_bridge`): the first of `route_rules::local_fills`
+/// (robust box, stair bridge, bars clipped to two widths past the gap) that
+/// no fixed geometry blocks and that routed metal of other nets does block,
+/// with those nets (sorted) as the victims to re-route. A candidate that is
+/// already clear is skipped (cleanup's own clearance test failed on geometry
+/// this index does not hold). `None` when no candidate qualifies. A pure
+/// function of the geometry and the index, so the choice is order-stable.
+fn notch_fill_reservation(
+    spatial: &mut Spatial<'_>,
+    net: u32,
+    layer: u32,
+    a: Rect,
+    b: Rect,
+) -> Result<Option<(Vec<Rect>, BTreeSet<u32>)>> {
+    let width = spatial.input.layers[layer as usize].width;
+    let candidates = route_rules::local_fills(a, b, width, spatial.input.grid);
+    'candidate: for rects in candidates {
+        let mut victims = BTreeSet::new();
+        for rect in &rects {
+            match spatial.probe_soft(layer, *rect, net)? {
+                Soft::Blocked => continue 'candidate,
+                Soft::Clear { victims: v, .. } => victims.extend(v),
+            }
+        }
+        victims.remove(&net);
+        if !victims.is_empty() {
+            return Ok(Some((rects, victims)));
+        }
+    }
+    Ok(None)
+}
+
 /// Bounding box of a terminal's pin shapes.
 fn pin_box(t: &Terminal) -> Rect {
     t.shapes.iter().skip(1).fold(t.shapes[0].rect, |r, s| Rect {
@@ -4673,6 +4707,7 @@ pub(crate) fn route_with_prior(
     let mut zone_count = 0usize;
     // Same-net notch fills reserved as fixed metal (net, layer, rects).
     let mut notch_reserved: BTreeSet<(u32, u32, Vec<[i64; 4]>)> = BTreeSet::new();
+    let notch_bridge = r.plan.qor.as_ref().is_some_and(|q| q.notch_bridge);
     // Directed rip counts (ripper, victim), at most `MAX_PAIR_RIPS` pairs. Two
     // nets that keep ripping each other rebuild the same pair of routes every
     // time (their rip prices grow together), so once both directions reach
@@ -5377,30 +5412,16 @@ pub(crate) fn route_with_prior(
             // the nets in its way, so the next cleanup can place the patch.
             // Candidates and victims are pure functions of the geometry
             // (order-stable); each reservation is placed once.
-            if *seen >= 2
+            // Only with `RouteQor::notch_bridge`.
+            if notch_bridge
+                && *seen >= 2
                 && zone_count < MAX_NOTCH_ZONES
                 && let route_rules::Violation::Spacing { layer, a, b, .. } = *v
+                && let Some((rects, victims)) =
+                    notch_fill_reservation(&mut r.spatial, n, layer, a, b)?
             {
-                let width = input.layers[layer as usize].width;
-                let candidates = route_rules::local_fills(a, b, width, input.grid);
-                'candidate: for rects in candidates {
-                    let mut victims = BTreeSet::new();
-                    for rect in &rects {
-                        match r.spatial.probe_soft(layer, *rect, n)? {
-                            Soft::Blocked => continue 'candidate,
-                            Soft::Clear { victims: v, .. } => victims.extend(v),
-                        }
-                    }
-                    victims.remove(&n);
-                    if victims.is_empty() {
-                        // Clear already: cleanup's own clearance test failed on
-                        // geometry this index does not hold; try the next.
-                        continue;
-                    }
-                    let key = rects.iter().map(|q| [q.lx, q.ly, q.ux, q.uy]).collect();
-                    if !notch_reserved.insert((n, layer, key)) {
-                        break;
-                    }
+                let key = rects.iter().map(|q| [q.lx, q.ly, q.ux, q.uy]).collect();
+                if notch_reserved.insert((n, layer, key)) {
                     for rect in rects {
                         if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
                             eprintln!(
@@ -5415,7 +5436,6 @@ pub(crate) fn route_with_prior(
                         zone_count += 1;
                     }
                     bad.extend(victims);
-                    break;
                 }
             }
             // A notch that survives a strict re-route lies between two parts of
@@ -8514,6 +8534,85 @@ mod tests {
         assert!(prim_terminal_order(&mut group, centre, &mut 0, 35).is_err());
     }
 
+    #[test]
+    fn notch_fill_reservation_takes_the_first_fill_only_routed_metal_blocks() {
+        // The captured Metal2 stair notch (net 12085) moved near the origin:
+        // an upper pad and a lower escape of net 7 face over 80 DBU across a
+        // 175 DBU gap (width 200, spacing 210). Candidates, in order: robust
+        // box, stair bridge, two bars clipped to two widths past the gap.
+        let mut design = input(Vec::new(), Vec::new());
+        design.die = rect(0, 0, 3000, 3000);
+        for l in &mut design.layers[..3] {
+            (l.width, l.spacing) = (200, 210);
+        }
+        let (a, b) = (rect(550, 1275, 750, 1565), rect(670, 480, 870, 1100));
+        let robust = rect(550, 875, 870, 1500);
+        let stair = rect(550, 1085, 870, 1290);
+        assert_eq!(
+            route_rules::local_fills(a, b, 200, 5),
+            vec![
+                vec![robust],
+                vec![stair],
+                vec![rect(550, 700, 750, 1565)],
+                vec![rect(670, 700, 870, 1565)],
+            ]
+        );
+        let limits = limits();
+        // Fixed metal of net 11 above the pair (within spacing of the robust
+        // box and both clipped bars, 310 DBU clear of the stair bridge) and a
+        // routed net-9 wire 30 DBU right of the pair.
+        let fixed = rect(800, 1600, 1000, 1700);
+        let wire = rect(900, 1150, 1300, 1250);
+        let reserve = |with_fixed: bool, with_wire: bool, swap: bool| {
+            let mut spatial = Spatial::new(&design, &limits).unwrap();
+            for shape in [a, b] {
+                spatial
+                    .add_routed(Blockage {
+                        layer: 1,
+                        rect: shape,
+                        net: Some(7),
+                    })
+                    .unwrap();
+            }
+            if with_fixed {
+                spatial
+                    .add_fixed(Blockage {
+                        layer: 1,
+                        rect: fixed,
+                        net: Some(11),
+                    })
+                    .unwrap();
+            }
+            if with_wire {
+                spatial
+                    .add_routed(Blockage {
+                        layer: 1,
+                        rect: wire,
+                        net: Some(9),
+                    })
+                    .unwrap();
+            }
+            let (x, y) = if swap { (b, a) } else { (a, b) };
+            notch_fill_reservation(&mut spatial, 7, 1, x, y).unwrap()
+        };
+        let victims = BTreeSet::from([9u32]);
+        // Only routed metal in the way: the robust box, net 9 re-routed.
+        assert_eq!(
+            reserve(false, true, false),
+            Some((vec![robust], victims.clone()))
+        );
+        // Fixed metal blocks the robust box: the stair bridge is reserved.
+        assert_eq!(
+            reserve(true, true, false),
+            Some((vec![stair], victims.clone()))
+        );
+        // Order-stable: the pair in either order picks the same fill.
+        assert_eq!(reserve(true, true, true), Some((vec![stair], victims)));
+        // Nothing to re-route: every fill is clear or blocked by fixed metal.
+        assert_eq!(reserve(false, false, false), None);
+        assert_eq!(reserve(true, false, false), None);
+    }
+
     fn crossing_nets() -> RouteInput {
         let mut t = Vec::new();
         // A four-sink net, two crossing two-pin nets and a three-pin net.
@@ -8564,6 +8663,7 @@ mod tests {
             bend_cost: 40,
             small_net_terminals: 3,
             small_net_weight: 1,
+            notch_bridge: true,
         });
         let a = route_cpu_ref(&design, &limits()).unwrap();
         let b = route_cpu_ref(&design, &limits()).unwrap();

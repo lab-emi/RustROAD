@@ -545,9 +545,12 @@ pub(crate) fn fill_for_robust(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
 /// Smaller same-net bridges tried when the `fill_for_robust` box touches
 /// another net (two pads of one net a jog apart). Diagonal pairs: the two
 /// L shapes, each leg as thick as the shape it extends; facing pairs: a bar
-/// across the gap as tall (wide) as either shape, at least one width. The
-/// caller checks clearance and re-runs the rule check on the result.
-pub(crate) fn bridges(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Rect>> {
+/// across the gap as tall (wide) as either shape, at least one width. With
+/// `stair` (`RouteQor::notch_bridge`), facing pairs first try the stair
+/// bridge (when they face over less than a width) and the bars clipped to
+/// two widths past the gap; without it the candidates are exactly the legacy
+/// ones. The caller checks clearance and re-runs the rule check on the result.
+pub(crate) fn bridges(a: Rect, b: Rect, width: i64, grid: i64, stair: bool) -> Vec<Vec<Rect>> {
     let snap = |r: Rect| Rect {
         lx: floor_to(r.lx, grid),
         ly: floor_to(r.ly, grid),
@@ -587,7 +590,7 @@ pub(crate) fn bridges(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Rect>>
         let t = |r: Rect| if across_x { transpose(r) } else { r };
         let (ta, tb) = (t(a), t(b));
         let overlap = if across_x { oy } else { ox };
-        if overlap < i128::from(width) {
+        if stair && overlap < i128::from(width) {
             out.push(vec![snap(t(stair_bridge(ta, tb, width)))]);
         }
         let (hull_lo, hull_hi) = (ta.ly.min(tb.ly), ta.uy.max(tb.uy));
@@ -597,7 +600,7 @@ pub(crate) fn bridges(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Rect>>
             (gap_lo - 2 * width).max(hull_lo),
             (gap_hi + 2 * width).min(hull_hi),
         );
-        if (near_lo, near_hi) != (hull_lo, hull_hi) {
+        if stair && (near_lo, near_hi) != (hull_lo, hull_hi) {
             for s in [ta, tb] {
                 let (u0, u1) = span(s.lx, s.ux);
                 out.push(vec![snap(t(Rect {
@@ -660,7 +663,7 @@ pub(crate) fn local_fills(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Re
     let inside =
         |r: &Rect| window.lx <= r.lx && r.ux <= window.ux && window.ly <= r.ly && r.uy <= window.uy;
     let mut out = vec![vec![fill_for_robust(a, b, width, grid)]];
-    out.extend(bridges(a, b, width, grid));
+    out.extend(bridges(a, b, width, grid, true));
     out.retain(|rects| rects.iter().all(inside));
     out.dedup();
     out
@@ -1981,14 +1984,14 @@ mod tests {
         let (cap, mut w) = (1 << 30, 0);
         assert_eq!(relation(a, b, 210), Relation::Near);
         assert!(!local_ok(a, &[b], 210, &mut w, cap).unwrap());
-        let candidates = bridges(a, b, 200, 5);
+        let candidates = bridges(a, b, 200, 5, true);
         assert_eq!(candidates[0].len(), 1, "{candidates:?}");
         let bar = candidates[0][0];
         // One bar over both shapes' extents, a width thick across the gap,
         // snapped outward to the 5 DBU grid.
         assert_eq!(bar, r(496_550, 63_085, 496_870, 63_290));
         // Order-stable: swapped arguments give the same first candidate.
-        assert_eq!(bridges(b, a, 200, 5)[0], vec![bar]);
+        assert_eq!(bridges(b, a, 200, 5, true)[0], vec![bar]);
         // The gap is covered and the bar meets both shapes: no near pair left.
         for (x, rest) in [(a, [b, bar]), (b, [a, bar]), (bar, [a, b])] {
             assert!(local_ok(x, &rest, 210, &mut w, cap).unwrap(), "{x:?}");
@@ -2006,7 +2009,20 @@ mod tests {
         assert!(bar.ly >= b.ly && bar.uy <= a.uy);
         // Side-by-side shapes get the transposed bar.
         let t = |q: Rect| r(q.ly, q.lx, q.uy, q.ux);
-        assert_eq!(bridges(t(a), t(b), 200, 5)[0], vec![t(bar)]);
+        assert_eq!(bridges(t(a), t(b), 200, 5, true)[0], vec![t(bar)]);
+        // Without `notch_bridge` the candidates are the legacy full-length
+        // bars only (each shape's extent across the gap, over the pair's hull).
+        let legacy = bridges(a, b, 200, 5, false);
+        assert_eq!(
+            legacy,
+            vec![
+                vec![r(496_550, 62_480, 496_750, 63_565)],
+                vec![r(496_670, 62_480, 496_870, 63_565)],
+            ]
+        );
+        // The flag only prepends candidates: the stair bridge and two clipped bars.
+        assert_eq!(candidates.len(), 5);
+        assert_eq!(candidates[3..], legacy[..]);
     }
     #[test]
     fn notch_against_own_pin_leg_is_detected_and_covered_gap_is_not() {

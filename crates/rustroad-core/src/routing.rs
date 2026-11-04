@@ -472,6 +472,14 @@ pub struct RouteQor {
     /// admissible A*.
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub small_net_weight: u64,
+    /// Same-net notch repair for facing shapes: cleanup's bridges add the
+    /// stair bridge (one bar across a gap the two shapes face over less
+    /// than a width) and bars clipped to two widths past the gap before the
+    /// full-length bars, and a notch that repeats after a re-route with
+    /// every fill blocked by other nets' routed metal gets a reserved fill
+    /// (its victims are re-routed). Off keeps the legacy bars and repair.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub notch_bridge: bool,
 }
 fn is_zero_u64(value: &u64) -> bool {
     *value == 0
@@ -3591,6 +3599,12 @@ pub(crate) fn cleanup_report(
         })?;
     }
     let mut tried = BTreeSet::new();
+    // Stair bridge and clipped bars only with `RouteQor::notch_bridge`.
+    let stair = input
+        .tracks
+        .as_ref()
+        .and_then(|plan| plan.qor.as_ref())
+        .is_some_and(|q| q.notch_bridge);
     for _ in 0..8 {
         let mut violations = route_rules::check(input, out, limits, &mut work)?;
         if violations.is_empty() {
@@ -3632,7 +3646,7 @@ pub(crate) fn cleanup_report(
                     } else if fresh && input.tracks.is_some() {
                         // The robust box reaches another net: try the smaller bridges.
                         let mut chosen = Vec::new();
-                        for rects in route_rules::bridges(*a, *b, width, input.grid) {
+                        for rects in route_rules::bridges(*a, *b, width, input.grid, stair) {
                             let mut clear = true;
                             for r in &rects {
                                 clear = clear && spatial.clear(*layer, *r, *net)?;
@@ -6091,7 +6105,10 @@ mod tests {
             memory_mib: 64,
             max_history_entries: DEFAULT_MAX_HISTORY_ENTRIES,
             area_stacks: false,
-            qor: None,
+            qor: Some(RouteQor {
+                notch_bridge: true,
+                ..Default::default()
+            }),
         });
         input.terminals = vec![
             terminal(0, true, vec![rect(59, 64, 63, 68)]),
@@ -6146,6 +6163,18 @@ mod tests {
         let mut again = build(&input);
         cleanup_report(&input, &mut again, &limits).unwrap();
         assert_eq!(again.patches, routes.patches);
+        // Without `notch_bridge` cleanup keeps the legacy candidates: the
+        // robust box and both bars touch net 1, so the notch stays.
+        input.tracks.as_mut().unwrap().qor = None;
+        let mut legacy = build(&input);
+        let (_, left) = cleanup_report(&input, &mut legacy, &limits).unwrap();
+        assert!(
+            left.iter()
+                .any(|v| matches!(v, Violation::Spacing { layer: 0, .. })),
+            "{:?}",
+            left.iter().map(|v| v.describe()).collect::<Vec<_>>()
+        );
+        assert!(legacy.patches.is_empty(), "{:?}", legacy.patches);
     }
     #[test]
     fn min_area_cleanup_splits_the_stub_when_no_side_alone_has_room() {

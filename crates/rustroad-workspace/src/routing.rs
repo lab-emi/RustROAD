@@ -168,6 +168,10 @@ pub struct RouteQorConfig {
     pub small_net_terminals: usize,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub small_net_weight: u64,
+    /// Same-net notch repair with the stair bridge, clipped bars and
+    /// reserved fills (off keeps the legacy bars).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notch_bridge: bool,
 }
 fn is_zero(value: &u64) -> bool {
     *value == 0
@@ -1479,6 +1483,7 @@ fn route_qor(
         bend_cost: config.bend_cost,
         small_net_terminals: config.small_net_terminals,
         small_net_weight: config.small_net_weight,
+        notch_bridge: config.notch_bridge,
     })
 }
 /// Relative (origin 0,0) pin and same-master other-net geometry of one

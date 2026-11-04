@@ -304,9 +304,11 @@ large enough; exact union area is retained for every reported area violation.
 
 ### Detailed-route quality controls (`track_router.qor`)
 
-All optional; omitted (or all defaults) routes exactly as before
-(`default_quality_controls_reproduce_the_legacy_route`) and leaves the
-serialized plan unchanged.
+All optional; omitted (or all defaults) routes exactly as before and leaves
+the serialized plan unchanged: `default_quality_controls_reproduce_the_legacy_route`
+compares `qor` omitted with all defaults, and on Ibex the dense-placement
+replay of the legacy Metal3-access configuration (no `qor`) writes a
+`routes.rbin` byte-identical to the one of the RustROAD `baff0ba` merged head.
 
 | Key | Effect |
 | --- | --- |
@@ -317,6 +319,7 @@ serialized plan unchanged.
 | `small_net_terminals`, `small_net_weight` | Hard detailed searches of nets with at most this many terminals use this weight (1 = admissible A*) instead of `heuristic_weight`; soft rip-up searches keep `repair_heuristic_weight`. |
 | `layer_cost_milli`, `via_cost_milli` | Per routing layer, wire-step multiplier and via multiplier (by the via's upper layer), thousandths, 1000..=64000. |
 | `bend_cost` | Surcharge of a same-layer wire step that turns from the axis of the step that reached the node. |
+| `notch_bridge` | Same-net notch repair for facing shapes: cleanup's bridges try the stair bridge and bars clipped to two widths past the gap before the legacy full-length bars, and a notch that repeats after a re-route with every fill blocked gets a reserved fill (repair rung 5 below). Off keeps the legacy bars and repair. Needed with `access_layer` Metal2 on Ibex. |
 
 The search lower bound (`routing_target::CostModel`) prices each via pair at
 its own cost (Dijkstra over layer and covered directions instead of a hop
@@ -530,18 +533,22 @@ with a structured diagnostic instead of looping silently:
    that walls the net in is dropped, and each direction is tried once. At most
    2^18 directed pairs are tracked, about 40 bytes each. Converging Ibex
    routes peak at 3–5 mutual rips, so they do not change.
-5. A same-net notch that cleanup could not fill (the robust box and every
-   bridge touch other nets' metal) and that repeats after a re-route gets a
-   *reserved fill*: the first local fill candidate (robust box, stair bridge,
-   then bars clipped to two widths past the gap) that only routed metal of
-   other nets blocks is added as fixed metal of the net, and the nets in its
-   way are re-routed, so the next cleanup can place the patch. A candidate
-   blocked by fixed geometry is skipped; reservations are order-stable, placed
-   once each and share the 4,096-zone cap. Cleanup's bridges include the
-   stair bridge: for two shapes that face each other over less than a width,
-   one bar over both shapes' extents (at most one width past the facing span),
-   at least a width thick across the gap, so the union is a Z whose inner
-   corners are a width apart.
+5. With `qor.notch_bridge` only: a same-net notch that cleanup could not
+   fill (the robust box and every bridge touch other nets' metal) and that
+   repeats after a re-route gets a *reserved fill*: the first local fill
+   candidate (robust box, stair bridge, then bars clipped to two widths past
+   the gap) that only routed metal of other nets blocks is added as fixed
+   metal of the net, and the nets in its way are re-routed, so the next
+   cleanup can place the patch
+   (`notch_fill_reservation_takes_the_first_fill_only_routed_metal_blocks`).
+   A candidate blocked by fixed geometry is skipped; reservations are
+   order-stable, placed once each and share the 4,096-zone cap. With the flag,
+   cleanup's bridges also include the stair bridge: for two shapes that face
+   each other over less than a width, one bar over both shapes' extents (at
+   most one width past the facing span), at least a width thick across the
+   gap, so the union is a Z whose inner corners are a width apart. Fill
+   clearance (cleanup and reservation) checks the base spacing; a wide-metal
+   conflict of a fill is left to the rule check and repair.
 6. The rip-up cap (`max_ripups_per_net`), the repair-round cap and the 8
    rule passes bound everything. Exceeding any of them fails with `NO_ROUTE`
    or `ROUTING_RULE` and names the net and the violation.
@@ -555,5 +562,5 @@ These are the livelocks seen on Ibex and the rung that removes each one:
 | net 15647 | a same-net notch on a relaxed long net, identical for 8 passes | notch zone (`notch_zone_forbids_same_net_near_misses_only_inside_it`) |
 | fe18c 15954/7015 | cleanup merged a same-net notch into wide metal facing a fixed escape (235 nm < 240 nm) | notch zone |
 | fe22b 14972/13203 | two nets ripped each other 256 times in pass 1 | yield (`yielding_net_never_rips_its_protected_partner`); the full replay converges |
-| Metal2 access, net 12085 | a Metal2 pad 175 nm above its own escape, facing it over 80 nm; robust box and bars touched other nets for 8 passes | stair bridge and reserved fill (`captured_metal2_stair_notch_gets_a_neck_free_bridge`, `stair_notch_is_bridged_when_the_robust_fill_touches_other_nets`); the published-placement replay with Metal2 access completes |
+| Metal2 access, net 12085 | a Metal2 pad 175 nm above its own escape, facing it over 80 nm; robust box and bars touched other nets for 8 passes | `notch_bridge`: stair bridge (`captured_metal2_stair_notch_gets_a_neck_free_bridge`, `stair_notch_is_bridged_when_the_robust_fill_touches_other_nets`) and reserved fill (`notch_fill_reservation_takes_the_first_fill_only_routed_metal_blocks`); the published-placement replay with Metal2 access completes |
 | flow placement, net 7237 pin 30742 | with `net_aware_access`, a failed pin's repair re-blocked it with the same net-nearer top of a neighbour 4 times (`has no legal access` after 14 s) | hinted terminals fall back to the cheapest top once they fail or are displaced (`stacked_pins_on_one_track_escape_away_from_each_other`) |
