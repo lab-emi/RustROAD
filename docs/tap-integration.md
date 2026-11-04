@@ -77,7 +77,12 @@ repair tap is dropped, and `phase` and `pitch - phase` must each be at least
 the tap width. Absent `unpaired` keeps the plain lattice and its JSON. The
 planner still makes no coverage claim. A layout that uses it needs independent
 latch-up evidence; for the IHP Ibex recipe that is the `tap_coverage.py`
-certificate, the maximal-deck LU.a gate and main-deck LU.b on the final GDS.
+certificate, a maximal-deck LU.a run and main-deck LU.b on the final GDS. Only
+LU.b runs inside that flow (main-deck DRC); the tap-coverage certificate and
+maximal-deck LU.a are required out-of-flow evidence, not gates. At a 42 um
+pitch the densification is load-bearing: without `unpaired` the certificate
+leaves three LU.a boxes in the top core row. The recipe therefore admits only
+lattices with that evidence on its floorplan instead of any staggered pitch.
 
 The native gap metric is distinct from foundry diffusion-to-corresponding-tie
 distance. The pattern does not establish connected well/body domains, electrical
