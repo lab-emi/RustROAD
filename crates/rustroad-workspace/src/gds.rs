@@ -538,7 +538,7 @@ pub fn export_snapshot(
     let library = gds::parse_library(&cell_bytes, &options.limits, false)?;
     let gds_dbu = gds::dbu_per_micron(&library.units)?;
     let lef_dbu = design.units_per_micron;
-    if lef_dbu < gds_dbu || lef_dbu % gds_dbu != 0 {
+    if lef_dbu < gds_dbu || !lef_dbu.is_multiple_of(gds_dbu) {
         return Err(fail(
             "GDS_UNIT_MISMATCH",
             format!("LEF {lef_dbu} DBU/um is not an integer multiple of cell-GDS {gds_dbu} DBU/um"),
