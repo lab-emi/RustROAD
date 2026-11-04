@@ -482,6 +482,109 @@ pub struct RouteQor {
     /// (its victims are re-routed). Off keeps the legacy bars and repair.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub notch_bridge: bool,
+    /// The bounded wide-metal cycle cut of rule repair (a redundant detail
+    /// wire of a loop that cleanup filled into wide metal) also runs for an
+    /// owner whose strict re-route succeeded, from the second sighting of a
+    /// wide pair and before the halos, at most three cuts per wide region
+    /// (`MAX_REGION_CUTS` in `troute`) instead of once per net. A strict
+    /// search only refuses same-net near misses, and a loop through the
+    /// owner's own fixed escape at full spacing is none, so a strict owner
+    /// rebuilt the same ring every pass. Off keeps the cut for relaxed
+    /// owners, once per net, after both halos.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub strict_wide_cycles: bool,
+    /// Post-route via reduction: once every net is routed, nets are re-routed
+    /// one at a time against the final metal of all others with a higher via
+    /// price, keeping a new route only when it removes vias (see
+    /// `ViaReduction`). `None` keeps the routes of the repair loop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via_reduction: Option<ViaReduction>,
+}
+
+/// Post-route via reduction of the track router (`RouteQor::via_reduction`).
+///
+/// After negotiated repair has routed every net, each candidate net (at most
+/// `max_terminals` terminals, at least one routed via), in order of
+/// decreasing routed via count then net id, is ripped up and searched again
+/// as a hard (non-rip-up) admissible A* search (weight 1) in its repair
+/// region, with every other net's metal fixed, the via steps priced at
+/// `via_milli` thousandths of their normal cost and wrong-way steps at
+/// `wrong_way_factor`. The search lower bound is rebuilt with the same
+/// prices, so it stays admissible and consistent. The new route is kept only
+/// when it has fewer routed vias and its wire length grows by at most
+/// `length_per_via` DBU per via removed; otherwise the old route's shapes are
+/// restored unchanged. This is single-net layer and topology re-assignment
+/// against fixed neighbours for via count (the negotiation-based layer
+/// assignment of Liu and Li, ASP-DAC 2011, and congestion-constrained layer
+/// assignment of Lee and Wang, IEEE TCAD 27(9), 2008, re-expressed as a
+/// shortest-path re-route on the detailed track graph). Every new route is
+/// a legal hard search result; cleanup and the rule-repair passes then run
+/// as usual. Deterministic: a pure function of the routed state. In an ECO
+/// route (prior routes), a net that still holds its prior geometry is no
+/// candidate, so the nets the ECO keeps stay as they were; only the nets
+/// the ECO routed are re-assigned.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViaReduction {
+    /// Passes over the candidate nets (1..=4).
+    pub passes: usize,
+    /// Via step price during the re-route, thousandths of the normal via
+    /// cost (1000..=64000).
+    pub via_milli: u32,
+    /// Wrong-way multiplier during the re-route (1..=1000); 0 keeps
+    /// `wrong_way_factor`.
+    #[serde(default)]
+    pub wrong_way_factor: u64,
+    /// Nets with more terminals keep their route (2..=4096).
+    pub max_terminals: usize,
+    /// Wire length (DBU) a re-route may add per routed via it removes.
+    pub length_per_via: u64,
+    /// Search expansions one net's re-route may use (1..=10^8); a net that
+    /// needs more keeps its route.
+    pub net_expansions: usize,
+    /// Priority weight of the re-route searches (1..=16); 1 (the default)
+    /// is admissible A*, larger values trade optimality for speed.
+    #[serde(default = "one_u64")]
+    pub weight: u64,
+    /// GCells added around a net's global guide for its re-route (0..=64);
+    /// omitted uses the plan's `expand_margin`, as repair does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin: Option<usize>,
+    /// Candidates need at least this many routed vias (1..=2^20, default 1).
+    #[serde(default = "one_usize")]
+    pub min_vias: usize,
+    /// Candidates need at most this routed wire length (DBU) per terminal
+    /// connection (length / (terminals - 1), 1..=2^40). Long connections
+    /// cost most of the search effort and yield few vias; omitted admits
+    /// every length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_connection_length: Option<u64>,
+}
+fn one_u64() -> u64 {
+    1
+}
+fn one_usize() -> usize {
+    1
+}
+impl ViaReduction {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !(1..=4).contains(&self.passes)
+            || !(1000..=64_000).contains(&self.via_milli)
+            || self.wrong_way_factor > 1000
+            || !(2..=4096).contains(&self.max_terminals)
+            || self.length_per_via > 1 << 32
+            || !(1..=100_000_000).contains(&self.net_expansions)
+            || !(1..=16).contains(&self.weight)
+            || self.margin.is_some_and(|m| m > 64)
+            || !(1..=1 << 20).contains(&self.min_vias)
+            || self
+                .max_connection_length
+                .is_some_and(|l| !(1..=1 << 40).contains(&l))
+        {
+            return Err(invalid("track router via reduction"));
+        }
+        Ok(())
+    }
 }
 fn is_zero_u64(value: &u64) -> bool {
     *value == 0
@@ -520,6 +623,9 @@ impl RouteQor {
             || self.small_net_weight > 16
         {
             return Err(invalid("track router quality controls"));
+        }
+        if let Some(reduction) = &self.via_reduction {
+            reduction.validate()?;
         }
         Ok(())
     }
