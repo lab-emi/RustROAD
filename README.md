@@ -100,8 +100,11 @@ extraction indices and query workers, single-session antenna repair, an opt-in
 staggered tap lattice, placement-stage diagnostics and spacing-aware
 electrostatic density. The density model accounts for the same cell spacing
 required by legalization. Optional checkpoint retention at an evaluation
-horizon reports the reason explicitly; the default policy stays strict.
-Repeated same-path routing near misses receive bounded repair.
+horizon reports the reason explicitly; in that update the default policy stayed
+strict. Since then, keeping the checkpoint at the evaluation cap is the default
+(`stop_at_evaluation_cap`, see
+[electrostatic placement](docs/electrostatic-placement.md)). Repeated
+same-path routing near misses receive bounded repair.
 
 [Current source, scope and method](docs/development-status.md) ·
 [Place, CTS and route vs OpenROAD](https://lab-emi.github.io/RustEDA/benchmarks/#rustroad-place-cts-and-route-vs-openroad) ·

@@ -170,9 +170,12 @@ before reading the DEF and was rerun with a `.def` path.
 The development source combines bounded extraction indices and query workers,
 single-session antenna repair, an opt-in staggered tap lattice, placement-stage
 diagnostics and spacing-aware electrostatic density. The density model accounts
-for the same cell spacing required by legalization. Optional checkpoint retention
-at an evaluation horizon reports the reason explicitly; the default policy stays
-strict. Repeated same-path routing near misses receive bounded repair.
+for the same cell spacing required by legalization. When the evaluation cap is
+reached after a strictly improved exact-target checkpoint, the placer keeps that
+checkpoint by default and reports `evaluation_horizon_after_checkpoint`;
+`"stop_at_evaluation_cap": false` restores the strict fallback
+([electrostatic placement](electrostatic-placement.md)). Repeated same-path
+routing near misses receive bounded repair.
 
 In the qualified Ibex layout of the R20/R21 runs (2026-11-01, 16 logical CPUs
 of an i9-13900HX), standard-cell non-filler area is 204,053.9 µm², routed
