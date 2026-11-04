@@ -102,20 +102,25 @@ layer is unchanged; instances, pins and labels are unchanged.
 Vias: by default (`--vias flat`) each routed and supply via contributes its
 LEF shapes at the via point to its net's metal instead of an SREF to a via
 structure. The flattened geometry equals the SREF expansion exactly. The
-reason is downstream cost: the IHP foundry antenna deck (hierarchical KLayout
-connectivity) spent 274 CPU-seconds on the Ibex stream with 135,028 via
-SREFs and 220 CPU-seconds on the same geometry with the vias flattened
-(single samples at similar load, 2026-11-04; the interleaved A/B is in the
-superproject's lane-S evidence).
+reason is downstream cost: KLayout's deep-mode DRC, antenna and LVS decks
+process every via SREF as a cell instance with its own interaction context;
+written as top-level shapes, the cuts and enclosures are plain flat geometry
+(see "Downstream check cost" below).
 
-Evidence (Ibex SG13G2/EZ130, opt/phys layout, 2026-11-04): the Ibex top cell
-goes from 178,384 BOUNDARY elements (`off`) to 154,015 (`rectangles`) or
-105,401 + 244 pins + 1 (`polygons`: 84,822 rectangles and 20,579 polygons,
-one holed piece); a KLayout layer-by-layer XOR of each against the `off`
-stream is empty on all 38 layer/datatype pairs and the label sets are equal.
-`tests/gds_export.rs` checks the same equality on the fixture by cell-centre
-coverage, and `gds_merge` unit tests check exact, non-overlapping covers on
-300 random rectilinear sets.
+Evidence (Ibex SG13G2/EZ130, opt/phys layout, 2026-11-04): the top cell goes
+from 178,384 BOUNDARY elements and 189,396 SREFs (`--merge-shapes off --vias
+cells`, byte-identical to the previous export) to 371,073 BOUNDARY elements
+and 54,368 SREFs (default: 370,828 merged rectangles, 244 pin shapes, the PR
+boundary; instance SREFs only), and the library from 245 to 227 structures.
+A KLayout layer-by-layer XOR of the default stream, `--vias cells` with
+either merge style, and `--merge-shapes polygons --vias flat` against the
+previous stream is empty on all 38 layer/datatype pairs, and the label sets
+are equal. `tests/gds_export.rs` checks the same equality on the fixture by
+cell-centre coverage of every routing and cut layer for all style
+combinations, and `gds_merge` unit tests check exact, non-overlapping covers
+on 300 random rectilinear sets. The stream is byte-identical across runs and
+`--threads 1`/`4`, and a complete Ibex flow run streamed the same bytes as a
+replay of `export-gds` on the copied final workspace.
 
 Units: coordinates are integer LEF DBU. The cell-GDS UNITS are copied verbatim
 and must be an exact decimal micron grid (`dbu_per_micron`: user unit 10^-k um,
@@ -130,6 +135,32 @@ relocate it) is re-read; each used master must have exactly one `FOREIGN`
 naming itself, offset 0 0, orientation N/absent, and `ORIGIN 0 0`. The LEF
 reader now retains `FOREIGN name [x y [orient]]` as `LefMacro.foreign:
 Vec<LefForeign>`; import still uses LEF geometry and records a diagnostic.
+
+## Downstream check cost
+
+The IHP foundry decks (KLayout deep mode) and the tap-coverage latch-up check
+were run on three streams of the same Ibex layout and on LibreLane 3.0.17's
+final stream of the same design, with the exact invocations of the campaign's
+shared gates (`signoff_layout.py`), 3 interleaved repetitions per stream
+(order alternated each repetition, one check at a time, 4 vCPUs shared with
+other work at 1-minute load 1.7 to 3.0). Medians, wall / CPU
+(user + system) seconds; peak RSS is GNU time's maximum resident set size:
+
+| Check | LibreLane | previous export | default export | default / LibreLane | peak RSS KiB (LibreLane / previous / default) |
+|---|---|---|---|---|---|
+| Foundry main DRC | 531.3 / 683.3 | 500.0 / 641.9 | 376.3 / 514.0 | 0.71 / 0.75 | 2,292,508 / 2,319,980 / 2,263,316 |
+| Foundry antenna DRC | 255.4 / 251.7 | 265.2 / 263.0 | 193.8 / 190.9 | 0.76 / 0.76 | 1,693,768 / 1,721,132 / 1,614,236 |
+| Full-device LVS | 187.5 / 185.4 | 172.5 / 170.4 | 131.5 / 130.0 | 0.70 / 0.70 | 865,992 / 813,412 / 629,192 |
+| Latch-up tap coverage | 38.3 / 37.9 | 42.9 / 42.5 | 42.8 / 42.2 | 1.12 / 1.11 | 579,260 / 600,704 / 600,304 |
+
+"Previous export" is `--merge-shapes off --vias cells` (byte-identical to the
+earlier writer); "default export" is `--merge-shapes rectangles --vias flat`.
+The main-deck gain is in the deep-mode tables that see every via SREF as an
+instance with its own context (3.2 angle, 3.1 offgrid, 5.17 Metaln); the
+FEOL filler tables are unchanged. Merging alone (vias kept as cells) did not
+change the antenna deck's CPU time in single-sample diagnostics; flattening
+the vias did. The latch-up check reads well, diffusion and tie geometry, which
+the export does not change. All checks pass on every stream.
 
 ## Layer map profile (`rustroad.gds-layer-map.v1`)
 
