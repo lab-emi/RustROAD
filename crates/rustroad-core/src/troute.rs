@@ -1156,6 +1156,9 @@ struct Router<'a> {
     pair_via: Vec<u64>,
     /// Same-layer turn surcharge (0 = legacy).
     bend_cost: u64,
+    /// Wrong-way multiplier of detailed searches during post-route via
+    /// reduction (`RouteQor::via_reduction`); `None` uses the plan's.
+    wrong_way_override: Option<u64>,
     /// Terminals whose access portals were released (`RouteQor::release_portals`).
     portals_released: HashSet<u32, BuildFx>,
     /// Pin access of the current terminal: where the net's other terminals
@@ -1211,6 +1214,31 @@ struct Router<'a> {
     own_exclusions: BTreeMap<u32, Vec<LayerRect>>,
     /// Trace mode: why prior nets were not kept.
     prior_rejects: Option<BTreeMap<String, usize>>,
+}
+
+/// Search lower bound of the detailed router for per-pair via prices, a
+/// wrong-way multiplier and per-input-layer wire multipliers.
+fn target_cost_model(
+    graph: &Graph,
+    pair_via: &[u64],
+    wrong: u64,
+    layer_milli: &[u64],
+) -> Result<crate::routing_target::CostModel> {
+    crate::routing_target::CostModel::weighted(
+        &graph.layers.iter().map(|l| l.vertical).collect::<Vec<_>>(),
+        &graph
+            .pairs
+            .iter()
+            .zip(pair_via)
+            .map(|(p, &cost)| (p.lower, p.upper, cost))
+            .collect::<Vec<_>>(),
+        wrong,
+        &graph
+            .layers
+            .iter()
+            .map(|l| layer_milli[l.layer as usize])
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// Completed net geometry; the active search alone retains raw grid edges.
@@ -1297,21 +1325,8 @@ impl<'a> Router<'a> {
                 }
             })
             .collect();
-        let target_costs = crate::routing_target::CostModel::weighted(
-            &graph.layers.iter().map(|l| l.vertical).collect::<Vec<_>>(),
-            &graph
-                .pairs
-                .iter()
-                .zip(&pair_via)
-                .map(|(p, &cost)| (p.lower, p.upper, cost))
-                .collect::<Vec<_>>(),
-            plan.wrong_way_factor,
-            &graph
-                .layers
-                .iter()
-                .map(|l| layer_milli[l.layer as usize])
-                .collect::<Vec<_>>(),
-        )?;
+        let target_costs =
+            target_cost_model(&graph, &pair_via, plan.wrong_way_factor, &layer_milli)?;
         let bend_cost = plan.qor.as_ref().map_or(0, |q| q.bend_cost);
         let mut r = Router {
             input,
@@ -1342,6 +1357,7 @@ impl<'a> Router<'a> {
             layer_milli,
             pair_via,
             bend_cost,
+            wrong_way_override: None,
             portals_released: HashSet::with_hasher(BuildFx),
             access_hint: Vec::new(),
             #[cfg(test)]
@@ -3371,7 +3387,9 @@ impl<'a> Router<'a> {
         }
         let mut victims_all: BTreeSet<u32> = BTreeSet::new();
         let via_cost = self.plan.via_cost;
-        let wrong = self.plan.wrong_way_factor;
+        let wrong = self
+            .wrong_way_override
+            .unwrap_or(self.plan.wrong_way_factor);
         let conflict = if self.close_expanded && soft {
             if self.allowed_victim.is_some() {
                 via_cost.saturating_mul(SINGLE_OWNER_VIAS)
@@ -4492,6 +4510,275 @@ fn route_length(route: &NetRoute) -> u64 {
         .sum()
 }
 
+/// Post-route via reduction (`RouteQor::via_reduction`, see
+/// `routing::ViaReduction`): with every net routed, re-route each candidate
+/// net alone against the fixed metal of all others, with via steps priced at
+/// `via_milli` thousandths, the configured wrong-way factor and search
+/// weight (the lower bound is rebuilt with the same prices, so weight 1 is
+/// admissible), and keep the new route only when it has fewer routed vias
+/// within the length allowance. A rejected or failed re-route restores the
+/// old route's index shapes unchanged (no index compaction runs in between,
+/// so every removed shape id is still its own). Candidates: at most
+/// `max_terminals` terminals and at least `min_vias` routed vias, by
+/// decreasing via count then net id, so the order is a function of the
+/// routed state alone.
+#[allow(clippy::too_many_arguments)]
+fn reduce_vias(
+    r: &mut Router<'_>,
+    cfg: &crate::routing::ViaReduction,
+    groups: &BTreeMap<u32, Vec<&Terminal>>,
+    plans: &HashMap<u32, Plan>,
+    guides: &BTreeMap<u32, Vec<u32>>,
+    routed: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    demoted: &BTreeMap<u32, u8>,
+    t0: std::time::Instant,
+) -> Result<()> {
+    if r.trial_search_limit.is_some()
+        || r.trial_expansion_limit.is_some()
+        || r.allowed_victim.is_some()
+        || r.protected.is_some()
+    {
+        return Err(invalid("via reduction inside a trial search"));
+    }
+    let wrong = if cfg.wrong_way_factor == 0 {
+        r.plan.wrong_way_factor
+    } else {
+        cfg.wrong_way_factor
+    };
+    let pair_via: Vec<u64> = r
+        .pair_via
+        .iter()
+        .map(|&cost| scaled(cost, u64::from(cfg.via_milli)))
+        .collect();
+    let costs = target_cost_model(&r.graph, &pair_via, wrong, &r.layer_milli)?;
+    let saved_pair_via = std::mem::replace(&mut r.pair_via, pair_via);
+    let saved_costs = std::mem::replace(&mut r.target_costs, costs);
+    let saved_weight = r.heuristic_weight_override.replace(cfg.weight);
+    r.wrong_way_override = Some(wrong);
+    let result = reduce_vias_passes(
+        r,
+        cfg,
+        groups,
+        plans,
+        guides,
+        routed,
+        retained_edges,
+        demoted,
+        t0,
+    );
+    r.trial_expansion_limit = None;
+    r.wrong_way_override = None;
+    r.heuristic_weight_override = saved_weight;
+    r.target_costs = saved_costs;
+    r.pair_via = saved_pair_via;
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reduce_vias_passes(
+    r: &mut Router<'_>,
+    cfg: &crate::routing::ViaReduction,
+    groups: &BTreeMap<u32, Vec<&Terminal>>,
+    plans: &HashMap<u32, Plan>,
+    guides: &BTreeMap<u32, Vec<u32>>,
+    routed: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    demoted: &BTreeMap<u32, u8>,
+    t0: std::time::Instant,
+) -> Result<()> {
+    let limits = r.limits;
+    let none = BTreeMap::new();
+    let trace_nets = std::env::var("RUSTROAD_ROUTE_TRACE").is_ok_and(|v| v == "2");
+    for pass in 0..cfg.passes {
+        let mut order: Vec<(Reverse<usize>, u32)> = routed
+            .iter()
+            .filter_map(|(&net, route)| {
+                let terminals = groups.get(&net)?;
+                if terminals.len() > cfg.max_terminals {
+                    return None;
+                }
+                let (vias, length) = routed_size(route, terminals, plans);
+                let connections = terminals.len().saturating_sub(1).max(1) as u64;
+                (vias as usize >= cfg.min_vias
+                    && cfg
+                        .max_connection_length
+                        .is_none_or(|limit| length.div_ceil(connections) <= limit))
+                .then_some((Reverse(vias as usize), net))
+            })
+            .collect();
+        order.sort_unstable();
+        r.spatial.work = r
+            .spatial
+            .work
+            .checked_add(
+                order
+                    .len()
+                    .saturating_mul(order.len().max(1).ilog2() as usize + 1),
+            )
+            .filter(|&n| n <= limits.max_comparisons)
+            .ok_or_else(|| budget("via reduction order work"))?;
+        let (mut kept, mut limited, mut failed) = (0usize, 0usize, 0usize);
+        let (mut vias_removed, mut length_added, mut length_removed) = (0u64, 0u64, 0u64);
+        // Trace only: [nets, kept, vias removed, expansions] by terminal
+        // count (2, 3, 4-5, 6-10, more).
+        let mut classes = [[0usize; 4]; 5];
+        for &(_, net) in &order {
+            let class = match groups[&net].len() {
+                0..=2 => 0,
+                3 => 1,
+                4..=5 => 2,
+                6..=10 => 3,
+                _ => 4,
+            };
+            let expansions_before = r.expansions;
+            let old = remove_route(routed, retained_edges, net)
+                .ok_or_else(|| invalid("via reduction candidate without a route"))?;
+            r.spatial.work = r
+                .spatial
+                .work
+                .checked_add(old.shapes.len())
+                .filter(|&n| n <= limits.max_comparisons)
+                .ok_or_else(|| budget("via reduction rip-up work"))?;
+            for &id in &old.shapes {
+                r.spatial.remove(id);
+            }
+            r.area_level = if r.plan.area_stacks {
+                2 - demoted.get(&net).copied().unwrap_or(0)
+            } else {
+                0
+            };
+            let g = &guides[&net];
+            let margin = cfg.margin.unwrap_or(r.plan.expand_margin);
+            if r.close_expanded {
+                r.mark_region_corridor(g, margin);
+            } else {
+                r.mark_region(g, Some(margin));
+            }
+            r.trial_expansion_limit = Some(r.expansions.saturating_add(cfg.net_expansions));
+            let outcome = r.route_net(net, &groups[&net], plans, false, false, &none, 0);
+            r.trial_expansion_limit = None;
+            let terminals = &groups[&net];
+            let (old_vias, old_len) = routed_size(&old, terminals, plans);
+            let mut new_size = None;
+            let better = match outcome? {
+                Outcome::Routed(new, victims) => {
+                    if !victims.is_empty() {
+                        return Err(invalid("hard via-reduction search displaced a net"));
+                    }
+                    let (new_vias, new_len) = routed_size(&new, terminals, plans);
+                    new_size = Some((new_vias, new_len));
+                    let allowance = old_vias
+                        .saturating_sub(new_vias)
+                        .saturating_mul(cfg.length_per_via);
+                    if new_vias < old_vias && new_len <= old_len.saturating_add(allowance) {
+                        vias_removed += old_vias - new_vias;
+                        length_added += new_len.saturating_sub(old_len);
+                        length_removed += old_len.saturating_sub(new_len);
+                        Some(new)
+                    } else {
+                        discard_route(r, new)?;
+                        None
+                    }
+                }
+                Outcome::Limited(_) => {
+                    limited += 1;
+                    None
+                }
+                Outcome::Failed(_) => {
+                    failed += 1;
+                    None
+                }
+            };
+            let spent = r.expansions.saturating_sub(expansions_before);
+            if trace_nets {
+                eprintln!(
+                    "[troute-via] net {net} terminals {} vias {old_vias} length {old_len} new {new_size:?} kept {} exp {spent}",
+                    terminals.len(),
+                    better.is_some()
+                );
+            }
+            let row = &mut classes[class];
+            row[0] += 1;
+            row[3] = row[3].saturating_add(spent);
+            if better.is_some() {
+                row[1] += 1;
+                row[2] += old_vias.saturating_sub(new_size.map_or(old_vias, |(v, _)| v)) as usize;
+            }
+            let route = match better {
+                Some(new) => {
+                    kept += 1;
+                    new
+                }
+                None => {
+                    for &id in &old.shapes {
+                        r.spatial.restore(id)?;
+                    }
+                    old
+                }
+            };
+            retain_route(routed, retained_edges, net, route, limits.max_segments)?;
+        }
+        trace(
+            "via reduction",
+            t0,
+            format_args!(
+                "pass {pass} candidates {} kept {kept} limited {limited} failed {failed} vias -{vias_removed} length +{length_added} -{length_removed} work {} exp {} by terminals [nets kept vias exp] 2:{:?} 3:{:?} 4-5:{:?} 6-10:{:?} more:{:?}",
+                order.len(),
+                r.spatial.work,
+                r.expansions,
+                classes[0],
+                classes[1],
+                classes[2],
+                classes[3],
+                classes[4]
+            ),
+        );
+        if kept == 0 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Routed vias and wire length of a net's route without its pin escapes. A
+/// route searched from the escapes holds none; an imported prior route
+/// (ECO) holds them as ordinary records, possibly merged into collinear
+/// runs: a planned escape via is not counted, nor the length of a planned
+/// escape wire that a route wire covers.
+fn routed_size(
+    route: &NetRoute,
+    terminals: &[&Terminal],
+    plans: &HashMap<u32, Plan>,
+) -> (u64, u64) {
+    let covers = |w: &Wire, e: &Wire| {
+        let (lx, ux) = (w.start[0].min(w.end[0]), w.start[0].max(w.end[0]));
+        let (ly, uy) = (w.start[1].min(w.end[1]), w.start[1].max(w.end[1]));
+        w.layer == e.layer
+            && (lx == ux || ly == uy)
+            && [e.start, e.end]
+                .iter()
+                .all(|p| (lx..=ux).contains(&p[0]) && (ly..=uy).contains(&p[1]))
+    };
+    let mut vias = route.vias.len() as u64;
+    let mut length = route_length(route);
+    for t in terminals {
+        let plan = &plans[&t.pin];
+        for v in &plan.vias {
+            if route.vias.iter().any(|x| x.kind == v.kind && x.at == v.at) {
+                vias = vias.saturating_sub(1);
+            }
+        }
+        for e in &plan.wires {
+            if route.wires.iter().any(|w| covers(w, e)) {
+                length = length
+                    .saturating_sub(e.start[0].abs_diff(e.end[0]) + e.start[1].abs_diff(e.end[1]));
+            }
+        }
+    }
+    (vias, length)
+}
+
 /// Remove a refused route's geometry; nothing else was retained for it.
 fn discard_route(router: &mut Router<'_>, route: NetRoute) -> Result<()> {
     router.spatial.work = router
@@ -4809,6 +5096,10 @@ pub(crate) fn route_with_prior(
     // Wide-metal pairs (owner, other, layer) -> repairs already tried.
     let mut wide_seen: BTreeMap<(u32, u32, u32), u8> = BTreeMap::new();
     let mut cycle_tried: BTreeSet<u32> = BTreeSet::new();
+    // With `RouteQor::strict_wide_cycles`: cycle cuts tried per wide region
+    // (owner, layer, rect), at most `MAX_REGION_CUTS` each.
+    let mut cycle_regions: BTreeMap<(u32, u32, [i64; 4]), u8> = BTreeMap::new();
+    let strict_wide_cycles = r.plan.qor.as_ref().is_some_and(|q| q.strict_wide_cycles);
     // Remaining violations by exact geometry -> passes seen, and the notch
     // zones placed for them (bounded by `MAX_NOTCH_ZONES`).
     let mut rule_seen: BTreeMap<String, u8> = BTreeMap::new();
@@ -5390,6 +5681,22 @@ pub(crate) fn route_with_prior(
             ),
         );
         r.guard("repair")?;
+        if pass == 0
+            && let Some(reduction) = plan.qor.as_ref().and_then(|q| q.via_reduction.as_ref())
+        {
+            reduce_vias(
+                &mut r,
+                reduction,
+                &groups,
+                &plans,
+                &guides,
+                &mut routed,
+                &mut retained_edges,
+                &demoted,
+                t0,
+            )?;
+            r.guard("via reduction")?;
+        }
         if r.plan
             .qor
             .as_ref()
@@ -5487,6 +5794,9 @@ pub(crate) fn route_with_prior(
         // strictly within `notch_zone` of it (the rest of the net stays
         // relaxed, so the zone cannot wall in a distant pin).
         let mut bad = BTreeSet::new();
+        // Owners whose detail cycle was cut in this pass (strict wide
+        // cycles): their other entries in `remaining` are stale.
+        let mut cut_owners: BTreeSet<u32> = BTreeSet::new();
         for v in &remaining {
             let seen = rule_seen.entry(v.describe()).or_insert(0);
             *seen = seen.saturating_add(1);
@@ -5581,6 +5891,37 @@ pub(crate) fn route_with_prior(
             {
                 let tries = wide_seen.entry((owner, other, layer)).or_insert(0);
                 *tries = tries.saturating_add(1);
+                // Strict wide cycles: a strict search refuses same-net near
+                // misses only, so a detail loop through the owner's own fixed
+                // escape at full spacing (a ring whose hole cleanup fills into
+                // wide metal) is rebuilt by every strict re-route, and a halo
+                // cannot move a neighbour's fixed escape. From the second
+                // sighting, cut a proven-redundant detail wire of the loop
+                // first (bounded per region; other entries of the owner wait
+                // for the next pass).
+                if strict_wide_cycles {
+                    if cut_owners.contains(&owner) {
+                        continue;
+                    }
+                    if *tries >= 2
+                        && region_cut_allowed(&mut cycle_regions, (owner, layer, wide))
+                        && let Some(detail) = routed.get_mut(&owner)
+                        && cycle_repair::repair(
+                            &mut r,
+                            &groups[&owner],
+                            &plans,
+                            detail,
+                            LayerRect { layer, rect: wide },
+                        )?
+                    {
+                        retained_edges = retained_edges
+                            .checked_sub(1)
+                            .ok_or_else(|| invalid("wide-cycle retained record count"))?;
+                        cut_owners.insert(owner);
+                        bad.remove(&owner);
+                        continue;
+                    }
+                }
                 let grow = (rule.spacing - input.layers[layer as usize].spacing).max(0);
                 let halo = expand(wide, grow)?;
                 if *tries == 2
@@ -5614,7 +5955,8 @@ pub(crate) fn route_with_prior(
                         continue;
                     }
                 }
-                if *tries >= 3
+                if !strict_wide_cycles
+                    && *tries >= 3
                     && relaxed.contains(&owner)
                     && cycle_tried.insert(owner)
                     && let Some(detail) = routed.get_mut(&owner)
@@ -5636,6 +5978,9 @@ pub(crate) fn route_with_prior(
                     break;
                 }
             }
+            if cut_owners.contains(&v.net()) {
+                continue;
+            }
             bad.insert(v.net());
         }
         for net in bad {
@@ -5652,6 +5997,27 @@ pub(crate) fn route_with_prior(
     }
     unreachable!("bounded repair passes return")
 }
+
+/// Strict wide cycles: may rule repair try the bounded detail-cycle cut for
+/// this wide region (owner, layer, rectangle) once more? At most
+/// `MAX_REGION_CUTS` tries per region; records the try when it allows one.
+fn region_cut_allowed(
+    regions: &mut BTreeMap<(u32, u32, [i64; 4]), u8>,
+    (owner, layer, wide): (u32, u32, Rect),
+) -> bool {
+    let tries = regions
+        .entry((owner, layer, [wide.lx, wide.ly, wide.ux, wide.uy]))
+        .or_insert(0);
+    if *tries >= MAX_REGION_CUTS {
+        return false;
+    }
+    *tries += 1;
+    true
+}
+
+/// Detail-cycle cuts per wide region with `RouteQor::strict_wide_cycles` (a
+/// later re-route of the owner for another violation can rebuild a cut ring).
+const MAX_REGION_CUTS: u8 = 3;
 
 /// Last cleanup pass: a wide-metal pair needs up to three repairs (owner,
 /// neighbour behind an owner halo, owner behind a neighbour halo), and a
@@ -7068,6 +7434,7 @@ mod tests {
                 layer_milli: vec![1000; design.layers.len()],
                 pair_via: vec![plan.via_cost; graph.pairs.len()],
                 bend_cost: 0,
+                wrong_way_override: None,
                 portals_released: HashSet::with_hasher(BuildFx),
                 access_hint: Vec::new(),
                 keep_hints_after_repair: false,
@@ -8928,6 +9295,8 @@ mod tests {
             small_net_terminals: 3,
             small_net_weight: 1,
             notch_bridge: true,
+            strict_wide_cycles: true,
+            via_reduction: None,
         });
         let a = route_cpu_ref(&design, &limits()).unwrap();
         let b = route_cpu_ref(&design, &limits()).unwrap();
@@ -8960,6 +9329,194 @@ mod tests {
             d.tracks.as_mut().unwrap().qor = Some(bad);
             assert!(route_cpu_ref(&d, &limits()).is_err());
         }
+    }
+
+    /// One two-pin net, signal routing on M2 (V) and M3 (H) only, whose M2
+    /// escapes sit five tracks apart: the normal prices (via 80, wrong way
+    /// 4) join them over M3 with two routed vias; an M2 wrong-way jog has
+    /// the same length and no routed via.
+    fn offset_pair() -> RouteInput {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 490, 110, 510)),
+                terminal(1, 0, false, rect(290, 890, 310, 910)),
+            ],
+            Vec::new(),
+        );
+        design.tracks.as_mut().unwrap().routing_layers = Some([1, 2]);
+        design
+    }
+    fn via_reduction(via_milli: u32, wrong_way_factor: u64) -> crate::routing::ViaReduction {
+        crate::routing::ViaReduction {
+            passes: 2,
+            via_milli,
+            wrong_way_factor,
+            max_terminals: 8,
+            length_per_via: 0,
+            net_expansions: 100_000,
+            weight: 1,
+            margin: None,
+            min_vias: 1,
+            max_connection_length: None,
+        }
+    }
+    fn with_reduction(
+        mut design: RouteInput,
+        reduction: Option<crate::routing::ViaReduction>,
+    ) -> RouteInput {
+        design.tracks.as_mut().unwrap().qor = Some(crate::routing::RouteQor {
+            via_reduction: reduction,
+            ..Default::default()
+        });
+        design
+    }
+    fn route_length_of(routes: &Routes) -> u64 {
+        routes
+            .wires
+            .iter()
+            .map(|w| w.start[0].abs_diff(w.end[0]) + w.start[1].abs_diff(w.end[1]))
+            .sum()
+    }
+
+    #[test]
+    fn via_reduction_trades_routed_vias_for_a_wrong_way_jog() {
+        let legacy = route_cpu_ref(&offset_pair(), &limits()).unwrap();
+        let reduced_design = with_reduction(offset_pair(), Some(via_reduction(16_000, 1)));
+        let reduced = route_cpu_ref(&reduced_design, &limits()).unwrap();
+        crate::routing::validate(&reduced_design, &reduced, &limits()).unwrap();
+        // Escape vias are fixed; only routed vias can go.
+        assert!(
+            reduced.vias.len() < legacy.vias.len(),
+            "legacy {:?} reduced {:?}",
+            legacy.vias,
+            reduced.vias
+        );
+        assert!(route_length_of(&reduced) <= route_length_of(&legacy));
+        let again = route_cpu_ref(&reduced_design, &limits()).unwrap();
+        assert_eq!(reduced.wires, again.wires);
+        assert_eq!(reduced.vias, again.vias);
+        assert_eq!(reduced.patches, again.patches);
+    }
+
+    #[test]
+    fn via_reduction_keeps_routes_it_cannot_improve_unchanged() {
+        // Normal prices: the admissible re-route finds no route with fewer
+        // vias, so every old route (and its index shapes) is restored.
+        for fixture in [offset_pair as fn() -> RouteInput, crossing_nets] {
+            let legacy = route_cpu_ref(&fixture(), &limits()).unwrap();
+            let same = with_reduction(fixture(), Some(via_reduction(1000, 0)));
+            let kept = route_cpu_ref(&same, &limits()).unwrap();
+            assert_eq!(legacy.wires, kept.wires);
+            assert_eq!(legacy.vias, kept.vias);
+            assert_eq!(legacy.access, kept.access);
+            assert_eq!(legacy.patches, kept.patches);
+        }
+        // A connection-length filter below the net's length admits no
+        // candidate, even with the prices that would remove its vias.
+        let legacy = route_cpu_ref(&offset_pair(), &limits()).unwrap();
+        let filtered = with_reduction(
+            offset_pair(),
+            Some(crate::routing::ViaReduction {
+                max_connection_length: Some(1),
+                ..via_reduction(16_000, 1)
+            }),
+        );
+        let kept = route_cpu_ref(&filtered, &limits()).unwrap();
+        assert_eq!(legacy.wires, kept.wires);
+        assert_eq!(legacy.vias, kept.vias);
+        // `None` is the legacy route; the default controls leave it off.
+        assert_eq!(crate::routing::RouteQor::default().via_reduction, None);
+        assert!(!crate::routing::RouteQor::default().strict_wide_cycles);
+    }
+
+    #[test]
+    fn via_reduction_on_crossing_nets_is_valid_deterministic_and_never_adds_vias() {
+        let legacy = route_cpu_ref(&crossing_nets(), &limits()).unwrap();
+        let design = with_reduction(crossing_nets(), Some(via_reduction(8000, 2)));
+        let a = route_cpu_ref(&design, &limits()).unwrap();
+        let b = route_cpu_ref(&design, &limits()).unwrap();
+        crate::routing::validate(&design, &a, &limits()).unwrap();
+        assert_eq!(a.wires, b.wires);
+        assert_eq!(a.vias, b.vias);
+        assert_eq!(a.patches, b.patches);
+        assert_eq!(a.nets, legacy.nets);
+        assert!(a.vias.len() <= legacy.vias.len());
+    }
+
+    #[test]
+    fn via_reduction_rejects_out_of_range_controls() {
+        let good = via_reduction(3000, 0);
+        assert!(good.validate().is_ok());
+        for bad in [
+            crate::routing::ViaReduction {
+                passes: 0,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                passes: 5,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                via_milli: 999,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                via_milli: 64_001,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                wrong_way_factor: 1001,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                max_terminals: 1,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                net_expansions: 0,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                weight: 0,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                weight: 17,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                margin: Some(65),
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                min_vias: 0,
+                ..good.clone()
+            },
+            crate::routing::ViaReduction {
+                max_connection_length: Some(0),
+                ..good.clone()
+            },
+        ] {
+            assert!(bad.validate().is_err(), "{bad:?}");
+            let design = with_reduction(offset_pair(), Some(bad));
+            assert!(route_cpu_ref(&design, &limits()).is_err());
+        }
+    }
+
+    #[test]
+    fn strict_wide_cycle_cuts_are_bounded_per_region() {
+        let a = rect(0, 0, 420, 1040);
+        let b = rect(5880, 0, 6300, 1040);
+        let mut regions = BTreeMap::new();
+        for _ in 0..MAX_REGION_CUTS {
+            assert!(region_cut_allowed(&mut regions, (9, 1, a)));
+        }
+        assert!(!region_cut_allowed(&mut regions, (9, 1, a)));
+        // Another region of the same owner, layer or net is independent.
+        assert!(region_cut_allowed(&mut regions, (9, 1, b)));
+        assert!(region_cut_allowed(&mut regions, (9, 2, a)));
+        assert!(region_cut_allowed(&mut regions, (8, 1, a)));
+        assert_eq!(regions.len(), 4);
     }
 
     #[test]

@@ -320,6 +320,61 @@ replay of the legacy Metal3-access configuration (no `qor`) writes a
 | `layer_cost_milli`, `via_cost_milli` | Per routing layer, wire-step multiplier and via multiplier (by the via's upper layer), thousandths, 1000..=64000. |
 | `bend_cost` | Surcharge of a same-layer wire step that turns from the axis of the step that reached the node. |
 | `notch_bridge` | Same-net notch repair for facing shapes: cleanup's bridges try the stair bridge and bars clipped to two widths past the gap before the legacy full-length bars, and a notch that repeats after a re-route with every fill blocked gets a reserved fill (repair rung 5 below). Off keeps the legacy bars and repair. Needed with `access_layer` Metal2 on Ibex. |
+| `strict_wide_cycles` | The bounded detail-cycle cut of rule repair (rung 3 below) also runs for an owner whose strict re-route succeeded, before the halos, from the second sighting of a wide pair, at most three times per wide region, and several cuts can happen in one pass. Off keeps the cut for relaxed owners only, once per net, after both halos. |
+| `via_reduction` | Post-route via reduction (section below). Omitted keeps the routes of the repair loop. |
+
+#### Post-route via reduction (`track_router.qor.via_reduction`)
+
+Global routing here is two-dimensional and the detailed search picks layers
+step by step, so a net routed early in a congested region often climbs to
+Metal4 and above, and keeps those layer changes after the space it avoided
+has been freed or used by others. On the Ibex phys-config placement the
+routed vias exceeded LibreLane's by 8.3 k, all of it on Via3 and above
+(+12.3 k), concentrated in multi-terminal nets: 4.5 Via3 per 6-10-terminal
+net against 1.6. Re-assigning a net's layers against fixed neighbours for
+via count is the classic layer-assignment-for-via-minimization step after
+global routing (constrained via minimization; congestion-constrained layer
+assignment, T.-H. Lee and T.-C. Wang, IEEE TCAD 27(9):1643-1656, 2008;
+negotiation-based layer assignment for via count, W.-H. Liu and Y.-L. Li,
+ASP-DAC 2011, which re-assigns one net at a time against the others). Here
+it is re-expressed as a single-net re-route on the detailed track graph,
+which also lets a net straighten its topology:
+
+1. Once negotiated repair has routed every net (first rule pass only), the
+   candidates are the nets with at most `max_terminals` terminals and at
+   least `min_vias` routed vias (escape vias of the pin access plans are
+   never counted), in order of decreasing routed via count, then net id.
+2. Each candidate in turn is ripped up and searched again as a hard
+   (non-rip-up) search in its global guide grown by `margin` GCells (default:
+   the plan's `expand_margin`), with every other net's metal fixed, the via
+   steps priced at `via_milli` thousandths of their normal cost and
+   wrong-way steps at `wrong_way_factor` (0 keeps the plan's), with search
+   weight `weight` (default 1) and at most `net_expansions` expansions for
+   the net.
+3. The new route is kept only when it has fewer routed vias and its wire
+   length grows by at most `length_per_via` DBU per via removed. Otherwise,
+   or when the search fails or hits its cap, the old route's index shapes
+   are restored unchanged (no index compaction runs in between, so every
+   removed shape id is still its own); the order and every decision are
+   functions of the routed state alone (deterministic).
+4. `passes` repeats this over the new state (a pass that keeps nothing
+   ends it); cleanup and the rule-repair passes then run as usual on the
+   result, so every route still passes the same checks.
+
+The search lower bound is rebuilt from the same prices before the first
+re-route and restored afterwards (`routing_target::CostModel`), so with
+weight 1 the bound stays admissible and consistent for the pass's step
+costs. Every new route is a legal hard-search result: no other net is
+displaced. The pass charges the comparison budget for its ordering and
+rip-ups and reports per terminal-count class the nets tried, kept, vias
+removed and search expansions in the `via reduction` trace line.
+
+Tests: `via_reduction_trades_routed_vias_for_a_wrong_way_jog` (two routed
+vias become a Metal2 jog at equal length),
+`via_reduction_keeps_routes_it_cannot_improve_unchanged` (normal prices: the
+output equals the route without the pass, so rejected re-routes restore
+exactly), `via_reduction_on_crossing_nets_is_valid_deterministic_and_never_adds_vias`,
+`via_reduction_rejects_out_of_range_controls`.
 
 The search lower bound (`routing_target::CostModel`) prices each via pair at
 its own cost (Dijkstra over layer and covered directions instead of a hop
@@ -533,7 +588,18 @@ with a structured diagnostic instead of looping silently:
    are at most 4,096 zones in total.
 3. A foreign wide-metal pair that survives a repair first gets a halo around
    the owner, then a halo around the neighbour's facing metal. After that, a
-   bounded cut of the owner's local detail cycle is tried once per net.
+   bounded cut of the owner's local detail cycle is tried once per net (for
+   a relaxed owner). With `qor.strict_wide_cycles` the cut comes first, from
+   the second sighting, for every owner, at most three times per wide region,
+   and an owner cut in a pass waits for the next pass's check instead of
+   being re-routed on a stale entry (other violations of the pass are still
+   handled). A strict search refuses same-net near misses only, and a detail
+   loop through the owner's own fixed escape at full spacing is none: the
+   ring's hole is filled by cleanup into wide metal facing a neighbour's
+   fixed escape, a halo cannot move that escape, and every strict re-route
+   rebuilt the ring (Ibex, published-RustSys placement, `via_cost` 2520 and
+   `wrong_way_factor` 3: net 14325 at pin D of two AOI221X1 cells, 220 nm
+   from the facing pin-C escapes, unresolved after 8 passes).
 4. Two nets can keep ripping each other because their rip prices grow
    together. Once both directions of a pair reach 8 rips, the net ripped last
    *yields*: its soft search treats the partner's metal as blocked. A yield
@@ -571,3 +637,4 @@ These are the livelocks seen on Ibex and the rung that removes each one:
 | fe22b 14972/13203 | two nets ripped each other 256 times in pass 1 | yield (`yielding_net_never_rips_its_protected_partner`); the full replay converges |
 | Metal2 access, net 12085 | a Metal2 pad 175 nm above its own escape, facing it over 80 nm; robust box and bars touched other nets for 8 passes | `notch_bridge`: stair bridge (`captured_metal2_stair_notch_gets_a_neck_free_bridge`, `stair_notch_is_bridged_when_the_robust_fill_touches_other_nets`) and reserved fill (`notch_fill_reservation_takes_the_first_fill_only_routed_metal_blocks`); the published-placement replay with Metal2 access completes |
 | flow placement, net 7237 pin 30742 | with `net_aware_access`, a failed pin's repair re-blocked it with the same net-nearer top of a neighbour 4 times (`has no legal access` after 14 s) | hinted terminals fall back to the cheapest top once they fail or are displaced (`net_aware_access_falls_back_to_the_cheapest_tops_after_a_failed_escape`: a row that livelocks without the fallback); a hinted pass that still fails is redone without hints (`failed_net_aware_access_is_redone_without_hints`) |
+| published-RustSys placement, `via_cost` 2520 and `wrong_way_factor` 3, net 14325 | a strict owner's detail loop through its own pin-D escape (two Metal2 jogs one track over) is filled by cleanup into a 620 nm wide block 220 nm from the neighbours' fixed pin-C escapes (240 nm wide spacing); the halos cannot move a fixed escape, the strict re-route rebuilds the loop, 2 pairs unresolved after 8 passes | `strict_wide_cycles`: the cycle cut runs for strict owners first, once per region and pass (`strict_wide_cycle_cuts_are_bounded_per_region`); the replay then completes in rule pass 3 after 5 cuts |

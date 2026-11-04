@@ -172,6 +172,14 @@ pub struct RouteQorConfig {
     /// reserved fills (off keeps the legacy bars).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub notch_bridge: bool,
+    /// The wide-metal cycle cut of rule repair also runs for strict owners,
+    /// once per wide region.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strict_wide_cycles: bool,
+    /// Post-route via reduction (`rustroad_core::routing::ViaReduction`);
+    /// omitted keeps the routes of the repair loop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_reduction: Option<rustroad_core::routing::ViaReduction>,
 }
 fn is_zero(value: &u64) -> bool {
     *value == 0
@@ -1484,6 +1492,8 @@ fn route_qor(
         small_net_terminals: config.small_net_terminals,
         small_net_weight: config.small_net_weight,
         notch_bridge: config.notch_bridge,
+        strict_wide_cycles: config.strict_wide_cycles,
+        via_reduction: config.via_reduction.clone(),
     })
 }
 /// Relative (origin 0,0) pin and same-master other-net geometry of one
@@ -2381,6 +2391,64 @@ mod obstruction_tests {
         assert_eq!(
             master.obstructions[0], geometry,
             "the imported LEF view stays exact"
+        );
+    }
+}
+
+#[cfg(test)]
+mod qor_config_tests {
+    use super::*;
+
+    fn layers() -> Vec<RouteLayer> {
+        ["Metal1", "Via1", "Metal2"]
+            .iter()
+            .enumerate()
+            .map(|(i, name)| RouteLayer {
+                name: (*name).into(),
+                width: 200,
+                spacing: 210,
+                vertical: (i != 1).then_some(i == 2),
+                min_area: None,
+                min_step: None,
+                wide_spacing: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn via_reduction_and_strict_wide_cycles_parse_and_default_off() {
+        let off: RouteQorConfig = serde_json::from_str(r#"{"notch_bridge": true}"#).unwrap();
+        let resolved = route_qor(&off, &layers()).unwrap();
+        assert!(!resolved.strict_wide_cycles);
+        assert_eq!(resolved.via_reduction, None);
+        assert_eq!(
+            serde_json::to_string(&off).unwrap(),
+            r#"{"notch_bridge":true}"#
+        );
+        let on: RouteQorConfig = serde_json::from_str(
+            r#"{"strict_wide_cycles": true, "via_reduction": {"passes": 1,
+                "via_milli": 3000, "max_terminals": 10, "length_per_via": 1680,
+                "net_expansions": 10000, "max_connection_length": 40000}}"#,
+        )
+        .unwrap();
+        let resolved = route_qor(&on, &layers()).unwrap();
+        assert!(resolved.strict_wide_cycles);
+        let reduction = resolved.via_reduction.unwrap();
+        assert_eq!(
+            (reduction.passes, reduction.via_milli, reduction.weight),
+            (1, 3000, 1)
+        );
+        assert_eq!(reduction.wrong_way_factor, 0);
+        assert_eq!(reduction.margin, None);
+        assert_eq!(reduction.min_vias, 1);
+        assert_eq!(reduction.max_connection_length, Some(40000));
+        // Unknown keys are refused, like every routing-config table.
+        assert!(
+            serde_json::from_str::<RouteQorConfig>(
+                r#"{"via_reduction": {"passes": 1, "via_milli": 3000, "max_terminals": 10,
+                    "length_per_via": 0, "net_expansions": 1, "bogus": 1}}"#
+            )
+            .is_err()
         );
     }
 }
