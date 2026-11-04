@@ -549,6 +549,12 @@ fn single<S: Sink>(
     result
 }
 
+/// The x and y strips of one rectangle: one other-layer face query and one
+/// own-layer query over both lateral windows, then each strip's numerics in
+/// order. When the shared queries fail (a candidate cap or a query budget,
+/// possibly the y strip's alone), the strips are recomputed one after the
+/// other from the original work count, so the x strip's accumulations and
+/// budgets come before any y strip error, as for two separate strips.
 #[expect(
     clippy::too_many_arguments,
     reason = "a pair shares one scratch, sink and work counter"
@@ -565,6 +571,44 @@ fn pair<S: Sink>(
 ) -> Flow {
     debug_assert!(x.shape == y.shape && !x.vertical && y.vertical);
     debug_assert!(body_rect(x) == body_rect(y));
+    let start = *work;
+    let widest = match pair_candidates(ctx, x, y, cap, sc, work) {
+        Ok(widest) => widest,
+        Err(Stop::Error(_)) => {
+            *work = start;
+            single(ctx, x, cap, sc, sink, work, counts)?;
+            return single(ctx, y, cap, sc, sink, work, counts);
+        }
+        Err(stop) => return Err(stop),
+    };
+    counts.max_run_candidates = counts.max_run_candidates.max(widest);
+    let mut cands = std::mem::take(&mut sc.cands);
+    for (run, flag) in [(x, 1u8), (y, 2u8)] {
+        merge(
+            &sc.other,
+            sc.own.iter().filter(|c| c.1 & flag != 0).map(|c| c.0),
+            &mut cands,
+        );
+        if let Err(stop) = numeric(ctx, run, &cands, sc, sink, work, counts) {
+            sc.cands = cands;
+            return Err(stop);
+        }
+    }
+    sc.cands = cands;
+    Ok(())
+}
+
+/// Shared candidate queries of a pair: other-layer candidates in
+/// `sc.other`, own-layer hits with per-strip flags (1: x, 2: y) in
+/// `sc.own`, both ID-sorted. Returns the larger strip's candidate count.
+fn pair_candidates(
+    ctx: &Ctx<'_, '_>,
+    x: &Run,
+    y: &Run,
+    cap: usize,
+    sc: &mut Scratch,
+    work: &mut usize,
+) -> std::result::Result<usize, Stop> {
     let w = ctx.info(x.layer)?.window_dbu;
     gather_other(ctx, x, cap, sc, work)?;
     // One own-layer query covers both lateral windows; each hit is tested
@@ -607,21 +651,7 @@ fn pair<S: Sink>(
         return Err(over_cap(ctx.limits, over.max(base + 1)));
     }
     own.sort_unstable_by_key(|c| c.0.id);
-    counts.max_run_candidates = counts.max_run_candidates.max(base + nx.max(ny));
-    let mut cands = std::mem::take(&mut sc.cands);
-    for (run, flag) in [(x, 1u8), (y, 2u8)] {
-        merge(
-            &sc.other,
-            sc.own.iter().filter(|c| c.1 & flag != 0).map(|c| c.0),
-            &mut cands,
-        );
-        if let Err(stop) = numeric(ctx, run, &cands, sc, sink, work, counts) {
-            sc.cands = cands;
-            return Err(stop);
-        }
-    }
-    sc.cands = cands;
-    Ok(())
+    Ok(base + nx.max(ny))
 }
 
 #[inline]

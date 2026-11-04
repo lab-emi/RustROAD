@@ -84,9 +84,15 @@ the memory allowance. `stats.memory` reports the estimate and cap. The CLI reads
 the workspace once, converting the segment length under the same snapshot lock.
 The spatial-index allowance (24 bytes per `--max-extract-bin-entries` entry) is
 shared by structures that are never alive together: the same-net conductor lists
-during metal construction, then the retained-shape grid. Each is admitted against
-that allowance plus the headroom below `--extract-memory-mib` when it is built,
-with its exact size. Virtual cell geometry keeps its separate index.
+(and their buckets) during metal construction, then the per-layer grid. The lists
+and the retained-shape grid are admitted against that allowance plus the headroom
+below `--extract-memory-mib` when they are built, with their exact size. The
+same-net buckets and the grid with virtual cell geometry are admitted against the
+configured allowance alone, never the headroom (which follows the live resident
+set), so whether they are used depends only on the input and the limits. A grid
+larger than the allowance adds its excess to `stats.memory` and leaves that much
+less headroom for parallel scratch. Virtual cell geometry otherwise keeps its
+separate index.
 
 SPEF formatting retains the numeric RC network once and generates labeled nets one
 at a time. A compact coupling incidence table preserves record order; the name
@@ -106,9 +112,19 @@ one corner. Builds and tests use two workers under a 4 GiB OS cap.
 
 Metal construction (end extensions, via pads and patches minus same-net metal)
 looks up same-net conductors in per-`(net, layer)` lists of retained shape IDs and
-virtual signal-pin IDs; pieces are appended as they are added. The covering set is
-the same closed-overlap set in shape-ID order as before, so the pieces and their
-order are unchanged. Cell geometry is indexed once, at the admitted query bin: twice
+virtual signal-pin IDs; pieces are appended as they are added. A list of 256 or
+more IDs is bucketed on its first lookup by the construction bin (twice the largest
+calibration window): each ID goes to every bin its closed rectangle touches, and
+later pieces of the list are added as they are created. A lookup scans the buckets
+the rectangle touches when they are fewer than the list's IDs, otherwise the list,
+so a net with tens of thousands of shapes on one layer (an unbuffered clock or
+reset) costs its local density per lookup instead of its length. Bucket entries
+are admitted at 128 bytes each (entry and cell header with growth slack) from what
+the lists' bound leaves of the configured index allowance, capped by
+`--max-extract-bin-entries`; a list that would exceed them is scanned linearly from
+then on. The covering set is the same closed-overlap set in shape-ID order as
+before, so the pieces and their order are unchanged; only `stats.work` (entries
+scanned and bucketed) depends on the bucketing. Cell geometry is indexed once, at the admitted query bin: twice
 the smallest per-layer calibration window when it fits (the selection rule and the
 reported `stats.memory.instance_query_bin_dbu` are unchanged), otherwise the coarse
 bin. The extraction instance index caches every instance's world bounds and a
@@ -123,19 +139,32 @@ window, doubled until a layer has no more cells than shapes. Entries hold the
 rectangle relative to the layer origin in 32 bits plus the shape ID (20 bytes);
 a layer wider than 2^32 DBU stores absolute rectangles (40 bytes). A query reports
 each strictly intersecting entry exactly once, from the first query cell it occupies.
-Grid entries are capped by `--max-extract-bin-entries`. Passive conductors find
-their crossing routed metal through the grid, and the same strict predicate.
+Grid entries are capped by `--max-extract-bin-entries`; this cap now counts the
+per-layer grid's entries rather than the former 2x-window construction bins. When
+the retained shapes exceed the cap at the base cells, every layer's cell is
+doubled until they fit (results never depend on the cell; `stats.work` does, and
+counts the entries of each rejected size); only a grid of single cells over the cap
+fails (`extraction spatial-bin entries`), i.e. a cap below the retained shape
+count. Passive conductors find their crossing routed metal through the grid, and
+the same strict predicate.
 
 When the virtual cell shapes on routing layers are no more numerous than the
-retained shapes, have positive area and fit the entry cap and the allowance (with
-a pin bitset, a rank table and the `(net, pin)` of each signal pin), they are
-indexed in the same grids. Strip queries then take cell geometry from the grid
+retained shapes, have positive area and fit the entry cap at the base cells and the
+configured index allowance (with a pin bitset, a rank table and the `(net, pin)` of
+each signal pin), they are indexed in the same grids. Strip queries then take cell geometry from the grid
 instead of visiting instances and transforming their templates: the strict
 intersection with the query reports exactly the conductors the instance query plus
 the acceptance predicate reported, so candidates, interval boundaries and the SPEF
 are unchanged (`stats.work` counts the cells and entries scanned). The instance
 index computes the virtual crossing marks and is then released. Otherwise cell
-geometry stays virtual and is queried per instance, as before.
+geometry stays virtual and is queried per instance, as before. The two paths scan
+different cells, so for a given input `stats.work` (and whether a
+`--max-extract-work` cap passes) depends on `--max-extract-bin-entries`. The
+same-net buckets, the virtual grid and the grid cell sizes are chosen from the
+configured limits only. As before, the instance query bin falls back to the coarse
+bin when the refined index does not fit the memory estimate (which includes the
+live resident set), and that choice also changes `stats.work`. Nothing depends on
+threads or chunk size.
 
 ## Strips and parallel computation
 
@@ -146,7 +175,11 @@ interval boundaries and every f64 expression are unchanged. A piece or passive
 conductor contributes an x strip and a y strip of one rectangle; both accept exactly
 the conductors overlapping that rectangle on other layers, so the pair queries other
 layers once, and its own layer once for the union of both lateral windows (each hit
-is tested with each strip's own predicate). Virtual cell shapes are decoded once per
+is tested with each strip's own predicate). When these shared queries fail (a
+candidate cap or a query budget, possibly the y strip's alone), the two strips are
+recomputed one after the other from the unit's starting work count, so the x
+strip's accumulations and budget checks come before any y strip error, as when
+they were separate strips. Virtual cell shapes are decoded once per
 query and travel with the candidate; no design-sized decoded-shape cache is kept.
 The interval sweep uses a bitset of candidate positions (ascending position is
 ascending shape ID), per-layer dense context tables, reused buffers and packed
@@ -207,15 +240,18 @@ path, until it fits, and any excess over the unused allowance is added to
 64) for argument compatibility, and have no effect. A hidden `--extract-tile-units N`
 sets the chunk size (and forces the chunked path on one thread) for tests; results do
 not depend on it. `RUSTROAD_EXTRACT_PROFILE=1` prints phase timings, lanes, shards,
-chunks, barriers and serially computed units to stderr.
+chunks, barriers, serially computed units, grid size and same-net bucket counts to
+stderr.
 
 The phases around the strips also run on the `--threads` pool, each with an
 ordered result. Net trees are computed in batches of 2,048 nets and merged in net
 order; the serial loop's cumulative budgets (graph nodes, wire length, RC nodes) are
 replayed at the checkpoint each net reached, so errors are those of the serial loop.
-The virtual-conductor crossing marks are a set (OR-merged per-thread bitsets) and
-their work total is order-independent; any query error or a work total over the
-budget reruns the serial scan for the exact error. At the end each shard drains and
+The virtual-conductor crossing marks are a set: each pool thread owns one bitset
+and instance-mark scratch (admitted, for all threads, against the unused index
+allowance plus the remaining headroom like the lanes, otherwise the scan is
+serial), OR-merged at the end; their work total is order-independent; any query
+error or a work total over the budget reruns the serial scan for the exact error. At the end each shard drains and
 sorts its coupling entries in parallel and the sorted lists are merged while
 couplings are thresholded and grounded in key order. Geometry, strip records and
 the passive copy are released before the SPEF is written. The SPEF writer
@@ -462,7 +498,11 @@ one thread (the extractor is deterministic at every thread count):
   layer before subtraction);
 * passive strips: at most 2 per passive shape, bounded by 2 x the shape cap,
   64 B each = 256 MiB worst case;
-* 8 M bin entries x 4 B, plus the map, < 128 MiB;
+* the spatial-index allowance, 8 M bin entries x 24 B = 192 MB: per-layer grid
+  entries of 20 B (40 B on a layer wider than 2^32 DBU) plus 4-byte cell offsets
+  (no more cells than entries), or, during metal construction, the same-net lists
+  and their buckets (128 B admitted per bucket entry); a larger grid's excess is
+  added to the estimate;
 * 500 k nodes (virtual cut nodes included) with keys and adjacency, about
   64 MiB;
 * 1 M couplings x about 30 B (20-byte arena entries plus heads, then one

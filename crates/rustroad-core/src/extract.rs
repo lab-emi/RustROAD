@@ -592,7 +592,13 @@ impl PhaseProfile {
             self.mark = now;
         }
     }
-    fn report(&self, stats: &ExtractStats, strips: &parallel::Report, grid: (usize, u64)) {
+    fn report(
+        &self,
+        stats: &ExtractStats,
+        strips: &parallel::Report,
+        grid: (usize, u64),
+        net_bins: (u32, usize),
+    ) {
         if self.enabled {
             eprintln!(
                 "{}",
@@ -618,6 +624,8 @@ impl PhaseProfile {
                     "committed_ops": strips.ops,
                     "grid_entries": grid.0,
                     "grid_bytes": grid.1,
+                    "same_net_bucketed_lists": net_bins.0,
+                    "same_net_bucket_entries": net_bins.1,
                     "peak_rss_bytes": crate::memory::peak_rss_bytes(),
                     "intervals": stats.intervals,
                     "passive_intervals": stats.passive_intervals,
@@ -1543,49 +1551,234 @@ fn net_tree(
     })
 }
 
+/// Same-net lists at least this long are also bucketed by construction bin,
+/// so a lookup scans the nearby entries instead of the whole list.
+const NET_BIN_LIST: usize = 256;
+/// Admitted bytes per bucket entry: the entry with vector growth slack plus
+/// at most one cell header with hash-table growth slack.
+const NET_BIN_ENTRY_BYTES: u64 = 128;
+
+/// One `(net, layer)` same-net list: shape IDs in insertion order.
+#[derive(Default)]
+struct NetList {
+    ids: Vec<u32>,
+    /// Bucket key of the list, once bucketed.
+    key: u32,
+    /// Every ID of the list is in the buckets.
+    binned: bool,
+    /// The buckets ran out of admitted entries while this list was added;
+    /// it is scanned linearly from then on.
+    unbinnable: bool,
+}
+
+/// Construction-bin buckets of the long same-net lists: per `(list, cell)`
+/// a chain of shape IDs in insertion order. A shape is in every cell its
+/// closed rectangle touches.
+struct NetBins {
+    cell: i64,
+    heads: HashMap<(u32, i64, i64), [u32; 3], BuildFx>,
+    /// `(id, next)` chain links.
+    entries: Vec<[u32; 2]>,
+    /// Admitted entries (from the configured allowance only, so whether a
+    /// list is bucketed never depends on live memory).
+    capacity: usize,
+    lists: u32,
+}
+impl NetBins {
+    const NONE: u32 = u32::MAX;
+    fn new(cell: i64, capacity: usize) -> Self {
+        Self {
+            cell: cell.max(1),
+            heads: HashMap::default(),
+            entries: Vec::new(),
+            capacity: capacity.min(Self::NONE as usize),
+            lists: 0,
+        }
+    }
+    #[inline]
+    fn range(&self, lo: i64, hi: i64) -> (i64, i64) {
+        (lo.div_euclid(self.cell), hi.div_euclid(self.cell))
+    }
+    /// Closed cell span of `r`, as an entry count (saturating).
+    fn span(&self, r: Rect) -> u128 {
+        let (x0, x1) = self.range(r.lx, r.ux);
+        let (y0, y1) = self.range(r.ly, r.uy);
+        ((x1 as i128 - x0 as i128 + 1) as u128)
+            .saturating_mul((y1 as i128 - y0 as i128 + 1) as u128)
+    }
+    /// Adds `id` (rectangle `r`) to list `key`; `false` when the admitted
+    /// entries are exhausted (nothing is added then). Inserted entries are
+    /// charged to `work`.
+    fn insert(
+        &mut self,
+        key: u32,
+        id: u32,
+        r: Rect,
+        work: &mut usize,
+        limits: &ExtractLimits,
+    ) -> Result<bool> {
+        let n = self.span(r);
+        if n > (self.capacity - self.entries.len()) as u128 {
+            return Ok(false);
+        }
+        let n = n as usize;
+        *work = work
+            .checked_add(n)
+            .filter(|&w| w <= limits.max_work)
+            .ok_or_else(|| budget("extraction work"))?;
+        self.entries
+            .try_reserve(n)
+            .map_err(|_| budget("extraction same-net index allocation"))?;
+        self.heads
+            .try_reserve(n)
+            .map_err(|_| budget("extraction same-net index allocation"))?;
+        let (x0, x1) = self.range(r.lx, r.ux);
+        let (y0, y1) = self.range(r.ly, r.uy);
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                let at = self.entries.len() as u32;
+                let head = self
+                    .heads
+                    .entry((key, x, y))
+                    .or_insert([Self::NONE, Self::NONE, 0]);
+                if head[1] == Self::NONE {
+                    head[0] = at;
+                } else {
+                    self.entries[head[1] as usize][1] = at;
+                }
+                head[1] = at;
+                head[2] += 1;
+                self.entries.push([id, Self::NONE]);
+            }
+        }
+        Ok(true)
+    }
+    /// Every ID of list `key` whose rectangle touches `r` (closed), each
+    /// once, appended to `found` (unordered). Each scanned cell's entries
+    /// are charged to `work` before the cell is scanned.
+    fn touching(
+        &self,
+        key: u32,
+        r: Rect,
+        rect_of: impl Fn(u32) -> Rect,
+        found: &mut Vec<u32>,
+        work: &mut usize,
+        limits: &ExtractLimits,
+    ) -> Result<()> {
+        let (qx0, qx1) = self.range(r.lx, r.ux);
+        let (qy0, qy1) = self.range(r.ly, r.uy);
+        for x in qx0..=qx1 {
+            for y in qy0..=qy1 {
+                let [mut at, _, count] =
+                    self.heads
+                        .get(&(key, x, y))
+                        .copied()
+                        .unwrap_or([Self::NONE, Self::NONE, 0]);
+                *work = work
+                    .checked_add((count as usize).max(1))
+                    .filter(|&w| w <= limits.max_work)
+                    .ok_or_else(|| budget("extraction work"))?;
+                while at != Self::NONE {
+                    let [id, next] = self.entries[at as usize];
+                    at = next;
+                    let q = rect_of(id);
+                    // Reported from the first query cell it occupies.
+                    if q.lx <= r.ux
+                        && r.lx <= q.ux
+                        && q.ly <= r.uy
+                        && r.ly <= q.uy
+                        && x == q.lx.div_euclid(self.cell).max(qx0)
+                        && y == q.ly.div_euclid(self.cell).max(qy0)
+                    {
+                        found.push(id);
+                        if found.len() > limits.max_candidates {
+                            return Err(budget("extraction candidates per metal piece"));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Same-net conductors during metal construction: retained shape IDs and
 /// virtual signal-pin IDs per `(net, layer)`, in insertion order. Pieces are
-/// appended as they are added. Released before the retained-shape grid.
+/// appended as they are added. Lists of `NET_BIN_LIST` or more IDs are
+/// bucketed when first looked up, within the admitted bucket entries.
+/// Released before the retained-shape grid.
 struct NetShapes {
-    lists: HashMap<(u32, u32), Vec<u32>, BuildFx>,
+    lists: HashMap<(u32, u32), NetList, BuildFx>,
+    bins: NetBins,
+    /// Lists this long are bucketed (`usize::MAX` disables buckets: tests).
+    long: usize,
 }
 impl NetShapes {
     /// Conservative bytes: IDs with vector growth headroom plus map slots.
     fn bound(retained: usize, virtual_pins: usize, keys: usize) -> u64 {
         ((retained as u64).saturating_add(virtual_pins as u64))
             .saturating_mul(8)
-            .saturating_add((keys as u64).saturating_mul(64))
+            .saturating_add((keys as u64).saturating_mul(96))
     }
+    /// The lists' bound must fit `allowance` (index allowance plus memory
+    /// headroom). Buckets get what the bound leaves of the configured index
+    /// allowance alone, capped by `max_bin_entries`.
     fn new(
         shapes: &Shapes<'_>,
         built: &Built,
         limits: &ExtractLimits,
         allowance: u64,
+        cell: i64,
+        long: usize,
     ) -> Result<Self> {
-        let mut lists: HashMap<(u32, u32), Vec<u32>, BuildFx> = HashMap::default();
+        let mut lists: HashMap<(u32, u32), NetList, BuildFx> = HashMap::default();
         let mut virtual_pins = 0usize;
         for (id, s) in shapes.owned() {
             if let Some(net) = shape_net(built, s) {
-                lists.entry((net, s.layer)).or_default().push(id);
+                lists.entry((net, s.layer)).or_default().ids.push(id);
             }
         }
         for (id, s) in shapes.virtual_shapes() {
             if let Some(net) = s.net() {
                 virtual_pins += 1;
-                lists.entry((net, s.layer)).or_default().push(id);
+                lists.entry((net, s.layer)).or_default().ids.push(id);
             }
         }
         // Later pieces grow the lists up to the retained-shape budget.
-        if Self::bound(limits.max_shapes, virtual_pins, lists.len()) > allowance {
+        let bound = Self::bound(limits.max_shapes, virtual_pins, lists.len());
+        if bound > allowance {
             return Err(budget("extraction same-net index memory"));
         }
-        Ok(Self { lists })
+        let room = index_allowance(limits).saturating_sub(bound) / NET_BIN_ENTRY_BYTES;
+        let capacity = usize::try_from(room)
+            .unwrap_or(usize::MAX)
+            .min(limits.max_bin_entries);
+        Ok(Self {
+            lists,
+            bins: NetBins::new(cell, capacity),
+            long,
+        })
     }
-    fn get(&self, net: u32, layer: u32) -> &[u32] {
-        self.lists.get(&(net, layer)).map_or(&[], Vec::as_slice)
-    }
-    fn push(&mut self, net: u32, layer: u32, id: u32) {
-        self.lists.entry((net, layer)).or_default().push(id);
+    fn push(
+        &mut self,
+        net: u32,
+        layer: u32,
+        id: u32,
+        rect: Rect,
+        limits: &ExtractLimits,
+        stats: &mut ExtractStats,
+    ) -> Result<()> {
+        let list = self.lists.entry((net, layer)).or_default();
+        list.ids.push(id);
+        if list.binned
+            && !self
+                .bins
+                .insert(list.key, id, rect, &mut stats.work, limits)?
+        {
+            list.binned = false;
+            list.unbinnable = true;
+        }
+        Ok(())
     }
 }
 
@@ -1626,29 +1819,69 @@ fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
 const MAX_PATCH_PIECES: usize = 256;
 
 /// Same-net conductor shapes on `layer` that overlap or touch `r` (closed),
-/// in shape-index order. List scans are charged to the work budget.
+/// in shape-index order. A long list is bucketed on its first lookup; a
+/// lookup scans the buckets `r` touches when they are fewer than the list's
+/// IDs, otherwise the list. Scanned entries are charged to the work budget.
 fn same_net_near(
     r: Rect,
     net: u32,
     layer: u32,
-    near: &NetShapes,
+    near: &mut NetShapes,
     shapes: &Shapes<'_>,
     limits: &ExtractLimits,
     stats: &mut ExtractStats,
 ) -> Result<Vec<u32>> {
-    let list = near.get(net, layer);
-    stats.work = stats
-        .work
-        .checked_add(list.len().max(1))
-        .filter(|&n| n <= limits.max_work)
-        .ok_or_else(|| budget("extraction work"))?;
+    let charge = |stats: &mut ExtractStats, n: usize| -> Result<()> {
+        stats.work = stats
+            .work
+            .checked_add(n.max(1))
+            .filter(|&n| n <= limits.max_work)
+            .ok_or_else(|| budget("extraction work"))?;
+        Ok(())
+    };
+    let Some(list) = near.lists.get_mut(&(net, layer)) else {
+        charge(stats, 0)?;
+        return Ok(Vec::new());
+    };
+    if list.ids.len() >= near.long && !list.binned && !list.unbinnable {
+        // Bucket every ID so far, in list order; on exhaustion the entries
+        // already added stay unused.
+        let key = near.bins.lists;
+        near.bins.lists = key
+            .checked_add(1)
+            .ok_or_else(|| budget("extraction same-net index lists"))?;
+        list.key = key;
+        list.binned = true;
+        for &id in &list.ids {
+            if !near
+                .bins
+                .insert(key, id, shapes.get(id).rect, &mut stats.work, limits)?
+            {
+                list.binned = false;
+                list.unbinnable = true;
+                break;
+            }
+        }
+    }
     let mut found = Vec::new();
-    for &id in list {
-        let q = shapes.get(id).rect;
-        if q.lx <= r.ux && r.lx <= q.ux && q.ly <= r.uy && r.ly <= q.uy {
-            found.push(id);
-            if found.len() > limits.max_candidates {
-                return Err(budget("extraction candidates per metal piece"));
+    if list.binned && near.bins.span(r) < list.ids.len() as u128 {
+        near.bins.touching(
+            list.key,
+            r,
+            |id| shapes.get(id).rect,
+            &mut found,
+            &mut stats.work,
+            limits,
+        )?;
+    } else {
+        charge(stats, list.ids.len())?;
+        for &id in &list.ids {
+            let q = shapes.get(id).rect;
+            if q.lx <= r.ux && r.lx <= q.ux && q.ly <= r.uy && r.ly <= q.uy {
+                found.push(id);
+                if found.len() > limits.max_candidates {
+                    return Err(budget("extraction candidates per metal piece"));
+                }
             }
         }
     }
@@ -1684,6 +1917,7 @@ fn add_piece(
     shapes: &mut Shapes<'_>,
     near: &mut NetShapes,
     limits: &ExtractLimits,
+    stats: &mut ExtractStats,
 ) -> Result<()> {
     let shape = shapes.len() as u32;
     let index = built.pieces.len() as u32;
@@ -1698,11 +1932,10 @@ fn add_piece(
         rect: piece,
         owner: Owner::Piece(index),
     });
-    near.push(net, layer, shape);
     if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
-    Ok(())
+    near.push(net, layer, shape, piece, limits, stats)
 }
 
 /// Metal of routed nets beyond the wire bodies, as capacitance-only pieces:
@@ -1775,7 +2008,7 @@ fn add_metal_pieces(
             stats.end_pieces += pieces.len();
         }
         for piece in pieces {
-            add_piece(piece, net, layer, node, built, shapes, near, limits)?;
+            add_piece(piece, net, layer, node, built, shapes, near, limits, stats)?;
         }
     }
     Ok(())
@@ -1864,6 +2097,7 @@ fn add_patches(
                 shapes,
                 near,
                 limits,
+                stats,
             )?;
         }
     }
@@ -1939,24 +2173,29 @@ fn add_passive_strips(
 /// Mark only virtual conductors crossed by routed metal. One bit per virtual
 /// shape replaces a retained rectangle plus two passive-strip records.
 ///
-/// Routed shapes are scanned in parallel chunks with private query scratch
-/// and bitsets that are OR-merged: the marked set and the total work are
-/// order-independent. Any query error or a work total over the budget is
-/// reproduced exactly by the serial scan from the original work count.
+/// Routed shapes are scanned in parallel chunks; each pool thread owns one
+/// bitset and query scratch (admitted within `available` bytes, otherwise
+/// the scan is serial), OR-merged at the end: the marked set and the total
+/// work are order-independent. Any query error or a work total over the
+/// budget is reproduced exactly by the serial scan from the original work
+/// count. Returns the marks and the parallel scratch bytes used.
 fn virtual_crossings(
     shapes: &Shapes<'_>,
     grid: &index::GridIndex,
     instances: Option<&InstanceGeometry<'_>>,
     layers: &[u32],
     limits: &ExtractLimits,
+    available: u64,
     stats: &mut ExtractStats,
-) -> Result<Vec<u64>> {
+) -> Result<(Vec<u64>, u64)> {
     use rayon::prelude::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     let words = shapes.virtual_count().div_ceil(64);
     let geometry = match instances {
         Some(g) => Some(g),
         None if grid.has_virtual() => None,
-        None => return Ok(vec![0u64; words]),
+        None => return Ok((vec![0u64; words], 0)),
     };
     let instance_count = shapes.source.map_or(0, |s| s.geometry.len());
     let offset = shapes.virtual_offset();
@@ -2004,47 +2243,59 @@ fn virtual_crossings(
         Ok(())
     };
     let retained = shapes.retained();
-    let parallel = (rayon::current_num_threads() > 1)
+    let scratch_instances = if geometry.is_some() {
+        instance_count
+    } else {
+        0
+    };
+    // One bitset and instance-mark scratch per pool thread.
+    let threads = rayon::current_num_threads();
+    let per_thread = (words as u64)
+        .saturating_mul(8)
+        .saturating_add((scratch_instances as u64).saturating_mul(8));
+    let parallel_bytes = (threads as u64).saturating_mul(per_thread);
+    let parallel = (threads > 1 && parallel_bytes <= available)
         .then(|| {
-            retained
-                .par_chunks(4096)
-                .fold(
-                    || (Vec::new(), None::<InstanceQueryScratch>, 0usize, false),
-                    |(mut marked, mut sc, mut work, mut failed), part| {
-                        if !failed {
-                            if marked.is_empty() {
-                                marked = vec![0u64; words];
-                            }
-                            if sc.is_none() {
-                                sc = InstanceQueryScratch::new(if geometry.is_some() {
-                                    instance_count
-                                } else {
-                                    0
-                                })
-                                .ok();
-                            }
-                            failed = match sc.as_mut() {
-                                Some(sc) => scan(part, sc, &mut marked, &mut work).is_err(),
-                                None => true,
-                            };
-                        }
-                        (marked, sc, work, failed)
-                    },
-                )
-                .map(|(marked, _, work, failed)| (marked, work, failed))
-                .reduce(
-                    || (Vec::new(), 0usize, false),
-                    |(mut a, wa, fa), (b, wb, fb)| {
-                        if a.is_empty() {
-                            a = b;
-                        } else if !b.is_empty() {
-                            for (x, y) in a.iter_mut().zip(&b) {
-                                *x |= y;
-                            }
-                        }
-                        (a, wa.saturating_add(wb), fa || fb)
-                    },
-                )
+            type State = Option<(Vec<u64>, InstanceQueryScratch)>;
+            let states: Vec<Mutex<State>> = (0..threads).map(|_| Mutex::new(None)).collect();
+            let work = AtomicUsize::new(0);
+            let failed = AtomicBool::new(false);
+            retained.par_chunks(4096).for_each(|part| {
+                if failed.load(Ordering::Relaxed) {
+                    return;
+                }
+                let Some(slot) = rayon::current_thread_index().and_then(|i| states.get(i)) else {
+                    failed.store(true, Ordering::Relaxed);
+                    return;
+                };
+                // Only this pool thread locks its own slot.
+                let mut state = slot.lock().unwrap_or_else(|e| e.into_inner());
+                if state.is_none() {
+                    *state = InstanceQueryScratch::new(scratch_instances)
+                        .ok()
+                        .map(|sc| (vec![0u64; words], sc));
+                }
+                let Some((marked, sc)) = state.as_mut() else {
+                    failed.store(true, Ordering::Relaxed);
+                    return;
+                };
+                let mut local = 0usize;
+                if scan(part, sc, marked, &mut local).is_err() {
+                    failed.store(true, Ordering::Relaxed);
+                }
+                let _ = work.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |w| {
+                    Some(w.saturating_add(local))
+                });
+            });
+            let mut marked = vec![0u64; words];
+            for state in states {
+                if let Some((m, _)) = state.into_inner().unwrap_or_else(|e| e.into_inner()) {
+                    for (x, y) in marked.iter_mut().zip(&m) {
+                        *x |= y;
+                    }
+                }
+            }
+            (marked, work.into_inner(), failed.into_inner())
         })
         .and_then(|(marked, work, failed)| {
             let total = stats
@@ -2053,21 +2304,16 @@ fn virtual_crossings(
                 .filter(|&n| !failed && n <= limits.max_work)?;
             Some((marked, total))
         });
-    let marked = match parallel {
-        Some((mut marked, total)) => {
+    let (marked, used) = match parallel {
+        Some((marked, total)) => {
             stats.work = total;
-            marked.resize(words, 0);
-            marked
+            (marked, parallel_bytes)
         }
         None => {
             let mut marked = vec![0u64; words];
-            let mut sc = InstanceQueryScratch::new(if geometry.is_some() {
-                instance_count
-            } else {
-                0
-            })?;
+            let mut sc = InstanceQueryScratch::new(scratch_instances)?;
             scan(retained, &mut sc, &mut marked, &mut stats.work)?;
-            marked
+            (marked, 0)
         }
     };
     stats.passive_strips = stats
@@ -2080,7 +2326,7 @@ fn virtual_crossings(
                 .saturating_mul(2),
         )
         .ok_or_else(|| budget("virtual passive strips"))?;
-    Ok(marked)
+    Ok((marked, used))
 }
 
 /// One strip (x or y) of a crossed passive conductor (retained or virtual).
@@ -2233,8 +2479,20 @@ fn extract_with_queries(
         .map(|(i, n)| (n.net, i))
         .collect();
     profile.phase(1);
-    {
-        let mut near = NetShapes::new(&shapes, &built, limits, index_budget)?;
+    let net_bins = {
+        let long = match queries {
+            Queries::Indexed(bounds) => bounds.net_bin_list,
+            #[cfg(test)]
+            Queries::Reference => NET_BIN_LIST,
+        };
+        let mut near = NetShapes::new(
+            &shapes,
+            &built,
+            limits,
+            index_budget,
+            extraction_bin(input)?,
+            long,
+        )?;
         add_metal_pieces(
             input,
             limits,
@@ -2252,7 +2510,8 @@ fn extract_with_queries(
             &net_index,
             &mut stats,
         )?;
-    }
+        (near.bins.lists, near.bins.entries.len())
+    };
     // Via pads are fully converted into pieces; release growth slack.
     built.pads = Vec::new();
     built.pieces.shrink_to_fit();
@@ -2275,8 +2534,11 @@ fn extract_with_queries(
             })
         })
         .collect();
-    // Virtual cell shapes on routing layers join the grid when it fits:
-    // strip and crossing queries then need no instance-index traversal.
+    // Virtual cell shapes on routing layers join the grid when it fits the
+    // entry cap and the configured index allowance (never the live-memory
+    // headroom, so the query path, and with it the work count, depends only
+    // on the input and the limits): strip and crossing queries then need no
+    // instance-index traversal.
     let virtual_grid = match queries {
         Queries::Indexed(bounds) => bounds.virtual_grid,
         #[cfg(test)]
@@ -2291,7 +2553,7 @@ fn extract_with_queries(
                 input.layers.len(),
                 &base_cell,
                 limits,
-                index_budget,
+                index_allowance(limits),
                 &mut stats.work,
             )
         })
@@ -2308,14 +2570,32 @@ fn extract_with_queries(
         )?,
     };
     profile.phase(3);
+    // A grid larger than the index allowance holds part of the headroom: it
+    // joins the working estimate. Transient parallel scratch (crossing
+    // marks, then strip lanes) gets the unused index allowance first, then
+    // the headroom the grid left.
+    let instance_count = input.instances.map_or(0, |i| i.geometry.len());
+    let unused = index_allowance(limits).saturating_sub(grid.bytes());
+    let grid_excess = grid.bytes().saturating_sub(index_allowance(limits));
+    let headroom = headroom.saturating_sub(grid_excess);
+    if grid_excess > 0
+        && let Some(estimate) = stats.memory.as_mut()
+    {
+        estimate.working_bytes = estimate.working_bytes.saturating_add(grid_excess);
+        estimate.estimate_bytes = estimate.estimate_bytes.saturating_add(grid_excess);
+        if estimate.estimate_bytes > estimate.limit_bytes {
+            return Err(budget("extraction grid index memory"));
+        }
+    }
     add_passive_strips(input, limits, &mut built, &shapes, &grid, &mut stats)?;
     profile.phase(4);
-    let crossed = virtual_crossings(
+    let (crossed, crossing_bytes) = virtual_crossings(
         &shapes,
         &grid,
         instances.as_ref(),
         &routing_layers,
         limits,
+        headroom.saturating_add(unused),
         &mut stats,
     )?;
     // After the crossings, the instance index serves only the strip queries
@@ -2332,9 +2612,6 @@ fn extract_with_queries(
         return Err(budget("extraction shape count"));
     }
     profile.phase(5);
-    // Parallel lanes use the unused index allowance first, then headroom.
-    let instance_count = input.instances.map_or(0, |i| i.geometry.len());
-    let unused = index_allowance(limits).saturating_sub(grid.bytes());
     let (bounds, threads) = match queries {
         Queries::Indexed(bounds) => (bounds, rayon::current_num_threads()),
         #[cfg(test)]
@@ -2347,15 +2624,21 @@ fn extract_with_queries(
         limits,
         instance_count,
     );
-    if lanes > 1 || limits.tile_units > 0 {
-        let excess =
-            parallel::parallel_bytes(bounds, lanes, limits, instance_count).saturating_sub(unused);
-        if let Some(estimate) = stats.memory.as_mut() {
-            estimate.working_bytes = estimate.working_bytes.saturating_add(excess);
-            estimate.estimate_bytes = estimate.estimate_bytes.saturating_add(excess);
-            if estimate.estimate_bytes > estimate.limit_bytes {
-                return Err(budget("extraction tile memory"));
-            }
+    let lane_bytes = if lanes > 1 || limits.tile_units > 0 {
+        parallel::parallel_bytes(bounds, lanes, limits, instance_count)
+    } else {
+        0
+    };
+    // The crossing marks are released before the lanes start: the larger
+    // excess over the unused allowance is the peak.
+    let excess = lane_bytes.max(crossing_bytes).saturating_sub(unused);
+    if excess > 0
+        && let Some(estimate) = stats.memory.as_mut()
+    {
+        estimate.working_bytes = estimate.working_bytes.saturating_add(excess);
+        estimate.estimate_bytes = estimate.estimate_bytes.saturating_add(excess);
+        if estimate.estimate_bytes > estimate.limit_bytes {
+            return Err(budget("extraction tile memory"));
         }
     }
     let nodes = NodeIds::new(&built.nets, &net_index)?;
@@ -2473,7 +2756,7 @@ fn extract_with_queries(
     }
     guard_memory(limits)?;
     profile.phase(7);
-    profile.report(&stats, &report, grid_size);
+    profile.report(&stats, &report, grid_size, net_bins);
     Ok(RcNetwork {
         nets,
         couplings,
@@ -3093,6 +3376,7 @@ mod tests {
             chunk_ops: 24,
             pending_bytes: 1,
             virtual_grid: true,
+            net_bin_list: NET_BIN_LIST,
         }
     }
     /// Every pool size and tile size, with default and tight parallel
@@ -3122,6 +3406,16 @@ mod tests {
                 assert!(memory.estimate_bytes <= memory.limit_bytes);
             }
         }
+        // Every same-net list bucketed: the same network (only work differs).
+        let bucketed = parallel::Bounds {
+            net_bin_list: 1,
+            ..parallel::Bounds::default()
+        };
+        let mut parallel = pool(2)
+            .install(|| extract_with_queries(input, limits, Queries::Indexed(bucketed)))
+            .unwrap();
+        parallel.stats.work = serial.stats.work;
+        assert_network_exact(serial, &parallel);
     }
     fn run(
         r: &Routes,
@@ -4573,6 +4867,394 @@ mod tests {
         }
         // Candidate, coupling, element and work caps all fail somewhere.
         assert!(errors >= 8, "{errors} failing variants");
+    }
+
+    #[test]
+    fn same_net_buckets_report_exactly_the_touching_ids() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move |n: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as i64
+        };
+        let limits = ExtractLimits {
+            max_candidates: MAX_CANDIDATES_CEILING,
+            max_work: 1 << 40,
+            ..Default::default()
+        };
+        // Lattice coordinates make exact edge and corner contacts common.
+        let mut rect = |big: bool, far: bool| {
+            let span = if big { 400 } else { 30 };
+            let origin = if far { (1i64 << 60) - 10_000 } else { 0 };
+            let (x, y) = (origin + 100 * (next(400) - 200), 100 * (next(400) - 200));
+            Rect {
+                lx: x,
+                ly: y,
+                ux: x + 100 * (1 + next(span)),
+                uy: y + 100 * (1 + next(span)),
+            }
+        };
+        for (cell, capacity) in [
+            (1000, usize::MAX),
+            (2500, usize::MAX),
+            (1 << 40, usize::MAX),
+            (700, 3000),
+            (1 << 40, 50),
+        ] {
+            let mut bins = NetBins::new(cell, capacity);
+            let mut rects: Vec<(u32, Rect)> = Vec::new();
+            let mut complete = [true, true];
+            let mut work = 0usize;
+            for id in 0..1200u32 {
+                let r = rect(id % 97 == 0, id % 211 == 0);
+                let key = id % 2;
+                let before = bins.entries.len();
+                if bins.insert(key, id, r, &mut work, &limits).unwrap() {
+                    rects.push((key, r));
+                } else {
+                    // Nothing is added when the admitted entries run out.
+                    assert_eq!(bins.entries.len(), before);
+                    complete[key as usize] = false;
+                    rects.push((u32::MAX, r));
+                }
+            }
+            assert!(bins.entries.len() <= capacity);
+            let rect_of = |id: u32| rects[id as usize].1;
+            let mut checked = 0;
+            for q in 0..300 {
+                let query = rect(q % 13 == 0, q % 17 == 0);
+                for key in [0u32, 1] {
+                    if !complete[key as usize] {
+                        continue;
+                    }
+                    let mut found = Vec::new();
+                    bins.touching(key, query, rect_of, &mut found, &mut work, &limits)
+                        .unwrap();
+                    let n = found.len();
+                    found.sort_unstable();
+                    found.dedup();
+                    assert_eq!(found.len(), n, "an ID is reported once");
+                    let expected: Vec<u32> = (0..rects.len() as u32)
+                        .filter(|&id| {
+                            let (k, r) = rects[id as usize];
+                            k == key
+                                && r.lx <= query.ux
+                                && query.lx <= r.ux
+                                && r.ly <= query.uy
+                                && query.ly <= r.uy
+                        })
+                        .collect();
+                    assert_eq!(found, expected, "cell {cell} key {key} query {query:?}");
+                    checked += 1;
+                }
+            }
+            // Unbounded buckets answer every query; tight ones run out.
+            assert_eq!(checked == 600, capacity == usize::MAX, "{checked}");
+        }
+        // Candidate and work budgets fail like the list scan.
+        let mut bins = NetBins::new(1000, usize::MAX);
+        let mut work = 0;
+        let big = Rect {
+            lx: 0,
+            ly: 0,
+            ux: 5000,
+            uy: 5000,
+        };
+        for id in 0..10 {
+            bins.insert(0, id, big, &mut work, &limits).unwrap();
+        }
+        let tight = ExtractLimits {
+            max_candidates: 9,
+            ..limits.clone()
+        };
+        let err = bins
+            .touching(0, big, |_| big, &mut Vec::new(), &mut 0, &tight)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("candidates per metal piece"),
+            "{err}"
+        );
+        let tight = ExtractLimits {
+            max_work: 5,
+            ..limits.clone()
+        };
+        let err = bins
+            .touching(0, big, |_| big, &mut Vec::new(), &mut 0, &tight)
+            .unwrap_err();
+        assert!(err.to_string().contains("extraction work"), "{err}");
+    }
+
+    /// One net: a trunk with `n` same-layer stubs (every stub and trunk run
+    /// is on the net's single M1 list).
+    fn comb(n: i64) -> Routes {
+        let (pitch, stub) = (2000, 1000);
+        let mut wires = vec![Wire {
+            net: 0,
+            layer: 0,
+            start: [0, 0],
+            end: [n * pitch, 0],
+        }];
+        for i in 1..=n {
+            let x = i * pitch - pitch / 2;
+            wires.push(Wire {
+                net: 0,
+                layer: 0,
+                start: [x, 0],
+                end: [x, stub],
+            });
+        }
+        routes(
+            wires,
+            vec![],
+            vec![Access {
+                pin: 0,
+                net: 0,
+                layer: 0,
+                at: [0, 0],
+            }],
+            vec![0],
+        )
+    }
+
+    #[test]
+    fn a_giant_net_costs_its_local_density_not_its_length() {
+        // 2,001 runs on one net and layer (an unbuffered clock or reset):
+        // the linear scan's work grows with the square of the list, the
+        // bucketed lookups' with its length, for the same network.
+        let (l, v, tk) = (layers(), vias(), tech(false));
+        let t = [terminal(0, 0, true)];
+        let r = comb(1000);
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &[],
+            instances: None,
+            held_bytes: 0,
+            tech: &tk,
+        };
+        let run = |max_work, net_bin_list| {
+            pool(1).install(|| {
+                extract_with_queries(
+                    &input,
+                    &ExtractLimits {
+                        max_work,
+                        ..Default::default()
+                    },
+                    Queries::Indexed(parallel::Bounds {
+                        net_bin_list,
+                        ..parallel::Bounds::default()
+                    }),
+                )
+            })
+        };
+        let mut bucketed = run(1 << 40, NET_BIN_LIST).unwrap();
+        let scanned = run(1 << 40, usize::MAX).unwrap();
+        assert_eq!(bucketed.stats.wire_runs, 2001);
+        assert!(
+            bucketed.stats.work * 8 < scanned.stats.work,
+            "{} vs {}",
+            bucketed.stats.work,
+            scanned.stats.work
+        );
+        let cap = bucketed.stats.work;
+        bucketed.stats.work = scanned.stats.work;
+        assert_network_exact(&scanned, &bucketed);
+        run(cap, NET_BIN_LIST).unwrap();
+        let err = run(cap, usize::MAX).unwrap_err();
+        assert!(err.to_string().contains("extraction work"), "{err}");
+    }
+
+    #[test]
+    fn retained_grid_coarsens_to_fit_the_entry_cap() {
+        // Small squares and a long rail make base-cell entries exceed the
+        // shape count; a cap between them coarsens the cells instead of
+        // failing, and only a cap below the shape count fails.
+        let mut wires = straight(0, 0, 10);
+        wires.extend(straight(1, 600, 10));
+        let r = routes(
+            wires,
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 1,
+                    layer: 0,
+                    at: [0, 600],
+                },
+            ],
+            vec![0, 1],
+        );
+        let t = [terminal(0, 0, true), terminal(1, 1, true)];
+        let mut passive: Vec<PassiveShape> = (0..400)
+            .map(|i| PassiveShape {
+                layer: 0,
+                rect: Rect {
+                    lx: -200_000 + i * 1000,
+                    ly: 20_000,
+                    ux: -199_500 + i * 1000,
+                    uy: 20_500,
+                },
+                owner: PassiveOwner::Ground,
+            })
+            .collect();
+        passive.push(PassiveShape {
+            layer: 0,
+            rect: Rect {
+                lx: -200_000,
+                ly: 5000,
+                ux: 200_000,
+                uy: 5100,
+            },
+            owner: PassiveOwner::Ground,
+        });
+        let (l, v, tk) = (layers(), vias(), tech(false));
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &passive,
+            instances: None,
+            held_bytes: 0,
+            tech: &tk,
+        };
+        let limits = ExtractLimits::default();
+        let base = serial(&input, &limits).unwrap();
+        let shapes = base.stats.shapes;
+        let capped = ExtractLimits {
+            max_bin_entries: shapes,
+            ..limits.clone()
+        };
+        let mut coarse = serial(&input, &capped).unwrap();
+        // Rejected cell sizes are charged: the cells did change.
+        assert!(coarse.stats.work > base.stats.work);
+        coarse.stats.work = base.stats.work;
+        assert_network_exact(&base, &coarse);
+        check_parallel(&input, &capped, &serial(&input, &capped).unwrap());
+        let err = serial(
+            &input,
+            &ExtractLimits {
+                max_bin_entries: shapes - 1,
+                ..limits
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("spatial-bin entries"), "{err}");
+    }
+
+    #[test]
+    fn a_pair_reports_its_x_strip_before_a_y_strip_error() {
+        // The end piece at x = 10 um (a pair unit): its x strip couples to
+        // two pins of net 1 above and below it (two new coupling keys); its
+        // y strip sees the wire body and eight ground slivers to its right
+        // (nine candidates). With max_candidates 8 and max_couplings 1 the
+        // x strip's coupling budget fails first, as for separate strips.
+        let mut wires = straight(0, 0, 10);
+        wires.extend(straight(1, 100_000, 10));
+        let r = routes(
+            wires,
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 5,
+                    net: 1,
+                    layer: 0,
+                    at: [0, 100_000],
+                },
+                Access {
+                    pin: 6,
+                    net: 1,
+                    layer: 0,
+                    at: [10_000, 100_000],
+                },
+            ],
+            vec![0, 1],
+        );
+        let t = [
+            terminal(0, 0, true),
+            terminal(5, 1, true),
+            terminal(6, 1, false),
+        ];
+        let mut passive: Vec<PassiveShape> = (0..8)
+            .map(|i| PassiveShape {
+                layer: 0,
+                rect: Rect {
+                    lx: 10_100 + 20 * i,
+                    ly: -50,
+                    ux: 10_110 + 20 * i,
+                    uy: 50,
+                },
+                owner: PassiveOwner::Ground,
+            })
+            .collect();
+        for (pin, ly) in [(5, 300), (6, -400)] {
+            passive.push(PassiveShape {
+                layer: 0,
+                rect: Rect {
+                    lx: 10_005,
+                    ly,
+                    ux: 10_045,
+                    uy: ly + 100,
+                },
+                owner: PassiveOwner::Pin { net: 1, pin },
+            });
+        }
+        let (l, v, tk) = (layers(), vias(), tech(false));
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &passive,
+            instances: None,
+            held_bytes: 0,
+            tech: &tk,
+        };
+        let limits = ExtractLimits::default();
+        let ok = serial(&input, &limits).unwrap();
+        assert_eq!(ok.couplings.len(), 2);
+        assert_eq!(ok.stats.max_run_candidates, 9);
+        for (max_candidates, max_couplings, expected) in [
+            (8, 1, "extraction coupling capacitors"),
+            (8, 2, "extraction candidates per wire run"),
+            (9, 1, "extraction coupling capacitors"),
+        ] {
+            let limits = ExtractLimits {
+                max_candidates,
+                max_couplings,
+                ..limits.clone()
+            };
+            for (threads, tile) in [(1, 0), (1, 1), (2, 0), (3, 1), (4, 7)] {
+                for bounds in [parallel::Bounds::default(), tight_bounds()] {
+                    let limits = ExtractLimits {
+                        tile_units: tile,
+                        ..limits.clone()
+                    };
+                    let err = pool(threads)
+                        .install(|| extract_with_queries(&input, &limits, Queries::Indexed(bounds)))
+                        .unwrap_err();
+                    assert!(err.to_string().contains(expected), "{err} vs {expected}");
+                }
+            }
+        }
     }
 
     #[test]

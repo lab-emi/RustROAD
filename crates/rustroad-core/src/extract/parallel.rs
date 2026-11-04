@@ -54,6 +54,9 @@ pub(super) struct Bounds {
     /// Index virtual cell shapes in the per-layer grids when they fit (no
     /// instance queries); `false` keeps the instance-index path (tests).
     pub virtual_grid: bool,
+    /// Same-net construction lists this long are bucketed; `usize::MAX`
+    /// scans every list linearly (tests).
+    pub net_bin_list: usize,
 }
 impl Default for Bounds {
     fn default() -> Self {
@@ -62,6 +65,7 @@ impl Default for Bounds {
             chunk_ops: 1 << 17,
             pending_bytes: 4 << 20,
             virtual_grid: true,
+            net_bin_list: super::NET_BIN_LIST,
         }
     }
 }

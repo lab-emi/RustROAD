@@ -282,6 +282,30 @@ fn fill<E: Entry>(
     Ok(entries)
 }
 
+/// Entries of the grids `plans` over the indexed shapes; counting stops
+/// once the total exceeds `cap`.
+fn count_entries(
+    shapes: &Shapes<'_>,
+    virtual_layers: Option<&[bool]>,
+    plans: &[Option<Plan>],
+    cap: usize,
+) -> usize {
+    let mut total = 0usize;
+    for (_, layer, r) in indexed(shapes, virtual_layers) {
+        let Some(p) = plans.get(layer as usize).copied().flatten() else {
+            continue;
+        };
+        let at = |v: i64, lo: i64, n: i64| v.saturating_sub(lo).div_euclid(p.cell).clamp(0, n - 1);
+        let nx = at(r.ux, p.bounds.lx, p.nx) - at(r.lx, p.bounds.lx, p.nx) + 1;
+        let ny = at(r.uy, p.bounds.ly, p.ny) - at(r.ly, p.bounds.ly, p.ny) + 1;
+        total = total.saturating_add((nx as usize).saturating_mul(ny as usize));
+        if total > cap {
+            break;
+        }
+    }
+    total
+}
+
 impl GridIndex {
     /// Exact heap bytes of the built index (offsets plus entries).
     pub(super) fn bytes(&self) -> u64 {
@@ -325,8 +349,12 @@ impl GridIndex {
 
     /// Builds one grid per populated layer. `base_cell[layer]` is the
     /// smallest cell side (DBU); populated layers beyond it use one DBU.
-    /// Entries are capped by `limits.max_bin_entries`, and the exact table
-    /// bytes must fit `allowance`. Every inserted entry is charged to `work`.
+    /// Entries are capped by `limits.max_bin_entries`: when the base cells
+    /// exceed the cap, every layer's cell is doubled until the entries fit
+    /// (results never depend on the cell; the work count does), and only a
+    /// grid of single cells over the cap fails. The exact table bytes must
+    /// fit `allowance`. Every inserted entry, and every entry counted for a
+    /// rejected cell size, is charged to `work`.
     pub(super) fn build(
         shapes: &Shapes<'_>,
         layer_count: usize,
@@ -340,6 +368,7 @@ impl GridIndex {
             None,
             layer_count,
             base_cell,
+            true,
             limits,
             allowance,
             work,
@@ -394,6 +423,7 @@ impl GridIndex {
             Some(virtual_layers),
             layer_count,
             base_cell,
+            false,
             limits,
             allowance.checked_sub(owners)?,
             &mut attempt,
@@ -423,11 +453,16 @@ impl GridIndex {
         Some(grid)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one builder for the retained and the virtual grid"
+    )]
     fn build_with(
         shapes: &Shapes<'_>,
         virtual_layers: Option<&[bool]>,
         layer_count: usize,
         base_cell: &[i64],
+        coarsen: bool,
         limits: &ExtractLimits,
         allowance: u64,
         work: &mut usize,
@@ -451,11 +486,31 @@ impl GridIndex {
                 ),
             });
         }
-        let plans: Vec<Option<Plan>> = bounds
-            .iter()
-            .enumerate()
-            .map(|(l, b)| b.map(|(r, n)| plan(r, n, base_cell.get(l).copied().unwrap_or(1))))
-            .collect();
+        let cap = limits.max_bin_entries.min(u32::MAX as usize - 1);
+        let mut scale = 0u32;
+        let plans = loop {
+            let plans: Vec<Option<Plan>> = bounds
+                .iter()
+                .enumerate()
+                .map(|(l, b)| {
+                    let base = i128::from(base_cell.get(l).copied().unwrap_or(1).max(1));
+                    let cell = (base << scale.min(64)).min(HUGE_SPAN) as i64;
+                    b.map(|(r, n)| plan(r, n, cell))
+                })
+                .collect();
+            if !coarsen || plans.iter().flatten().all(|p| p.nx * p.ny == 1) {
+                break plans;
+            }
+            let counted = count_entries(shapes, virtual_layers, &plans, cap);
+            if counted <= cap {
+                break plans;
+            }
+            *work = work
+                .checked_add(counted)
+                .filter(|&n| n <= limits.max_work)
+                .ok_or_else(|| budget("extraction grid-index work"))?;
+            scale += 1;
+        };
         let mut layers: Vec<Option<LayerGrid>> = Vec::with_capacity(layer_count);
         let mut bytes = 0u64;
         for p in &plans {
