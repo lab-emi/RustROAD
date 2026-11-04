@@ -57,6 +57,28 @@ lattice anchor receives a bounded interior repair when needed. Narrow segments
 that cannot hold the boundary taps fail explicitly. Placement, free intervals,
 persisted-policy validation and repeated placement all use this same policy.
 
+The lattice relies on wells shared by row pairs: an `N` row and the `FS` row
+that faces it share one well, and their two phases interleave there at half the
+pitch. A row edge without such a partner (the top core row, a row bordering a
+macro, its halo or a row gap) carries only its own anchors. The optional
+`"unpaired"` field adds the other row parity's anchors on exactly those
+stretches, widened by half a pitch at each end:
+
+```json
+"max_gap": 42000, "pattern": {"kind": "staggered", "phase": 21000, "unpaired": "cell_top"}
+```
+
+`cell_top` names the edge at the top of an unflipped cell (the top of an `N` row,
+the bottom of an `FS` row; the n-well edge of a library whose power rail is at
+the cell top); `both` checks both edges. A partner exists only where a row
+segment of the opposite orientation abuts that edge. Added anchors never
+replace or move the row's own anchors; one that would overlap a boundary or
+repair tap is dropped, and `phase` and `pitch - phase` must each be at least
+the tap width. Absent `unpaired` keeps the plain lattice and its JSON. The
+planner still makes no coverage claim. A layout that uses it needs independent
+latch-up evidence; for the IHP Ibex recipe that is the `tap_coverage.py`
+certificate, the maximal-deck LU.a gate and main-deck LU.b on the final GDS.
+
 The native gap metric is distinct from foundry diffusion-to-corresponding-tie
 distance. The pattern does not establish connected well/body domains, electrical
 contact or latch-up compliance. Its report retains

@@ -31,7 +31,30 @@ pub struct TapSite {
 pub enum TapPattern {
     /// A global lattice with nominal pitch `max_gap`, shifted on odd physical
     /// rows. Both pitch and phase are rounded down to the site lattice.
-    Staggered { phase: i64 },
+    Staggered {
+        phase: i64,
+        /// Optional edge densification. Where the row across the selected
+        /// edge is absent, or does not face this row with the opposite
+        /// orientation (so no well is shared across that edge), the stretch
+        /// also receives the other row parity's lattice anchors. It then
+        /// carries alone the interleaved half-pitch spacing that a shared well
+        /// gets from both of its rows: the top core row, rows that border a
+        /// macro or a row gap. Absent keeps the plain lattice.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unpaired: Option<UnpairedEdge>,
+    },
+}
+/// Row edge whose missing partner row triggers [`TapPattern::Staggered`]
+/// densification. Edges are named in the unflipped (`N`) cell frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnpairedEdge {
+    /// The edge at the top of an unflipped cell: the top edge of an `N` row
+    /// and the bottom edge of an `FS` row. For a library whose power rail
+    /// (and n-well) is at the cell top this is the n-well edge.
+    CellTop,
+    /// Both row edges.
+    Both,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -158,7 +181,7 @@ pub fn reserve_with_pattern(
     pattern: Option<&TapPattern>,
     limits: &TapLimits,
 ) -> Result<TapReport> {
-    let Some(TapPattern::Staggered { phase }) = pattern else {
+    let Some(TapPattern::Staggered { phase, unpaired }) = pattern else {
         return reserve(design, tap_width, max_gap, limits);
     };
     design.validate(&Limits {
@@ -180,10 +203,31 @@ pub fn reserve_with_pattern(
     if pitch <= i128::from(tap_width) || phase >= pitch {
         return Err(invalid("staggered pitch/phase collapse on site lattice"));
     }
+    // Both lattices share one row only when their anchors cannot overlap.
+    if unpaired.is_some()
+        && (phase < i128::from(tap_width) || pitch - phase < i128::from(tap_width))
+    {
+        return Err(invalid("unpaired densification needs phase >= tap width"));
+    }
     let segments = crate::fixed::row_segments(design, limits.max_work)?;
-    let mut sites = Vec::new();
     let mut work = 0;
+    // Segments by row coordinate, in x order, for the partner-row lookup.
+    let mut by_y: std::collections::BTreeMap<i64, Vec<(i64, i64, crate::Orientation)>> =
+        std::collections::BTreeMap::new();
+    if unpaired.is_some() {
+        for row in &segments {
+            tick(&mut work, limits.max_work)?;
+            by_y.entry(row.y)
+                .or_default()
+                .push((row.x_start, row.x_end, row.orientation));
+        }
+        for list in by_y.values_mut() {
+            list.sort_unstable_by_key(|s| (s.0, s.1));
+        }
+    }
+    let mut sites = Vec::new();
     let mut actual = 0;
+    let mut extra = Vec::new();
     for (ri, row) in segments.iter().enumerate() {
         tick(&mut work, limits.max_work)?;
         let start = i128::from(row.x_start);
@@ -198,10 +242,14 @@ pub fn reserve_with_pattern(
         // row into multiple segments and must never flip the phase mid-row.
         let row_number =
             (i128::from(row.y) - i128::from(design.core_area.ly)) / i128::from(design.site.height);
-        let origin = i128::from(design.core_area.lx) + (row_number % 2) * phase;
+        let core = i128::from(design.core_area.lx);
+        let origin = core + (row_number % 2) * phase;
         let target = start + i128::from(tap_width);
-        let first = origin + (target - origin).div_euclid(pitch) * pitch;
-        let first = if first < target { first + pitch } else { first };
+        let anchor = |origin: i128, from: i128| {
+            let first = origin + (from - origin).div_euclid(pitch) * pitch;
+            if first < from { first + pitch } else { first }
+        };
+        let first = anchor(origin, target);
         let last = end - i128::from(tap_width);
         let interior = if first <= last {
             (last - first) / pitch + 1
@@ -218,9 +266,62 @@ pub fn reserve_with_pattern(
                     + ((end - start - 2 * i128::from(tap_width)) / 2 / i128::from(site))
                         * i128::from(site)
             });
-        let count =
+        // Partner-lattice anchors on stretches whose well partner is missing,
+        // widened by half a pitch so the stretch ends overlap the paired rows.
+        extra.clear();
+        if let Some(edge) = unpaired {
+            let partner = core + ((row_number + 1) % 2) * phase;
+            let above = row.orientation == crate::Orientation::N;
+            let sides: &[bool] = match edge {
+                UnpairedEdge::CellTop => &[above],
+                UnpairedEdge::Both => &[true, false],
+            };
+            for &up in sides {
+                let y = if up {
+                    i64::try_from(i128::from(row.y) + i128::from(design.site.height))
+                } else {
+                    i64::try_from(i128::from(row.y) - i128::from(design.site.height))
+                }
+                .map_err(|_| invalid("tap row coordinate overflow"))?;
+                let mut covered = start;
+                let mut open = Vec::new();
+                for &(lo, hi, orientation) in by_y.get(&y).map_or(&[][..], Vec::as_slice) {
+                    tick(&mut work, limits.max_work)?;
+                    if orientation == row.orientation {
+                        continue;
+                    }
+                    let (lo, hi) = (i128::from(lo), i128::from(hi));
+                    if hi <= covered || lo >= i128::from(row.x_end) {
+                        continue;
+                    }
+                    if lo > covered {
+                        open.push((covered, lo));
+                    }
+                    covered = covered.max(hi);
+                }
+                if covered < i128::from(row.x_end) {
+                    open.push((covered, i128::from(row.x_end)));
+                }
+                for (a, b) in open {
+                    let from = (a - pitch / 2).max(target);
+                    let to = (b + pitch / 2).min(last);
+                    let mut x = anchor(partner, from);
+                    while x <= to {
+                        tick(&mut work, limits.max_work)?;
+                        extra.push(x);
+                        x += pitch;
+                    }
+                }
+            }
+            extra.sort_unstable();
+            extra.dedup();
+        }
+        let base =
             usize::try_from(interior + 1 + i128::from(start != end) + i128::from(repair.is_some()))
                 .map_err(|_| budget("staggered tap count overflow"))?;
+        let count = base
+            .checked_add(extra.len())
+            .ok_or_else(|| budget("staggered tap count overflow"))?;
         if count > limits.max_taps.saturating_sub(sites.len()) {
             return Err(budget("tap max_taps exceeded"));
         }
@@ -238,12 +339,40 @@ pub fn reserve_with_pattern(
                 .try_reserve_exact(capacity - sites.len())
                 .map_err(|_| budget("staggered tap allocation failed"))?;
         }
-        let mut previous = None;
-        for x in std::iter::once(start)
+        // Merge the row's own anchors with the partner anchors in x order. A
+        // partner anchor that would overlap a boundary or repair tap is
+        // dropped: the own lattice keeps priority.
+        let mut own = std::iter::once(start)
             .chain((0..interior).map(|i| first + i * pitch))
             .chain(repair)
             .chain((start != end).then_some(end))
-        {
+            .peekable();
+        let mut more = extra.iter().copied().peekable();
+        let mut previous: Option<i128> = None;
+        loop {
+            let x = match (own.peek(), more.peek()) {
+                (Some(&a), Some(&b)) if b < a => {
+                    more.next();
+                    if previous.is_some_and(|p| b - p < i128::from(tap_width))
+                        || b + i128::from(tap_width) > a
+                    {
+                        continue;
+                    }
+                    b
+                }
+                (Some(&a), _) => {
+                    own.next();
+                    a
+                }
+                (None, Some(&b)) => {
+                    more.next();
+                    if previous.is_some_and(|p| b - p < i128::from(tap_width)) {
+                        continue;
+                    }
+                    b
+                }
+                (None, None) => break,
+            };
             tick(&mut work, limits.max_work)?;
             if let Some(previous) = previous {
                 let clear = x - previous - i128::from(tap_width);
@@ -454,7 +583,10 @@ mod tests {
     #[test]
     fn staggered_global_lattice_and_edges_have_explicit_positions() {
         let d = fixture();
-        let pattern = TapPattern::Staggered { phase: 30 };
+        let pattern = TapPattern::Staggered {
+            phase: 30,
+            unpaired: None,
+        };
         let a = reserve_with_pattern(&d, 10, 60, Some(&pattern), &TapLimits::default()).unwrap();
         let positions = |y| {
             a.sites
@@ -497,7 +629,10 @@ mod tests {
             &d,
             10,
             60,
-            Some(&TapPattern::Staggered { phase: 30 }),
+            Some(&TapPattern::Staggered {
+                phase: 30,
+                unpaired: None,
+            }),
             &TapLimits::default(),
         )
         .unwrap();
@@ -520,7 +655,10 @@ mod tests {
             &d,
             10,
             60,
-            Some(&TapPattern::Staggered { phase: 30 }),
+            Some(&TapPattern::Staggered {
+                phase: 30,
+                unpaired: None,
+            }),
             &TapLimits::default(),
         )
         .unwrap();
@@ -550,6 +688,7 @@ mod tests {
                             nominal * 10 + 9,
                             Some(&TapPattern::Staggered {
                                 phase: phase * 10 + 1,
+                                unpaired: None,
                             }),
                             &TapLimits::default(),
                         );
@@ -576,10 +715,226 @@ mod tests {
         }
     }
 
+    fn three_rows() -> Design {
+        let mut d = fixture();
+        d.core_area.uy = 60;
+        d.rows.push(Row {
+            x_start: 0,
+            x_end: 200,
+            y: 40,
+            orientation: Orientation::N,
+        });
+        d
+    }
+    fn row_x(r: &TapReport, y: i64) -> Vec<i64> {
+        r.sites.iter().filter(|s| s.y == y).map(|s| s.x).collect()
+    }
+
+    #[test]
+    fn unpaired_edges_receive_the_partner_lattice() {
+        let d = three_rows();
+        let plain = TapPattern::Staggered {
+            phase: 30,
+            unpaired: None,
+        };
+        let top = TapPattern::Staggered {
+            phase: 30,
+            unpaired: Some(UnpairedEdge::CellTop),
+        };
+        let both = TapPattern::Staggered {
+            phase: 30,
+            unpaired: Some(UnpairedEdge::Both),
+        };
+        let limits = TapLimits::default();
+        let p = reserve_with_pattern(&d, 10, 60, Some(&plain), &limits).unwrap();
+        assert_eq!(row_x(&p, 0), [0, 60, 120, 180, 190]);
+        assert_eq!(row_x(&p, 20), [0, 30, 90, 150, 190]);
+        assert_eq!(row_x(&p, 40), [0, 60, 120, 180, 190]);
+        // N rows carry the cell top at the row top: only the top core row's
+        // n-well edge has no facing FS partner.
+        let t = reserve_with_pattern(&d, 10, 60, Some(&top), &limits).unwrap();
+        assert_eq!(row_x(&t, 0), row_x(&p, 0));
+        assert_eq!(row_x(&t, 20), row_x(&p, 20));
+        assert_eq!(row_x(&t, 40), [0, 30, 60, 90, 120, 150, 180, 190]);
+        assert_eq!(t.max_clear_gap, 50);
+        // Both edges: the bottom core row is unpaired as well.
+        let b = reserve_with_pattern(&d, 10, 60, Some(&both), &limits).unwrap();
+        assert_eq!(row_x(&b, 0), [0, 30, 60, 90, 120, 150, 180, 190]);
+        assert_eq!(row_x(&b, 20), row_x(&p, 20));
+        assert_eq!(row_x(&b, 40), row_x(&t, 40));
+        assert_eq!(
+            b,
+            reserve_with_pattern(&d, 10, 60, Some(&both), &limits).unwrap()
+        );
+        // Rows of one orientation never share a well across an edge.
+        let mut same = d.clone();
+        for row in &mut same.rows {
+            row.orientation = Orientation::N;
+        }
+        let s = reserve_with_pattern(&same, 10, 60, Some(&top), &limits).unwrap();
+        assert_eq!(row_x(&s, 0), [0, 30, 60, 90, 120, 150, 180, 190]);
+        assert_eq!(row_x(&s, 20), [0, 30, 60, 90, 120, 150, 180, 190]);
+        // Partner anchors must not be able to overlap the own lattice.
+        for phase in [0, 5] {
+            let bad = TapPattern::Staggered {
+                phase,
+                unpaired: Some(UnpairedEdge::CellTop),
+            };
+            assert!(reserve_with_pattern(&d, 10, 60, Some(&bad), &limits).is_err());
+            let ok = TapPattern::Staggered {
+                phase,
+                unpaired: None,
+            };
+            assert!(reserve_with_pattern(&d, 10, 60, Some(&ok), &limits).is_ok());
+        }
+        // Budgets count the added anchors.
+        let n = t.sites.len();
+        assert!(matches!(
+            reserve_with_pattern(
+                &d,
+                10,
+                60,
+                Some(&top),
+                &TapLimits {
+                    max_taps: n - 1,
+                    max_work: 1000
+                }
+            ),
+            Err(Error::Budget(_))
+        ));
+    }
+
+    #[test]
+    fn macro_cut_partner_row_densifies_only_the_cut_stretch() {
+        let mut d = three_rows();
+        // A macro occupying the FS row over x 80..120 removes the n-well
+        // partner of the N row below it there.
+        d.cells.push(crate::Cell {
+            name: "macro".into(),
+            master: "macro".into(),
+            width: 40,
+            height: 20,
+            fixed: Some(crate::fixed::FixedPlacement {
+                x: 80,
+                y: 20,
+                orientation: crate::Orientation::N,
+                halo: 0,
+            }),
+        });
+        let top = TapPattern::Staggered {
+            phase: 30,
+            unpaired: Some(UnpairedEdge::CellTop),
+        };
+        let r = reserve_with_pattern(&d, 10, 60, Some(&top), &TapLimits::default()).unwrap();
+        // Stretch 80..120 widened by half a pitch to 50..150: partner anchors
+        // 90 and 150 join the own lattice of the N row.
+        assert_eq!(row_x(&r, 0), [0, 60, 90, 120, 150, 180, 190]);
+        // The FS row's segments face an N row below: paired, unchanged.
+        assert_eq!(row_x(&r, 20), [0, 30, 70, 120, 150, 190]);
+        // The top N row is unpaired over its full width.
+        assert_eq!(row_x(&r, 40), [0, 30, 60, 90, 120, 150, 180, 190]);
+        for pair in r.sites.windows(2) {
+            if pair[0].row == pair[1].row {
+                let gap = pair[1].x - pair[0].x - 10;
+                assert!((0..=60).contains(&gap), "{pair:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn unpaired_adversarial_lattices_obey_cell_edge_gap_bound() {
+        let mut d = three_rows();
+        d.cells.truncate(1);
+        d.die_area.ux = 300;
+        d.core_area.ux = 300;
+        for length in 1..=30 {
+            for width in 1..=3 {
+                for nominal in (width + 1)..=9 {
+                    for phase in 0..nominal {
+                        for row in &mut d.rows {
+                            row.x_end = length * 10;
+                        }
+                        d.rows[1].x_start = (length / 3) * 10;
+                        for edge in [UnpairedEdge::CellTop, UnpairedEdge::Both] {
+                            let r = reserve_with_pattern(
+                                &d,
+                                width * 10,
+                                nominal * 10 + 9,
+                                Some(&TapPattern::Staggered {
+                                    phase: phase * 10 + 1,
+                                    unpaired: Some(edge),
+                                }),
+                                &TapLimits::default(),
+                            );
+                            let Ok(r) = r else { continue };
+                            let mut rows = r.sites.clone();
+                            rows.dedup_by_key(|s| s.row);
+                            for row in rows.iter().map(|s| s.row) {
+                                let slots: Vec<_> =
+                                    r.sites.iter().filter(|s| s.row == row).collect();
+                                for pair in slots.windows(2) {
+                                    let gap = pair[1].x - pair[0].x - width * 10;
+                                    assert!((0..=nominal * 10 + 9).contains(&gap));
+                                }
+                                for slot in slots {
+                                    assert_eq!(slot.x % 10, 0);
+                                }
+                            }
+                            // Densification only adds taps to the plain lattice.
+                            let plain = reserve_with_pattern(
+                                &d,
+                                width * 10,
+                                nominal * 10 + 9,
+                                Some(&TapPattern::Staggered {
+                                    phase: phase * 10 + 1,
+                                    unpaired: None,
+                                }),
+                                &TapLimits::default(),
+                            )
+                            .unwrap();
+                            for s in &plain.sites {
+                                assert!(r.sites.contains(s));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unpaired_pattern_json_is_backward_compatible() {
+        let legacy: TapPattern =
+            serde_json::from_str(r#"{"kind":"staggered","phase":14490}"#).unwrap();
+        assert_eq!(
+            legacy,
+            TapPattern::Staggered {
+                phase: 14490,
+                unpaired: None
+            }
+        );
+        assert_eq!(
+            serde_json::to_string(&legacy).unwrap(),
+            r#"{"kind":"staggered","phase":14490}"#
+        );
+        let text = r#"{"kind":"staggered","phase":14490,"unpaired":"cell_top"}"#;
+        let edge: TapPattern = serde_json::from_str(text).unwrap();
+        assert_eq!(serde_json::to_string(&edge).unwrap(), text);
+        assert!(
+            serde_json::from_str::<TapPattern>(
+                r#"{"kind":"staggered","phase":1,"unpaired":"left"}"#
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn staggered_caps_and_invalid_phase_fail_without_partial_plan() {
         let d = fixture();
-        let pattern = TapPattern::Staggered { phase: 30 };
+        let pattern = TapPattern::Staggered {
+            phase: 30,
+            unpaired: None,
+        };
         for limits in [
             TapLimits {
                 max_taps: 1,
@@ -607,7 +962,10 @@ mod tests {
                     &d,
                     width,
                     pitch,
-                    Some(&TapPattern::Staggered { phase }),
+                    Some(&TapPattern::Staggered {
+                        phase,
+                        unpaired: None
+                    }),
                     &TapLimits::default()
                 )
                 .is_err()
@@ -628,6 +986,7 @@ mod tests {
             i64::MAX,
             Some(&TapPattern::Staggered {
                 phase: i64::MAX / 2,
+                unpaired: None,
             }),
             &TapLimits::default(),
         )

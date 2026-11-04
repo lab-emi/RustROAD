@@ -1026,8 +1026,10 @@ fn staggered_taps_roundtrip_reopen_repeat_and_stale_revision_contract() {
     let legacy_json = serde_json::to_value(&cfg).unwrap();
     assert!(legacy_json["tap"].get("pattern").is_none());
     cfg.tap.as_mut().unwrap().max_gap = 5000;
-    cfg.tap.as_mut().unwrap().pattern =
-        Some(rustroad_core::tap::TapPattern::Staggered { phase: 2000 });
+    cfg.tap.as_mut().unwrap().pattern = Some(rustroad_core::tap::TapPattern::Staggered {
+        phase: 2000,
+        unpaired: None,
+    });
     fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
     f.import().unwrap();
     let first = place(&f.workspace, "rev1", &limits()).unwrap();
@@ -1057,7 +1059,10 @@ fn staggered_taps_roundtrip_reopen_repeat_and_stale_revision_contract() {
             .as_ref()
             .unwrap()
             .pattern,
-        Some(rustroad_core::tap::TapPattern::Staggered { phase: 2000 })
+        Some(rustroad_core::tap::TapPattern::Staggered {
+            phase: 2000,
+            unpaired: None
+        })
     );
     let mut before = Vec::new();
     s.export_def(&mut before).unwrap();
