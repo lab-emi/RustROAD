@@ -2592,7 +2592,7 @@ impl<'a> Router<'a> {
             // Rip up escapes of terminals whose windows overlap this one.
             if window_index.is_none() {
                 *window_index = Some(WindowIndex::new(
-                    &windows,
+                    windows,
                     &mut self.spatial.work,
                     self.limits.max_comparisons,
                 )?);
