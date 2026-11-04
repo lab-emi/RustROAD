@@ -305,6 +305,19 @@ enum Command {
         max_gds_bytes: u64,
         #[arg(long, default_value_t = rustroad_workspace::gds::DEFAULT_MAX_OUTPUT_RECORDS)]
         max_gds_records: u64,
+        /// Top-level net metal: `off` (default) writes one rectangle per
+        /// routed run and patch (the DEF view), `rectangles` each net's metal
+        /// per GDS layer as maximal non-overlapping rectangles, `polygons` as
+        /// one polygon per hole-free piece. The metal is identical.
+        #[arg(long, default_value = rustroad_workspace::gds::DEFAULT_MERGE.name())]
+        merge_shapes: String,
+        /// Vias: `cells` (default) writes one structure per used fixed via
+        /// and one SREF per via; `flat` writes each via's LEF shapes into the
+        /// top cell with its net's metal. `--merge-shapes rectangles --vias
+        /// flat` is the cheapest stream for DRC/LVS engines; the defaults
+        /// keep the structure the verification harnesses inspect.
+        #[arg(long, default_value = rustroad_workspace::gds::DEFAULT_VIAS.name())]
+        vias: String,
     },
     /// Inspect pinned external tools and PDK files; readiness is not signoff.
     FlowCheck {
@@ -1067,11 +1080,15 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             cell_lef,
             max_gds_bytes,
             max_gds_records,
+            merge_shapes,
+            vias,
         } => {
             let mut options = rustroad_workspace::gds::ExportOptions::new(cell_gds, layer_map, out);
             options.cell_lef = cell_lef;
             options.max_output_bytes = max_gds_bytes;
             options.max_output_records = max_gds_records;
+            options.merge = rustroad_workspace::gds_merge::MergeStyle::parse(&merge_shapes)?;
+            options.vias = rustroad_workspace::gds::ViaStyle::parse(&vias)?;
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
             emit(&rustroad_workspace::gds::export_snapshot(
                 &workspace, &snapshot, &options,
@@ -1394,5 +1411,47 @@ mod tests {
             .is_err()
         );
         assert!(run(Cli::try_parse_from(["rustroad", "inspect"]).unwrap()).is_err());
+    }
+    #[test]
+    fn export_gds_styles_default_to_the_legacy_stream_and_reject_unknown_values() {
+        let export = |extra: &[&str]| {
+            let mut argv = vec![
+                "rustroad",
+                "export-gds",
+                "--workspace",
+                "rustroad-export-style-test-workspace-not-created",
+                "--cell-gds",
+                "c.gds",
+                "--layer-map",
+                "m.json",
+                "--out",
+                "o.gds",
+            ];
+            argv.extend_from_slice(extra);
+            Cli::try_parse_from(argv).unwrap()
+        };
+        match export(&[]).command {
+            Command::ExportGds {
+                merge_shapes, vias, ..
+            } => assert_eq!((merge_shapes.as_str(), vias.as_str()), ("off", "cells")),
+            _ => panic!("export-gds"),
+        }
+        match export(&["--merge-shapes", "rectangles", "--vias", "flat"]).command {
+            Command::ExportGds {
+                merge_shapes, vias, ..
+            } => assert_eq!(
+                (merge_shapes.as_str(), vias.as_str()),
+                ("rectangles", "flat")
+            ),
+            _ => panic!("export-gds"),
+        }
+        // Unknown styles fail with their coded error before any file is read.
+        for (extra, code) in [
+            (["--merge-shapes", "triangles"], "GDS_MERGE_STYLE:"),
+            (["--vias", "tiles"], "GDS_VIA_STYLE:"),
+        ] {
+            let message = run(export(&extra)).unwrap_err().to_string();
+            assert!(message.starts_with(code), "{message}");
+        }
     }
 }

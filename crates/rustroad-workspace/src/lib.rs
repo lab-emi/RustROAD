@@ -16,6 +16,7 @@ pub mod eco;
 pub mod extract;
 pub mod floorplan;
 pub mod gds;
+pub mod gds_merge;
 pub mod input_buffer;
 pub mod macro_supply;
 pub mod netlist_export;

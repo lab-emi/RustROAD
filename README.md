@@ -271,7 +271,12 @@ not be treated as complete timing closure. See
 
 `export-gds` is read-only and byte-deterministic. It copies the used PDK cell
 structures verbatim, writes one structure per used fixed via and a top cell with
-SREFs, DEF-semantics wires, supply geometry, labelled pins and the PR boundary:
+SREFs, DEF-semantics wires, supply geometry, labelled pins and the PR boundary.
+`--merge-shapes rectangles|polygons` writes each net's metal per layer as an
+exact cover of its union and `--vias flat` writes the vias' shapes with it
+instead of via structures: the same geometry, cheaper for the foundry
+DRC/antenna/LVS decks ([docs/gds-export.md](docs/gds-export.md)); the
+defaults keep the legacy stream that `scripts/verify_gds.py` inspects:
 
 ```sh
 rustroad export-gds --workspace .work/chip \
