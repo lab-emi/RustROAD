@@ -34,7 +34,12 @@ payloads share storage but retain separate stage labels and stage reports.
 Each reached stage then emits integer projection, after-retarget, after-legalize
 and after-detail coordinates. A zero-horizon stage is not invented. A successful
 late stall retains its actual reached current iterate; numerical/budget/observer
-failures are unverified errors, never successful baseline fallback.
+failures are unverified errors, never successful baseline fallback. An
+evaluation cap reached after an exact-target checkpoint is not such a failure
+by default: like the ordinary path (`stop_at_evaluation_cap`, default `true`) it
+ends successfully with the best checkpoint and reports
+`evaluation_horizon_after_checkpoint`. `stop_at_evaluation_cap: false` restores
+the strict behaviour, in which that cap is an unverified budget error.
 
 `observations.json` uses `rustroad.p1-stage-observations.v1` in its header. It
 contains borrowed imported metadata, initial fixed-order packing, the exact

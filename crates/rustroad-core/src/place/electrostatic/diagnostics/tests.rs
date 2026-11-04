@@ -233,6 +233,50 @@ fn observer_and_late_numerical_failure_never_become_baseline_success() {
 }
 
 #[test]
+fn default_evaluation_cap_after_a_checkpoint_is_a_successful_horizon() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        let p = problem();
+        let limits = PlaceLimits::default();
+        let mut cfg = config();
+        let c = cfg.electrostatic.as_mut().unwrap();
+        c.max_iterations = 6;
+        c.max_evaluations = 4;
+        c.initial_step_milli = 1000;
+        c.max_backtracks = 4;
+        assert!(c.stop_at_evaluation_cap, "the default keeps the checkpoint");
+        // The ordinary path ends at the cap with its best checkpoint ...
+        let ordinary = crate::place::place_in_region(&p, &cfg, &limits, context().core).unwrap();
+        let report = ordinary.electrostatic.as_ref().unwrap();
+        assert_eq!(report.termination, "evaluation_horizon_after_checkpoint");
+        assert_eq!(report.counts.evaluations, 4);
+        crate::place::check_legal(&p, &ordinary.positions).unwrap();
+        // ... and the diagnostic path reproduces it as a success, observing
+        // the same selected geometry.
+        let mut selected = None;
+        let mut observer = |view: DiagnosticPhaseView<'_>| {
+            if view.phase == DiagnosticPhase::DefaultSelected {
+                selected = Some(view.positions.to_vec());
+            }
+            Ok(())
+        };
+        let diagnostic = diagnose_cpu_ref(&p, &cfg, &limits, context(), &mut observer).unwrap();
+        assert_eq!(diagnostic.reference.positions, ordinary.positions);
+        assert_eq!(diagnostic.reference.hpwl, ordinary.hpwl);
+        let diagnosed = diagnostic.reference.electrostatic.as_ref().unwrap();
+        assert_eq!(diagnosed.status, report.status);
+        assert_eq!(diagnosed.termination, report.termination);
+        assert_eq!(selected.as_deref(), Some(&ordinary.positions[..]));
+        // The strict option makes the same cap an unverified error.
+        cfg.electrostatic.as_mut().unwrap().stop_at_evaluation_cap = false;
+        assert!(diagnose_cpu_ref(&p, &cfg, &limits, context(), &mut |_| Ok(())).is_err());
+    });
+}
+
+#[test]
 fn unsupported_native_arithmetic_rejects_before_old_cost_helpers() {
     let mut p = problem();
     assert!(admit_native_arithmetic(&p, context().core).is_ok());
