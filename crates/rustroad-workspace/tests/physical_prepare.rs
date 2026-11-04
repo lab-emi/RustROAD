@@ -1846,6 +1846,84 @@ fn clock_tree_reuses_the_leaf_order_of_a_seed_over_the_same_sinks() {
 }
 
 #[test]
+fn clock_tree_seed_from_placement_equals_an_explicit_seed_of_the_same_revision() {
+    // `clock.seed_from_placement` must re-place exactly as the default does
+    // after `placement_seed::from_snapshot` of the unseeded revision and
+    // `place --seed` with it. Five clock sinks, fan-out 2 (six buffers) on a
+    // 2 x 50-site fixture; four small workspaces, < 1 MiB each.
+    let mut cfg = config();
+    cfg.max_added_cells = 128;
+    cfg.placer = Some(Default::default());
+    cfg.clock = Some(ClockConfig {
+        max_fanout: 2,
+        max_buffers: 16,
+        ..regroup_clock(ClockClustering::Hilbert, &[])
+    });
+    let mut logic = String::from("module chip(input clk, output [4:0] y);\n");
+    for i in 0..5 {
+        logic.push_str(&format!("BUF s{i}(.A(clk),.Y(y[{i}]));\n"));
+    }
+    logic.push_str("endmodule\n");
+    let cells = |f: &Fixture| -> Vec<(String, [i64; 2])> {
+        let s = read(&f.workspace, &limits()).unwrap();
+        s.metadata()
+            .design
+            .cells
+            .iter()
+            .zip(s.records())
+            .map(|(c, r)| (c.name.clone(), [r.x, r.y]))
+            .collect()
+    };
+    let fixture = |seed_from_placement: bool| {
+        let mut c = cfg.clone();
+        c.clock.as_mut().unwrap().seed_from_placement = seed_from_placement;
+        let f = Fixture::new(&logic, &c);
+        widen_input_fixture(&f);
+        f.import().unwrap();
+        f
+    };
+    // Opt-in: unseeded placement, then the clock tree seeds itself.
+    let own = fixture(true);
+    place(&own.workspace, "rev1", &limits()).unwrap();
+    let placed = cells(&own);
+    rustroad_workspace::clock::synthesize(&own.workspace, "rev2", &limits()).unwrap();
+    let own_cells = cells(&own);
+    // Default: the same unseeded placement exported as a seed ...
+    let first = fixture(false);
+    place(&first.workspace, "rev1", &limits()).unwrap();
+    assert_eq!(cells(&first), placed);
+    let seed = {
+        let s = read(&first.workspace, &limits()).unwrap();
+        rustroad_workspace::placement_seed::from_snapshot(&s).unwrap()
+    };
+    // ... and placed with `place --seed` before the default clock tree.
+    let explicit = fixture(false);
+    let file = explicit.root.join("seed.json");
+    fs::write(&file, serde_json::to_vec(&seed).unwrap()).unwrap();
+    rustroad_workspace::place_with(&explicit.workspace, "rev1", &limits(), None, Some(&file))
+        .unwrap();
+    // Seeding a legal placement with itself keeps it.
+    assert_eq!(cells(&explicit), placed);
+    rustroad_workspace::clock::synthesize(&explicit.workspace, "rev2", &limits()).unwrap();
+    let explicit_cells = cells(&explicit);
+    // The six tree buffers are new cells (generated cells are re-planned).
+    let names: std::collections::BTreeSet<&String> = placed.iter().map(|(n, _)| n).collect();
+    assert!(own_cells.iter().filter(|(n, _)| !names.contains(n)).count() >= 6);
+    assert_eq!(own_cells, explicit_cells);
+    let report = |f: &Fixture| {
+        let s = read(&f.workspace, &limits()).unwrap();
+        let b = s.metadata().physical.as_ref().unwrap();
+        let r = b.placement.clone().unwrap();
+        (
+            r.mode,
+            r.hpwl_dbu,
+            r.seed.map(|s| (s.seeded, s.unseeded, s.unmatched)),
+        )
+    };
+    assert_eq!(report(&own), report(&explicit));
+}
+
+#[test]
 fn clock_tree_can_reuse_an_unseeded_placement_as_its_seed() {
     // Five clock sinks, fan-out 2 (six buffers) on a 2 x 50-site fixture;
     // three small workspaces, < 1 MiB each.
