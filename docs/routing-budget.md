@@ -369,6 +369,22 @@ displaced. The pass charges the comparison budget for its ordering and
 rip-ups and reports per terminal-count class the nets tried, kept, vias
 removed and search expansions in the `via reduction` trace line.
 
+On the Ibex phys-config placement (route replays of the flow's `be_route`
+input, routed vias and wire from the exported DEF with the receipt code), the
+cost of the pass is dominated by long connections: with weight 1, via steps
+at three times their price and no filter it removed 11.4 k vias for 42.5 M
+expansions, but nets with at most 20 µm of routed wire per connection gave
+64 % of that gain for 4 % of the expansions, and the median net needed 49
+expansions against 87 k at the 99th percentile. With the recipe's `via_cost`
+2520, `wrong_way_factor` 3 and `strict_wide_cycles`, the pass with
+`via_milli` 2000, `max_terminals` 10, `max_connection_length` 20000,
+`net_expansions` 10000 and `length_per_via` 1680 removed 3.2 k further vias
+in about 15 s; the full route went from 130,527 vias and 892,781.5 µm (the
+previous configuration) to 118,424 vias and 897,717.5 µm. The same
+configuration completes on the placement of the published RustSys netlist,
+where the previous wrong-way price alone ended unresolved (126,138 vias
+against 138,730).
+
 Tests: `via_reduction_trades_routed_vias_for_a_wrong_way_jog` (two routed
 vias become a Metal2 jog at equal length),
 `via_reduction_keeps_routes_it_cannot_improve_unchanged` (normal prices: the
