@@ -2387,8 +2387,12 @@ impl<'a> Router<'a> {
             })
             .collect::<Result<_>>()?;
         let mut queue: VecDeque<usize> = order.into_iter().map(|o| o.2).collect();
-        // Net members for net-aware access (opt-in); small nets only.
+        // Net members for net-aware access (opt-in); small nets only. A
+        // terminal whose escape failed, and every escape it displaced, take
+        // the cheapest top from then on: the legacy repair then converges as
+        // before instead of re-blocking the same pin with a nearer top.
         let mut by_net: HashMap<u32, Vec<usize>, BuildFx> = HashMap::with_hasher(BuildFx);
+        let mut unhinted: HashSet<usize, BuildFx> = HashSet::with_hasher(BuildFx);
         if self.plan.qor.as_ref().is_some_and(|q| q.net_aware_access) {
             for (i, t) in terminals.iter().enumerate() {
                 by_net.entry(t.net).or_default().push(i);
@@ -2422,25 +2426,29 @@ impl<'a> Router<'a> {
             }
             let avoid = protect.remove(&i).unwrap_or_default();
             let hint: Vec<Rect> = match by_net.get(&t.net) {
-                Some(members) if members.len() <= ACCESS_HINT_TERMINALS => members
-                    .iter()
-                    .filter(|&&j| j != i)
-                    .map(|&j| {
-                        let o = terminals[j];
-                        match plans.get(&o.pin) {
-                            Some(p) => {
-                                let at = self.graph.point(p.top).1;
-                                Rect {
-                                    lx: at[0],
-                                    ly: at[1],
-                                    ux: at[0],
-                                    uy: at[1],
+                Some(members)
+                    if members.len() <= ACCESS_HINT_TERMINALS && !unhinted.contains(&i) =>
+                {
+                    members
+                        .iter()
+                        .filter(|&&j| j != i)
+                        .map(|&j| {
+                            let o = terminals[j];
+                            match plans.get(&o.pin) {
+                                Some(p) => {
+                                    let at = self.graph.point(p.top).1;
+                                    Rect {
+                                        lx: at[0],
+                                        ly: at[1],
+                                        ux: at[0],
+                                        uy: at[1],
+                                    }
                                 }
+                                None => pin_box(o),
                             }
-                            None => pin_box(o),
-                        }
-                    })
-                    .collect(),
+                        })
+                        .collect()
+                }
                 _ => Vec::new(),
             };
             let mut plan = None;
@@ -2532,6 +2540,10 @@ impl<'a> Router<'a> {
                     self.spatial.remove(id);
                 }
                 back.push(owner.remove(&p).unwrap());
+            }
+            if !by_net.is_empty() {
+                unhinted.insert(i);
+                unhinted.extend(back.iter().copied());
             }
             // Rotate the victims so repeated repairs try different orders.
             let rot = attempts[i] % back.len().max(1);
@@ -7911,6 +7923,18 @@ mod tests {
         let routes = route_cpu_ref(&design, &limits())
             .expect("pins sharing one track must both reserve an escape");
         validate(&design, &routes, &limits()).unwrap();
+        // Net-aware access leans each escape toward its net's far pin; the
+        // displaced pin and its repair fall back to the cheapest tops, so the
+        // same repair still converges (and portals may be dropped later).
+        design.tracks.as_mut().unwrap().qor = Some(crate::routing::RouteQor {
+            prim_order: true,
+            drop_portals: true,
+            net_aware_access: true,
+            ..Default::default()
+        });
+        let aware = route_cpu_ref(&design, &limits())
+            .expect("net-aware access must keep the shared-track repair");
+        validate(&design, &aware, &limits()).unwrap();
     }
 
     #[test]
