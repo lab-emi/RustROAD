@@ -173,7 +173,7 @@ pub struct RouteQorConfig {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub notch_bridge: bool,
     /// The wide-metal cycle cut of rule repair also runs for strict owners,
-    /// once per wide region.
+    /// at most three cuts per wide region.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub strict_wide_cycles: bool,
     /// Post-route via reduction (`rustroad_core::routing::ViaReduction`);

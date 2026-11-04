@@ -484,11 +484,13 @@ pub struct RouteQor {
     pub notch_bridge: bool,
     /// The bounded wide-metal cycle cut of rule repair (a redundant detail
     /// wire of a loop that cleanup filled into wide metal) also runs for an
-    /// owner whose strict re-route succeeded, once per wide region instead
-    /// of once per net. A strict search only refuses same-net near misses,
-    /// and a loop through the owner's own fixed escape at full spacing is
-    /// none, so a strict owner rebuilt the same ring every pass. Off keeps
-    /// the cut for relaxed owners, once per net.
+    /// owner whose strict re-route succeeded, from the second sighting of a
+    /// wide pair and before the halos, at most three cuts per wide region
+    /// (`MAX_REGION_CUTS` in `troute`) instead of once per net. A strict
+    /// search only refuses same-net near misses, and a loop through the
+    /// owner's own fixed escape at full spacing is none, so a strict owner
+    /// rebuilt the same ring every pass. Off keeps the cut for relaxed
+    /// owners, once per net, after both halos.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub strict_wide_cycles: bool,
     /// Post-route via reduction: once every net is routed, nets are re-routed
@@ -517,7 +519,10 @@ pub struct RouteQor {
 /// assignment of Lee and Wang, IEEE TCAD 27(9), 2008, re-expressed as a
 /// shortest-path re-route on the detailed track graph). Every new route is
 /// a legal hard search result; cleanup and the rule-repair passes then run
-/// as usual. Deterministic: a pure function of the routed state.
+/// as usual. Deterministic: a pure function of the routed state. In an ECO
+/// route (prior routes), a net that still holds its prior geometry is no
+/// candidate, so the nets the ECO keeps stay as they were; only the nets
+/// the ECO routed are re-assigned.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ViaReduction {

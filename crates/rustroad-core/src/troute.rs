@@ -4521,7 +4521,9 @@ fn route_length(route: &NetRoute) -> u64 {
 /// so every removed shape id is still its own). Candidates: at most
 /// `max_terminals` terminals and at least `min_vias` routed vias, by
 /// decreasing via count then net id, so the order is a function of the
-/// routed state alone.
+/// routed state alone. In an ECO route (`prior`), a net whose route still
+/// equals its prior geometry is no candidate: the ECO keeps unchanged nets
+/// as they were and only the nets it routed are re-assigned.
 #[allow(clippy::too_many_arguments)]
 fn reduce_vias(
     r: &mut Router<'_>,
@@ -4532,6 +4534,7 @@ fn reduce_vias(
     routed: &mut BTreeMap<u32, NetRoute>,
     retained_edges: &mut usize,
     demoted: &BTreeMap<u32, u8>,
+    prior: Option<&PriorRoutes>,
     t0: std::time::Instant,
 ) -> Result<()> {
     if r.trial_search_limit.is_some()
@@ -4565,6 +4568,7 @@ fn reduce_vias(
         routed,
         retained_edges,
         demoted,
+        prior,
         t0,
     );
     r.trial_expansion_limit = None;
@@ -4573,6 +4577,28 @@ fn reduce_vias(
     r.target_costs = saved_costs;
     r.pair_via = saved_pair_via;
     result
+}
+
+/// Totals of one via-reduction run, summed over its passes (the `via
+/// reduction` trace lines; unit tests read them through
+/// `VIA_REDUCTION_TALLY`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ViaReductionTally {
+    /// Candidate re-routes tried.
+    candidates: usize,
+    /// Nets skipped because they still hold their ECO prior geometry.
+    prior_unchanged: usize,
+    kept: usize,
+    limited: usize,
+    failed: usize,
+    vias_removed: u64,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The tally of the last via-reduction run on this thread (tests only).
+    static VIA_REDUCTION_TALLY: std::cell::Cell<Option<ViaReductionTally>> =
+        const { std::cell::Cell::new(None) };
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4585,18 +4611,30 @@ fn reduce_vias_passes(
     routed: &mut BTreeMap<u32, NetRoute>,
     retained_edges: &mut usize,
     demoted: &BTreeMap<u32, u8>,
+    prior: Option<&PriorRoutes>,
     t0: std::time::Instant,
 ) -> Result<()> {
     let limits = r.limits;
     let none = BTreeMap::new();
     let trace_nets = std::env::var("RUSTROAD_ROUTE_TRACE").is_ok_and(|v| v == "2");
+    let mut tally = ViaReductionTally::default();
     for pass in 0..cfg.passes {
+        // ECO: comparing a net's route with its prior record is charged to
+        // the comparison budget (nothing without a prior).
+        let (mut prior_unchanged, mut prior_work) = (0usize, 0usize);
         let mut order: Vec<(Reverse<usize>, u32)> = routed
             .iter()
             .filter_map(|(&net, route)| {
                 let terminals = groups.get(&net)?;
                 if terminals.len() > cfg.max_terminals {
                     return None;
+                }
+                if let Some((wires, vias)) = prior.and_then(|p| p.nets.get(&net)) {
+                    prior_work = prior_work.saturating_add(route.segments());
+                    if route.wires == *wires && route.vias == *vias {
+                        prior_unchanged += 1;
+                        return None;
+                    }
                 }
                 let (vias, length) = routed_size(route, terminals, plans);
                 let connections = terminals.len().saturating_sub(1).max(1) as u64;
@@ -4614,7 +4652,8 @@ fn reduce_vias_passes(
             .checked_add(
                 order
                     .len()
-                    .saturating_mul(order.len().max(1).ilog2() as usize + 1),
+                    .saturating_mul(order.len().max(1).ilog2() as usize + 1)
+                    .saturating_add(prior_work),
             )
             .filter(|&n| n <= limits.max_comparisons)
             .ok_or_else(|| budget("via reduction order work"))?;
@@ -4723,7 +4762,7 @@ fn reduce_vias_passes(
             "via reduction",
             t0,
             format_args!(
-                "pass {pass} candidates {} kept {kept} limited {limited} failed {failed} vias -{vias_removed} length +{length_added} -{length_removed} work {} exp {} by terminals [nets kept vias exp] 2:{:?} 3:{:?} 4-5:{:?} 6-10:{:?} more:{:?}",
+                "pass {pass} candidates {} kept {kept} limited {limited} failed {failed} vias -{vias_removed} length +{length_added} -{length_removed} work {} exp {} by terminals [nets kept vias exp] 2:{:?} 3:{:?} 4-5:{:?} 6-10:{:?} more:{:?}{}",
                 order.len(),
                 r.spatial.work,
                 r.expansions,
@@ -4731,21 +4770,50 @@ fn reduce_vias_passes(
                 classes[1],
                 classes[2],
                 classes[3],
-                classes[4]
+                classes[4],
+                if prior.is_some() {
+                    format!(" prior_unchanged {prior_unchanged}")
+                } else {
+                    String::new()
+                }
             ),
         );
+        tally.candidates += order.len();
+        tally.prior_unchanged += prior_unchanged;
+        tally.kept += kept;
+        tally.limited += limited;
+        tally.failed += failed;
+        tally.vias_removed += vias_removed;
         if kept == 0 {
             break;
         }
     }
+    trace(
+        "via reduction",
+        t0,
+        format_args!(
+            "total candidates {} kept {} limited {} failed {} vias -{} prior_unchanged {}",
+            tally.candidates,
+            tally.kept,
+            tally.limited,
+            tally.failed,
+            tally.vias_removed,
+            tally.prior_unchanged
+        ),
+    );
+    #[cfg(test)]
+    VIA_REDUCTION_TALLY.with(|t| t.set(Some(tally)));
     Ok(())
 }
 
-/// Routed vias and wire length of a net's route without its pin escapes. A
-/// route searched from the escapes holds none; an imported prior route
-/// (ECO) holds them as ordinary records, possibly merged into collinear
-/// runs: a planned escape via is not counted, nor the length of a planned
-/// escape wire that a route wire covers.
+/// Routed vias and wire length of a net's route without its pin escapes:
+/// an imported prior route (ECO) holds the escapes as ordinary records,
+/// possibly merged into collinear runs, so a route via of the same kind and
+/// place as a planned escape via is not counted, nor the length of a planned
+/// escape wire that a route wire covers. A searched route can also hold a
+/// via stacked on its own escape via (same kind and place, a duplicate
+/// record); it is not counted either, while the receipt (`def_metrics.py`)
+/// counts every via record (24 such duplicates on the Ibex routes).
 fn routed_size(
     route: &NetRoute,
     terminals: &[&Terminal],
@@ -5693,6 +5761,7 @@ pub(crate) fn route_with_prior(
                 &mut routed,
                 &mut retained_edges,
                 &demoted,
+                prior,
                 t0,
             )?;
             r.guard("via reduction")?;
@@ -5899,28 +5968,23 @@ pub(crate) fn route_with_prior(
                 // sighting, cut a proven-redundant detail wire of the loop
                 // first (bounded per region; other entries of the owner wait
                 // for the next pass).
-                if strict_wide_cycles {
-                    if cut_owners.contains(&owner) {
-                        continue;
-                    }
-                    if *tries >= 2
-                        && region_cut_allowed(&mut cycle_regions, (owner, layer, wide))
-                        && let Some(detail) = routed.get_mut(&owner)
-                        && cycle_repair::repair(
-                            &mut r,
-                            &groups[&owner],
-                            &plans,
-                            detail,
-                            LayerRect { layer, rect: wide },
-                        )?
-                    {
-                        retained_edges = retained_edges
-                            .checked_sub(1)
-                            .ok_or_else(|| invalid("wide-cycle retained record count"))?;
-                        cut_owners.insert(owner);
-                        bad.remove(&owner);
-                        continue;
-                    }
+                if strict_wide_cycles
+                    && strict_wide_cycle_entry(
+                        &mut r,
+                        &groups,
+                        &plans,
+                        &mut routed,
+                        &mut retained_edges,
+                        StrictWideState {
+                            regions: &mut cycle_regions,
+                            cut_owners: &mut cut_owners,
+                            bad: &mut bad,
+                        },
+                        *tries,
+                        (owner, layer, wide),
+                    )?
+                {
+                    continue;
                 }
                 let grow = (rule.spacing - input.layers[layer as usize].spacing).max(0);
                 let halo = expand(wide, grow)?;
@@ -5959,18 +6023,16 @@ pub(crate) fn route_with_prior(
                     && *tries >= 3
                     && relaxed.contains(&owner)
                     && cycle_tried.insert(owner)
-                    && let Some(detail) = routed.get_mut(&owner)
-                    && cycle_repair::repair(
+                    && cut_wide_cycle(
                         &mut r,
-                        &groups[&owner],
+                        &groups,
                         &plans,
-                        detail,
+                        &mut routed,
+                        &mut retained_edges,
+                        owner,
                         LayerRect { layer, rect: wide },
                     )?
                 {
-                    retained_edges = retained_edges
-                        .checked_sub(1)
-                        .ok_or_else(|| invalid("wide-cycle retained record count"))?;
                     // Every span in `remaining` was measured before this cut.
                     // Recheck geometry next pass instead of undoing the repair
                     // through an earlier or later stale entry for this owner.
@@ -5996,6 +6058,84 @@ pub(crate) fn route_with_prior(
         }
     }
     unreachable!("bounded repair passes return")
+}
+
+/// The bounded detail-cycle cut (`route_cycle_repair`) of `owner`'s route in
+/// `region`: removes one proven-redundant detail wire of a loop (fixed
+/// escapes untouched) and keeps the retained record count in step. `false`
+/// when the owner has no route or no such wire.
+fn cut_wide_cycle(
+    r: &mut Router<'_>,
+    groups: &BTreeMap<u32, Vec<&Terminal>>,
+    plans: &HashMap<u32, Plan>,
+    routed: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    owner: u32,
+    region: LayerRect,
+) -> Result<bool> {
+    let Some(detail) = routed.get_mut(&owner) else {
+        return Ok(false);
+    };
+    if !cycle_repair::repair(r, &groups[&owner], plans, detail, region)? {
+        return Ok(false);
+    }
+    *retained_edges = retained_edges
+        .checked_sub(1)
+        .ok_or_else(|| invalid("wide-cycle retained record count"))?;
+    Ok(true)
+}
+
+/// Rule-repair bookkeeping of `RouteQor::strict_wide_cycles`.
+struct StrictWideState<'s> {
+    /// Cuts tried per wide region (owner, layer, rect), all passes.
+    regions: &'s mut BTreeMap<(u32, u32, [i64; 4]), u8>,
+    /// Owners cut in this pass: their other entries were measured before
+    /// the cut and wait for the next pass's check.
+    cut_owners: &'s mut BTreeSet<u32>,
+    /// Nets to re-route after this pass.
+    bad: &'s mut BTreeSet<u32>,
+}
+
+/// One wide-pair entry of rule repair with `RouteQor::strict_wide_cycles`:
+/// an owner already cut in this pass is skipped; otherwise, from the second
+/// sighting of the pair (`tries`) and at most `MAX_REGION_CUTS` times per
+/// wide region, a proven-redundant detail wire of the owner's loop in the
+/// region is cut and the owner is not re-routed in this pass. A strict
+/// search refuses same-net near misses only, so it rebuilds a loop through
+/// the owner's own fixed escape at full spacing, and a halo cannot move a
+/// neighbour's fixed escape. Returns whether the entry is handled; `false`
+/// leaves it to the halos.
+#[allow(clippy::too_many_arguments)]
+fn strict_wide_cycle_entry(
+    r: &mut Router<'_>,
+    groups: &BTreeMap<u32, Vec<&Terminal>>,
+    plans: &HashMap<u32, Plan>,
+    routed: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    state: StrictWideState<'_>,
+    tries: u8,
+    (owner, layer, wide): (u32, u32, Rect),
+) -> Result<bool> {
+    if state.cut_owners.contains(&owner) {
+        return Ok(true);
+    }
+    if tries >= 2
+        && region_cut_allowed(state.regions, (owner, layer, wide))
+        && cut_wide_cycle(
+            r,
+            groups,
+            plans,
+            routed,
+            retained_edges,
+            owner,
+            LayerRect { layer, rect: wide },
+        )?
+    {
+        state.cut_owners.insert(owner);
+        state.bad.remove(&owner);
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// Strict wide cycles: may rule repair try the bounded detail-cycle cut for
@@ -9517,6 +9657,455 @@ mod tests {
         assert!(region_cut_allowed(&mut regions, (9, 2, a)));
         assert!(region_cut_allowed(&mut regions, (8, 1, a)));
         assert_eq!(regions.len(), 4);
+    }
+
+    /// The tally of the last via-reduction run on this thread (taken).
+    fn take_tally() -> Option<ViaReductionTally> {
+        VIA_REDUCTION_TALLY.with(|t| t.take())
+    }
+    /// Sorted (layer, start, end) wires and (kind, at) vias of one net.
+    #[allow(clippy::type_complexity)]
+    fn net_key(
+        routes: &Routes,
+        net: u32,
+    ) -> (Vec<(u32, [i64; 2], [i64; 2])>, Vec<(u32, [i64; 2])>) {
+        let mut w: Vec<_> = routes
+            .wires
+            .iter()
+            .filter(|w| w.net == net)
+            .map(|w| (w.layer, w.start, w.end))
+            .collect();
+        let mut v: Vec<_> = routes
+            .vias
+            .iter()
+            .filter(|v| v.net == net)
+            .map(|v| (v.kind, v.at))
+            .collect();
+        w.sort_unstable();
+        v.sort_unstable();
+        (w, v)
+    }
+    fn prior_of(routes: &Routes) -> PriorRoutes {
+        let mut prior = PriorRoutes::default();
+        for w in &routes.wires {
+            prior.nets.entry(w.net).or_default().0.push(w.clone());
+        }
+        for v in &routes.vias {
+            prior.nets.entry(v.net).or_default().1.push(v.clone());
+        }
+        prior
+    }
+
+    #[test]
+    fn via_reduction_restores_routes_whose_re_route_hits_the_expansion_cap() {
+        // The prices that turn the offset pair's two routed vias into a jog,
+        // but one search expansion per net: every re-route stops `Limited`
+        // and the old route comes back exactly.
+        let legacy = route_cpu_ref(&offset_pair(), &limits()).unwrap();
+        let capped = with_reduction(
+            offset_pair(),
+            Some(crate::routing::ViaReduction {
+                net_expansions: 1,
+                ..via_reduction(16_000, 1)
+            }),
+        );
+        take_tally();
+        let kept = route_cpu_ref(&capped, &limits()).unwrap();
+        let tally = take_tally().expect("the pass ran");
+        assert_eq!((tally.candidates, tally.limited), (1, 1), "{tally:?}");
+        assert_eq!((tally.kept, tally.failed, tally.vias_removed), (0, 0, 0));
+        assert_eq!(legacy.wires, kept.wires);
+        assert_eq!(legacy.vias, kept.vias);
+        assert_eq!(legacy.access, kept.access);
+        assert_eq!(legacy.patches, kept.patches);
+        // Premise: without the cap the same pass removes the vias.
+        let free = route_cpu_ref(
+            &with_reduction(offset_pair(), Some(via_reduction(16_000, 1))),
+            &limits(),
+        )
+        .unwrap();
+        let tally = take_tally().expect("the pass ran");
+        assert!(tally.kept == 1 && tally.vias_removed > 0, "{tally:?}");
+        assert!(free.vias.len() < legacy.vias.len());
+    }
+
+    #[test]
+    fn via_reduction_restores_routes_whose_re_route_fails_in_its_region() {
+        // The offset pair routed, then re-routed by the pass within a guide
+        // of one far GCell and no margin: the hard search cannot reach the
+        // pins, fails, and the old route and its index shapes come back.
+        let cfg = crate::routing::ViaReduction {
+            margin: Some(0),
+            ..via_reduction(16_000, 1)
+        };
+        let design = with_reduction(offset_pair(), Some(cfg.clone()));
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(&design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let mut r = Router::prepared(&design, &limits, graph, cells).unwrap();
+        r.gmark.fill(1);
+        r.gepoch = 1;
+        let terminals: Vec<_> = design.terminals.iter().collect();
+        let plans = r.reserve(&terminals).unwrap();
+        let Outcome::Routed(old, _) = r
+            .route_net(0, &terminals, &plans, false, false, &BTreeMap::new(), 1)
+            .unwrap()
+        else {
+            panic!("the fixture is open");
+        };
+        assert!(!old.vias.is_empty(), "premise: routed vias to remove");
+        let groups: BTreeMap<u32, Vec<&Terminal>> = [(0, terminals.clone())].into();
+        let mut routed = BTreeMap::new();
+        let mut retained = 0usize;
+        retain_route(
+            &mut routed,
+            &mut retained,
+            0,
+            old.clone(),
+            limits.max_segments,
+        )
+        .unwrap();
+        let guides: BTreeMap<u32, Vec<u32>> = [(0, vec![r.cells.of([900, 100])])].into();
+        take_tally();
+        reduce_vias(
+            &mut r,
+            &cfg,
+            &groups,
+            &plans,
+            &guides,
+            &mut routed,
+            &mut retained,
+            &BTreeMap::new(),
+            None,
+            std::time::Instant::now(),
+        )
+        .unwrap();
+        let tally = take_tally().expect("the pass ran");
+        assert_eq!((tally.candidates, tally.failed), (1, 1), "{tally:?}");
+        assert_eq!((tally.kept, tally.limited), (0, 0));
+        assert_eq!(routed[&0].wires, old.wires);
+        assert_eq!(routed[&0].vias, old.vias);
+        assert_eq!(routed[&0].shapes, old.shapes);
+        assert_eq!(retained, old.segments());
+        // The restored shapes block another net again.
+        for w in &old.wires {
+            let rect = wire_rect(w, 20).unwrap();
+            assert!(
+                r.spatial.probe(w.layer, rect, 99).unwrap().is_none(),
+                "{w:?}"
+            );
+        }
+        // The pass left the router's prices and limits as it found them.
+        assert!(r.trial_expansion_limit.is_none() && r.wrong_way_override.is_none());
+    }
+
+    #[test]
+    fn via_reduction_skips_nets_above_max_terminals() {
+        // crossing_nets: a five-terminal, a three-terminal and two two-pin
+        // nets. One pass, every net with a routed via is a candidate up to
+        // its terminal limit.
+        let one_pass = |max_terminals: usize| {
+            let design = with_reduction(
+                crossing_nets(),
+                Some(crate::routing::ViaReduction {
+                    passes: 1,
+                    max_terminals,
+                    ..via_reduction(1000, 0)
+                }),
+            );
+            take_tally();
+            let routes = route_cpu_ref(&design, &limits()).unwrap();
+            crate::routing::validate(&design, &routes, &limits()).unwrap();
+            take_tally().expect("the pass ran").candidates
+        };
+        let (two, three, five) = (one_pass(2), one_pass(3), one_pass(5));
+        assert!(two <= 2, "two-pin nets only: {two}");
+        assert!(two < three && three < five, "{two} {three} {five}");
+        assert_eq!(five, 4, "every net has a routed via");
+    }
+
+    #[test]
+    fn via_reduction_in_an_eco_route_keeps_prior_nets_and_re_assigns_rerouted_ones() {
+        // Two offset pairs. The prior is the route without the pass, which
+        // the pass would change (premise below).
+        let pairs = |moved: bool| {
+            let mut design = input(
+                vec![
+                    terminal(0, 0, true, rect(90, 490, 110, 510)),
+                    terminal(1, 0, false, rect(290, 890, 310, 910)),
+                    terminal(2, 1, true, rect(610, 490, 630, 510)),
+                    if moved {
+                        terminal(3, 1, false, rect(490, 890, 510, 910))
+                    } else {
+                        terminal(3, 1, false, rect(810, 890, 830, 910))
+                    },
+                ],
+                Vec::new(),
+            );
+            design.tracks.as_mut().unwrap().routing_layers = Some([1, 2]);
+            design
+        };
+        let limits = limits();
+        let full = route(&pairs(false), &limits).unwrap();
+        let prior = prior_of(&full);
+        let same = with_reduction(pairs(false), Some(via_reduction(16_000, 1)));
+        let reduced = route(&same, &limits).unwrap();
+        assert_ne!(net_key(&reduced, 0), net_key(&full, 0), "premise");
+        // Nothing moved: every net keeps its prior geometry, none is tried.
+        take_tally();
+        let eco = route_with_prior(&same, &limits, Some(&prior)).unwrap();
+        crate::routing::validate(&same, &eco, &limits).unwrap();
+        let tally = take_tally().expect("the pass ran");
+        assert_eq!(
+            (tally.candidates, tally.prior_unchanged),
+            (0, 2),
+            "{tally:?}"
+        );
+        for net in 0..2 {
+            assert_eq!(net_key(&eco, net), net_key(&full, net), "net {net}");
+        }
+        // A pin of net 1 moved: net 0 is kept, net 1 is routed by the ECO
+        // and re-assigned by the pass (fewer vias than the ECO without it).
+        let moved = with_reduction(
+            pairs(true),
+            Some(crate::routing::ViaReduction {
+                passes: 1,
+                ..via_reduction(16_000, 1)
+            }),
+        );
+        take_tally();
+        let eco = route_with_prior(&moved, &limits, Some(&prior)).unwrap();
+        crate::routing::validate(&moved, &eco, &limits).unwrap();
+        let tally = take_tally().expect("the pass ran");
+        assert_eq!(
+            (tally.prior_unchanged, tally.candidates, tally.kept),
+            (1, 1, 1),
+            "{tally:?}"
+        );
+        assert_eq!(net_key(&eco, 0), net_key(&full, 0));
+        let plain = route_with_prior(&pairs(true), &limits, Some(&prior)).unwrap();
+        assert_eq!(net_key(&plain, 0), net_key(&full, 0));
+        assert!(net_key(&eco, 1).1.len() < net_key(&plain, 1).1.len());
+    }
+
+    #[test]
+    fn strict_wide_cycle_entry_cuts_a_redundant_loop_wire_once_per_pass_and_region() {
+        // Net 7 routed straight up M2 between two pins, then given a loop on
+        // M2 beside the middle of its run (two bars and a parallel wire one
+        // track over): the shape a strict re-route rebuilt every pass on
+        // Ibex. Rule repair's strict entry for a wide pair over that region
+        // must leave the first sighting to the halos, cut one loop wire from
+        // the second, skip the owner's other entries in the same pass, and
+        // stop after `MAX_REGION_CUTS` cuts of the region.
+        let design = input(
+            vec![
+                terminal(0, 7, true, rect(90, 90, 110, 110)),
+                terminal(1, 7, false, rect(90, 890, 110, 910)),
+            ],
+            Vec::new(),
+        );
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(&design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let mut r = Router::prepared(&design, &limits, graph, cells).unwrap();
+        r.gmark.fill(1);
+        r.gepoch = 1;
+        let terminals: Vec<_> = design.terminals.iter().collect();
+        let plans = r.reserve(&terminals).unwrap();
+        let Outcome::Routed(tree, _) = r
+            .route_net(7, &terminals, &plans, false, false, &BTreeMap::new(), 1)
+            .unwrap()
+        else {
+            panic!("the fixture is open");
+        };
+        let run = tree
+            .wires
+            .iter()
+            .find(|w| w.layer == 1 && w.start[0] == w.end[0] && w.start[1].abs_diff(w.end[1]) > 400)
+            .cloned()
+            .expect("fixture premise: a long M2 run");
+        let x = run.start[0];
+        let middle = (run.start[1] + run.end[1]) / 2;
+        let (a, b) = (middle - 80, middle + 80);
+        let wire = |start: [i64; 2], end: [i64; 2]| Wire {
+            net: 7,
+            layer: 1,
+            start,
+            end,
+        };
+        let ring = [
+            wire([x, a], [x + 40, a]),
+            wire([x + 40, a], [x + 40, b]),
+            wire([x + 40, b], [x, b]),
+        ];
+        let groups: BTreeMap<u32, Vec<&Terminal>> = [(7, terminals.clone())].into();
+        let mut routed = BTreeMap::new();
+        let mut retained = 0usize;
+        // (Re)build the looped route with its index shapes.
+        let looped =
+            |r: &mut Router<'_>, routed: &mut BTreeMap<u32, NetRoute>, retained: &mut usize| {
+                if let Some(old) = remove_route(routed, retained, 7) {
+                    for id in old.shapes {
+                        r.spatial.remove(id);
+                    }
+                }
+                let mut route = NetRoute {
+                    wires: tree.wires.iter().chain(&ring).cloned().collect(),
+                    vias: tree.vias.clone(),
+                    shapes: Vec::new(),
+                };
+                for w in &route.wires {
+                    route.shapes.push(
+                        r.spatial
+                            .add_routed(Blockage {
+                                layer: w.layer,
+                                rect: wire_rect(w, 20).unwrap(),
+                                net: Some(7),
+                            })
+                            .unwrap(),
+                    );
+                }
+                for v in &route.vias {
+                    for shape in &design.vias[v.kind as usize].shapes {
+                        route.shapes.push(
+                            r.spatial
+                                .add_routed(Blockage {
+                                    layer: shape.layer,
+                                    rect: shifted(shape.rect, v.at).unwrap(),
+                                    net: Some(7),
+                                })
+                                .unwrap(),
+                        );
+                    }
+                }
+                retain_route(routed, retained, 7, route, limits.max_segments).unwrap();
+            };
+        let wide = rect(x - 10, a - 10, x + 50, b + 10);
+        let mut regions = BTreeMap::new();
+        let mut cut_owners = BTreeSet::new();
+        let mut bad = BTreeSet::from([7u32, 9]);
+        let full = tree.wires.len() + ring.len();
+        let mut entry = |r: &mut Router<'_>,
+                         routed: &mut BTreeMap<u32, NetRoute>,
+                         retained: &mut usize,
+                         cut_owners: &mut BTreeSet<u32>,
+                         bad: &mut BTreeSet<u32>,
+                         tries: u8| {
+            strict_wide_cycle_entry(
+                r,
+                &groups,
+                &plans,
+                routed,
+                retained,
+                StrictWideState {
+                    regions: &mut regions,
+                    cut_owners,
+                    bad,
+                },
+                tries,
+                (7, 1, wide),
+            )
+            .unwrap()
+        };
+        looped(&mut r, &mut routed, &mut retained);
+        // First sighting: left to the halos, nothing cut.
+        assert!(!entry(
+            &mut r,
+            &mut routed,
+            &mut retained,
+            &mut cut_owners,
+            &mut bad,
+            1
+        ));
+        assert_eq!(routed[&7].wires.len(), full);
+        assert!(cut_owners.is_empty() && bad.contains(&7));
+        // Second sighting: one loop wire goes; the owner waits for the next
+        // check instead of a re-route; the record count follows.
+        assert!(entry(
+            &mut r,
+            &mut routed,
+            &mut retained,
+            &mut cut_owners,
+            &mut bad,
+            2
+        ));
+        assert_eq!(routed[&7].wires.len(), full - 1);
+        assert!(ring.iter().any(|w| !routed[&7].wires.contains(w)));
+        assert!(tree.wires.iter().all(|w| routed[&7].wires.contains(w)));
+        assert_eq!(retained, routed[&7].segments());
+        assert_eq!(cut_owners, BTreeSet::from([7]));
+        assert_eq!(bad, BTreeSet::from([9]));
+        // Another entry of the owner in the same pass is stale: skipped.
+        let after = routed[&7].wires.clone();
+        assert!(entry(
+            &mut r,
+            &mut routed,
+            &mut retained,
+            &mut cut_owners,
+            &mut bad,
+            3
+        ));
+        assert_eq!(routed[&7].wires, after);
+        // Later passes rebuild the loop (a re-route for another violation):
+        // the region allows `MAX_REGION_CUTS` cuts in all, then the entry
+        // falls back to the halos with the loop intact.
+        for _ in 1..MAX_REGION_CUTS {
+            cut_owners.clear();
+            looped(&mut r, &mut routed, &mut retained);
+            assert!(entry(
+                &mut r,
+                &mut routed,
+                &mut retained,
+                &mut cut_owners,
+                &mut bad,
+                4
+            ));
+            assert_eq!(routed[&7].wires.len(), full - 1);
+        }
+        cut_owners.clear();
+        bad.insert(7);
+        looped(&mut r, &mut routed, &mut retained);
+        assert!(!entry(
+            &mut r,
+            &mut routed,
+            &mut retained,
+            &mut cut_owners,
+            &mut bad,
+            5
+        ));
+        assert_eq!(routed[&7].wires.len(), full);
+        assert!(cut_owners.is_empty() && bad.contains(&7));
+        // A tree has no redundant wire: nothing is cut in a fresh region.
+        let elsewhere = rect(x - 10, a - 50, x + 10, a - 20);
+        remove_route(&mut routed, &mut retained, 7);
+        retain_route(
+            &mut routed,
+            &mut retained,
+            7,
+            tree.clone(),
+            limits.max_segments,
+        )
+        .unwrap();
+        assert!(
+            !strict_wide_cycle_entry(
+                &mut r,
+                &groups,
+                &plans,
+                &mut routed,
+                &mut retained,
+                StrictWideState {
+                    regions: &mut BTreeMap::new(),
+                    cut_owners: &mut cut_owners,
+                    bad: &mut bad,
+                },
+                2,
+                (7, 1, elsewhere),
+            )
+            .unwrap()
+        );
+        assert_eq!(routed[&7].wires, tree.wires);
     }
 
     #[test]
