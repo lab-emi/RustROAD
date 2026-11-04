@@ -305,6 +305,17 @@ enum Command {
         max_gds_bytes: u64,
         #[arg(long, default_value_t = rustroad_workspace::gds::DEFAULT_MAX_OUTPUT_RECORDS)]
         max_gds_records: u64,
+        /// Top-level net metal: `rectangles` (default) writes each net's
+        /// metal per GDS layer as maximal non-overlapping rectangles,
+        /// `polygons` as one polygon per hole-free piece, `off` one rectangle
+        /// per routed run and patch (the DEF view). The metal is identical.
+        #[arg(long, default_value = rustroad_workspace::gds::DEFAULT_MERGE.name())]
+        merge_shapes: String,
+        /// Vias: `flat` (default) writes each via's LEF shapes into the top
+        /// cell with its net's metal; `cells` writes one structure per used
+        /// fixed via and one SREF per via.
+        #[arg(long, default_value = rustroad_workspace::gds::DEFAULT_VIAS.name())]
+        vias: String,
     },
     /// Inspect pinned external tools and PDK files; readiness is not signoff.
     FlowCheck {
@@ -1067,11 +1078,15 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             cell_lef,
             max_gds_bytes,
             max_gds_records,
+            merge_shapes,
+            vias,
         } => {
             let mut options = rustroad_workspace::gds::ExportOptions::new(cell_gds, layer_map, out);
             options.cell_lef = cell_lef;
             options.max_output_bytes = max_gds_bytes;
             options.max_output_records = max_gds_records;
+            options.merge = rustroad_workspace::gds_merge::MergeStyle::parse(&merge_shapes)?;
+            options.vias = rustroad_workspace::gds::ViaStyle::parse(&vias)?;
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
             emit(&rustroad_workspace::gds::export_snapshot(
                 &workspace, &snapshot, &options,

@@ -11,7 +11,8 @@
 use rustroad_core::Limits;
 use rustroad_core::connectivity::ConnectivityLimits;
 use rustroad_formats::gds::{self, ElementKind, GdsLimits, GdsWriter, Real8, Strans};
-use rustroad_workspace::gds::{ExportOptions, FIXED_DATES, export_gds};
+use rustroad_workspace::gds::{ExportOptions, FIXED_DATES, ViaStyle, export_gds};
+use rustroad_workspace::gds_merge::MergeStyle;
 use rustroad_workspace::pdk::{ImportSources, import_pdk_with_config};
 use rustroad_workspace::physical::{PhysicalConfig, TieCell};
 use rustroad_workspace::{Error, place};
@@ -317,7 +318,9 @@ fn routed_workspace_streams_deterministically_and_read_only() {
     // Only placed masters (BUF, FILL) and BUF's child LEAF are copied.
     assert_eq!(report.foreign_bindings_checked, 2);
     assert_eq!(report.pdk_structures, ["LEAF", "BUF", "FILL"]);
-    assert_eq!(report.via_structures, ["VIA_V12", "VIA_V23"]);
+    // Default: vias are written flat with their net's metal (no via structures).
+    assert_eq!(report.via_style, "flat");
+    assert!(report.via_structures.is_empty());
     let bytes = fs::read(&first).unwrap();
     assert_eq!(report.output.bytes, bytes.len() as u64);
     assert_eq!(report.output.sha256, {
@@ -350,13 +353,22 @@ fn routed_workspace_streams_deterministically_and_read_only() {
     assert_eq!(top.dates, FIXED_DATES);
     let count = |k: ElementKind| top.elements.iter().filter(|e| e.kind == k).count();
     let e = &report.elements;
-    assert_eq!(
-        count(ElementKind::Sref),
-        e.instances + e.routed_vias + e.supply_vias
-    );
+    assert_eq!(count(ElementKind::Sref), e.instances);
+    // Default: each net's metal (wires, patches, supply geometry and via
+    // shapes) is written as maximal non-overlapping rectangles.
+    assert_eq!(report.shape_merge, "rectangles");
+    assert_eq!(e.merged_polygons, 0);
     assert_eq!(
         count(ElementKind::Boundary),
-        e.routed_wires + e.routed_patches + e.supply_wires + e.pin_shapes + 1
+        e.merged_rectangles + e.pin_shapes + 1
+    );
+    // Each fixture via has three shapes (two metals and a cut).
+    assert!(
+        e.merged_rectangles
+            < e.routed_wires
+                + e.routed_patches
+                + e.supply_wires
+                + 3 * (e.routed_vias + e.supply_vias)
     );
     assert!(e.routed_wires < e.stored_wire_records, "runs are merged");
     assert_eq!(count(ElementKind::Text), 6, "a, y, h, l, VDD, VSS");
@@ -597,6 +609,216 @@ fn def_and_gds_write_merged_runs_with_the_stored_lattice_metal() {
     assert_eq!(report.elements.routed_patches, routing.routes.patches.len());
 }
 
+/// Top-level BOUNDARY elements plus the shapes of SREFed `VIA_*` structures
+/// (translated; via SREFs carry no STRANS), as (layer, datatype, closed xy).
+fn flat_metal(library: &gds::Library) -> Vec<(i16, i16, Vec<[i64; 2]>)> {
+    let top = library.structures.last().unwrap();
+    let index = library.index();
+    let mut out = Vec::new();
+    let mut add = |e: &gds::Element, dx: i64, dy: i64| {
+        let xy =
+            e.xy.iter()
+                .map(|p| [i64::from(p[0]) + dx, i64::from(p[1]) + dy])
+                .collect();
+        out.push((e.layer.unwrap(), e.datatype.unwrap(), xy));
+    };
+    for e in &top.elements {
+        match e.kind {
+            ElementKind::Boundary => add(e, 0, 0),
+            ElementKind::Sref if e.sname.as_deref().is_some_and(|n| n.starts_with("VIA_")) => {
+                assert_eq!(e.strans, None);
+                let via = &library.structures[index[e.sname.as_deref().unwrap()]];
+                for v in via
+                    .elements
+                    .iter()
+                    .filter(|v| v.kind == ElementKind::Boundary)
+                {
+                    add(v, i64::from(e.xy[0][0]), i64::from(e.xy[0][1]));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Even-odd coverage of each compressed-grid cell centre by the shapes on
+/// `layer`/`datatype` (independent of the exporter).
+fn coverage(
+    shapes: &[(i16, i16, Vec<[i64; 2]>)],
+    layer: i16,
+    datatype: i16,
+    xs: &[i64],
+    ys: &[i64],
+) -> Vec<u32> {
+    let shapes: Vec<&Vec<[i64; 2]>> = shapes
+        .iter()
+        .filter(|s| s.0 == layer && s.1 == datatype)
+        .map(|s| &s.2)
+        .collect();
+    let mut out = Vec::new();
+    for i in 0..xs.len().saturating_sub(1) {
+        for j in 0..ys.len().saturating_sub(1) {
+            let (cx, cy) = (xs[i] + xs[i + 1], ys[j] + ys[j + 1]);
+            let mut n = 0;
+            for xy in &shapes {
+                let mut inside = false;
+                for k in 0..xy.len() - 1 {
+                    let (a, b) = (xy[k], xy[k + 1]);
+                    if a[0] == b[0]
+                        && 2 * a[0] > cx
+                        && 2 * a[1].min(b[1]) < cy
+                        && cy < 2 * a[1].max(b[1])
+                    {
+                        inside = !inside;
+                    }
+                }
+                n += u32::from(inside);
+            }
+            out.push(n);
+        }
+    }
+    out
+}
+
+#[test]
+fn merged_styles_and_flat_vias_write_the_same_geometry() {
+    let f = fixture(TECHNOLOGY, &same_name, 1000);
+    let cells = f.root.join("cells.gds");
+    cell_gds(&cells, "", &[]);
+    let map = f.root.join("map.json");
+    layer_map(&map, &|_| {});
+    let export = |style: MergeStyle, vias: ViaStyle| {
+        let out = f.root.join(format!("{}-{}.gds", style.name(), vias.name()));
+        let mut options = ExportOptions::new(cells.clone(), map.clone(), out.clone());
+        options.merge = style;
+        options.vias = vias;
+        let report = export_gds(&f.workspace, &options, &limits()).unwrap();
+        assert_eq!(
+            (report.shape_merge, report.via_style),
+            (style.name(), vias.name())
+        );
+        let again = f
+            .root
+            .join(format!("{}-{}-again.gds", style.name(), vias.name()));
+        options.out = again.clone();
+        export_gds(&f.workspace, &options, &limits()).unwrap();
+        let bytes = fs::read(&out).unwrap();
+        assert_eq!(
+            fs::read(&again).unwrap(),
+            bytes,
+            "{style:?} {vias:?} is deterministic"
+        );
+        (
+            report,
+            gds::parse_library(&bytes, &GdsLimits::default(), true).unwrap(),
+        )
+    };
+    let (legacy, reference) = export(MergeStyle::Off, ViaStyle::Cells);
+    assert_eq!(
+        legacy.elements.merged_rectangles + legacy.elements.merged_polygons,
+        0
+    );
+    assert_eq!(legacy.via_structures, ["VIA_V12", "VIA_V23"]);
+    let base = flat_metal(&reference);
+    let top_of = |l: &gds::Library| l.structures.last().unwrap().clone();
+    // Instances (non-via SREFs), labels, pin shapes and the PR boundary.
+    let kept = |s: &gds::Structure| {
+        let mut v: Vec<String> = s
+            .elements
+            .iter()
+            .filter(|e| match e.kind {
+                ElementKind::Sref => !e.sname.as_deref().unwrap().starts_with("VIA_"),
+                ElementKind::Boundary => e.datatype != Some(0) || e.layer == Some(100),
+                _ => true,
+            })
+            .map(|e| format!("{e:?}"))
+            .collect();
+        v.sort();
+        v
+    };
+    let reference_kept = kept(&top_of(&reference));
+    for (style, vias) in [
+        (MergeStyle::Rectangles, ViaStyle::Cells),
+        (MergeStyle::Polygons, ViaStyle::Cells),
+        (MergeStyle::Off, ViaStyle::Flat),
+        (MergeStyle::Rectangles, ViaStyle::Flat),
+        (MergeStyle::Polygons, ViaStyle::Flat),
+    ] {
+        let (report, library) = export(style, vias);
+        let top = top_of(&library);
+        assert_eq!(kept(&top), reference_kept, "{style:?} {vias:?}");
+        let shapes = flat_metal(&library);
+        let mut xs: Vec<i64> = base
+            .iter()
+            .chain(&shapes)
+            .flat_map(|s| s.2.iter().map(|p| p[0]))
+            .collect();
+        let mut ys: Vec<i64> = base
+            .iter()
+            .chain(&shapes)
+            .flat_map(|s| s.2.iter().map(|p| p[1]))
+            .collect();
+        xs.sort_unstable();
+        xs.dedup();
+        ys.sort_unstable();
+        ys.dedup();
+        // Routing layers 1..3 and cut layers 10, 11, datatype 0.
+        for layer in [1, 2, 3, 10, 11] {
+            let before = coverage(&base, layer, 0, &xs, &ys);
+            let after = coverage(&shapes, layer, 0, &xs, &ys);
+            let covered = |v: &[u32]| v.iter().map(|&n| n > 0).collect::<Vec<_>>();
+            assert_eq!(
+                covered(&before),
+                covered(&after),
+                "{style:?} {vias:?} layer {layer}: same geometry"
+            );
+            assert!(before.iter().any(|&n| n > 0));
+        }
+        let srefs = top
+            .elements
+            .iter()
+            .filter(|e| e.kind == ElementKind::Sref)
+            .count();
+        if vias == ViaStyle::Flat {
+            assert!(report.via_structures.is_empty());
+            assert!(
+                library
+                    .structures
+                    .iter()
+                    .all(|s| !s.name.starts_with("VIA_"))
+            );
+            assert_eq!(srefs, report.elements.instances);
+        } else {
+            assert_eq!(report.via_structures, legacy.via_structures);
+            assert_eq!(
+                srefs,
+                report.elements.instances
+                    + report.elements.routed_vias
+                    + report.elements.supply_vias
+            );
+            let boundaries = top
+                .elements
+                .iter()
+                .filter(|e| e.kind == ElementKind::Boundary)
+                .count();
+            let legacy_boundaries = top_of(&reference)
+                .elements
+                .iter()
+                .filter(|e| e.kind == ElementKind::Boundary)
+                .count();
+            assert!(
+                boundaries < legacy_boundaries,
+                "{style:?} writes fewer shapes"
+            );
+        }
+        assert_eq!(report.elements.routed_vias, legacy.elements.routed_vias);
+        assert_eq!(report.elements.supply_vias, legacy.elements.supply_vias);
+        assert_eq!(report.elements.routed_wires, legacy.elements.routed_wires);
+        assert_eq!(report.elements.merged_capped_pieces, 0);
+    }
+}
+
 #[test]
 fn missing_cells_collisions_and_wrong_maps_fail_explicitly() {
     let f = fixture(TECHNOLOGY, &same_name, 1000);
@@ -621,11 +843,22 @@ fn missing_cells_collisions_and_wrong_maps_fail_explicitly() {
     }
     for extra in ["VIA_V12", "chip"] {
         cell_gds(&cells, "", &[extra]);
+        let mut options = ExportOptions::new(cells.clone(), map.clone(), out.clone());
+        options.vias = ViaStyle::Cells;
         assert_eq!(
-            code(run(&cells, &map).unwrap_err()),
+            code(export_gds(&f.workspace, &options, &limits()).unwrap_err()),
             "GDS_NAME_COLLISION",
             "{extra}"
         );
+        if extra == "VIA_V12" {
+            // Flat vias write no via structures, so a same-named PDK cell is no collision.
+            let flat = f.root.join("flat-via-names.gds");
+            let options = ExportOptions::new(cells.clone(), map.clone(), flat.clone());
+            export_gds(&f.workspace, &options, &limits()).unwrap();
+            fs::remove_file(flat).unwrap();
+        } else {
+            assert_eq!(code(run(&cells, &map).unwrap_err()), "GDS_NAME_COLLISION");
+        }
     }
     cell_gds(&cells, "", &[]);
     let wrong = f.root.join("wrong.json");

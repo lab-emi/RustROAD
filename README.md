@@ -271,7 +271,11 @@ not be treated as complete timing closure. See
 
 `export-gds` is read-only and byte-deterministic. It copies the used PDK cell
 structures verbatim, writes one structure per used fixed via and a top cell with
-SREFs, DEF-semantics wires, supply geometry, labelled pins and the PR boundary:
+SREFs, each net's metal (DEF-semantics wires, patches, supply geometry and
+the shapes of its vias, written per layer as an exact cover of their union:
+maximal non-overlapping rectangles by default, `--merge-shapes polygons|off`,
+`--vias cells` for via structures and SREFs), labelled pins and the PR
+boundary:
 
 ```sh
 rustroad export-gds --workspace .work/chip \

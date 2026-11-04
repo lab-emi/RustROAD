@@ -17,7 +17,8 @@ rustroad --workspace W export-gds \
   --layer-map fixtures/pdk/<pdk>-gds-map.json \
   --out <file.gds> \
   [--cell-lef <cell LEF; must match the imported sha256>] \
-  [--max-gds-bytes 268435456] [--max-gds-records 16000000]
+  [--max-gds-bytes 268435456] [--max-gds-records 16000000] \
+  [--merge-shapes rectangles|polygons|off] [--vias flat|cells]
 ```
 
 - Read-only: takes the shared workspace lock, has no `--base-rev`, never writes
@@ -36,9 +37,11 @@ rustroad --workspace W export-gds \
   `gds_dbu_per_micron`, `coordinate_divisor`, `pdk_structures`,
   `via_structures`, `elements {instances, routed_wires (merged runs),
   stored_wire_records, routed_vias, routed_patches, supply_wires,
-  supply_vias, pin_shapes, labels, boundary}`, `routing_status`,
-  `drc_status: "unchecked"`, `lvs_status: "unchecked"`, `scope:
-  "block_level_no_pad_or_seal_ring"`, `workspace_mutated: false`.
+  supply_vias, pin_shapes, labels, boundary, merged_rectangles,
+  merged_polygons, merged_holed_pieces, merged_capped_pieces}`,
+  `routing_status`, `drc_status: "unchecked"`, `lvs_status: "unchecked"`,
+  `scope: "block_level_no_pad_or_seal_ring"`, `shape_merge` and `via_style`
+  (the styles used), `workspace_mutated: false`.
 - Errors exit 2 with `{"status":"error","code":...}`. GDS codes:
   `GDS_ODD_COORDINATE`, `GDS_COORDINATE_RANGE`, `GDS_UNIT_MISMATCH`,
   `GDS_UNITS_UNSUPPORTED`, `GDS_CELL_MISSING`, `GDS_NAME_COLLISION`,
@@ -54,14 +57,65 @@ rustroad --workspace W export-gds \
 | Structure / element | Source and semantics |
 |---|---|
 | PDK cells | Every used master plus its SREF/AREF closure (iterative DFS, depth cap 64, cycle guard), copied **byte-identically** from the cell GDS in library order. Missing structure: `GDS_CELL_MISSING`. |
-| `VIA_<name>` | One structure per used fixed LEF VIA (routed + supply), its RECT/POLYGON shapes on the map's `via` targets. Name collisions with any cell-GDS structure or the top: `GDS_NAME_COLLISION`. |
+| `VIA_<name>` | `--vias cells` only: one structure per used fixed LEF VIA (routed + supply), its RECT/POLYGON shapes on the map's `via` targets. Name collisions with any cell-GDS structure or the top: `GDS_NAME_COLLISION`. With the default `--vias flat` no via structure is written. |
 | Instances | SREF per instance in instance order. Row `N`: no STRANS at (x, y). Row `FS`: STRANS x-reflection at (x, y + height). |
+| Net metal (default `--merge-shapes rectangles --vias flat`) | Per net and per GDS layer/datatype, the routed wires and patches below, for a supply net its supply rails/spines, and (flat vias) the LEF shapes of the net's vias at their via points are written as one exact cover of their union: maximal non-overlapping rectangles (`rectangles`) or one simple polygon per hole-free connected piece (`polygons`). See "Same-net shape merging". With `--vias cells` the net's routed (and supply) via SREFs follow its metal. `--merge-shapes off --vias cells` writes the rows below unchanged (byte-identical to the unmerged export). |
 | Routed wires | DEF NETS semantics: layer default `WIDTH`, half-width extension at both ends (exact `wire_rect`). One BOUNDARY per maximal collinear same-net run on `net` targets, the same runs `export-def` writes (`rustroad_core::wire_runs`): stored lattice records that touch or overlap on one track line are merged, and a run is split only at a strictly interior via landing (lower or upper metal), pin-access point or same-layer branch. The metal union equals the stored records'. |
-| Routed / supply vias | SREF to `VIA_<name>` at the via point. Every used LEF via variant (LEF-rule routing, e.g. `M1M2_PR_MR`, `Via1_VH`, `Via2_HH`) gets its own structure. |
+| Routed / supply vias | Default `--vias flat`: the via's LEF RECT shapes at the via point, on each layer's `via` targets, merged with the net's metal (cut shapes stay one rectangle per cut unless cuts of one net touch); LEF POLYGON shapes are written unmerged. `--vias cells`: SREF to `VIA_<name>` at the via point. Every used LEF via variant (LEF-rule routing, e.g. `M1M2_PR_MR`, `Via1_VH`, `Via2_HH`) gets its own structure. |
 | Routing patches | Every `Routes.patches` rectangle (DEF routing `RECT`, same-net notch/corner fill) as one BOUNDARY on the routing layer's `net` targets. |
 | Supply rails/spines | SPECIALNETS geometry (explicit width, half-width extension) on `special_net` targets. |
 | Pins | I/O and supply pin rectangles on every `pin` target; one TEXT per pin at the rectangle centre on the `label` target. Bus bits are labelled `a[1]`; supply ports `VDD`/`VSS`. Escaped/non-printable names: `GDS_LABEL_UNSUPPORTED`. |
 | PR boundary | Die area on the map's boundary layer (SKY130 235/4, GF180 0/0). |
+
+## Same-net shape merging
+
+The DEF view of a route is a set of maximal collinear runs (split at via
+landings, pin-access points and branches) with half-width end extensions,
+plus patches. Runs of one net overlap at every split and corner, and patches
+or supply ties are often covered by runs. Every downstream geometry engine
+merges this again: the foundry DRC, antenna and LVS decks treat a layer as
+the union of its shapes. `export-gds` therefore writes each net's metal as an
+exact cover of the union (`rustroad_workspace::gds_merge`):
+
+1. Rectangles of one net on one GDS layer/datatype are sorted, deduplicated
+   and grouped into connected pieces (positive-area overlap or a shared edge of
+   positive length; corner contact does not connect, so no polygon touches
+   itself).
+2. Each piece is rasterized on its own compressed grid (its distinct edge
+   coordinates; Bentley's rectangle-union treatment, Preparata & Shamos,
+   *Computational Geometry*, 1985, sec. 8.4) with a 2-D difference array.
+3. `rectangles`: the covered cells are decomposed into maximal slabs (runs of
+   covered cells along one axis, merged across the other while identical), in
+   both orientations; the decomposition with fewer rectangles is written
+   (horizontal on ties). The rectangles do not overlap.
+   `polygons`: the boundary of the covered cells is traced as directed edges
+   (interior on the left; at a diagonal pinch the walk turns left, keeping the
+   cell it borders). A piece with exactly one loop and no repeated vertex is
+   written as one BOUNDARY; a piece with holes (a same-net loop) keeps its
+   rectangle decomposition, since a GDS BOUNDARY cannot carry a hole.
+4. Output is sorted, so the stream does not depend on input order.
+
+A piece over 2^22 grid cells keeps its input rectangles (exact, unmerged;
+counted as `merged_capped_pieces`). The covered point set of every net and
+layer is unchanged; instances, pins and labels are unchanged.
+
+Vias: by default (`--vias flat`) each routed and supply via contributes its
+LEF shapes at the via point to its net's metal instead of an SREF to a via
+structure. The flattened geometry equals the SREF expansion exactly. The
+reason is downstream cost: the IHP foundry antenna deck (hierarchical KLayout
+connectivity) spent 274 CPU-seconds on the Ibex stream with 135,028 via
+SREFs and 220 CPU-seconds on the same geometry with the vias flattened
+(single samples at similar load, 2026-11-04; the interleaved A/B is in the
+superproject's lane-S evidence).
+
+Evidence (Ibex SG13G2/EZ130, opt/phys layout, 2026-11-04): the Ibex top cell
+goes from 178,384 BOUNDARY elements (`off`) to 154,015 (`rectangles`) or
+105,401 + 244 pins + 1 (`polygons`: 84,822 rectangles and 20,579 polygons,
+one holed piece); a KLayout layer-by-layer XOR of each against the `off`
+stream is empty on all 38 layer/datatype pairs and the label sets are equal.
+`tests/gds_export.rs` checks the same equality on the fixture by cell-centre
+coverage, and `gds_merge` unit tests check exact, non-overlapping covers on
+300 random rectilinear sets.
 
 Units: coordinates are integer LEF DBU. The cell-GDS UNITS are copied verbatim
 and must be an exact decimal micron grid (`dbu_per_micron`: user unit 10^-k um,

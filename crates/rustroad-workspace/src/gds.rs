@@ -20,6 +20,7 @@
 //! exactly; an inexact division is the explicit error `GDS_ODD_COORDINATE`.
 //! Library units are never rescaled.
 
+use crate::gds_merge::{self, MergeStyle, Piece};
 use crate::pdk::PhysicalBundle;
 use crate::{Error, Result, Stage};
 use rustroad_core::connectivity::PinUse;
@@ -71,7 +72,46 @@ pub struct ExportOptions {
     pub max_output_bytes: u64,
     pub max_output_records: u64,
     pub limits: GdsLimits,
+    /// How each net's top-level metal is written (`gds_merge`). `Off` keeps
+    /// the DEF view (one rectangle per run and patch, byte-identical to the
+    /// unmerged export); the merged styles write an exact cover of each net's
+    /// metal per GDS layer/datatype.
+    pub merge: MergeStyle,
+    pub vias: ViaStyle,
 }
+/// Default top-level metal representation of `export-gds`.
+pub const DEFAULT_MERGE: MergeStyle = MergeStyle::Rectangles;
+
+/// How routed and supply vias are written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViaStyle {
+    /// One `VIA_<name>` structure per used fixed via and one SREF per via.
+    Cells,
+    /// Each via's LEF shapes written into the top cell with its net's metal
+    /// (cut shapes on the cut layer, enclosures merged with the net's metal
+    /// by `merge`); no via structures.
+    Flat,
+}
+impl ViaStyle {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "cells" => Ok(Self::Cells),
+            "flat" => Ok(Self::Flat),
+            other => Err(fail(
+                "GDS_VIA_STYLE",
+                format!("unknown via style {other:?} (cells, flat)"),
+            )),
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cells => "cells",
+            Self::Flat => "flat",
+        }
+    }
+}
+/// Default via representation of `export-gds`.
+pub const DEFAULT_VIAS: ViaStyle = ViaStyle::Flat;
 impl ExportOptions {
     pub fn new(cell_gds: PathBuf, layer_map: PathBuf, out: PathBuf) -> Self {
         Self {
@@ -82,6 +122,8 @@ impl ExportOptions {
             max_output_bytes: DEFAULT_MAX_OUTPUT_BYTES,
             max_output_records: DEFAULT_MAX_OUTPUT_RECORDS,
             limits: GdsLimits::default(),
+            merge: DEFAULT_MERGE,
+            vias: DEFAULT_VIAS,
         }
     }
 }
@@ -107,6 +149,14 @@ pub struct ElementCounts {
     pub pin_shapes: usize,
     pub labels: usize,
     pub boundary: usize,
+    /// Merged styles: net metal written per GDS layer/datatype (routed runs,
+    /// patches and, for supply nets, supply wires, merged per net).
+    pub merged_rectangles: usize,
+    pub merged_polygons: usize,
+    /// Merged pieces with holes (written as rectangles) and pieces over the
+    /// grid cap (written as their input rectangles).
+    pub merged_holed_pieces: usize,
+    pub merged_capped_pieces: usize,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct GdsReport {
@@ -130,6 +180,8 @@ pub struct GdsReport {
     pub drc_status: &'static str,
     pub lvs_status: &'static str,
     pub scope: &'static str,
+    pub shape_merge: &'static str,
+    pub via_style: &'static str,
     pub workspace_mutated: bool,
 }
 
@@ -489,6 +541,127 @@ fn wire_rect(start: [i64; 2], end: [i64; 2], width: i64) -> Result<Rect> {
     .map_err(|e| fail("GDS_GEOMETRY", e.to_string()))
 }
 
+/// One net's metal before merging: LEF-DBU rectangles per GDS layer/datatype.
+type Metal = BTreeMap<(i16, i16), Vec<[i64; 4]>>;
+
+fn add_metal(metal: &mut Metal, targets: &[GdsLayer], r: Rect) {
+    for t in targets {
+        metal
+            .entry((t.0, t.1))
+            .or_default()
+            .push([r.lx, r.ly, r.ux, r.uy]);
+    }
+}
+
+/// A flattened via's LEF shapes at `at`: rectangles join the net's metal
+/// (`via` targets of each layer); polygons (rare) are kept to be written as
+/// given, after the merged metal.
+fn add_via_shapes(
+    metal: &mut Metal,
+    polygons: &mut Vec<(GdsLayer, Vec<[i64; 2]>)>,
+    layers: &Layers,
+    via: &lef::LefVia,
+    at: [i64; 2],
+) -> Result<()> {
+    let shift = |p: [i64; 2]| -> Result<[i64; 2]> {
+        Ok([
+            p[0].checked_add(at[0])
+                .ok_or_else(|| fail("GDS_COORDINATE_RANGE", "via shape"))?,
+            p[1].checked_add(at[1])
+                .ok_or_else(|| fail("GDS_COORDINATE_RANGE", "via shape"))?,
+        ])
+    };
+    for g in &via.geometries {
+        match g {
+            LefGeometry::Rect { layer, rect } => {
+                let lo = shift([rect[0], rect[1]])?;
+                let hi = shift([rect[2], rect[3]])?;
+                if !(lo[0] < hi[0] && lo[1] < hi[1]) {
+                    return Err(fail(
+                        "GDS_GEOMETRY",
+                        format!("VIA {}: empty rectangle", via.name),
+                    ));
+                }
+                let r = rect_of([lo[0], lo[1], hi[0], hi[1]]);
+                add_metal(metal, layers.targets(layer, Purpose::Via)?, r);
+            }
+            LefGeometry::Polygon { layer, points } => {
+                let xy = points
+                    .iter()
+                    .map(|p| shift(*p))
+                    .collect::<Result<Vec<_>>>()?;
+                for t in layers.targets(layer, Purpose::Via)? {
+                    polygons.push((*t, xy.clone()));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_polygons<W: Write>(
+    w: &mut GdsWriter<W>,
+    polygons: &[(GdsLayer, Vec<[i64; 2]>)],
+    scale: Scale,
+    what: &dyn Fn() -> String,
+) -> Result<()> {
+    for (t, points) in polygons {
+        let mut xy = points
+            .iter()
+            .map(|p| scale.point_lazy(*p, what))
+            .collect::<Result<Vec<_>>>()?;
+        if xy.first() != xy.last() {
+            xy.push(xy[0]);
+        }
+        w.boundary(t.0, t.1, &xy)?;
+    }
+    Ok(())
+}
+
+/// Rail polarity of a supply net; `None` for signal nets.
+fn supply_polarity(use_: PinUse) -> Option<RailPolarity> {
+    match use_ {
+        PinUse::Power => Some(RailPolarity::Power),
+        u if u.is_supply() => Some(RailPolarity::Ground),
+        _ => None,
+    }
+}
+
+/// Write one net's metal as an exact cover per GDS layer/datatype
+/// (`gds_merge::merge`), in layer/datatype order.
+fn write_metal<W: Write>(
+    w: &mut GdsWriter<W>,
+    metal: &Metal,
+    style: MergeStyle,
+    scale: Scale,
+    what: &dyn Fn() -> String,
+    counts: &mut ElementCounts,
+) -> Result<()> {
+    for (&(layer, datatype), rects) in metal {
+        let (pieces, stats) = gds_merge::merge(rects, style)?;
+        for piece in &pieces {
+            match piece {
+                Piece::Rect(r) => {
+                    w.rectangle(layer, datatype, scale.rect_lazy(rect_of(*r), what)?)?
+                }
+                Piece::Polygon(points) => {
+                    let mut xy = points
+                        .iter()
+                        .map(|p| scale.point_lazy(*p, what))
+                        .collect::<Result<Vec<_>>>()?;
+                    xy.push(xy[0]);
+                    w.boundary(layer, datatype, &xy)?;
+                }
+            }
+        }
+        counts.merged_rectangles += stats.rectangles;
+        counts.merged_polygons += stats.polygons;
+        counts.merged_holed_pieces += stats.holed_pieces;
+        counts.merged_capped_pieces += stats.capped_pieces;
+    }
+    Ok(())
+}
+
 /// Stream the current revision. Read-only: takes the shared workspace lock.
 pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) -> Result<GdsReport> {
     let snapshot = crate::read(workspace, limits)?;
@@ -598,8 +771,10 @@ pub fn export_snapshot(
             format!("top cell {top} collides with a cell-GDS structure"),
         ));
     }
+    let flat_vias = options.vias == ViaStyle::Flat;
     let via_cells: BTreeMap<&str, String> = vias
         .keys()
+        .filter(|_| !flat_vias)
         .map(|n| (*n, format!("{VIA_CELL_PREFIX}{n}")))
         .collect();
     for cell in via_cells.values() {
@@ -661,7 +836,7 @@ pub fn export_snapshot(
     for &i in &closure {
         w.raw(&cell_bytes[library.structures[i].source.clone()])?;
     }
-    for (name, via) in &vias {
+    for (name, via) in vias.iter().filter(|_| !flat_vias) {
         w.begin_structure(&via_cells[name], &FIXED_DATES)?;
         let what = format!("VIA {name}");
         for g in &via.geometries {
@@ -761,6 +936,77 @@ pub fn export_snapshot(
             .collect();
         for (ni, net) in model.nets.iter().enumerate() {
             let what = || format!("net {}", net.name);
+            if options.merge != MergeStyle::Off || flat_vias {
+                // One exact cover of the net's metal per GDS layer/datatype:
+                // routed runs and patches, plus the supply wires of a supply
+                // net, plus (flat vias) the net's via shapes; then the net's
+                // via SREFs (via cells).
+                let mut metal = Metal::new();
+                let mut polygons = Vec::new();
+                for wire in wires.of(ni) {
+                    let (targets, width) = resolve(wire.layer)?;
+                    add_metal(&mut metal, targets, wire_rect(wire.start, wire.end, width)?);
+                    counts.routed_wires += 1;
+                }
+                for patch in patches.of(ni) {
+                    let (targets, _) = resolve(patch.layer)?;
+                    if !(patch.rect.lx < patch.rect.ux && patch.rect.ly < patch.rect.uy) {
+                        return Err(fail("GDS_GEOMETRY", format!("{}: empty patch", what())));
+                    }
+                    add_metal(&mut metal, targets, patch.rect);
+                    counts.routed_patches += 1;
+                }
+                let polarity = supply_polarity(net.use_);
+                if let Some(polarity) = polarity {
+                    for wire in state.supply.wires.iter().filter(|x| x.polarity == polarity) {
+                        let rect = wire_rect(wire.start, wire.end, wire.width)?;
+                        add_metal(
+                            &mut metal,
+                            layers.targets(&wire.layer, Purpose::SpecialNet)?,
+                            rect,
+                        );
+                        counts.supply_wires += 1;
+                    }
+                }
+                if flat_vias {
+                    for via in routed.of(ni) {
+                        let name = r.via_names[via.kind as usize].as_str();
+                        add_via_shapes(&mut metal, &mut polygons, &layers, vias[name], via.at)?;
+                        counts.routed_vias += 1;
+                    }
+                    if let Some(polarity) = polarity {
+                        for via in state.supply.vias.iter().filter(|x| x.polarity == polarity) {
+                            let name = via.name.as_str();
+                            add_via_shapes(&mut metal, &mut polygons, &layers, vias[name], via.at)?;
+                            counts.supply_vias += 1;
+                        }
+                    }
+                }
+                write_metal(&mut w, &metal, options.merge, scale, &what, &mut counts)?;
+                write_polygons(&mut w, &polygons, scale, &what)?;
+                if !flat_vias {
+                    for via in routed.of(ni) {
+                        let name = &r.via_names[via.kind as usize];
+                        let cell = match via_cell[via.kind as usize] {
+                            "" => via_cells[name.as_str()].as_str(),
+                            cell => cell,
+                        };
+                        w.sref(cell, None, scale.point_lazy(via.at, what)?)?;
+                        counts.routed_vias += 1;
+                    }
+                    if let Some(polarity) = polarity {
+                        for via in state.supply.vias.iter().filter(|x| x.polarity == polarity) {
+                            w.sref(
+                                &via_cells[via.name.as_str()],
+                                None,
+                                scale.point_lazy(via.at, what)?,
+                            )?;
+                            counts.supply_vias += 1;
+                        }
+                    }
+                }
+                continue;
+            }
             for wire in wires.of(ni) {
                 let (targets, width) = resolve(wire.layer)?;
                 let rect = scale.rect_lazy(wire_rect(wire.start, wire.end, width)?, what)?;
@@ -795,7 +1041,52 @@ pub fn export_snapshot(
         "absent"
     };
 
-    for net in model.nets.iter().filter(|n| n.use_.is_supply()) {
+    // The merged styles drew supply wires and vias with their net above,
+    // unless there is no routing, in which case only supply nets are drawn.
+    let merged_supply = options.merge != MergeStyle::Off || flat_vias;
+    if merged_supply && routing_status == "absent" {
+        for net in model.nets.iter() {
+            let Some(polarity) = supply_polarity(net.use_) else {
+                continue;
+            };
+            let what = || format!("supply net {}", net.name);
+            let mut metal = Metal::new();
+            let mut polygons = Vec::new();
+            for wire in state.supply.wires.iter().filter(|x| x.polarity == polarity) {
+                let rect = wire_rect(wire.start, wire.end, wire.width)?;
+                add_metal(
+                    &mut metal,
+                    layers.targets(&wire.layer, Purpose::SpecialNet)?,
+                    rect,
+                );
+                counts.supply_wires += 1;
+            }
+            if flat_vias {
+                for via in state.supply.vias.iter().filter(|x| x.polarity == polarity) {
+                    let name = via.name.as_str();
+                    add_via_shapes(&mut metal, &mut polygons, &layers, vias[name], via.at)?;
+                    counts.supply_vias += 1;
+                }
+            }
+            write_metal(&mut w, &metal, options.merge, scale, &what, &mut counts)?;
+            write_polygons(&mut w, &polygons, scale, &what)?;
+            if !flat_vias {
+                for via in state.supply.vias.iter().filter(|x| x.polarity == polarity) {
+                    w.sref(
+                        &via_cells[via.name.as_str()],
+                        None,
+                        scale.point_lazy(via.at, what)?,
+                    )?;
+                    counts.supply_vias += 1;
+                }
+            }
+        }
+    }
+    for net in model
+        .nets
+        .iter()
+        .filter(|n| !merged_supply && n.use_.is_supply())
+    {
         let polarity = if net.use_ == PinUse::Power {
             RailPolarity::Power
         } else {
@@ -919,6 +1210,8 @@ pub fn export_snapshot(
         drc_status: "unchecked",
         lvs_status: "unchecked",
         scope: "block_level_no_pad_or_seal_ring",
+        shape_merge: options.merge.name(),
+        via_style: options.vias.name(),
         workspace_mutated: false,
     })
 }

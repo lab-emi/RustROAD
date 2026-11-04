@@ -37,7 +37,17 @@ temporary file and renamed; it is never held in memory. Output cap: 256 MiB and
 16 M records (`--max-gds-bytes`, `--max-gds-records`).
 
 Top-cell element count = instances + routed wires + routed vias + supply wires
-+ supply vias + pin shapes + labels + 1. For the pipeline fixture: ~131 + 4,964
++ supply vias + pin shapes + labels + 1 with `--merge-shapes off`; the merged
+styles replace routed wires + patches + supply wires by their exact cover per
+net and layer, never more elements than the input rectangles.
+
+Shape merging (`gds_merge`) works one net at a time: the net's rectangles
+(at most its runs + patches + supply wires) per layer, a pairwise connectivity
+sweep in x order (O(n^2) worst case per net and layer), and per connected
+piece a compressed grid of at most 2^22 cells: a 4-byte difference array
+(<= 16 MiB) and a 1-byte coverage map (<= 4 MiB), freed before the next
+piece. A larger piece is written unmerged. On the Ibex layout the export takes
+1.9 s and 214 MiB peak RSS (`rectangles`), against 1.7 s and 214 MiB (`off`). For the pipeline fixture: ~131 + 4,964
 + 101 + 10 + 9 + 24 + 12 + 1 (Sky130). One corner, one thread: the export is a
 single linear pass, O(elements). Expected peak RSS for the fixture < 128 MiB.
 
