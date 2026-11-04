@@ -58,6 +58,14 @@ pub struct ClockConfig {
     /// Requires Hilbert clustering; empty (the default) leaves trees as built.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub regroup_prefixes: Vec<String>,
+    /// Re-place a design that was placed without a seed from its current
+    /// placement: every placed logical cell is seeded at its position, and the
+    /// new (and regrouped) buffers start from their pins' centroid, exactly
+    /// as with an explicit `place --seed` of this revision. The seed is not
+    /// persisted. Off (the default) places the buffered netlist from scratch,
+    /// which repeats the whole global placement.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub seed_from_placement: bool,
 }
 /// Sink grouping policy. Row-major order puts a whole placement row into one
 /// group, so a leaf net can span the die; the Hilbert order keeps consecutive
@@ -760,6 +768,18 @@ pub fn synthesize_with_sdc(
         return Err(fail("place the design before clock synthesis"));
     }
     let positions: Vec<Placed> = snapshot.records().collect();
+    let own_seed = match snapshot.metadata().physical.as_ref() {
+        Some(b)
+            if b.placement_seed.is_none()
+                && b.config
+                    .as_ref()
+                    .and_then(|c| c.clock.as_ref())
+                    .is_some_and(|c| c.seed_from_placement) =>
+        {
+            Some(crate::placement_seed::from_snapshot(&snapshot)?)
+        }
+        _ => None,
+    };
     let (_lock, mut metadata) = snapshot.into_metadata();
     let bundle = metadata
         .physical
@@ -769,6 +789,10 @@ pub fn synthesize_with_sdc(
         return Err(fail(
             "clock tree already exists; reimport to choose a new topology",
         ));
+    }
+    let seeded_here = own_seed.is_some();
+    if let Some(seed) = own_seed {
+        bundle.placement_seed = Some(seed);
     }
     let cfg = bundle
         .config
@@ -1078,6 +1102,9 @@ pub fn synthesize_with_sdc(
     let initial = rustroad_core::place_design_cpu_ref(&metadata.design, limits)?;
     let (records, extra) =
         crate::physical::prepare(&mut metadata.design, bundle, initial.cells, limits)?;
+    if seeded_here {
+        bundle.placement_seed = None;
+    }
     metadata.expansions = initial
         .expansions
         .checked_add(extra)

@@ -377,7 +377,7 @@ impl PhysicalConfig {
         }
         if let Some(TapConfig {
             max_gap,
-            pattern: Some(rustroad_core::tap::TapPattern::Staggered { phase }),
+            pattern: Some(rustroad_core::tap::TapPattern::Staggered { phase, .. }),
             ..
         }) = &self.tap
             && (*max_gap <= 0 || *phase < 0 || phase >= max_gap)

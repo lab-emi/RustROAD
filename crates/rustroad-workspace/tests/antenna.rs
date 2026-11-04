@@ -129,6 +129,7 @@ fn config() -> PhysicalConfig {
             root_at_driver: false,
             clustering: Default::default(),
             regroup_prefixes: Vec::new(),
+            seed_from_placement: false,
         }),
         placer: None,
         io_plan: None,
