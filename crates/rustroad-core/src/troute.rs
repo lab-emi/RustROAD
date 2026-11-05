@@ -35,6 +35,8 @@ mod cycle_repair;
 mod owner_repair;
 #[path = "route_replay.rs"]
 pub(crate) mod replay;
+#[path = "route_straighten.rs"]
+mod straighten;
 
 use crate::route_rules;
 use crate::route_search::{History, Search, State};
@@ -3083,14 +3085,7 @@ impl<'a> Router<'a> {
     /// Is the pad of via `kind` on `layer` at least as long along the given
     /// direction as across it?
     fn pad_along(&self, kind: usize, layer: u32, vertical: bool) -> bool {
-        self.input.vias[kind]
-            .shapes
-            .iter()
-            .filter(|s| s.layer == layer)
-            .all(|s| {
-                let (w, h) = (s.rect.ux - s.rect.lx, s.rect.uy - s.rect.ly);
-                if vertical { h >= w } else { w >= h }
-            })
+        pad_along_kind(self.input, kind, layer, vertical)
     }
 
     fn pad_direction(&self, kind: usize, layer: u32) -> Option<bool> {
@@ -5766,6 +5761,25 @@ pub(crate) fn route_with_prior(
             )?;
             r.guard("via reduction")?;
         }
+        if pass == 0
+            && let Some(cfg) = plan.qor.as_ref().and_then(|q| q.straighten.as_ref())
+        {
+            straighten::straighten(
+                &mut r,
+                cfg,
+                &groups,
+                &plans,
+                straighten::Region {
+                    guides: &guides,
+                    demoted: &demoted,
+                },
+                &mut routed,
+                &mut retained_edges,
+                prior,
+                t0,
+            )?;
+            r.guard("straightening")?;
+        }
         if r.plan
             .qor
             .as_ref()
@@ -5778,7 +5792,24 @@ pub(crate) fn route_with_prior(
         }
         let oriented = r.orient_vias(&mut routed)?;
         trace("orient", t0, format_args!("vias re-picked {oriented}"));
-        let mut out = assemble(&r, &groups, &plans, &routed, input, limits, &via_layers)?;
+        let mut deduped = 0usize;
+        let mut out = assemble(
+            &r,
+            &groups,
+            &plans,
+            &routed,
+            input,
+            limits,
+            &via_layers,
+            &mut deduped,
+        )?;
+        if r.plan.qor.as_ref().is_some_and(|q| q.dedupe_vias) {
+            trace(
+                "dedupe",
+                t0,
+                format_args!("pass {pass} coincident vias removed {deduped}"),
+            );
+        }
         let (work, remaining) = crate::routing::cleanup_report(input, &mut out, limits)?;
         r.guard("rule repair")?;
         trace(
@@ -6304,6 +6335,7 @@ fn covered(r: Rect, by: &[Rect]) -> bool {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn assemble(
     r: &Router<'_>,
     groups: &BTreeMap<u32, Vec<&Terminal>>,
@@ -6312,7 +6344,9 @@ fn assemble(
     input: &RouteInput,
     limits: &RouteLimits,
     via_layers: &[(u32, u32)],
+    deduped: &mut usize,
 ) -> Result<Routes> {
+    let dedupe = r.plan.qor.as_ref().is_some_and(|q| q.dedupe_vias);
     let records = plans.values().try_fold(0usize, |n, p| {
         n.checked_add(p.wires.len())
             .and_then(|n| n.checked_add(p.vias.len()))
@@ -6351,6 +6385,15 @@ fn assemble(
         via_refs.extend(route.vias.iter());
         via_refs.sort_unstable_by_key(|v| (v.kind, v.at));
         via_refs.dedup();
+        if dedupe {
+            *deduped = deduped.saturating_add(dedupe_coincident_vias(
+                input,
+                &mut via_refs,
+                &wire_refs,
+                &mut work,
+                limits.max_comparisons,
+            )?);
+        }
         let net_runs = crate::wire_runs::net_runs(
             &wire_refs,
             &via_refs,
@@ -6389,6 +6432,123 @@ fn assemble(
             single_owner_repair: r.single_owner_stats.clone(),
         },
     })
+}
+
+/// Axis-parallel centre line of `w` contains `p` (a zero-length record has
+/// no axis and contains only its point).
+fn on_wire(w: &Wire, p: [i64; 2]) -> bool {
+    let (lx, ux) = (w.start[0].min(w.end[0]), w.start[0].max(w.end[0]));
+    let (ly, uy) = (w.start[1].min(w.end[1]), w.start[1].max(w.end[1]));
+    (lx == ux || ly == uy) && (lx..=ux).contains(&p[0]) && (ly..=uy).contains(&p[1])
+}
+
+/// `RouteQor::dedupe_vias`: among the vias of one net in `vias` that share a
+/// point and a layer pair (different variants of one cut; identical records
+/// were already removed), keep one and drop the others. The kept variant is
+/// the first, by kind, whose pads are elongated along the net's wires at
+/// that point on each of its two layers where those wires share one axis
+/// (as `orient_vias` picks); without such a variant, the lowest kind. Every
+/// dropped via is redundant: the kept one joins the same two layers at the
+/// same point, and every wire of the net that reached the dropped via ends
+/// at that point. Returns the number of vias dropped. Work: one sort and
+/// one scan of the wires per coincident group, charged.
+fn dedupe_coincident_vias(
+    input: &RouteInput,
+    vias: &mut Vec<&Via>,
+    wires: &[&Wire],
+    work: &mut usize,
+    cap: usize,
+) -> Result<usize> {
+    let pair = |v: &Via| {
+        let k = &input.vias[v.kind as usize];
+        (k.lower, k.upper)
+    };
+    *work = work
+        .checked_add(
+            vias.len()
+                .saturating_mul(vias.len().max(1).ilog2() as usize + 1),
+        )
+        .filter(|&n| n <= cap)
+        .ok_or_else(|| budget("coincident via work"))?;
+    let mut order: Vec<usize> = (0..vias.len()).collect();
+    order.sort_unstable_by_key(|&i| (vias[i].at, pair(vias[i]), vias[i].kind));
+    let mut drop = vec![false; vias.len()];
+    let mut dropped = 0usize;
+    let mut start = 0;
+    while start < order.len() {
+        let key = |i: usize| (vias[i].at, pair(vias[i]));
+        let first = order[start];
+        let mut end = start + 1;
+        while end < order.len() && key(order[end]) == key(first) {
+            end += 1;
+        }
+        if end - start > 1 {
+            let (at, (lower, upper)) = key(first);
+            *work = work
+                .checked_add(wires.len())
+                .filter(|&n| n <= cap)
+                .ok_or_else(|| budget("coincident via work"))?;
+            // Per layer of the pair: the one axis of the wires through `at`,
+            // if they share one.
+            let axis = |layer: u32| -> Option<bool> {
+                let mut found = None;
+                for w in wires.iter().filter(|w| w.layer == layer && on_wire(w, at)) {
+                    if w.start == w.end {
+                        continue;
+                    }
+                    let vertical = w.start[0] == w.end[0];
+                    match found {
+                        None => found = Some(vertical),
+                        Some(v) if v != vertical => return None,
+                        Some(_) => {}
+                    }
+                }
+                found
+            };
+            let wants: Vec<(u32, bool)> = [lower, upper]
+                .into_iter()
+                .filter_map(|l| axis(l).map(|d| (l, d)))
+                .collect();
+            let keep = order[start..end]
+                .iter()
+                .copied()
+                .find(|&i| {
+                    wants
+                        .iter()
+                        .all(|&(l, d)| pad_along_kind(input, vias[i].kind as usize, l, d))
+                })
+                .unwrap_or(first);
+            for &i in &order[start..end] {
+                if i != keep {
+                    drop[i] = true;
+                    dropped += 1;
+                }
+            }
+        }
+        start = end;
+    }
+    if dropped > 0 {
+        let mut i = 0;
+        vias.retain(|_| {
+            let keep = !drop[i];
+            i += 1;
+            keep
+        });
+    }
+    Ok(dropped)
+}
+
+/// Every pad of via `kind` on `layer` is at least as long along the axis
+/// (`vertical`) as across it (`Router::pad_along`).
+fn pad_along_kind(input: &RouteInput, kind: usize, layer: u32, vertical: bool) -> bool {
+    input.vias[kind]
+        .shapes
+        .iter()
+        .filter(|s| s.layer == layer)
+        .all(|s| {
+            let (w, h) = (s.rect.ux - s.rect.lx, s.rect.uy - s.rect.ly);
+            if vertical { h >= w } else { w >= h }
+        })
 }
 
 #[cfg(test)]
@@ -6484,7 +6644,10 @@ mod tests {
             single_owner_repair: None,
             own_pin_index: None,
             instance_index: None,
-            memory_mib: 64,
+            // The runtime guard compares this cap with the whole test
+            // process's peak resident set, which earlier tests of a serial
+            // run raise; 64 MiB left about 2 MiB of headroom.
+            memory_mib: 256,
             max_history_entries: crate::routing::DEFAULT_MAX_HISTORY_ENTRIES,
             area_stacks: false,
             qor: None,
@@ -7130,6 +7293,7 @@ mod tests {
                     &design,
                     &limits,
                     &via_layers,
+                    &mut 0,
                 )
                 .unwrap();
                 output.stats.wire_length_dbu = output
@@ -7663,6 +7827,7 @@ mod tests {
                 &design,
                 &limits,
                 &[(0, 1), (1, 2)],
+                &mut 0,
             )
             .unwrap();
             out.stats.wire_length_dbu = out
@@ -9437,6 +9602,17 @@ mod tests {
             notch_bridge: true,
             strict_wide_cycles: true,
             via_reduction: None,
+            dedupe_vias: true,
+            straighten: Some(crate::routing::Straighten {
+                passes: 2,
+                turn_at_ends: false,
+                reroute: Some(crate::routing::StraightenReroute {
+                    bend_cost: 40,
+                    max_terminals: 8,
+                    net_expansions: 100_000,
+                    weight: 1,
+                }),
+            }),
         });
         let a = route_cpu_ref(&design, &limits()).unwrap();
         let b = route_cpu_ref(&design, &limits()).unwrap();
@@ -9581,6 +9757,514 @@ mod tests {
         assert_eq!(a.patches, b.patches);
         assert_eq!(a.nets, legacy.nets);
         assert!(a.vias.len() <= legacy.vias.len());
+    }
+
+    /// Two Via1 variants of one layer pair: `XY` has its M1 pad along x and
+    /// its M2 pad along y, `YY` both pads along y (the Ibex `Via1_XY_so` /
+    /// `Via1_YY_so` shape classes at fixture scale).
+    fn variant_input() -> RouteInput {
+        let mut design = input(Vec::new(), Vec::new());
+        let variant = |name: &str, m1: Rect| RouteVia {
+            name: name.into(),
+            lower: 0,
+            upper: 1,
+            shapes: vec![
+                LayerRect { layer: 0, rect: m1 },
+                LayerRect {
+                    layer: 3,
+                    rect: rect(-5, -5, 5, 5),
+                },
+                LayerRect {
+                    layer: 1,
+                    rect: rect(-10, -15, 10, 15),
+                },
+            ],
+        };
+        design.vias = vec![
+            variant("V12_YY", rect(-10, -15, 10, 15)),
+            variant("V12_XY", rect(-15, -10, 15, 10)),
+            via("V23", 1, 4, 2),
+        ];
+        design
+    }
+
+    #[test]
+    fn coincident_vias_of_one_layer_pair_keep_the_variant_along_the_wires() {
+        let design = variant_input();
+        let via = |kind: u32, at: [i64; 2]| Via { net: 5, kind, at };
+        let wire = |layer: u32, start: [i64; 2], end: [i64; 2]| Wire {
+            net: 5,
+            layer,
+            start,
+            end,
+        };
+        // The Ibex pattern: M1 runs on both sides of the point, an M2 stub
+        // ending there, both variants at the point; elsewhere one V23 and a
+        // lone V12 that must stay.
+        let vias = [
+            via(0, [100, 100]),
+            via(1, [100, 100]),
+            via(2, [100, 100]),
+            via(0, [300, 100]),
+        ];
+        let wires = [
+            wire(0, [60, 100], [100, 100]),
+            wire(0, [100, 100], [180, 100]),
+            wire(1, [100, 40], [100, 100]),
+        ];
+        let wire_refs: Vec<&Wire> = wires.iter().collect();
+        let mut refs: Vec<&Via> = vias.iter().collect();
+        let mut work = 0;
+        let dropped =
+            dedupe_coincident_vias(&design, &mut refs, &wire_refs, &mut work, usize::MAX).unwrap();
+        assert_eq!(dropped, 1);
+        assert!(work > 0);
+        let kept: Vec<(u32, [i64; 2])> = refs.iter().map(|v| (v.kind, v.at)).collect();
+        assert_eq!(
+            kept,
+            vec![(1, [100, 100]), (2, [100, 100]), (0, [300, 100])]
+        );
+        // Wires that agree with no variant (M1 along y): the lowest kind.
+        let wires = [
+            wire(0, [100, 60], [100, 100]),
+            wire(0, [100, 100], [140, 100]),
+        ];
+        let wire_refs: Vec<&Wire> = wires.iter().collect();
+        let mut refs: Vec<&Via> = vias[..2].iter().collect();
+        assert_eq!(
+            dedupe_coincident_vias(&design, &mut refs, &wire_refs, &mut work, usize::MAX).unwrap(),
+            1
+        );
+        assert_eq!(refs[0].kind, 0);
+        // The work is charged against the comparison budget.
+        let mut refs: Vec<&Via> = vias.iter().collect();
+        let mut work = 0;
+        assert!(dedupe_coincident_vias(&design, &mut refs, &wire_refs, &mut work, 1).is_err());
+    }
+
+    #[test]
+    fn coincident_via_dedupe_is_off_by_default_and_never_changes_a_clean_route() {
+        // Every route of the crossing fixture is the same with and without the
+        // dedupe (it holds no coincident pair), and the control serializes to
+        // nothing when off.
+        let legacy = crossing_nets();
+        let mut on = crossing_nets();
+        on.tracks.as_mut().unwrap().qor = Some(crate::routing::RouteQor {
+            dedupe_vias: true,
+            ..Default::default()
+        });
+        let a = route_cpu_ref(&legacy, &limits()).unwrap();
+        let b = route_cpu_ref(&on, &limits()).unwrap();
+        assert_eq!(a.wires, b.wires);
+        assert_eq!(a.vias, b.vias);
+        assert_eq!(a.patches, b.patches);
+        assert_eq!(
+            serde_json::to_string(&crate::routing::RouteQor::default()).unwrap(),
+            "{}"
+        );
+    }
+
+    /// Straighten a five-run M2 staircase of a two-pin net (written into the
+    /// router as negotiated repair can leave one) with an optional fixed
+    /// M2 blockage of another net; returns the routed net's wires and vias
+    /// after the pass, its tally and the validated output.
+    fn straighten_staircase(
+        blockers: &[Rect],
+        turn_at_ends: bool,
+    ) -> (Vec<Wire>, Vec<Via>, straighten::StraightenTally, Routes) {
+        straighten_staircase_with(blockers, turn_at_ends, None)
+    }
+    fn straighten_staircase_with(
+        blockers: &[Rect],
+        turn_at_ends: bool,
+        reroute: Option<crate::routing::StraightenReroute>,
+    ) -> (Vec<Wire>, Vec<Via>, straighten::StraightenTally, Routes) {
+        let obstacles = blockers
+            .iter()
+            .map(|&rect| Blockage {
+                layer: 1,
+                rect,
+                net: Some(9),
+            })
+            .collect();
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(650, 610, 670, 630)),
+            ],
+            obstacles,
+        );
+        let cfg = crate::routing::Straighten {
+            passes: 2,
+            turn_at_ends,
+            reroute,
+        };
+        {
+            let plan = design.tracks.as_mut().unwrap();
+            plan.routing_layers = Some([1, 1]);
+            plan.wrong_way_factor = 1;
+            plan.qor = Some(crate::routing::RouteQor {
+                straighten: Some(cfg.clone()),
+                ..Default::default()
+            });
+        }
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(&design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let mut router = Router::prepared(&design, &limits, graph, cells).unwrap();
+        let terminals: Vec<&Terminal> = design.terminals.iter().collect();
+        let plans = router.reserve(&terminals).unwrap();
+        let a = router.graph.point(plans[&0].top).1;
+        let b = router.graph.point(plans[&1].top).1;
+        assert_eq!(
+            (a, b),
+            ([100, 100], [660, 620]),
+            "escape tops of the fixture"
+        );
+        let points = [a, [100, 260], [380, 260], [380, 460], [660, 460], b];
+        let mut route = NetRoute::default();
+        for p in points.windows(2) {
+            let w = Wire {
+                net: 0,
+                layer: 1,
+                start: p[0],
+                end: p[1],
+            };
+            let rect = router.edge_rect(1, w.start, w.end, 0).unwrap();
+            route.shapes.push(
+                router
+                    .spatial
+                    .add_routed(Blockage {
+                        layer: 1,
+                        rect,
+                        net: Some(0),
+                    })
+                    .unwrap(),
+            );
+            route.wires.push(w);
+        }
+        let old_length = route_length(&route);
+        let mut retained = route.segments();
+        let mut routed = BTreeMap::from([(0, route)]);
+        let groups = BTreeMap::from([(0, terminals)]);
+        let guides = BTreeMap::from([(0, (0..router.cells.len() as u32).collect::<Vec<_>>())]);
+        straighten::straighten(
+            &mut router,
+            &cfg,
+            &groups,
+            &plans,
+            straighten::Region {
+                guides: &guides,
+                demoted: &BTreeMap::new(),
+            },
+            &mut routed,
+            &mut retained,
+            None,
+            std::time::Instant::now(),
+        )
+        .unwrap();
+        let tally = straighten::TALLY.with(|t| t.get()).unwrap();
+        let route = &routed[&0];
+        assert_eq!(retained, route.segments());
+        assert!(route_length(route) <= old_length);
+        assert!(route.vias.is_empty(), "the pass never adds a via");
+        let via_layers: Vec<(u32, u32)> = design.vias.iter().map(|v| (v.lower, v.upper)).collect();
+        let mut out = assemble(
+            &router,
+            &groups,
+            &plans,
+            &routed,
+            &design,
+            &limits,
+            &via_layers,
+            &mut 0,
+        )
+        .unwrap();
+        crate::routing::cleanup_report(&design, &mut out, &limits).unwrap();
+        out.stats.wire_length_dbu = out
+            .wires
+            .iter()
+            .map(|w| w.start[0].abs_diff(w.end[0]) + w.start[1].abs_diff(w.end[1]))
+            .sum();
+        validate(&design, &out, &limits).unwrap();
+        (route.wires.clone(), route.vias.clone(), tally, out)
+    }
+
+    #[test]
+    fn straightening_turns_a_staircase_into_a_z_on_its_own_corner_row() {
+        let (wires, vias, tally, out) = straighten_staircase(&[], false);
+        let mut runs: Vec<_> = wires.iter().map(|w| (w.start, w.end)).collect();
+        runs.sort_unstable();
+        assert_eq!(
+            runs,
+            vec![
+                ([100, 100], [100, 260]),
+                ([100, 260], [660, 260]),
+                ([660, 260], [660, 620]),
+            ]
+        );
+        assert!(vias.is_empty());
+        assert_eq!(
+            (
+                tally.chains,
+                tally.kept,
+                tally.nets,
+                tally.runs_removed,
+                tally.length_removed
+            ),
+            (2, 1, 1, 2, 0),
+            "the second pass sees the Z as a chain without a shorter candidate"
+        );
+        // Turning at the ends: the L that keeps the driver end's axis.
+        let (turned, _, tally, _) = straighten_staircase(&[], true);
+        let mut runs: Vec<_> = turned.iter().map(|w| (w.start, w.end)).collect();
+        runs.sort_unstable();
+        assert_eq!(
+            runs,
+            vec![([100, 100], [100, 620]), ([100, 620], [660, 620])]
+        );
+        assert_eq!((tally.kept, tally.runs_removed), (1, 3));
+        // Deterministic.
+        let (again, _, _, out2) = straighten_staircase(&[], false);
+        assert_eq!(again, wires);
+        assert_eq!(out.wires, out2.wires);
+        assert_eq!(out.vias, out2.vias);
+        assert_eq!(out.patches, out2.patches);
+    }
+
+    #[test]
+    fn straightening_reroute_replaces_a_staircase_by_a_bend_priced_search() {
+        // The bend-priced re-route rips the staircase up and searches again
+        // (M2 only, so no via can appear): the L has fewer runs at the same
+        // length and is kept before any geometric rewrite is needed.
+        let reroute = crate::routing::StraightenReroute {
+            bend_cost: 40,
+            max_terminals: 8,
+            net_expansions: 100_000,
+            weight: 1,
+        };
+        let (wires, vias, tally, out) =
+            straighten_staircase_with(&[], false, Some(reroute.clone()));
+        assert!(vias.is_empty());
+        assert_eq!(wires.len(), 2, "{wires:?}");
+        assert_eq!(
+            (tally.rerouted, tally.reroute_kept, tally.reroute_runs),
+            (1, 1, 3)
+        );
+        assert_eq!(tally.kept, 0, "nothing left for the rewrites");
+        assert!(out.wires.iter().all(|w| w.net == 0));
+        // A re-route capped at one expansion keeps the staircase, which the
+        // rewrites then turn into the Z.
+        let (wires, _, tally, _) = straighten_staircase_with(
+            &[],
+            false,
+            Some(crate::routing::StraightenReroute {
+                net_expansions: 1,
+                ..reroute
+            }),
+        );
+        assert_eq!(
+            (tally.rerouted, tally.reroute_kept, tally.reroute_limited),
+            (1, 0, 1)
+        );
+        assert_eq!((wires.len(), tally.kept), (3, 1));
+    }
+
+    #[test]
+    fn straightening_chains_stop_at_junctions_and_skip_runs_that_meet_escapes_inside() {
+        let design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(650, 450, 670, 470)),
+            ],
+            Vec::new(),
+        );
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(&design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let mut router = Router::prepared(&design, &limits, graph, cells).unwrap();
+        let wire = |a: [i64; 2], b: [i64; 2]| Wire {
+            net: 0,
+            layer: 1,
+            start: a,
+            end: b,
+        };
+        // V H V H between two vias, then a stub past the second via.
+        let wires = vec![
+            wire([100, 100], [100, 260]),
+            wire([100, 260], [380, 260]),
+            wire([380, 260], [380, 460]),
+            wire([380, 460], [660, 460]),
+            wire([660, 460], [700, 460]),
+        ];
+        let vias = vec![
+            Via {
+                net: 0,
+                kind: 0,
+                at: [100, 100],
+            },
+            Via {
+                net: 0,
+                kind: 0,
+                at: [660, 460],
+            },
+        ];
+        let none = straighten::Fixed {
+            plan_wires: Vec::new(),
+            plan_vias: Vec::new(),
+            access: Vec::new(),
+            pins: Vec::new(),
+        };
+        let chains = router.chains(&wires, &vias, &none).unwrap();
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].wires, vec![0, 1, 2, 3]);
+        assert_eq!(chains[0].points.first(), Some(&[100, 100]));
+        assert_eq!(chains[0].points.last(), Some(&[660, 460]));
+        // An escape wire ending inside the second run joins the net there
+        // (the run is not split at it): that chain is left alone.
+        let escape = wire([240, 100], [240, 260]);
+        let pinned = straighten::Fixed {
+            plan_wires: vec![&escape],
+            ..none
+        };
+        assert!(router.chains(&wires, &vias, &pinned).unwrap().is_empty());
+        // Ending at a corner instead makes the corner a junction: the chain
+        // then starts there.
+        let at_corner = wire([100, 260], [40, 260]);
+        let split = straighten::Fixed {
+            plan_wires: vec![&at_corner],
+            plan_vias: Vec::new(),
+            access: Vec::new(),
+            pins: Vec::new(),
+        };
+        let chains = router.chains(&wires, &vias, &split).unwrap();
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].wires, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn straightening_skips_a_candidate_another_nets_metal_blocks() {
+        // Net 9's fixed M2 metal on the first candidate's middle row (y 260):
+        // the second candidate (row 460) is taken; the old staircase is clear.
+        let (wires, _, tally, out) = straighten_staircase(&[rect(530, 250, 550, 270)], false);
+        let mut runs: Vec<_> = wires.iter().map(|w| (w.start, w.end)).collect();
+        runs.sort_unstable();
+        assert_eq!(
+            runs,
+            vec![
+                ([100, 100], [100, 460]),
+                ([100, 460], [660, 460]),
+                ([660, 460], [660, 620]),
+            ]
+        );
+        assert_eq!((tally.kept, tally.blocked), (1, 1));
+        assert!(out.wires.iter().all(|w| w.net == 0));
+        // Both corner rows blocked: the minimum-bend search finds the Z on
+        // another stop row clear of the blockage.
+        let blocker = rect(530, 250, 550, 470);
+        let (wires, _, tally, out) = straighten_staircase(&[blocker], false);
+        assert_eq!(wires.len(), 3);
+        // The second pass sees the Z (three runs, both ends along y): no
+        // shorter path exists, so it is not searched again.
+        assert_eq!(
+            (tally.kept, tally.blocked, tally.searched, tally.found),
+            (1, 2, 1, 1)
+        );
+        assert!(wires.iter().all(|w| {
+            let r = wire_rect(w, 20).unwrap();
+            r.ux + 20 <= blocker.lx
+                || r.lx >= blocker.ux + 20
+                || r.uy + 20 <= blocker.ly
+                || r.ly >= blocker.uy + 20
+        }));
+        assert!(out.wires.iter().all(|w| w.net == 0));
+        // Metal above-left and below-right of the staircase (each 40 DBU from
+        // it): every monotone path that keeps both end axes has five runs, so
+        // the staircase stays.
+        let walls = [rect(150, 310, 330, 640), rect(430, 80, 610, 410)];
+        let (wires, _, tally, _) = straighten_staircase(&walls, false);
+        assert_eq!(wires.len(), 5);
+        assert_eq!((tally.kept, tally.found), (0, 1));
+    }
+
+    #[test]
+    fn straightening_and_dedupe_are_off_by_default_and_reject_out_of_range_passes() {
+        assert_eq!(crate::routing::RouteQor::default().straighten, None);
+        assert!(!crate::routing::RouteQor::default().dedupe_vias);
+        for bad in [
+            crate::routing::StraightenReroute {
+                bend_cost: 0,
+                max_terminals: 10,
+                net_expansions: 1,
+                weight: 1,
+            },
+            crate::routing::StraightenReroute {
+                bend_cost: 1,
+                max_terminals: 1,
+                net_expansions: 1,
+                weight: 1,
+            },
+            crate::routing::StraightenReroute {
+                bend_cost: 1,
+                max_terminals: 10,
+                net_expansions: 0,
+                weight: 1,
+            },
+            crate::routing::StraightenReroute {
+                bend_cost: 1,
+                max_terminals: 10,
+                net_expansions: 1,
+                weight: 17,
+            },
+        ] {
+            let qor = crate::routing::RouteQor {
+                straighten: Some(crate::routing::Straighten {
+                    passes: 1,
+                    turn_at_ends: false,
+                    reroute: Some(bad.clone()),
+                }),
+                ..Default::default()
+            };
+            assert!(qor.validate(5).is_err(), "{bad:?}");
+        }
+        for passes in [0, 5] {
+            let qor = crate::routing::RouteQor {
+                straighten: Some(crate::routing::Straighten {
+                    passes,
+                    turn_at_ends: false,
+                    reroute: None,
+                }),
+                ..Default::default()
+            };
+            assert!(qor.validate(5).is_err(), "passes {passes}");
+        }
+        let qor = crate::routing::RouteQor {
+            straighten: Some(crate::routing::Straighten {
+                passes: 4,
+                turn_at_ends: true,
+                reroute: Some(crate::routing::StraightenReroute {
+                    bend_cost: 420,
+                    max_terminals: 10,
+                    net_expansions: 10_000,
+                    weight: 1,
+                }),
+            }),
+            ..Default::default()
+        };
+        qor.validate(5).unwrap();
+        // On the crossing fixture the pass keeps every via, never adds wire
+        // and the result validates.
+        let legacy = crossing_nets();
+        let mut on = crossing_nets();
+        on.tracks.as_mut().unwrap().qor = Some(qor);
+        let a = route_cpu_ref(&legacy, &limits()).unwrap();
+        let b = route_cpu_ref(&on, &limits()).unwrap();
+        crate::routing::validate(&on, &b, &limits()).unwrap();
+        assert_eq!(a.vias.len(), b.vias.len());
+        assert!(route_length_of(&b) <= route_length_of(&a));
+        assert!(b.wires.len() <= a.wires.len());
     }
 
     #[test]

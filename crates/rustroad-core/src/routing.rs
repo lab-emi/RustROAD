@@ -499,6 +499,140 @@ pub struct RouteQor {
     /// `ViaReduction`). `None` keeps the routes of the repair loop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub via_reduction: Option<ViaReduction>,
+    /// Same-net vias of one layer pair at one point are written once. Two
+    /// pin escapes of one net can land on the same escape top with
+    /// different variants of one via (net-aware access puts a pin's escape
+    /// on its neighbour's), and a searched route can stack a via on its own
+    /// escape via that `orient_vias` then re-picks; the output held both
+    /// (24 nets on Ibex: `Via1_YY_so` and `Via1_XY_so` at one point). Either
+    /// via makes the connection, and a reader may put the pair in series.
+    /// The output keeps the variant whose pads lie along the net's wires at
+    /// that point (as `orient_vias` picks), else the lowest kind; cleanup and
+    /// the rule passes then run on the result as usual. Routing decisions
+    /// are unchanged: only the redundant output record goes.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dedupe_vias: bool,
+    /// Post-route topology cleanup (`Straighten`): same-layer staircases and
+    /// zigzags of a routed net become straighter same-net geometry where
+    /// that is clear of every other net and adds no same-net rule
+    /// violation. `None` keeps the routes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub straighten: Option<Straighten>,
+}
+
+/// Post-route topology cleanup of the track router (`RouteQor::straighten`).
+///
+/// After negotiated repair and the via reduction (first rule pass only),
+/// every routed net is examined on each routing layer for *chains*: maximal
+/// sequences of its routed runs joined at plain corners (exactly two runs
+/// meet, no via lands, no pin access point, no escape metal, no pin shape and
+/// no other run of the net there). A chain of at least three runs between
+/// its two end junctions (vias, branches, escapes) is a staircase
+/// (monotone) or a zigzag. It is replaced by the first legal candidate with
+/// fewer runs: the straight run, an L, a Z whose middle leg lies on one of
+/// the chain's own corner lines, and then the minimum-bend shortest path
+/// over the layer's track grid inside the box of the two junctions. Without
+/// `turn_at_ends` every candidate leaves both junctions along the axis the
+/// chain used there, so via pads and escapes see the same arrival direction.
+///
+/// Every candidate is a shortest rectilinear path between the junctions, so
+/// the wire length never grows; vias are never touched, so the via count is
+/// identical. A candidate is legal when every new run is clear of the metal
+/// of every other net, fixed geometry and cell obstructions (the clearance
+/// probe the searches use for a wire step) and of the wide-metal spacing of
+/// any other net's shape that is wide on its own; touches same-net metal only
+/// where the chain's end runs touched it at its two end junctions (no new
+/// branch, no loop, no more overlap of its own pins); and the net's same-net
+/// rule check on that layer (`route_rules`: notches, necks, holes, minimum
+/// area) finds no violation the old geometry did not have. The net's new
+/// geometry must also pass the endpoint connectivity check of `validate`
+/// (else the net keeps its route). Cleanup and the rule-repair passes then
+/// run as usual.
+///
+/// Among the rectilinear shortest paths between two points, the ones with
+/// the fewest bends are the minimum-bend shortest paths (C. D. Yang,
+/// D. T. Lee and C. K. Wong, "Rectilinear path problems among rectilinear
+/// obstacles revisited", SIAM J. Comput. 24(3), 1995); a staircase is a
+/// shortest path with the most bends. Here the cleanup rewrites each chain
+/// into a fewer-bend path that the router's own clearance and same-net rule
+/// checks accept, against the fixed metal of all other nets; the search is a
+/// dynamic programme over the monotone grid of the box (arrival axis as
+/// state). Deterministic: nets in id order, chains in run order, candidates
+/// in a fixed order. In an ECO route (prior routes), a net that still holds
+/// its prior geometry is left as it is, like the via reduction.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Straighten {
+    /// Passes over the routed nets (1..=4); a pass that changes nothing ends
+    /// the cleanup.
+    pub passes: usize,
+    /// Also try candidates that leave an end junction along the other axis
+    /// (both Ls of a staircase whose ends share an axis, and the straight
+    /// run of a U turn), after those that keep both end axes among
+    /// candidates with as few runs. The router's own searches arrive at
+    /// vias and escapes along either axis; `orient_vias` then re-picks a
+    /// routed via's variant along its wire where another net allows it.
+    /// Off keeps both end axes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub turn_at_ends: bool,
+    /// Before the rewrites, re-route each net that still holds a chain of
+    /// three or more runs, alone against the fixed metal of all others, with
+    /// a bend surcharge in the search (`StraightenReroute`); the new route is
+    /// kept only when it has fewer runs, no more routed vias and no more
+    /// wire. `None` skips the re-route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reroute: Option<StraightenReroute>,
+}
+impl Straighten {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !(1..=4).contains(&self.passes) {
+            return Err(invalid("track router straightening"));
+        }
+        if let Some(reroute) = &self.reroute {
+            reroute.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// Bend-priced single-net re-route of `Straighten` (the via-reduction
+/// machinery with another price and acceptance test): each candidate net (at
+/// most `max_terminals` terminals, at least one chain of three or more runs),
+/// in order of decreasing chain runs then net id, is ripped up and searched
+/// again as a hard (non-rip-up) search in its global guide grown by the
+/// plan's `expand_margin`, with every other net's metal fixed, a surcharge of
+/// `bend_cost` on every same-layer turn and weight `weight`, capped at
+/// `net_expansions` expansions. The new route is kept only when it has fewer
+/// runs (the routed records split at junctions), no more routed vias and no
+/// more wire; otherwise the old route's index shapes are restored unchanged.
+/// The bend surcharge depends on the step that reached a node (search states
+/// are nodes), so the search is a heuristic for fewer bends, not an exact
+/// minimum; the acceptance test makes every kept change an improvement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StraightenReroute {
+    /// Surcharge (DBU-equivalent) of a same-layer turn during the re-route
+    /// (1..=2^20).
+    pub bend_cost: u64,
+    /// Nets with more terminals keep their route (2..=4096).
+    pub max_terminals: usize,
+    /// Search expansions one net's re-route may use (1..=10^8).
+    pub net_expansions: usize,
+    /// Priority weight of the re-route searches (1..=16, default 1).
+    #[serde(default = "one_u64")]
+    pub weight: u64,
+}
+impl StraightenReroute {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !(1..=1 << 20).contains(&self.bend_cost)
+            || !(2..=4096).contains(&self.max_terminals)
+            || !(1..=100_000_000).contains(&self.net_expansions)
+            || !(1..=16).contains(&self.weight)
+        {
+            return Err(invalid("track router straightening re-route"));
+        }
+        Ok(())
+    }
 }
 
 /// Post-route via reduction of the track router (`RouteQor::via_reduction`).
@@ -626,6 +760,9 @@ impl RouteQor {
         }
         if let Some(reduction) = &self.via_reduction {
             reduction.validate()?;
+        }
+        if let Some(straighten) = &self.straighten {
+            straighten.validate()?;
         }
         Ok(())
     }
@@ -2505,6 +2642,80 @@ impl<'a> Spatial<'a> {
             None => return Ok(None),
         }
         Ok(Some(near))
+    }
+    /// Wide-metal spacing of new metal `rect` of `net` on `layer` against
+    /// every stored or cell shape of another net (or of no net) that is wide
+    /// on its own: both sides at least `rule.width`. Such a shape closer than
+    /// `rule.spacing` across a parallel run of at least `rule.parallel_run`
+    /// (the projections overlap that much) blocks; `rect` itself is never
+    /// wide here (a routing wire). Wide parts made of several shapes are
+    /// left to the rule check after cleanup, which sees the merged metal.
+    /// Used by the track router's straightening; the searches do not test
+    /// this rule.
+    pub(crate) fn wide_clear(
+        &mut self,
+        layer: u32,
+        rect: Rect,
+        net: u32,
+        rule: WideSpacing,
+    ) -> Result<bool> {
+        let query = expand(rect, rule.spacing)?;
+        let blocks = |b: &Rect| -> bool {
+            if b.ux - b.lx < rule.width || b.uy - b.ly < rule.width {
+                return false;
+            }
+            let gap_x = (b.lx - rect.ux).max(rect.lx - b.ux);
+            let gap_y = (b.ly - rect.uy).max(rect.ly - b.uy);
+            let run_x = rect.ux.min(b.ux) - rect.lx.max(b.lx);
+            let run_y = rect.uy.min(b.uy) - rect.ly.max(b.ly);
+            (gap_x < rule.spacing && gap_y < 0 && run_y >= rule.parallel_run)
+                || (gap_y < rule.spacing && gap_x < 0 && run_x >= rule.parallel_run)
+        };
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| budget("routing query generation"))?;
+        let (x0, x1, y0, y1) = (
+            query.lx.div_euclid(self.bin),
+            query.ux.div_euclid(self.bin),
+            query.ly.div_euclid(self.bin),
+            query.uy.div_euclid(self.bin),
+        );
+        let bins = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        if bins > self.limits.max_bin_entries as i128 {
+            return Err(budget("routing query extent"));
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                self.work += 1;
+                if self.work > self.limits.max_comparisons {
+                    return Err(budget("routing comparison limit"));
+                }
+                for id in self.bins.iter(layer, x, y) {
+                    if self.marks[id] == self.generation {
+                        continue;
+                    }
+                    self.marks[id] = self.generation;
+                    self.work += 1;
+                    if self.work > self.limits.max_comparisons {
+                        return Err(budget("routing comparison limit"));
+                    }
+                    if !self.alive(id) {
+                        continue;
+                    }
+                    let b = self.shape(id);
+                    if b.net != Some(net) && overlap(query, b.rect) && blocks(&b.rect) {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        let Some(instances) = &mut self.instances else {
+            return Ok(true);
+        };
+        instances.visit(layer, query, &mut self.work, self.limits, |b| {
+            Ok(b.net == Some(net) || !blocks(&b.rect))
+        })
     }
     pub(crate) fn via_clear(&mut self, kind: usize, at: [i64; 2], net: u32) -> Result<bool> {
         Ok(self.via_probe(kind, at, net)?.is_some())

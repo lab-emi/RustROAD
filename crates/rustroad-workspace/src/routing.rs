@@ -180,6 +180,14 @@ pub struct RouteQorConfig {
     /// omitted keeps the routes of the repair loop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub via_reduction: Option<rustroad_core::routing::ViaReduction>,
+    /// Same-net vias of one layer pair at one point are written once
+    /// (`rustroad_core::routing::RouteQor::dedupe_vias`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dedupe_vias: bool,
+    /// Post-route topology cleanup (`rustroad_core::routing::Straighten`);
+    /// omitted keeps the routes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub straighten: Option<rustroad_core::routing::Straighten>,
 }
 fn is_zero(value: &u64) -> bool {
     *value == 0
@@ -1494,6 +1502,8 @@ fn route_qor(
         notch_bridge: config.notch_bridge,
         strict_wide_cycles: config.strict_wide_cycles,
         via_reduction: config.via_reduction.clone(),
+        dedupe_vias: config.dedupe_vias,
+        straighten: config.straighten.clone(),
     })
 }
 /// Relative (origin 0,0) pin and same-master other-net geometry of one
@@ -2450,6 +2460,44 @@ mod qor_config_tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn via_dedupe_and_straightening_parse_and_default_off() {
+        let off: RouteQorConfig = serde_json::from_str(r#"{"notch_bridge": true}"#).unwrap();
+        let resolved = route_qor(&off, &layers()).unwrap();
+        assert!(!resolved.dedupe_vias);
+        assert_eq!(resolved.straighten, None);
+        // Off: the resolved controls serialize exactly as before.
+        assert_eq!(
+            serde_json::to_string(&resolved).unwrap(),
+            r#"{"notch_bridge":true}"#
+        );
+        let on: RouteQorConfig =
+            serde_json::from_str(r#"{"dedupe_vias": true, "straighten": {"passes": 2}}"#).unwrap();
+        let resolved = route_qor(&on, &layers()).unwrap();
+        assert!(resolved.dedupe_vias);
+        assert_eq!(
+            resolved.straighten,
+            Some(rustroad_core::routing::Straighten {
+                passes: 2,
+                turn_at_ends: false,
+                reroute: None
+            })
+        );
+        assert!(
+            serde_json::from_str::<RouteQorConfig>(r#"{"straighten": {"passes": 1, "bogus": 1}}"#)
+                .is_err()
+        );
+        assert!(serde_json::from_str::<RouteQorConfig>(r#"{"straighten": {}}"#).is_err());
+        let rerouted: RouteQorConfig = serde_json::from_str(
+            r#"{"straighten": {"passes": 1, "turn_at_ends": true, "reroute": {"bend_cost": 420,
+                "max_terminals": 10, "net_expansions": 10000}}}"#,
+        )
+        .unwrap();
+        let s = route_qor(&rerouted, &layers()).unwrap().straighten.unwrap();
+        assert!(s.turn_at_ends);
+        assert_eq!(s.reroute.unwrap().weight, 1);
     }
 }
 
