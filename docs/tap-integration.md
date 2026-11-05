@@ -94,6 +94,43 @@ inventories and their missing-tie negative controls. Neither deck name alone
 establishes both rule scopes. No full-flow or default promotion follows from
 planner tests or a component placement replay.
 
+### Row-pair wells stay separate
+
+Each `N`/`FS` row pair shares one NWell strip, and the taps of that pair bias
+it. RustROAD does not join the strips to each other. A GDS-export variant that
+did (an NWell spine just outside one core side, with a stub to every strip that
+reaches that side) was evaluated on the IHP Ibex layout and removed again
+(commit `e106b5d`):
+
+1. **It weakens the geometric latch-up certificate.** `tap_coverage.py` takes
+   each merged NWell polygon as one domain and accepts any contacted n-tie of
+   that domain within 20 µm straight-line L1 distance. Once the strips form one
+   comb, the ties of the neighbouring strips, 6.72 µm away across the
+   p-substrate gap, certify a strip that has none. With the n-tie contacts of
+   all 54 taps of one full-width strip removed, the certificate passed the
+   bridged copy and failed the unbridged copy (32 uncertified boxes, its report
+   cap). The IHP LU.a definition grows the ties inside the NWell
+   (`ext_enlarge_inside`), so that strip violates it in both copies.
+2. **Its speed-up came from certifying less.** The certificate ran faster on
+   the bridged layout (109 LU.a domains with targets instead of 251) only
+   because it then certified 143 strips as one domain.
+3. **It had no measured electrical benefit.** Each stub touched only the
+   0.205 µm well overhang of its strip's edge WELLTAP, so a strip that loses
+   that tap is cut off from the spine again, and the 0.84 µm wide, 956 µm long
+   spine is a high-resistance path next to a tap. NW.b (minimum NWell space or
+   notch of the same net, 0.62 µm) concerns wells closer than 0.62 µm; the
+   strips are 2.92 µm apart.
+
+For the record, the certificate's run time depends on the domain shapes: in
+single diagnostic runs its per-domain intersection took roughly 80 ms for a
+notched (non-rectangular) domain and about 2 ms for a rectangle. On the Ibex
+layout 71 of the 251 LU.a domains are notched (24 of 197 on the LibreLane
+reference layout). The notches belong to six masters placed 1,599 times,
+mostly the mux-input reset flop `DFFMRQX2` (1,344), whose N+ diffusion lies
+closer than NW.d (0.31 µm) to the notch, so the notch cannot be filled. That
+cost follows from cell selection in synthesis, not from the well geometry
+RustROAD draws.
+
 ## Independent physical verification
 
 `verify_taps.py` invokes pinned OpenROAD/OpenDB as an external process to read
