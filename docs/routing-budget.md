@@ -322,7 +322,7 @@ replay of the legacy Metal3-access configuration (no `qor`) writes a
 | `notch_bridge` | Same-net notch repair for facing shapes: cleanup's bridges try the stair bridge and bars clipped to two widths past the gap before the legacy full-length bars, and a notch that repeats after a re-route with every fill blocked gets a reserved fill (repair rung 5 below). Off keeps the legacy bars and repair. Needed with `access_layer` Metal2 on Ibex. |
 | `strict_wide_cycles` | The bounded detail-cycle cut of rule repair (rung 3 below) also runs for an owner whose strict re-route succeeded, before the halos, from the second sighting of a wide pair, at most three cuts per wide region (`MAX_REGION_CUTS`), and several cuts can happen in one pass. Off keeps the cut for relaxed owners only, once per net, after both halos. |
 | `via_reduction` | Post-route via reduction (section below). Omitted keeps the routes of the repair loop. |
-| `dedupe_vias` | Same-net vias of one layer pair at one point (different variants of one cut) are written once (section below). Routing decisions are unchanged. |
+| `dedupe_vias` | One via per net, layer pair and point: the pin escapes of a net that land vias at one point share one right after pin access, and the output writes one (section below). |
 | `straighten` | Post-route topology cleanup: same-layer staircases and zigzags become straighter same-net geometry where the clearance and same-net rule checks allow (section below). Omitted keeps the routes. |
 
 #### Post-route via reduction (`track_router.qor.via_reduction`)
@@ -449,9 +449,10 @@ via pairs: two Via1 instances of different variants (`Via1_YY_so` and
 connection. In the previous configuration's DEF OpenRCX puts both in
 series on 10 of these nets, 40 ohm more on one driver-to-sink path than
 their continuous Metal1 (`docs/extraction.md`, "Oracles"); on `n9210`,
-with either via removed, it does not. `dedupe_vias` drops the redundant
-via (24 fewer vias; a geometry change, so rule repair and the signoff
-checks run on it again; "Coincident same-net vias" below).
+with either via removed, it does not. Both vias of each pair are pin-access
+escape vias; `dedupe_vias` keeps one of them right after pin access (a
+geometry change, so rule repair and the signoff checks run on it again;
+"Coincident same-net vias" below).
 
 Rule repair converges in 3 passes on this placement with both the previous
 configuration and the recipe (17, 6, 0 and 48, 13, 0 remaining violations;
@@ -497,39 +498,54 @@ is not guaranteed to find the cheapest path.
 Both native Ibex DEFs of 2026-11-04 (phys configuration and recipe) hold 24
 nets with two Via1 instances of different variants (`Via1_YY_so` and
 `Via1_XY_so`) at one point, written between two Metal1 runs with a Metal2
-stub ending there: two records of one cut at one escape top, which
-`assemble` wrote both because it removed identical records only. Two paths
-of the router can make such a pair (which one made each Ibex pair was not
-traced; the fix below covers both): with `net_aware_access` a pin's escape
-is pulled onto its neighbour's top, so two escapes of one net can land on
-the same point, each with the variant its own pin access picked; and a
-searched route can stack a via on its own escape via (same kind and place,
-which `assemble` already writes once) that `orient_vias` then re-picks to
-another variant along the route's wire. Either via makes the connection; OpenRCX put the pair in series on
-10 of these nets (40 ohm on one driver-to-sink path, `docs/extraction.md`).
+stub ending there. A traced replay of the final configuration's `be_route`
+input (each such group listed with the origin of every via) shows where all
+24 come from: pin access. In each, two pins of one net lie on one Metal1 row,
+and `net_aware_access` pulls each pin's escape towards the other's: both
+escapes run on Metal1 to the same via point between the pins and up one
+Metal2 stub to a shared top 840 DBU away, each through the variant its own
+access search picked. Both vias are escape records: none is a routed via,
+and neither is at its escape's top. On 8 of the nets (two terminals) the
+route itself is empty, because both escapes end on the same top. `assemble`
+removed identical records only, so it wrote both. Either via makes the
+connection; OpenRCX put the pair in series on 10 of these nets (40 ohm on one
+driver-to-sink path, `docs/extraction.md`).
 
-With `dedupe_vias`, `assemble` keeps one via per (net, layer pair, point):
-the first variant, by kind, whose pads lie along the net's wires through
+With `dedupe_vias`, the escapes of one net share one via per layer pair and
+point right after pin access, before any search (`share_escape_vias`): the
+first variant, by kind, whose pads lie along the net's escape wires through
 that point on each of its two layers where those wires share an axis (the
-`orient_vias` rule), else the lowest kind. Every dropped via is redundant:
-the kept one joins the same layers at the same point, and every wire that
-reached the dropped one ends there. Routing decisions, the search index and
-every other record are unchanged; cleanup, the rule passes and `validate`
-run on the result as usual. On the Ibex `be_route` input (route replay of
-the final configuration) the trace reports 24 vias removed in each rule
-pass, the exported DEF has no coincident pair left, and the route
-validates. Exactly these 24 nets change, with 32 fewer Via1 (53,271 to
-53,239): on 8 of them the pair had joined the same two points twice, a loop
-that kept the Metal2 stub at the escape top alive; with one via left, that
-via and stub lead to no access point, and cleanup's dead-end pruning
-removes them, so the net becomes one Metal1 run (on `n9210` the DEF entry
-shrinks from two Metal1 segments, both vias, the stub and a patch to a
-single Metal1 segment).
+`orient_vias` rule), else the lowest kind, stays in the first plan (terminal
+order) that holds it, and every other via of the group leaves its plan
+together with its pads in the search index. So the searches, rule repair and
+the output all see one via, and the index matches what is written. A pair at
+an escape's own top stays in the plans (the escape's stacking and pad checks
+read that via); for that case, and for a routed via that `orient_vias`
+re-picks on top of its own escape via (the other way a pair could arise),
+`assemble` still keeps one via per (net, layer pair, point), by the same rule
+over all of the net's wires.
 
-Tests: `coincident_vias_of_one_layer_pair_keep_the_variant_along_the_wires`
-(the Ibex pattern: the variant along the wires stays, a via of another
-layer pair and a lone via elsewhere stay, the lowest kind when no variant
-fits, budget charged), `coincident_via_dedupe_is_off_by_default_and_never_changes_a_clean_route`.
+On the Ibex `be_route` input the trace reports 39 escape vias shared (one of
+each of the 24 two-variant pairs, and 15 exact duplicates of another escape's
+via, which the output already wrote once) and 0 removed by `assemble` in each
+rule pass; the exported DEF has no coincident pair, and with the recipe's
+straightening the route (`routes.rbin`) and DEF are byte-identical to those of
+the earlier output-stage removal. With the removal alone exactly these 24
+nets change, with 32 fewer Via1 (53,271 to 53,239): on 8 of them the pair had
+joined the same two points twice, a loop that kept the Metal2 stub at the
+shared top alive; with one via left, that via and stub lead to no access
+point, and cleanup's dead-end pruning removes them, so the net becomes one
+Metal1 run (on `n9210` the DEF entry shrinks from two Metal1 segments, both
+vias, the stub and a patch to a single Metal1 segment).
+
+Tests: `escape_vias_of_one_net_at_one_point_share_one_via` (the Ibex pattern:
+the variant along the escape wires stays, the other leaves its plan and the
+index with the plan's shape layout kept, a pair at the escapes' own tops
+stays for `assemble`, which writes it once),
+`coincident_vias_of_one_layer_pair_keep_the_variant_along_the_wires` (the
+output rule: a via of another layer pair and a lone via elsewhere stay, the
+lowest kind when no variant fits, budget charged),
+`coincident_via_dedupe_is_off_by_default_and_never_changes_a_clean_route`.
 
 #### Post-route topology cleanup (`track_router.qor.straighten`)
 
@@ -556,7 +572,8 @@ reduction are done (first rule pass only):
    net's escape geometry inside it (an escape wire ending on it, an escape
    via or access point inside it) is left alone: the route's runs are not
    split at such points, so the run is a connection.
-2. **Optional bend-priced re-route** (`reroute`): before the rewrites, each
+2. **Optional bend-priced re-route** (`reroute`; not in the Ibex recipe,
+   below): before the rewrites, each
    net with at most `max_terminals` terminals that holds a chain is ripped
    up and searched again (the via-reduction machinery: hard search in its
    guide grown by `expand_margin`, every other net fixed, at most
@@ -572,8 +589,9 @@ reduction are done (first rule pass only):
    ties to continuing straight. Without `turn_at_ends` a candidate leaves
    both junctions along the chain's own axis there; with it, that is a
    preference among candidates with as few runs.
-4. **Checks.** Every candidate is a shortest path, so the wire never
-   grows, and no via is touched. Each new run must be clear of every other
+4. **Checks.** Every candidate is a shortest path, so a rewrite never adds
+   wire, and it touches no via (the optional re-route may remove vias and
+   wire, never add them). Each new run must be clear of every other
    net's metal, fixed geometry and cell obstructions (`Spatial::probe`, the
    test of a search step) and of the wide-metal spacing of any shape of
    another net that is wide on its own (`Spatial::wide_clear`); it may touch
@@ -592,70 +610,111 @@ reduction are done (first rule pass only):
 Route replays of the Ibex `be_route` input of the final configuration
 (superproject `3ac4328`: RustROAD `04640e5` recipe routing, the flow's
 `--threads 4` invocation; QoR from the exported DEF with the receipt code,
-pieces and causes with `scripts/def_pieces.py`; route CPU from single
-replays at different host loads, not an A/B):
+pieces and causes with `scripts/def_pieces.py`):
 
-| `be_route` replay | vias | wire µm | wrong-way µm | pieces | staircase / zigzag pieces | route CPU s |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| final configuration | 118,424 | 897,717.5 | 26,213.8 | 198,730 | 51,235 / 41,665 | 332 |
-| `dedupe_vias` | 118,392 | 897,713.7 | 26,213.8 | 198,714 | 51,235 / 41,665 | 383 |
-| plus `straighten` (2 passes) | 118,393 | 897,660.8 | 26,179.7 | 195,300 | 48,060 / 40,635 | 346 |
-| plus `turn_at_ends` | 118,331 | 897,357.3 | 26,110.3 | 192,134 | 42,774 / 39,411 | 381 |
-| plus `reroute` (bend 420, 10,000 expansions) | 117,886 | 895,577.7 | 25,385.6 | 189,040 | 41,807 / 37,482 | 438 |
-| plus `reroute` (bend 420, 4,000 expansions; the recipe) | 118,114 | 896,263.3 | 25,703.1 | 190,096 | 42,343 / 38,004 | 364 |
-| `dedupe_vias`, the rewrites with `turn_at_ends` and main-search `bend_cost` 20 (no `reroute`) | 118,871 | 897,023.9 | 23,882.3 | 183,917 | 39,804 / 32,750 | 388 |
-| the same with `bend_cost` 100 | 118,845 | 896,935.1 | 23,727.8 | 183,593 | 39,717 / 32,393 | 349 |
+| `be_route` replay | vias | wire µm | wrong-way µm | pieces | staircase / zigzag pieces |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| final configuration | 118,424 | 897,717.5 | 26,213.8 | 198,730 | 51,235 / 41,665 |
+| `dedupe_vias` (output-stage removal) | 118,392 | 897,713.7 | 26,213.8 | 198,714 | 51,235 / 41,665 |
+| plus `straighten` (2 passes) | 118,393 | 897,660.8 | 26,179.7 | 195,300 | 48,060 / 40,635 |
+| plus `turn_at_ends` | 118,331 | 897,357.3 | 26,110.3 | 192,134 | 42,774 / 39,411 |
+| the same with the escape vias shared at pin access (the recipe) | 118,331 | 897,357.3 | 26,110.3 | 192,134 | 42,774 / 39,411 |
+| plus `reroute` (bend 420, 10,000 expansions) | 117,886 | 895,577.7 | 25,385.6 | 189,040 | 41,807 / 37,482 |
+| plus `reroute` (bend 420, 4,000 expansions; the earlier recipe) | 118,114 | 896,263.3 | 25,703.1 | 190,096 | 42,343 / 38,004 |
+| `dedupe_vias`, the rewrites with `turn_at_ends` and main-search `bend_cost` 20 (no `reroute`) | 118,871 | 897,023.9 | 23,882.3 | 183,917 | 39,804 / 32,750 |
+| the same with `bend_cost` 100 | 118,845 | 896,935.1 | 23,727.8 | 183,593 | 39,717 / 32,393 |
 
-`dedupe_vias` removes the 24 coincident pairs in every rule pass (32 fewer
-Via1 in the DEF, above). The
-rewrites take about 2 s: on the recipe line, 3,733 chains of 2,412 nets
-become 5,797 fewer runs and 124 µm less wire, with no connectivity
-fallback; the re-route tries 5,875 nets, keeps 1,389 (3,334 fewer runs,
-904 capped) and takes about 35 s (66 s at 10,000 expansions). Most chains
-stay: in the first pass 3,702 of 9,788 chains were rewritten; candidates
-were refused 20,461 times for other nets' metal, 1,036 times for same-net
-contact and 42 times by the same-net rule check (never by the wide-metal
-test), and the minimum-bend search found a legal shortest path in 3,896 of
-the 6,375 boxes it searched. The second pass rewrote 31 more. A bend
-surcharge in the main search (the existing `bend_cost` control) removes
-more pieces but adds about 450 vias, so the recipe leaves it off.
+The row with the escape vias shared at pin access writes the same
+`routes.rbin` and DEF as the row above it (output-stage removal).
+
+The rewrites take about 2 s (1.6 to 1.9 s in every trace). On the recipe
+line, 4,572 chains of 3,161 nets become 7,112 fewer runs and 157 µm less
+wire, with no connectivity fallback. Most chains stay: in the first pass
+4,537 of 10,735 chains were rewritten; candidates were refused 21,717 times
+for other nets' metal, 1,230 times for same-net contact and 46 times by the
+same-net rule check (never by the wide-metal test on Ibex; its unit test
+exercises it), and the minimum-bend search found a legal shortest path in
+3,934 of the 6,557 boxes it searched. The second pass rewrote 35 more.
+These guarantees hold per rewrite, not per net of the final DEF: cleanup and
+the rule-repair passes that follow re-route some nets, as they do without
+the cleanup.
+
+The bend-priced re-route (`reroute`) is not in the recipe. In every trace
+it took 30.9 to 35.1 s (5,875 nets tried, 1,389 kept, 904 stopped at 4,000
+expansions; 66 s at 10,000), and the route after the via reduction took
+43.8 to 48.8 s with it against 13.0 to 21.0 s without it (trace times
+within each process; the work before the via reduction is identical): 25.1
+to 31.0 s more in each of four back-to-back pairs, 7 to 9 % of `be_route`.
+For that it gave 2.0 k fewer
+pieces than the rewrites alone (192,134 to 190,096, about 1 %), 217 fewer
+vias, 1.1 mm less wire and 407 µm less wrong-way wire, and in interleaved
+runs on the final DEFs OpenRCX took about 0.25 s less per run (below). That
+is more than its 1 % of the pieces alone would explain, but a small fraction
+of its route time. A bend surcharge in
+the main search (the existing `bend_cost` control) removes more pieces but
+adds about 450 vias, so the recipe leaves it off as well.
 
 Full flow (the private campaign kit: superproject `3ac4328` with this routing
-change, RustROAD `b6fe57d`, the other binaries of the frozen final set):
-the producer completed all 119 steps (exit 0; `timing_accuracy` largest
-RustSTA/OpenSTA difference 0.1645 ps) and every shared gate passed (DRC,
+change, RustROAD `661c045`, the other binaries of the frozen final set): the
+producer completed all 119 steps (exit 0; `timing_accuracy` largest
+RustSTA/OpenSTA difference 0.1639 ps) and every shared gate passed (DRC,
 antenna, latch-up, LVS, timing, simulation, both equivalences, density;
 OpenRCX timing TT setup/hold worst slack 49.636/0.111 ns, SS 49.442/0.211 ns,
-no setup, hold, slew, capacitance or fanout violation). The final DEF has
-118,308 vias (Via1 53,239, Via2 49,048, Via3 13,097, Via4 2,684, TopVia1
-236, TopVia2 4) against 118,610, 896,263.3 µm of signal wire against
-897,717.5, 25,773.6 µm of wrong-way wire against 26,279.3 (LibreLane
-17,301), 190,290 pieces against 198,916 (LibreLane 129,901; staircase and
-zigzag 42,350 and 37,997 against 51,249 and 41,652) and no coincident via
-pair; area, cells and every netlist are unchanged. A second complete run
-wrote byte-identical GDS, DEF, netlists and native SPEF, and the final
+no setup, hold, slew, capacitance or fanout violation). `be_route` wrote the
+`routes.rbin` of the replay above. The final DEF has 118,525 vias (Via1
+53,239, Via2 49,179, Via3 13,170, Via4 2,701, TopVia1 232, TopVia2 4)
+against 118,610, 897,357.3 µm of signal wire against 897,717.5, 26,180.9 µm
+of wrong-way wire against 26,279.3 (LibreLane 17,301), 192,328 pieces against
+198,916 (LibreLane 129,901; staircase and zigzag 42,789 and 39,398 against
+51,249 and 41,652) and no coincident via pair; area, cells and every netlist
+are unchanged. Per net against the previous final DEF, 3,232 nets changed;
+9 of them got longer (28.1 µm in all, at most 9.6 µm) and 9 got more vias
+(27 in all), through the rule passes after the cleanup, while the totals
+fell by 360.2 µm and 85 vias. A second complete run wrote byte-identical
+GDS, DEF, netlists and native SPEF (the OpenRCX SPEF file differs, every
+timing value read from it is equal, and six reruns of the `be_openrcx` step
+on this DEF wrote identical SPEF apart from its date line), and the final
 binary with both controls off routes the replay input to the same
 `routes.rbin` and DEF as the `04640e5` build.
 
-OpenRCX on the final DEFs (interleaved, five runs per DEF, each holding the
-host's heavy-job lock): the producer's `be_openrcx` step took 7.84 s wall
-and 7.60 s CPU (medians) on the new DEF, 8.42 and 8.14 s on the previous
-native DEF and 6.11 and 5.99 s on LibreLane's (load 0.8 to 1.0): 1.28 and
-1.27 times LibreLane against 1.38 and 1.36. The shared extraction gate, on a
-noisier host (load 0.9 to 1.5, 7.2 to 9.3 s per native run), took 8.56 and
-8.31 s against 8.22 and 8.03 s and 6.25 and 5.99 s: the two native DEFs are
-not separated there. So the cleanup removes 4.3 % of the pieces and up to
-about 7 % of the OpenRCX time; OpenRCX still takes about 1.3 times as long on
-the native DEF as on LibreLane's, which this cleanup does not close.
+OpenRCX on the final DEFs (interleaved runs, each holding the host's
+heavy-job lock; medians, wall and CPU). The producer's `be_openrcx` step, in
+two batches (nine runs per DEF, load 0.6 to 1.0): 7.65 and 7.36 s on the new
+DEF, 8.02 and 7.86 s on the previous native DEF and 5.83 and 5.73 s on
+LibreLane's, so 1.31 and 1.28 times LibreLane against 1.38 and 1.37 (median
+per-run ratio 1.28 and 1.30); faster than on the previous DEF in 7 of 9
+pairs (median 0.57 s wall, 0.55 s CPU). The shared extraction gate (six runs,
+load 0.8 to 1.0): 7.15 and 7.04 s against 7.37 and 7.23 s and 5.24 and
+5.06 s, so 1.37 and 1.39 times LibreLane against 1.41 and 1.43; the two
+native DEFs are not separated there (median paired difference 0.00 s wall,
+faster in 4 of 6 pairs). The same batches had a fourth arm, the final DEF
+of the earlier recipe with the re-route (190,290 pieces): about 0.25 s
+faster than the new DEF per run (`be_openrcx` 0.27 s, faster in 5 of 6
+pairs; gate 0.25 s, 4 of 6), 1.27 and 1.26 times LibreLane for the step and
+1.30 and 1.32 for the gate. Earlier batches on that DEF gave, for the step,
+1.28 and 1.27 times LibreLane as a ratio of medians (five runs, load 0.8 to
+1.0; 1.35 and 1.34 as the median per-run ratio) and 1.37 and 1.39 (eight
+runs, load 1.1 to 1.4), with the previous native DEF at 1.38 to 1.51; and
+for the gate 1.33 and 1.32 (six runs, load 0.85 to 1.1, faster than the
+previous DEF in 6 of 6 pairs by a median 0.36 s) and, on a noisier host,
+1.37 and 1.39 with the two native DEFs not separated. Across batches the
+host moves these ratios by 0.1 or more, more than the cleanup does: it takes
+about 0.4 to 0.6 s (5 to 7 %) off the step, and OpenRCX still takes about
+1.3 to 1.4 times as long on the native DEF as on LibreLane's.
 
-Route CPU, interleaved replays of the flow's `be_route` input (three per
-configuration, each holding the heavy-job lock, load 1.0 to 1.6): 369.3 s
-median with the cleanup (367.9 to 376.4 s) against 362.5 s without (341.8
-to 379.9 s; the host slowed by about 38 s over the three runs without it);
-in the trace the re-route takes about 35 s and the rewrites about 2 s.
-LibreLane's published routing (global routing with antenna repair plus
-detailed routing) took 1,865.8 s.
-
+Route CPU, interleaved replays of the flow's `be_route` input with the final
+binaries (three pairs, each run holding the heavy-job lock, load 1.0 to
+1.2): 327.9 s median with the recipe's cleanup (311.0 to 338.5 s) against
+316.9 s without it (`04640e5` build and final configuration; 316.1 to
+341.2 s), paired differences -2.6, +11.8 and -5.9 s. The whole-run spread
+comes from the routing before the via reduction, which is the same work in
+both arms (296.7 to 323.2 s). Within each run, the rewrites took 1.6 to
+1.9 s, and everything after the via reduction took 13.3 to 13.9 s with the
+cleanup against 15.5 to 18.2 s without it, since the rewritten nets leave
+rule repair less to do: the cleanup costs no measurable route time. In the
+full flow `be_route` took 308.6 s CPU (310.4 s wall). LibreLane's published
+routing (global routing with antenna repair plus detailed routing) took
+1,865.8 s.
 
 Tests: `candidates_keep_both_end_axes_and_are_never_longer` (candidate
 shapes, order, end axes, length), `straightening_turns_a_staircase_into_a_z_on_its_own_corner_row`
@@ -664,6 +723,18 @@ shapes, order, end axes, length), `straightening_turns_a_staircase_into_a_z_on_i
 is skipped, the minimum-bend search finds another, a staircase walled in
 on both sides stays), `straightening_reroute_replaces_a_staircase_by_a_bend_priced_search`,
 `straightening_chains_stop_at_junctions_and_skip_runs_that_meet_escapes_inside`,
+`straightening_refuses_a_candidate_inside_wide_metal_spacing` (a candidate
+clear at the normal spacing but inside the wide-metal spacing of another
+net's wide shape is refused, the other corner row is taken; without the wide
+rule the refused row is taken),
+`straightening_in_an_eco_route_leaves_nets_that_keep_their_prior_geometry`
+(neither the re-route nor the rewrites touch a net that still holds its prior
+geometry, both run on a net the ECO routed again, and an identity ECO of a
+routed design with the cleanup on writes the routes of the same ECO without
+it), `straightening_turns_at_a_via_junction_and_the_via_follows_the_new_arrival`
+(with `turn_at_ends` a staircase ending at a routed via becomes an L that
+arrives along the other axis, `orient_vias` re-picks the via variant whose pad
+lies along it, and the result validates with the same vias),
 `straightening_and_dedupe_are_off_by_default_and_reject_out_of_range_passes`.
 
 Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope

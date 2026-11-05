@@ -654,8 +654,9 @@ item is a campaign control or a canonical structure, re-run every campaign:
   the Metal2 side (as rewrite (a) does), and 1.09 ohm in every form tried
   with either via removed. Rewrite (b) adds the 40 ohm on another of these
   nets (5 sinks). Dropping the redundant via in the router is the clean fix:
-  `track_router.qor.dedupe_vias` writes one via per net, layer pair and
-  point (`docs/routing-budget.md`, "Coincident same-net vias").
+  both vias of each pair are pin-access escape vias of two pins of one net,
+  and `track_router.qor.dedupe_vias` lets those escapes share one via right
+  after pin access (`docs/routing-budget.md`, "Coincident same-net vias").
 * **Most of its work follows the wire pieces.** For a DEF that ends every
   path at its junctions (`export-def`'s and LibreLane's, and variants of
   them), the wires OpenRCX reports extracting equal the DEF's segments split
