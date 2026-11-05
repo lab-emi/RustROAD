@@ -624,37 +624,80 @@ item is a campaign control or a canonical structure, re-run every campaign:
 * OpenRCX can write two parallel resistors at a pin access; RustSTA rejects
   meshes, so those resistors are opened (counted in
   `openrcx.<corner>.loops_opened_for_sta`) before timing.
-* **A via inside a straight path is not a node of that path.** An Ibex
-  SG13G2 DEF of `export-def` (phys configuration, 14,178 routed nets)
-  rewritten with every net's wires as maximal collinear runs and every via in
-  its own statement at its point (per-net, per-layer metal and the via
-  instances checked identical) changed OpenRCX's nominal SPEF on 3,496 nets:
-  per-net totals by up to 11.6 % (one net lost 0.039 fF, the metal past an
-  interior via) and driver-to-sink resistance by up to 40 ohm, the resistance
-  of two vias. Rewriting the same segments in another statement order moved
-  19 nets by at most 0.027 fF and 1.2 ohm. So `export-def` ends a path at
-  every via landing and branch, and the statement structure is not neutral
-  for this reader.
-* **Its work follows the wire pieces.** The wires OpenRCX reports extracting
-  are the DEF's segments split at every via landing or branch strictly
-  inside them, plus the special wiring (within 0.21 % on six native and
-  LibreLane variants): a DEF not split there gets no fewer (the merged
-  rewrite above: -1.3 % for 22,257 fewer segments), a DEF split at more
-  points gets more. Extraction time grows with that count, about 21.6 us per
-  wire over fourteen variants of the native and the LibreLane Ibex DEF
-  (segments split at their midpoints; vias, patches, special wiring or every
-  second net's routing removed), 22.5 us per wire on the native DEF against
-  18.9 us on LibreLane's. Removing every via made extraction 0.32 s
-  (native, 118,610 vias) and 0.39 s (LibreLane, 122,194) faster, about 3 us
-  per via; removing LibreLane's 30,477 `RECT` patches saved nothing.
-  Reading the DEF took 0.51 s (LibreLane's 0.77 s) and writing SPEF 0.78 s
-  (0.74 s). The same native segments written
-  one statement each, as LibreLane's DEF is, read 0.28 s and extract 0.30 s
-  slower than `export-def`'s connected trails, whose statement count is
-  within 6 % of the fewest possible for those segments.
-  `scripts/def_pieces.py` counts pieces, statements and that bound from a
-  DEF alone. The cost of the shared OpenRCX gate is therefore set by the
-  route topology (pieces per connection), not by the DEF writer. Evidence:
+* **How a via inside a straight run is written changes the RC network.** The
+  `export-def` DEF of the Ibex SG13G2 phys configuration (14,178 routed
+  nets) was rewritten with every net's wires as maximal collinear runs, in
+  two ways with the same per-net, per-layer metal and the same via instances
+  (checked with a negative control): (a) as connected trails, so a via
+  landing inside a run is passed from the via's other layer; (b) with every
+  via in its own statement on its lower layer. OpenRCX's nominal SPEF
+  changed the total of 3,496 nets (a) and 3,521 nets (b), almost all
+  downwards (3,440 and 3,435; worst -11.6 %, 0.039 fF on one net; design
+  total -0.05 %), and the driver-to-sink resistance of 4,534 and 4,476
+  sinks. Leaving out the duplicate-via nets of the next item, those changes
+  stay within +1.12 / -1.39 ohm (a) and +1.12 / -1.40 ohm (b). The same
+  pieces written as other trails changed the total of 19 nets (at most 0.027
+  fF) and 24 sinks (at most 1.2 ohm). So `export-def` ends a path at every
+  via landing and branch, and the statement structure is not neutral for
+  this reader.
+* **Two vias of one layer pair at one point can be put in series.** 24 nets
+  of both native DEFs (phys configuration and recipe) hold two Via1
+  instances (`Via1_YY_so` and `Via1_XY_so`) at one point. They are in the
+  route itself: `export-def` writes each via of the route once. On 10 of
+  these nets of the phys DEF one driver-to-sink resistance is 40 ohm higher
+  than in rewrite (a). One-net DEFs of `n9210`, whose Metal1 is one
+  continuous run, give 41.09 ohm driver to sink whether the run is written
+  as two segments with the vias between them (as exported), as separate
+  statements or as one merged run with each via in its own statement:
+  OpenRCX then joins the two Metal1 sides only through both vias. They give
+  1.09 ohm when the run is one path and the pair is written as a chain from
+  the Metal2 side (as rewrite (a) does), and 1.09 ohm in every form tried
+  with either via removed. Rewrite (b) adds the 40 ohm on another of these
+  nets (5 sinks). Dropping the redundant via in the router is the clean fix
+  (`docs/routing-budget.md`).
+* **Most of its work follows the wire pieces.** For a DEF that ends every
+  path at its junctions (`export-def`'s and LibreLane's, and variants of
+  them), the wires OpenRCX reports extracting equal the DEF's segments split
+  at every via landing or branch strictly inside them, plus the special
+  wiring, within 0.21 %. A DEF split at more points gets more (every segment
+  split at its midpoint: 401,982 wires for 198,916 pieces); the run-merged
+  rewrites above, which leave via landings inside runs, got 174,621 and
+  174,618 wires where the pieces predict 176,513 (-1.1 %), at the price of
+  the changed RC network. Extraction time grows with that count, but not at
+  one rate. Over fourteen variants of the native and the LibreLane Ibex DEF
+  (five interleaved runs each) the extraction phase averaged 22.5 us per
+  wire on the native DEF and 18.9 us on LibreLane's; removing every second
+  net's routing saved 28.0 us (native) and 19.8 us (LibreLane) per wire
+  removed, and splitting every segment at its midpoint cost 19.9 us and
+  12.1 us per wire added. At LibreLane's average the native wires would
+  extract about 0.7 s faster: about a third of the extraction-phase gap is
+  this per-wire difference, which the piece count does not explain.
+* **Net order changes the cost, not the SPEF.** The native recipe DEF with
+  only its `NETS` entries reordered (each entry byte-identical) gives the
+  same SPEF for every net once the name map is resolved (coupling capacitors
+  identical as a design-wide multiset). In an interleaved A/B (six runs
+  each) a random order extracted 13 % slower than `export-def`'s netlist
+  order (in all six runs; 11 % wall, in five), while ordering the nets by
+  the centre of their routing (20 um bands, or a Hilbert curve) gave no
+  consistent gain (median -1.4 % and +2.5 %, faster in three and two of the
+  six runs). A locality-preserving order is an optional writer follow-up
+  with no measured gain yet.
+* **Other DEF choices.** The same native segments written one statement
+  each, as LibreLane's DEF is, read 0.28 s and extract 0.30 s slower than
+  `export-def`'s connected trails (that rewrite also moves every via into
+  its own statement, so the two effects are not separated); `export-def`'s
+  statement count is within 6 % of the fewest possible for its segments
+  (44,057 against 41,719). Removing every via from those one-statement
+  rewrites made extraction 0.32 s (native, 118,610 vias) and 0.39 s
+  (LibreLane, 122,194) faster, but the via-free native rewrite extracts
+  only 22 ms faster than the shipped DEF. Removing LibreLane's 30,477
+  `RECT` patches saved nothing. Reading the DEF took 0.51 s (LibreLane's
+  0.77 s) and writing SPEF 0.78 s (0.74 s).
+  `scripts/def_pieces.py` counts pieces, statements and the statement bound
+  from a DEF alone. The route topology (pieces per connection) sets most of
+  the gate's cost; a writer choice that keeps the SPEF (a random net order)
+  moved it by up to 13 %, and part of the per-wire difference between the
+  two designs is not explained. Evidence:
   `docs/evidence/def-openrcx-pieces.json`.
 
 So OpenRCX is geometry-identical to the native extractor for the routed wires

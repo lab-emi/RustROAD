@@ -1,11 +1,11 @@
 {
- "schema": "rustroad.def-openrcx-pieces.v1",
+ "schema": "rustroad.def-openrcx-pieces.v2",
  "date": "2026-11-05",
  "design": "Ibex + 2 SRAM macros, IHP SG13G2 / EZ130 8T",
  "openrcx": {
   "binary": "OpenROAD 26Q3 (black box)",
   "script": "set_thread_count 2; read_lef x3; read_def; define_process_corner nom; extract_parasitics -version 1 (IHP rules); write_spef",
-  "host": "4 vCPU shared; every run held the host heavy-job lock"
+  "host": "4 vCPU shared; every timing run (variants, gate, step and order A/Bs) and every SPEF run of rewrites_of_native_phys, duplicate_via_pairs and net_order held the host heavy-job lock per run or per repetition"
  },
  "defs": {
   "native_recipe": {
@@ -58,7 +58,8 @@
     "TopMetal2": {
      "preferred": 2
     }
-   }
+   },
+   "crossings": 20
   },
   "native_phys": {
    "sha256": "e4618aaa311af9cf5e4b1c32b6408bd5c1ea76765747b3126c0e44c58808baa0",
@@ -111,7 +112,8 @@
      "preferred": 2,
      "wrong_way": 2
     }
-   }
+   },
+   "crossings": 10
   },
   "librelane": {
    "sha256": "53d259734016ff18fe33d53cfe9281d99e9811670aeaf2d2b5dc9380811f119d",
@@ -151,7 +153,8 @@
      "preferred": 536,
      "wrong_way": 28
     }
-   }
+   },
+   "crossings": 2
   }
  },
  "openrcx_wires_baseline": {
@@ -256,7 +259,47 @@
     "wall": 1.201,
     "cpu": 1.244
    }
-  }
+  },
+  "repeats": [
+   {
+    "what": "gate invocation, independent repeat, 5 runs each",
+    "native_over_librelane": {
+     "wall": 1.445,
+     "cpu": 1.415
+    },
+    "native_over_phys_wall": 1.165
+   },
+   {
+    "what": "producer be_openrcx step, independent repeat, 5 runs each",
+    "native_over_librelane": {
+     "wall": 1.406,
+     "cpu": 1.381
+    },
+    "native_over_phys_wall": 1.163
+   },
+   {
+    "what": "gate OpenRCX script alone (net_order runs), 6 runs each",
+    "native_over_librelane": {
+     "wall": 1.487,
+     "cpu": 1.482
+    },
+    "native_over_phys_wall": 1.116
+   }
+  ],
+  "range_native_over_librelane": {
+   "wall": [
+    1.362,
+    1.487
+   ],
+   "cpu": [
+    1.381,
+    1.482
+   ]
+  },
+  "range_native_over_phys_wall": [
+   1.116,
+   1.165
+  ]
  },
  "variants": {
   "N0": {
@@ -457,54 +500,407 @@
   }
  },
  "fit": {
-  "extract_ms_per_wire_us": 21.62,
-  "intercept_ms": -189.9
+  "note": "one least-squares line over the fourteen variants is a rough guide only: the per-wire cost differs by design and by variant",
+  "pooled_extract_ms_per_wire_us": 21.62,
+  "pooled_intercept_ms": -189.9,
+  "average_us_per_wire": {
+   "native_recipe": 22.5,
+   "librelane": 18.9
+  },
+  "marginal_us_per_wire": {
+   "every_second_net_unrouted": {
+    "native": 28.0,
+    "librelane": 19.8
+   },
+   "every_segment_split_at_midpoint": {
+    "native": 19.9,
+    "librelane": 12.1
+   }
+  }
  },
  "rewrites_of_native_phys": {
+  "input": {
+   "def": "native_phys",
+   "sha256": "e4618aaa311af9cf5e4b1c32b6408bd5c1ea76765747b3126c0e44c58808baa0",
+   "openrcx_wires": 176874,
+   "pieces_plus_special": 176513
+  },
+  "geometry_check": "own per-net, per-layer metal union and via-instance multiset comparison; negative control (one Metal1 end moved 10 DBU) detected",
   "c-none": {
-   "what": "maximal collinear runs, each via its own statement at its point",
-   "metal_and_vias_identical": true,
-   "def_segments": 150329,
+   "what": "maximal collinear runs written as connected trails (a via landing inside a run is passed from the via's other layer)",
+   "sha256": "4f09bb11e061fcc596ecb694e0b9e52c14204f92aeee95eabf87b39b417a8f74",
    "openrcx_wires": 174621,
-   "nets_total_changed": 3496,
-   "sinks_path_r_changed": 4534,
-   "worst_total_pf": 0.00011480000000000518,
-   "worst_relative_total": 0.1156,
-   "worst_path_r_ohm": 40.0001,
-   "design_total_pf": [
-    154.762625,
-    154.683174
-   ]
+   "metal_and_vias_identical": true,
+   "spef_change": {
+    "nets": 14178,
+    "nets_total_up": 56,
+    "nets_total_down": 3440,
+    "worst_total_up_pf": [
+     3.1630000000000156e-05,
+     "n640"
+    ],
+    "worst_total_down_pf": [
+     -0.00011480000000000518,
+     "native_electrical_278_n"
+    ],
+    "worst_relative_up": [
+     0.02386413363311264,
+     "n640"
+    ],
+    "worst_relative_down": [
+     -0.11562905720530087,
+     "n2711"
+    ],
+    "sinks": 39608,
+    "sinks_path_r_up": 2564,
+    "sinks_path_r_down": 1970,
+    "sinks_up_ge_20_ohm": 0,
+    "sinks_down_ge_20_ohm": 10,
+    "worst_path_r_up_ohm": [
+     1.1176000000000101,
+     "native_electrical_120_n/g6700:A0"
+    ],
+    "worst_path_r_down_ohm": [
+     -40.00005,
+     "n9210/g9212:B"
+    ],
+    "design_total_pf": [
+     154.762625,
+     154.683174
+    ]
+   },
+   "spef_change_without_duplicate_via_nets": {
+    "nets": 14154,
+    "nets_total_up": 56,
+    "nets_total_down": 3437,
+    "worst_total_up_pf": [
+     3.1630000000000156e-05,
+     "n640"
+    ],
+    "worst_total_down_pf": [
+     -0.00011480000000000518,
+     "native_electrical_278_n"
+    ],
+    "worst_relative_up": [
+     0.02386413363311264,
+     "n640"
+    ],
+    "worst_relative_down": [
+     -0.11562905720530087,
+     "n2711"
+    ],
+    "sinks": 39551,
+    "sinks_path_r_up": 2564,
+    "sinks_path_r_down": 1939,
+    "sinks_up_ge_20_ohm": 0,
+    "sinks_down_ge_20_ohm": 0,
+    "worst_path_r_up_ohm": [
+     1.1176000000000101,
+     "native_electrical_120_n/g6700:A0"
+    ],
+    "worst_path_r_down_ohm": [
+     -1.3903999999999996,
+     "n5971/g5972:B"
+    ],
+    "design_total_pf": [
+     154.694649,
+     154.61525
+    ]
+   }
+  },
+  "v-min": {
+   "what": "maximal collinear runs, every via its own statement on its lower layer",
+   "sha256": "6ad8a63c48b0ed7bac80fd0a9d653b1651792ac6ad4a64d23c8d44d4de769c8b",
+   "openrcx_wires": 174618,
+   "metal_and_vias_identical": true,
+   "spef_change": {
+    "nets": 14178,
+    "nets_total_up": 86,
+    "nets_total_down": 3435,
+    "worst_total_up_pf": [
+     4.769999999999991e-05,
+     "n8726"
+    ],
+    "worst_total_down_pf": [
+     -0.00011480000000000518,
+     "native_electrical_278_n"
+    ],
+    "worst_relative_up": [
+     0.05693530069762869,
+     "n7630"
+    ],
+    "worst_relative_down": [
+     -0.11562905720530087,
+     "n2711"
+    ],
+    "sinks": 39608,
+    "sinks_path_r_up": 2996,
+    "sinks_path_r_down": 1480,
+    "sinks_up_ge_20_ohm": 5,
+    "sinks_down_ge_20_ohm": 0,
+    "worst_path_r_up_ohm": [
+     40.00000000000003,
+     "u_cpu\\.u_ibex_core\\.cs_registers_i\\.minstret_counter_i\\.counter_q[40]/g7071:C"
+    ],
+    "worst_path_r_down_ohm": [
+     -1.4035999999999973,
+     "n4782/g4786:A0"
+    ],
+    "design_total_pf": [
+     154.762625,
+     154.68489
+    ]
+   },
+   "spef_change_without_duplicate_via_nets": {
+    "nets": 14154,
+    "nets_total_up": 85,
+    "nets_total_down": 3432,
+    "worst_total_up_pf": [
+     4.769999999999991e-05,
+     "n8726"
+    ],
+    "worst_total_down_pf": [
+     -0.00011480000000000518,
+     "native_electrical_278_n"
+    ],
+    "worst_relative_up": [
+     0.05693530069762869,
+     "n7630"
+    ],
+    "worst_relative_down": [
+     -0.11562905720530087,
+     "n2711"
+    ],
+    "sinks": 39551,
+    "sinks_path_r_up": 2990,
+    "sinks_path_r_down": 1465,
+    "sinks_up_ge_20_ohm": 0,
+    "sinks_down_ge_20_ohm": 0,
+    "worst_path_r_up_ohm": [
+     1.1176000000000101,
+     "native_electrical_120_n/g6700:A0"
+    ],
+    "worst_path_r_down_ohm": [
+     -1.4035999999999973,
+     "n4782/g4786:A0"
+    ],
+    "design_total_pf": [
+     154.694649,
+     154.616942
+    ]
+   }
   },
   "c-via": {
-   "what": "runs split at via landings only (branches merged)",
-   "metal_and_vias_identical": true,
-   "def_segments": 169993,
+   "what": "runs split at via landings only (branches merged), as trails",
+   "sha256": "95eb764615d5706b8eadb5f51c0ebb74f037264fefe912b35c4235308c829d2f",
    "openrcx_wires": 176759,
-   "nets_total_changed": 214,
-   "sinks_path_r_changed": 409,
-   "worst_total_pf": 4.1660000000000655e-05,
-   "worst_relative_total": 0.0177,
-   "worst_path_r_ohm": 1.3904,
-   "design_total_pf": [
-    154.762625,
-    154.759866
-   ]
+   "spef_change": {
+    "nets": 14178,
+    "nets_total_up": 22,
+    "nets_total_down": 192,
+    "worst_total_up_pf": [
+     2.6700000000004498e-05,
+     "native_fanout_101_0_10_n"
+    ],
+    "worst_total_down_pf": [
+     -4.1660000000000655e-05,
+     "u_cpu\\.u_ibex_core\\.cs_registers_i\\.mcycle_counter_i\\.counter_q[33]"
+    ],
+    "worst_relative_up": [
+     0.005070917803960198,
+     "n441"
+    ],
+    "worst_relative_down": [
+     -0.01765412630472314,
+     "n6994"
+    ],
+    "sinks": 39608,
+    "sinks_path_r_up": 175,
+    "sinks_path_r_down": 234,
+    "sinks_up_ge_20_ohm": 0,
+    "sinks_down_ge_20_ohm": 0,
+    "worst_path_r_up_ohm": [
+     1.0515999999999934,
+     "n3054/g3098:B"
+    ],
+    "worst_path_r_down_ohm": [
+     -1.3903999999999996,
+     "n5971/g5972:B"
+    ],
+    "design_total_pf": [
+     154.762625,
+     154.759866
+    ]
+   }
   },
   "c-via,tee": {
-   "what": "the export-def splits, other statement order",
-   "metal_and_vias_identical": true,
-   "def_segments": 172566,
+   "what": "the export-def pieces written as other trails",
+   "sha256": "cccbaa1d86c8c1cb39b413da59f119dc9e3515c69803c9728de0730b1e334e23",
    "openrcx_wires": 176864,
-   "nets_total_changed": 19,
-   "sinks_path_r_changed": 24,
-   "worst_total_pf": 2.670000000000103e-05,
-   "worst_relative_total": 0.0072,
-   "worst_path_r_ohm": 1.2144,
-   "design_total_pf": [
-    154.762625,
-    154.762531
-   ]
+   "metal_and_vias_identical": true,
+   "spef_change": {
+    "nets": 14178,
+    "nets_total_up": 6,
+    "nets_total_down": 13,
+    "worst_total_up_pf": [
+     2.670000000000103e-05,
+     "native_fanout_185_0_6_n"
+    ],
+    "worst_total_down_pf": [
+     -2.6299999999999935e-05,
+     "native_fanout_185_0_4_n"
+    ],
+    "worst_relative_up": [
+     0.0015736429539695309,
+     "native_fanout_185_0_6_n"
+    ],
+    "worst_relative_down": [
+     -0.007153738414236038,
+     "n3054"
+    ],
+    "sinks": 39608,
+    "sinks_path_r_up": 4,
+    "sinks_path_r_down": 20,
+    "sinks_up_ge_20_ohm": 0,
+    "sinks_down_ge_20_ohm": 0,
+    "worst_path_r_up_ohm": [
+     1.0515999999999934,
+     "n3054/g3098:B"
+    ],
+    "worst_path_r_down_ohm": [
+     -1.214400000000012,
+     "u_cpu\\.gen_regfile_ff\\.register_file_i\\.g_rf_flops[14]\\.rf_reg_q[13]/r1435:D"
+    ],
+    "design_total_pf": [
+     154.762625,
+     154.762531
+    ]
+   }
+  }
+ },
+ "duplicate_via_pairs": {
+  "what": "two Via1 instances (Via1_YY_so, Via1_XY_so) of one net at one point, in the route itself",
+  "nets": {
+   "native_phys": 24,
+   "native_recipe": 24
+  },
+  "extra_vias": {
+   "native_phys": 24,
+   "native_recipe": 24
+  },
+  "native_phys_nets_with_40_ohm_series_path": 10,
+  "n9210_driver_to_sink_ohm_one_net_defs": {
+   "two Metal1 segments and each via in separate statements": 41.0863,
+   "one merged Metal1 run, each via its own Metal1 statement": 41.0863,
+   "as_exported (Metal1, both vias, Metal1 in one path)": 41.0863,
+   "one merged Metal1 run, the pair chained from the Metal2 stub": 1.0862,
+   "Metal1 path through the point, the pair chained from the Metal2 stub": 1.0862,
+   "Via1_XY_so removed": 1.0862,
+   "Via1_YY_so removed": 1.0862,
+   "Via1_XY_so removed, Via1_YY_so inside the first Metal1 path": 1.0862
+  }
+ },
+ "net_order": {
+  "runs": 6,
+  "method": "gate OpenRCX script alone (phase marks), arms alternated forward/reverse per repetition, heavy lock per repetition",
+  "load1": [
+   0.98,
+   1.0
+  ],
+  "arms": {
+   "N0": {
+    "what": "native recipe DEF (export-def: netlist order)",
+    "wall": 7.324999999999999,
+    "cpu": 7.21,
+    "read_def_ms": 591.5,
+    "extract_ms": 5497.0,
+    "write_spef_ms": 954.5
+   },
+   "NSHUF": {
+    "what": "NETS entries shuffled (seed 20261105)",
+    "wall": 7.965,
+    "cpu": 7.88,
+    "read_def_ms": 681.5,
+    "extract_ms": 6083.5,
+    "write_spef_ms": 943.5,
+    "paired_over_N0_wall": 1.107,
+    "faster_than_N0_wall": 1,
+    "paired_over_N0_cpu": 1.109,
+    "faster_than_N0_cpu": 0,
+    "paired_over_N0_extract_ms": 1.132,
+    "faster_than_N0_extract_ms": 0,
+    "spef_vs_N0": {
+     "nets": 14178,
+     "identical": 14178,
+     "coupling_multiset_equal": true
+    }
+   },
+   "NBAND": {
+    "what": "nets by routing bbox centre, 20 um y bands, alternating x",
+    "wall": 7.37,
+    "cpu": 7.27,
+    "read_def_ms": 615.5,
+    "extract_ms": 5229.0,
+    "write_spef_ms": 982.5,
+    "paired_over_N0_wall": 0.981,
+    "faster_than_N0_wall": 3,
+    "paired_over_N0_cpu": 0.986,
+    "faster_than_N0_cpu": 3,
+    "paired_over_N0_extract_ms": 0.986,
+    "faster_than_N0_extract_ms": 3,
+    "spef_vs_N0": {
+     "nets": 14178,
+     "identical": 14178,
+     "coupling_multiset_equal": true
+    }
+   },
+   "NHIL": {
+    "what": "nets by Hilbert index of the routing bbox centre",
+    "wall": 7.470000000000001,
+    "cpu": 7.390000000000001,
+    "read_def_ms": 690.5,
+    "extract_ms": 5627.5,
+    "write_spef_ms": 893.0,
+    "paired_over_N0_wall": 1.034,
+    "faster_than_N0_wall": 2,
+    "paired_over_N0_cpu": 1.036,
+    "faster_than_N0_cpu": 2,
+    "paired_over_N0_extract_ms": 1.025,
+    "faster_than_N0_extract_ms": 2,
+    "spef_vs_N0": {
+     "nets": 14178,
+     "identical": 14178,
+     "coupling_multiset_equal": true
+    }
+   },
+   "P0": {
+    "what": "native phys DEF",
+    "wall": 6.5649999999999995,
+    "cpu": 6.48,
+    "read_def_ms": 644.0,
+    "extract_ms": 4582.0,
+    "write_spef_ms": 937.0,
+    "paired_over_N0_wall": 0.885,
+    "faster_than_N0_wall": 6,
+    "paired_over_N0_cpu": 0.888,
+    "faster_than_N0_cpu": 6,
+    "paired_over_N0_extract_ms": 0.833,
+    "faster_than_N0_extract_ms": 5
+   },
+   "L0": {
+    "what": "LibreLane DEF",
+    "wall": 4.925,
+    "cpu": 4.865,
+    "read_def_ms": 834.0,
+    "extract_ms": 2908.0,
+    "write_spef_ms": 882.5,
+    "paired_over_N0_wall": 0.686,
+    "faster_than_N0_wall": 6,
+    "paired_over_N0_cpu": 0.686,
+    "faster_than_N0_cpu": 6,
+    "paired_over_N0_extract_ms": 0.549,
+    "faster_than_N0_extract_ms": 6
+   }
   }
  }
 }

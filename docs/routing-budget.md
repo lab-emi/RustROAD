@@ -421,20 +421,35 @@ and 2.205 per terminal against 2.197. The raw difference comes from the
 smaller netlist and 2.3 k fewer Via1; Via3 and Via4 remain 6.7 k and 1.6 k
 above LibreLane's.
 
-The wrong-way jogs cost the shared OpenRCX extraction gate, whose work
-follows the DEF's wire pieces (`docs/extraction.md`, "Oracles";
+The wrong-way jogs cost the shared OpenRCX extraction gate, most of whose
+work follows the DEF's wire pieces (`docs/extraction.md`, "Oracles";
 `scripts/def_pieces.py`): runs split at every via landing or branch inside
 them. The final DEF of the recipe has 198,916 pieces (5.02 per connection)
 against 172,566 (4.36) with the previous configuration and LibreLane's
-129,901 (3.21), and in an interleaved A/B of that gate (five runs each, the
+129,901 (3.21). In an interleaved A/B of that gate (five runs each, the
 gate's own invocation, load 0.8 to 1.3) it took 6.79 s wall and 6.63 s CPU
-against 5.99 s and 5.91 s, and 4.99 s and 4.75 s on LibreLane's DEF. By
-cause (first match per run), chains of three or more same-layer runs joined
-at plain corners hold most of the increase: monotone staircases 51.2 k
-pieces against 32.4 k before and 25.9 k for LibreLane, non-monotone zigzags
-41.7 k against 20.0 k and 17.6 k. The rest of the gap to LibreLane is
+against 5.99 s and 5.91 s, and 4.99 s and 4.75 s on LibreLane's DEF. Over
+four interleaved A/Bs of the same three DEFs (the gate twice, the
+producer's `be_openrcx` step, and the gate's OpenRCX script alone; five or
+six runs each, load 0.4 to 1.5) the recipe took 1.36 to 1.49 times
+LibreLane's wall time and 1.38 to 1.48 times its CPU time, and 12 % to 17 %
+more wall time than the previous configuration. By cause (first match per
+run), chains of three or more same-layer runs joined at plain corners hold
+most of the increase: monotone staircases 51.2 k pieces against 32.4 k
+before (+58 %) and 25.9 k for LibreLane, non-monotone zigzags 41.7 k
+against 20.0 k (+108 %) and 17.6 k. The rest of the gap to LibreLane is
 Metal1 pin-access runs (11.1 k; LibreLane's DEF routes no Metal1) and
 Metal4 and above (9.2 k against 3.9 k).
+
+Both native DEFs (previous configuration and recipe) also hold 24 redundant
+via pairs: two Via1 instances of different variants (`Via1_YY_so` and
+`Via1_XY_so`) at one point of one net, either of which makes the
+connection. In the previous configuration's DEF OpenRCX puts both in
+series on 10 of these nets, 40 ohm more on one driver-to-sink path than
+their continuous Metal1 (`docs/extraction.md`, "Oracles"); on `n9210`,
+with either via removed, it does not. Dropping the redundant via
+(24 fewer vias; a geometry change, so rule repair and the signoff checks
+must pass again) is an open clean-up item of the route.
 
 Rule repair converges in 3 passes on this placement with both the previous
 configuration and the recipe (17, 6, 0 and 48, 13, 0 remaining violations;
