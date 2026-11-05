@@ -255,9 +255,11 @@ or its finite lattice; a failed route preserves HEAD. Re-placement invalidates
 routes. Schema 5 stores checked geometry in `routing.rbin`.
 
 The track router's optional quality controls (`track_router.qor`: pin-access
-order and hints, notch repair, strict wide-metal cycle cuts and a post-route
-via reduction pass) are off by default, so a configuration without them routes
-exactly as before; each is described with its Ibex replay evidence in
+order and hints, notch repair, strict wide-metal cycle cuts, a post-route
+via reduction pass, coincident same-net via removal and a post-route
+staircase/zigzag straightening pass) are off by default, so a configuration
+without them routes exactly as before; each is described with its Ibex replay
+evidence in
 [docs/routing-budget.md](docs/routing-budget.md#detailed-route-quality-controls-track_routerqor).
 
 The [CTS/routing report](docs/cts-routing.md) records actual results.
