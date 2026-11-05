@@ -2,18 +2,25 @@
 """Reference-extraction work of a DEF's regular wiring (NETS), counted from the DEF alone.
 
 Black-box measurements of OpenRCX (no source read; docs/extraction.md, "Oracles") on the Ibex
-SG13G2 layouts: its extraction time follows the number of wires it reports extracting, and that
-number is the regular wiring's *pieces* (plus the special wiring): every maximal collinear
+SG13G2 layouts: most of its extraction time follows the number of wires it reports extracting.
+That number is the regular wiring's segments as written, further split at every junction strictly
+inside them, plus the special wiring. For a DEF that ends every path at its junctions (export-def's
+and LibreLane's DEFs) it equals the *pieces* below within 0.21 %: every maximal collinear
 same-layer run of a net, split at each junction strictly inside it (a via landing or a branch).
-OpenRCX splits there whether or not the DEF does, and a DEF that leaves a via inside a run changes
-its RC network, so export-def ends a path at every junction. Pieces therefore depend on the route topology,
-not on how the DEF is written.
+A DEF split at more points gets more wires (every segment split at its midpoint doubled them); a
+DEF that leaves via landings inside its runs got 1.1 % fewer, but its RC network changed. So
+pieces are the count reached by a DEF that keeps every junction a path end, and they are set by
+the route topology. The per-wire cost is not constant: it differs between designs, and the order
+of the NETS entries alone changes it (docs/extraction.md).
 
 Per DEF this prints (JSON):
   segments        consecutive point pairs of all routing statements
   runs            maximal collinear same-layer runs per net (union of centre-line intervals)
   pieces          runs + distinct junctions strictly inside a run: via landings on the run's
                   layer and ends of the net's other runs on that layer (branches)
+  crossings       points strictly inside two perpendicular runs of one net on one layer; they are
+                  not counted as junctions (20, 10 and 2 in the recipe, phys-configuration and
+                  LibreLane Ibex DEFs: too few to matter at the 0.21 % agreement above)
   statements      '+ ROUTED' / 'NEW' statements other than RECT patches
   trail_bound     lower bound on statements for the same segments: per connected component of a
                   net's segment/via graph, max(1, odd-degree vertices / 2)
@@ -27,13 +34,15 @@ Per DEF this prints (JSON):
                   other
 
 usage: def_pieces.py --tech-lef TECH.lef DEF [DEF ...] [--json OUT]
-Supports DEF 5.8 regular wiring: '*' coordinates, extension values, vias inside paths, TAPER,
-RECT patches and a DEF VIAS section. Exit 2 on a construct it does not read (MASK, VIRTUAL,
-SHAPE, STYLE, explicit width). Own code, standard formats only.
+Supports DEF 5.8 regular wiring: '*' coordinates, extension values, vias inside paths (with an
+optional orientation), TAPER / TAPERRULE, '( x y ) RECT ( ... )' patch statements and a DEF VIAS
+section. Exit 2 on a construct it does not read (MASK, VIRTUAL, SHAPE, STYLE, explicit width, RECT
+after a path's wires, an unknown via). Own code, standard formats only.
 """
 from __future__ import annotations
 
 import argparse
+import bisect
 import collections
 import json
 import re
@@ -41,6 +50,10 @@ import sys
 from pathlib import Path
 
 TOKEN = re.compile(r"\(\s*(\S+)\s+(\S+)(?:\s+(\S+))?\s*\)|([^\s()]+)")
+PATCH = re.compile(r"\(\s*-?\d+\s+-?\d+\s*\)\s*RECT\s*\(\s*-?\d+\s+-?\d+\s+-?\d+\s+-?\d+\s*\)$")
+ORIENTATIONS = {"N", "S", "E", "W", "FN", "FS", "FE", "FW"}
+COUNTERS = ("segments", "vias", "patches", "statements", "routed_nets", "connections", "runs",
+            "pieces", "inner", "crossings", "trail_bound")
 
 
 def technology(lef: str):
@@ -96,13 +109,16 @@ def parse_net(entry: str, vias):
             layer, rest = m.group(1), m.group(2)
             if re.match(r"-?\d", rest):
                 raise ValueError("explicit width in net " + name)
-            if re.search(r"\bRECT\b", rest):
+            if PATCH.match(rest):
                 patches += 1
                 continue
+            if re.search(r"\bRECT\b", rest):
+                raise ValueError("RECT after a path's wires in net " + name)
             statements += 1
-            last, cur = None, layer
+            last, cur, after_via = None, layer, False
             for t in TOKEN.finditer(rest):
                 if t.group(1) is not None:
+                    after_via = False
                     x = last[0] if t.group(1) == "*" else int(t.group(1))
                     y = last[1] if t.group(2) == "*" else int(t.group(2))
                     if last is not None and (x, y) != last:
@@ -112,9 +128,13 @@ def parse_net(entry: str, vias):
                     last = (x, y)
                     continue
                 word = t.group(4)
+                if word in ORIENTATIONS and after_via:
+                    after_via = False
+                    continue
                 if word not in vias or last is None:
                     raise ValueError("unknown via %r in net %s" % (word, name))
                 landings.append((word, last[0], last[1]))
+                after_via = True
                 lo, hi = vias[word]
                 cur = hi if cur == lo else lo if cur == hi else None
                 if cur is None:
@@ -176,6 +196,15 @@ def net_stats(wires, landings, vias, routing, direction, pitch, units):
         junction[layer] |= pts
     for r in runs:
         junction[r[0]].update(ends(r))
+    crossings = 0
+    for layer in {r[0] for r in runs}:
+        hs = sorted((r[2], r[3], r[4]) for r in runs if r[0] == layer and r[1] == "h")
+        ys = [h[0] for h in hs]
+        for r in runs:
+            if r[0] == layer and r[1] == "v":
+                lo = bisect.bisect_right(ys, r[3])
+                hi = bisect.bisect_left(ys, r[4])
+                crossings += sum(1 for y, a, b in hs[lo:hi] if a < r[2] < b)
     inner = []
     for r in runs:
         layer, o, c, lo, hi = r
@@ -251,7 +280,7 @@ def net_stats(wires, landings, vias, routing, direction, pitch, units):
         odd[find(v)] += d % 2
     bound = sum(max(1, n // 2) for n in odd.values())
     return dict(runs=len(runs), pieces=len(runs) + sum(inner), inner=sum(inner), cause=cause,
-                by_layer=by_layer, trail_bound=bound)
+                by_layer=by_layer, trail_bound=bound, crossings=crossings)
 
 
 def analyse(def_path: Path, tech):
@@ -259,9 +288,12 @@ def analyse(def_path: Path, tech):
     text = def_path.read_text()
     vias = dict(lef_vias)
     def_vias(text, routing, order, vias)
-    units = int(re.search(r"^UNITS DISTANCE MICRONS (\d+)", text, re.M).group(1))
+    units = re.search(r"^UNITS DISTANCE MICRONS (\d+)", text, re.M)
     sec = re.search(r"^NETS (\d+) ;\n(.*?)^END NETS", text, re.M | re.S)
-    total = collections.Counter()
+    if not units or not sec:
+        raise ValueError("no UNITS DISTANCE MICRONS or NETS section in " + str(def_path))
+    units = int(units.group(1))
+    total = dict.fromkeys(COUNTERS, 0)
     cause = collections.Counter()
     by_layer = collections.defaultdict(collections.Counter)
     nets = 0
@@ -279,7 +311,7 @@ def analyse(def_path: Path, tech):
             total["routed_nets"] += 1
             total["connections"] += max(pins - 1, 0)
             s = net_stats(wires, landings, vias, routing, direction, pitch, units)
-            for k in ("runs", "pieces", "inner", "trail_bound"):
+            for k in ("runs", "pieces", "inner", "trail_bound", "crossings"):
                 total[k] += s[k]
             cause.update(s["cause"])
             for layer, c in s["by_layer"].items():
