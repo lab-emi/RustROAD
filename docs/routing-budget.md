@@ -497,14 +497,15 @@ is not guaranteed to find the cheapest path.
 Both native Ibex DEFs of 2026-11-04 (phys configuration and recipe) hold 24
 nets with two Via1 instances of different variants (`Via1_YY_so` and
 `Via1_XY_so`) at one point, written between two Metal1 runs with a Metal2
-stub ending there. They come from two records of one cut at one escape
-top: with `net_aware_access` a pin's escape is pulled onto its neighbour's
-top, so two escapes of one net can land on the same point, each with the
-variant its own pin access picked; and a searched route can stack a via on
-its own escape via (same kind and place, which `assemble` already writes
-once) that `orient_vias` then re-picks to another variant along the route's
-wire. `assemble` removed identical records only, so both variants were
-written. Either via makes the connection; OpenRCX put the pair in series on
+stub ending there: two records of one cut at one escape top, which
+`assemble` wrote both because it removed identical records only. Two paths
+of the router can make such a pair (which one made each Ibex pair was not
+traced; the fix below covers both): with `net_aware_access` a pin's escape
+is pulled onto its neighbour's top, so two escapes of one net can land on
+the same point, each with the variant its own pin access picked; and a
+searched route can stack a via on its own escape via (same kind and place,
+which `assemble` already writes once) that `orient_vias` then re-picks to
+another variant along the route's wire. Either via makes the connection; OpenRCX put the pair in series on
 10 of these nets (40 ohm on one driver-to-sink path, `docs/extraction.md`).
 
 With `dedupe_vias`, `assemble` keeps one via per (net, layer pair, point):
