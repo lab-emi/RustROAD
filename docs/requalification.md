@@ -22,7 +22,8 @@ Evidence (all tracked): `docs/evidence/requalification.json`,
    strictly interior via landing (lower or upper metal), pin-access point or
    same-layer branch. Vias stay singleton paths and patches stay `RECT`
    statements. Every via and branch remains a path end, which is what
-   endpoint-based readers need.
+   endpoint-based readers need (OpenRCX among them: `docs/extraction.md`,
+   "Oracles").
 2. **`export-gds` streams patches and writes the same runs.** `Routes.patches`
    were dropped; they are now rectangles on the routing layer's net purpose.
    Wires use the DEF runs. Every used LEF via variant already had its own

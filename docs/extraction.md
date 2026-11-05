@@ -624,6 +624,38 @@ item is a campaign control or a canonical structure, re-run every campaign:
 * OpenRCX can write two parallel resistors at a pin access; RustSTA rejects
   meshes, so those resistors are opened (counted in
   `openrcx.<corner>.loops_opened_for_sta`) before timing.
+* **A via inside a straight path is not a node of that path.** An Ibex
+  SG13G2 DEF of `export-def` (phys configuration, 14,178 routed nets)
+  rewritten with every net's wires as maximal collinear runs and every via in
+  its own statement at its point (per-net, per-layer metal and the via
+  instances checked identical) changed OpenRCX's nominal SPEF on 3,496 nets:
+  per-net totals by up to 11.6 % (one net lost 0.039 fF, the metal past an
+  interior via) and driver-to-sink resistance by up to 40 ohm, the resistance
+  of two vias. Rewriting the same segments in another statement order moved
+  19 nets by at most 0.027 fF and 1.2 ohm. So `export-def` ends a path at
+  every via landing and branch, and the statement structure is not neutral
+  for this reader.
+* **Its work follows the wire pieces.** The wires OpenRCX reports extracting
+  are the DEF's segments split at every via landing or branch strictly
+  inside them, plus the special wiring (within 0.21 % on six native and
+  LibreLane variants): a DEF not split there gets no fewer (the merged
+  rewrite above: -1.3 % for 22,257 fewer segments), a DEF split at more
+  points gets more. Extraction time grows with that count, about 21.6 us per
+  wire over fourteen variants of the native and the LibreLane Ibex DEF
+  (segments split at their midpoints; vias, patches, special wiring or every
+  second net's routing removed), 22.5 us per wire on the native DEF against
+  18.9 us on LibreLane's. Removing every via made extraction 0.32 s
+  (native, 118,610 vias) and 0.39 s (LibreLane, 122,194) faster, about 3 us
+  per via; removing LibreLane's 30,477 `RECT` patches saved nothing.
+  Reading the DEF took 0.51 s (LibreLane's 0.77 s) and writing SPEF 0.78 s
+  (0.74 s). The same native segments written
+  one statement each, as LibreLane's DEF is, read 0.28 s and extract 0.30 s
+  slower than `export-def`'s connected trails, whose statement count is
+  within 6 % of the fewest possible for those segments.
+  `scripts/def_pieces.py` counts pieces, statements and that bound from a
+  DEF alone. The cost of the shared OpenRCX gate is therefore set by the
+  route topology (pieces per connection), not by the DEF writer. Evidence:
+  `docs/evidence/def-openrcx-pieces.json`.
 
 So OpenRCX is geometry-identical to the native extractor for the routed wires
 and the supply metal, but not for the cell pins, cell obstructions and via

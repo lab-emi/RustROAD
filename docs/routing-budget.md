@@ -421,6 +421,21 @@ and 2.205 per terminal against 2.197. The raw difference comes from the
 smaller netlist and 2.3 k fewer Via1; Via3 and Via4 remain 6.7 k and 1.6 k
 above LibreLane's.
 
+The wrong-way jogs cost the shared OpenRCX extraction gate, whose work
+follows the DEF's wire pieces (`docs/extraction.md`, "Oracles";
+`scripts/def_pieces.py`): runs split at every via landing or branch inside
+them. The final DEF of the recipe has 198,916 pieces (5.02 per connection)
+against 172,566 (4.36) with the previous configuration and LibreLane's
+129,901 (3.21), and in an interleaved A/B of that gate (five runs each, the
+gate's own invocation, load 0.8 to 1.3) it took 6.79 s wall and 6.63 s CPU
+against 5.99 s and 5.91 s, and 4.99 s and 4.75 s on LibreLane's DEF. By
+cause (first match per run), chains of three or more same-layer runs joined
+at plain corners hold most of the increase: monotone staircases 51.2 k
+pieces against 32.4 k before and 25.9 k for LibreLane, non-monotone zigzags
+41.7 k against 20.0 k and 17.6 k. The rest of the gap to LibreLane is
+Metal1 pin-access runs (11.1 k; LibreLane's DEF routes no Metal1) and
+Metal4 and above (9.2 k against 3.9 k).
+
 Rule repair converges in 3 passes on this placement with both the previous
 configuration and the recipe (17, 6, 0 and 48, 13, 0 remaining violations;
 the new prices without the pass need 5), and in 4 with the recipe on the
