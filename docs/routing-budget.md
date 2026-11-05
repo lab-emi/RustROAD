@@ -619,6 +619,42 @@ the 6,375 boxes it searched. The second pass rewrote 31 more. A bend
 surcharge in the main search (the existing `bend_cost` control) removes
 more pieces but adds about 450 vias, so the recipe leaves it off.
 
+Full flow (the private campaign kit: superproject `3ac4328` with this routing
+change, RustROAD `b6fe57d`, the other binaries of the frozen final set):
+the producer completed all 119 steps (exit 0; `timing_accuracy` largest
+RustSTA/OpenSTA difference 0.1645 ps) and every shared gate passed (DRC,
+antenna, latch-up, LVS, timing, simulation, both equivalences, density;
+OpenRCX timing TT setup/hold worst slack 49.636/0.111 ns, SS 49.442/0.211 ns,
+no setup, hold, slew, capacitance or fanout violation). The final DEF has
+118,308 vias (Via1 53,239, Via2 49,048, Via3 13,097, Via4 2,684, TopVia1
+236, TopVia2 4) against 118,610, 896,263.3 µm of signal wire against
+897,717.5, 25,773.6 µm of wrong-way wire against 26,279.3 (LibreLane
+17,301), 190,290 pieces against 198,916 (LibreLane 129,901; staircase and
+zigzag 42,350 and 37,997 against 51,249 and 41,652) and no coincident via
+pair; area, cells and every netlist are unchanged. A second complete run
+wrote byte-identical GDS, DEF, netlists and native SPEF, and the final
+binary with both controls off routes the replay input to the same
+`routes.rbin` and DEF as the `04640e5` build.
+
+OpenRCX on the final DEFs (interleaved, five runs per DEF, each holding the
+host's heavy-job lock): the producer's `be_openrcx` step took 7.84 s wall
+and 7.60 s CPU (medians) on the new DEF, 8.42 and 8.14 s on the previous
+native DEF and 6.11 and 5.99 s on LibreLane's (load 0.8 to 1.0): 1.28 and
+1.27 times LibreLane against 1.38 and 1.36. The shared extraction gate, on a
+noisier host (load 0.9 to 1.5, 7.2 to 9.3 s per native run), took 8.56 and
+8.31 s against 8.22 and 8.03 s and 6.25 and 5.99 s: the two native DEFs are
+not separated there. So the cleanup removes 4.3 % of the pieces and up to
+about 7 % of the OpenRCX time; OpenRCX still takes about 1.3 times as long on
+the native DEF as on LibreLane's, which this cleanup does not close.
+
+Route CPU, interleaved replays of the flow's `be_route` input (three per
+configuration, each holding the heavy-job lock, load 1.0 to 1.6): 369.3 s
+median with the cleanup (367.9 to 376.4 s) against 362.5 s without (341.8
+to 379.9 s; the host slowed by about 38 s over the three runs without it);
+in the trace the re-route takes about 35 s and the rewrites about 2 s.
+LibreLane's published routing (global routing with antenna repair plus
+detailed routing) took 1,865.8 s.
+
 
 Tests: `candidates_keep_both_end_axes_and_are_never_longer` (candidate
 shapes, order, end axes, length), `straightening_turns_a_staircase_into_a_z_on_its_own_corner_row`
