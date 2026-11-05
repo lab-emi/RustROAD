@@ -180,7 +180,8 @@ pub struct RouteQorConfig {
     /// omitted keeps the routes of the repair loop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub via_reduction: Option<rustroad_core::routing::ViaReduction>,
-    /// Same-net vias of one layer pair at one point are written once
+    /// One via per net, layer pair and point: pin escapes of one net share
+    /// a via they land at one point, and the output writes one
     /// (`rustroad_core::routing::RouteQor::dedupe_vias`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dedupe_vias: bool,

@@ -29,6 +29,11 @@
 //! (`route_rules::check_group`: notches, necks, holes, minimum area) reports
 //! no violation that the layer did not already have. The rewritten net must
 //! pass `validate`'s endpoint connectivity check, else it keeps its route.
+//!
+//! The optional bend-priced re-route (`reroute_bends`, `Straighten::reroute`)
+//! runs before the rewrites and may replace a net's whole route, vias
+//! included; it keeps a new route only with fewer runs and no more vias or
+//! wire.
 use super::{
     Access, Blockage, BuildFx, NetRoute, Outcome, Plan, PriorRoutes, Router, Terminal, Via, Wire,
     budget, discard_route, expand, invalid, on_wire, remove_route, retain_route, routed_size,

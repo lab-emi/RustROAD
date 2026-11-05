@@ -3099,6 +3099,182 @@ impl<'a> Router<'a> {
         }
     }
 
+    /// `RouteQor::dedupe_vias` where the pairs come from, pin access: the
+    /// escapes of one net that land vias of one layer pair at one point share
+    /// one via. With `net_aware_access` two neighbouring pins of one net can
+    /// escape to the same top through the same via point, each with the
+    /// variant its own access search picked (24 nets on Ibex: `Via1_XY_so`
+    /// and `Via1_YY_so` between the two pins' Metal1 escapes, under one
+    /// Metal2 stub to the shared top). The kept via is the first variant, by
+    /// kind, whose pads lie along the net's escape wires through that point
+    /// on each of its two layers where those wires share an axis (the
+    /// `orient_vias` rule), else the lowest kind; it stays in the first plan,
+    /// in terminal order, that holds it. Every other via of the group leaves
+    /// its plan together with its pad shapes in the search index, so the
+    /// searches, rule repair and the output all see one via. A via at its
+    /// own plan's escape top stays (the escape's stacking and pad checks read
+    /// it); `assemble` writes such a pair once. Run once, right after pin
+    /// access, before any search. Returns the number of vias removed. Work:
+    /// one sort of each net's escape vias and one scan of its escape wires
+    /// per coincident group, charged.
+    fn share_escape_vias(
+        &mut self,
+        groups: &BTreeMap<u32, Vec<&Terminal>>,
+        plans: &mut HashMap<u32, Plan>,
+    ) -> Result<usize> {
+        let cap = self.limits.max_comparisons;
+        let mut removed = 0usize;
+        // (point, layer pair, terminal index, via index, kind)
+        type Entry = ([i64; 2], (u32, u32), usize, usize, u32);
+        let mut entries: Vec<Entry> = Vec::new();
+        for terminals in groups.values() {
+            entries.clear();
+            for (ti, t) in terminals.iter().enumerate() {
+                let plan = plans
+                    .get(&t.pin)
+                    .ok_or_else(|| invalid("terminal without an escape plan"))?;
+                for (vi, v) in plan.vias.iter().enumerate() {
+                    let k = &self.input.vias[v.kind as usize];
+                    entries.push((v.at, (k.lower, k.upper), ti, vi, v.kind));
+                }
+            }
+            if entries.len() < 2 {
+                continue;
+            }
+            self.spatial.work = self
+                .spatial
+                .work
+                .checked_add(
+                    entries
+                        .len()
+                        .saturating_mul(entries.len().ilog2() as usize + 1),
+                )
+                .filter(|&n| n <= cap)
+                .ok_or_else(|| budget("escape via sharing work"))?;
+            entries.sort_unstable();
+            // (terminal index, via index) of every via that leaves its plan.
+            let mut drop: Vec<(usize, usize)> = Vec::new();
+            let mut start = 0;
+            while start < entries.len() {
+                let key = (entries[start].0, entries[start].1);
+                let mut end = start + 1;
+                while end < entries.len() && (entries[end].0, entries[end].1) == key {
+                    end += 1;
+                }
+                if end - start > 1 {
+                    let (at, (lower, upper)) = key;
+                    let escape_wires = terminals
+                        .iter()
+                        .map(|t| plans[&t.pin].wires.len())
+                        .sum::<usize>();
+                    self.spatial.work = self
+                        .spatial
+                        .work
+                        .checked_add(escape_wires)
+                        .filter(|&n| n <= cap)
+                        .ok_or_else(|| budget("escape via sharing work"))?;
+                    // Per layer of the pair: the one axis of the net's escape
+                    // wires through `at`, if they share one.
+                    let axis = |layer: u32| -> Option<bool> {
+                        let mut found = None;
+                        for w in terminals
+                            .iter()
+                            .flat_map(|t| plans[&t.pin].wires.iter())
+                            .filter(|w| w.layer == layer && on_wire(w, at) && w.start != w.end)
+                        {
+                            let vertical = w.start[0] == w.end[0];
+                            match found {
+                                None => found = Some(vertical),
+                                Some(v) if v != vertical => return None,
+                                Some(_) => {}
+                            }
+                        }
+                        found
+                    };
+                    let wants: Vec<(u32, bool)> = [lower, upper]
+                        .into_iter()
+                        .filter_map(|l| axis(l).map(|d| (l, d)))
+                        .collect();
+                    let group = &entries[start..end];
+                    let kind = group
+                        .iter()
+                        .map(|e| e.4)
+                        .filter(|&k| {
+                            wants
+                                .iter()
+                                .all(|&(l, d)| pad_along_kind(self.input, k as usize, l, d))
+                        })
+                        .min()
+                        .unwrap_or_else(|| group.iter().map(|e| e.4).min().unwrap_or(0));
+                    let keep = group
+                        .iter()
+                        .filter(|e| e.4 == kind)
+                        .map(|e| (e.2, e.3))
+                        .min();
+                    for e in group {
+                        if Some((e.2, e.3)) == keep
+                            || self.graph.point(plans[&terminals[e.2].pin].top).1 == at
+                        {
+                            continue;
+                        }
+                        drop.push((e.2, e.3));
+                    }
+                }
+                start = end;
+            }
+            if drop.is_empty() {
+                continue;
+            }
+            drop.sort_unstable();
+            let mut k = 0;
+            while k < drop.len() {
+                let ti = drop[k].0;
+                let mut gone: Vec<usize> = Vec::new();
+                while k < drop.len() && drop[k].0 == ti {
+                    gone.push(drop[k].1);
+                    k += 1;
+                }
+                let plan = plans
+                    .get_mut(&terminals[ti].pin)
+                    .ok_or_else(|| invalid("terminal without an escape plan"))?;
+                // `escape` lays out the shape ids as one per wire, then every
+                // pad of each via in order, then the portal envelopes.
+                let via_shapes: usize = plan
+                    .vias
+                    .iter()
+                    .map(|v| self.input.vias[v.kind as usize].shapes.len())
+                    .sum();
+                if plan.shapes.len()
+                    != plan.wires.len() + via_shapes + usize::from(plan.portal_shapes)
+                {
+                    return Err(invalid("escape plan shape layout"));
+                }
+                let mut vias = Vec::with_capacity(plan.vias.len() - gone.len());
+                let mut shapes = Vec::with_capacity(plan.shapes.len());
+                shapes.extend_from_slice(&plan.shapes[..plan.wires.len()]);
+                let mut offset = plan.wires.len();
+                for (vi, v) in plan.vias.iter().enumerate() {
+                    let n = self.input.vias[v.kind as usize].shapes.len();
+                    let ids = &plan.shapes[offset..offset + n];
+                    if gone.binary_search(&vi).is_ok() {
+                        for &id in ids {
+                            self.spatial.remove(id);
+                        }
+                        removed += 1;
+                    } else {
+                        vias.push(v.clone());
+                        shapes.extend_from_slice(ids);
+                    }
+                    offset += n;
+                }
+                shapes.extend_from_slice(&plan.shapes[offset..]);
+                plan.vias = vias.into_boxed_slice();
+                plan.shapes = shapes.into_boxed_slice();
+            }
+        }
+        Ok(removed)
+    }
+
     /// Re-pick routed via variants so that on each layer where exactly one
     /// wire ends at the via, the pad is elongated along that wire (LEF58
     /// end-of-line enclosure rules are not modelled natively). A variant is
@@ -4984,7 +5160,7 @@ pub(crate) fn route_with_prior(
     r.guard("setup")?;
     trace("spatial index", t0, format_args!("work {}", r.spatial.work));
     let all: Vec<&Terminal> = groups.values().flatten().copied().collect();
-    let plans = r.reserve(&all)?;
+    let mut plans = r.reserve(&all)?;
     r.guard("pin access")?;
     trace(
         "access",
@@ -4997,6 +5173,15 @@ pub(crate) fn route_with_prior(
         ),
     );
     drop(all);
+    if r.plan.qor.as_ref().is_some_and(|q| q.dedupe_vias) {
+        let shared = r.share_escape_vias(&groups, &mut plans)?;
+        trace(
+            "dedupe",
+            t0,
+            format_args!("escape vias shared {shared} work {}", r.spatial.work),
+        );
+    }
+    let plans = plans;
     if r.plan.qor.as_ref().is_some_and(|q| q.prim_order) {
         for group in groups.values_mut() {
             prim_terminal_order(
@@ -9879,7 +10064,30 @@ mod tests {
         turn_at_ends: bool,
         reroute: Option<crate::routing::StraightenReroute>,
     ) -> (Vec<Wire>, Vec<Via>, straighten::StraightenTally, Routes) {
-        let obstacles = blockers
+        straighten_staircase_case(&StaircaseCase {
+            blockers,
+            turn_at_ends,
+            reroute,
+            ..StaircaseCase::default()
+        })
+    }
+    /// Options of the staircase fixture: other-net M2 blockages, the
+    /// straightening controls, an M2 wide-spacing rule, and an ECO prior
+    /// for the net (`Some(true)`: its current geometry, `Some(false)`:
+    /// other geometry).
+    #[derive(Default)]
+    struct StaircaseCase<'b> {
+        blockers: &'b [Rect],
+        turn_at_ends: bool,
+        reroute: Option<crate::routing::StraightenReroute>,
+        wide: Option<crate::routing::WideSpacing>,
+        prior: Option<bool>,
+    }
+    fn straighten_staircase_case(
+        case: &StaircaseCase<'_>,
+    ) -> (Vec<Wire>, Vec<Via>, straighten::StraightenTally, Routes) {
+        let obstacles = case
+            .blockers
             .iter()
             .map(|&rect| Blockage {
                 layer: 1,
@@ -9894,10 +10102,11 @@ mod tests {
             ],
             obstacles,
         );
+        design.layers[1].wide_spacing = case.wide;
         let cfg = crate::routing::Straighten {
             passes: 2,
-            turn_at_ends,
-            reroute,
+            turn_at_ends: case.turn_at_ends,
+            reroute: case.reroute.clone(),
         };
         {
             let plan = design.tracks.as_mut().unwrap();
@@ -9945,6 +10154,16 @@ mod tests {
             route.wires.push(w);
         }
         let old_length = route_length(&route);
+        let prior = case.prior.map(|same| PriorRoutes {
+            nets: BTreeMap::from([(
+                0,
+                if same {
+                    (route.wires.clone(), route.vias.clone())
+                } else {
+                    (route.wires[..1].to_vec(), Vec::new())
+                },
+            )]),
+        });
         let mut retained = route.segments();
         let mut routed = BTreeMap::from([(0, route)]);
         let groups = BTreeMap::from([(0, terminals)]);
@@ -9960,7 +10179,7 @@ mod tests {
             },
             &mut routed,
             &mut retained,
-            None,
+            prior.as_ref(),
             std::time::Instant::now(),
         )
         .unwrap();
@@ -10187,6 +10406,517 @@ mod tests {
         let (wires, _, tally, _) = straighten_staircase(&walls, false);
         assert_eq!(wires.len(), 5);
         assert_eq!((tally.kept, tally.found), (0, 1));
+    }
+
+    #[test]
+    fn straightening_refuses_a_candidate_inside_wide_metal_spacing() {
+        // Net 9's block (200 x 90, wide at 60) lies 30 DBU above the first Z
+        // candidate's middle row (y 260): clear at the 20 DBU spacing, but
+        // inside the 40 DBU wide spacing over a 200 DBU parallel run (at least
+        // 100). The staircase itself keeps 30 DBU to it over a 90 DBU run, so
+        // it is legal; the Z on the other corner row (y 460) is taken.
+        let block = rect(420, 300, 620, 390);
+        let wide = crate::routing::WideSpacing {
+            width: 60,
+            parallel_run: 100,
+            spacing: 40,
+        };
+        let (wires, _, tally, out) = straighten_staircase_case(&StaircaseCase {
+            blockers: &[block],
+            wide: Some(wide),
+            ..StaircaseCase::default()
+        });
+        let mut runs: Vec<_> = wires.iter().map(|w| (w.start, w.end)).collect();
+        runs.sort_unstable();
+        assert_eq!(
+            runs,
+            vec![
+                ([100, 100], [100, 460]),
+                ([100, 460], [660, 460]),
+                ([660, 460], [660, 620]),
+            ]
+        );
+        assert!(tally.wide >= 1, "{tally:?}");
+        assert_eq!(tally.kept, 1, "{tally:?}");
+        assert!(out.wires.iter().all(|w| w.net == 0));
+        // Control: without the wide rule the same block leaves row 260 legal.
+        let (wires, _, tally, _) = straighten_staircase(&[block], false);
+        let mut runs: Vec<_> = wires.iter().map(|w| (w.start, w.end)).collect();
+        runs.sort_unstable();
+        assert!(runs.contains(&([100, 260], [660, 260])), "{runs:?}");
+        assert_eq!((tally.wide, tally.kept), (0, 1));
+    }
+
+    #[test]
+    fn straightening_in_an_eco_route_leaves_nets_that_keep_their_prior_geometry() {
+        let reroute = crate::routing::StraightenReroute {
+            bend_cost: 40,
+            max_terminals: 8,
+            net_expansions: 100_000,
+            weight: 1,
+        };
+        // The net still holds its prior geometry: neither the re-route nor
+        // the rewrites touch it.
+        let (wires, vias, tally, _) = straighten_staircase_case(&StaircaseCase {
+            reroute: Some(reroute.clone()),
+            prior: Some(true),
+            ..StaircaseCase::default()
+        });
+        assert_eq!(wires.len(), 5, "{wires:?}");
+        assert!(vias.is_empty());
+        assert_eq!(
+            (tally.rerouted, tally.chains, tally.kept, tally.skipped),
+            (0, 0, 0, 1),
+            "{tally:?}"
+        );
+        // A prior of other geometry (the ECO routed the net again): the
+        // re-route runs, and without it the rewrites.
+        let (wires, _, tally, _) = straighten_staircase_case(&StaircaseCase {
+            reroute: Some(reroute.clone()),
+            prior: Some(false),
+            ..StaircaseCase::default()
+        });
+        assert_eq!(wires.len(), 2, "{wires:?}");
+        assert_eq!(
+            (tally.rerouted, tally.reroute_kept, tally.skipped),
+            (1, 1, 0)
+        );
+        let (wires, _, tally, _) = straighten_staircase_case(&StaircaseCase {
+            prior: Some(false),
+            ..StaircaseCase::default()
+        });
+        assert_eq!(wires.len(), 3, "{wires:?}");
+        assert_eq!((tally.kept, tally.skipped), (1, 0));
+        // End to end: an identity ECO of a routed design (its own output as
+        // the prior) with the cleanup on keeps every net and writes the
+        // routes of the same ECO without it.
+        let design = |on: bool| {
+            let mut design = crossing_nets();
+            design.tracks.as_mut().unwrap().qor = Some(crate::routing::RouteQor {
+                dedupe_vias: true,
+                straighten: on.then(|| crate::routing::Straighten {
+                    passes: 2,
+                    turn_at_ends: true,
+                    reroute: Some(reroute.clone()),
+                }),
+                ..Default::default()
+            });
+            design
+        };
+        let limits = limits();
+        let full = route(&design(true), &limits).unwrap();
+        let prior = prior_of(&full);
+        straighten::TALLY.with(|t| t.set(None));
+        let eco = route_with_prior(&design(true), &limits, Some(&prior)).unwrap();
+        crate::routing::validate(&design(true), &eco, &limits).unwrap();
+        let tally = straighten::TALLY.with(|t| t.get()).expect("the pass ran");
+        assert_eq!(
+            (tally.skipped, tally.rerouted, tally.kept),
+            (4, 0, 0),
+            "{tally:?}"
+        );
+        let plain = route_with_prior(&design(false), &limits, Some(&prior)).unwrap();
+        assert_eq!(eco.wires, plain.wires);
+        assert_eq!(eco.vias, plain.vias);
+        assert_eq!(eco.patches, plain.patches);
+    }
+
+    #[test]
+    fn straightening_turns_at_a_via_junction_and_the_via_follows_the_new_arrival() {
+        // A five-run M2 staircase from the driver's escape top to a routed
+        // V23 at (660, 620) whose M2 pad is elongated along y (the chain
+        // arrives along y), then M3 to a V23 on the sink's escape top. The
+        // other V23 variant has its M2 pad along x.
+        let run = |turn: bool| {
+            let mut design = input(
+                vec![
+                    terminal(0, 0, true, rect(90, 90, 110, 110)),
+                    terminal(1, 0, false, rect(890, 610, 910, 630)),
+                ],
+                Vec::new(),
+            );
+            let v23 = |name: &str, m2: Rect| RouteVia {
+                name: name.into(),
+                lower: 1,
+                upper: 2,
+                shapes: vec![
+                    LayerRect { layer: 1, rect: m2 },
+                    LayerRect {
+                        layer: 4,
+                        rect: rect(-5, -5, 5, 5),
+                    },
+                    LayerRect {
+                        layer: 2,
+                        rect: rect(-10, -10, 10, 10),
+                    },
+                ],
+            };
+            design.vias = vec![
+                via("V12", 0, 3, 1),
+                v23("V23_Y", rect(-10, -15, 10, 15)),
+                v23("V23_X", rect(-15, -10, 15, 10)),
+            ];
+            let cfg = crate::routing::Straighten {
+                passes: 2,
+                turn_at_ends: turn,
+                reroute: None,
+            };
+            {
+                let plan = design.tracks.as_mut().unwrap();
+                plan.routing_layers = Some([1, 2]);
+                plan.wrong_way_factor = 1;
+                plan.qor = Some(crate::routing::RouteQor {
+                    straighten: Some(cfg.clone()),
+                    ..Default::default()
+                });
+            }
+            let limits = limits();
+            let plan = design.tracks.as_ref().unwrap();
+            let graph = Graph::new(&design, plan, &limits).unwrap();
+            let cells = Cells::new(design.die, plan.gcell).unwrap();
+            let mut router = Router::prepared(&design, &limits, graph, cells).unwrap();
+            let terminals: Vec<&Terminal> = design.terminals.iter().collect();
+            let plans = router.reserve(&terminals).unwrap();
+            assert_eq!(router.graph.point(plans[&0].top), (1, [100, 100]));
+            assert_eq!(router.graph.point(plans[&1].top), (1, [900, 620]));
+            let mut route = NetRoute::default();
+            let corners = [
+                [100, 100],
+                [100, 260],
+                [380, 260],
+                [380, 460],
+                [660, 460],
+                [660, 620],
+            ];
+            let mut wires: Vec<Wire> = corners
+                .windows(2)
+                .map(|p| Wire {
+                    net: 0,
+                    layer: 1,
+                    start: p[0],
+                    end: p[1],
+                })
+                .collect();
+            wires.push(Wire {
+                net: 0,
+                layer: 2,
+                start: [660, 620],
+                end: [900, 620],
+            });
+            for w in wires {
+                let rect = router.edge_rect(w.layer, w.start, w.end, 0).unwrap();
+                route.shapes.push(
+                    router
+                        .spatial
+                        .add_routed(Blockage {
+                            layer: w.layer,
+                            rect,
+                            net: Some(0),
+                        })
+                        .unwrap(),
+                );
+                route.wires.push(w);
+            }
+            for at in [[660, 620], [900, 620]] {
+                for s in &design.vias[1].shapes {
+                    route.shapes.push(
+                        router
+                            .spatial
+                            .add_routed(Blockage {
+                                layer: s.layer,
+                                rect: shifted(s.rect, at).unwrap(),
+                                net: Some(0),
+                            })
+                            .unwrap(),
+                    );
+                }
+                route.vias.push(Via {
+                    net: 0,
+                    kind: 1,
+                    at,
+                });
+            }
+            let old_length = route_length(&route);
+            let mut retained = route.segments();
+            let mut routed = BTreeMap::from([(0, route)]);
+            let groups = BTreeMap::from([(0, terminals)]);
+            let guides = BTreeMap::from([(0, (0..router.cells.len() as u32).collect::<Vec<_>>())]);
+            straighten::straighten(
+                &mut router,
+                &cfg,
+                &groups,
+                &plans,
+                straighten::Region {
+                    guides: &guides,
+                    demoted: &BTreeMap::new(),
+                },
+                &mut routed,
+                &mut retained,
+                None,
+                std::time::Instant::now(),
+            )
+            .unwrap();
+            let oriented = router.orient_vias(&mut routed).unwrap();
+            let route = &routed[&0];
+            assert_eq!(route_length(route), old_length);
+            let via_layers: Vec<(u32, u32)> =
+                design.vias.iter().map(|v| (v.lower, v.upper)).collect();
+            let mut out = assemble(
+                &router,
+                &groups,
+                &plans,
+                &routed,
+                &design,
+                &limits,
+                &via_layers,
+                &mut 0,
+            )
+            .unwrap();
+            crate::routing::cleanup_report(&design, &mut out, &limits).unwrap();
+            out.stats.wire_length_dbu = out
+                .wires
+                .iter()
+                .map(|w| w.start[0].abs_diff(w.end[0]) + w.start[1].abs_diff(w.end[1]))
+                .sum();
+            validate(&design, &out, &limits).unwrap();
+            let mut m2: Vec<_> = route
+                .wires
+                .iter()
+                .filter(|w| w.layer == 1)
+                .map(|w| (w.start, w.end))
+                .collect();
+            m2.sort_unstable();
+            let kinds: Vec<(u32, [i64; 2])> = route.vias.iter().map(|v| (v.kind, v.at)).collect();
+            (m2, kinds, oriented, out.vias.len())
+        };
+        // Keeping the end axes: the Z on the first corner row, still arriving
+        // along y, so the via keeps its variant.
+        let (m2, kinds, oriented, vias) = run(false);
+        assert_eq!(
+            m2,
+            vec![
+                ([100, 100], [100, 260]),
+                ([100, 260], [660, 260]),
+                ([660, 260], [660, 620]),
+            ]
+        );
+        assert_eq!(kinds, vec![(1, [660, 620]), (1, [900, 620])]);
+        assert_eq!(oriented, 0);
+        // Turning at the ends: the L arrives at the via along x, and
+        // `orient_vias` re-picks the variant whose M2 pad lies along it; the
+        // result validates with the same vias.
+        let (m2, kinds, oriented, turned_vias) = run(true);
+        assert_eq!(m2.len(), 2, "{m2:?}");
+        assert!(
+            m2.iter()
+                .any(|&(a, b)| (a, b) == ([100, 620], [660, 620])
+                    || (b, a) == ([100, 620], [660, 620])),
+            "{m2:?}"
+        );
+        assert_eq!(kinds, vec![(2, [660, 620]), (1, [900, 620])]);
+        assert_eq!(oriented, 1);
+        assert_eq!(turned_vias, vias);
+    }
+
+    #[test]
+    fn escape_vias_of_one_net_at_one_point_share_one_via() {
+        // The Ibex pattern at fixture scale: pins 0 and 1 of net 5 escape on
+        // M1 from both sides to one via point (100, 100) and up an M2 stub to
+        // one top (100, 140), with different V12 variants (YY = kind 0, XY =
+        // kind 1). Pins 2 and 3 share a via point that is each one's own
+        // escape top, which pin access keeps.
+        let mut design = variant_input();
+        design.terminals = vec![
+            terminal(0, 5, true, rect(50, 90, 70, 110)),
+            terminal(1, 5, false, rect(130, 90, 150, 110)),
+            terminal(2, 5, false, rect(490, 490, 510, 510)),
+            terminal(3, 5, false, rect(490, 490, 510, 510)),
+        ];
+        design.tracks.as_mut().unwrap().qor = Some(crate::routing::RouteQor {
+            dedupe_vias: true,
+            ..Default::default()
+        });
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(&design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let mut r = Router::prepared(&design, &limits, graph, cells).unwrap();
+        let slot = r.graph.layers.iter().position(|g| g.layer == 1).unwrap();
+        // An escape plan laid out as `escape` lays it out: one shape per
+        // wire, every pad of each via, then the portal envelope (V23 pads).
+        let manual = |r: &mut Router<'_>,
+                      pin: u32,
+                      at: [i64; 2],
+                      wires: &[([i64; 2], [i64; 2], u32)],
+                      vias: &[(u32, [i64; 2])],
+                      top: [i64; 2]| {
+            let wires: Vec<Wire> = wires
+                .iter()
+                .map(|&(start, end, layer)| Wire {
+                    net: 5,
+                    layer,
+                    start,
+                    end,
+                })
+                .collect();
+            let vias: Vec<Via> = vias
+                .iter()
+                .map(|&(kind, at)| Via { net: 5, kind, at })
+                .collect();
+            let mut shapes = Vec::new();
+            for w in &wires {
+                let rect = wire_rect(w, r.width(w.layer)).unwrap();
+                shapes.push(
+                    r.spatial
+                        .add_fixed(Blockage {
+                            layer: w.layer,
+                            rect,
+                            net: Some(5),
+                        })
+                        .unwrap(),
+                );
+            }
+            let portal = r.input.vias[2].shapes.clone();
+            for (v, at) in vias
+                .iter()
+                .flat_map(|v| {
+                    r.input.vias[v.kind as usize]
+                        .shapes
+                        .iter()
+                        .map(move |s| (s.clone(), v.at))
+                })
+                .chain(portal.into_iter().map(|s| (s, top)))
+                .collect::<Vec<_>>()
+            {
+                shapes.push(
+                    r.spatial
+                        .add_fixed(Blockage {
+                            layer: v.layer,
+                            rect: shifted(v.rect, at).unwrap(),
+                            net: Some(5),
+                        })
+                        .unwrap(),
+                );
+            }
+            Plan {
+                access: Access {
+                    pin,
+                    net: 5,
+                    layer: 0,
+                    at,
+                },
+                top: r.graph.find(slot, top).unwrap(),
+                top_via: false,
+                portal_shapes: 3,
+                wires: wires.into_boxed_slice(),
+                vias: vias.into_boxed_slice(),
+                shapes: shapes.into_boxed_slice(),
+            }
+        };
+        let stub = ([100, 100], [100, 140], 1);
+        let mut plans = HashMap::new();
+        plans.insert(
+            0,
+            manual(
+                &mut r,
+                0,
+                [60, 100],
+                &[([60, 100], [100, 100], 0), stub],
+                &[(1, [100, 100])],
+                [100, 140],
+            ),
+        );
+        plans.insert(
+            1,
+            manual(
+                &mut r,
+                1,
+                [140, 100],
+                &[([140, 100], [100, 100], 0), stub],
+                &[(0, [100, 100])],
+                [100, 140],
+            ),
+        );
+        plans.insert(
+            2,
+            manual(&mut r, 2, [500, 500], &[], &[(0, [500, 500])], [500, 500]),
+        );
+        plans.insert(
+            3,
+            manual(&mut r, 3, [500, 500], &[], &[(1, [500, 500])], [500, 500]),
+        );
+        let before: Vec<usize> = plans[&1].shapes.to_vec();
+        let groups = BTreeMap::from([(5, design.terminals.iter().collect::<Vec<_>>())]);
+        let work = r.spatial.work;
+        assert_eq!(r.share_escape_vias(&groups, &mut plans).unwrap(), 1);
+        assert!(r.spatial.work > work, "work charged");
+        // Both escapes' M1 wires run along x through the point and the stub
+        // along y: the XY variant (pin 0's) stays; pin 1's YY via and its three
+        // pads leave the plan and the index, its wires and portal stay.
+        assert_eq!(
+            plans[&0].vias.to_vec(),
+            vec![Via {
+                net: 5,
+                kind: 1,
+                at: [100, 100]
+            }]
+        );
+        assert!(plans[&1].vias.is_empty());
+        let after: Vec<usize> = plans[&1].shapes.to_vec();
+        assert_eq!(after, [&before[..2], &before[5..]].concat());
+        assert_eq!(plans[&1].portal_shapes, 3);
+        assert!(before[2..5].iter().all(|&id| !r.spatial.is_alive(id)));
+        assert!(after.iter().all(|&id| r.spatial.is_alive(id)));
+        // The pair on the escape tops stays in the plans; `assemble` writes
+        // it once (the output backstop), and one via at (100, 100).
+        assert_eq!((plans[&2].vias.len(), plans[&3].vias.len()), (1, 1));
+        let routed = BTreeMap::from([(5, NetRoute::default())]);
+        let via_layers: Vec<(u32, u32)> = design.vias.iter().map(|v| (v.lower, v.upper)).collect();
+        let mut deduped = 0;
+        let out = assemble(
+            &r,
+            &groups,
+            &plans,
+            &routed,
+            &design,
+            &limits,
+            &via_layers,
+            &mut deduped,
+        )
+        .unwrap();
+        assert_eq!(deduped, 1);
+        let mut at: Vec<(u32, [i64; 2])> = out.vias.iter().map(|v| (v.kind, v.at)).collect();
+        at.sort_unstable();
+        assert_eq!(at, vec![(0, [500, 500]), (1, [100, 100])]);
+        // Swapping the variants moves the kept via to pin 1's plan.
+        let mut plans = HashMap::from([
+            (
+                0,
+                manual(
+                    &mut r,
+                    0,
+                    [60, 100],
+                    &[([60, 100], [100, 100], 0), stub],
+                    &[(0, [100, 100])],
+                    [100, 140],
+                ),
+            ),
+            (
+                1,
+                manual(
+                    &mut r,
+                    1,
+                    [140, 100],
+                    &[([140, 100], [100, 100], 0), stub],
+                    &[(1, [100, 100])],
+                    [100, 140],
+                ),
+            ),
+        ]);
+        let groups = BTreeMap::from([(5, design.terminals[..2].iter().collect::<Vec<_>>())]);
+        assert_eq!(r.share_escape_vias(&groups, &mut plans).unwrap(), 1);
+        assert!(plans[&0].vias.is_empty());
+        assert_eq!(plans[&1].vias.len(), 1);
     }
 
     #[test]

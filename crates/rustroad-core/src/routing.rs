@@ -499,17 +499,22 @@ pub struct RouteQor {
     /// `ViaReduction`). `None` keeps the routes of the repair loop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub via_reduction: Option<ViaReduction>,
-    /// Same-net vias of one layer pair at one point are written once. Two
-    /// pin escapes of one net can land on the same escape top with
-    /// different variants of one via (net-aware access puts a pin's escape
-    /// on its neighbour's), and a searched route can stack a via on its own
-    /// escape via that `orient_vias` then re-picks; the output held both
-    /// (24 nets on Ibex: `Via1_YY_so` and `Via1_XY_so` at one point). Either
-    /// via makes the connection, and a reader may put the pair in series.
-    /// The output keeps the variant whose pads lie along the net's wires at
-    /// that point (as `orient_vias` picks), else the lowest kind; cleanup and
-    /// the rule passes then run on the result as usual. Routing decisions
-    /// are unchanged: only the redundant output record goes.
+    /// One via per net, layer pair and point. With `net_aware_access` two
+    /// neighbouring pins of one net can escape through the same via point
+    /// to the same top, each with the variant its own access search picked
+    /// (all 24 such pairs on Ibex: `Via1_YY_so` and `Via1_XY_so` between the
+    /// two pins' Metal1 escapes); the output held both. Either via makes the
+    /// connection, and a reader may put the pair in series. Right after pin
+    /// access, the escapes of one net share one via at each such point: the
+    /// variant whose pads lie along the net's escape wires there (the
+    /// `orient_vias` rule), else the lowest kind, stays in the first plan
+    /// that holds it, and every other via leaves its plan with its pads in
+    /// the search index, so the searches, rule repair and the output see one
+    /// via. A pair at an escape's own top stays in the plans (the escape's
+    /// stacking and pad checks read it), and `assemble` then writes one via
+    /// per point (the same rule over all of the net's wires), which also
+    /// covers a routed via that `orient_vias` re-picks on top of an escape
+    /// via. Cleanup and the rule passes run on the result as usual.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dedupe_vias: bool,
     /// Post-route topology cleanup (`Straighten`): same-layer staircases and
@@ -536,8 +541,11 @@ pub struct RouteQor {
 /// chain used there, so via pads and escapes see the same arrival direction.
 ///
 /// Every candidate is a shortest rectilinear path between the junctions, so
-/// the wire length never grows; vias are never touched, so the via count is
-/// identical. A candidate is legal when every new run is clear of the metal
+/// a rewrite never adds wire, and it never touches a via. (The optional
+/// `reroute` may remove vias and wire but never adds either: it keeps a new
+/// route only with no more of both. Cleanup and the rule-repair passes that
+/// follow can still lengthen a net or add a via, as they do without this
+/// pass.) A candidate is legal when every new run is clear of the metal
 /// of every other net, fixed geometry and cell obstructions (the clearance
 /// probe the searches use for a wire step) and of the wide-metal spacing of
 /// any other net's shape that is wide on its own; touches same-net metal only
@@ -2375,6 +2383,10 @@ impl<'a> Spatial<'a> {
     }
     fn alive(&self, id: usize) -> bool {
         id < self.input.obstacles.len() || self.alive[id - self.input.obstacles.len()]
+    }
+    #[cfg(test)]
+    pub(crate) fn is_alive(&self, id: usize) -> bool {
+        self.alive(id)
     }
     fn routed(&self, id: usize) -> bool {
         id >= self.input.obstacles.len() && self.routed[id - self.input.obstacles.len()]
