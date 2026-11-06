@@ -10,7 +10,7 @@ repository lockfile when reproducing a run.
 The RustEDA Ibex host campaign of 2026-11-05 (IHP SG13G2 / EZ130 with two real
 SRAMs, on a 4-vCPU Intel Xeon cloud host with 15.7 GiB RAM and no swap; a
 different and slower machine than on 2026-11-02) ran RustROAD CLI 0.5.0
-(commit [`63d492d`](https://github.com/lab-emi/RustROAD/commit/63d492d6dbd0034e0ef96ae6145b519498db5aa7)) in the repository's current native recipe under an 8 GiB
+(commit [`1921481`](https://github.com/lab-emi/RustROAD/commit/1921481c5f0fde21b62971a3a21e245065c9bf90)) in the repository's current native recipe under an 8 GiB
 memory cap (+2 GiB memsw), and OpenROAD 26Q3 in LibreLane 3.0.17 Classic under
 a 10 GiB cap, from the same prepared RTL, SDC and floorplan. The same
 independent scripts checked both final layouts. **Both pass foundry main and
@@ -19,8 +19,8 @@ the shared timing gate the native layout has zero setup, hold, slew,
 capacitance and fanout violations at TT and SS, while LibreLane's keeps 28 (TT)
 and 24 (SS) capacitance and 30 fanout violations.** The native layout has less
 standard-cell area, less routed wire and fewer vias, from a different netlist;
-no area, wire or via ratio is formed, because LibreLane's layout fails a gate
-and the receipt's ratios are therefore null.
+the receipt keeps its ratio fields null because LibreLane's layout fails a gate;
+divided, the native layout has 5.2 % less area, 7.4 % less wire and 3.0 % fewer vias.
 
 The native run is `unqualified` (the component-qualification evidence is not
 published). Routing, post-route repair, antenna repair and extraction ran at

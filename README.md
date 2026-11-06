@@ -22,12 +22,23 @@ Part of **[RustEDA](https://github.com/lab-emi/RustEDA)**, infrastructure for ch
 
 [Current qualification and limits](docs/closeout-2026-10-25.md) · [Flow guide](docs/rtl2gds.md)
 
+## RustROAD vs OpenROAD at a glance
+
+Ibex RTL-to-GDS on IHP SG13G2 with EZ130 cells and two SRAM macros, 2026-11-05: RustEDA and LibreLane 3.0.17 (OpenROAD, Yosys, KLayout, Magic, Netgen) ran one after the other on the same 4-vCPU host from the same prepared inputs, and the same signoff scripts checked both layouts.
+
+- **Routing 8.5× faster than OpenROAD** (302.24 s against 2,570.19 s global and detailed), **placement and clock tree 1.7× faster**, and **export 168× faster** than LibreLane's streamout steps.
+- **5.2 % less standard-cell area, 7.4 % less routed wire and 3.0 % fewer vias**, with 52 antenna diodes against 504 and **zero timing violations** against LibreLane's 112.
+- GDS export **2.3× faster than KLayout** with **2.0× less peak memory**; foundry DRC, antenna and LVS run **1.3×, 1.3× and 1.4× faster** on RustROAD's layout (same scripts, same load).
+- The whole RustEDA flow finishes **4.2× sooner end to end**. RustROAD's own extraction is level with OpenRCX at 4 threads and 1.69× slower at 2.
+
+LibreLane's layout fails the shared timing gate (112 maximum-capacitance and fanout violations at TT and SS) and its equivalence check does not complete, so the receipt keeps its own ratio fields null under its publication rule; the multiples here divide the recorded times. Stages are paired by phase, not as identical tasks. RustEDA is not faster everywhere: its repair before global routing takes 1.18× LibreLane's two pre-route resizer steps alone, OpenRCX runs 1.36× longer on RustEDA's DEF, and the latch-up check 1.11× longer on its layout. [All stages, gates and losses](https://lab-emi.github.io/RustEDA/benchmarks/)
+
 ## Latest development · 2026-11-05
 
 The RustEDA Ibex host campaign of 2026-11-05 (IHP SG13G2 / EZ130 with two real
 SRAMs, on a 4-vCPU Intel Xeon cloud host with 15.7 GiB RAM and no swap; a
 different and slower machine than on 2026-11-02) ran RustROAD CLI 0.5.0
-(commit [`63d492d`](https://github.com/lab-emi/RustROAD/commit/63d492d6dbd0034e0ef96ae6145b519498db5aa7)) in the repository's current native recipe under an 8 GiB
+(commit [`1921481`](https://github.com/lab-emi/RustROAD/commit/1921481c5f0fde21b62971a3a21e245065c9bf90)) in the repository's current native recipe under an 8 GiB
 memory cap (+2 GiB memsw), and OpenROAD 26Q3 in LibreLane 3.0.17 Classic under
 a 10 GiB cap, from the same prepared RTL, SDC and floorplan. The same
 independent scripts checked both final layouts. **Both pass foundry main and
@@ -36,8 +47,8 @@ the shared timing gate the native layout has zero setup, hold, slew,
 capacitance and fanout violations at TT and SS, while LibreLane's keeps 28 (TT)
 and 24 (SS) capacitance and 30 fanout violations.** The native layout has less
 standard-cell area, less routed wire and fewer vias, from a different netlist;
-no area, wire or via ratio is formed, because LibreLane's layout fails a gate
-and the receipt's ratios are therefore null.
+the receipt keeps its ratio fields null because LibreLane's layout fails a gate;
+divided, the native layout has 5.2 % less area, 7.4 % less wire and 3.0 % fewer vias.
 
 | Ibex final layout | RustROAD, native recipe | OpenROAD 26Q3, LibreLane Classic |
 | --- | --- | --- |
@@ -53,7 +64,8 @@ and the receipt's ratios are therefore null.
 | Repair after routing | 7.34 s post-route + 18.99 s antenna repair and verification | None; its post-GRT repair runs before detailed routing |
 
 Stage times come from one timed run of each flow; the netlists and the repair
-around each stage differ, so no quotient is formed. The producer completed all
+around each stage differ, so the quotients in the summary above pair stages by
+phase, not as identical tasks. The producer completed all
 114 steps, and GDS, DEF, netlists and native SPEF were byte-identical in a
 second producer run through `be_timing`.
 

@@ -308,7 +308,7 @@ All optional; omitted (or all defaults) routes exactly as before and leaves
 the serialized plan unchanged: `default_quality_controls_reproduce_the_legacy_route`
 compares `qor` omitted with all defaults, and on Ibex the dense-placement
 replay of the legacy Metal3-access configuration (no `qor`) writes a
-`routes.rbin` byte-identical to the one of the RustROAD `baff0ba` merged head.
+`routes.rbin` byte-identical to the one of the RustROAD `485b5e6` merged head.
 
 | Key | Effect |
 | --- | --- |
@@ -608,7 +608,7 @@ reduction are done (first rule pass only):
    that still holds its prior geometry is left as it is.
 
 Route replays of the Ibex `be_route` input of the final configuration
-(superproject `3ac4328`: RustROAD `04640e5` recipe routing, the flow's
+(superproject `e0773f6`: RustROAD `deb9705` recipe routing, the flow's
 `--threads 4` invocation; QoR from the exported DEF with the receipt code,
 pieces and causes with `scripts/def_pieces.py`):
 
@@ -654,8 +654,8 @@ of its route time. A bend surcharge in
 the main search (the existing `bend_cost` control) removes more pieces but
 adds about 450 vias, so the recipe leaves it off as well.
 
-Full flow (the private campaign kit: superproject `3ac4328` with this routing
-change, RustROAD `661c045`, the other binaries of the frozen final set): the
+Full flow (the private campaign kit: superproject `e0773f6` with this routing
+change, RustROAD `c7471d7`, the other binaries of the frozen final set): the
 producer completed all 119 steps (exit 0; `timing_accuracy` largest
 RustSTA/OpenSTA difference 0.1639 ps) and every shared gate passed (DRC,
 antenna, latch-up, LVS, timing, simulation, both equivalences, density;
@@ -675,7 +675,7 @@ GDS, DEF, netlists and native SPEF (the OpenRCX SPEF file differs, every
 timing value read from it is equal, and six reruns of the `be_openrcx` step
 on this DEF wrote identical SPEF apart from its date line), and the final
 binary with both controls off routes the replay input to the same
-`routes.rbin` and DEF as the `04640e5` build.
+`routes.rbin` and DEF as the `deb9705` build.
 
 OpenRCX on the final DEFs (interleaved runs, each holding the host's
 heavy-job lock; medians, wall and CPU). The producer's `be_openrcx` step, in
@@ -705,7 +705,7 @@ about 0.4 to 0.6 s (5 to 7 %) off the step, and OpenRCX still takes about
 Route CPU, interleaved replays of the flow's `be_route` input with the final
 binaries (three pairs, each run holding the heavy-job lock, load 1.0 to
 1.2): 327.9 s median with the recipe's cleanup (311.0 to 338.5 s) against
-316.9 s without it (`04640e5` build and final configuration; 316.1 to
+316.9 s without it (`deb9705` build and final configuration; 316.1 to
 341.2 s), paired differences -2.6, +11.8 and -5.9 s. The whole-run spread
 comes from the routing before the via reduction, which is the same work in
 both arms (296.7 to 323.2 s). Within each run, the rewrites took 1.6 to
