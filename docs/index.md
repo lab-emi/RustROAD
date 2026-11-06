@@ -17,6 +17,46 @@ RustROAD implements placement, clock trees, routing, extraction and GDS export. 
 - [Signoff scope](signoff.md)
 
 
+## Ibex host campaign · 2026-11-05
+
+The RustEDA Ibex host campaign of 2026-11-05 (IHP SG13G2 / EZ130 with two real
+SRAMs, on a 4-vCPU Intel Xeon cloud host with 15.7 GiB RAM and no swap; a
+different and slower machine than on 2026-11-02) ran RustROAD CLI 0.5.0
+(commit [`63d492d`](https://github.com/lab-emi/RustROAD/commit/63d492d6dbd0034e0ef96ae6145b519498db5aa7)) in the repository's current native recipe under an 8 GiB
+memory cap (+2 GiB memsw), and OpenROAD 26Q3 in LibreLane 3.0.17 Classic under
+a 10 GiB cap, from the same prepared RTL, SDC and floorplan. The same
+independent scripts checked both final layouts. **Both pass foundry main and
+antenna DRC with 0 violations, latch-up tap coverage and full-device LVS; on
+the shared timing gate the native layout has zero setup, hold, slew,
+capacitance and fanout violations at TT and SS, while LibreLane's keeps 28 (TT)
+and 24 (SS) capacitance and 30 fanout violations.** The native layout has less
+standard-cell area, less routed wire and fewer vias, from a different netlist;
+no area, wire or via ratio is formed, because LibreLane's layout fails a gate
+and the receipt's ratios are therefore null.
+
+| Ibex final layout | RustROAD, native recipe | OpenROAD 26Q3, LibreLane Classic |
+| --- | --- | --- |
+| Standard-cell area | 187,585.2 µm² | 197,913.7 µm² |
+| Routed signal wirelength | 897,357.3 µm | 969,571.6 µm |
+| Vias | 118,525 | 122,194 |
+| Standard cells / antenna diodes / taps / fillers | 14,058 / 52 / 5,934 / 34,322 | 15,191 / 504 / 6,900 / 44,672 |
+| Foundry main / antenna DRC violations | 0 / 0 | 0 / 0 |
+| Latch-up tap coverage (LU.a, LU.b) and full-device LVS | `passed`, `passed` | `passed`, `passed` |
+| Slew / capacitance / fanout violations, TT and SS | 0 / 0 / 0 | 0 / 28 / 30 TT, 0 / 24 / 30 SS |
+| Placement and CTS | 28.00 s | 19.69 s placement + 27.36 s CTS |
+| Routing | 302.24 s at 4 threads, global and detailed | 83.34 s global routing and antenna checks/repair + 2,486.85 s detailed (4 threads) |
+| Repair after routing | 7.34 s post-route + 18.99 s antenna repair and verification | None; its post-GRT repair runs before detailed routing |
+
+RustROAD's GDS export took 0.831 s against 1.938 s for KLayout's LEF/DEF
+streamout; its extraction took 6.260 s at 4 threads against 5.944 s for OpenRCX
+(ranges overlap) and 10.121 s at 2 threads against 5.988 s. OpenRCX extraction
+of the native DEF is slower than of LibreLane's (1.36× in same-load runs),
+consistent with its route topology's larger number of wire pieces (192,328
+against 129,901).
+
+[Scope, tables and method](development-status.md#ibex-host-campaign-2026-11-05) ·
+[Host campaign 2026-11-05](https://lab-emi.github.io/RustEDA/benchmarks/#ibex-host-campaign-2026-11-05)
+
 ## Ibex host campaign · 2026-11-02
 
 In the RustEDA Ibex host campaign (IHP SG13G2 / EZ130 with two real SRAMs, on a

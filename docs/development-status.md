@@ -1,8 +1,103 @@
 # Development status
 
-Updated **2026-11-02**. This page describes the source published with the
+Updated **2026-11-05**. The 2026-11-05 section reports the RustEDA host campaign
+of that date; the rest of this page describes the source published with the
 RustEDA development update. Use the superproject’s exact gitlinks and the
 repository lockfile when reproducing a run.
+
+## Ibex host campaign · 2026-11-05
+
+The RustEDA Ibex host campaign of 2026-11-05 (IHP SG13G2 / EZ130 with two real
+SRAMs, on a 4-vCPU Intel Xeon cloud host with 15.7 GiB RAM and no swap; a
+different and slower machine than on 2026-11-02) ran RustROAD CLI 0.5.0
+(commit [`63d492d`](https://github.com/lab-emi/RustROAD/commit/63d492d6dbd0034e0ef96ae6145b519498db5aa7)) in the repository's current native recipe under an 8 GiB
+memory cap (+2 GiB memsw), and OpenROAD 26Q3 in LibreLane 3.0.17 Classic under
+a 10 GiB cap, from the same prepared RTL, SDC and floorplan. The same
+independent scripts checked both final layouts. **Both pass foundry main and
+antenna DRC with 0 violations, latch-up tap coverage and full-device LVS; on
+the shared timing gate the native layout has zero setup, hold, slew,
+capacitance and fanout violations at TT and SS, while LibreLane's keeps 28 (TT)
+and 24 (SS) capacitance and 30 fanout violations.** The native layout has less
+standard-cell area, less routed wire and fewer vias, from a different netlist;
+no area, wire or via ratio is formed, because LibreLane's layout fails a gate
+and the receipt's ratios are therefore null.
+
+The native run is `unqualified` (the component-qualification evidence is not
+published). Routing, post-route repair, antenna repair and extraction ran at
+`--threads 4`, frontend placement and CTS at `--threads 2`, and GDS export on
+the default 2-thread pool. The producer completed all 114 manifest steps,
+including its own foundry checks; a second producer run through `be_timing`
+produced byte-identical GDS, DEF, netlists and native SPEF (the OpenRCX SPEF, written by OpenROAD,
+differs). OpenROAD, OpenRCX and KLayout ran as external executables over
+standard-format files; no OpenROAD implementation is copied or inspected.
+
+### Place, CTS and route against OpenROAD · 2026-11-05
+
+| Ibex final layout | RustROAD, native recipe | OpenROAD 26Q3, LibreLane Classic |
+| --- | --- | --- |
+| Standard-cell area | 187,585.2 µm² | 197,913.7 µm² |
+| Routed signal wirelength | 897,357.3 µm | 969,571.6 µm |
+| Vias | 118,525 | 122,194 |
+| Standard cells / antenna diodes / taps / fillers | 14,058 / 52 / 5,934 / 34,322 | 15,191 / 504 / 6,900 / 44,672 |
+| Foundry main / antenna DRC violations | 0 / 0 | 0 / 0 |
+| Latch-up tap coverage (LU.a, LU.b) and full-device LVS | `passed`, `passed` | `passed`, `passed` |
+| Slew / capacitance / fanout violations, TT and SS | 0 / 0 / 0 | 0 / 28 / 30 TT, 0 / 24 / 30 SS |
+| Placement and CTS | 28.00 s | 19.69 s placement + 27.36 s CTS |
+| Routing | 302.24 s at 4 threads, global and detailed | 83.34 s global routing and antenna checks/repair + 2,486.85 s detailed (4 threads) |
+| Repair after routing | 7.34 s post-route + 18.99 s antenna repair and verification | None; its post-GRT repair runs before detailed routing |
+
+LibreLane's 2,486.85 s of detailed routing ran on the same 4 vCPUs; its
+repair before detailed routing (52.36 s, four resizer steps) sits beside the
+native frontend STA and ECO stage (26.04 s) on the benchmark page.
+
+### Extraction against OpenRCX · 2026-11-05
+
+The replay sets RustROAD's `--threads` to each setting on the recorded
+`extract` command, which now passes `--threads 4`; OpenRCX ran with
+`set_thread_count` 2 and 4. One warm-up and three measured repetitions,
+interleaved.
+
+| | RustROAD 0.5.0 | OpenRCX |
+| --- | ---: | ---: |
+| Median wall, 2 threads (fastest) | 10.121 s (9.783 s) | 5.988 s (5.970 s) |
+| Median wall, 4 threads (fastest) | 6.260 s (5.920 s) | 5.944 s (5.912 s) |
+| CPU time per run, 2 / 4 threads | 17.76–18.94 s / 17.79–19.05 s | 5.91–6.45 s / 5.88–6.24 s |
+| Worst peak RSS, 2 / 4 threads | 299,628 / 308,656 KiB | 211,480 / 212,012 KiB |
+| SPEF nets | 14,178 | 14,178 |
+| SPEF total capacitance / resistance | 162.695 pF / 2,752.769 kΩ | 153.653 pF / 2,769.870 kΩ |
+
+At 4 threads the two are level (the ranges overlap); at 2 threads OpenRCX is
+faster (RustROAD 1.69×). RustROAD uses about three times OpenRCX's CPU time and
+1.42–1.46× its peak RSS; its total capacitance is 5.9 % above OpenRCX's and its total
+resistance 0.6 % below.
+
+### GDS export against KLayout · 2026-11-05
+
+| | RustROAD `export-gds` | KLayout LEF/DEF streamout |
+| --- | ---: | ---: |
+| Median wall (fastest) | 0.831 s (0.799 s) | 1.938 s (1.730 s) |
+| Worst peak RSS | 105,316 KiB | 207,728 KiB |
+| Output size | 26,682,872 B | 25,363,292 B |
+
+**RustROAD is faster:** KLayout takes 2.33× its median wall time. The recipe
+now streams merged rectangles and flat vias (`--merge-shapes rectangles --vias
+flat`), which the foundry checks read faster; the two GDS files are not
+byte-equivalent and no geometric comparison was recorded.
+
+### Shared gates on the routed layouts · 2026-11-05
+
+Two shared gates are slower on the native layout, for different reasons. **OpenRCX extraction is slower on the native DEF**: in
+interleaved same-load runs the shared `extraction` gate took a median 6.57 s
+against 4.84 s on LibreLane's DEF (1.36×; ranges 6.35–6.74 and 4.58–5.04 s,
+5 runs each), and the flow's own `be_openrcx` took 6.79 s against 5.557 s
+for LibreLane's RCX step. Its time is consistent with the wire pieces it
+extracts, which the route topology sets: the native DEF has 192,328 pieces against 129,901
+(`scripts/def_pieces.py`), with 42,789 staircase and 39,398 zigzag pieces
+against 25,925 and 17,576, although it has less wire and fewer vias. The
+latch-up tap-coverage gate is slower on the native layout: median 50.54 s against 45.47 s (1.11×, ranges 49.58–52.77 and 44.51–46.74 s, 5 interleaved runs each); its time follows the notched n-well
+domains of the flip-flop masters that synthesis chose
+([tap integration](tap-integration.md)). Foundry main DRC, antenna DRC and
+LVS are faster on the native layout (benchmark page).
 
 ## Ibex host campaign · 2026-11-02
 
@@ -116,7 +211,7 @@ RSS. RustROAD's CPU time (155.73–158.90 s) tracks its wall time
 (157.605–161.041 s), so in the recipe's configuration extraction is
 effectively single-threaded: electrical arithmetic runs serially, and the
 recipe leaves the opt-in candidate-query workers at their serial default (see
-[bounded CPU candidate queries](extraction.md#bounded-cpu-candidate-queries)).
+[extraction guide](extraction.md#strips-and-parallel-computation)).
 Neither RustROAD's thread scaling nor that parallel query path was measured
 here. In the flow itself, native extraction took 161.48 s and OpenRCX
 18.02 s. RustROAD's total capacitance is 7.5 % above OpenRCX's and its total
