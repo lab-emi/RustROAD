@@ -477,9 +477,13 @@ fn extract_impl(
             },
         })
         .collect();
+    // Records and owners only serve the passive list.
+    drop((owners, placed));
     let has_ties = state.routes.nets.iter().any(|&n| !signal(n));
-    let filtered;
-    let (routes, terminals): (&rustroad_core::routing::Routes, Vec<_>) = if has_ties {
+    if has_ties {
+        // Rail-tie metal is grounded passive metal; the extractor skips
+        // every routed record of a non-signal net (no filtered copy of the
+        // routing table or terminals is made).
         let r = &state.routes;
         let mut ground = |layer: u32, rect: Rect| {
             passive.push(PassiveShape {
@@ -500,31 +504,7 @@ fn extract_impl(
         for patch in r.patches.iter().filter(|p| !signal(p.net)) {
             ground(patch.layer, patch.rect);
         }
-        filtered = rustroad_core::routing::Routes {
-            wires: r.wires.iter().filter(|w| signal(w.net)).cloned().collect(),
-            vias: r.vias.iter().filter(|v| signal(v.net)).cloned().collect(),
-            access: r.access.iter().filter(|a| signal(a.net)).cloned().collect(),
-            patches: r
-                .patches
-                .iter()
-                .filter(|p| signal(p.net))
-                .cloned()
-                .collect(),
-            nets: r.nets.iter().copied().filter(|&n| signal(n)).collect(),
-            stats: r.stats.clone(),
-        };
-        (
-            &filtered,
-            input
-                .terminals
-                .iter()
-                .filter(|t| signal(t.net))
-                .cloned()
-                .collect(),
-        )
-    } else {
-        (&state.routes, Vec::new())
-    };
+    }
     let network = extract::extract_cpu_ref(
         &extract::ExtractInput {
             held_bytes: rustroad_core::memory::live_bytes().unwrap_or(
@@ -539,17 +519,16 @@ fn extract_impl(
                 }),
             layers: &input.layers,
             vias: &input.vias,
-            routes,
-            terminals: if has_ties {
-                &terminals
-            } else {
-                &input.terminals
-            },
+            routes: &state.routes,
+            nets: has_ties.then_some(signal_nets.as_slice()),
+            terminals: &input.terminals,
             passive: &passive,
             tech: &tech,
         },
         &request.limits,
     )?;
+    // The passive copy is no longer needed while the SPEF is written.
+    drop(passive);
     // Names: nets by connectivity name, pins as instance/pin, ports by bit.
     let pin_label = |pin: u32| -> Result<(spef::Node, spef::Direction, Option<String>)> {
         let c = model
@@ -666,7 +645,7 @@ fn extract_impl(
             Some(design.cells[instance as usize].name.as_str())
         });
         let label = |pin| pin_label(pin).map_err(|e| spef::SpefError::Invalid(e.to_string()));
-        spef::write_streamed(
+        spef::write_streamed_parallel(
             &header,
             &ports,
             &names,

@@ -182,6 +182,7 @@ fn run(text: &str) -> Result<String, String> {
             layers: &layers,
             vias: &[],
             routes: &routes,
+            nets: None,
             terminals: &terminals,
             passive: &passive,
             tech: &tech,

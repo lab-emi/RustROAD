@@ -26,6 +26,10 @@ struct Cli {
     max_pins: usize,
     #[arg(long, global = true, default_value_t = 500_000)]
     max_aliases: usize,
+    /// Ignore commit-time validation receipts: every workspace load re-runs
+    /// the full validation (also `RUSTROAD_FORCE_VALIDATE=1`).
+    #[arg(long, global = true)]
+    verify_workspace: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -197,6 +201,13 @@ enum Command {
     },
     /// Read the current revision and honest analysis coverage.
     Inspect,
+    /// Fully validate the HEAD revision, ignoring its validation receipt;
+    /// with --write-receipt, stamp it so later reads skip re-validation.
+    VerifyWorkspace {
+        /// Write (or refresh) `receipts/<HEAD>.json` after the check.
+        #[arg(long)]
+        write_receipt: bool,
+    },
     /// Write placed DEF, including imported PINS/NETS when present.
     ExportDef,
     /// Write a bounded, read-only seed for `place --seed` in a fresh workspace.
@@ -253,15 +264,22 @@ enum Command {
         /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 48 MiB of scratch).
         #[arg(long, default_value_t = 4096)]
         max_extract_candidates: usize,
-        /// Opt-in candidate-query workers, bounded by --threads and extraction memory.
+        /// Accepted for compatibility (1..=16); no effect. Strips are
+        /// computed on the global --threads pool.
         #[arg(long, default_value_t = 1)]
         extract_query_workers: usize,
-        /// Candidate queries held per tile (1..=64); interval arithmetic stays serial.
+        /// Accepted for compatibility (1..=64); no effect.
         #[arg(long, default_value_t = 8)]
         extract_query_batch_runs: usize,
-        /// Additional query scratch cap within --extract-memory-mib (1..=64 MiB).
+        /// Accepted for compatibility (1..=64 MiB); no effect. Parallel strip
+        /// scratch is admitted against --extract-memory-mib.
         #[arg(long, default_value_t = 32)]
         extract_query_scratch_mib: u64,
+        /// Test knob: strip units per parallel chunk (0 = default of 64); a
+        /// non-zero value also forces chunks on one thread. Output is
+        /// identical for every value.
+        #[arg(long, default_value_t = 0, hide = true)]
+        extract_tile_units: usize,
         /// Couplings below this value (fF) become ground capacitance at both
         /// nodes; 0 keeps every coupling capacitor.
         #[arg(long, default_value_t = 0.0)]
@@ -287,6 +305,19 @@ enum Command {
         max_gds_bytes: u64,
         #[arg(long, default_value_t = rustroad_workspace::gds::DEFAULT_MAX_OUTPUT_RECORDS)]
         max_gds_records: u64,
+        /// Top-level net metal: `off` (default) writes one rectangle per
+        /// routed run and patch (the DEF view), `rectangles` each net's metal
+        /// per GDS layer as maximal non-overlapping rectangles, `polygons` as
+        /// one polygon per hole-free piece. The metal is identical.
+        #[arg(long, default_value = rustroad_workspace::gds::DEFAULT_MERGE.name())]
+        merge_shapes: String,
+        /// Vias: `cells` (default) writes one structure per used fixed via
+        /// and one SREF per via; `flat` writes each via's LEF shapes into the
+        /// top cell with its net's metal. `--merge-shapes rectangles --vias
+        /// flat` is the cheapest stream for DRC/LVS engines; the defaults
+        /// keep the structure the verification harnesses inspect.
+        #[arg(long, default_value = rustroad_workspace::gds::DEFAULT_VIAS.name())]
+        vias: String,
     },
     /// Inspect pinned external tools and PDK files; readiness is not signoff.
     FlowCheck {
@@ -975,14 +1006,27 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 &limits,
             )?)
         }
-        Command::Inspect => emit(&rustroad_workspace::read(&workspace, &limits)?.summary()),
+        Command::Inspect => {
+            let snapshot = rustroad_workspace::read_with(
+                &workspace,
+                &limits,
+                rustroad_workspace::ReadOptions { routes: false },
+            )?;
+            emit(&snapshot.summary())?;
+            finish(snapshot)
+        }
+        Command::VerifyWorkspace { write_receipt } => emit(&rustroad_workspace::verify_workspace(
+            &workspace,
+            &limits,
+            write_receipt,
+        )?),
         Command::ExportDef => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
             let stdout = io::stdout();
             let mut output = io::BufWriter::with_capacity(256 * 1024, stdout.lock());
             snapshot.export_def(&mut output)?;
             output.flush()?;
-            Ok(())
+            finish(snapshot)
         }
         Command::ExportPlacementSeed => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
@@ -996,7 +1040,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             export_memory_mib,
             max_export_work,
         } => {
-            let snapshot = rustroad_workspace::read(&workspace, &limits)?;
+            let snapshot = rustroad_workspace::read_with(
+                &workspace,
+                &limits,
+                rustroad_workspace::ReadOptions { routes: false },
+            )?;
             let stdout = io::stdout();
             let mut output = io::BufWriter::with_capacity(256 * 1024, stdout.lock());
             let mut syntax = parser_limits.clone();
@@ -1015,7 +1063,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 &mut output,
             )?;
             output.flush()?;
-            Ok(())
+            drop(output);
+            finish(snapshot)
         }
         Command::ExportConnectivity => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
@@ -1031,14 +1080,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             cell_lef,
             max_gds_bytes,
             max_gds_records,
+            merge_shapes,
+            vias,
         } => {
             let mut options = rustroad_workspace::gds::ExportOptions::new(cell_gds, layer_map, out);
             options.cell_lef = cell_lef;
             options.max_output_bytes = max_gds_bytes;
             options.max_output_records = max_gds_records;
-            emit(&rustroad_workspace::gds::export_gds(
-                &workspace, &options, &limits,
-            )?)
+            options.merge = rustroad_workspace::gds_merge::MergeStyle::parse(&merge_shapes)?;
+            options.vias = rustroad_workspace::gds::ViaStyle::parse(&vias)?;
+            let snapshot = rustroad_workspace::read(&workspace, &limits)?;
+            emit(&rustroad_workspace::gds::export_snapshot(
+                &workspace, &snapshot, &options,
+            )?)?;
+            finish(snapshot)
         }
         Command::Extract {
             rc_profile,
@@ -1059,6 +1114,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             extract_query_workers,
             extract_query_batch_runs,
             extract_query_scratch_mib,
+            extract_tile_units,
             min_coupling_ff,
         } => {
             if !(max_segment_um.is_finite() && (0.1..=10_000.0).contains(&max_segment_um)) {
@@ -1079,6 +1135,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 query_workers: extract_query_workers,
                 query_batch_runs: extract_query_batch_runs,
                 query_scratch_mib: extract_query_scratch_mib,
+                tile_units: extract_tile_units,
                 min_coupling_pf: min_coupling_ff / 1000.0,
             };
             emit(&rustroad_workspace::extract::extract_with_segment_um(
@@ -1193,8 +1250,18 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+/// End of a read-only command whose output is complete and flushed: the
+/// snapshot's large owned IR is released by process exit instead of being
+/// freed object by object (its shared lock closes with the process).
+fn finish(snapshot: rustroad_workspace::Snapshot) -> Result<(), Box<dyn std::error::Error>> {
+    io::stdout().lock().flush()?;
+    std::mem::forget(snapshot);
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
+    rustroad_workspace::set_force_validate(cli.verify_workspace);
     if matches!(&cli.command, Command::PlaceP1Diagnose { .. }) && cli.threads > 4 {
         let _ = writeln!(
             io::stderr().lock(),
@@ -1344,5 +1411,47 @@ mod tests {
             .is_err()
         );
         assert!(run(Cli::try_parse_from(["rustroad", "inspect"]).unwrap()).is_err());
+    }
+    #[test]
+    fn export_gds_styles_default_to_the_legacy_stream_and_reject_unknown_values() {
+        let export = |extra: &[&str]| {
+            let mut argv = vec![
+                "rustroad",
+                "export-gds",
+                "--workspace",
+                "rustroad-export-style-test-workspace-not-created",
+                "--cell-gds",
+                "c.gds",
+                "--layer-map",
+                "m.json",
+                "--out",
+                "o.gds",
+            ];
+            argv.extend_from_slice(extra);
+            Cli::try_parse_from(argv).unwrap()
+        };
+        match export(&[]).command {
+            Command::ExportGds {
+                merge_shapes, vias, ..
+            } => assert_eq!((merge_shapes.as_str(), vias.as_str()), ("off", "cells")),
+            _ => panic!("export-gds"),
+        }
+        match export(&["--merge-shapes", "rectangles", "--vias", "flat"]).command {
+            Command::ExportGds {
+                merge_shapes, vias, ..
+            } => assert_eq!(
+                (merge_shapes.as_str(), vias.as_str()),
+                ("rectangles", "flat")
+            ),
+            _ => panic!("export-gds"),
+        }
+        // Unknown styles fail with their coded error before any file is read.
+        for (extra, code) in [
+            (["--merge-shapes", "triangles"], "GDS_MERGE_STYLE:"),
+            (["--vias", "tiles"], "GDS_VIA_STYLE:"),
+        ] {
+            let message = run(export(&extra)).unwrap_err().to_string();
+            assert!(message.starts_with(code), "{message}");
+        }
     }
 }

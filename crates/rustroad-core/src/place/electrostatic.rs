@@ -79,10 +79,17 @@ pub struct ElectrostaticConfig {
     /// describes what the legalizer must actually fit.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub spacing_aware_density: bool,
-    /// End at an exhausted evaluation cap with the last checkpoint, reporting
-    /// `evaluation_horizon_after_checkpoint`, instead of the baseline fallback.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    /// End at an exhausted evaluation cap with the best exact-target
+    /// checkpoint, reporting `evaluation_horizon_after_checkpoint`; the common
+    /// legalizer and the no-worse integer gate still decide acceptance.
+    /// Default `true`: the hard cap of 512 evaluations is otherwise reached
+    /// before the iteration horizon on real designs and discards every
+    /// improvement. `false` restores the strict baseline fallback.
+    #[serde(skip_serializing_if = "is_true")]
     pub stop_at_evaluation_cap: bool,
+}
+fn is_true(value: &bool) -> bool {
+    *value
 }
 impl Default for ElectrostaticConfig {
     fn default() -> Self {
@@ -112,7 +119,7 @@ impl Default for ElectrostaticConfig {
             max_capacity_interactions: 64_000_000,
             max_work: 20_000_000_000,
             spacing_aware_density: false,
-            stop_at_evaluation_cap: false,
+            stop_at_evaluation_cap: true,
         }
     }
 }

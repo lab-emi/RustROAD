@@ -545,9 +545,12 @@ pub(crate) fn fill_for_robust(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
 /// Smaller same-net bridges tried when the `fill_for_robust` box touches
 /// another net (two pads of one net a jog apart). Diagonal pairs: the two
 /// L shapes, each leg as thick as the shape it extends; facing pairs: a bar
-/// across the gap as tall (wide) as either shape, at least one width. The
-/// caller checks clearance and re-runs the rule check on the result.
-pub(crate) fn bridges(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Rect>> {
+/// across the gap as tall (wide) as either shape, at least one width. With
+/// `stair` (`RouteQor::notch_bridge`), facing pairs first try the stair
+/// bridge (when they face over less than a width) and the bars clipped to
+/// two widths past the gap; without it the candidates are exactly the legacy
+/// ones. The caller checks clearance and re-runs the rule check on the result.
+pub(crate) fn bridges(a: Rect, b: Rect, width: i64, grid: i64, stair: bool) -> Vec<Vec<Rect>> {
     let snap = |r: Rect| Rect {
         lx: floor_to(r.lx, grid),
         ly: floor_to(r.ly, grid),
@@ -581,28 +584,98 @@ pub(crate) fn bridges(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Rect>>
                 }),
             ]);
         }
-    } else if ox <= 0 {
-        for s in [a, b] {
-            let (y0, y1) = span(s.ly, s.uy);
-            out.push(vec![snap(Rect {
-                lx,
-                ly: y0,
-                ux,
-                uy: y1,
-            })]);
-        }
     } else {
-        for s in [a, b] {
-            let (x0, x1) = span(s.lx, s.ux);
-            out.push(vec![snap(Rect {
-                lx: x0,
-                ly,
-                ux: x1,
-                uy,
-            })]);
+        // Facing pair: work in (u, v) with the gap along v; `t` maps back.
+        let across_x = ox <= 0;
+        let t = |r: Rect| if across_x { transpose(r) } else { r };
+        let (ta, tb) = (t(a), t(b));
+        let overlap = if across_x { oy } else { ox };
+        if stair && overlap < i128::from(width) {
+            out.push(vec![snap(t(stair_bridge(ta, tb, width)))]);
+        }
+        let (hull_lo, hull_hi) = (ta.ly.min(tb.ly), ta.uy.max(tb.uy));
+        let (gap_lo, gap_hi) = (ta.uy.min(tb.uy), ta.ly.max(tb.ly));
+        // Bars clipped to two widths past the gap first, then full length.
+        let (near_lo, near_hi) = (
+            (gap_lo - 2 * width).max(hull_lo),
+            (gap_hi + 2 * width).min(hull_hi),
+        );
+        if stair && (near_lo, near_hi) != (hull_lo, hull_hi) {
+            for s in [ta, tb] {
+                let (u0, u1) = span(s.lx, s.ux);
+                out.push(vec![snap(t(Rect {
+                    lx: u0,
+                    ly: near_lo,
+                    ux: u1,
+                    uy: near_hi,
+                }))]);
+            }
+        }
+        for s in [ta, tb] {
+            let (u0, u1) = span(s.lx, s.ux);
+            out.push(vec![snap(t(Rect {
+                lx: u0,
+                ly: hull_lo,
+                ux: u1,
+                uy: hull_hi,
+            }))]);
         }
     }
     out
+}
+
+/// Stair bridge of two same-net shapes that face each other across a gap
+/// over a span narrower than the width (a stair-step notch, e.g. a via pad
+/// half a track beside its own escape): one bar across the gap that spans
+/// both shapes' extents along the facing axis (at most one width past the
+/// facing span) and is at least one width thick across the gap. The union is
+/// then a Z whose inner corners are at least `width` apart, so it has no
+/// sub-width neck, and the bar touches no metal beyond the two shapes' own
+/// extents plus one width. In (u, v) coordinates: the gap runs along v.
+fn stair_bridge(a: Rect, b: Rect, width: i64) -> Rect {
+    let (span_lo, span_hi) = (a.lx.max(b.lx), a.ux.min(b.ux));
+    let u0 = a.lx.min(b.lx).max(span_lo - width);
+    let u1 = a.ux.max(b.ux).min(span_hi + width);
+    let (gap_lo, gap_hi) = (a.uy.min(b.uy), a.ly.max(b.ly));
+    let grow = (width - (gap_hi - gap_lo)).max(0);
+    let (hull_lo, hull_hi) = (a.ly.min(b.ly), a.uy.max(b.uy));
+    Rect {
+        lx: u0,
+        ly: (gap_lo - grow / 2).max(hull_lo),
+        ux: u1,
+        uy: (gap_hi + grow - grow / 2).min(hull_hi),
+    }
+}
+
+/// Same-net fills for a near pair that stay within two widths of its gap:
+/// the robust box, then the bridges that fit in that window. These are the
+/// fills worth reserving room for when other nets block all of them.
+pub(crate) fn local_fills(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Rect>> {
+    let window = {
+        let g = gap_hull(a, b);
+        Rect {
+            lx: g.lx - 2 * width - grid,
+            ly: g.ly - 2 * width - grid,
+            ux: g.ux + 2 * width + grid,
+            uy: g.uy + 2 * width + grid,
+        }
+    };
+    let inside =
+        |r: &Rect| window.lx <= r.lx && r.ux <= window.ux && window.ly <= r.ly && r.uy <= window.uy;
+    let mut out = vec![vec![fill_for_robust(a, b, width, grid)]];
+    out.extend(bridges(a, b, width, grid, true));
+    out.retain(|rects| rects.iter().all(inside));
+    out.dedup();
+    out
+}
+
+fn transpose(r: Rect) -> Rect {
+    Rect {
+        lx: r.ly,
+        ly: r.lx,
+        ux: r.uy,
+        uy: r.ux,
+    }
 }
 
 /// Bounding boxes of holes enclosed by a rectangle union. Small planes use
@@ -937,156 +1010,210 @@ pub(crate) fn check(
     limits: &RouteLimits,
     work: &mut usize,
 ) -> Result<Vec<Violation>> {
+    check_with(input, routes, limits, work, None)
+}
+
+/// `check`, reusing the input's terminal order (same result and work).
+pub(crate) fn check_with(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    work: &mut usize,
+    terminals: Option<&crate::rule_index::TerminalOrder>,
+) -> Result<Vec<Violation>> {
     let cap = limits.max_comparisons;
-    let index = crate::rule_index::RuleIndex::new(input, routes, work, cap)?;
+    let index = match terminals {
+        Some(terminals) => {
+            crate::rule_index::RuleIndex::with_terminals(input, routes, work, cap, terminals)?
+        }
+        None => crate::rule_index::RuleIndex::new(input, routes, work, cap)?,
+    };
     let mut out = Vec::new();
     let mut diagnostic_shapes = 0;
     for &net in index.nets() {
-        let groups = index.collect(input, routes, net, limits, work)?;
-        for (&(net, layer), shapes) in &groups {
-            let rule = &input.layers[layer as usize];
-            let s = rule.spacing;
-            let n = shapes.len();
-            let mut parent: Vec<usize> = (0..n).collect();
-            for i in 0..n {
-                let a = shapes[i];
-                for (j, b) in shapes.iter().enumerate().skip(i + 1) {
-                    if i128::from(b.rect.lx) >= i128::from(a.rect.ux) + i128::from(s) {
-                        break;
-                    }
-                    charge(work, 1, cap)?;
-                    match relation(a.rect, b.rect, s) {
-                        Relation::Connected => {
-                            let (x, y) = (find(&mut parent, i), find(&mut parent, j));
-                            parent[x.max(y)] = x.min(y);
-                            if input.tracks.is_none()
-                                || (a.origin == Origin::Pin && b.origin == Origin::Pin)
-                            {
-                                continue;
-                            }
-                            if let Some((probes, _)) = neck(a.rect, b.rect, rule.width) {
-                                charge(work, n, cap)?;
-                                let closed = shapes.iter().enumerate().any(|(k, c)| {
-                                    k != i
-                                        && k != j
-                                        && probes.iter().any(|p| clip(*p, c.rect).is_some())
-                                });
-                                if !closed {
-                                    push_violation(
-                                        &mut out,
-                                        &mut diagnostic_shapes,
-                                        Violation::Neck {
-                                            net,
-                                            layer,
-                                            a: a.rect,
-                                            b: b.rect,
-                                        },
-                                        limits.max_rule_violations,
-                                    )?;
-                                }
-                            }
-                        }
-                        Relation::Far => {}
-                        Relation::Near => {
-                            if a.origin == Origin::Pin && b.origin == Origin::Pin {
-                                continue;
-                            }
-                            // One DBU wider: corner tests look just outside it.
-                            let hull = gap_hull(a.rect, b.rect);
-                            let region = Rect {
-                                lx: hull.lx - 1,
-                                ly: hull.ly - 1,
-                                ux: hull.ux + 1,
-                                uy: hull.uy + 1,
-                            };
-                            let rest = || {
-                                shapes
-                                    .iter()
-                                    .enumerate()
-                                    .filter(move |(k, c)| {
-                                        *k != i
-                                            && *k != j
-                                            && c.rect.lx < region.ux
-                                            && c.rect.ux > region.lx
-                                            && c.rect.ly < region.uy
-                                            && c.rect.uy > region.ly
-                                    })
-                                    .map(|(_, c)| c.rect)
-                            };
-                            if !near_ok(a.rect, b.rect, rest, work, cap)? {
-                                push_violation(
-                                    &mut out,
-                                    &mut diagnostic_shapes,
-                                    Violation::Spacing {
-                                        net,
-                                        layer,
-                                        a: a.rect,
-                                        b: b.rect,
-                                    },
-                                    limits.max_rule_violations,
-                                )?;
-                            }
-                        }
-                    }
+        check_net(
+            input,
+            routes,
+            &index,
+            net,
+            limits,
+            work,
+            &mut out,
+            &mut diagnostic_shapes,
+        )?;
+    }
+    Ok(out)
+}
+
+/// Whether the stored geometry has no same-net rule violation, decided net
+/// by net on the rayon pool. `Some(work)` when every net is clean, with the
+/// work `check` would charge after `start` (nets are independent and every
+/// charge is `work <= cap`, so `check` succeeds exactly when this total fits);
+/// `None` when a net has a violation or fails, so the caller must run `check`
+/// for the canonical result.
+pub(crate) fn clean_parallel(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    start: usize,
+) -> Option<usize> {
+    use rayon::prelude::*;
+    let cap = limits.max_comparisons;
+    let mut work = start;
+    let index = crate::rule_index::RuleIndex::new(input, routes, &mut work, cap).ok()?;
+    let nets = index.nets();
+    let parts: Vec<Option<usize>> = nets
+        .par_chunks(nets.len().div_ceil(rayon::current_num_threads() * 8).max(1))
+        .map(|chunk| {
+            let mut total = 0usize;
+            let (mut out, mut shapes) = (Vec::new(), 0);
+            for &net in chunk {
+                let mut w = 0;
+                check_net(
+                    input,
+                    routes,
+                    &index,
+                    net,
+                    limits,
+                    &mut w,
+                    &mut out,
+                    &mut shapes,
+                )
+                .ok()?;
+                if !out.is_empty() {
+                    return None;
                 }
+                total = total.saturating_add(w);
             }
-            let mut members = BTreeMap::<usize, Vec<usize>>::new();
-            for i in 0..n {
-                let root = find(&mut parent, i);
-                members.entry(root).or_default().push(i);
+            Some(total)
+        })
+        .collect();
+    parts
+        .into_iter()
+        .try_fold(work, |sum, part| part.map(|w| sum.saturating_add(w)))
+        .filter(|&total| total <= cap)
+}
+
+/// The same-net rule checks of one net (all of its routing layers).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "shared counters of the sequential pass stay explicit"
+)]
+fn check_net(
+    input: &RouteInput,
+    routes: &Routes,
+    index: &crate::rule_index::RuleIndex,
+    net: u32,
+    limits: &RouteLimits,
+    work: &mut usize,
+    out: &mut Vec<Violation>,
+    diagnostic_shapes: &mut usize,
+) -> Result<()> {
+    let groups = index.collect(input, routes, net, limits, work)?;
+    for (&(net, layer), shapes) in &groups {
+        check_group(
+            input,
+            (net, layer),
+            shapes,
+            limits,
+            work,
+            out,
+            diagnostic_shapes,
+        )?;
+    }
+    Ok(())
+}
+
+/// The same-net rule checks of one (net, routing layer) group of collected
+/// shapes (`collect_parts`): the per-layer body of `check_net`, also used by
+/// the track router's straightening to compare a net's layer before and
+/// after a rewrite.
+pub(crate) fn check_group(
+    input: &RouteInput,
+    (net, layer): (u32, u32),
+    shapes: &[Shape],
+    limits: &RouteLimits,
+    work: &mut usize,
+    out: &mut Vec<Violation>,
+    diagnostic_shapes: &mut usize,
+) -> Result<()> {
+    let cap = limits.max_comparisons;
+    let rule = &input.layers[layer as usize];
+    let s = rule.spacing;
+    let n = shapes.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    for i in 0..n {
+        let a = shapes[i];
+        for (j, b) in shapes.iter().enumerate().skip(i + 1) {
+            if i128::from(b.rect.lx) >= i128::from(a.rect.ux) + i128::from(s) {
+                break;
             }
-            for list in members.values() {
-                let route = list.iter().any(|&i| shapes[i].origin == Origin::Route);
-                if !route {
-                    if let Some(&i) = list.iter().find(|&&i| shapes[i].origin == Origin::Patch) {
-                        push_violation(
-                            &mut out,
-                            &mut diagnostic_shapes,
-                            Violation::Floating {
-                                net,
-                                layer,
-                                rect: shapes[i].rect,
-                            },
-                            limits.max_rule_violations,
-                        )?;
+            charge(work, 1, cap)?;
+            match relation(a.rect, b.rect, s) {
+                Relation::Connected => {
+                    let (x, y) = (find(&mut parent, i), find(&mut parent, j));
+                    parent[x.max(y)] = x.min(y);
+                    if input.tracks.is_none()
+                        || (a.origin == Origin::Pin && b.origin == Origin::Pin)
+                    {
+                        continue;
                     }
-                    continue;
-                }
-                if input.tracks.is_some()
-                    && list.len() >= 3
-                    && let Some(min) = rule.min_area
-                {
-                    // Holes below four times the AREA rule are filled (the LEF
-                    // MINENCLOSEDAREA is not retained; every same-net hole of
-                    // this size can only be filled, never routed through).
-                    let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
-                    for h in holes(&rects, work, cap, limits.max_rule_grid_cells)? {
-                        let a = i128::from(h.ux - h.lx) * i128::from(h.uy - h.ly);
-                        if a < 4 * i128::from(min) {
+                    if let Some((probes, _)) = neck(a.rect, b.rect, rule.width) {
+                        charge(work, n, cap)?;
+                        let closed = shapes.iter().enumerate().any(|(k, c)| {
+                            k != i && k != j && probes.iter().any(|p| clip(*p, c.rect).is_some())
+                        });
+                        if !closed {
                             push_violation(
-                                &mut out,
-                                &mut diagnostic_shapes,
-                                Violation::Hole {
+                                out,
+                                diagnostic_shapes,
+                                Violation::Neck {
                                     net,
                                     layer,
-                                    rect: h,
+                                    a: a.rect,
+                                    b: b.rect,
                                 },
                                 limits.max_rule_violations,
                             )?;
                         }
                     }
                 }
-                if let Some(min) = rule.min_area {
-                    let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
-                    if let Some(area) = area_violation(&rects, i128::from(min), work, cap)? {
+                Relation::Far => {}
+                Relation::Near => {
+                    if a.origin == Origin::Pin && b.origin == Origin::Pin {
+                        continue;
+                    }
+                    // One DBU wider: corner tests look just outside it.
+                    let hull = gap_hull(a.rect, b.rect);
+                    let region = Rect {
+                        lx: hull.lx - 1,
+                        ly: hull.ly - 1,
+                        ux: hull.ux + 1,
+                        uy: hull.uy + 1,
+                    };
+                    let rest = || {
+                        shapes
+                            .iter()
+                            .enumerate()
+                            .filter(move |(k, c)| {
+                                *k != i
+                                    && *k != j
+                                    && c.rect.lx < region.ux
+                                    && c.rect.ux > region.lx
+                                    && c.rect.ly < region.uy
+                                    && c.rect.uy > region.ly
+                            })
+                            .map(|(_, c)| c.rect)
+                    };
+                    if !near_ok(a.rect, b.rect, rest, work, cap)? {
                         push_violation(
-                            &mut out,
-                            &mut diagnostic_shapes,
-                            Violation::Area {
+                            out,
+                            diagnostic_shapes,
+                            Violation::Spacing {
                                 net,
                                 layer,
-                                area,
-                                shapes: rects,
+                                a: a.rect,
+                                b: b.rect,
                             },
                             limits.max_rule_violations,
                         )?;
@@ -1095,7 +1222,70 @@ pub(crate) fn check(
             }
         }
     }
-    Ok(out)
+    let mut members = BTreeMap::<usize, Vec<usize>>::new();
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        members.entry(root).or_default().push(i);
+    }
+    for list in members.values() {
+        let route = list.iter().any(|&i| shapes[i].origin == Origin::Route);
+        if !route {
+            if let Some(&i) = list.iter().find(|&&i| shapes[i].origin == Origin::Patch) {
+                push_violation(
+                    out,
+                    diagnostic_shapes,
+                    Violation::Floating {
+                        net,
+                        layer,
+                        rect: shapes[i].rect,
+                    },
+                    limits.max_rule_violations,
+                )?;
+            }
+            continue;
+        }
+        if input.tracks.is_some()
+            && list.len() >= 3
+            && let Some(min) = rule.min_area
+        {
+            // Holes below four times the AREA rule are filled (the LEF
+            // MINENCLOSEDAREA is not retained; every same-net hole of
+            // this size can only be filled, never routed through).
+            let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
+            for h in holes(&rects, work, cap, limits.max_rule_grid_cells)? {
+                let a = i128::from(h.ux - h.lx) * i128::from(h.uy - h.ly);
+                if a < 4 * i128::from(min) {
+                    push_violation(
+                        out,
+                        diagnostic_shapes,
+                        Violation::Hole {
+                            net,
+                            layer,
+                            rect: h,
+                        },
+                        limits.max_rule_violations,
+                    )?;
+                }
+            }
+        }
+        if let Some(min) = rule.min_area {
+            let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
+            if let Some(area) = area_violation(&rects, i128::from(min), work, cap)? {
+                push_violation(
+                    out,
+                    diagnostic_shapes,
+                    Violation::Area {
+                        net,
+                        layer,
+                        area,
+                        shapes: rects,
+                    },
+                    limits.max_rule_violations,
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn flip_y(r: Rect) -> Rect {
@@ -1805,6 +1995,56 @@ mod tests {
         );
     }
 
+    #[test]
+    fn captured_metal2_stair_notch_gets_a_neck_free_bridge() {
+        // Metal2 access failure (net 12085): an upper pad and a lower escape
+        // face each other over 80 DBU across a 175 DBU gap (spacing 210,
+        // width 200). The robust box and the legacy bars touched other nets.
+        let a = r(496_550, 63_275, 496_750, 63_565);
+        let b = r(496_670, 62_480, 496_870, 63_100);
+        let (cap, mut w) = (1 << 30, 0);
+        assert_eq!(relation(a, b, 210), Relation::Near);
+        assert!(!local_ok(a, &[b], 210, &mut w, cap).unwrap());
+        let candidates = bridges(a, b, 200, 5, true);
+        assert_eq!(candidates[0].len(), 1, "{candidates:?}");
+        let bar = candidates[0][0];
+        // One bar over both shapes' extents, a width thick across the gap,
+        // snapped outward to the 5 DBU grid.
+        assert_eq!(bar, r(496_550, 63_085, 496_870, 63_290));
+        // Order-stable: swapped arguments give the same first candidate.
+        assert_eq!(bridges(b, a, 200, 5, true)[0], vec![bar]);
+        // The gap is covered and the bar meets both shapes: no near pair left.
+        for (x, rest) in [(a, [b, bar]), (b, [a, bar]), (bar, [a, b])] {
+            assert!(local_ok(x, &rest, 210, &mut w, cap).unwrap(), "{x:?}");
+        }
+        assert_eq!(relation(bar, a, 210), Relation::Connected);
+        assert_eq!(relation(bar, b, 210), Relation::Connected);
+        // No stair-step neck, and the Z's inner corners are a width apart.
+        for (x, y) in [(a, bar), (b, bar), (a, b)] {
+            assert!(neck(x, y, 200).is_none());
+        }
+        let (dx, dy) = (i128::from(a.ux - b.lx), i128::from(bar.uy - bar.ly));
+        assert!(dx * dx + dy * dy >= 200 * 200);
+        // It stays inside both shapes' extents (no metal past either end).
+        assert!(bar.lx >= a.lx.min(b.lx) && bar.ux <= a.ux.max(b.ux));
+        assert!(bar.ly >= b.ly && bar.uy <= a.uy);
+        // Side-by-side shapes get the transposed bar.
+        let t = |q: Rect| r(q.ly, q.lx, q.uy, q.ux);
+        assert_eq!(bridges(t(a), t(b), 200, 5, true)[0], vec![t(bar)]);
+        // Without `notch_bridge` the candidates are the legacy full-length
+        // bars only (each shape's extent across the gap, over the pair's hull).
+        let legacy = bridges(a, b, 200, 5, false);
+        assert_eq!(
+            legacy,
+            vec![
+                vec![r(496_550, 62_480, 496_750, 63_565)],
+                vec![r(496_670, 62_480, 496_870, 63_565)],
+            ]
+        );
+        // The flag only prepends candidates: the stair bridge and two clipped bars.
+        assert_eq!(candidates.len(), 5);
+        assert_eq!(candidates[3..], legacy[..]);
+    }
     #[test]
     fn notch_against_own_pin_leg_is_detected_and_covered_gap_is_not() {
         // Pad protrudes 5 DBU past a 375-wide leg; bar above at 222 < 230.

@@ -413,6 +413,367 @@ pub struct TrackPlan {
     /// layer in every search, not only in strict re-routes after cleanup.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub area_stacks: bool,
+    /// Optional detailed-route quality controls. `None` keeps the legacy
+    /// terminal order, step costs and snapshot encoding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qor: Option<RouteQor>,
+}
+
+/// Detailed-route quality controls of the track router (all optional; the
+/// defaults reproduce the legacy search and repair exactly).
+///
+/// Every step cost stays at least its legacy value (multipliers are at
+/// least 1000 milli, scaled wire steps are rounded up and the bend surcharge
+/// is non-negative) and the search lower bound charges the cheapest layer of
+/// each axis (scaled distances rounded down) and the cheapest via chain
+/// between layers, so the bound never exceeds the cost of a path and drops
+/// by at most a step's cost per step (admissible and consistent). A bend
+/// surcharge depends on the step that reached a node while search states
+/// are nodes, so with `bend_cost` even weight 1 is not guaranteed to find
+/// the cheapest path.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct RouteQor {
+    /// Initial detailed routing joins a net's terminals in Prim order: the
+    /// driver first, then repeatedly the terminal whose escape top is nearest
+    /// (L1) to an already joined escape top, ties by pin id. Repair keeps its
+    /// own centre-out order.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub prim_order: bool,
+    /// Once a net is routed, drop the upward-via envelopes ("portals") its
+    /// pin escapes reserved. They are search geometry only, and after the
+    /// net is joined they only wall other nets out of the lower layers above
+    /// every pin. Released once per terminal; never restored.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub release_portals: bool,
+    /// Drop every access portal once pin access and global routing are
+    /// done, before the first detailed search (implies `release_portals`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub drop_portals: bool,
+    /// Pin access of nets with at most eight terminals prefers, among legal
+    /// escape tops within two tracks of cost of the cheapest, the one
+    /// nearest the net's other terminals (so aligned pins share a track).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub net_aware_access: bool,
+    /// Wire-step cost multiplier per input layer in thousandths (indexed like
+    /// `RouteInput::layers`, at least 1000; empty means 1000 everywhere).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub layer_cost_milli: Vec<u32>,
+    /// Via cost multiplier by the via's upper layer in thousandths (same
+    /// indexing and range; empty means 1000 everywhere).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub via_cost_milli: Vec<u32>,
+    /// Surcharge (DBU-equivalent) of a wire step that turns from the axis of
+    /// the wire step that reached its node on the same layer.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub bend_cost: u64,
+    /// Hard (non-rip-up) searches of nets with at most this many terminals
+    /// use `small_net_weight` instead of `heuristic_weight` (0 disables).
+    #[serde(skip_serializing_if = "is_zero_usize")]
+    pub small_net_terminals: usize,
+    /// Priority weight (1..=16) of those small-net hard searches; 1 is
+    /// admissible A*.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub small_net_weight: u64,
+    /// Same-net notch repair for facing shapes: cleanup's bridges add the
+    /// stair bridge (one bar across a gap the two shapes face over less
+    /// than a width) and bars clipped to two widths past the gap before the
+    /// full-length bars, and a notch that repeats after a re-route with
+    /// every fill blocked by other nets' routed metal gets a reserved fill
+    /// (its victims are re-routed). Off keeps the legacy bars and repair.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub notch_bridge: bool,
+    /// The bounded wide-metal cycle cut of rule repair (a redundant detail
+    /// wire of a loop that cleanup filled into wide metal) also runs for an
+    /// owner whose strict re-route succeeded, from the second sighting of a
+    /// wide pair and before the halos, at most three cuts per wide region
+    /// (`MAX_REGION_CUTS` in `troute`) instead of once per net. A strict
+    /// search only refuses same-net near misses, and a loop through the
+    /// owner's own fixed escape at full spacing is none, so a strict owner
+    /// rebuilt the same ring every pass. Off keeps the cut for relaxed
+    /// owners, once per net, after both halos.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub strict_wide_cycles: bool,
+    /// Post-route via reduction: once every net is routed, nets are re-routed
+    /// one at a time against the final metal of all others with a higher via
+    /// price, keeping a new route only when it removes vias (see
+    /// `ViaReduction`). `None` keeps the routes of the repair loop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via_reduction: Option<ViaReduction>,
+    /// One via per net, layer pair and point. With `net_aware_access` two
+    /// neighbouring pins of one net can escape through the same via point
+    /// to the same top, each with the variant its own access search picked
+    /// (all 24 such pairs on Ibex: `Via1_YY_so` and `Via1_XY_so` between the
+    /// two pins' Metal1 escapes); the output held both. Either via makes the
+    /// connection, and a reader may put the pair in series. Right after pin
+    /// access, the escapes of one net share one via at each such point: the
+    /// variant whose pads lie along the net's escape wires there (the
+    /// `orient_vias` rule), else the lowest kind, stays in the first plan
+    /// that holds it, and every other via leaves its plan with its pads in
+    /// the search index, so the searches, rule repair and the output see one
+    /// via. A pair at an escape's own top stays in the plans (the escape's
+    /// stacking and pad checks read it), and `assemble` then writes one via
+    /// per point (the same rule over all of the net's wires), which also
+    /// covers a routed via that `orient_vias` re-picks on top of an escape
+    /// via. Cleanup and the rule passes run on the result as usual.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dedupe_vias: bool,
+    /// Post-route topology cleanup (`Straighten`): same-layer staircases and
+    /// zigzags of a routed net become straighter same-net geometry where
+    /// that is clear of every other net and adds no same-net rule
+    /// violation. `None` keeps the routes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub straighten: Option<Straighten>,
+}
+
+/// Post-route topology cleanup of the track router (`RouteQor::straighten`).
+///
+/// After negotiated repair and the via reduction (first rule pass only),
+/// every routed net is examined on each routing layer for *chains*: maximal
+/// sequences of its routed runs joined at plain corners (exactly two runs
+/// meet, no via lands, no pin access point, no escape metal, no pin shape and
+/// no other run of the net there). A chain of at least three runs between
+/// its two end junctions (vias, branches, escapes) is a staircase
+/// (monotone) or a zigzag. It is replaced by the first legal candidate with
+/// fewer runs: the straight run, an L, a Z whose middle leg lies on one of
+/// the chain's own corner lines, and then the minimum-bend shortest path
+/// over the layer's track grid inside the box of the two junctions. Without
+/// `turn_at_ends` every candidate leaves both junctions along the axis the
+/// chain used there, so via pads and escapes see the same arrival direction.
+///
+/// Every candidate is a shortest rectilinear path between the junctions, so
+/// a rewrite never adds wire, and it never touches a via. (The optional
+/// `reroute` may remove vias and wire but never adds either: it keeps a new
+/// route only with no more of both. Cleanup and the rule-repair passes that
+/// follow can still lengthen a net or add a via, as they do without this
+/// pass.) A candidate is legal when every new run is clear of the metal
+/// of every other net, fixed geometry and cell obstructions (the clearance
+/// probe the searches use for a wire step) and of the wide-metal spacing of
+/// any other net's shape that is wide on its own; touches same-net metal only
+/// where the chain's end runs touched it at its two end junctions (no new
+/// branch, no loop, no more overlap of its own pins); and the net's same-net
+/// rule check on that layer (`route_rules`: notches, necks, holes, minimum
+/// area) finds no violation the old geometry did not have. The net's new
+/// geometry must also pass the endpoint connectivity check of `validate`
+/// (else the net keeps its route). Cleanup and the rule-repair passes then
+/// run as usual.
+///
+/// Among the rectilinear shortest paths between two points, the ones with
+/// the fewest bends are the minimum-bend shortest paths (C. D. Yang,
+/// D. T. Lee and C. K. Wong, "Rectilinear path problems among rectilinear
+/// obstacles revisited", SIAM J. Comput. 24(3), 1995); a staircase is a
+/// shortest path with the most bends. Here the cleanup rewrites each chain
+/// into a fewer-bend path that the router's own clearance and same-net rule
+/// checks accept, against the fixed metal of all other nets; the search is a
+/// dynamic programme over the monotone grid of the box (arrival axis as
+/// state). Deterministic: nets in id order, chains in run order, candidates
+/// in a fixed order. In an ECO route (prior routes), a net that still holds
+/// its prior geometry is left as it is, like the via reduction.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Straighten {
+    /// Passes over the routed nets (1..=4); a pass that changes nothing ends
+    /// the cleanup.
+    pub passes: usize,
+    /// Also try candidates that leave an end junction along the other axis
+    /// (both Ls of a staircase whose ends share an axis, and the straight
+    /// run of a U turn), after those that keep both end axes among
+    /// candidates with as few runs. The router's own searches arrive at
+    /// vias and escapes along either axis; `orient_vias` then re-picks a
+    /// routed via's variant along its wire where another net allows it.
+    /// Off keeps both end axes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub turn_at_ends: bool,
+    /// Before the rewrites, re-route each net that still holds a chain of
+    /// three or more runs, alone against the fixed metal of all others, with
+    /// a bend surcharge in the search (`StraightenReroute`); the new route is
+    /// kept only when it has fewer runs, no more routed vias and no more
+    /// wire. `None` skips the re-route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reroute: Option<StraightenReroute>,
+}
+impl Straighten {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !(1..=4).contains(&self.passes) {
+            return Err(invalid("track router straightening"));
+        }
+        if let Some(reroute) = &self.reroute {
+            reroute.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// Bend-priced single-net re-route of `Straighten` (the via-reduction
+/// machinery with another price and acceptance test): each candidate net (at
+/// most `max_terminals` terminals, at least one chain of three or more runs),
+/// in order of decreasing chain runs then net id, is ripped up and searched
+/// again as a hard (non-rip-up) search in its global guide grown by the
+/// plan's `expand_margin`, with every other net's metal fixed, a surcharge of
+/// `bend_cost` on every same-layer turn and weight `weight`, capped at
+/// `net_expansions` expansions. The new route is kept only when it has fewer
+/// runs (the routed records split at junctions), no more routed vias and no
+/// more wire; otherwise the old route's index shapes are restored unchanged.
+/// The bend surcharge depends on the step that reached a node (search states
+/// are nodes), so the search is a heuristic for fewer bends, not an exact
+/// minimum; the acceptance test makes every kept change an improvement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StraightenReroute {
+    /// Surcharge (DBU-equivalent) of a same-layer turn during the re-route
+    /// (1..=2^20).
+    pub bend_cost: u64,
+    /// Nets with more terminals keep their route (2..=4096).
+    pub max_terminals: usize,
+    /// Search expansions one net's re-route may use (1..=10^8).
+    pub net_expansions: usize,
+    /// Priority weight of the re-route searches (1..=16, default 1).
+    #[serde(default = "one_u64")]
+    pub weight: u64,
+}
+impl StraightenReroute {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !(1..=1 << 20).contains(&self.bend_cost)
+            || !(2..=4096).contains(&self.max_terminals)
+            || !(1..=100_000_000).contains(&self.net_expansions)
+            || !(1..=16).contains(&self.weight)
+        {
+            return Err(invalid("track router straightening re-route"));
+        }
+        Ok(())
+    }
+}
+
+/// Post-route via reduction of the track router (`RouteQor::via_reduction`).
+///
+/// After negotiated repair has routed every net, each candidate net (at most
+/// `max_terminals` terminals, at least one routed via), in order of
+/// decreasing routed via count then net id, is ripped up and searched again
+/// as a hard (non-rip-up) admissible A* search (weight 1) in its repair
+/// region, with every other net's metal fixed, the via steps priced at
+/// `via_milli` thousandths of their normal cost and wrong-way steps at
+/// `wrong_way_factor`. The search lower bound is rebuilt with the same
+/// prices, so it stays admissible and consistent. The new route is kept only
+/// when it has fewer routed vias and its wire length grows by at most
+/// `length_per_via` DBU per via removed; otherwise the old route's shapes are
+/// restored unchanged. This is single-net layer and topology re-assignment
+/// against fixed neighbours for via count (the negotiation-based layer
+/// assignment of Liu and Li, ASP-DAC 2011, and congestion-constrained layer
+/// assignment of Lee and Wang, IEEE TCAD 27(9), 2008, re-expressed as a
+/// shortest-path re-route on the detailed track graph). Every new route is
+/// a legal hard search result; cleanup and the rule-repair passes then run
+/// as usual. Deterministic: a pure function of the routed state. In an ECO
+/// route (prior routes), a net that still holds its prior geometry is no
+/// candidate, so the nets the ECO keeps stay as they were; only the nets
+/// the ECO routed are re-assigned.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViaReduction {
+    /// Passes over the candidate nets (1..=4).
+    pub passes: usize,
+    /// Via step price during the re-route, thousandths of the normal via
+    /// cost (1000..=64000).
+    pub via_milli: u32,
+    /// Wrong-way multiplier during the re-route (1..=1000); 0 keeps
+    /// `wrong_way_factor`.
+    #[serde(default)]
+    pub wrong_way_factor: u64,
+    /// Nets with more terminals keep their route (2..=4096).
+    pub max_terminals: usize,
+    /// Wire length (DBU) a re-route may add per routed via it removes.
+    pub length_per_via: u64,
+    /// Search expansions one net's re-route may use (1..=10^8); a net that
+    /// needs more keeps its route.
+    pub net_expansions: usize,
+    /// Priority weight of the re-route searches (1..=16); 1 (the default)
+    /// is admissible A*, larger values trade optimality for speed.
+    #[serde(default = "one_u64")]
+    pub weight: u64,
+    /// GCells added around a net's global guide for its re-route (0..=64);
+    /// omitted uses the plan's `expand_margin`, as repair does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin: Option<usize>,
+    /// Candidates need at least this many routed vias (1..=2^20, default 1).
+    #[serde(default = "one_usize")]
+    pub min_vias: usize,
+    /// Candidates need at most this routed wire length (DBU) per terminal
+    /// connection (length / (terminals - 1), 1..=2^40). Long connections
+    /// cost most of the search effort and yield few vias; omitted admits
+    /// every length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_connection_length: Option<u64>,
+}
+fn one_u64() -> u64 {
+    1
+}
+fn one_usize() -> usize {
+    1
+}
+impl ViaReduction {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !(1..=4).contains(&self.passes)
+            || !(1000..=64_000).contains(&self.via_milli)
+            || self.wrong_way_factor > 1000
+            || !(2..=4096).contains(&self.max_terminals)
+            || self.length_per_via > 1 << 32
+            || !(1..=100_000_000).contains(&self.net_expansions)
+            || !(1..=16).contains(&self.weight)
+            || self.margin.is_some_and(|m| m > 64)
+            || !(1..=1 << 20).contains(&self.min_vias)
+            || self
+                .max_connection_length
+                .is_some_and(|l| !(1..=1 << 40).contains(&l))
+        {
+            return Err(invalid("track router via reduction"));
+        }
+        Ok(())
+    }
+}
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+}
+fn is_zero_usize(value: &usize) -> bool {
+    *value == 0
+}
+impl RouteQor {
+    /// Wire-step multiplier of an input layer (1000 when unset).
+    pub(crate) fn layer_milli(&self, layer: u32) -> u64 {
+        u64::from(
+            self.layer_cost_milli
+                .get(layer as usize)
+                .copied()
+                .unwrap_or(1000),
+        )
+    }
+    /// Via multiplier by the via's upper input layer (1000 when unset).
+    pub(crate) fn via_milli(&self, upper: u32) -> u64 {
+        u64::from(
+            self.via_cost_milli
+                .get(upper as usize)
+                .copied()
+                .unwrap_or(1000),
+        )
+    }
+    pub(crate) fn validate(&self, layers: usize) -> Result<()> {
+        let range = |v: &[u32]| {
+            (v.is_empty() || v.len() == layers) && v.iter().all(|m| (1000..=64_000).contains(m))
+        };
+        if !range(&self.layer_cost_milli)
+            || !range(&self.via_cost_milli)
+            || self.bend_cost > 1 << 40
+            || self.small_net_terminals > 1 << 20
+            || (self.small_net_terminals > 0) != (self.small_net_weight > 0)
+            || self.small_net_weight > 16
+        {
+            return Err(invalid("track router quality controls"));
+        }
+        if let Some(reduction) = &self.via_reduction {
+            reduction.validate()?;
+        }
+        if let Some(straighten) = &self.straighten {
+            straighten.validate()?;
+        }
+        Ok(())
+    }
 }
 
 /// Explicit bounds for one-owner trials. None in TrackPlan preserves legacy
@@ -841,6 +1202,8 @@ pub fn cleanup_replay(
     })
 }
 
+mod spatial_order;
+
 pub(crate) fn budget(s: &str) -> Error {
     Error::Budget(s.into())
 }
@@ -1125,6 +1488,46 @@ pub(crate) struct InstanceIndex<'a> {
     generation: u64,
     entries: usize,
     mode: Option<InstanceIndexMode>,
+    /// Extraction-only per-instance world bounds and layer masks, computed
+    /// once at construction. Router indices keep `None` and their original
+    /// per-visit bounds computation.
+    cache: Option<InstanceCache>,
+}
+
+/// Immutable per-instance query filters. A layer mask bit is set for every
+/// template layer below 64; any layer at or above 64 sets every bit, so the
+/// mask never rejects an instance that has shapes on the queried layer.
+struct InstanceCache {
+    bounds: Vec<Option<Rect>>,
+    layers: Vec<u64>,
+}
+impl InstanceCache {
+    fn new(source: &InstanceObstacles) -> Result<Self> {
+        let mut bounds = Vec::new();
+        let mut layers = Vec::new();
+        bounds
+            .try_reserve_exact(source.len())
+            .map_err(|_| budget("instance bounds cache allocation"))?;
+        layers
+            .try_reserve_exact(source.len())
+            .map_err(|_| budget("instance layer-mask allocation"))?;
+        for i in 0..source.len() {
+            bounds.push(source.bounds(i)?);
+            layers.push(
+                source
+                    .instance_layers(i)
+                    .fold(0u64, |mask, layer| mask | layer_bit(layer)),
+            );
+        }
+        Ok(Self { bounds, layers })
+    }
+}
+fn layer_bit(layer: u32) -> u64 {
+    if layer < 64 { 1 << layer } else { u64::MAX }
+}
+/// Bytes of the extraction-only instance cache (bounds plus layer mask).
+pub(crate) fn instance_cache_bytes(instances: usize) -> u64 {
+    (instances as u64).saturating_mul((size_of::<Option<Rect>>() + size_of::<u64>()) as u64)
 }
 
 /// Bounded worker-private deduplication state for immutable instance queries.
@@ -1307,6 +1710,9 @@ impl<'a> InstanceIndex<'a> {
             input.tracks.as_ref().and_then(|p| p.instance_index),
         )
     }
+    /// Extraction index: shares the router's bins and work accounting, plus
+    /// cached instance bounds and a layer mask that skip instances without
+    /// metal on the queried layer before any template work is charged.
     pub(crate) fn for_geometry(
         source: &'a InstanceObstacles,
         die: Rect,
@@ -1314,7 +1720,9 @@ impl<'a> InstanceIndex<'a> {
         layer_count: usize,
         limits: &RouteLimits,
     ) -> Result<Self> {
-        Self::for_geometry_mode(source, die, bin, layer_count, limits, None)
+        let mut index = Self::for_geometry_mode(source, die, bin, layer_count, limits, None)?;
+        index.cache = Some(InstanceCache::new(source)?);
+        Ok(index)
     }
     fn for_geometry_mode(
         source: &'a InstanceObstacles,
@@ -1387,6 +1795,7 @@ impl<'a> InstanceIndex<'a> {
             generation: 0,
             entries,
             mode,
+            cache: None,
         })
     }
     fn visit(
@@ -1427,6 +1836,7 @@ impl<'a> InstanceIndex<'a> {
             self.bin,
             &self.bins,
             self.mode,
+            self.cache.as_ref(),
             &mut self.marks,
             &mut self.generation,
             layer,
@@ -1454,6 +1864,7 @@ impl<'a> InstanceIndex<'a> {
             self.bin,
             &self.bins,
             self.mode,
+            self.cache.as_ref(),
             &mut scratch.marks,
             &mut scratch.generation,
             layer,
@@ -1462,25 +1873,6 @@ impl<'a> InstanceIndex<'a> {
             limits,
             visitor,
         )
-    }
-    pub(crate) fn query_work_bound(
-        &self,
-        layer: u32,
-        query: Rect,
-        virtual_shapes: usize,
-    ) -> Option<usize> {
-        if !self.source.has_layer(layer) {
-            return Some(0);
-        }
-        let span = |lo: i64, hi: i64| {
-            i128::from(hi.div_euclid(self.bin)) - i128::from(lo.div_euclid(self.bin)) + 1
-        };
-        let extent = span(query.lx, query.ux).checked_mul(span(query.ly, query.uy))?;
-        // Each cell is visited once; each instance and template shape at most once.
-        usize::try_from(extent)
-            .ok()?
-            .checked_add(self.source.len())?
-            .checked_add(virtual_shapes)
     }
     #[expect(
         clippy::too_many_arguments,
@@ -1491,6 +1883,7 @@ impl<'a> InstanceIndex<'a> {
         bin: i64,
         bins: &BinGrid,
         mode: Option<InstanceIndexMode>,
+        cache: Option<&InstanceCache>,
         marks: &mut [u64],
         generation: &mut u64,
         layer: u32,
@@ -1515,6 +1908,7 @@ impl<'a> InstanceIndex<'a> {
         if extent > limits.max_bin_entries as i128 {
             return Err(budget("instance query extent"));
         }
+        let bit = layer_bit(layer);
         for x in x0..=x1 {
             for y in y0..=y1 {
                 *work = work
@@ -1530,7 +1924,16 @@ impl<'a> InstanceIndex<'a> {
                         .checked_add(1)
                         .filter(|&n| n <= limits.max_comparisons)
                         .ok_or_else(|| budget("instance query work"))?;
-                    if !source.bounds(i)?.is_some_and(|b| overlap(query, b)) {
+                    // Work is charged before either filter, so the cache and
+                    // layer mask change no work count: an instance without
+                    // the layer visits no template shape.
+                    if let Some(cache) = cache {
+                        if cache.layers[i] & bit == 0
+                            || !cache.bounds[i].is_some_and(|b| overlap(query, b))
+                        {
+                            continue;
+                        }
+                    } else if !source.bounds(i)?.is_some_and(|b| overlap(query, b)) {
                         continue;
                     }
                     let clear = visitor(i, work)?;
@@ -1981,6 +2384,10 @@ impl<'a> Spatial<'a> {
     fn alive(&self, id: usize) -> bool {
         id < self.input.obstacles.len() || self.alive[id - self.input.obstacles.len()]
     }
+    #[cfg(test)]
+    pub(crate) fn is_alive(&self, id: usize) -> bool {
+        self.alive(id)
+    }
     fn routed(&self, id: usize) -> bool {
         id >= self.input.obstacles.len() && self.routed[id - self.input.obstacles.len()]
     }
@@ -2247,6 +2654,80 @@ impl<'a> Spatial<'a> {
             None => return Ok(None),
         }
         Ok(Some(near))
+    }
+    /// Wide-metal spacing of new metal `rect` of `net` on `layer` against
+    /// every stored or cell shape of another net (or of no net) that is wide
+    /// on its own: both sides at least `rule.width`. Such a shape closer than
+    /// `rule.spacing` across a parallel run of at least `rule.parallel_run`
+    /// (the projections overlap that much) blocks; `rect` itself is never
+    /// wide here (a routing wire). Wide parts made of several shapes are
+    /// left to the rule check after cleanup, which sees the merged metal.
+    /// Used by the track router's straightening; the searches do not test
+    /// this rule.
+    pub(crate) fn wide_clear(
+        &mut self,
+        layer: u32,
+        rect: Rect,
+        net: u32,
+        rule: WideSpacing,
+    ) -> Result<bool> {
+        let query = expand(rect, rule.spacing)?;
+        let blocks = |b: &Rect| -> bool {
+            if b.ux - b.lx < rule.width || b.uy - b.ly < rule.width {
+                return false;
+            }
+            let gap_x = (b.lx - rect.ux).max(rect.lx - b.ux);
+            let gap_y = (b.ly - rect.uy).max(rect.ly - b.uy);
+            let run_x = rect.ux.min(b.ux) - rect.lx.max(b.lx);
+            let run_y = rect.uy.min(b.uy) - rect.ly.max(b.ly);
+            (gap_x < rule.spacing && gap_y < 0 && run_y >= rule.parallel_run)
+                || (gap_y < rule.spacing && gap_x < 0 && run_x >= rule.parallel_run)
+        };
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| budget("routing query generation"))?;
+        let (x0, x1, y0, y1) = (
+            query.lx.div_euclid(self.bin),
+            query.ux.div_euclid(self.bin),
+            query.ly.div_euclid(self.bin),
+            query.uy.div_euclid(self.bin),
+        );
+        let bins = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
+        if bins > self.limits.max_bin_entries as i128 {
+            return Err(budget("routing query extent"));
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                self.work += 1;
+                if self.work > self.limits.max_comparisons {
+                    return Err(budget("routing comparison limit"));
+                }
+                for id in self.bins.iter(layer, x, y) {
+                    if self.marks[id] == self.generation {
+                        continue;
+                    }
+                    self.marks[id] = self.generation;
+                    self.work += 1;
+                    if self.work > self.limits.max_comparisons {
+                        return Err(budget("routing comparison limit"));
+                    }
+                    if !self.alive(id) {
+                        continue;
+                    }
+                    let b = self.shape(id);
+                    if b.net != Some(net) && overlap(query, b.rect) && blocks(&b.rect) {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        let Some(instances) = &mut self.instances else {
+            return Ok(true);
+        };
+        instances.visit(layer, query, &mut self.work, self.limits, |b| {
+            Ok(b.net == Some(net) || !blocks(&b.rect))
+        })
     }
     pub(crate) fn via_clear(&mut self, kind: usize, at: [i64; 2], net: u32) -> Result<bool> {
         Ok(self.via_probe(kind, at, net)?.is_some())
@@ -3449,6 +3930,12 @@ pub(crate) fn cleanup_report(
         })?;
     }
     let mut tried = BTreeSet::new();
+    // Stair bridge and clipped bars only with `RouteQor::notch_bridge`.
+    let stair = input
+        .tracks
+        .as_ref()
+        .and_then(|plan| plan.qor.as_ref())
+        .is_some_and(|q| q.notch_bridge);
     for _ in 0..8 {
         let mut violations = route_rules::check(input, out, limits, &mut work)?;
         if violations.is_empty() {
@@ -3490,7 +3977,7 @@ pub(crate) fn cleanup_report(
                     } else if fresh && input.tracks.is_some() {
                         // The robust box reaches another net: try the smaller bridges.
                         let mut chosen = Vec::new();
-                        for rects in route_rules::bridges(*a, *b, width, input.grid) {
+                        for rects in route_rules::bridges(*a, *b, width, input.grid, stair) {
                             let mut clear = true;
                             for r in &rects {
                                 clear = clear && spatial.clear(*layer, *r, *net)?;
@@ -3861,23 +4348,11 @@ fn validate_geometry(
     if !input.rules && !routes.patches.is_empty() {
         return Err(invalid("routing patches require LEF-rule mode"));
     }
-    let mut spatial = Spatial::new(input, limits)?;
-    let mut selected: Vec<u32> = input.terminals.iter().map(|t| t.net).collect();
-    selected.sort_unstable();
-    let (mut read, mut write) = (0, 0);
-    while read < selected.len() {
-        let net = selected[read];
-        let start = read;
-        while read < selected.len() && selected[read] == net {
-            read += 1;
-        }
-        if read - start >= 2 {
-            selected[write] = net;
-            write += 1;
-        }
+    if rayon::current_num_threads() > 1 && proven_valid(input, routes, limits, validation_work) {
+        return Ok(());
     }
-    selected.truncate(write);
-    let selected = selected.into_boxed_slice();
+    let mut spatial = Spatial::new(input, limits)?;
+    let selected = routed_net_set(input);
     if selected.as_ref() != routes.nets {
         return Err(invalid("stored routed-net coverage"));
     }
@@ -3951,10 +4426,69 @@ fn validate_geometry(
         })?;
     }
     let mut work = validation_work.map_or(0, |_| spatial.work);
+    check_access(input, routes, &selected, limits, &mut work)?;
+    let index = crate::route_graph::NetIndex::new(routes, limits, &mut work)?;
+    for &net in index.nets() {
+        let graph = crate::route_graph::Graph::new(
+            input,
+            routes,
+            index.sources(routes, net),
+            limits,
+            &mut work,
+        )?;
+        if !graph.connected(&mut work, limits.max_comparisons)? {
+            return Err(invalid("disconnected routed net"));
+        }
+    }
+    drop(index);
+    if input.rules {
+        if validation_work.is_none() {
+            work = 0;
+        }
+        let violations = route_rules::check(input, routes, limits, &mut work)?;
+        if let Some(v) = violations.first() {
+            return Err(invalid(&format!(
+                "ROUTING_RULE {} ({} total)",
+                v.describe(),
+                violations.len()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Nets with at least two terminals (the routed set), sorted.
+fn routed_net_set(input: &RouteInput) -> Box<[u32]> {
+    let mut selected: Vec<u32> = input.terminals.iter().map(|t| t.net).collect();
+    selected.sort_unstable();
+    let (mut read, mut write) = (0, 0);
+    while read < selected.len() {
+        let net = selected[read];
+        let start = read;
+        while read < selected.len() && selected[read] == net {
+            read += 1;
+        }
+        if read - start >= 2 {
+            selected[write] = net;
+            write += 1;
+        }
+    }
+    selected.truncate(write);
+    selected.into_boxed_slice()
+}
+
+/// Every access record touches its own pin once; every routed terminal has one.
+fn check_access(
+    input: &RouteInput,
+    routes: &Routes,
+    selected: &[u32],
+    limits: &RouteLimits,
+    work: &mut usize,
+) -> Result<()> {
     let terminals = crate::rule_index::order(
         input.terminals.len(),
         |i| input.terminals[i].pin,
-        &mut work,
+        work,
         limits.max_comparisons,
     )?;
     let mut seen = vec![false; input.terminals.len()];
@@ -3984,36 +4518,504 @@ fn validate_geometry(
     {
         return Err(invalid("missing routed terminal"));
     }
-    drop(terminals);
-    drop(seen);
-    let index = crate::route_graph::NetIndex::new(routes, limits, &mut work)?;
-    for &net in index.nets() {
-        let graph = crate::route_graph::Graph::new(
-            input,
-            routes,
-            index.sources(routes, net),
-            limits,
-            &mut work,
-        )?;
-        if !graph.connected(&mut work, limits.max_comparisons)? {
-            return Err(invalid("disconnected routed net"));
-        }
-    }
-    drop(index);
-    if input.rules {
-        if validation_work.is_none() {
-            work = 0;
-        }
-        let violations = route_rules::check(input, routes, limits, &mut work)?;
-        if let Some(v) = violations.first() {
-            return Err(invalid(&format!(
-                "ROUTING_RULE {} ({} total)",
-                v.describe(),
-                violations.len()
-            )));
-        }
-    }
     Ok(())
+}
+
+/// Parallel proof that the sequential pass of `validate_geometry` accepts
+/// `routes`. `false` only means "not proven": the caller then runs the
+/// sequential pass, so every verdict and every error (text and choice) is the
+/// sequential one. The proof never accepts what the sequential pass rejects:
+///
+/// * Shapes: each wire, via shape and patch is probed against the complete,
+///   frozen index (every fixed and routed shape) rather than only the shapes
+///   inserted before it. A superset can only add blockers, so a clear probe
+///   here is clear in insertion order. The work counted per probe (bins plus
+///   distinct candidates, deduplicated by their first bin in scan order) is
+///   an upper bound of the sequential charge, which sees the same bins and a
+///   subset of the candidates.
+/// * Access coverage, endpoint-graph connectivity and same-net rules are
+///   per-net, order-independent checks; their work is counted exactly.
+/// * Every budget check of the sequential pass is "running total <= cap", so
+///   totals (upper bounds for the probes) within the cap rule out a budget
+///   error at any point of the sequential order.
+fn proven_valid(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    validation_work: Option<usize>,
+) -> bool {
+    let selected = routed_net_set(input);
+    if selected.as_ref() != routes.nets {
+        return false;
+    }
+    let ((shapes, access), (graphs, rules)) = rayon::join(
+        || {
+            rayon::join(
+                || frozen_probe_work(input, routes, limits, &selected),
+                || {
+                    let mut work = 0;
+                    check_access(input, routes, &selected, limits, &mut work)
+                        .ok()
+                        .map(|()| work)
+                },
+            )
+        },
+        || {
+            rayon::join(
+                || graph_work(input, routes, limits),
+                || {
+                    if input.rules {
+                        route_rules::clean_parallel(input, routes, limits, 0)
+                    } else {
+                        Some(0)
+                    }
+                },
+            )
+        },
+    );
+    let (Some(shapes), Some(access), Some(graphs), Some(rules)) = (shapes, access, graphs, rules)
+    else {
+        return false;
+    };
+    let cap = limits.max_comparisons;
+    let within = |parts: &[usize]| {
+        parts
+            .iter()
+            .try_fold(0usize, |sum, &w| sum.checked_add(w))
+            .is_some_and(|total| total <= cap)
+    };
+    if validation_work.is_some() {
+        // One counter runs through probes, access, graphs and rules.
+        within(&[shapes, access, graphs, rules])
+    } else {
+        within(&[shapes]) && within(&[access, graphs]) && within(&[rules])
+    }
+}
+
+/// Endpoint-graph connectivity of every routed net on the rayon pool; the
+/// exact work of `NetIndex::new` plus every net's graph, or `None` when a net
+/// is disconnected or a per-net check fails.
+fn graph_work(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Option<usize> {
+    use rayon::prelude::*;
+    let mut work = 0;
+    let index = crate::route_graph::NetIndex::new(routes, limits, &mut work).ok()?;
+    let nets = index.nets();
+    let chunk = nets.len().div_ceil(rayon::current_num_threads() * 8).max(1);
+    let parts: Option<Vec<usize>> = nets
+        .par_chunks(chunk)
+        .map(|chunk| {
+            let mut total = 0usize;
+            for &net in chunk {
+                let mut w = 0;
+                let graph = crate::route_graph::Graph::new(
+                    input,
+                    routes,
+                    index.sources(routes, net),
+                    limits,
+                    &mut w,
+                )
+                .ok()?;
+                if !graph.connected(&mut w, limits.max_comparisons).ok()? {
+                    return None;
+                }
+                total = total.checked_add(w)?;
+            }
+            Some(total)
+        })
+        .collect();
+    parts?
+        .into_iter()
+        .try_fold(work, |sum, w| sum.checked_add(w))
+}
+
+/// One indexed shape of `FrozenIndex`: integer rectangle, owning net
+/// (`u32::MAX` for none) and its insertion id (fixed obstacles first, then
+/// routed shapes in the sequential insertion order).
+#[derive(Clone, Copy)]
+struct FrozenShape {
+    rect: [i32; 4],
+    net: u32,
+    id: u32,
+}
+impl FrozenShape {
+    fn rect(&self) -> Rect {
+        Rect {
+            lx: i64::from(self.rect[0]),
+            ly: i64::from(self.rect[1]),
+            ux: i64::from(self.rect[2]),
+            uy: i64::from(self.rect[3]),
+        }
+    }
+}
+
+/// Immutable per-layer grids (compressed rows) over every fixed obstacle and
+/// stored routed shape. Cells are whole multiples of the router's spatial
+/// bin, so every shape a bin of a query holds is listed in a scanned cell.
+struct FrozenIndex {
+    side: i64,
+    x0: i64,
+    y0: i64,
+    nx: i64,
+    ny: i64,
+    /// Per layer: cell offsets (`nx * ny + 1`, empty for an unused layer)
+    /// into that layer's entries.
+    layers: Vec<(Vec<u32>, Vec<FrozenShape>)>,
+}
+impl FrozenIndex {
+    fn cells(&self, rect: Rect) -> (i64, i64, i64, i64) {
+        (
+            (rect.lx.div_euclid(self.side) - self.x0).clamp(0, self.nx - 1),
+            (rect.ux.div_euclid(self.side) - self.x0).clamp(0, self.nx - 1),
+            (rect.ly.div_euclid(self.side) - self.y0).clamp(0, self.ny - 1),
+            (rect.uy.div_euclid(self.side) - self.y0).clamp(0, self.ny - 1),
+        )
+    }
+    fn cell(&self, layer: u32, x: i64, y: i64) -> &[FrozenShape] {
+        let (offsets, entries) = &self.layers[layer as usize];
+        if offsets.is_empty() {
+            return &[];
+        }
+        let k = (y * self.nx + x) as usize;
+        &entries[offsets[k] as usize..offsets[k + 1] as usize]
+    }
+    /// `None` when a shape does not fit the compact form (the caller then
+    /// leaves the decision to the sequential pass).
+    fn build(
+        input: &RouteInput,
+        bin: i64,
+        shapes: &[(u32, Rect, u32, u32)],
+        routed_base: u32,
+    ) -> Option<Self> {
+        use rayon::prelude::*;
+        let mut extent = input.die;
+        for b in &input.obstacles {
+            extent.lx = extent.lx.min(b.rect.lx);
+            extent.ly = extent.ly.min(b.rect.ly);
+            extent.ux = extent.ux.max(b.rect.ux);
+            extent.uy = extent.uy.max(b.rect.uy);
+        }
+        let span = |side: i64| {
+            (
+                extent.lx.div_euclid(side),
+                extent.ux.div_euclid(side) - extent.lx.div_euclid(side) + 1,
+                extent.ly.div_euclid(side),
+                extent.uy.div_euclid(side) - extent.ly.div_euclid(side) + 1,
+            )
+        };
+        // Cells of a whole number of bins, at most 2^18 per layer.
+        let mut side = bin;
+        while {
+            let (_, nx, _, ny) = span(side);
+            nx.saturating_mul(ny) > 1 << 18
+        } {
+            side = side.checked_add(bin)?;
+        }
+        let (x0, nx, y0, ny) = span(side);
+        let mut index = Self {
+            side,
+            x0,
+            y0,
+            nx,
+            ny,
+            layers: Vec::new(),
+        };
+        // Shape ids: fixed obstacles first, then the routed shapes.
+        let fixed = u32::try_from(input.obstacles.len()).ok()?;
+        routed_base.checked_add(u32::try_from(shapes.len()).ok()?)?;
+        let shape = |i: u32| -> (u32, Rect, u32) {
+            if i < fixed {
+                let b = &input.obstacles[i as usize];
+                (b.layer, b.rect, b.net.unwrap_or(u32::MAX))
+            } else {
+                let (layer, rect, net, _) = shapes[(i - fixed) as usize];
+                (layer, rect, net)
+            }
+        };
+        let total = fixed.checked_add(u32::try_from(shapes.len()).ok()?)?;
+        let mut by_layer: Vec<Vec<u32>> = vec![Vec::new(); input.layers.len()];
+        for i in 0..total {
+            let (layer, rect, _) = shape(i);
+            if layer as usize >= input.layers.len() || !extent.contains(rect) {
+                return None;
+            }
+            by_layer[layer as usize].push(i);
+        }
+        let cells = usize::try_from(nx.checked_mul(ny)?).ok()?;
+        let layers: Option<Vec<(Vec<u32>, Vec<FrozenShape>)>> = by_layer
+            .into_par_iter()
+            .map(|ids| {
+                if ids.is_empty() {
+                    return Some((Vec::new(), Vec::new()));
+                }
+                let mut offsets = vec![0u32; cells + 1];
+                for &i in &ids {
+                    let (cx0, cx1, cy0, cy1) = index.cells(shape(i).1);
+                    for y in cy0..=cy1 {
+                        for x in cx0..=cx1 {
+                            let k = (y * nx + x) as usize + 1;
+                            offsets[k] = offsets[k].checked_add(1)?;
+                        }
+                    }
+                }
+                for k in 1..offsets.len() {
+                    offsets[k] = offsets[k].checked_add(offsets[k - 1])?;
+                }
+                let mut cursor = offsets[..cells].to_vec();
+                let blank = FrozenShape {
+                    rect: [0; 4],
+                    net: 0,
+                    id: 0,
+                };
+                let mut entries = vec![blank; offsets[cells] as usize];
+                for &i in &ids {
+                    let (_, rect, net) = shape(i);
+                    let entry = FrozenShape {
+                        rect: [
+                            i32::try_from(rect.lx).ok()?,
+                            i32::try_from(rect.ly).ok()?,
+                            i32::try_from(rect.ux).ok()?,
+                            i32::try_from(rect.uy).ok()?,
+                        ],
+                        net,
+                        id: if i < fixed {
+                            i
+                        } else {
+                            routed_base + (i - fixed)
+                        },
+                    };
+                    let (cx0, cx1, cy0, cy1) = index.cells(rect);
+                    for y in cy0..=cy1 {
+                        for x in cx0..=cx1 {
+                            let k = (y * nx + x) as usize;
+                            entries[cursor[k] as usize] = entry;
+                            cursor[k] += 1;
+                        }
+                    }
+                }
+                Some((offsets, entries))
+            })
+            .collect();
+        index.layers = layers?;
+        Some(index)
+    }
+}
+
+/// Identity checks, the insertion budgets and frozen-index probes of every
+/// stored shape (see `proven_valid`); an upper bound of the sequential
+/// spatial work, or `None`.
+fn frozen_probe_work(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    selected: &[u32],
+) -> Option<usize> {
+    use rayon::prelude::*;
+    let on_grid = |values: &[i64]| values.iter().all(|x| x % input.grid == 0);
+    let routing = |layer: u32| {
+        input
+            .layers
+            .get(layer as usize)
+            .is_some_and(|l| l.vertical.is_some())
+    };
+    let identity = routes.wires.par_iter().all(|w| {
+        selected.binary_search(&w.net).is_ok()
+            && routing(w.layer)
+            && on_grid(&[w.start[0], w.start[1], w.end[0], w.end[1]])
+    }) && routes.vias.par_iter().all(|v| {
+        selected.binary_search(&v.net).is_ok()
+            && (v.kind as usize) < input.vias.len()
+            && on_grid(&v.at)
+    }) && routes.patches.iter().all(|p| {
+        selected.binary_search(&p.net).is_ok()
+            && routing(p.layer)
+            && p.rect.valid()
+            && on_grid(&[p.rect.lx, p.rect.ly, p.rect.ux, p.rect.uy])
+    });
+    if !identity {
+        return None;
+    }
+    // The routed shapes in the sequential insertion order, each with the
+    // position before which its probe sees shapes: its own, or for a via
+    // shape the via's first (all shapes of a via are probed, then added).
+    // Spatial::new (its own budget checks; the instance index) runs beside.
+    let list = || -> Option<Vec<(u32, Rect, u32, u32)>> {
+        let mut first = Vec::new();
+        first.try_reserve_exact(routes.vias.len()).ok()?;
+        let mut at = u32::try_from(routes.wires.len()).ok()?;
+        for v in &routes.vias {
+            first.push(at);
+            at = at.checked_add(u32::try_from(input.vias[v.kind as usize].shapes.len()).ok()?)?;
+        }
+        at.checked_add(u32::try_from(routes.patches.len()).ok()?)?;
+        let wires = routes.wires.par_iter().enumerate().map(|(i, w)| {
+            let rect = wire_rect(w, input.layers[w.layer as usize].width).ok()?;
+            Some((w.layer, rect, w.net, i as u32))
+        });
+        let vias = routes
+            .vias
+            .par_iter()
+            .zip(&first)
+            .flat_map_iter(|(v, &first)| {
+                input.vias[v.kind as usize].shapes.iter().map(move |shape| {
+                    Some((shape.layer, shifted(shape.rect, v.at).ok()?, v.net, first))
+                })
+            });
+        let base = at - u32::try_from(routes.patches.len()).ok()?;
+        let patches = routes
+            .patches
+            .par_iter()
+            .enumerate()
+            .map(|(i, p)| Some((p.layer, p.rect, p.net, base + i as u32)));
+        wires.chain(vias).chain(patches).collect()
+    };
+    let (shapes, spatial) = rayon::join(list, || Spatial::new(input, limits).ok());
+    let (shapes, spatial) = (shapes?, spatial?);
+    let bin = spatial.bin;
+    let instance_shapes = input.instances.as_ref().map_or(0, InstanceObstacles::len);
+    let base = spatial.len();
+    let entries = shapes
+        .par_iter()
+        .map(|(layer, rect, _, _)| {
+            if *layer as usize >= input.layers.len() || !rect.valid() {
+                return None;
+            }
+            let n = (i128::from(rect.ux.div_euclid(bin)) - i128::from(rect.lx.div_euclid(bin)) + 1)
+                * (i128::from(rect.uy.div_euclid(bin)) - i128::from(rect.ly.div_euclid(bin)) + 1);
+            usize::try_from(n).ok()
+        })
+        .try_reduce(|| 0, |a, b| a.checked_add(b))?
+        .checked_add(spatial.entries)?;
+    if entries > limits.max_bin_entries
+        || entries >= NIL as usize
+        || base
+            .checked_add(shapes.len())?
+            .checked_add(instance_shapes)?
+            > limits.max_obstacles
+    {
+        return None;
+    }
+    let index = FrozenIndex::build(input, bin, &shapes, u32::try_from(base).ok()?)?;
+    let base = base as u32;
+    let parts: Option<Vec<usize>> = shapes
+        .par_chunks(4096)
+        .map_init(
+            || InstanceQueryScratch::new(instance_shapes),
+            |scratch, slice| {
+                let scratch = scratch.as_mut().ok()?;
+                slice
+                    .iter()
+                    .try_fold(0usize, |sum, &(layer, rect, net, before)| {
+                        let work = spatial
+                            .probe_frozen(&index, scratch, base + before, layer, rect, net)
+                            .ok()??;
+                        sum.checked_add(work)
+                    })
+            },
+        )
+        .collect();
+    parts?
+        .into_iter()
+        .try_fold(spatial.work, |sum, w| sum.checked_add(w))
+}
+
+impl Spatial<'_> {
+    /// `probe` of a stored shape against the shapes inserted before id
+    /// `before` (exactly the sequential candidates), read-only for `proven_valid`:
+    /// `None` when blocked, otherwise an upper bound of the work `probe`
+    /// charges (its bins, every scanned grid entry, and the instance work,
+    /// which uses the caller's private query marks).
+    fn probe_frozen(
+        &self,
+        index: &FrozenIndex,
+        scratch: &mut InstanceQueryScratch,
+        before: u32,
+        layer: u32,
+        rect: Rect,
+        net: u32,
+    ) -> Result<Option<usize>> {
+        if !self.input.die.contains(rect) {
+            return Ok(None);
+        }
+        let rule = &self.input.layers[layer as usize];
+        let query = expand(rect, rule.spacing)?;
+        let bins = (i128::from(query.ux.div_euclid(self.bin))
+            - i128::from(query.lx.div_euclid(self.bin))
+            + 1)
+            * (i128::from(query.uy.div_euclid(self.bin))
+                - i128::from(query.ly.div_euclid(self.bin))
+                + 1);
+        if bins > self.limits.max_bin_entries as i128 {
+            return Err(budget("routing query extent"));
+        }
+        let routing = rule.vertical.is_some();
+        let mut work = bins as usize;
+        let (cx0, cx1, cy0, cy1) = index.cells(query);
+        for y in cy0..=cy1 {
+            for x in cx0..=cx1 {
+                let cell = index.cell(layer, x, y);
+                work += cell.len();
+                for e in cell {
+                    if e.id >= before {
+                        continue;
+                    }
+                    let other = e.rect();
+                    if !overlap(query, other) {
+                        continue;
+                    }
+                    if self.input.rules && routing_separated(rule, rect, other) {
+                        continue;
+                    }
+                    let b = Blockage {
+                        layer,
+                        rect: other,
+                        net: (e.net != u32::MAX).then_some(e.net),
+                    };
+                    if !(self.same_net(net, layer, rect, &b) && (routing || rect == other)) {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        let Some(instances) = &self.instances else {
+            return Ok(Some(work));
+        };
+        let source = instances.source;
+        let ties = &self.ties;
+        let rules = self.input.rules;
+        let limits = self.limits;
+        let clear = instances.visit_cells_with_scratch(
+            scratch,
+            layer,
+            query,
+            &mut work,
+            limits,
+            |i, work| {
+                source.visit_near(
+                    i,
+                    layer,
+                    query,
+                    || {
+                        *work = work
+                            .checked_add(1)
+                            .filter(|&n| n <= limits.max_comparisons)
+                            .ok_or_else(|| budget("instance geometry work"))?;
+                        Ok(())
+                    },
+                    |_, b, _| {
+                        if !overlap(query, b.rect) {
+                            return Ok(true);
+                        }
+                        if rules && routing_separated(rule, rect, b.rect) {
+                            return Ok(true);
+                        }
+                        Ok(same_net_shapes(ties, net, layer, rect, &b)
+                            && (routing || rect == b.rect))
+                    },
+                )
+            },
+        )?;
+        Ok(clear.then_some(work))
+    }
 }
 
 #[cfg(test)]
@@ -4111,6 +5113,33 @@ mod tests {
         };
         let limits = RouteLimits::default();
         for bin in [8, 64, 1000] {
+            // The extraction index (cached bounds + layer mask) must visit the
+            // same instances and charge the same work as the router form.
+            let mut cached = InstanceIndex::for_geometry(&source, die, bin, 8, &limits).unwrap();
+            let mut plain =
+                InstanceIndex::for_geometry_mode(&source, die, bin, 8, &limits, None).unwrap();
+            assert!(cached.cache.is_some() && plain.cache.is_none());
+            for layer in 0..9 {
+                for x in (-100..200).step_by(7) {
+                    let query = Rect {
+                        lx: x,
+                        ly: -10,
+                        ux: x + 23,
+                        uy: 20,
+                    };
+                    let gather = |index: &mut InstanceIndex<'_>| {
+                        let (mut work, mut hits) = (0, Vec::new());
+                        index
+                            .visit(layer, query, &mut work, &limits, |b| {
+                                hits.push((b.layer, b.rect.lx, b.rect.ly, b.rect.ux, b.rect.uy));
+                                Ok(true)
+                            })
+                            .unwrap();
+                        (work, hits)
+                    };
+                    assert_eq!(gather(&mut cached), gather(&mut plain));
+                }
+            }
             let mut old = InstanceIndex::for_geometry(&source, die, bin, 8, &limits).unwrap();
             let mut new = InstanceIndex::for_geometry_mode(
                 &source,
@@ -5377,6 +6406,108 @@ mod tests {
         assert!(validate(&input, &floating, &RouteLimits::default()).is_err());
     }
     #[test]
+    fn stair_notch_is_bridged_when_the_robust_fill_touches_other_nets() {
+        // Same-net shapes a (upper) and b (lower) face over 4 DBU across a
+        // 9 DBU gap (width 10, spacing 11): the Metal2 access failure shape
+        // at 1/20 scale. Net 1 blocks the robust box and both legacy bars;
+        // only the stair bridge is clear.
+        let mut input = rules_input();
+        input.die = rect(0, 0, 300, 300);
+        input.layers[0].width = 10;
+        input.layers[0].spacing = 11;
+        // Track-router mode: robust fills, bridges and the neck rules.
+        input.tracks = Some(TrackPlan {
+            tracks: vec![Some((20, 0)), Some((20, 0)), None],
+            routing_layers: None,
+            gcell: 100,
+            global_iterations: 1,
+            capacity_percent: 80,
+            guide_margin: 1,
+            expand_margin: 1,
+            max_ripups_per_net: 1,
+            max_repair_rounds: 1,
+            via_cost: 40,
+            wrong_way_factor: 4,
+            heuristic_weight: 1,
+            repair_heuristic_weight: None,
+            single_owner_repair: None,
+            own_pin_index: None,
+            instance_index: None,
+            memory_mib: 64,
+            max_history_entries: DEFAULT_MAX_HISTORY_ENTRIES,
+            area_stacks: false,
+            qor: Some(RouteQor {
+                notch_bridge: true,
+                ..Default::default()
+            }),
+        });
+        input.terminals = vec![
+            terminal(0, true, vec![rect(59, 64, 63, 68)]),
+            terminal(1, false, vec![rect(53, 83, 57, 87)]),
+        ];
+        for r in [rect(20, 45, 45, 58), rect(71, 95, 80, 110)] {
+            input.obstacles.push(Blockage {
+                layer: 0,
+                rect: r,
+                net: Some(1),
+            });
+        }
+        let limits = RouteLimits::default();
+        // b: (56,40)-(66,71); a: (50,80)-(60,135); joined around the right.
+        let path = [
+            ([61, 66], [61, 45], 0),
+            ([61, 45], [150, 45], 0),
+            ([150, 45], [150, 130], 0),
+            ([150, 130], [55, 130], 0),
+            ([55, 130], [55, 85], 0),
+        ];
+        let build = |input: &RouteInput| {
+            let mut routes = manual(input, &path, &[]);
+            routes.access[0].at = [61, 66];
+            routes.access[1].at = [55, 85];
+            routes
+        };
+        let mut routes = build(&input);
+        let before = route_rules::check(&input, &routes, &limits, &mut 0).unwrap();
+        assert!(
+            before
+                .iter()
+                .any(|v| matches!(v, Violation::Spacing { layer: 0, .. })),
+            "{:?}",
+            before.iter().map(|v| v.describe()).collect::<Vec<_>>()
+        );
+        let (_, remaining) = cleanup_report(&input, &mut routes, &limits).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "{:?}",
+            remaining.iter().map(|v| v.describe()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            routes.patches,
+            vec![Patch {
+                net: 0,
+                layer: 0,
+                rect: rect(50, 71, 66, 81)
+            }]
+        );
+        // Deterministic: a second cleanup of the same input picks the same patch.
+        let mut again = build(&input);
+        cleanup_report(&input, &mut again, &limits).unwrap();
+        assert_eq!(again.patches, routes.patches);
+        // Without `notch_bridge` cleanup keeps the legacy candidates: the
+        // robust box and both bars touch net 1, so the notch stays.
+        input.tracks.as_mut().unwrap().qor = None;
+        let mut legacy = build(&input);
+        let (_, left) = cleanup_report(&input, &mut legacy, &limits).unwrap();
+        assert!(
+            left.iter()
+                .any(|v| matches!(v, Violation::Spacing { layer: 0, .. })),
+            "{:?}",
+            left.iter().map(|v| v.describe()).collect::<Vec<_>>()
+        );
+        assert!(legacy.patches.is_empty(), "{:?}", legacy.patches);
+    }
+    #[test]
     fn min_area_cleanup_splits_the_stub_when_no_side_alone_has_room() {
         // M2 island 2 x 4 at y 9..13 needs height 25 (area 50). Fixed M2
         // metal leaves 9 DBU below (die edge) and 14 above (spacing 4), and
@@ -5597,6 +6728,102 @@ mod tests {
         input.access_classes.clear();
         input.rules = false;
         assert!(route_cpu_ref(&input, &limits).is_err());
+    }
+    /// The parallel proof never accepts what the sequential pass rejects:
+    /// on routed fixtures and on every single-record mutation (moved wire,
+    /// wire handed to another net, dropped via, moved via, dropped access,
+    /// moved patch) and under tight chained work limits, a four-thread pool
+    /// returns exactly the one-thread (sequential) verdict and error text.
+    #[test]
+    fn parallel_validation_matches_the_sequential_pass_on_mutations() {
+        let one = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        let four = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        let mut area = rules_input();
+        area.terminals = vec![
+            terminal(0, true, vec![rect(9, 49, 11, 51)]),
+            terminal(1, false, vec![rect(89, 49, 91, 51)]),
+        ];
+        area.obstacles.push(Blockage {
+            layer: 0,
+            rect: rect(49, 0, 51, 100),
+            net: None,
+        });
+        area.layers[1].min_area = Some(120);
+        let mut two_nets = rules_input();
+        two_nets.terminals = vec![
+            terminal(0, true, vec![rect(9, 9, 11, 11)]),
+            terminal(1, false, vec![rect(89, 9, 91, 11)]),
+            terminal(2, true, vec![rect(9, 89, 11, 91)]),
+            terminal(3, false, vec![rect(89, 89, 91, 91)]),
+        ];
+        two_nets.terminals[2].net = 1;
+        two_nets.terminals[3].net = 1;
+        let mut proven = 0;
+        for input in [fixture(), rules_input(), area, two_nets] {
+            let limits = RouteLimits::default();
+            let routes = route_cpu_ref(&input, &limits).unwrap();
+            let mut cases = vec![routes.clone()];
+            let step = input.grid.max(1);
+            for i in 0..routes.wires.len() {
+                for d in [[step, 0], [0, step], [-step, 0]] {
+                    let mut r = routes.clone();
+                    let w = &mut r.wires[i];
+                    for p in [&mut w.start, &mut w.end] {
+                        p[0] += d[0];
+                        p[1] += d[1];
+                    }
+                    cases.push(r);
+                }
+                if let Some(&other) = routes.nets.iter().find(|&&n| n != routes.wires[i].net) {
+                    let mut r = routes.clone();
+                    r.wires[i].net = other;
+                    cases.push(r);
+                }
+            }
+            for i in 0..routes.vias.len() {
+                let mut r = routes.clone();
+                r.vias.remove(i);
+                cases.push(r);
+                let mut r = routes.clone();
+                r.vias[i].at[0] += step;
+                cases.push(r);
+            }
+            for i in 0..routes.access.len() {
+                let mut r = routes.clone();
+                r.access.remove(i);
+                cases.push(r);
+            }
+            for i in 0..routes.patches.len() {
+                let mut r = routes.clone();
+                r.patches[i].rect.lx -= step;
+                r.patches[i].rect.ux -= step;
+                cases.push(r);
+            }
+            for (k, case) in cases.iter().enumerate() {
+                let sequential = one.install(|| validate(&input, case, &limits));
+                let parallel = four.install(|| validate(&input, case, &limits));
+                assert_eq!(
+                    format!("{sequential:?}"),
+                    format!("{parallel:?}"),
+                    "case {k}"
+                );
+                let proof = four.install(|| proven_valid(&input, case, &limits, None));
+                assert!(sequential.is_ok() || !proof, "case {k}: proven but invalid");
+                proven += usize::from(proof);
+                for cap in [1, 50, 400, 2_000, 20_000] {
+                    let a = one.install(|| validate_with_work_limit(&input, case, &limits, cap));
+                    let b = four.install(|| validate_with_work_limit(&input, case, &limits, cap));
+                    assert_eq!(format!("{a:?}"), format!("{b:?}"), "case {k} cap {cap}");
+                }
+            }
+        }
+        assert!(proven >= 4, "valid fixtures take the parallel proof");
     }
     #[test]
     fn routes_around_blockage_using_vias_and_is_deterministic() {

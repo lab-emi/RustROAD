@@ -88,6 +88,15 @@ strictly improved exact-target checkpoint retains that checkpoint for the
 common legalizer and final no-worse gate; a stall without it falls back. The iteration horizon is
 reported as a horizon, without a convergence-rate claim.
 
+Exhausting `max_evaluations` after such a checkpoint also retains the best
+exact-target checkpoint, reports `evaluation_horizon_after_checkpoint`, and
+leaves acceptance to the same legalizer and no-worse gate
+(`stop_at_evaluation_cap`, default `true`). On a real design the hard cap of
+512 evaluations is reached before the 200-iteration horizon (the Ibex
+temporary netlist stops after about 196 iterations), so the strict alternative
+discarded every improvement. `"stop_at_evaluation_cap": false` restores that
+strict baseline fallback; the default stays out of serialized configurations.
+
 The mathematical basis is the published formulation in
 [Lu et al., ePlace, TODAES 2015](https://doi.org/10.1145/2699873). This prototype
 uses its own fixed-grid discrete operator and differentiated deposition; it
@@ -134,7 +143,18 @@ process guard. No cell-by-bin matrix or per-iteration transcript is retained.
 
 Independent transform output jobs preserve fixed serial inner sums.
 Deposition and global scalar reductions use object/bin order. The caller's
-thread pool is bounded further to four active numerical jobs.
+thread pool is bounded further to four active numerical jobs. Per-net wire
+values and derivatives and per-object deposition weights are computed in
+contiguous parallel ranges and gathered serially in stored order; each
+evaluation computes the deposition weights once and reuses them for the
+adjoint, whose per-object forces are independent. Every sum therefore has the
+same operands in the same order for any worker count. Failures keep the serial
+order too: each range records its first failing net or object, and the serial
+gather charges the work meter object by object and reports the first failure
+in stored order, budget before an object's own numerical check, so the reason
+and the meter state at a failure do not depend on the worker count. The
+effective worker count is `workers` bounded by the caller's pool, so
+determinism evidence must vary `workers`, not only `--threads`.
 
 ## Qualification scope
 

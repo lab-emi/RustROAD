@@ -619,7 +619,18 @@ pub(super) fn open(
         memory_bytes: 768 << 20,
         inventory_bytes: 1 << 20,
     };
-    let snapshot = crate::load_capped(source, lock, limits, Some(caps))?;
+    // Always the full validation, whatever receipt the workspace holds for
+    // the source revision (receipts live outside the revision directory).
+    let snapshot = crate::load_with(
+        source,
+        lock,
+        limits,
+        Some(caps),
+        crate::LoadOptions {
+            routes: true,
+            force: true,
+        },
+    )?;
     let (lock, metadata) = snapshot.into_metadata();
     validate_typed(&metadata, &inventory, &stats)?;
     Ok(Opened {
@@ -724,6 +735,43 @@ pub(super) fn recheck(proof: &SourceProof, io: &mut ByteLedger) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sealed source revision holds exactly its five tables: validation
+    /// receipts live outside revision directories, and nothing else (a
+    /// receipt-named file included) is admitted.
+    #[test]
+    fn revision_inventory_admits_exactly_the_five_tables() {
+        let dir =
+            std::env::temp_dir().join(format!("rustroad-p1-inventory-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let seal = |name: &str| {
+            let path = dir.join(name);
+            fs::write(&path, b"xx").unwrap();
+            let mut permissions = fs::metadata(&path).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(&path, permissions).unwrap();
+        };
+        for (name, _) in FILES {
+            seal(name);
+        }
+        assert_eq!(inventory(&dir).unwrap().len(), 5);
+        seal("validated.json");
+        assert!(inventory(&dir).is_err());
+        let unseal = |name: &str| {
+            let path = dir.join(name);
+            let mut permissions = fs::metadata(&path).unwrap().permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            fs::set_permissions(&path, permissions).unwrap();
+            fs::remove_file(path).unwrap();
+        };
+        unseal("validated.json");
+        assert_eq!(inventory(&dir).unwrap().len(), 5);
+        unseal("pins.rbin");
+        assert!(inventory(&dir).is_err(), "a required table is missing");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn anchored_schema_and_strict_numeric_admission() {

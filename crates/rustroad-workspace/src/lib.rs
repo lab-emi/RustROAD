@@ -5,7 +5,7 @@ use rustroad_core::{Design, Limits, Placed};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub mod access_test;
@@ -16,6 +16,7 @@ pub mod eco;
 pub mod extract;
 pub mod floorplan;
 pub mod gds;
+pub mod gds_merge;
 pub mod input_buffer;
 pub mod macro_supply;
 pub mod netlist_export;
@@ -24,10 +25,15 @@ pub mod physical;
 pub mod placement_diagnostics;
 pub mod placement_seed;
 mod port_ties;
+mod receipt;
 pub mod routing;
 mod segmented_supply;
 mod storage;
 pub mod ties;
+pub use receipt::{
+    RECEIPT_DIR, Receipt, VALIDATION_EPOCH, Validation, build_identity, force_validate,
+    receipt_path, set_force_validate,
+};
 use rustroad_core::connectivity::{ConnectedDesign, PinOwner};
 
 /// design.json cap (also bounds the schema-5 mirrors). 64 MiB holds the
@@ -269,6 +275,9 @@ pub struct Snapshot {
     _connections: Option<ConnectionMaps>,
     _layout: Option<Mmap>,
     _routing: Option<Mmap>,
+    validation: Validation,
+    /// Receipt-backed read without route records (`ReadOptions::routes`).
+    routes_deferred: bool,
 }
 struct ConnectionMaps {
     _pins: Option<Mmap>,
@@ -287,13 +296,43 @@ impl Snapshot {
     pub fn metadata(&self) -> &Metadata {
         &self.metadata
     }
+    /// How this snapshot's semantic validity was established.
+    pub fn validation(&self) -> &Validation {
+        &self.validation
+    }
+    /// True when the route records were not decoded (see `ReadOptions`).
+    pub fn routes_deferred(&self) -> bool {
+        self.routes_deferred
+    }
+    fn require_routes(&self) -> Result<()> {
+        if self.routes_deferred {
+            return Err(Error::Invalid(
+                "snapshot was read without its route records".into(),
+            ));
+        }
+        Ok(())
+    }
     pub fn records(&self) -> impl ExactSizeIterator<Item = Placed> + '_ {
         self.map.chunks_exact(RECORD_BYTES).map(decode_record)
     }
     pub fn summary(&self) -> Summary {
-        self.metadata.summary()
+        let mut summary = self.metadata.summary();
+        if self.routes_deferred
+            && let Some(table) = self
+                .metadata
+                .physical
+                .as_ref()
+                .and_then(|p| p.routing.as_ref())
+                .and_then(|r| r.table.as_ref())
+        {
+            // The receipt-bound route table records exactly these counts.
+            summary.routed_nets = Some(table.nets);
+            summary.routing_segments = Some(table.wires + table.vias);
+        }
+        summary
     }
     pub fn export_def(&self, output: &mut impl Write) -> Result<()> {
+        self.require_routes()?;
         if self.metadata.stage != Stage::Placed {
             return Err(Error::Invalid(
                 "place the design before exporting DEF".into(),
@@ -498,6 +537,103 @@ pub fn read(path: &Path, limits: &Limits) -> Result<Snapshot> {
     load(path, lock, limits)
 }
 
+/// What a read needs beyond the always-present metadata.
+#[derive(Clone, Copy, Debug)]
+pub struct ReadOptions {
+    /// Decode the route records. A receipt-backed read of a command that
+    /// never touches routes (inspect, export-verilog) may leave them out; the
+    /// summary then reports the counts recorded with the route table, and
+    /// route consumers (`Snapshot::export_def`, GDS) refuse the snapshot.
+    pub routes: bool,
+}
+impl Default for ReadOptions {
+    fn default() -> Self {
+        Self { routes: true }
+    }
+}
+
+/// `read` with explicit `ReadOptions`.
+pub fn read_with(path: &Path, limits: &Limits, options: ReadOptions) -> Result<Snapshot> {
+    let lock = lock(path, false, false)?;
+    load_with(
+        path,
+        lock,
+        limits,
+        None,
+        LoadOptions {
+            routes: options.routes,
+            force: false,
+        },
+    )
+}
+
+/// Outcome of `verify_workspace`.
+#[derive(Debug, Serialize)]
+pub struct VerifyReport {
+    pub status: &'static str,
+    pub revision: String,
+    /// Receipt found before the check: absent, current, or why it was unusable.
+    pub previous_receipt: &'static str,
+    /// written, current (already matching) or not_requested.
+    pub receipt: &'static str,
+    pub validator_epoch: u32,
+    pub validator_build: String,
+}
+
+/// Fully validate the HEAD revision (ignoring any receipt) and optionally
+/// stamp it with a receipt, so revisions committed before receipts existed
+/// (or by another validator build) are trusted by later reads. Writing takes
+/// the exclusive workspace lock; the revision's own files are not modified.
+pub fn verify_workspace(path: &Path, limits: &Limits, write_receipt: bool) -> Result<VerifyReport> {
+    let lock = lock(path, false, write_receipt)?;
+    let current = head(path)?;
+    let directory = path.join("revisions").join(&current);
+    // Whether the receipt on disk (if any) still binds the current bytes.
+    let previous = receipt::read(path, &current).and_then(|existing| {
+        let maps = receipt::Premapped::open(&directory, &existing).ok_or("receipt_stale")?;
+        let design = read_bounded(&directory.join("design.json"), MAX_METADATA_BYTES)
+            .map_err(|_| "receipt_stale")?;
+        if maps.matches(&existing, &design) {
+            Ok(existing)
+        } else {
+            Err("receipt_stale")
+        }
+    });
+    let snapshot = load_with(
+        path,
+        lock,
+        limits,
+        None,
+        LoadOptions {
+            routes: true,
+            force: true,
+        },
+    )?;
+    let fresh = receipt::build(&directory, &snapshot.metadata)?;
+    let previous_receipt = match &previous {
+        Ok(existing) if *existing == fresh => "current",
+        Ok(_) => "receipt_stale",
+        Err(reason) => reason,
+    };
+    let receipt = if !write_receipt {
+        "not_requested"
+    } else if previous_receipt == "current" {
+        "current"
+    } else {
+        receipt::write(path, &fresh)?;
+        "written"
+    };
+    drop(snapshot);
+    Ok(VerifyReport {
+        status: "validated",
+        revision: current,
+        previous_receipt,
+        receipt,
+        validator_epoch: VALIDATION_EPOCH,
+        validator_build: build_identity(),
+    })
+}
+
 fn lock(path: &Path, create: bool, exclusive: bool) -> Result<File> {
     if create {
         fs::create_dir_all(path)?;
@@ -638,6 +774,38 @@ fn load_capped(
     limits: &Limits,
     caps: Option<SnapshotCaps>,
 ) -> Result<Snapshot> {
+    load_with(path, lock, limits, caps, LoadOptions::FULL)
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LoadOptions {
+    /// Decode route records even when a receipt makes it optional.
+    routes: bool,
+    /// Ignore any receipt (full validation).
+    force: bool,
+}
+impl LoadOptions {
+    const FULL: Self = Self {
+        routes: true,
+        force: false,
+    };
+}
+
+/// Integrity work done while design.json is parsed.
+enum Hashed {
+    /// Receipt digests of design.json and every pre-mapped table.
+    Receipt(bool),
+    /// Full validation: SHA-256 of a pre-mapped routes.rbin, if present.
+    Routes(Option<String>),
+}
+
+fn load_with(
+    path: &Path,
+    lock: File,
+    limits: &Limits,
+    caps: Option<SnapshotCaps>,
+    options: LoadOptions,
+) -> Result<Snapshot> {
     let current = head(path)?;
     if current == "rev0" {
         return Err(Error::Invalid("workspace has no published revision".into()));
@@ -648,9 +816,67 @@ fn load_capped(
     if let Some(caps) = caps {
         caps.admit(metadata_bytes, 0, 0)?;
     }
-    let metadata: Metadata =
-        serde_json::from_slice(&read_bounded(&metadata_path, MAX_METADATA_BYTES)?)?;
-    let mut metadata = metadata;
+    // A receipt is only a candidate here; it is trusted after every byte it
+    // binds has been hashed and the configuration digest recomputed.
+    let mut premapped = receipt::Premapped::empty();
+    let mut candidate = None;
+    let mut validation = Validation::Full("forced");
+    if !(options.force || receipt::force_validate()) {
+        match receipt::read(path, &current) {
+            Ok(r) => match receipt::Premapped::open(&revision_dir, &r) {
+                Some(maps) => {
+                    premapped = maps;
+                    candidate = Some(r);
+                }
+                None => validation = Validation::Full("receipt_files_mismatch"),
+            },
+            Err(reason) => validation = Validation::Full(reason),
+        }
+    }
+    // Full validation: hash routes.rbin (best effort; the regular path below
+    // reports any problem) while design.json is parsed.
+    let mut routes_map = None;
+    if candidate.is_none() {
+        routes_map = receipt::map_file(&revision_dir.join(routing::ROUTE_TABLE))
+            .ok()
+            .flatten();
+    }
+    let raw = read_bounded(&metadata_path, MAX_METADATA_BYTES)?;
+    let (parsed, hashed) = rayon::join(
+        || serde_json::from_slice::<Metadata>(&raw),
+        || match &candidate {
+            Some(r) => Hashed::Receipt(premapped.matches(r, &raw)),
+            None => Hashed::Routes(routes_map.as_deref().map(routing::sha256_hex)),
+        },
+    );
+    drop(raw);
+    let mut metadata: Metadata = parsed?;
+    let mut routes_sha = None;
+    let trusted = match hashed {
+        Hashed::Receipt(true) => {
+            let r = candidate.as_ref().expect("receipt candidate");
+            if receipt::config_digest(&metadata)? == r.config_xxh3_128 {
+                true
+            } else {
+                validation = Validation::Full("receipt_config_mismatch");
+                false
+            }
+        }
+        Hashed::Receipt(false) => {
+            validation = Validation::Full("receipt_digest_mismatch");
+            false
+        }
+        Hashed::Routes(sha) => {
+            routes_sha = sha;
+            false
+        }
+    };
+    if trusted {
+        validation = Validation::Receipt;
+    } else {
+        // Untrusted: drop pre-mapped tables; the regular checks map them again.
+        premapped = receipt::Premapped::empty();
+    }
     if let Some(caps) = caps {
         let model_bytes = metadata.tables.as_ref().map_or(0, storage::Tables::bytes);
         let state = metadata.physical.as_ref().and_then(|p| p.routing.as_ref());
@@ -712,6 +938,7 @@ fn load_capped(
         return Err(Error::Invalid("routing schema/payload mismatch".into()));
     }
     // Schema 6: the route records live in the authoritative routes.rbin.
+    let mut routes_deferred = false;
     if format_version == 6 {
         let routing = metadata
             .physical
@@ -736,22 +963,55 @@ fn load_capped(
         }
         let length =
             usize::try_from(table.bytes).map_err(|_| Error::Budget("route table length".into()))?;
-        let map = map_table(&revision_dir.join(routing::ROUTE_TABLE), length)?;
-        let mut decoded = routing::decode_route_table(map.as_deref().unwrap_or(&[]), &table)?;
-        decoded.stats = routing.routes.stats.clone();
-        routing.routes = decoded;
+        let route_path = revision_dir.join(routing::ROUTE_TABLE);
+        if trusted && !options.routes {
+            // Receipt-bound bytes that this read does not need.
+            routes_deferred = true;
+        } else {
+            let (map, sha) = if trusted {
+                (
+                    take_table(&mut premapped, &route_path, length)?,
+                    routing::RouteSha::Receipt,
+                )
+            } else {
+                match routes_map.take() {
+                    // The parallel hash covered exactly this mapping.
+                    Some(m) if m.len() == length && fs::metadata(&route_path)?.is_file() => (
+                        Some(m),
+                        routes_sha
+                            .take()
+                            .map_or(routing::RouteSha::Compute, routing::RouteSha::Known),
+                    ),
+                    _ => (map_table(&route_path, length)?, routing::RouteSha::Compute),
+                }
+            };
+            let mut decoded =
+                routing::decode_route_table_with(map.as_deref().unwrap_or(&[]), &table, sha)?;
+            decoded.stats = routing.routes.stats.clone();
+            routing.routes = decoded;
+        }
     }
+    drop(routes_map);
     let connections = if let Some(physical) = &metadata.physical {
-        pdk::validate_bundle(
-            physical,
-            &metadata.design,
-            &pdk::connection_limits(&metadata.design)?,
-        )?;
-        Some(read_connection_tables(
-            &revision_dir,
-            &metadata.design,
-            &physical.connectivity,
-        )?)
+        if trusted {
+            pdk::validate_bundle_bounds(physical, &metadata.design)?;
+            Some(map_connection_tables(
+                &revision_dir,
+                &physical.connectivity,
+                &mut premapped,
+            )?)
+        } else {
+            pdk::validate_bundle(
+                physical,
+                &metadata.design,
+                &pdk::connection_limits(&metadata.design)?,
+            )?;
+            Some(read_connection_tables(
+                &revision_dir,
+                &metadata.design,
+                &physical.connectivity,
+            )?)
+        }
     } else {
         None
     };
@@ -760,22 +1020,28 @@ fn load_capped(
             "imported snapshot has placement expansions".into(),
         ));
     }
-    let file = File::open(revision_dir.join("instances.rbin"))?;
     let expected = metadata
         .design
         .cells
         .len()
         .checked_mul(RECORD_BYTES)
         .ok_or_else(|| Error::Budget("table length overflow".into()))?;
-    if file.metadata()?.len() != expected as u64 {
-        return Err(Error::Invalid("instance table length mismatch".into()));
-    }
-    // SAFETY: writers only create new immutable revision files while holding the
-    // workspace lock, and never truncate a published table. Mapping is read-only.
-    // External programs must honor this contract; arbitrary outside file mutation
-    // is unsupported, as with every mmap-backed workspace.
-    #[allow(unsafe_code)]
-    let map = unsafe { Mmap::map(&file)? };
+    let map = match premapped.take("instances.rbin", expected) {
+        Some(Some(map)) => map,
+        _ => {
+            let file = File::open(revision_dir.join("instances.rbin"))?;
+            if file.metadata()?.len() != expected as u64 {
+                return Err(Error::Invalid("instance table length mismatch".into()));
+            }
+            // SAFETY: writers only create new immutable revision files while holding the
+            // workspace lock, and never truncate a published table. Mapping is read-only.
+            // External programs must honor this contract; arbitrary outside file mutation
+            // is unsupported, as with every mmap-backed workspace.
+            #[allow(unsafe_code)]
+            let map = unsafe { Mmap::map(&file)? };
+            map
+        }
+    };
     let snapshot = Snapshot {
         _lock: lock,
         metadata,
@@ -783,6 +1049,8 @@ fn load_capped(
         _connections: connections,
         _layout: None,
         _routing: None,
+        validation,
+        routes_deferred,
     };
     let mut seen = HashSet::with_capacity(snapshot.metadata.design.cells.len());
     for (record, cell) in snapshot.records().zip(&snapshot.metadata.design.cells) {
@@ -798,22 +1066,40 @@ fn load_capped(
     }
     let mut snapshot = snapshot;
     if snapshot.metadata.stage == Stage::Placed {
-        check_placed(&snapshot)?;
+        if !trusted {
+            check_placed(&snapshot)?;
+        }
         if let Some(bundle) = &snapshot.metadata.physical
             && bundle.config.is_some()
         {
-            let records = snapshot.records().collect::<Vec<_>>();
-            crate::physical::validate_state(&snapshot.metadata.design, bundle, &records)?;
+            let records = if trusted {
+                Vec::new()
+            } else {
+                snapshot.records().collect::<Vec<_>>()
+            };
+            if !trusted {
+                crate::physical::validate_state(&snapshot.metadata.design, bundle, &records)?;
+            }
             let state = bundle.state.as_ref().unwrap();
             let length = crate::physical::table_len(state)?;
-            let map = map_table(&revision_dir.join("physical.rbin"), length)?
+            let map = take_table(&mut premapped, &revision_dir.join("physical.rbin"), length)?
                 .ok_or_else(|| Error::Invalid("empty prepared geometry table".into()))?;
             crate::physical::validate_table(state, &map)?;
             snapshot._layout = Some(map);
-            crate::routing::validate_state(&snapshot.metadata.design, bundle, &records)?;
+            if !trusted {
+                crate::routing::validate_state(&snapshot.metadata.design, bundle, &records)?;
+            } else if let Some(routing) = &bundle.routing
+                && !snapshot.routes_deferred
+            {
+                crate::routing::validate_bounds(routing)?;
+            }
             if let Some(routing) = bundle.routing.as_ref().filter(|r| r.table.is_none()) {
                 let expected = crate::routing::table_bytes(routing)?;
-                let map = map_table(&revision_dir.join("routing.rbin"), expected.len())?;
+                let map = take_table(
+                    &mut premapped,
+                    &revision_dir.join("routing.rbin"),
+                    expected.len(),
+                )?;
                 if map.as_ref().map_or(&[][..], |m| &m[..]) != expected {
                     return Err(Error::Invalid("routing table mismatch".into()));
                 }
@@ -833,17 +1119,46 @@ fn load_capped(
     Ok(snapshot)
 }
 
+/// A pre-mapped receipt table, or a fresh `map_table`.
+fn take_table(
+    premapped: &mut receipt::Premapped,
+    path: &Path,
+    bytes: usize,
+) -> Result<Option<Mmap>> {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    match premapped.take(name, bytes) {
+        Some(map) => Ok(map),
+        None => map_table(path, bytes),
+    }
+}
+
 fn check_placed(snapshot: &Snapshot) -> Result<()> {
     let records = snapshot.records().collect::<Vec<_>>();
+    check_placed_records(&snapshot.metadata.design, &records)
+}
+fn check_placed_records(design: &Design, records: &[Placed]) -> Result<()> {
     rustroad_core::validate_placement(
-        &snapshot.metadata.design,
-        &records,
+        design,
+        records,
         &Limits {
-            max_cells: snapshot.metadata.design.cells.len().max(250_000),
+            max_cells: design.cells.len().max(250_000),
             ..Limits::default()
         },
     )
     .map_err(|e| Error::Invalid(e.to_string()))?;
+    Ok(())
+}
+/// The placed-stage checks of a full read (`load_with`) that commit does not
+/// otherwise run; a receipt is only written when they pass.
+fn placed_checks(metadata: &Metadata, records: &[Placed]) -> Result<()> {
+    if metadata.stage == Stage::Placed {
+        check_placed_records(&metadata.design, records)?;
+        if let Some(bundle) = &metadata.physical
+            && bundle.config.is_some()
+        {
+            crate::physical::validate_state(&metadata.design, bundle, records)?;
+        }
+    }
     Ok(())
 }
 
@@ -852,6 +1167,49 @@ fn commit(path: &Path, mut metadata: Metadata, records: &[Placed]) -> Result<Sum
 }
 
 fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> Result<Summary> {
+    commit_with(path, metadata, records, None)
+}
+
+/// `commit_in_place` under exactly `rev{number}` (a session's last logical
+/// revision, chosen by `next_free_revision`); refused when that revision
+/// already exists.
+pub(crate) fn commit_as(
+    path: &Path,
+    metadata: &mut Metadata,
+    records: &[Placed],
+    number: u64,
+) -> Result<Summary> {
+    commit_with(path, metadata, records, Some(number))
+}
+
+/// The revision number a commit whose parent is `rev{parent}` would take
+/// now: the first of `MAX_ORPHAN_SLOTS` slots after the parent with no
+/// directory entry (orphans of interrupted commits are skipped, never
+/// reused). A session that names its logical revisions with this, under the
+/// exclusive lock, names them exactly as per-attempt commits would.
+pub(crate) fn next_free_revision(path: &Path, parent: u64) -> Result<u64> {
+    let revisions = path.join("revisions");
+    for offset in 1..=MAX_ORPHAN_SLOTS {
+        let number = parent
+            .checked_add(offset)
+            .ok_or_else(|| Error::Budget("revision number exhausted".into()))?;
+        match fs::symlink_metadata(revisions.join(format!("rev{number}"))) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(number),
+            Err(error) => return Err(error.into()),
+            Ok(_) => {}
+        }
+    }
+    Err(Error::Budget(
+        "too many orphan revisions; inspect workspace before recovery".into(),
+    ))
+}
+
+fn commit_with(
+    path: &Path,
+    metadata: &mut Metadata,
+    records: &[Placed],
+    number: Option<u64>,
+) -> Result<Summary> {
     metadata.format_version = storage::logical_version(metadata)?;
     if let Some(p) = &metadata.physical {
         metadata.format_version = if p
@@ -873,14 +1231,31 @@ fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> 
         } else {
             2
         };
-        crate::routing::validate_state(&metadata.design, p, records)?;
     }
+    // Everything a full read checks: routing here, the bundle link below; the
+    // placed-stage checks run beside routing and only gate the receipt (a
+    // failing revision is published exactly as before and fails on read).
+    let (routing, placed) = rayon::join(
+        || match &metadata.physical {
+            Some(p) => crate::routing::validate_state(&metadata.design, p, records),
+            None => Ok(()),
+        },
+        || placed_checks(metadata, records),
+    );
+    routing?;
     fs::create_dir_all(path.join("revisions"))?;
-    let first = revision_number(&metadata.parent_revision)?
-        .checked_add(1)
-        .ok_or_else(|| Error::Budget("revision number exhausted".into()))?;
+    let first = match number {
+        Some(n) => n,
+        None => revision_number(&metadata.parent_revision)?
+            .checked_add(1)
+            .ok_or_else(|| Error::Budget("revision number exhausted".into()))?,
+    };
     let mut chosen: Option<PathBuf> = None;
-    for offset in 0..MAX_ORPHAN_SLOTS {
+    for offset in 0..if number.is_some() {
+        1
+    } else {
+        MAX_ORPHAN_SLOTS
+    } {
         let number = first
             .checked_add(offset)
             .ok_or_else(|| Error::Budget("revision number exhausted".into()))?;
@@ -897,7 +1272,13 @@ fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> 
         }
     }
     let directory = chosen.ok_or_else(|| {
-        Error::Budget("too many orphan revisions; inspect workspace before recovery".into())
+        if number.is_some() {
+            Error::Invalid(format!(
+                "REVISION_CONFLICT: rev{first} already exists; inspect workspace before recovery"
+            ))
+        } else {
+            Error::Budget("too many orphan revisions; inspect workspace before recovery".into())
+        }
     })?;
     // Schema 6: move the route records out of design.json into routes.rbin.
     let mut held = None;
@@ -928,20 +1309,22 @@ fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> 
         r.routes = routes;
     }
     write_new(&directory.join("design.json"), &bytes)?;
-    let file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(directory.join("instances.rbin"))?;
-    let mut table = BufWriter::with_capacity(256 * 1024, file);
+    let mut table = Vec::new();
+    table
+        .try_reserve_exact(records.len().saturating_mul(40))
+        .map_err(|_| Error::Budget("instance table allocation".into()))?;
     for record in records {
-        table.write_all(&record.id.to_le_bytes())?;
-        table.write_all(&record.x.to_le_bytes())?;
-        table.write_all(&record.y.to_le_bytes())?;
-        table.write_all(&record.width.to_le_bytes())?;
-        table.write_all(&record.height.to_le_bytes())?;
+        table.extend_from_slice(&record.id.to_le_bytes());
+        table.extend_from_slice(&record.x.to_le_bytes());
+        table.extend_from_slice(&record.y.to_le_bytes());
+        table.extend_from_slice(&record.width.to_le_bytes());
+        table.extend_from_slice(&record.height.to_le_bytes());
     }
-    table.flush()?;
-    table.get_ref().sync_all()?;
+    // Every table is an independent synced file (never a hard link to the
+    // parent's identical table): an in-place edit of one revision can never
+    // reach another, and snapshot tools that pin `st_nlink == 1` admit it.
+    write_new(&directory.join("instances.rbin"), &table)?;
+    drop(table);
     if let Some(physical) = &metadata.physical {
         pdk::validate_bundle(
             physical,
@@ -958,8 +1341,22 @@ fn commit_in_place(path: &Path, metadata: &mut Metadata, records: &[Placed]) -> 
             )?;
         }
         if let Some(state) = &physical.state {
-            crate::physical::write_table(state, &directory.join("physical.rbin"))?;
+            write_new(
+                &directory.join("physical.rbin"),
+                &crate::physical::table_bytes(state)?,
+            )?;
         }
+    }
+    // The receipt is a cache: failing to write it only costs a later read
+    // its full validation, so it never fails the commit. Without a fresh
+    // receipt, any receipt left under this revision name by a removed
+    // orphan is dropped (it would not match these bytes anyway).
+    let stamped = placed.is_ok()
+        && receipt::build(&directory, metadata)
+            .and_then(|r| receipt::write(path, &r))
+            .is_ok();
+    if !stamped {
+        receipt::remove(path, &metadata.revision);
     }
     sync_directory(&directory)?;
     sync_directory(&path.join("revisions"))?;
@@ -990,39 +1387,23 @@ fn write_connection_tables(
     model: &ConnectedDesign,
 ) -> Result<()> {
     let csr = model.lower_csr(design, &pdk::connection_limits(design)?)?;
-    let write_table =
-        |name: &str, produce: &mut dyn FnMut(&mut BufWriter<File>) -> Result<()>| -> Result<()> {
-            let file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(directory.join(name))?;
-            let mut out = BufWriter::with_capacity(256 * 1024, file);
-            produce(&mut out)?;
-            out.flush()?;
-            out.get_ref().sync_all()?;
-            Ok(())
-        };
-    write_table("pins.rbin", &mut |out| {
-        for pin in &model.pins {
-            for field in owner_record(pin) {
-                out.write_all(&field.to_le_bytes())?;
-            }
+    let mut bytes = Vec::new();
+    for pin in &model.pins {
+        for field in owner_record(pin) {
+            bytes.extend_from_slice(&field.to_le_bytes());
         }
-        Ok(())
-    })?;
-    write_table("net_offsets.rbin", &mut |out| {
-        for offset in &csr.offsets {
-            out.write_all(&offset.to_le_bytes())?;
-        }
-        Ok(())
-    })?;
-    write_table("net_pins.rbin", &mut |out| {
-        for pin in &csr.pin_indices {
-            out.write_all(&pin.to_le_bytes())?;
-        }
-        Ok(())
-    })?;
-    Ok(())
+    }
+    write_new(&directory.join("pins.rbin"), &bytes)?;
+    bytes.clear();
+    for offset in &csr.offsets {
+        bytes.extend_from_slice(&offset.to_le_bytes());
+    }
+    write_new(&directory.join("net_offsets.rbin"), &bytes)?;
+    bytes.clear();
+    for pin in &csr.pin_indices {
+        bytes.extend_from_slice(&pin.to_le_bytes());
+    }
+    write_new(&directory.join("net_pins.rbin"), &bytes)
 }
 fn map_table(path: &Path, bytes: usize) -> Result<Option<Mmap>> {
     if !fs::metadata(path)?.is_file() {
@@ -1101,6 +1482,37 @@ fn read_connection_tables(
             return Err(Error::Invalid("net CSR differs from metadata".into()));
         }
     }
+    Ok(ConnectionMaps {
+        _pins: pins,
+        _net_offsets: offsets,
+        _net_pins: net_pins,
+    })
+}
+/// Receipt-backed read: map the connection tables at the lengths the model
+/// implies; their contents were compared with the model at commit.
+fn map_connection_tables(
+    directory: &Path,
+    model: &ConnectedDesign,
+    premapped: &mut receipt::Premapped,
+) -> Result<ConnectionMaps> {
+    let overflow = || Error::Budget("connection table overflow".into());
+    let connected = model.pins.iter().filter(|p| p.net.is_some()).count();
+    let pins = take_table(
+        premapped,
+        &directory.join("pins.rbin"),
+        model.pins.len().checked_mul(16).ok_or_else(overflow)?,
+    )?;
+    let offsets = take_table(
+        premapped,
+        &directory.join("net_offsets.rbin"),
+        (model.nets.len() + 1).checked_mul(8).ok_or_else(overflow)?,
+    )?
+    .ok_or_else(|| Error::Invalid("missing offset sentinel".into()))?;
+    let net_pins = take_table(
+        premapped,
+        &directory.join("net_pins.rbin"),
+        connected.checked_mul(4).ok_or_else(overflow)?,
+    )?;
     Ok(ConnectionMaps {
         _pins: pins,
         _net_offsets: offsets,
@@ -1257,6 +1669,64 @@ mod tests {
         init(&dir, "rev0", fixture(), &limits).unwrap();
         fs::write(dir.join("revisions/rev1/instances.rbin"), [0; 3]).unwrap();
         assert!(matches!(read(&dir, &limits), Err(Error::Invalid(_))));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn stale_receipt_never_skips_placement_validation() {
+        let dir = dir();
+        let limits = Limits::default();
+        init(&dir, "rev0", fixture(), &limits).unwrap();
+        place(&dir, "rev1", &limits).unwrap();
+        let revision = dir.join("revisions/rev2");
+        assert!(receipt_path(&dir, "rev2").is_file());
+        assert_eq!(
+            fs::read_dir(&revision).unwrap().count(),
+            2,
+            "receipt kept outside"
+        );
+        assert_eq!(
+            load_with(
+                &dir,
+                lock(&dir, false, false).unwrap(),
+                &limits,
+                None,
+                LoadOptions::FULL
+            )
+            .unwrap()
+            .validation,
+            Validation::Receipt
+        );
+        assert_eq!(
+            load_with(
+                &dir,
+                lock(&dir, false, false).unwrap(),
+                &limits,
+                None,
+                LoadOptions {
+                    routes: true,
+                    force: true
+                }
+            )
+            .unwrap()
+            .validation,
+            Validation::Full("forced")
+        );
+        // Move the cell off its site grid: same table length and identity,
+        // so only the (receipt-skippable) placement check can reject it.
+        let table = revision.join("instances.rbin");
+        let original = fs::read(&table).unwrap();
+        let mut moved = original.clone();
+        moved[8..16].copy_from_slice(&3i64.to_le_bytes());
+        fs::write(&table, &moved).unwrap();
+        assert!(matches!(read(&dir, &limits), Err(Error::Invalid(_))));
+        fs::write(&table, &original).unwrap();
+        assert_eq!(read(&dir, &limits).unwrap().validation, Validation::Receipt);
+        // An unknown extra file in the revision is not covered by the receipt.
+        fs::write(revision.join("extra.bin"), b"x").unwrap();
+        assert_eq!(
+            read(&dir, &limits).unwrap().validation,
+            Validation::Full("receipt_files_mismatch")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

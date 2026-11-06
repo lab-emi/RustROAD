@@ -131,6 +131,70 @@ pub struct TrackRouterConfig {
     /// Routed stacks need the minimum-area run in every search.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub area_stacks: bool,
+    /// Optional detailed-route quality controls; omitted keeps the legacy
+    /// search (`rustroad_core::routing::RouteQor`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qor: Option<RouteQorConfig>,
+}
+/// Detailed-route quality controls by layer name (see
+/// `rustroad_core::routing::RouteQor`). Unlisted layers keep 1000 milli.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteQorConfig {
+    /// Initial detailed routing joins terminals in Prim (nearest-first) order.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prim_order: bool,
+    /// Drop a routed net's pin-access via envelopes (search geometry only).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub release_portals: bool,
+    /// Drop every pin-access via envelope before detailed routing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drop_portals: bool,
+    /// Pin access of small nets leans toward the net's other terminals.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub net_aware_access: bool,
+    /// Wire-step cost multiplier per routing layer, thousandths (>= 1000).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub layer_cost_milli: BTreeMap<String, u32>,
+    /// Via cost multiplier by the via's upper layer, thousandths (>= 1000).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub via_cost_milli: BTreeMap<String, u32>,
+    /// Surcharge of a same-layer turn (DBU-equivalent).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub bend_cost: u64,
+    /// Hard searches of nets with at most this many terminals use
+    /// `small_net_weight` (0 disables).
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub small_net_terminals: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub small_net_weight: u64,
+    /// Same-net notch repair with the stair bridge, clipped bars and
+    /// reserved fills (off keeps the legacy bars).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notch_bridge: bool,
+    /// The wide-metal cycle cut of rule repair also runs for strict owners,
+    /// at most three cuts per wide region.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strict_wide_cycles: bool,
+    /// Post-route via reduction (`rustroad_core::routing::ViaReduction`);
+    /// omitted keeps the routes of the repair loop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_reduction: Option<rustroad_core::routing::ViaReduction>,
+    /// One via per net, layer pair and point: pin escapes of one net share
+    /// a via they land at one point, and the output writes one
+    /// (`rustroad_core::routing::RouteQor::dedupe_vias`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dedupe_vias: bool,
+    /// Post-route topology cleanup (`rustroad_core::routing::Straighten`);
+    /// omitted keeps the routes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub straighten: Option<rustroad_core::routing::Straighten>,
+}
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+fn is_zero_usize(value: &usize) -> bool {
+    *value == 0
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -302,8 +366,28 @@ pub(crate) fn write_route_table(routes: &Routes, path: &Path) -> Result<RoutesTa
         nets: routes.nets.len(),
     })
 }
-/// Decode a schema 6 route table; every count must match `table`.
-pub(crate) fn decode_route_table(bytes: &[u8], table: &RoutesTable) -> Result<Routes> {
+/// Lowercase hex SHA-256 (the `RoutesTable::sha256` form).
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
+/// How `decode_route_table_with` establishes the table's SHA-256 identity.
+pub(crate) enum RouteSha {
+    /// Hash the bytes now.
+    Compute,
+    /// SHA-256 already computed over exactly these bytes.
+    Known(String),
+    /// The bytes are bound by a matching validation receipt (XXH3-128 of the
+    /// file that passed full validation, whose design.json pins the SHA-256).
+    Receipt,
+}
+/// Decode a schema 6 route table; every count must match `table`. `sha`
+/// says how the table's SHA-256 identity is established.
+pub(crate) fn decode_route_table_with(
+    bytes: &[u8],
+    table: &RoutesTable,
+    sha: RouteSha,
+) -> Result<Routes> {
     let bad = |s: &str| Error::Invalid(format!("route table: {s}"));
     if bytes.len() as u64 != table.bytes
         || !bytes.len().is_multiple_of(64)
@@ -311,8 +395,12 @@ pub(crate) fn decode_route_table(bytes: &[u8], table: &RoutesTable) -> Result<Ro
     {
         return Err(bad("length"));
     }
-    use sha2::{Digest, Sha256};
-    if format!("{:x}", Sha256::digest(bytes)) != table.sha256 {
+    let digest = match sha {
+        RouteSha::Compute => Some(sha256_hex(bytes)),
+        RouteSha::Known(hex) => Some(hex),
+        RouteSha::Receipt => None,
+    };
+    if digest.is_some_and(|hex| hex != table.sha256) {
         return Err(bad("sha256 differs from design.json"));
     }
     let count = [
@@ -1373,6 +1461,50 @@ pub(crate) fn track_plan(
         memory_mib: config.memory_mib,
         max_history_entries: config.max_history_entries,
         area_stacks: config.area_stacks,
+        qor: config
+            .qor
+            .as_ref()
+            .map(|q| route_qor(q, layers))
+            .transpose()?,
+    })
+}
+/// Layer-name quality controls resolved to input-layer indices.
+fn route_qor(
+    config: &RouteQorConfig,
+    layers: &[RouteLayer],
+) -> Result<rustroad_core::routing::RouteQor> {
+    let resolve = |named: &BTreeMap<String, u32>| -> Result<Vec<u32>> {
+        if named.is_empty() {
+            return Ok(Vec::new());
+        }
+        for name in named.keys() {
+            if !layers
+                .iter()
+                .any(|l| &l.name == name && l.vertical.is_some())
+            {
+                return Err(fail("route quality layer names no selected routing layer"));
+            }
+        }
+        Ok(layers
+            .iter()
+            .map(|l| named.get(&l.name).copied().unwrap_or(1000))
+            .collect())
+    };
+    Ok(rustroad_core::routing::RouteQor {
+        prim_order: config.prim_order,
+        release_portals: config.release_portals,
+        drop_portals: config.drop_portals,
+        net_aware_access: config.net_aware_access,
+        layer_cost_milli: resolve(&config.layer_cost_milli)?,
+        via_cost_milli: resolve(&config.via_cost_milli)?,
+        bend_cost: config.bend_cost,
+        small_net_terminals: config.small_net_terminals,
+        small_net_weight: config.small_net_weight,
+        notch_bridge: config.notch_bridge,
+        strict_wide_cycles: config.strict_wide_cycles,
+        via_reduction: config.via_reduction.clone(),
+        dedupe_vias: config.dedupe_vias,
+        straighten: config.straighten.clone(),
     })
 }
 /// Relative (origin 0,0) pin and same-master other-net geometry of one
@@ -1769,6 +1901,23 @@ pub(crate) fn validate_state(
             return Err(fail("routing technology names changed"));
         }
         routing::validate(&input, &state.routes, &state.config.limits)?;
+    }
+    Ok(())
+}
+/// Receipt-backed read: the O(n) index bounds later code relies on (layer,
+/// via kind). Geometry, connectivity and rules were validated at commit.
+pub(crate) fn validate_bounds(state: &RoutingState) -> Result<()> {
+    let layers = state.layers.len();
+    let kinds = state.via_names.len();
+    let r = &state.routes;
+    if state.via_lower_layers.len() != kinds
+        || state.via_lower_layers.iter().any(|&l| l as usize >= layers)
+        || r.wires.iter().any(|w| w.layer as usize >= layers)
+        || r.vias.iter().any(|v| v.kind as usize >= kinds)
+        || r.access.iter().any(|a| a.layer as usize >= layers)
+        || r.patches.iter().any(|p| p.layer as usize >= layers)
+    {
+        return Err(fail("stored route index out of range"));
     }
     Ok(())
 }
@@ -2254,6 +2403,102 @@ mod obstruction_tests {
             master.obstructions[0], geometry,
             "the imported LEF view stays exact"
         );
+    }
+}
+
+#[cfg(test)]
+mod qor_config_tests {
+    use super::*;
+
+    fn layers() -> Vec<RouteLayer> {
+        ["Metal1", "Via1", "Metal2"]
+            .iter()
+            .enumerate()
+            .map(|(i, name)| RouteLayer {
+                name: (*name).into(),
+                width: 200,
+                spacing: 210,
+                vertical: (i != 1).then_some(i == 2),
+                min_area: None,
+                min_step: None,
+                wide_spacing: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn via_reduction_and_strict_wide_cycles_parse_and_default_off() {
+        let off: RouteQorConfig = serde_json::from_str(r#"{"notch_bridge": true}"#).unwrap();
+        let resolved = route_qor(&off, &layers()).unwrap();
+        assert!(!resolved.strict_wide_cycles);
+        assert_eq!(resolved.via_reduction, None);
+        assert_eq!(
+            serde_json::to_string(&off).unwrap(),
+            r#"{"notch_bridge":true}"#
+        );
+        let on: RouteQorConfig = serde_json::from_str(
+            r#"{"strict_wide_cycles": true, "via_reduction": {"passes": 1,
+                "via_milli": 3000, "max_terminals": 10, "length_per_via": 1680,
+                "net_expansions": 10000, "max_connection_length": 40000}}"#,
+        )
+        .unwrap();
+        let resolved = route_qor(&on, &layers()).unwrap();
+        assert!(resolved.strict_wide_cycles);
+        let reduction = resolved.via_reduction.unwrap();
+        assert_eq!(
+            (reduction.passes, reduction.via_milli, reduction.weight),
+            (1, 3000, 1)
+        );
+        assert_eq!(reduction.wrong_way_factor, 0);
+        assert_eq!(reduction.margin, None);
+        assert_eq!(reduction.min_vias, 1);
+        assert_eq!(reduction.max_connection_length, Some(40000));
+        // Unknown keys are refused, like every routing-config table.
+        assert!(
+            serde_json::from_str::<RouteQorConfig>(
+                r#"{"via_reduction": {"passes": 1, "via_milli": 3000, "max_terminals": 10,
+                    "length_per_via": 0, "net_expansions": 1, "bogus": 1}}"#
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn via_dedupe_and_straightening_parse_and_default_off() {
+        let off: RouteQorConfig = serde_json::from_str(r#"{"notch_bridge": true}"#).unwrap();
+        let resolved = route_qor(&off, &layers()).unwrap();
+        assert!(!resolved.dedupe_vias);
+        assert_eq!(resolved.straighten, None);
+        // Off: the resolved controls serialize exactly as before.
+        assert_eq!(
+            serde_json::to_string(&resolved).unwrap(),
+            r#"{"notch_bridge":true}"#
+        );
+        let on: RouteQorConfig =
+            serde_json::from_str(r#"{"dedupe_vias": true, "straighten": {"passes": 2}}"#).unwrap();
+        let resolved = route_qor(&on, &layers()).unwrap();
+        assert!(resolved.dedupe_vias);
+        assert_eq!(
+            resolved.straighten,
+            Some(rustroad_core::routing::Straighten {
+                passes: 2,
+                turn_at_ends: false,
+                reroute: None
+            })
+        );
+        assert!(
+            serde_json::from_str::<RouteQorConfig>(r#"{"straighten": {"passes": 1, "bogus": 1}}"#)
+                .is_err()
+        );
+        assert!(serde_json::from_str::<RouteQorConfig>(r#"{"straighten": {}}"#).is_err());
+        let rerouted: RouteQorConfig = serde_json::from_str(
+            r#"{"straighten": {"passes": 1, "turn_at_ends": true, "reroute": {"bend_cost": 420,
+                "max_terminals": 10, "net_expansions": 10000}}}"#,
+        )
+        .unwrap();
+        let s = route_qor(&rerouted, &layers()).unwrap().straighten.unwrap();
+        assert!(s.turn_at_ends);
+        assert_eq!(s.reroute.unwrap().weight, 1);
     }
 }
 

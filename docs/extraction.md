@@ -58,7 +58,8 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
   were a fixed cap; they are a budget now. Per run the extractor holds the
   candidate list, interval events, ordered active set and plane list, with
   vector growth and hash/tree occupancy included: 256 B per candidate
-  (`CANDIDATE_SCRATCH_BYTES`), one run at a time. The ceiling is 48 MiB of
+  (`CANDIDATE_SCRATCH_BYTES`) for the serial path; parallel lanes are admitted
+  separately (see "Strips and parallel computation"). The ceiling is 48 MiB of
   that scratch, 196,608 candidates (`MAX_CANDIDATES_CEILING`). An interval sweep
   skips disjoint candidates while keeping shape-ID accumulation order. Index
   work and active-candidate comparisons debit `--max-extract-work`. The report states `max_candidates_per_run`,
@@ -81,10 +82,17 @@ allowances against `--extract-memory-mib`. Runtime peak RSS is checked during
 extraction. Larger object limits still fail when their combined estimate exceeds
 the memory allowance. `stats.memory` reports the estimate and cap. The CLI reads
 the workspace once, converting the segment length under the same snapshot lock.
-Owned-conductor bins use a shared insertion-ordered entry array and fixed
-headers. The estimate accounts for entry-vector reallocation and bounds header
-count by each routing layer's actual conductor extent. Virtual cell geometry
-keeps its separate index. Candidate order and per-bin work counts are preserved.
+The spatial-index allowance (24 bytes per `--max-extract-bin-entries` entry) is
+shared by structures that are never alive together: the same-net conductor lists
+(and their buckets) during metal construction, then the per-layer grid. The lists
+and the retained-shape grid are admitted against that allowance plus the headroom
+below `--extract-memory-mib` when they are built, with their exact size. The
+same-net buckets and the grid with virtual cell geometry are admitted against the
+configured allowance alone, never the headroom (which follows the live resident
+set), so whether they are used depends only on the input and the limits. A grid
+larger than the allowance adds its excess to `stats.memory` and leaves that much
+less headroom for parallel scratch. Virtual cell geometry otherwise keeps its
+separate index.
 
 SPEF formatting retains the numeric RC network once and generates labeled nets one
 at a time. A compact coupling incidence table preserves record order; the name
@@ -98,26 +106,164 @@ Candidate queries use the lateral calibration window on the wire's own layer
 and its exact footprint on every other modelled layer. All accepted shape IDs
 and interval boundaries are retained, including shapes with no direct final
 capacitance contribution; removing such boundaries can change f64 rounding.
-Candidates are still processed in shape-ID order. The query change adds no
-per-run storage or worker concurrency: the run16 replay estimate is 3.46 GiB,
-including 16 MiB scratch (65,536 candidates at 256 bytes), one corner and one
-extraction worker. Builds and tests use two workers under a 4 GiB OS cap.
+Candidates are still processed in shape-ID order. The run16 replay estimate is
+3.46 GiB, including 16 MiB serial scratch (65,536 candidates at 256 bytes) and
+one corner. Builds and tests use two workers under a 4 GiB OS cap.
 
-After metal construction and crossing discovery, an immutable BVH indexes only
-the retained shape IDs. The mutable conductor bins are released first; virtual
-cell geometry stays separate. Admission takes the maximum of the old bin and
-new BVH allowances, including a bounded construction/query stack. For four
-million retained shapes and 15 layers the BVH allowance is about 112 MiB,
-below the existing 192 MiB bin-entry allowance. Build/query probes consume the
-original work budget; candidate and electrical accumulation order stay fixed.
+Metal construction (end extensions, via pads and patches minus same-net metal)
+looks up same-net conductors in per-`(net, layer)` lists of retained shape IDs and
+virtual signal-pin IDs; pieces are appended as they are added. A list of 256 or
+more IDs is bucketed on its first lookup by the construction bin (twice the largest
+calibration window): each ID goes to every bin its closed rectangle touches, and
+later pieces of the list are added as they are created. A lookup scans the buckets
+the rectangle touches when they are fewer than the list's IDs, otherwise the list,
+so a net with tens of thousands of shapes on one layer (an unbuffered clock or
+reset) costs its local density per lookup instead of its length. Bucket entries
+are admitted at 128 bytes each (entry and cell header with growth slack) from what
+the lists' bound leaves of the configured index allowance, capped by
+`--max-extract-bin-entries`; a list that would exceed them is scanned linearly from
+then on. The covering set is the same closed-overlap set in shape-ID order as
+before, so the pieces and their order are unchanged; only `stats.work` (entries
+scanned and bucketed) depends on the bucketing. Cell geometry is indexed once, at the admitted query bin: twice
+the smallest per-layer calibration window when it fits (the selection rule and the
+reported `stats.memory.instance_query_bin_dbu` are unchanged), otherwise the coarse
+bin. The extraction instance index caches every instance's world bounds and a
+per-instance layer mask (bounds plus mask: 48 bytes per instance, included in the
+geometry estimate); the router's index keeps its original per-visit bounds, so
+router work counts are unchanged. An instance without metal on the queried layer
+visits no template shape either way, so the mask changes no extraction work count.
 
-The final virtual-cell query index uses twice the smallest per-layer calibration
-window when it fits. Construction keeps the original index order until all metal
-tiling and crossing discovery are complete. Admission checks the exact proposed
-index storage and a conservative bound covering every later query, including
-the largest window and one-DBU margin. A tiny window, excessive query extent or
-insufficient memory retains the coarse index. The report records the selected
-`stats.memory.instance_query_bin_dbu`; the process memory cap stays unchanged.
+After all retained metal exists, one uniform grid per layer indexes the retained
+shape IDs. The cell side is at least 2 um and the layer's lateral calibration
+window, doubled until a layer has no more cells than shapes. Entries hold the
+rectangle relative to the layer origin in 32 bits plus the shape ID (20 bytes);
+a layer wider than 2^32 DBU stores absolute rectangles (40 bytes). A query reports
+each strictly intersecting entry exactly once, from the first query cell it occupies.
+Grid entries are capped by `--max-extract-bin-entries`; this cap now counts the
+per-layer grid's entries rather than the former 2x-window construction bins. When
+the retained shapes exceed the cap at the base cells, every layer's cell is
+doubled until they fit (results never depend on the cell; `stats.work` does, and
+counts the entries of each rejected size); only a grid of single cells over the cap
+fails (`extraction spatial-bin entries`), i.e. a cap below the retained shape
+count. Passive conductors find their crossing routed metal through the grid, and
+the same strict predicate.
+
+When the virtual cell shapes on routing layers are no more numerous than the
+retained shapes, have positive area and fit the entry cap at the base cells and the
+configured index allowance (with a pin bitset, a rank table and the `(net, pin)` of
+each signal pin), they are indexed in the same grids. Strip queries then take cell geometry from the grid
+instead of visiting instances and transforming their templates: the strict
+intersection with the query reports exactly the conductors the instance query plus
+the acceptance predicate reported, so candidates, interval boundaries and the SPEF
+are unchanged (`stats.work` counts the cells and entries scanned). The instance
+index computes the virtual crossing marks and is then released. Otherwise cell
+geometry stays virtual and is queried per instance, as before. The two paths scan
+different cells, so for a given input `stats.work` (and whether a
+`--max-extract-work` cap passes) depends on `--max-extract-bin-entries`. The
+same-net buckets, the virtual grid and the grid cell sizes are chosen from the
+configured limits only. As before, the instance query bin falls back to the coarse
+bin when the refined index does not fit the memory estimate (which includes the
+live resident set), and that choice also changes `stats.work`. Nothing depends on
+threads or chunk size.
+
+## Strips and parallel computation
+
+Each strip's candidates are the conductors that overlap it along its axis and lie
+within the lateral calibration window on its own layer or under its face on every
+other modelled layer. They are processed in shape-ID order exactly as before, so
+interval boundaries and every f64 expression are unchanged. A piece or passive
+conductor contributes an x strip and a y strip of one rectangle; both accept exactly
+the conductors overlapping that rectangle on other layers, so the pair queries other
+layers once, and its own layer once for the union of both lateral windows (each hit
+is tested with each strip's own predicate). When these shared queries fail (a
+candidate cap or a query budget, possibly the y strip's alone), the two strips are
+recomputed one after the other from the unit's starting work count, so the x
+strip's accumulations and budget checks come before any y strip error, as when
+they were separate strips. Virtual cell shapes are decoded once per
+query and travel with the candidate; no design-sized decoded-shape cache is kept.
+The interval sweep uses a bitset of candidate positions (ascending position is
+ascending shape ID), per-layer dense context tables, reused buffers and packed
+event keys; each candidate's extents along and across the strip and its layer's
+calibration metal are computed once per strip, and calibration-row samples are
+memoized by `(rows, spacing)` (a pure function). `stats.work` counts index cells and entries actually scanned, so it is
+smaller than before; all other statistics are unchanged.
+
+Only wire bodies are stored as strip records. A piece (end extension, via pad or
+patch piece) is its shape plus its net and node (8 bytes); a crossed retained
+passive conductor is its shape ID. Their x and y strips are generated from the
+shape when the unit is computed, with the same fields in the same order as the
+records the construction used to store (unit test
+`lazy_piece_and_conductor_strips_match_the_materialized_runs`). Units run in the
+original order: wire bodies, pieces in creation order, crossed virtual conductors,
+then crossed retained passive conductors.
+
+Every RC node has a global ID: nets in ascending net ID, then the net's local node
+order, so ID order is `(net, node)` order. An accumulation is a 16-byte record: a
+coupling between global nodes `a <= b` is keyed `a << 32 | b` (key order is the
+original endpoint order), ground at node `g` and the overlap-area statistic have
+reserved key ranges. The accumulators are split into shards (one on the serial
+path, otherwise the lane count rounded up to a power of two): ground nodes by
+`g mod shards`, coupling keys by a hash of the key, the area statistic in shard 0.
+Each shard holds a dense ground array and a chained hash table of coupling keys whose
+20-byte entries live in fixed 32,768-entry arena chunks: growth appends a chunk and
+rebuilds only the 4-byte head array (at most two entries per head), so the table
+never holds two copies of its entries.
+
+Strips are computed on the `--threads` pool. Units (a wire body, or the strip pair
+of one rectangle) are taken from the unit iterator in chunks of 64. Lanes compute
+chunks into bounded transcripts of ordered accumulations (every `ground[node] +=`,
+`coupling[key] +=` and overlap-area addition). A complete chunk's transcript is
+split by shard in its lane, and each shard's records are stably sorted by key, so
+every accumulator's additions stay in run order and are applied with one lookup per
+accumulator. A leader (whichever lane holds it) clears chunks strictly in run order:
+cumulative work and integer statistics, and a proof that no budget can fail inside
+the chunk (work, and an upper bound of the coupling count). Each shard then applies
+the cleared chunks for its own accumulators, in chunk order, on whichever lane is
+free; shards never touch each other's accumulators. At the end the coupling entries
+are sorted by key (keys are unique) and thresholded and grounded in that order, as
+before. Every accumulator therefore receives the identical sequence of f64
+additions at any thread count, chunk size and shard count, and the SPEF bytes are
+identical.
+
+A unit a lane cannot finish within its parallel bounds (16,384 candidates, 131,072
+transcript records) or that fails, and any chunk whose committed work or exact
+coupling count could exceed its budget, is committed at a barrier: every shard first
+applies all earlier chunks, then the serial path computes the chunk at its place in
+run order from the committed state. Budget errors therefore carry the serial path's
+code and message. One pool thread runs the serial path directly (one shard). Lane scratch (candidate
+buffers at the parallel cap, instance query marks, one chunk) plus 4 MiB of
+committed-pending chunks is admitted against the unused spatial-index allowance and
+the headroom below `--extract-memory-mib`; lanes are reduced, down to the serial
+path, until it fits, and any excess over the unused allowance is added to
+`stats.memory`. `--extract-query-workers`, `--extract-query-batch-runs` and
+`--extract-query-scratch-mib` are still accepted and validated (ceilings 16, 64 and
+64) for argument compatibility, and have no effect. A hidden `--extract-tile-units N`
+sets the chunk size (and forces the chunked path on one thread) for tests; results do
+not depend on it. `RUSTROAD_EXTRACT_PROFILE=1` prints phase timings, lanes, shards,
+chunks, barriers, serially computed units, grid size and same-net bucket counts to
+stderr.
+
+The phases around the strips also run on the `--threads` pool, each with an
+ordered result. Net trees are computed in batches of 2,048 nets and merged in net
+order; the serial loop's cumulative budgets (graph nodes, wire length, RC nodes) are
+replayed at the checkpoint each net reached, so errors are those of the serial loop.
+The virtual-conductor crossing marks are a set: each pool thread owns one bitset
+and instance-mark scratch (admitted, for all threads, against the unused index
+allowance plus the remaining headroom like the lanes, otherwise the scan is
+serial), OR-merged at the end; their work total is order-independent; any query
+error or a work total over the budget reruns the serial scan for the exact error. At the end each shard drains and
+sorts its coupling entries in parallel and the sorted lists are merged while
+couplings are thresholded and grounded in key order. Geometry, strip records and
+the passive copy are released before the SPEF is written. The SPEF writer
+serializes batches of 256 nets on the pool and writes them in net order (each net's
+bytes depend only on that net and the name map), with the same byte cap, hash and
+error precedence as the streamed writer.
+
+When the routing table contains rail-tie (supply) nets, the workspace passes the
+signal-net mask as `ExtractInput::nets` instead of a filtered copy of the routing
+table and terminals: the extractor ignores every routed record and terminal of the
+other nets, exactly as the copy did, and the tie metal is passed as grounded
+passive shapes as before.
 
 ## RC profile (`rustroad.rc-profile.v1`)
 
@@ -345,17 +491,22 @@ and `cell_internal_metal` describe the overlap-area term.
 ## Resources (Rule 9)
 
 Estimate made before implementation, at the default caps with one corner and
-one thread (the extractor is serial and deterministic):
+one thread (the extractor is deterministic at every thread count):
 
 * 2 M shapes x 56 B = 112 MiB (bodies, pieces and passive shapes share this
   cap; a run adds at most two end pieces and a via at most one pad per routing
   layer before subtraction);
 * passive strips: at most 2 per passive shape, bounded by 2 x the shape cap,
   64 B each = 256 MiB worst case;
-* 8 M bin entries x 4 B, plus the map, < 128 MiB;
+* the spatial-index allowance, 8 M bin entries x 24 B = 192 MB: per-layer grid
+  entries of 20 B (40 B on a layer wider than 2^32 DBU) plus 4-byte cell offsets
+  (no more cells than entries), or, during metal construction, the same-net lists
+  and their buckets (128 B admitted per bucket entry); a larger grid's excess is
+  added to the estimate;
 * 500 k nodes (virtual cut nodes included) with keys and adjacency, about
   64 MiB;
-* 1 M couplings x about 64 B (BTreeMap) = 64 MiB;
+* 1 M couplings x about 30 B (20-byte arena entries plus heads, then one
+  16-byte sorted list per shard) = 30 MiB;
 * SPEF model strings < 64 MiB; the file is streamed through a 256 KiB buffer;
 * the workspace read itself is under 16 MiB of `design.json`, about 200 MiB
   parsed.
@@ -473,6 +624,83 @@ item is a campaign control or a canonical structure, re-run every campaign:
 * OpenRCX can write two parallel resistors at a pin access; RustSTA rejects
   meshes, so those resistors are opened (counted in
   `openrcx.<corner>.loops_opened_for_sta`) before timing.
+* **How a via inside a straight run is written changes the RC network.** The
+  `export-def` DEF of the Ibex SG13G2 phys configuration (14,178 routed
+  nets) was rewritten with every net's wires as maximal collinear runs, in
+  two ways with the same per-net, per-layer metal and the same via instances
+  (checked with a negative control): (a) as connected trails, so a via
+  landing inside a run is passed from the via's other layer; (b) with every
+  via in its own statement on its lower layer. OpenRCX's nominal SPEF
+  changed the total of 3,496 nets (a) and 3,521 nets (b), almost all
+  downwards (3,440 and 3,435; worst -11.6 %, 0.039 fF on one net; design
+  total -0.05 %), and the driver-to-sink resistance of 4,534 and 4,476
+  sinks. Leaving out the duplicate-via nets of the next item, those changes
+  stay within +1.12 / -1.39 ohm (a) and +1.12 / -1.40 ohm (b). The same
+  pieces written as other trails changed the total of 19 nets (at most 0.027
+  fF) and 24 sinks (at most 1.2 ohm). So `export-def` ends a path at every
+  via landing and branch, and the statement structure is not neutral for
+  this reader.
+* **Two vias of one layer pair at one point can be put in series.** 24 nets
+  of both native DEFs (phys configuration and recipe) hold two Via1
+  instances (`Via1_YY_so` and `Via1_XY_so`) at one point. They are in the
+  route itself: `export-def` writes each via of the route once. On 10 of
+  these nets of the phys DEF one driver-to-sink resistance is 40 ohm higher
+  than in rewrite (a). One-net DEFs of `n9210`, whose Metal1 is one
+  continuous run, give 41.09 ohm driver to sink whether the run is written
+  as two segments with the vias between them (as exported), as separate
+  statements or as one merged run with each via in its own statement:
+  OpenRCX then joins the two Metal1 sides only through both vias. They give
+  1.09 ohm when the run is one path and the pair is written as a chain from
+  the Metal2 side (as rewrite (a) does), and 1.09 ohm in every form tried
+  with either via removed. Rewrite (b) adds the 40 ohm on another of these
+  nets (5 sinks). Dropping the redundant via in the router is the clean fix:
+  both vias of each pair are pin-access escape vias of two pins of one net,
+  and `track_router.qor.dedupe_vias` lets those escapes share one via right
+  after pin access (`docs/routing-budget.md`, "Coincident same-net vias").
+* **Most of its work follows the wire pieces.** For a DEF that ends every
+  path at its junctions (`export-def`'s and LibreLane's, and variants of
+  them), the wires OpenRCX reports extracting equal the DEF's segments split
+  at every via landing or branch strictly inside them, plus the special
+  wiring, within 0.21 %. A DEF split at more points gets more (every segment
+  split at its midpoint: 401,982 wires for 198,916 pieces); the run-merged
+  rewrites above, which leave via landings inside runs, got 174,621 and
+  174,618 wires where the pieces predict 176,513 (-1.1 %), at the price of
+  the changed RC network. Extraction time grows with that count, but not at
+  one rate. Over fourteen variants of the native and the LibreLane Ibex DEF
+  (five interleaved runs each) the extraction phase averaged 22.5 us per
+  wire on the native DEF and 18.9 us on LibreLane's; removing every second
+  net's routing saved 28.0 us (native) and 19.8 us (LibreLane) per wire
+  removed, and splitting every segment at its midpoint cost 19.9 us and
+  12.1 us per wire added. At LibreLane's average the native wires would
+  extract about 0.7 s faster: about a third of the extraction-phase gap is
+  this per-wire difference, which the piece count does not explain.
+* **Net order changes the cost, not the SPEF.** The native recipe DEF with
+  only its `NETS` entries reordered (each entry byte-identical) gives the
+  same SPEF for every net once the name map is resolved (coupling capacitors
+  identical as a design-wide multiset). In an interleaved A/B (six runs
+  each) a random order extracted 13 % slower than `export-def`'s netlist
+  order (in all six runs; 11 % wall, in five), while ordering the nets by
+  the centre of their routing (20 um bands, or a Hilbert curve) gave no
+  consistent gain (median -1.4 % and +2.5 %, faster in three and two of the
+  six runs). A locality-preserving order is an optional writer follow-up
+  with no measured gain yet.
+* **Other DEF choices.** The same native segments written one statement
+  each, as LibreLane's DEF is, read 0.28 s and extract 0.30 s slower than
+  `export-def`'s connected trails (that rewrite also moves every via into
+  its own statement, so the two effects are not separated); `export-def`'s
+  statement count is within 6 % of the fewest possible for its segments
+  (44,057 against 41,719). Removing every via from those one-statement
+  rewrites made extraction 0.32 s (native, 118,610 vias) and 0.39 s
+  (LibreLane, 122,194) faster, but the via-free native rewrite extracts
+  only 22 ms faster than the shipped DEF. Removing LibreLane's 30,477
+  `RECT` patches saved nothing. Reading the DEF took 0.51 s (LibreLane's
+  0.77 s) and writing SPEF 0.78 s (0.74 s).
+  `scripts/def_pieces.py` counts pieces, statements and the statement bound
+  from a DEF alone. The route topology (pieces per connection) sets most of
+  the gate's cost; a writer choice that keeps the SPEF (a random net order)
+  moved it by up to 13 %, and part of the per-wire difference between the
+  two designs is not explained. Evidence:
+  `docs/evidence/def-openrcx-pieces.json`.
 
 So OpenRCX is geometry-identical to the native extractor for the routed wires
 and the supply metal, but not for the cell pins, cell obstructions and via
@@ -727,43 +955,7 @@ with `feat/rtl2gds-scale`.
 * The field solver uses a homogeneous dielectric and idealised environments
   (infinite wires, periodic crossings); its factors are evidence, not model
   data.
-* Electrical arithmetic runs serially in `cpu_ref`; candidate queries can use bounded CPU workers. There is no GPU path.
+* Strips are computed on CPU threads and their electrical additions are committed
+  in the serial order (see "Strips and parallel computation"). There is no GPU path.
 
 
-## Bounded CPU candidate queries
-
-`extract --extract-query-workers N` opts into candidate-only concurrency (`1`
-by default, ceiling `16`). The effective worker count cannot exceed `--threads`,
-`--extract-query-batch-runs` (default `8`, ceiling `64`), or the workers admitted
-under both `--extract-memory-mib` and `--extract-query-scratch-mib` (default `32`,
-ceiling `64` MiB). If fewer than two workers fit, extraction uses the serial path.
-The original memory admission and instance-query bin selection happen first.
-The extra scratch is added to the reported working and total memory estimates.
-
-Each worker has bounded candidate deduplication and one generation-mark vector
-with one `u64` per physical instance. All workers borrow the same immutable
-retained-shape BVH, instance bins, templates and shape IDs. A tile holds at most
-`batch_runs * max_candidates` IDs, with exact reserved capacities and checked
-candidate caps; it never retains electrical contribution transcripts. Conservative
-admission is `workers * (64 * max_candidates + 8 * instances + 2 MiB)` plus
-`8 * batch_runs * max_candidates + 4096` bytes. The stack term covers active
-query workers; pool resources already exist before the original live-memory probe.
-
-The original run iterator stays lazy. Query results are consumed in its original
-order, and each candidate list is sorted by the original shape ID. All routing
-layers, including shapes without a direct electrical contribution, remain in the
-query. Interval formation, passive strip effects, individual ground/coupling
-additions, final threshold handling and statistical floating-point additions all
-run in the original serial order. Integer work charges and maxima are unchanged.
-
-A tile runs concurrently only when a conservative bound on every query,
-interval-index operation and active-interval comparison fits the remaining
-original `max_work`. A query visits each retained BVH node/ID at most once and
-each instance/virtual shape at most once per layer. For `n` candidates, there are
-at most `2*n` events and `2*n+1` intervals with at most `n` active IDs. Overflow
-or insufficient remaining work selects the original serial path, preserving its
-budget rejection order. Results and errors are consumed in run order.
-
-Opt-in receipts expose `stats.parallel_queries` with requested/admitted workers,
-original memory estimate, admitted scratch, tile bound, and parallel/serial tile
-counts. Default serial receipts keep their original shape.

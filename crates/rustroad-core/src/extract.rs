@@ -6,15 +6,18 @@
 //! Nothing here enumerates paths: each net is one graph walk, each straight
 //! wire run is one resistor, and neighbour search is a bounded binned query.
 //! Model, budgets and the memory estimate are in docs/extraction.md.
-use crate::routing::{RouteLayer, RouteVia, Routes, Terminal};
+use crate::routing::{BuildFx, RouteLayer, RouteVia, Routes, Terminal};
 use crate::{Error, Rect, Result};
 use std::collections::{BTreeMap, HashMap};
+#[cfg(test)]
 mod bins;
 mod geometry;
 mod index;
 mod parallel;
+mod strip;
+use crate::routing::InstanceQueryScratch;
 use geometry::{InstanceGeometry, Shapes};
-pub use parallel::QueryStats;
+pub use parallel::MAX_TILE_UNITS;
 
 /// One vertical context of a calibration table.
 #[derive(Clone, Debug)]
@@ -70,6 +73,11 @@ pub struct ExtractInput<'a> {
     pub layers: &'a [RouteLayer],
     pub vias: &'a [RouteVia],
     pub routes: &'a Routes,
+    /// When set, only the routed records (wires, vias, access points,
+    /// patches, route nets) and terminals of nets `n` with `nets[n]` are
+    /// extracted; every other routed record is ignored, exactly as if the
+    /// caller had removed it (it passes that metal as passive shapes).
+    pub nets: Option<&'a [bool]>,
     pub terminals: &'a [Terminal],
     pub passive: &'a [PassiveShape],
     /// Shared cell pin/obstruction geometry, decoded only for local queries.
@@ -106,12 +114,18 @@ pub struct ExtractLimits {
     /// below `CANDIDATE_SCRATCH_CEILING_BYTES`. Work (including active intervals)
     /// is charged to `max_work`.
     pub max_candidates: usize,
-    /// Candidate-query workers; numerical intervals remain serial. Opt-in.
+    /// Accepted for compatibility (1..=16) and otherwise ignored: strips
+    /// are computed on the caller's Rayon pool (`--threads`).
     pub query_workers: usize,
-    /// Maximum retained run queries per tile (1..=64).
+    /// Accepted for compatibility (1..=64) and otherwise ignored.
     pub query_batch_runs: usize,
-    /// Additional query scratch hard cap, also bounded by memory_mib (1..=64).
+    /// Accepted for compatibility (1..=64) and otherwise ignored; parallel
+    /// strip scratch is admitted against `memory_mib`.
     pub query_scratch_mib: u64,
+    /// Strip units per parallel chunk (commit granularity); 0 selects the
+    /// default of 64. A non-zero value also forces the chunked path on one
+    /// thread. Test knob: results are identical for every value.
+    pub tile_units: usize,
     /// Spatial-bin entries.
     pub max_bin_entries: usize,
     /// Straight runs longer than this are split at existing lattice nodes (DBU).
@@ -135,6 +149,7 @@ impl Default for ExtractLimits {
             query_workers: 1,
             query_batch_runs: 8,
             query_scratch_mib: 32,
+            tile_units: 0,
             max_bin_entries: 8_000_000,
             max_segment_length: 25_000,
             min_coupling_pf: 0.0,
@@ -175,6 +190,9 @@ impl ExtractLimits {
         }
         if self.query_scratch_mib == 0 || self.query_scratch_mib > 64 {
             return Err(budget("extraction query scratch allowance"));
+        }
+        if self.tile_units > MAX_TILE_UNITS {
+            return Err(budget("extraction tile size"));
         }
         if self.memory_mib == 0 || self.memory_mib > 65_536 {
             return Err(budget("extraction memory allowance"));
@@ -219,8 +237,6 @@ pub struct RcCoupling {
 pub struct ExtractStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<ExtractMemory>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parallel_queries: Option<QueryStats>,
     pub nets: usize,
     pub lattice_wires: usize,
     pub wire_runs: usize,
@@ -298,6 +314,15 @@ pub struct ExtractMemory {
     pub limit_bytes: u64,
     /// Actual cell-geometry query bin, DBU; coarse when refinement cannot fit.
     pub instance_query_bin_dbu: i64,
+}
+
+impl ExtractInput<'_> {
+    /// Whether routed records of `net` are extracted.
+    #[inline]
+    fn extracts(&self, net: u32) -> bool {
+        self.nets
+            .is_none_or(|m| m.get(net as usize).copied().unwrap_or(false))
+    }
 }
 
 fn extraction_bin(input: &ExtractInput<'_>) -> Result<i64> {
@@ -379,14 +404,14 @@ fn conductor_bounds(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<
         });
         Ok(())
     };
-    for wire in &input.routes.wires {
+    for wire in input.routes.wires.iter().filter(|w| input.extracts(w.net)) {
         let layer = input
             .layers
             .get(wire.layer as usize)
             .ok_or_else(|| invalid("extraction wire layer"))?;
         include(wire.layer, crate::routing::wire_rect(wire, layer.width)?)?;
     }
-    for via in &input.routes.vias {
+    for via in input.routes.vias.iter().filter(|v| input.extracts(v.net)) {
         let kind = input
             .vias
             .get(via.kind as usize)
@@ -395,7 +420,12 @@ fn conductor_bounds(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<
             include(shape.layer, crate::routing::shifted(shape.rect, via.at)?)?;
         }
     }
-    for patch in &input.routes.patches {
+    for patch in input
+        .routes
+        .patches
+        .iter()
+        .filter(|p| input.extracts(p.net))
+    {
         include(patch.layer, patch.rect)?;
     }
     for shape in input.passive {
@@ -416,6 +446,13 @@ fn query_extent_fits(bounds: Rect, bin: i64, window: i64, cap: usize) -> bool {
         .is_some_and(|n| n <= cap as i128)
 }
 
+/// Allowance of the spatial structures that are never alive together: the
+/// same-net lists during metal construction, then the retained-shape grid,
+/// with any unused remainder lending room to parallel strip scratch.
+fn index_allowance(limits: &ExtractLimits) -> u64 {
+    (limits.max_bin_entries as u64).saturating_mul(24)
+}
+
 fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<ExtractMemory> {
     let live = crate::memory::live_bytes().unwrap_or(input.held_bytes);
     let held = live.max(input.held_bytes);
@@ -428,13 +465,17 @@ fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<E
         .saturating_add((limits.max_elements as u64).saturating_mul(16))
         .saturating_add((limits.max_shapes as u64).saturating_mul(320))
         .saturating_add((limits.max_couplings as u64).saturating_mul(128))
-        // Linked entries include old+new vector storage during reallocation;
-        // fixed headers include hash-table occupancy and rehash headroom.
-        .saturating_add((limits.max_bin_entries as u64).saturating_mul(24).max(
-            index::ShapeIndex::estimated_bytes(limits.max_shapes, input.layers.len()),
-        ))
+        .saturating_add(index_allowance(limits))
         .saturating_add(populated.saturating_mul(96))
-        .saturating_add((input.routes.nets.len() as u64).saturating_mul(192))
+        .saturating_add(
+            (input
+                .routes
+                .nets
+                .iter()
+                .filter(|&&n| input.extracts(n))
+                .count() as u64)
+                .saturating_mul(192),
+        )
         .saturating_add(limits.candidate_scratch_bytes() as u64);
     let mut geometry =
         InstanceGeometry::estimated_bytes(input.instances, bin, input.layers.len(), limits)?;
@@ -514,18 +555,26 @@ fn invalid(s: &str) -> Error {
 }
 
 type Key = (u32, i64, i64);
-/// Calibration context `(over, under)` to its index in `RcLayer::contexts`.
-type ContextIndex = HashMap<(u32, Option<u32>), usize>;
 
 /// Private phase-timing instrumentation: fixed state, no contribution records.
-/// Enabled only by RUSTROAD_EXTRACT_PROFILE; all numerical operations stay serial.
+/// Enabled only by RUSTROAD_EXTRACT_PROFILE (stderr); never changes results.
 struct PhaseProfile {
     enabled: bool,
     start: std::time::Instant,
     mark: std::time::Instant,
-    ns: [u128; 8],
-    strips: usize,
+    ns: [u128; STAGES.len()],
 }
+/// Profile stage names, in order.
+const STAGES: [&str; 8] = [
+    "preflight_and_trees",
+    "shapes_and_instance_index",
+    "metal_construction",
+    "grid",
+    "passive_strips",
+    "virtual_crossings",
+    "strips",
+    "finalization",
+];
 impl PhaseProfile {
     fn new() -> Self {
         let now = std::time::Instant::now();
@@ -533,8 +582,7 @@ impl PhaseProfile {
             enabled: std::env::var_os("RUSTROAD_EXTRACT_PROFILE").is_some(),
             start: now,
             mark: now,
-            ns: [0; 8],
-            strips: 0,
+            ns: [0; STAGES.len()],
         }
     }
     fn phase(&mut self, at: usize) {
@@ -544,31 +592,46 @@ impl PhaseProfile {
             self.mark = now;
         }
     }
-    fn report(&self, stats: &ExtractStats) {
+    fn report(
+        &self,
+        stats: &ExtractStats,
+        strips: &parallel::Report,
+        grid: (usize, u64),
+        net_bins: (u32, usize),
+    ) {
         if self.enabled {
             eprintln!(
                 "{}",
                 serde_json::json!({
-                    "schema": "rustroad.extract-phase-profile.v1",
-                    "scope": "extraction core; candidate queries may be parallel; electrical arithmetic remains serial",
+                    "schema": "rustroad.extract-phase-profile.v3",
+                    "scope": "extraction core; strips computed on the --threads pool, accumulations committed in run order per sharded accumulator",
                     "elapsed_ns": self.start.elapsed().as_nanos(),
-                    "stage_ns": {
-                        "preflight_and_trees": self.ns[0],
-                        "geometry_pieces_passive_crossings": self.ns[1],
-                        "immutable_indexes": self.ns[2],
-                        "candidate_queries_and_sort": self.ns[3],
-                        "interval_events_setup": self.ns[4],
-                        "interval_geometry_numerics_and_ordered_additions": self.ns[5],
-                        "strip_iteration_and_metadata": self.ns[6],
-                        "finalization": self.ns[7],
+                    "stage_ns": STAGES
+                        .iter()
+                        .zip(self.ns)
+                        .map(|(k, v)| ((*k).to_string(), serde_json::json!(v)))
+                        .collect::<serde_json::Map<_, _>>(),
+                    "strip_phases_ns": {
+                        "compute": strips.compute_ns,
+                        "ordered_commit": strips.commit_ns,
                     },
-                    "strips": self.strips,
+                    "lanes": strips.lanes,
+                    "shards": strips.shards,
+                    "barriers": strips.barriers,
+                    "chunks": strips.chunks,
+                    "units": strips.units,
+                    "serial_units": strips.units.min(strips.serial_units),
+                    "committed_ops": strips.ops,
+                    "grid_entries": grid.0,
+                    "grid_bytes": grid.1,
+                    "same_net_bucketed_lists": net_bins.0,
+                    "same_net_bucket_entries": net_bins.1,
+                    "peak_rss_bytes": crate::memory::peak_rss_bytes(),
                     "intervals": stats.intervals,
                     "passive_intervals": stats.passive_intervals,
                     "work": stats.work,
                     "max_run_candidates": stats.max_run_candidates,
-                    "profile_state_bytes": size_of::<Self>(),
-                    "floating_point_order": "unchanged individual serial additions",
+                    "floating_point_order": "unchanged individual additions in run order",
                 })
             );
         }
@@ -592,7 +655,6 @@ struct Run {
     net: u32,
     layer: u32,
     vertical: bool,
-    cross: i64,
     lo: i64,
     hi: i64,
     /// Side edge coordinates across the axis (`minus < plus`).
@@ -611,12 +673,32 @@ struct Run {
     node_lo: u32,
     node_hi: u32,
 }
-/// Owner of a conductor shape. Every routed-net shape (wire body or piece) is
-/// a `Run` strip that models its own exposed sides.
+impl Run {
+    /// Centre across the axis. Exact for every strip: a wire body has
+    /// `minus = cross - w/2` and `plus = cross + w/2` (integer halves), and
+    /// pieces and passive strips define their centre this way.
+    #[inline]
+    fn cross(&self) -> i64 {
+        self.minus + (self.plus - self.minus) / 2
+    }
+}
+/// Owner of a conductor shape. Every routed-net shape (wire body or piece)
+/// models its own exposed sides.
 #[derive(Clone, Copy, Debug)]
 enum Owner {
+    /// Wire body `Built::runs[i]`.
     Run(u32),
+    /// Rectangle piece `Built::pieces[p]` (end extension, via pad or patch).
+    Piece(u32),
     Passive(PassiveOwner),
+}
+/// A rectangle piece of routed metal: its net and the one RC node all of
+/// its capacitance attaches to. Its rectangle and layer are its shape; its
+/// x and y strips are generated when its unit is computed.
+#[derive(Clone, Copy, Debug)]
+struct PieceInfo {
+    net: u32,
+    node: u32,
 }
 /// Via landing-pad metal on a routing layer, at the via's node in the tree.
 #[derive(Clone, Copy, Debug)]
@@ -636,15 +718,20 @@ impl Shape {
     /// Signal net of a passive pin shape (runs are resolved through `runs`).
     fn net(&self) -> Option<u32> {
         match self.owner {
-            Owner::Run(_) => None,
+            Owner::Run(_) | Owner::Piece(_) => None,
             Owner::Passive(PassiveOwner::Pin { net, .. }) => Some(net),
             Owner::Passive(PassiveOwner::Ground) => None,
         }
     }
+    /// Routed metal (a wire body or a piece).
+    fn routed(&self) -> bool {
+        matches!(self.owner, Owner::Run(_) | Owner::Piece(_))
+    }
 }
-fn shape_net(runs: &[Run], s: &Shape) -> Option<u32> {
+fn shape_net(built: &Built, s: &Shape) -> Option<u32> {
     match s.owner {
-        Owner::Run(o) => Some(runs[o as usize].net),
+        Owner::Run(o) => Some(built.runs[o as usize].net),
+        Owner::Piece(p) => Some(built.pieces[p as usize].net),
         _ => s.net(),
     }
 }
@@ -669,10 +756,92 @@ fn body_rect(r: &Run) -> Rect {
 
 struct Built {
     nets: Vec<RcNet>,
+    /// Wire bodies, in tree order per net.
     runs: Vec<Run>,
+    /// Rectangle pieces in creation order; piece `p` is shape
+    /// `piece_shape0 + p`.
+    pieces: Vec<PieceInfo>,
+    piece_shape0: u32,
+    /// Retained passive conductors crossed by routed metal, by shape ID in
+    /// shape order (each is an x/y strip pair).
+    passive_units: Vec<u32>,
     pads: Vec<Pad>,
     /// Pin index -> (net, local node).
-    pin_nodes: HashMap<u32, (u32, u32)>,
+    pin_nodes: HashMap<u32, (u32, u32), BuildFx>,
+}
+impl Built {
+    /// Strip records of the original layout: one per body, two per piece
+    /// and per crossed retained passive conductor.
+    fn strips(&self) -> usize {
+        self.runs.len() + 2 * (self.pieces.len() + self.passive_units.len())
+    }
+}
+
+/// Global RC node IDs: nets in ascending net ID, then local node order, so
+/// global ID order equals `(net, node)` order. IDs stay below `u32::MAX`.
+struct NodeIds {
+    /// By local net index: global ID of its node 0.
+    base: Vec<u32>,
+    /// By net ID (dense IDs only): the base of `net_index[net]`.
+    by_net: Vec<u32>,
+    /// By global ID: its local net index.
+    net_of: Vec<u32>,
+    total: usize,
+}
+impl NodeIds {
+    fn new(nets: &[RcNet], net_index: &HashMap<u32, usize, BuildFx>) -> Result<Self> {
+        let mut order: Vec<u32> = (0..nets.len() as u32).collect();
+        order.sort_by_key(|&l| (nets[l as usize].net, l));
+        let mut base = vec![0u32; nets.len()];
+        let mut net_of = Vec::new();
+        for l in order {
+            let b = u32::try_from(net_of.len())
+                .ok()
+                .filter(|&b| b < u32::MAX - 1)
+                .ok_or_else(|| budget("extraction RC node IDs"))?;
+            base[l as usize] = b;
+            net_of.resize(net_of.len() + nets[l as usize].nodes.len(), l);
+        }
+        let total = net_of.len();
+        if total >= u32::MAX as usize - 1 {
+            return Err(budget("extraction RC node IDs"));
+        }
+        let top = nets.iter().map(|n| n.net as usize + 1).max().unwrap_or(0);
+        let by_net = if top <= 4 * nets.len() + 65_536 {
+            let mut v = vec![u32::MAX; top];
+            for (&net, &l) in net_index {
+                v[net as usize] = base[l];
+            }
+            v
+        } else {
+            Vec::new()
+        };
+        Ok(Self {
+            base,
+            by_net,
+            net_of,
+            total,
+        })
+    }
+    /// Global ID of `node` of local net `local`.
+    #[inline]
+    fn local(&self, local: usize, node: u32) -> u32 {
+        self.base[local] + node
+    }
+    /// Global ID of `(net, node)`; the net is resolved like `net_index`.
+    #[inline]
+    fn of(&self, net_index: &HashMap<u32, usize, BuildFx>, net: u32, node: u32) -> u32 {
+        match self.by_net.get(net as usize) {
+            Some(&b) if b != u32::MAX => b + node,
+            _ => self.base[net_index[&net]] + node,
+        }
+    }
+    /// `(local net index, node)` of a global ID.
+    #[inline]
+    fn decode(&self, g: u32) -> (usize, u32) {
+        let l = self.net_of[g as usize] as usize;
+        (l, g - self.base[l])
+    }
 }
 
 fn layer_model<'a>(input: &ExtractInput<'a>, layer: u32) -> Result<&'a RcLayer> {
@@ -745,533 +914,869 @@ fn um(tech: &RcTech, dbu: i64) -> f64 {
     dbu as f64 / tech.dbu_per_um
 }
 
+/// Where one net's tree computation stopped, relative to the cumulative
+/// budget checks of the serial loop (replayed in net order at merge).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum NetStage {
+    /// Before the graph-node budget.
+    #[default]
+    Start,
+    /// After the graph-node budget, before the wire-length sum.
+    Graph,
+    /// Inside the wire-length sum (`NetProbe::wire` is its prefix).
+    Wire,
+    /// After the wire-length sum, before the RC-node budget.
+    Tree,
+    /// After the RC-node budget.
+    Tail,
+}
+#[derive(Default)]
+struct NetProbe {
+    stage: NetStage,
+    keys: usize,
+    wire: u64,
+    nodes: usize,
+}
+/// Per-net statistics, added in net order at merge.
+#[derive(Default)]
+struct NetCounts {
+    duplicate_wire_edges: usize,
+    segment_cut_nodes: usize,
+    coincident_pin_links: usize,
+    opened_loop_resistors: usize,
+    resistors: usize,
+    resistance: f64,
+    lattice_wires: usize,
+    vias: usize,
+}
+/// One net's tree: its RC net, wire bodies (shape IDs assigned at merge),
+/// via pads and `(pin, local node)` pairs in node order.
+struct NetTree {
+    rc: RcNet,
+    runs: Vec<Run>,
+    pads: Vec<Pad>,
+    pins: Vec<(u32, u32)>,
+    counts: NetCounts,
+}
+/// Nets computed concurrently before each in-order merge.
+const TREE_BATCH: usize = 2048;
+
 /// Build per-net graphs, straight runs, the tree order and resistors.
+/// Nets are independent: batches are computed in parallel and merged in net
+/// order, replaying the serial loop's cumulative budget checks at the
+/// checkpoint each net reached, so results and errors are those of the
+/// serial loop.
 fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Built, ExtractStats)> {
+    use rayon::prelude::*;
     let routes = input.routes;
     let mut stats = ExtractStats::default();
-    let terminals: HashMap<u32, &Terminal> = input.terminals.iter().map(|t| (t.pin, t)).collect();
+    let terminals: HashMap<u32, &Terminal> = input
+        .terminals
+        .iter()
+        .filter(|t| input.extracts(t.net))
+        .map(|t| (t.pin, t))
+        .collect();
     let mut wires = BTreeMap::<u32, Vec<usize>>::new();
     let mut vias = BTreeMap::<u32, Vec<usize>>::new();
     let mut access = BTreeMap::<u32, Vec<usize>>::new();
     for (i, w) in routes.wires.iter().enumerate() {
-        wires.entry(w.net).or_default().push(i);
+        if input.extracts(w.net) {
+            wires.entry(w.net).or_default().push(i);
+        }
     }
     for (i, v) in routes.vias.iter().enumerate() {
+        if !input.extracts(v.net) {
+            continue;
+        }
         if v.kind as usize >= input.vias.len() {
             return Err(invalid("via kind outside routing input"));
         }
         vias.entry(v.net).or_default().push(i);
     }
     for (i, a) in routes.access.iter().enumerate() {
-        access.entry(a.net).or_default().push(i);
+        if input.extracts(a.net) {
+            access.entry(a.net).or_default().push(i);
+        }
     }
+    let route_nets: Vec<u32> = routes
+        .nets
+        .iter()
+        .copied()
+        .filter(|&n| input.extracts(n))
+        .collect();
     let mut out = Built {
         nets: Vec::new(),
         runs: Vec::new(),
+        pieces: Vec::new(),
+        piece_shape0: 0,
+        passive_units: Vec::new(),
         pads: Vec::new(),
-        pin_nodes: HashMap::new(),
+        pin_nodes: HashMap::default(),
     };
-    for (net_index, &net) in routes.nets.iter().enumerate() {
-        if net_index.is_multiple_of(4096) {
-            guard_memory(limits)?;
-        }
-        let net_wires = wires.get(&net).map(Vec::as_slice).unwrap_or(&[]);
-        let net_vias = vias.get(&net).map(Vec::as_slice).unwrap_or(&[]);
-        let net_access = access
-            .get(&net)
-            .ok_or_else(|| invalid("routed net without pin access"))?;
-        // Graph nodes in key order.
-        let mut keys: Vec<Key> = Vec::with_capacity(2 * (net_wires.len() + net_vias.len()) + 1);
-        for &i in net_wires {
-            let w = &routes.wires[i];
-            if w.start == w.end || (w.start[0] != w.end[0] && w.start[1] != w.end[1]) {
-                return Err(invalid("non-Manhattan or zero-length wire"));
-            }
-            layer_model(input, w.layer)?;
-            keys.push((w.layer, w.start[0], w.start[1]));
-            keys.push((w.layer, w.end[0], w.end[1]));
-        }
-        for &i in net_vias {
-            let v = &routes.vias[i];
-            let spec = &input.vias[v.kind as usize];
-            keys.push((spec.lower, v.at[0], v.at[1]));
-            keys.push((spec.upper, v.at[0], v.at[1]));
-        }
-        for &i in net_access {
-            let a = &routes.access[i];
-            keys.push((a.layer, a.at[0], a.at[1]));
-        }
-        keys.sort_unstable();
-        keys.dedup();
-        if stats.nodes + keys.len() > limits.max_nodes.saturating_mul(4) {
-            return Err(budget("extraction graph nodes"));
-        }
-        let id = |k: &Key| keys.binary_search(k).map(|i| i as u32);
-        let missing = |_| invalid("graph node lookup");
-        // A wire record may be one lattice edge or a longer collinear
-        // segment: split every record at each same-net node of its layer that
-        // lies strictly inside it, so the graph does not depend on how the
-        // router stored the metal.
-        let mut by_row = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, y) -> x
-        let mut by_col = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, x) -> y
-        for k in &keys {
-            by_row.entry((k.0, k.2)).or_default().push(k.1);
-            by_col.entry((k.0, k.1)).or_default().push(k.2);
-        }
-        for v in by_row.values_mut() {
-            v.sort_unstable();
-        }
-        let mut edges: Vec<(u32, u32, EdgeKind)> = Vec::new();
-        for &i in net_wires {
-            let w = &routes.wires[i];
-            let horizontal = w.start[1] == w.end[1];
-            let (fixed, a0, a1) = if horizontal {
-                (
-                    w.start[1],
-                    w.start[0].min(w.end[0]),
-                    w.start[0].max(w.end[0]),
-                )
-            } else {
-                (
-                    w.start[0],
-                    w.start[1].min(w.end[1]),
-                    w.start[1].max(w.end[1]),
-                )
-            };
-            let line = if horizontal {
-                &by_row[&(w.layer, fixed)]
-            } else {
-                &by_col[&(w.layer, fixed)]
-            };
-            let lo = line.partition_point(|&c| c < a0);
-            let hi = line.partition_point(|&c| c <= a1);
-            let at = |c: i64| -> Key {
-                if horizontal {
-                    (w.layer, c, fixed)
-                } else {
-                    (w.layer, fixed, c)
-                }
-            };
-            for pair in line[lo..hi].windows(2) {
-                let a = id(&at(pair[0])).map_err(missing)?;
-                let b = id(&at(pair[1])).map_err(missing)?;
-                edges.push((a.min(b), a.max(b), EdgeKind::Wire(w.layer)));
-            }
-            if edges.len() > limits.max_elements.saturating_mul(4) {
-                return Err(budget("extraction wire edges"));
-            }
-        }
-        // Overlapping records describe the same metal once.
-        let before = edges.len();
-        edges.sort_unstable_by_key(|e| (e.0, e.1));
-        edges.dedup_by_key(|e| (e.0, e.1));
-        stats.duplicate_wire_edges += before - edges.len();
-        for &i in net_vias {
-            let v = &routes.vias[i];
-            let spec = &input.vias[v.kind as usize];
-            let a = id(&(spec.lower, v.at[0], v.at[1])).map_err(missing)?;
-            let b = id(&(spec.upper, v.at[0], v.at[1])).map_err(missing)?;
-            edges.push((a.min(b), a.max(b), EdgeKind::Via(v.kind)));
-        }
-        let n = keys.len();
-        let mut incident = vec![Vec::<u32>::new(); n];
-        for (e, &(a, b, _)) in edges.iter().enumerate() {
-            incident[a as usize].push(e as u32);
-            incident[b as usize].push(e as u32);
-        }
-        // Pins: first pin (lowest index) names a node; others get links.
-        let mut pins: Vec<(u32, u32)> = Vec::new();
-        let mut driver = None;
-        for &i in net_access {
-            let a = &routes.access[i];
-            let t = terminals
-                .get(&a.pin)
-                .ok_or_else(|| invalid("pin access without terminal"))?;
-            if t.net != net {
-                return Err(invalid("pin access net mismatch"));
-            }
-            pins.push((a.pin, id(&(a.layer, a.at[0], a.at[1])).map_err(missing)?));
-            if t.driver {
-                if driver.is_some() {
-                    return Err(invalid("routed net has more than one driver"));
-                }
-                driver = Some(a.pin);
-            }
-        }
-        pins.sort_unstable();
-        let driver = driver.ok_or_else(|| invalid("routed net without driver"))?;
-        let mut pin_of = vec![None::<u32>; n];
-        let mut extra: Vec<(u32, u32)> = Vec::new(); // (pin, graph node)
-        for &(pin, node) in &pins {
-            if pin_of[node as usize].is_none() {
-                pin_of[node as usize] = Some(pin);
-            } else {
-                extra.push((pin, node));
-            }
-        }
-        // Junctions: everything but interior points of straight same-layer runs.
-        let point = |g: u32| keys[g as usize];
-        let mut virtual_keys: Vec<Key> = Vec::new();
-        let mut junction = vec![true; n];
-        for g in 0..n {
-            if pin_of[g].is_some() || incident[g].len() != 2 {
-                continue;
-            }
-            let (e0, e1) = (
-                edges[incident[g][0] as usize],
-                edges[incident[g][1] as usize],
-            );
-            if let (EdgeKind::Wire(l0), EdgeKind::Wire(l1)) = (e0.2, e1.2) {
-                let other = |e: (u32, u32, EdgeKind)| if e.0 as usize == g { e.1 } else { e.0 };
-                let (p, a, b) = (point(g as u32), point(other(e0)), point(other(e1)));
-                let collinear = (a.1 == p.1 && b.1 == p.1) || (a.2 == p.2 && b.2 == p.2);
-                // Straight-through only: the two neighbours lie on opposite sides.
-                let through = (a.1 - p.1).signum() * (b.1 - p.1).signum() <= 0
-                    && (a.2 - p.2).signum() * (b.2 - p.2).signum() <= 0;
-                if l0 == l1 && collinear && through {
-                    junction[g] = false;
-                }
-            }
-        }
-        // Straight runs between junctions, split at lattice nodes by length.
-        let mut used = vec![false; edges.len()];
-        let mut run_ends: Vec<(u32, u32, u32)> = Vec::new(); // (graph a, graph b, layer)
-        for e in 0..edges.len() {
-            let EdgeKind::Wire(layer) = edges[e].2 else {
-                continue;
-            };
-            if used[e] {
-                continue;
-            }
-            // Walk to one end of the straight chain.
-            let mut start = edges[e].0;
-            let mut via_edge = e as u32;
-            loop {
-                if junction[start as usize] {
-                    break;
-                }
-                let next_edge = *incident[start as usize]
-                    .iter()
-                    .find(|&&x| x != via_edge)
-                    .ok_or_else(|| invalid("chain walk"))?;
-                let (a, b, _) = edges[next_edge as usize];
-                start = if a == start { b } else { a };
-                via_edge = next_edge;
-                if start == edges[e].0 {
-                    return Err(invalid("closed straight chain"));
-                }
-            }
-            // Collect nodes from that end through the chain.
-            let mut chain = vec![start];
-            let mut current = start;
-            let mut from_edge = u32::MAX;
-            loop {
-                let candidates: Vec<u32> = incident[current as usize]
-                    .iter()
-                    .copied()
-                    .filter(|&x| {
-                        x != from_edge
-                            && matches!(edges[x as usize].2, EdgeKind::Wire(l) if l == layer)
-                    })
-                    .collect();
-                let next_edge = if current == start {
-                    // Leave the start junction along the seed chain only.
-                    via_edge
-                } else if junction[current as usize] {
-                    break;
-                } else {
-                    *candidates.first().ok_or_else(|| invalid("chain step"))?
-                };
-                if used[next_edge as usize] {
-                    return Err(invalid("chain revisited"));
-                }
-                used[next_edge as usize] = true;
-                let (a, b, _) = edges[next_edge as usize];
-                current = if a == current { b } else { a };
-                chain.push(current);
-                from_edge = next_edge;
-                if chain.len() > keys.len() + 1 {
-                    return Err(invalid("chain length"));
-                }
-                if junction[current as usize] {
-                    break;
-                }
-            }
-            // Split a run longer than the segment limit into equal pieces at
-            // exact coordinates (independent of where records start and end):
-            // n = ceil(L / limit) pieces; a cut point that is not a stored node
-            // becomes a virtual node.
-            let (ka, kb) = (point(start), point(current));
-            let horizontal = ka.2 == kb.2;
-            let (p0, p1) = if horizontal {
-                (ka.1, kb.1)
-            } else {
-                (ka.2, kb.2)
-            };
-            let length = (p1 - p0).abs();
-            let pieces = if length > limits.max_segment_length {
-                (length + limits.max_segment_length - 1) / limits.max_segment_length
-            } else {
-                1
-            };
-            let mut prev = start;
-            for i in 1..pieces {
-                let c = p0
-                    + (p1 - p0).signum()
-                        * ((i128::from(length) * i128::from(i) / i128::from(pieces)) as i64);
-                let key = if horizontal {
-                    (layer, c, ka.2)
-                } else {
-                    (layer, ka.1, c)
-                };
-                let node = match keys.binary_search(&key) {
-                    Ok(g) => {
-                        junction[g] = true;
-                        g as u32
-                    }
-                    Err(_) => {
-                        virtual_keys.push(key);
-                        (n + virtual_keys.len() - 1) as u32
-                    }
-                };
-                run_ends.push((prev, node, layer));
-                prev = node;
-            }
-            run_ends.push((prev, current, layer));
-        }
-        if used
-            .iter()
-            .zip(&edges)
-            .any(|(u, e)| !u && matches!(e.2, EdgeKind::Wire(_)))
-        {
-            return Err(invalid("wire not covered by a straight run"));
-        }
-        // Electrical elements over junction and virtual nodes plus extra pin
-        // nodes (graph nodes, then virtual cut nodes, then extra pins).
-        let node_count = n + virtual_keys.len();
-        stats.segment_cut_nodes += virtual_keys.len();
-        let point = |g: u32| -> Key {
-            if (g as usize) < n {
-                keys[g as usize]
-            } else {
-                virtual_keys[g as usize - n]
-            }
-        };
-        let mut elems: Vec<(u32, u32, f64)> = Vec::new();
-        for &(a, b, layer) in &run_ends {
-            let m = layer_model(input, layer)?;
-            let (ka, kb) = (point(a), point(b));
-            let length = (ka.1 - kb.1).abs() + (ka.2 - kb.2).abs();
-            let ohm = m.sheet_ohm * um(input.tech, length) / um(input.tech, m.width);
-            elems.push((a, b, ohm));
-            stats.wire_length_dbu = stats
-                .wire_length_dbu
-                .checked_add(length as u64)
-                .ok_or_else(|| budget("wire length"))?;
-        }
-        for (a, b, kind) in edges.iter().copied() {
-            if let EdgeKind::Via(k) = kind {
-                elems.push((a, b, input.tech.via_ohm[k as usize]));
-            }
-        }
-        let mut total_nodes = node_count as u32;
-        let mut extra_pin = Vec::new();
-        for &(pin, node) in &extra {
-            let v = total_nodes;
-            total_nodes += 1;
-            extra_pin.push((v, pin));
-            elems.push((node, v, 0.0));
-            stats.coincident_pin_links += 1;
-        }
-        let total = total_nodes as usize;
-        let mut adjacency = vec![Vec::<u32>::new(); total];
-        for (i, e) in elems.iter().enumerate() {
-            adjacency[e.0 as usize].push(i as u32);
-            adjacency[e.1 as usize].push(i as u32);
-        }
-        let mut pin_of_full = pin_of.clone();
-        pin_of_full.resize(total, None);
-        for &(v, pin) in &extra_pin {
-            pin_of_full[v as usize] = Some(pin);
-        }
-        let electrical: Vec<bool> = (0..total)
-            .map(|g| g >= n || junction[g] || pin_of_full[g].is_some())
-            .collect();
-        let sort_key = |g: u32| -> (u8, Key) {
-            if (g as usize) < node_count {
-                (0, point(g))
-            } else {
-                (1, (g, 0, 0))
-            }
-        };
-        let root = pins
-            .iter()
-            .find(|p| p.0 == driver)
-            .map(|p| p.1)
-            .ok_or_else(|| invalid("driver node"))?;
-        // Breadth-first tree order from the driver, deterministic by node key.
-        let mut local = vec![u32::MAX; total];
-        let mut order: Vec<u32> = vec![root];
-        local[root as usize] = 0;
-        let mut elem_done = vec![false; elems.len()];
-        let mut resistors = Vec::new();
-        let mut head = 0;
-        while head < order.len() {
-            let u = order[head];
-            head += 1;
-            let mut next: Vec<(u8, Key, u32)> = adjacency[u as usize]
-                .iter()
-                .map(|&e| {
-                    let (a, b, _) = elems[e as usize];
-                    let other = if a == u { b } else { a };
-                    let k = sort_key(other);
-                    (k.0, k.1, e)
-                })
-                .collect();
-            next.sort_unstable();
-            for (_, _, e) in next {
-                if elem_done[e as usize] {
-                    continue;
-                }
-                elem_done[e as usize] = true;
-                let (a, b, ohm) = elems[e as usize];
-                let other = if a == u { b } else { a };
-                if local[other as usize] != u32::MAX {
-                    stats.opened_loop_resistors += 1;
-                    continue;
-                }
-                local[other as usize] = order.len() as u32;
-                order.push(other);
-                resistors.push((local[u as usize], local[other as usize], ohm));
-            }
-        }
-        if (0..total).any(|g| electrical[g] && local[g] == u32::MAX) {
-            return Err(invalid(&format!("net {net} RC graph is disconnected")));
-        }
-        let mut counter = 0u32;
-        let nodes: Vec<RcNode> = order
-            .iter()
-            .map(|&g| match pin_of_full[g as usize] {
-                Some(pin) => RcNode::Pin(pin),
-                None => {
-                    counter += 1;
-                    RcNode::Internal(counter)
-                }
+    let maps = (&wires, &vias, &access);
+    for (b, batch) in route_nets.chunks(TREE_BATCH).enumerate() {
+        let trees: Vec<(Result<NetTree>, NetProbe)> = batch
+            .par_iter()
+            .map(|&net| {
+                let mut probe = NetProbe::default();
+                let tree = net_tree(input, limits, &terminals, maps, net, &mut probe);
+                (tree, probe)
             })
             .collect();
-        for (i, node) in nodes.iter().enumerate() {
-            if let RcNode::Pin(pin) = node {
-                out.pin_nodes.insert(*pin, (net, i as u32));
+        out.runs
+            .reserve_exact(trees.iter().flat_map(|t| &t.0).map(|t| t.runs.len()).sum());
+        for (k, (tree, probe)) in trees.into_iter().enumerate() {
+            if (b * TREE_BATCH + k).is_multiple_of(4096) {
+                guard_memory(limits)?;
             }
-        }
-        stats.nodes += nodes.len();
-        if stats.nodes > limits.max_nodes {
-            return Err(budget("extraction RC nodes"));
-        }
-        stats.resistors += resistors.len();
-        stats.resistance_ohm += resistors.iter().map(|r| r.2).sum::<f64>();
-        // Straight runs with tree-order end nodes.
-        for &(a, b, layer) in &run_ends {
-            let (ka, kb) = (point(a), point(b));
-            let vertical = ka.1 == kb.1;
-            let (pa, pb) = if vertical { (ka.2, kb.2) } else { (ka.1, kb.1) };
-            let (lo_node, hi_node) = if pa <= pb { (a, b) } else { (b, a) };
-            let cross = if vertical { ka.1 } else { ka.2 };
-            let half = input.layers[layer as usize].width / 2;
-            out.runs.push(Run {
-                net,
-                layer,
-                vertical,
-                cross,
-                lo: pa.min(pb),
-                hi: pa.max(pb),
-                minus: cross - half,
-                plus: cross + half,
-                shape: out.runs.len() as u32,
-                piece: false,
-                passive: None,
-                node_lo: local[lo_node as usize],
-                node_hi: local[hi_node as usize],
-            });
-        }
-        // Via landing-pad metal of this net, at the via's node on each layer.
-        for &i in net_vias {
-            let v = &routes.vias[i];
-            let spec = &input.vias[v.kind as usize];
-            for s in &spec.shapes {
-                if input.layers[s.layer as usize].vertical.is_none() {
-                    continue;
-                }
-                let g = id(&(s.layer, v.at[0], v.at[1])).map_err(missing)?;
-                out.pads.push(Pad {
-                    net,
-                    layer: s.layer,
-                    rect: crate::routing::shifted(s.rect, v.at)?,
-                    node: local[g as usize],
-                });
+            if probe.stage == NetStage::Start {
+                return Err(tree.err().unwrap_or_else(|| invalid("net tree stage")));
             }
+            if stats.nodes + probe.keys > limits.max_nodes.saturating_mul(4) {
+                return Err(budget("extraction graph nodes"));
+            }
+            if probe.stage == NetStage::Graph {
+                return Err(tree.err().unwrap_or_else(|| invalid("net tree stage")));
+            }
+            stats.wire_length_dbu = stats
+                .wire_length_dbu
+                .checked_add(probe.wire)
+                .ok_or_else(|| budget("wire length"))?;
+            if matches!(probe.stage, NetStage::Wire | NetStage::Tree) {
+                return Err(tree.err().unwrap_or_else(|| invalid("net tree stage")));
+            }
+            stats.nodes += probe.nodes;
+            if stats.nodes > limits.max_nodes {
+                return Err(budget("extraction RC nodes"));
+            }
+            let tree = tree?;
+            let c = &tree.counts;
+            stats.duplicate_wire_edges += c.duplicate_wire_edges;
+            stats.segment_cut_nodes += c.segment_cut_nodes;
+            stats.coincident_pin_links += c.coincident_pin_links;
+            stats.opened_loop_resistors += c.opened_loop_resistors;
+            for &(pin, node) in &tree.pins {
+                out.pin_nodes.insert(pin, (tree.rc.net, node));
+            }
+            stats.resistors += c.resistors;
+            stats.resistance_ohm += c.resistance;
+            for mut run in tree.runs {
+                run.shape = out.runs.len() as u32;
+                out.runs.push(run);
+            }
+            out.pads.extend(tree.pads);
+            stats.lattice_wires += c.lattice_wires;
+            stats.vias += c.vias;
+            out.nets.push(tree.rc);
         }
-        stats.lattice_wires += net_wires.len();
-        stats.vias += net_vias.len();
-        out.nets.push(RcNet {
-            net,
-            ground: vec![0.0; nodes.len()],
-            nodes,
-            resistors,
-        });
     }
     stats.nets = out.nets.len();
     stats.wire_runs = out.runs.len();
     Ok((out, stats))
 }
 
-struct Bins<'a> {
-    size: i64,
-    map: bins::BinLists,
-    instances: Option<InstanceGeometry<'a>>,
-    query_index: Option<index::ShapeIndex>,
-}
-impl Bins<'_> {
-    fn range(&self, lo: i64, hi: i64) -> (i64, i64) {
-        (lo.div_euclid(self.size), hi.div_euclid(self.size))
-    }
-    fn visit(
-        &mut self,
-        layer: u32,
-        query: Rect,
-        shapes: &Shapes<'_>,
-        stats: &mut ExtractStats,
-        limits: &ExtractLimits,
-        mut visitor: impl FnMut(u32, Shape) -> Result<()>,
-    ) -> Result<()> {
-        let (x0, x1) = self.range(query.lx, query.ux);
-        let (y0, y1) = self.range(query.ly, query.uy);
-        let cells = (i128::from(x1) - i128::from(x0) + 1) * (i128::from(y1) - i128::from(y0) + 1);
-        if cells > limits.max_bin_entries as i128 {
-            return Err(budget("extraction query extent"));
+type NetLists<'m> = (
+    &'m BTreeMap<u32, Vec<usize>>,
+    &'m BTreeMap<u32, Vec<usize>>,
+    &'m BTreeMap<u32, Vec<usize>>,
+);
+
+/// One net's graph, straight runs, tree order, resistors, runs and pads.
+/// `probe` records the serial loop's budget checkpoints this net reached.
+fn net_tree(
+    input: &ExtractInput<'_>,
+    limits: &ExtractLimits,
+    terminals: &HashMap<u32, &Terminal>,
+    (wires, vias, access): NetLists<'_>,
+    net: u32,
+    probe: &mut NetProbe,
+) -> Result<NetTree> {
+    let routes = input.routes;
+    let mut counts = NetCounts::default();
+    let net_wires = wires.get(&net).map(Vec::as_slice).unwrap_or(&[]);
+    let net_vias = vias.get(&net).map(Vec::as_slice).unwrap_or(&[]);
+    let net_access = access
+        .get(&net)
+        .ok_or_else(|| invalid("routed net without pin access"))?;
+    // Graph nodes in key order.
+    let mut keys: Vec<Key> = Vec::with_capacity(2 * (net_wires.len() + net_vias.len()) + 1);
+    for &i in net_wires {
+        let w = &routes.wires[i];
+        if w.start == w.end || (w.start[0] != w.end[0] && w.start[1] != w.end[1]) {
+            return Err(invalid("non-Manhattan or zero-length wire"));
         }
-        if let Some(index) = &self.query_index {
-            index.visit(layer, query, shapes, limits, &mut stats.work, &mut visitor)?;
+        layer_model(input, w.layer)?;
+        keys.push((w.layer, w.start[0], w.start[1]));
+        keys.push((w.layer, w.end[0], w.end[1]));
+    }
+    for &i in net_vias {
+        let v = &routes.vias[i];
+        let spec = &input.vias[v.kind as usize];
+        keys.push((spec.lower, v.at[0], v.at[1]));
+        keys.push((spec.upper, v.at[0], v.at[1]));
+    }
+    for &i in net_access {
+        let a = &routes.access[i];
+        keys.push((a.layer, a.at[0], a.at[1]));
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    // Checkpoint: the cumulative graph-node budget (checked at merge).
+    probe.keys = keys.len();
+    probe.stage = NetStage::Graph;
+    let id = |k: &Key| keys.binary_search(k).map(|i| i as u32);
+    let missing = |_| invalid("graph node lookup");
+    // A wire record may be one lattice edge or a longer collinear
+    // segment: split every record at each same-net node of its layer that
+    // lies strictly inside it, so the graph does not depend on how the
+    // router stored the metal.
+    let mut by_row = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, y) -> x
+    let mut by_col = BTreeMap::<(u32, i64), Vec<i64>>::new(); // (layer, x) -> y
+    for k in &keys {
+        by_row.entry((k.0, k.2)).or_default().push(k.1);
+        by_col.entry((k.0, k.1)).or_default().push(k.2);
+    }
+    for v in by_row.values_mut() {
+        v.sort_unstable();
+    }
+    let mut edges: Vec<(u32, u32, EdgeKind)> = Vec::new();
+    for &i in net_wires {
+        let w = &routes.wires[i];
+        let horizontal = w.start[1] == w.end[1];
+        let (fixed, a0, a1) = if horizontal {
+            (
+                w.start[1],
+                w.start[0].min(w.end[0]),
+                w.start[0].max(w.end[0]),
+            )
         } else {
-            for x in x0..=x1 {
-                for y in y0..=y1 {
-                    let list = self.map.iter((layer, x, y));
-                    stats.work = stats
-                        .work
-                        .checked_add(list.len().max(1))
-                        .filter(|&n| n <= limits.max_work)
-                        .ok_or_else(|| budget("extraction work"))?;
-                    for id in list {
-                        visitor(id, shapes.get(id))?;
+            (
+                w.start[0],
+                w.start[1].min(w.end[1]),
+                w.start[1].max(w.end[1]),
+            )
+        };
+        let line = if horizontal {
+            &by_row[&(w.layer, fixed)]
+        } else {
+            &by_col[&(w.layer, fixed)]
+        };
+        let lo = line.partition_point(|&c| c < a0);
+        let hi = line.partition_point(|&c| c <= a1);
+        let at = |c: i64| -> Key {
+            if horizontal {
+                (w.layer, c, fixed)
+            } else {
+                (w.layer, fixed, c)
+            }
+        };
+        for pair in line[lo..hi].windows(2) {
+            let a = id(&at(pair[0])).map_err(missing)?;
+            let b = id(&at(pair[1])).map_err(missing)?;
+            edges.push((a.min(b), a.max(b), EdgeKind::Wire(w.layer)));
+        }
+        if edges.len() > limits.max_elements.saturating_mul(4) {
+            return Err(budget("extraction wire edges"));
+        }
+    }
+    // Overlapping records describe the same metal once.
+    let before = edges.len();
+    edges.sort_unstable_by_key(|e| (e.0, e.1));
+    edges.dedup_by_key(|e| (e.0, e.1));
+    counts.duplicate_wire_edges += before - edges.len();
+    for &i in net_vias {
+        let v = &routes.vias[i];
+        let spec = &input.vias[v.kind as usize];
+        let a = id(&(spec.lower, v.at[0], v.at[1])).map_err(missing)?;
+        let b = id(&(spec.upper, v.at[0], v.at[1])).map_err(missing)?;
+        edges.push((a.min(b), a.max(b), EdgeKind::Via(v.kind)));
+    }
+    let n = keys.len();
+    let mut incident = vec![Vec::<u32>::new(); n];
+    for (e, &(a, b, _)) in edges.iter().enumerate() {
+        incident[a as usize].push(e as u32);
+        incident[b as usize].push(e as u32);
+    }
+    // Pins: first pin (lowest index) names a node; others get links.
+    let mut pins: Vec<(u32, u32)> = Vec::new();
+    let mut driver = None;
+    for &i in net_access {
+        let a = &routes.access[i];
+        let t = terminals
+            .get(&a.pin)
+            .ok_or_else(|| invalid("pin access without terminal"))?;
+        if t.net != net {
+            return Err(invalid("pin access net mismatch"));
+        }
+        pins.push((a.pin, id(&(a.layer, a.at[0], a.at[1])).map_err(missing)?));
+        if t.driver {
+            if driver.is_some() {
+                return Err(invalid("routed net has more than one driver"));
+            }
+            driver = Some(a.pin);
+        }
+    }
+    pins.sort_unstable();
+    let driver = driver.ok_or_else(|| invalid("routed net without driver"))?;
+    let mut pin_of = vec![None::<u32>; n];
+    let mut extra: Vec<(u32, u32)> = Vec::new(); // (pin, graph node)
+    for &(pin, node) in &pins {
+        if pin_of[node as usize].is_none() {
+            pin_of[node as usize] = Some(pin);
+        } else {
+            extra.push((pin, node));
+        }
+    }
+    // Junctions: everything but interior points of straight same-layer runs.
+    let point = |g: u32| keys[g as usize];
+    let mut virtual_keys: Vec<Key> = Vec::new();
+    let mut junction = vec![true; n];
+    for g in 0..n {
+        if pin_of[g].is_some() || incident[g].len() != 2 {
+            continue;
+        }
+        let (e0, e1) = (
+            edges[incident[g][0] as usize],
+            edges[incident[g][1] as usize],
+        );
+        if let (EdgeKind::Wire(l0), EdgeKind::Wire(l1)) = (e0.2, e1.2) {
+            let other = |e: (u32, u32, EdgeKind)| if e.0 as usize == g { e.1 } else { e.0 };
+            let (p, a, b) = (point(g as u32), point(other(e0)), point(other(e1)));
+            let collinear = (a.1 == p.1 && b.1 == p.1) || (a.2 == p.2 && b.2 == p.2);
+            // Straight-through only: the two neighbours lie on opposite sides.
+            let through = (a.1 - p.1).signum() * (b.1 - p.1).signum() <= 0
+                && (a.2 - p.2).signum() * (b.2 - p.2).signum() <= 0;
+            if l0 == l1 && collinear && through {
+                junction[g] = false;
+            }
+        }
+    }
+    // Straight runs between junctions, split at lattice nodes by length.
+    let mut used = vec![false; edges.len()];
+    let mut run_ends: Vec<(u32, u32, u32)> = Vec::new(); // (graph a, graph b, layer)
+    for e in 0..edges.len() {
+        let EdgeKind::Wire(layer) = edges[e].2 else {
+            continue;
+        };
+        if used[e] {
+            continue;
+        }
+        // Walk to one end of the straight chain.
+        let mut start = edges[e].0;
+        let mut via_edge = e as u32;
+        loop {
+            if junction[start as usize] {
+                break;
+            }
+            let next_edge = *incident[start as usize]
+                .iter()
+                .find(|&&x| x != via_edge)
+                .ok_or_else(|| invalid("chain walk"))?;
+            let (a, b, _) = edges[next_edge as usize];
+            start = if a == start { b } else { a };
+            via_edge = next_edge;
+            if start == edges[e].0 {
+                return Err(invalid("closed straight chain"));
+            }
+        }
+        // Collect nodes from that end through the chain.
+        let mut chain = vec![start];
+        let mut current = start;
+        let mut from_edge = u32::MAX;
+        loop {
+            let candidates: Vec<u32> = incident[current as usize]
+                .iter()
+                .copied()
+                .filter(|&x| {
+                    x != from_edge && matches!(edges[x as usize].2, EdgeKind::Wire(l) if l == layer)
+                })
+                .collect();
+            let next_edge = if current == start {
+                // Leave the start junction along the seed chain only.
+                via_edge
+            } else if junction[current as usize] {
+                break;
+            } else {
+                *candidates.first().ok_or_else(|| invalid("chain step"))?
+            };
+            if used[next_edge as usize] {
+                return Err(invalid("chain revisited"));
+            }
+            used[next_edge as usize] = true;
+            let (a, b, _) = edges[next_edge as usize];
+            current = if a == current { b } else { a };
+            chain.push(current);
+            from_edge = next_edge;
+            if chain.len() > keys.len() + 1 {
+                return Err(invalid("chain length"));
+            }
+            if junction[current as usize] {
+                break;
+            }
+        }
+        // Split a run longer than the segment limit into equal pieces at
+        // exact coordinates (independent of where records start and end):
+        // n = ceil(L / limit) pieces; a cut point that is not a stored node
+        // becomes a virtual node.
+        let (ka, kb) = (point(start), point(current));
+        let horizontal = ka.2 == kb.2;
+        let (p0, p1) = if horizontal {
+            (ka.1, kb.1)
+        } else {
+            (ka.2, kb.2)
+        };
+        let length = (p1 - p0).abs();
+        let pieces = if length > limits.max_segment_length {
+            (length + limits.max_segment_length - 1) / limits.max_segment_length
+        } else {
+            1
+        };
+        let mut prev = start;
+        for i in 1..pieces {
+            let c = p0
+                + (p1 - p0).signum()
+                    * ((i128::from(length) * i128::from(i) / i128::from(pieces)) as i64);
+            let key = if horizontal {
+                (layer, c, ka.2)
+            } else {
+                (layer, ka.1, c)
+            };
+            let node = match keys.binary_search(&key) {
+                Ok(g) => {
+                    junction[g] = true;
+                    g as u32
+                }
+                Err(_) => {
+                    virtual_keys.push(key);
+                    (n + virtual_keys.len() - 1) as u32
+                }
+            };
+            run_ends.push((prev, node, layer));
+            prev = node;
+        }
+        run_ends.push((prev, current, layer));
+    }
+    if used
+        .iter()
+        .zip(&edges)
+        .any(|(u, e)| !u && matches!(e.2, EdgeKind::Wire(_)))
+    {
+        return Err(invalid("wire not covered by a straight run"));
+    }
+    // Electrical elements over junction and virtual nodes plus extra pin
+    // nodes (graph nodes, then virtual cut nodes, then extra pins).
+    let node_count = n + virtual_keys.len();
+    counts.segment_cut_nodes += virtual_keys.len();
+    let point = |g: u32| -> Key {
+        if (g as usize) < n {
+            keys[g as usize]
+        } else {
+            virtual_keys[g as usize - n]
+        }
+    };
+    let mut elems: Vec<(u32, u32, f64)> = Vec::new();
+    // Checkpoint: the cumulative wire length (its prefix is added at merge).
+    probe.stage = NetStage::Wire;
+    for &(a, b, layer) in &run_ends {
+        let m = layer_model(input, layer)?;
+        let (ka, kb) = (point(a), point(b));
+        let length = (ka.1 - kb.1).abs() + (ka.2 - kb.2).abs();
+        let ohm = m.sheet_ohm * um(input.tech, length) / um(input.tech, m.width);
+        elems.push((a, b, ohm));
+        probe.wire = probe
+            .wire
+            .checked_add(length as u64)
+            .ok_or_else(|| budget("wire length"))?;
+    }
+    probe.stage = NetStage::Tree;
+    for (a, b, kind) in edges.iter().copied() {
+        if let EdgeKind::Via(k) = kind {
+            elems.push((a, b, input.tech.via_ohm[k as usize]));
+        }
+    }
+    let mut total_nodes = node_count as u32;
+    let mut extra_pin = Vec::new();
+    for &(pin, node) in &extra {
+        let v = total_nodes;
+        total_nodes += 1;
+        extra_pin.push((v, pin));
+        elems.push((node, v, 0.0));
+        counts.coincident_pin_links += 1;
+    }
+    let total = total_nodes as usize;
+    let mut adjacency = vec![Vec::<u32>::new(); total];
+    for (i, e) in elems.iter().enumerate() {
+        adjacency[e.0 as usize].push(i as u32);
+        adjacency[e.1 as usize].push(i as u32);
+    }
+    let mut pin_of_full = pin_of.clone();
+    pin_of_full.resize(total, None);
+    for &(v, pin) in &extra_pin {
+        pin_of_full[v as usize] = Some(pin);
+    }
+    let electrical: Vec<bool> = (0..total)
+        .map(|g| g >= n || junction[g] || pin_of_full[g].is_some())
+        .collect();
+    let sort_key = |g: u32| -> (u8, Key) {
+        if (g as usize) < node_count {
+            (0, point(g))
+        } else {
+            (1, (g, 0, 0))
+        }
+    };
+    let root = pins
+        .iter()
+        .find(|p| p.0 == driver)
+        .map(|p| p.1)
+        .ok_or_else(|| invalid("driver node"))?;
+    // Breadth-first tree order from the driver, deterministic by node key.
+    let mut local = vec![u32::MAX; total];
+    let mut order: Vec<u32> = vec![root];
+    local[root as usize] = 0;
+    let mut elem_done = vec![false; elems.len()];
+    let mut resistors = Vec::new();
+    let mut head = 0;
+    while head < order.len() {
+        let u = order[head];
+        head += 1;
+        let mut next: Vec<(u8, Key, u32)> = adjacency[u as usize]
+            .iter()
+            .map(|&e| {
+                let (a, b, _) = elems[e as usize];
+                let other = if a == u { b } else { a };
+                let k = sort_key(other);
+                (k.0, k.1, e)
+            })
+            .collect();
+        next.sort_unstable();
+        for (_, _, e) in next {
+            if elem_done[e as usize] {
+                continue;
+            }
+            elem_done[e as usize] = true;
+            let (a, b, ohm) = elems[e as usize];
+            let other = if a == u { b } else { a };
+            if local[other as usize] != u32::MAX {
+                counts.opened_loop_resistors += 1;
+                continue;
+            }
+            local[other as usize] = order.len() as u32;
+            order.push(other);
+            resistors.push((local[u as usize], local[other as usize], ohm));
+        }
+    }
+    if (0..total).any(|g| electrical[g] && local[g] == u32::MAX) {
+        return Err(invalid(&format!("net {net} RC graph is disconnected")));
+    }
+    let mut counter = 0u32;
+    let nodes: Vec<RcNode> = order
+        .iter()
+        .map(|&g| match pin_of_full[g as usize] {
+            Some(pin) => RcNode::Pin(pin),
+            None => {
+                counter += 1;
+                RcNode::Internal(counter)
+            }
+        })
+        .collect();
+    let pins: Vec<(u32, u32)> = nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, node)| match node {
+            RcNode::Pin(pin) => Some((*pin, i as u32)),
+            RcNode::Internal(_) => None,
+        })
+        .collect();
+    // Checkpoint: the cumulative RC-node budget (checked at merge).
+    probe.nodes = nodes.len();
+    probe.stage = NetStage::Tail;
+    counts.resistors = resistors.len();
+    counts.resistance = resistors.iter().map(|r| r.2).sum::<f64>();
+    let mut runs = Vec::with_capacity(run_ends.len());
+    let mut pads = Vec::new();
+    // Straight runs with tree-order end nodes.
+    for &(a, b, layer) in &run_ends {
+        let (ka, kb) = (point(a), point(b));
+        let vertical = ka.1 == kb.1;
+        let (pa, pb) = if vertical { (ka.2, kb.2) } else { (ka.1, kb.1) };
+        let (lo_node, hi_node) = if pa <= pb { (a, b) } else { (b, a) };
+        let cross = if vertical { ka.1 } else { ka.2 };
+        let half = input.layers[layer as usize].width / 2;
+        runs.push(Run {
+            net,
+            layer,
+            vertical,
+            lo: pa.min(pb),
+            hi: pa.max(pb),
+            minus: cross - half,
+            plus: cross + half,
+            // Assigned at merge (the body's index).
+            shape: 0,
+            piece: false,
+            passive: None,
+            node_lo: local[lo_node as usize],
+            node_hi: local[hi_node as usize],
+        });
+    }
+    // Via landing-pad metal of this net, at the via's node on each layer.
+    for &i in net_vias {
+        let v = &routes.vias[i];
+        let spec = &input.vias[v.kind as usize];
+        for s in &spec.shapes {
+            if input.layers[s.layer as usize].vertical.is_none() {
+                continue;
+            }
+            let g = id(&(s.layer, v.at[0], v.at[1])).map_err(missing)?;
+            pads.push(Pad {
+                net,
+                layer: s.layer,
+                rect: crate::routing::shifted(s.rect, v.at)?,
+                node: local[g as usize],
+            });
+        }
+    }
+    counts.lattice_wires = net_wires.len();
+    counts.vias = net_vias.len();
+    Ok(NetTree {
+        rc: RcNet {
+            net,
+            ground: vec![0.0; nodes.len()],
+            nodes,
+            resistors,
+        },
+        runs,
+        pads,
+        pins,
+        counts,
+    })
+}
+
+/// Same-net lists at least this long are also bucketed by construction bin,
+/// so a lookup scans the nearby entries instead of the whole list.
+const NET_BIN_LIST: usize = 256;
+/// Admitted bytes per bucket entry: the entry with vector growth slack plus
+/// at most one cell header with hash-table growth slack.
+const NET_BIN_ENTRY_BYTES: u64 = 128;
+
+/// One `(net, layer)` same-net list: shape IDs in insertion order.
+#[derive(Default)]
+struct NetList {
+    ids: Vec<u32>,
+    /// Bucket key of the list, once bucketed.
+    key: u32,
+    /// Every ID of the list is in the buckets.
+    binned: bool,
+    /// The buckets ran out of admitted entries while this list was added;
+    /// it is scanned linearly from then on.
+    unbinnable: bool,
+}
+
+/// Construction-bin buckets of the long same-net lists: per `(list, cell)`
+/// a chain of shape IDs in insertion order. A shape is in every cell its
+/// closed rectangle touches.
+struct NetBins {
+    cell: i64,
+    heads: HashMap<(u32, i64, i64), [u32; 3], BuildFx>,
+    /// `(id, next)` chain links.
+    entries: Vec<[u32; 2]>,
+    /// Admitted entries (from the configured allowance only, so whether a
+    /// list is bucketed never depends on live memory).
+    capacity: usize,
+    lists: u32,
+}
+impl NetBins {
+    const NONE: u32 = u32::MAX;
+    fn new(cell: i64, capacity: usize) -> Self {
+        Self {
+            cell: cell.max(1),
+            heads: HashMap::default(),
+            entries: Vec::new(),
+            capacity: capacity.min(Self::NONE as usize),
+            lists: 0,
+        }
+    }
+    #[inline]
+    fn range(&self, lo: i64, hi: i64) -> (i64, i64) {
+        (lo.div_euclid(self.cell), hi.div_euclid(self.cell))
+    }
+    /// Closed cell span of `r`, as an entry count (saturating).
+    fn span(&self, r: Rect) -> u128 {
+        let (x0, x1) = self.range(r.lx, r.ux);
+        let (y0, y1) = self.range(r.ly, r.uy);
+        ((x1 as i128 - x0 as i128 + 1) as u128)
+            .saturating_mul((y1 as i128 - y0 as i128 + 1) as u128)
+    }
+    /// Adds `id` (rectangle `r`) to list `key`; `false` when the admitted
+    /// entries are exhausted (nothing is added then). Inserted entries are
+    /// charged to `work`.
+    fn insert(
+        &mut self,
+        key: u32,
+        id: u32,
+        r: Rect,
+        work: &mut usize,
+        limits: &ExtractLimits,
+    ) -> Result<bool> {
+        let n = self.span(r);
+        if n > (self.capacity - self.entries.len()) as u128 {
+            return Ok(false);
+        }
+        let n = n as usize;
+        *work = work
+            .checked_add(n)
+            .filter(|&w| w <= limits.max_work)
+            .ok_or_else(|| budget("extraction work"))?;
+        self.entries
+            .try_reserve(n)
+            .map_err(|_| budget("extraction same-net index allocation"))?;
+        self.heads
+            .try_reserve(n)
+            .map_err(|_| budget("extraction same-net index allocation"))?;
+        let (x0, x1) = self.range(r.lx, r.ux);
+        let (y0, y1) = self.range(r.ly, r.uy);
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                let at = self.entries.len() as u32;
+                let head = self
+                    .heads
+                    .entry((key, x, y))
+                    .or_insert([Self::NONE, Self::NONE, 0]);
+                if head[1] == Self::NONE {
+                    head[0] = at;
+                } else {
+                    self.entries[head[1] as usize][1] = at;
+                }
+                head[1] = at;
+                head[2] += 1;
+                self.entries.push([id, Self::NONE]);
+            }
+        }
+        Ok(true)
+    }
+    /// Every ID of list `key` whose rectangle touches `r` (closed), each
+    /// once, appended to `found` (unordered). Each scanned cell's entries
+    /// are charged to `work` before the cell is scanned.
+    fn touching(
+        &self,
+        key: u32,
+        r: Rect,
+        rect_of: impl Fn(u32) -> Rect,
+        found: &mut Vec<u32>,
+        work: &mut usize,
+        limits: &ExtractLimits,
+    ) -> Result<()> {
+        let (qx0, qx1) = self.range(r.lx, r.ux);
+        let (qy0, qy1) = self.range(r.ly, r.uy);
+        for x in qx0..=qx1 {
+            for y in qy0..=qy1 {
+                let [mut at, _, count] =
+                    self.heads
+                        .get(&(key, x, y))
+                        .copied()
+                        .unwrap_or([Self::NONE, Self::NONE, 0]);
+                *work = work
+                    .checked_add((count as usize).max(1))
+                    .filter(|&w| w <= limits.max_work)
+                    .ok_or_else(|| budget("extraction work"))?;
+                while at != Self::NONE {
+                    let [id, next] = self.entries[at as usize];
+                    at = next;
+                    let q = rect_of(id);
+                    // Reported from the first query cell it occupies.
+                    if q.lx <= r.ux
+                        && r.lx <= q.ux
+                        && q.ly <= r.uy
+                        && r.ly <= q.uy
+                        && x == q.lx.div_euclid(self.cell).max(qx0)
+                        && y == q.ly.div_euclid(self.cell).max(qy0)
+                    {
+                        found.push(id);
+                        if found.len() > limits.max_candidates {
+                            return Err(budget("extraction candidates per metal piece"));
+                        }
                     }
                 }
             }
         }
-        if let Some(instances) = &mut self.instances {
-            instances.visit(shapes, layer, query, &mut stats.work, |id, shape| {
-                visitor(id, shape)?;
-                Ok(true)
-            })?;
+        Ok(())
+    }
+}
+
+/// Same-net conductors during metal construction: retained shape IDs and
+/// virtual signal-pin IDs per `(net, layer)`, in insertion order. Pieces are
+/// appended as they are added. Lists of `NET_BIN_LIST` or more IDs are
+/// bucketed when first looked up, within the admitted bucket entries.
+/// Released before the retained-shape grid.
+struct NetShapes {
+    lists: HashMap<(u32, u32), NetList, BuildFx>,
+    bins: NetBins,
+    /// Lists this long are bucketed (`usize::MAX` disables buckets: tests).
+    long: usize,
+}
+impl NetShapes {
+    /// Conservative bytes: IDs with vector growth headroom plus map slots.
+    fn bound(retained: usize, virtual_pins: usize, keys: usize) -> u64 {
+        ((retained as u64).saturating_add(virtual_pins as u64))
+            .saturating_mul(8)
+            .saturating_add((keys as u64).saturating_mul(96))
+    }
+    /// The lists' bound must fit `allowance` (index allowance plus memory
+    /// headroom). Buckets get what the bound leaves of the configured index
+    /// allowance alone, capped by `max_bin_entries`.
+    fn new(
+        shapes: &Shapes<'_>,
+        built: &Built,
+        limits: &ExtractLimits,
+        allowance: u64,
+        cell: i64,
+        long: usize,
+    ) -> Result<Self> {
+        let mut lists: HashMap<(u32, u32), NetList, BuildFx> = HashMap::default();
+        let mut virtual_pins = 0usize;
+        for (id, s) in shapes.owned() {
+            if let Some(net) = shape_net(built, s) {
+                lists.entry((net, s.layer)).or_default().ids.push(id);
+            }
+        }
+        for (id, s) in shapes.virtual_shapes() {
+            if let Some(net) = s.net() {
+                virtual_pins += 1;
+                lists.entry((net, s.layer)).or_default().ids.push(id);
+            }
+        }
+        // Later pieces grow the lists up to the retained-shape budget.
+        let bound = Self::bound(limits.max_shapes, virtual_pins, lists.len());
+        if bound > allowance {
+            return Err(budget("extraction same-net index memory"));
+        }
+        let room = index_allowance(limits).saturating_sub(bound) / NET_BIN_ENTRY_BYTES;
+        let capacity = usize::try_from(room)
+            .unwrap_or(usize::MAX)
+            .min(limits.max_bin_entries);
+        Ok(Self {
+            lists,
+            bins: NetBins::new(cell, capacity),
+            long,
+        })
+    }
+    fn push(
+        &mut self,
+        net: u32,
+        layer: u32,
+        id: u32,
+        rect: Rect,
+        limits: &ExtractLimits,
+        stats: &mut ExtractStats,
+    ) -> Result<()> {
+        let list = self.lists.entry((net, layer)).or_default();
+        list.ids.push(id);
+        if list.binned
+            && !self
+                .bins
+                .insert(list.key, id, rect, &mut stats.work, limits)?
+        {
+            list.binned = false;
+            list.unbinnable = true;
         }
         Ok(())
     }
@@ -1314,36 +1819,75 @@ fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
 const MAX_PATCH_PIECES: usize = 256;
 
 /// Same-net conductor shapes on `layer` that overlap or touch `r` (closed),
-/// in shape-index order. Bin scans are charged to the work budget.
-#[allow(clippy::too_many_arguments)]
+/// in shape-index order. A long list is bucketed on its first lookup; a
+/// lookup scans the buckets `r` touches when they are fewer than the list's
+/// IDs, otherwise the list. Scanned entries are charged to the work budget.
 fn same_net_near(
     r: Rect,
     net: u32,
     layer: u32,
-    built: &Built,
+    near: &mut NetShapes,
     shapes: &Shapes<'_>,
-    bins: &mut Bins<'_>,
     limits: &ExtractLimits,
     stats: &mut ExtractStats,
 ) -> Result<Vec<u32>> {
-    let mut found = std::collections::BTreeSet::new();
-    bins.visit(layer, r, shapes, stats, limits, |id, shape| {
-        let q = shape.rect;
-        if shape_net(&built.runs, &shape) == Some(net)
-            && q.lx <= r.ux
-            && r.lx <= q.ux
-            && q.ly <= r.uy
-            && r.ly <= q.uy
-        {
-            found.insert(id);
-            if found.len() > limits.max_candidates {
-                return Err(budget("extraction candidates per metal piece"));
+    let charge = |stats: &mut ExtractStats, n: usize| -> Result<()> {
+        stats.work = stats
+            .work
+            .checked_add(n.max(1))
+            .filter(|&n| n <= limits.max_work)
+            .ok_or_else(|| budget("extraction work"))?;
+        Ok(())
+    };
+    let Some(list) = near.lists.get_mut(&(net, layer)) else {
+        charge(stats, 0)?;
+        return Ok(Vec::new());
+    };
+    if list.ids.len() >= near.long && !list.binned && !list.unbinnable {
+        // Bucket every ID so far, in list order; on exhaustion the entries
+        // already added stay unused.
+        let key = near.bins.lists;
+        near.bins.lists = key
+            .checked_add(1)
+            .ok_or_else(|| budget("extraction same-net index lists"))?;
+        list.key = key;
+        list.binned = true;
+        for &id in &list.ids {
+            if !near
+                .bins
+                .insert(key, id, shapes.get(id).rect, &mut stats.work, limits)?
+            {
+                list.binned = false;
+                list.unbinnable = true;
+                break;
             }
         }
-        Ok(())
-    })?;
-    let near = found.into_iter().collect();
-    Ok(near)
+    }
+    let mut found = Vec::new();
+    if list.binned && near.bins.span(r) < list.ids.len() as u128 {
+        near.bins.touching(
+            list.key,
+            r,
+            |id| shapes.get(id).rect,
+            &mut found,
+            &mut stats.work,
+            limits,
+        )?;
+    } else {
+        charge(stats, list.ids.len())?;
+        for &id in &list.ids {
+            let q = shapes.get(id).rect;
+            if q.lx <= r.ux && r.lx <= q.ux && q.ly <= r.uy && r.ly <= q.uy {
+                found.push(id);
+                if found.len() > limits.max_candidates {
+                    return Err(budget("extraction candidates per metal piece"));
+                }
+            }
+        }
+    }
+    // IDs are unique per list; sorting reproduces the shape-index order.
+    found.sort_unstable();
+    Ok(found)
 }
 
 /// `r` minus every listed shape, as disjoint rectangles (exact integers).
@@ -1359,9 +1903,10 @@ fn uncovered(r: Rect, covering: &[u32], shapes: &Shapes<'_>) -> Result<Vec<Rect>
     Ok(pieces)
 }
 
-/// Add one rectangle piece as a conductor shape with two side strips (along x
-/// and along y), all of its capacitance at `node`. Pieces add capacitance only:
-/// never a node or a resistor.
+/// Add one rectangle piece as a conductor shape, all of its capacitance at
+/// `node`; its two side strips (along x and along y) are generated from the
+/// shape when its unit is computed. Pieces add capacitance only: never a
+/// node or a resistor.
 #[allow(clippy::too_many_arguments)]
 fn add_piece(
     piece: Rect,
@@ -1370,58 +1915,27 @@ fn add_piece(
     node: u32,
     built: &mut Built,
     shapes: &mut Shapes<'_>,
-    bins: &mut Bins<'_>,
-    entries: &mut usize,
+    near: &mut NetShapes,
     limits: &ExtractLimits,
+    stats: &mut ExtractStats,
 ) -> Result<()> {
     let shape = shapes.len() as u32;
-    let first = built.runs.len() as u32;
-    for vertical in [false, true] {
-        let (lo, hi, minus, plus) = if vertical {
-            (piece.ly, piece.uy, piece.lx, piece.ux)
-        } else {
-            (piece.lx, piece.ux, piece.ly, piece.uy)
-        };
-        built.runs.push(Run {
-            net,
-            layer,
-            vertical,
-            cross: minus + (plus - minus) / 2,
-            lo,
-            hi,
-            minus,
-            plus,
-            shape,
-            piece: true,
-            passive: None,
-            node_lo: node,
-            node_hi: node,
-        });
+    let index = built.pieces.len() as u32;
+    if index == 0 {
+        built.piece_shape0 = shape;
+    } else if shape != built.piece_shape0 + index {
+        return Err(invalid("piece shapes are not contiguous"));
     }
+    built.pieces.push(PieceInfo { net, node });
     shapes.push(Shape {
         layer,
         rect: piece,
-        owner: Owner::Run(first),
+        owner: Owner::Piece(index),
     });
     if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
-    let (x0, x1) = bins.range(piece.lx, piece.ux);
-    let (y0, y1) = bins.range(piece.ly, piece.uy);
-    let cells = usize::try_from((x1 - x0 + 1) * (y1 - y0 + 1)).map_err(|_| budget("bin span"))?;
-    *entries = entries
-        .checked_add(cells)
-        .ok_or_else(|| budget("bin entries"))?;
-    if *entries > limits.max_bin_entries {
-        return Err(budget("extraction spatial-bin entries"));
-    }
-    for bx in x0..=x1 {
-        for by in y0..=y1 {
-            bins.map
-                .push((layer, bx, by), shape, limits.max_bin_entries)?;
-        }
-    }
-    Ok(())
+    near.push(net, layer, shape, piece, limits, stats)
 }
 
 /// Metal of routed nets beyond the wire bodies, as capacitance-only pieces:
@@ -1436,13 +1950,12 @@ fn add_metal_pieces(
     limits: &ExtractLimits,
     built: &mut Built,
     shapes: &mut Shapes<'_>,
-    bins: &mut Bins<'_>,
-    entries: &mut usize,
+    near: &mut NetShapes,
     stats: &mut ExtractStats,
 ) -> Result<()> {
     // (net, layer, rect, node, is_pad) in a fixed order.
     let mut candidates: Vec<(u32, u32, Rect, u32, bool)> = Vec::new();
-    for r in built.runs.iter().filter(|r| !r.piece) {
+    for r in &built.runs {
         let e = input.layers[r.layer as usize].width / 2;
         if e <= 0 {
             continue;
@@ -1487,7 +2000,7 @@ fn add_metal_pieces(
         }
     }
     for (net, layer, rect, node, is_pad) in candidates {
-        let covering = same_net_near(rect, net, layer, built, shapes, bins, limits, stats)?;
+        let covering = same_net_near(rect, net, layer, near, shapes, limits, stats)?;
         let pieces = uncovered(rect, &covering, shapes)?;
         if is_pad {
             stats.pad_pieces += pieces.len();
@@ -1495,9 +2008,7 @@ fn add_metal_pieces(
             stats.end_pieces += pieces.len();
         }
         for piece in pieces {
-            add_piece(
-                piece, net, layer, node, built, shapes, bins, entries, limits,
-            )?;
+            add_piece(piece, net, layer, node, built, shapes, near, limits, stats)?;
         }
     }
     Ok(())
@@ -1516,12 +2027,16 @@ fn add_patches(
     limits: &ExtractLimits,
     built: &mut Built,
     shapes: &mut Shapes<'_>,
-    bins: &mut Bins<'_>,
-    entries: &mut usize,
-    net_index: &HashMap<u32, usize>,
+    near: &mut NetShapes,
+    net_index: &HashMap<u32, usize, BuildFx>,
     stats: &mut ExtractStats,
 ) -> Result<()> {
-    for patch in &input.routes.patches {
+    for patch in input
+        .routes
+        .patches
+        .iter()
+        .filter(|p| input.extracts(p.net))
+    {
         let r = patch.rect;
         if !r.valid()
             || patch.layer as usize >= input.layers.len()
@@ -1534,16 +2049,7 @@ fn add_patches(
             return Err(invalid("routing patch on a net without an RC tree"));
         }
         // Same-net conductors on the patch layer touching the patch (closed).
-        let touching = same_net_near(
-            r,
-            patch.net,
-            patch.layer,
-            built,
-            shapes,
-            bins,
-            limits,
-            stats,
-        )?;
+        let touching = same_net_near(r, patch.net, patch.layer, near, shapes, limits, stats)?;
         let overlap = |q: Rect| -> i128 {
             let w = i128::from(q.ux.min(r.ux)) - i128::from(q.lx.max(r.lx));
             let h = i128::from(q.uy.min(r.uy)) - i128::from(q.ly.max(r.ly));
@@ -1555,21 +2061,18 @@ fn add_patches(
             .max_by_key(|&s| (overlap(shapes.get(s).rect), std::cmp::Reverse(s)))
             .ok_or_else(|| invalid("floating routing patch (touches no same-net conductor)"))?;
         let node = match shapes.get(anchor).owner {
+            Owner::Piece(p) => built.pieces[p as usize].node,
             Owner::Run(o) => {
                 let run = &built.runs[o as usize];
-                if run.piece {
+                let centre = if run.vertical {
+                    r.ly + (r.uy - r.ly) / 2
+                } else {
+                    r.lx + (r.ux - r.lx) / 2
+                };
+                if (centre - run.lo).abs() <= (run.hi - centre).abs() {
                     run.node_lo
                 } else {
-                    let centre = if run.vertical {
-                        r.ly + (r.uy - r.ly) / 2
-                    } else {
-                        r.lx + (r.ux - r.lx) / 2
-                    };
-                    if (centre - run.lo).abs() <= (run.hi - centre).abs() {
-                        run.node_lo
-                    } else {
-                        run.node_hi
-                    }
+                    run.node_hi
                 }
             }
             Owner::Passive(PassiveOwner::Pin { pin, .. }) => built
@@ -1592,9 +2095,9 @@ fn add_patches(
                 node,
                 built,
                 shapes,
-                bins,
-                entries,
+                near,
                 limits,
+                stats,
             )?;
         }
     }
@@ -1606,13 +2109,13 @@ fn add_patches(
 fn nearer_end(run: &Run, point: [f64; 2]) -> u32 {
     let ends = if run.vertical {
         [
-            [run.cross as f64, run.lo as f64],
-            [run.cross as f64, run.hi as f64],
+            [run.cross() as f64, run.lo as f64],
+            [run.cross() as f64, run.hi as f64],
         ]
     } else {
         [
-            [run.lo as f64, run.cross as f64],
-            [run.hi as f64, run.cross as f64],
+            [run.lo as f64, run.cross() as f64],
+            [run.hi as f64, run.cross() as f64],
         ]
     };
     let d = |p: [f64; 2]| (p[0] - point[0]).abs() + (p[1] - point[1]).abs();
@@ -1623,151 +2126,44 @@ fn nearer_end(run: &Run, point: [f64; 2]) -> u32 {
     }
 }
 
-/// `(metal, covered width, [(shape, width)])` of one layer over a strip face.
-type FacePortion = (u32, i64, Vec<(u32, i64)>);
-
-/// Coverage of a strip face `minus..plus` by the metal of other layers below
-/// (`upper == false`) or above, nearest layer first; a nearer layer shields
-/// the farther ones. Each entry is `(metal, covered width, [(shape, width)])`
-/// in exact integer DBU. `layered` is sorted by metal, then cross extent.
-fn face_portions(
-    layered: &[(u32, i64, i64, u32)],
-    own: u32,
-    upper: bool,
-    minus: i64,
-    plus: i64,
-) -> Vec<FacePortion> {
-    let mut metals: Vec<u32> = layered
-        .iter()
-        .map(|e| e.0)
-        .filter(|&m| if upper { m > own } else { m < own })
-        .collect();
-    metals.dedup();
-    if !upper {
-        metals.reverse();
-    }
-    let mut remaining: Vec<(i64, i64)> = vec![(minus, plus)];
-    let mut out = Vec::new();
-    for metal in metals {
-        let mut owners: Vec<(u32, i64)> = Vec::new();
-        let mut covered = 0;
-        for e in layered.iter().filter(|e| e.0 == metal) {
-            let mut next = Vec::with_capacity(remaining.len() + 1);
-            let mut width = 0;
-            for &(r0, r1) in &remaining {
-                let (c0, c1) = (r0.max(e.1), r1.min(e.2));
-                if c1 > c0 {
-                    width += c1 - c0;
-                    if r0 < c0 {
-                        next.push((r0, c0));
-                    }
-                    if c1 < r1 {
-                        next.push((c1, r1));
-                    }
-                } else {
-                    next.push((r0, r1));
-                }
-            }
-            remaining = next;
-            if width > 0 {
-                owners.push((e.3, width));
-                covered += width;
-            }
-        }
-        if covered > 0 {
-            out.push((metal, covered, owners));
-        }
-        if remaining.is_empty() {
-            break;
-        }
-    }
-    out
-}
-
 /// Passive conductors (pins, obstructions, supply metal) that a routed
 /// conductor on another routing layer overlaps get two strips (along x and
 /// along y, like a piece) so that their own cross-section is counted where a
 /// routed conductor is their calibration plate: a crossing is counted from
-/// both conductors' cross-sections whoever owns them.
+/// both conductors' cross-sections whoever owns them. Their shape IDs are
+/// recorded; the strips are generated when their units are computed.
 fn add_passive_strips(
     input: &ExtractInput<'_>,
     limits: &ExtractLimits,
     built: &mut Built,
     shapes: &Shapes<'_>,
-    bins: &mut Bins<'_>,
+    grid: &index::GridIndex,
     stats: &mut ExtractStats,
 ) -> Result<()> {
     let routing: Vec<u32> = (0..input.layers.len() as u32)
         .filter(|&l| input.tech.layers[l as usize].is_some())
         .collect();
     for (si, sh) in shapes.owned() {
-        let Owner::Passive(owner) = sh.owner else {
+        if !matches!(sh.owner, Owner::Passive(_)) {
             continue;
-        };
+        }
         let r = sh.rect;
-        let (x0, x1) = bins.range(r.lx, r.ux);
-        let (y0, y1) = bins.range(r.ly, r.uy);
         let mut crossed = false;
-        'search: for &layer in routing.iter().filter(|&&l| l != sh.layer) {
-            for bx in x0..=x1 {
-                for by in y0..=y1 {
-                    let list = bins.map.iter((layer, bx, by));
-                    if list.len() == 0 {
-                        continue;
-                    }
-                    stats.work = stats
-                        .work
-                        .checked_add(list.len())
-                        .ok_or_else(|| budget("extraction work"))?;
-                    if stats.work > limits.max_work {
-                        return Err(budget("extraction work"));
-                    }
-                    for o in list {
-                        let q = &shapes.get(o);
-                        if matches!(q.owner, Owner::Run(_))
-                            && q.rect.lx < r.ux
-                            && r.lx < q.rect.ux
-                            && q.rect.ly < r.uy
-                            && r.ly < q.rect.uy
-                        {
-                            crossed = true;
-                            break 'search;
-                        }
-                    }
-                }
+        for &layer in routing.iter().filter(|&&l| l != sh.layer) {
+            grid.visit(layer, r, limits, &mut stats.work, |id, _| {
+                crossed = !grid.is_virtual(id) && shapes.get(id).routed();
+                Ok(!crossed)
+            })?;
+            if crossed {
+                break;
             }
         }
         if !crossed {
             continue;
         }
-        let net = match owner {
-            PassiveOwner::Pin { net, .. } => net,
-            PassiveOwner::Ground => u32::MAX,
-        };
-        for vertical in [false, true] {
-            let (lo, hi, minus, plus) = if vertical {
-                (r.ly, r.uy, r.lx, r.ux)
-            } else {
-                (r.lx, r.ux, r.ly, r.uy)
-            };
-            built.runs.push(Run {
-                net,
-                layer: sh.layer,
-                vertical,
-                cross: minus + (plus - minus) / 2,
-                lo,
-                hi,
-                minus,
-                plus,
-                shape: si,
-                piece: true,
-                passive: Some(owner),
-                node_lo: 0,
-                node_hi: 0,
-            });
-        }
+        built.passive_units.push(si);
         stats.passive_strips += 2;
-        if built.runs.len() > limits.max_shapes.saturating_mul(2) {
+        if built.strips() > limits.max_shapes.saturating_mul(2) {
             return Err(budget("extraction strips"));
         }
     }
@@ -1776,31 +2172,150 @@ fn add_passive_strips(
 
 /// Mark only virtual conductors crossed by routed metal. One bit per virtual
 /// shape replaces a retained rectangle plus two passive-strip records.
+///
+/// Routed shapes are scanned in parallel chunks; each pool thread owns one
+/// bitset and query scratch (admitted within `available` bytes, otherwise
+/// the scan is serial), OR-merged at the end: the marked set and the total
+/// work are order-independent. Any query error or a work total over the
+/// budget is reproduced exactly by the serial scan from the original work
+/// count. Returns the marks and the parallel scratch bytes used.
 fn virtual_crossings(
     shapes: &Shapes<'_>,
-    bins: &mut Bins<'_>,
+    grid: &index::GridIndex,
+    instances: Option<&InstanceGeometry<'_>>,
     layers: &[u32],
+    limits: &ExtractLimits,
+    available: u64,
     stats: &mut ExtractStats,
-) -> Result<Vec<u64>> {
-    let mut marked = vec![0u64; shapes.virtual_count().div_ceil(64)];
-    let Some(instances) = &mut bins.instances else {
-        return Ok(marked);
+) -> Result<(Vec<u64>, u64)> {
+    use rayon::prelude::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let words = shapes.virtual_count().div_ceil(64);
+    let geometry = match instances {
+        Some(g) => Some(g),
+        None if grid.has_virtual() => None,
+        None => return Ok((vec![0u64; words], 0)),
     };
-    for (_, shape) in shapes.owned() {
-        if !matches!(shape.owner, Owner::Run(_)) {
-            continue;
-        }
-        for &layer in layers.iter().filter(|&&l| l != shape.layer) {
-            instances.visit(shapes, layer, shape.rect, &mut stats.work, |id, other| {
-                let (a, b) = (shape.rect, other.rect);
-                if a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy {
-                    let k = id as usize - shapes.virtual_offset();
-                    marked[k / 64] |= 1 << (k % 64);
+    let instance_count = shapes.source.map_or(0, |s| s.geometry.len());
+    let offset = shapes.virtual_offset();
+    // Virtual shapes strictly overlapping a routed shape on another layer,
+    // from the grid (strict intersection) or the instance index.
+    let scan = |part: &[Shape],
+                sc: &mut InstanceQueryScratch,
+                marked: &mut [u64],
+                work: &mut usize|
+     -> Result<()> {
+        for shape in part.iter().filter(|s| s.routed()) {
+            for &layer in layers.iter().filter(|&&l| l != shape.layer) {
+                let mut mark = |id: u32, b: Rect| {
+                    let a = shape.rect;
+                    if a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy {
+                        let k = id as usize - offset;
+                        marked[k / 64] |= 1 << (k % 64);
+                    }
+                };
+                match geometry {
+                    Some(geometry) => {
+                        geometry.visit_shared(
+                            sc,
+                            shapes,
+                            layer,
+                            shape.rect,
+                            work,
+                            |id, other| {
+                                mark(id, other.rect);
+                                Ok(true)
+                            },
+                        )?;
+                    }
+                    None => {
+                        grid.visit(layer, shape.rect, limits, work, |id, rect| {
+                            if grid.is_virtual(id) {
+                                mark(id, rect);
+                            }
+                            Ok(true)
+                        })?;
+                    }
                 }
-                Ok(true)
-            })?;
+            }
         }
-    }
+        Ok(())
+    };
+    let retained = shapes.retained();
+    let scratch_instances = if geometry.is_some() {
+        instance_count
+    } else {
+        0
+    };
+    // One bitset and instance-mark scratch per pool thread.
+    let threads = rayon::current_num_threads();
+    let per_thread = (words as u64)
+        .saturating_mul(8)
+        .saturating_add((scratch_instances as u64).saturating_mul(8));
+    let parallel_bytes = (threads as u64).saturating_mul(per_thread);
+    let parallel = (threads > 1 && parallel_bytes <= available)
+        .then(|| {
+            type State = Option<(Vec<u64>, InstanceQueryScratch)>;
+            let states: Vec<Mutex<State>> = (0..threads).map(|_| Mutex::new(None)).collect();
+            let work = AtomicUsize::new(0);
+            let failed = AtomicBool::new(false);
+            retained.par_chunks(4096).for_each(|part| {
+                if failed.load(Ordering::Relaxed) {
+                    return;
+                }
+                let Some(slot) = rayon::current_thread_index().and_then(|i| states.get(i)) else {
+                    failed.store(true, Ordering::Relaxed);
+                    return;
+                };
+                // Only this pool thread locks its own slot.
+                let mut state = slot.lock().unwrap_or_else(|e| e.into_inner());
+                if state.is_none() {
+                    *state = InstanceQueryScratch::new(scratch_instances)
+                        .ok()
+                        .map(|sc| (vec![0u64; words], sc));
+                }
+                let Some((marked, sc)) = state.as_mut() else {
+                    failed.store(true, Ordering::Relaxed);
+                    return;
+                };
+                let mut local = 0usize;
+                if scan(part, sc, marked, &mut local).is_err() {
+                    failed.store(true, Ordering::Relaxed);
+                }
+                let _ = work.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |w| {
+                    Some(w.saturating_add(local))
+                });
+            });
+            let mut marked = vec![0u64; words];
+            for state in states {
+                if let Some((m, _)) = state.into_inner().unwrap_or_else(|e| e.into_inner()) {
+                    for (x, y) in marked.iter_mut().zip(&m) {
+                        *x |= y;
+                    }
+                }
+            }
+            (marked, work.into_inner(), failed.into_inner())
+        })
+        .and_then(|(marked, work, failed)| {
+            let total = stats
+                .work
+                .checked_add(work)
+                .filter(|&n| !failed && n <= limits.max_work)?;
+            Some((marked, total))
+        });
+    let (marked, used) = match parallel {
+        Some((marked, total)) => {
+            stats.work = total;
+            (marked, parallel_bytes)
+        }
+        None => {
+            let mut marked = vec![0u64; words];
+            let mut sc = InstanceQueryScratch::new(scratch_instances)?;
+            scan(retained, &mut sc, &mut marked, &mut stats.work)?;
+            (marked, 0)
+        }
+    };
     stats.passive_strips = stats
         .passive_strips
         .checked_add(
@@ -1811,12 +2326,13 @@ fn virtual_crossings(
                 .saturating_mul(2),
         )
         .ok_or_else(|| budget("virtual passive strips"))?;
-    Ok(marked)
+    Ok((marked, used))
 }
 
-fn virtual_strip(id: u32, shape: Shape, vertical: bool) -> Run {
+/// One strip (x or y) of a crossed passive conductor (retained or virtual).
+fn conductor_strip(id: u32, shape: Shape, vertical: bool) -> Run {
     let Owner::Passive(owner) = shape.owner else {
-        unreachable!("virtual conductor is passive")
+        unreachable!("crossed conductor is passive")
     };
     let r = shape.rect;
     let (lo, hi, minus, plus) = if vertical {
@@ -1831,7 +2347,6 @@ fn virtual_strip(id: u32, shape: Shape, vertical: bool) -> Run {
         },
         layer: shape.layer,
         vertical,
-        cross: minus + (plus - minus) / 2,
         lo,
         hi,
         minus,
@@ -1844,58 +2359,28 @@ fn virtual_strip(id: u32, shape: Shape, vertical: bool) -> Run {
     }
 }
 
-/// The plate below (`upper == false`) or above a strip: the nearest other
-/// calibration metal whose conductors (merged along the strip's cross axis)
-/// cover `minus..plus` and extend at least one strip width beyond each side
-/// edge (where the edge fringe lands), with the conductor under each side
-/// edge (`[plus side, minus side]`). `layered` is sorted by metal, then cross
-/// extent.
-fn plate(
-    layered: &[(u32, i64, i64, u32)],
-    own: u32,
-    upper: bool,
-    minus: i64,
-    plus: i64,
-) -> Option<(u32, [u32; 2])> {
-    let mut metals: Vec<u32> = layered
-        .iter()
-        .map(|e| e.0)
-        .filter(|&m| if upper { m > own } else { m < own })
-        .collect();
-    metals.dedup();
-    if !upper {
-        metals.reverse();
+/// One strip (x or y) of a routed-metal piece: both ends at its node.
+#[inline]
+fn piece_strip(id: u32, r: Rect, layer: u32, info: PieceInfo, vertical: bool) -> Run {
+    let (lo, hi, minus, plus) = if vertical {
+        (r.ly, r.uy, r.lx, r.ux)
+    } else {
+        (r.lx, r.ux, r.ly, r.uy)
+    };
+    Run {
+        net: info.net,
+        layer,
+        vertical,
+        lo,
+        hi,
+        minus,
+        plus,
+        shape: id,
+        piece: true,
+        passive: None,
+        node_lo: info.node,
+        node_hi: info.node,
     }
-    for metal in metals {
-        let on: Vec<&(u32, i64, i64, u32)> = layered.iter().filter(|e| e.0 == metal).collect();
-        // Merged cross-axis coverage; `on` is sorted by its lower end.
-        let margin = plus - minus;
-        let (need_lo, need_hi) = (minus - margin, plus + margin);
-        let mut spans = false;
-        let (mut lo, mut hi) = (on[0].1, on[0].2);
-        for e in &on[1..] {
-            if e.1 <= hi {
-                hi = hi.max(e.2);
-            } else {
-                spans |= lo <= need_lo && hi >= need_hi;
-                (lo, hi) = (e.1, e.2);
-            }
-        }
-        spans |= lo <= need_lo && hi >= need_hi;
-        if !spans {
-            continue;
-        }
-        let plus_owner = on
-            .iter()
-            .filter(|e| e.1 < plus && e.2 >= plus)
-            .max_by_key(|e| (e.2, std::cmp::Reverse(e.3)))?;
-        let minus_owner = on
-            .iter()
-            .filter(|e| e.2 > minus && e.1 <= minus)
-            .min_by_key(|e| (e.1, e.3))?;
-        return Some((metal, [plus_owner.3, minus_owner.3]));
-    }
-    None
 }
 
 fn sample(rows: &[[f64; 3]], spacing: Option<f64>) -> (f64, f64) {
@@ -1916,14 +2401,28 @@ fn sample(rows: &[[f64; 3]], spacing: Option<f64>) -> (f64, f64) {
 }
 
 /// Compute an RC tree for every routed net plus grounded and coupling caps.
+/// Strips are computed on the caller's Rayon pool; results, statistics and
+/// errors are identical at every pool size.
 pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<RcNetwork> {
-    extract_with_queries(input, limits, true)
+    extract_with_queries(input, limits, Queries::Indexed(parallel::Bounds::default()))
+}
+
+/// Candidate-query implementation.
+#[derive(Clone, Copy)]
+enum Queries {
+    /// Per-layer grids and instance index, face queries on other layers,
+    /// shared x/y pair queries, parallel tiles within these bounds.
+    Indexed(parallel::Bounds),
+    /// Independent test oracle: coarse conductor bins, the full lateral
+    /// window on every layer, one strip at a time, serial.
+    #[cfg(test)]
+    Reference,
 }
 
 fn extract_with_queries(
     input: &ExtractInput<'_>,
     limits: &ExtractLimits,
-    footprint_queries: bool,
+    queries: Queries,
 ) -> Result<RcNetwork> {
     let mut profile = PhaseProfile::new();
     preflight(input, limits)?;
@@ -1961,178 +2460,343 @@ fn extract_with_queries(
     let routing_layers: Vec<u32> = (0..input.layers.len() as u32)
         .filter(|&l| tech.layers[l as usize].is_some())
         .collect();
-    let bin_size = extraction_bin(input)?;
-    let mut bins = Bins {
-        size: bin_size,
-        map: bins::BinLists::default(),
-        instances: InstanceGeometry::new(&shapes, bin_size, input.layers.len(), limits)?,
-        query_index: None,
-    };
-    let mut entries = 0usize;
-    for (i, s) in shapes.owned() {
-        let (x0, x1) = bins.range(s.rect.lx, s.rect.ux);
-        let (y0, y1) = bins.range(s.rect.ly, s.rect.uy);
-        let cells = (x1 - x0 + 1)
-            .checked_mul(y1 - y0 + 1)
-            .ok_or_else(|| budget("bin span"))?;
-        entries = entries
-            .checked_add(usize::try_from(cells).map_err(|_| budget("bin span"))?)
-            .ok_or_else(|| budget("bin entries"))?;
-        if entries > limits.max_bin_entries {
-            return Err(budget("extraction spatial-bin entries"));
-        }
-        for bx in x0..=x1 {
-            for by in y0..=y1 {
-                bins.map
-                    .push((s.layer, bx, by), i, limits.max_bin_entries)?;
-            }
-        }
-    }
-    let net_index: HashMap<u32, usize> = built
+    // The same-net lists, then the grid, share the spatial-index allowance
+    // (plus any headroom below the memory limit); they are never alive
+    // together.
+    let headroom = memory.limit_bytes.saturating_sub(memory.estimate_bytes);
+    let index_budget = headroom.saturating_add(index_allowance(limits));
+    // Cell geometry is indexed once, at the admitted query bin.
+    let instances = InstanceGeometry::new(
+        &shapes,
+        memory.instance_query_bin_dbu,
+        input.layers.len(),
+        limits,
+    )?;
+    let net_index: HashMap<u32, usize, BuildFx> = built
         .nets
         .iter()
         .enumerate()
         .map(|(i, n)| (n.net, i))
         .collect();
-    add_metal_pieces(
-        input,
-        limits,
-        &mut built,
-        &mut shapes,
-        &mut bins,
-        &mut entries,
-        &mut stats,
-    )?;
-    add_patches(
-        input,
-        limits,
-        &mut built,
-        &mut shapes,
-        &mut bins,
-        &mut entries,
-        &net_index,
-        &mut stats,
-    )?;
-    let routed_runs = built.runs.len();
-    add_passive_strips(input, limits, &mut built, &shapes, &mut bins, &mut stats)?;
-    let crossed = virtual_crossings(&shapes, &mut bins, &routing_layers, &mut stats)?;
     profile.phase(1);
-    if footprint_queries {
-        // Construction is complete. Release the mutable owned-shape bins
-        // before reserving the static index, so admission covers their maximum
-        // rather than their sum. Shared virtual cell geometry stays indexed.
-        bins.map = bins::BinLists::default();
-        bins.query_index = Some(index::ShapeIndex::build(
+    let net_bins = {
+        let long = match queries {
+            Queries::Indexed(bounds) => bounds.net_bin_list,
+            #[cfg(test)]
+            Queries::Reference => NET_BIN_LIST,
+        };
+        let mut near = NetShapes::new(
+            &shapes,
+            &built,
+            limits,
+            index_budget,
+            extraction_bin(input)?,
+            long,
+        )?;
+        add_metal_pieces(
+            input,
+            limits,
+            &mut built,
+            &mut shapes,
+            &mut near,
+            &mut stats,
+        )?;
+        add_patches(
+            input,
+            limits,
+            &mut built,
+            &mut shapes,
+            &mut near,
+            &net_index,
+            &mut stats,
+        )?;
+        (near.bins.lists, near.bins.entries.len())
+    };
+    // Via pads are fully converted into pieces; release growth slack.
+    built.pads = Vec::new();
+    built.pieces.shrink_to_fit();
+    shapes.shrink_to_fit();
+    profile.phase(2);
+    // Grid cells: at least 2 um and the layer's lateral window, so a strip
+    // query spans few cells on every layer.
+    let min_cell = (2.0 * tech.dbu_per_um).ceil().max(1.0) as i64;
+    let base_cell: Vec<i64> = tech
+        .layers
+        .iter()
+        .map(|model| {
+            model.as_ref().map_or(min_cell, |m| {
+                let window = m
+                    .contexts
+                    .iter()
+                    .map(|c| c.rows[c.rows.len() - 1][0])
+                    .fold(0.0f64, f64::max);
+                ((window * tech.dbu_per_um).ceil() as i64).max(min_cell)
+            })
+        })
+        .collect();
+    // Virtual cell shapes on routing layers join the grid when it fits the
+    // entry cap and the configured index allowance (never the live-memory
+    // headroom, so the query path, and with it the work count, depends only
+    // on the input and the limits): strip and crossing queries then need no
+    // instance-index traversal.
+    let virtual_grid = match queries {
+        Queries::Indexed(bounds) => bounds.virtual_grid,
+        #[cfg(test)]
+        Queries::Reference => true,
+    };
+    let routing_mask: Vec<bool> = tech.layers.iter().map(Option::is_some).collect();
+    let grid = match (virtual_grid && instances.is_some())
+        .then(|| {
+            index::GridIndex::build_virtual(
+                &shapes,
+                &routing_mask,
+                input.layers.len(),
+                &base_cell,
+                limits,
+                index_allowance(limits),
+                &mut stats.work,
+            )
+        })
+        .flatten()
+    {
+        Some(grid) => grid,
+        None => index::GridIndex::build(
             &shapes,
             input.layers.len(),
+            &base_cell,
             limits,
+            index_budget,
             &mut stats.work,
-        )?);
-        // The construction index's visitation order affects metal tiling.
-        // Only the final candidate phase sorts every accepted ID, so refresh
-        // virtual geometry here with bins suited to the smaller layer windows.
-        if memory.instance_query_bin_dbu != bin_size {
-            bins.instances = None;
-            bins.instances = InstanceGeometry::new(
-                &shapes,
-                memory.instance_query_bin_dbu,
-                input.layers.len(),
-                limits,
-            )?;
+        )?,
+    };
+    profile.phase(3);
+    // A grid larger than the index allowance holds part of the headroom: it
+    // joins the working estimate. Transient parallel scratch (crossing
+    // marks, then strip lanes) gets the unused index allowance first, then
+    // the headroom the grid left.
+    let instance_count = input.instances.map_or(0, |i| i.geometry.len());
+    let unused = index_allowance(limits).saturating_sub(grid.bytes());
+    let grid_excess = grid.bytes().saturating_sub(index_allowance(limits));
+    let headroom = headroom.saturating_sub(grid_excess);
+    if grid_excess > 0
+        && let Some(estimate) = stats.memory.as_mut()
+    {
+        estimate.working_bytes = estimate.working_bytes.saturating_add(grid_excess);
+        estimate.estimate_bytes = estimate.estimate_bytes.saturating_add(grid_excess);
+        if estimate.estimate_bytes > estimate.limit_bytes {
+            return Err(budget("extraction grid index memory"));
         }
     }
-    stats.wire_runs = built.runs.iter().filter(|r| !r.piece).count();
-    profile.phase(2);
+    add_passive_strips(input, limits, &mut built, &shapes, &grid, &mut stats)?;
+    profile.phase(4);
+    let (crossed, crossing_bytes) = virtual_crossings(
+        &shapes,
+        &grid,
+        instances.as_ref(),
+        &routing_layers,
+        limits,
+        headroom.saturating_add(unused),
+        &mut stats,
+    )?;
+    // After the crossings, the instance index serves only the strip queries
+    // the grid does not cover (the test oracle keeps its own).
+    #[cfg(test)]
+    let keep = !grid.has_virtual() || matches!(queries, Queries::Reference);
+    #[cfg(not(test))]
+    let keep = !grid.has_virtual();
+    let instances = instances.filter(|_| keep);
+    let cell_index = instances.as_ref().filter(|_| !grid.has_virtual());
+    stats.wire_runs = built.runs.len();
     stats.shapes = shapes.len();
     if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
-    let mut coupling = BTreeMap::<((u32, u32), (u32, u32)), f64>::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut candidates: Vec<u32> = Vec::new();
-    let mut points: Vec<i64> = Vec::new();
-    let mut events: Vec<(i64, u32, bool)> = Vec::new();
-    let mut active = std::collections::BTreeSet::new();
-    // (calibration metal, cross-axis lo, hi, shape) of other-layer conductors.
-    let mut layered: Vec<(u32, i64, i64, u32)> = Vec::new();
-    let metal_layer: HashMap<u32, usize> = tech
-        .layers
-        .iter()
-        .enumerate()
-        .filter_map(|(i, l)| l.as_ref().map(|m| (m.metal, i)))
-        .collect();
-    let contexts: Vec<Option<ContextIndex>> = tech
-        .layers
-        .iter()
-        .map(|l| {
-            l.as_ref().map(|m| {
-                m.contexts
-                    .iter()
-                    .enumerate()
-                    .map(|(i, c)| ((c.over, c.under), i))
-                    .collect()
-            })
-        })
-        .collect();
-    let extra = (0..shapes.virtual_count())
-        .filter(|&i| crossed[i / 64] & (1 << (i % 64)) != 0)
-        .flat_map(|i| {
-            let id = (shapes.virtual_offset() + i) as u32;
-            let shape = shapes.get(id);
-            [
-                virtual_strip(id, shape, false),
-                virtual_strip(id, shape, true),
-            ]
-        });
-    let mut batch = parallel::Batch::new(input, limits, &memory, footprint_queries)?;
-    if let Some(estimate) = stats.memory.as_mut() {
-        estimate.working_bytes = estimate
-            .working_bytes
-            .saturating_add(batch.stats.scratch_bytes);
-        estimate.estimate_bytes = estimate
-            .estimate_bytes
-            .saturating_add(batch.stats.scratch_bytes);
+    profile.phase(5);
+    let (bounds, threads) = match queries {
+        Queries::Indexed(bounds) => (bounds, rayon::current_num_threads()),
+        #[cfg(test)]
+        Queries::Reference => (parallel::Bounds::default(), 1),
+    };
+    let lanes = parallel::admit(
+        bounds,
+        threads,
+        headroom.saturating_add(unused),
+        limits,
+        instance_count,
+    );
+    let lane_bytes = if lanes > 1 || limits.tile_units > 0 {
+        parallel::parallel_bytes(bounds, lanes, limits, instance_count)
+    } else {
+        0
+    };
+    // The crossing marks are released before the lanes start: the larger
+    // excess over the unused allowance is the peak.
+    let excess = lane_bytes.max(crossing_bytes).saturating_sub(unused);
+    if excess > 0
+        && let Some(estimate) = stats.memory.as_mut()
+    {
+        estimate.working_bytes = estimate.working_bytes.saturating_add(excess);
+        estimate.estimate_bytes = estimate.estimate_bytes.saturating_add(excess);
+        if estimate.estimate_bytes > estimate.limit_bytes {
+            return Err(budget("extraction tile memory"));
+        }
     }
-    let mut runs = built.runs[..routed_runs]
-        .iter()
-        .cloned()
-        .chain(extra)
-        .chain(built.runs[routed_runs..].iter().cloned())
-        .enumerate();
-
-    loop {
-        let (count, prepared) = batch.prepare(
-            &mut runs,
+    let nodes = NodeIds::new(&built.nets, &net_index)?;
+    let mut acc = parallel::Accumulators::new(
+        parallel::shard_count(lanes, limits),
+        nodes.total,
+        stats.overlap_area_um2,
+    )?;
+    let report = {
+        // Units in the original run order: wire bodies, pieces, crossed
+        // virtual conductors, then crossed retained passive conductors.
+        let (offset, count) = (shapes.virtual_offset(), shapes.virtual_count());
+        let mut units = (0..built.runs.len() as u32)
+            .map(strip::UnitRef::Body)
+            .chain((0..built.pieces.len() as u32).map(strip::UnitRef::Piece))
+            .chain(
+                (0..count)
+                    .filter(|&i| crossed[i / 64] & (1 << (i % 64)) != 0)
+                    .map(|i| strip::UnitRef::Conductor((offset + i) as u32)),
+            )
+            .chain(
+                built
+                    .passive_units
+                    .iter()
+                    .map(|&id| strip::UnitRef::Conductor(id)),
+            );
+        let ctx = strip::Ctx::new(
             input,
             &shapes,
-            &bins,
+            &grid,
+            cell_index,
             &routing_layers,
             limits,
-            stats.work,
+            &built.runs,
+            (&built.pieces, built.piece_shape0),
+            &built.pin_nodes,
+            &net_index,
+            &nodes,
         )?;
-        profile.phase(3);
-        if count == 0 {
-            break;
+        match queries {
+            Queries::Indexed(bounds) => parallel::run(
+                &ctx,
+                &mut units,
+                bounds,
+                lanes,
+                instance_count,
+                &mut acc,
+                &mut stats,
+            )?,
+            #[cfg(test)]
+            Queries::Reference => reference(
+                &ctx,
+                input,
+                instances.as_ref(),
+                &shapes,
+                &mut units,
+                instance_count,
+                parallel::Commit::new(&mut acc, &mut stats, limits.max_couplings),
+            )?,
         }
-        for slot in &mut batch.slots[..count] {
-            let (run_index, run) = slot.run.take().expect("populated query slot");
-            profile.phase(6);
-            profile.strips += 1;
-            if run_index.is_multiple_of(4096) {
-                guard_memory(limits)?;
+    };
+    profile.phase(6);
+    let grid_size = (grid.entries(), grid.bytes());
+    // Geometry is no longer needed: release it before the coupling list.
+    drop(grid);
+    drop(instances);
+    drop(shapes);
+    drop(crossed);
+    let Built {
+        mut nets,
+        runs,
+        pieces,
+        passive_units,
+        pin_nodes,
+        ..
+    } = built;
+    drop((runs, pieces, passive_units, pin_nodes));
+    stats.overlap_area_um2 = acc.area();
+    for (l, net) in nets.iter_mut().enumerate() {
+        for (node, ground) in net.ground.iter_mut().enumerate() {
+            *ground = acc.ground(nodes.local(l, node as u32));
+        }
+    }
+    let sorted = acc.into_sorted_couplings()?;
+    let mut couplings = Vec::new();
+    for (key, pf) in sorted {
+        if pf <= 0.0 {
+            continue;
+        }
+        let ((la, na), (lb, nb)) = (nodes.decode((key >> 32) as u32), nodes.decode(key as u32));
+        if pf < limits.min_coupling_pf {
+            // Each side keeps the full value to ground (Miller factor one);
+            // a net's total capacitance is unchanged.
+            nets[la].ground[na as usize] += pf;
+            nets[lb].ground[nb as usize] += pf;
+            stats.grounded_couplings += 1;
+            continue;
+        }
+        couplings.push(RcCoupling {
+            a: (nets[la].net, na),
+            b: (nets[lb].net, nb),
+            pf,
+        });
+    }
+    stats.couplings = couplings.len();
+    stats.coupling_pf = couplings.iter().map(|c| c.pf).sum();
+    stats.ground_pf = nets.iter().flat_map(|n| n.ground.iter()).sum();
+    let elements = stats
+        .resistors
+        .checked_add(stats.nodes)
+        .and_then(|n| n.checked_add(2 * stats.couplings))
+        .ok_or_else(|| budget("extraction elements"))?;
+    if elements > limits.max_elements {
+        return Err(budget("extraction RC elements"));
+    }
+    guard_memory(limits)?;
+    profile.phase(7);
+    profile.report(&stats, &report, grid_size, net_bins);
+    Ok(RcNetwork {
+        nets,
+        couplings,
+        stats,
+    })
+}
+
+/// Serial oracle: candidates from coarse insertion-ordered conductor bins and
+/// the instance index over the full lateral window on every layer,
+/// deduplicated and ID-sorted, then the shared numerical sweep.
+#[cfg(test)]
+fn reference(
+    ctx: &strip::Ctx<'_, '_>,
+    input: &ExtractInput<'_>,
+    geometry: Option<&InstanceGeometry<'_>>,
+    shapes: &Shapes<'_>,
+    units: &mut impl Iterator<Item = strip::UnitRef>,
+    instances: usize,
+    mut commit: parallel::Commit<'_>,
+) -> Result<parallel::Report> {
+    let limits = ctx.limits;
+    let size = extraction_bin(input)?;
+    let mut bins = bins::BinLists::default();
+    for (id, s) in shapes.owned() {
+        for bx in s.rect.lx.div_euclid(size)..=s.rect.ux.div_euclid(size) {
+            for by in s.rect.ly.div_euclid(size)..=s.rect.uy.div_euclid(size) {
+                bins.push((s.layer, bx, by), id, limits.max_bin_entries)?;
             }
-            let model = layer_model(input, run.layer)?;
-            let ctx_map = contexts[run.layer as usize].as_ref().unwrap();
-            let window = model
-                .contexts
-                .iter()
-                .map(|c| c.rows[c.rows.len() - 1][0])
-                .fold(0.0f64, f64::max);
-            let window_dbu = (window * tech.dbu_per_um).ceil() as i64;
-            let (edge_minus, edge_plus) = (run.minus, run.plus);
-            // Query region: lateral window on the run layer, footprint elsewhere.
-            let (c0, c1) = (edge_minus - window_dbu, edge_plus + window_dbu);
-            let query = if run.vertical {
+        }
+    }
+    let mut sc = strip::Scratch::new(instances)?;
+    let mut report = parallel::Report::default();
+    let mut cands = Vec::new();
+    for u in units {
+        let (first, second) = strip::strips(ctx, u);
+        report.units += 1;
+        for run in std::iter::once(first).chain(second) {
+            let w = ctx.window_dbu(run.layer)?;
+            let (c0, c1) = (run.minus - w, run.plus + w);
+            let q = if run.vertical {
                 Rect {
                     lx: c0,
                     ly: run.lo,
@@ -2147,508 +2811,222 @@ fn extract_with_queries(
                     uy: c1,
                 }
             };
-            if prepared {
-                slot.result.take().expect("prepared query result")?;
-                stats.work = stats
-                    .work
-                    .checked_add(slot.work)
-                    .filter(|&n| n <= limits.max_work)
-                    .ok_or_else(|| budget("extraction query tile work"))?;
-                std::mem::swap(&mut candidates, &mut slot.candidates);
-            } else {
-                candidates.clear();
-                seen.clear();
-                for &layer in &routing_layers {
-                    // Other-layer candidates must overlap the strip's face. Querying
-                    // only that face preserves the exact event boundaries and shape-ID
-                    // order while avoiding unrelated lateral bin/instance scans.
-                    let layer_query = if footprint_queries && layer != run.layer {
-                        body_rect(&run)
-                    } else {
-                        query
-                    };
-                    bins.visit(
+            cands.clear();
+            for &layer in ctx.routing_layers {
+                let lateral = (layer == run.layer).then_some((c0, c1));
+                for bx in q.lx.div_euclid(size)..=q.ux.div_euclid(size) {
+                    for by in q.ly.div_euclid(size)..=q.uy.div_euclid(size) {
+                        for id in bins.iter((layer, bx, by)) {
+                            let shape = shapes.get(id);
+                            if strip::accepts(&run, lateral, id, shape.rect) {
+                                cands.push(strip::Cand { id, shape });
+                            }
+                        }
+                    }
+                }
+                if let Some(geometry) = geometry {
+                    geometry.visit_shared(
+                        &mut sc.instances,
+                        shapes,
                         layer,
-                        layer_query,
-                        &shapes,
-                        &mut stats,
-                        limits,
+                        q,
+                        &mut 0,
                         |id, shape| {
-                            parallel::accept_candidate(
-                                run,
-                                layer,
-                                (c0, c1),
-                                id,
-                                shape,
-                                limits,
-                                &mut seen,
-                                &mut candidates,
-                            )
+                            if strip::accepts(&run, lateral, id, shape.rect) {
+                                cands.push(strip::Cand { id, shape });
+                            }
+                            Ok(true)
                         },
                     )?;
                 }
             }
-            stats.max_run_candidates = stats.max_run_candidates.max(candidates.len());
-            if candidates.len() > limits.max_candidates {
-                return Err(budget(&format!(
-                    "extraction candidates per wire run ({} > max_candidates {}; raise \
-                 --max-extract-candidates up to {MAX_CANDIDATES_CEILING})",
-                    candidates.len(),
-                    limits.max_candidates
-                )));
+            cands.sort_unstable_by_key(|c| c.id);
+            cands.dedup_by_key(|c| c.id);
+            if cands.len() > limits.max_candidates {
+                return Err(budget("extraction candidates per wire run"));
             }
-            candidates.sort_unstable();
-            profile.phase(3);
-            points.clear();
-            events.clear();
-            active.clear();
-            points.push(run.lo);
-            points.push(run.hi);
-            for &s in &candidates {
-                let r = shapes.get(s).rect;
-                let (a0, a1) = if run.vertical {
-                    (r.ly, r.uy)
-                } else {
-                    (r.lx, r.ux)
-                };
-                let (lo, hi) = (a0.max(run.lo), a1.min(run.hi));
-                points.push(lo);
-                points.push(hi);
-                events.push((lo, s, true));
-                events.push((hi, s, false));
-            }
-            points.sort_unstable();
-            points.dedup();
-            events.sort_unstable();
-            let index_work = events
-                .len()
-                .checked_mul(3 * events.len().max(1).ilog2() as usize + 4)
-                .ok_or_else(|| budget("extraction interval index work"))?;
-            stats.work = stats
-                .work
-                .checked_add(index_work)
-                .filter(|&n| n <= limits.max_work)
-                .ok_or_else(|| budget("extraction interval index work"))?;
-            let mut event_index = 0;
-            let span = (run.hi - run.lo) as f64;
-            // Passive strips attach to their routed partners only.
-            let net_local = match run.passive {
-                None => net_index[&run.net],
-                Some(_) => usize::MAX,
+            let mut counts = strip::Counts {
+                max_run_candidates: cands.len(),
+                ..Default::default()
             };
-            // Same metal as this strip: its own net, or for a passive conductor
-            // the same supply/ground class or the same pin net.
-            let same_metal = |sh: &Shape| -> bool {
-                match (sh.owner, run.passive) {
-                    (Owner::Run(o), _) => built.runs[o as usize].net == run.net,
-                    (Owner::Passive(p), None) => {
-                        matches!(p, PassiveOwner::Pin { net, .. } if net == run.net)
-                    }
-                    (Owner::Passive(p), Some(PassiveOwner::Ground)) => p == PassiveOwner::Ground,
-                    (Owner::Passive(p), Some(PassiveOwner::Pin { net, .. })) => {
-                        matches!(p, PassiveOwner::Pin { net: other, .. } if other == net)
-                    }
-                }
-            };
-            profile.phase(4);
-            for w in points.windows(2) {
-                let (t0, t1) = (w[0], w[1]);
-                if t1 <= t0 {
-                    continue;
-                }
-                while event_index < events.len() && events[event_index].0 <= t0 {
-                    let (_, shape, enter) = events[event_index];
-                    if enter {
-                        active.insert(shape);
-                    } else {
-                        active.remove(&shape);
-                    }
-                    event_index += 1;
-                }
-                if run.passive.is_some() {
-                    stats.passive_intervals += 1;
-                } else {
-                    stats.intervals += 1;
-                }
-                stats.work = stats
-                    .work
-                    .checked_add(active.len().max(1))
-                    .ok_or_else(|| budget("extraction work"))?;
-                if stats.work > limits.max_work {
-                    return Err(budget("extraction work"));
-                }
-                // Nearest lateral neighbour per side and nearest planes.
-                let mut plus: Option<(i64, u32)> = None;
-                let mut minus: Option<(i64, u32)> = None;
-                let (mut covered_plus, mut covered_minus) = (false, false);
-                layered.clear();
-                // Shape-ID order preserves the original floating-point accumulation
-                // and geometric ownership while skipping disjoint axis intervals.
-                for &s in &active {
-                    let sh = &shapes.get(s);
-                    let r = sh.rect;
-                    let (a0, a1, x0, x1) = if run.vertical {
-                        (r.ly, r.uy, r.lx, r.ux)
-                    } else {
-                        (r.lx, r.ux, r.ly, r.uy)
-                    };
-                    if a0 > t0 || a1 < t1 {
-                        continue;
-                    }
-                    let same = same_metal(sh);
-                    if sh.layer == run.layer {
-                        if x0 >= edge_plus {
-                            let gap = x0 - edge_plus;
-                            if gap < window_dbu && plus.is_none_or(|p| (gap, s) < p) {
-                                plus = Some((gap, s));
-                            }
-                        } else if x1 <= edge_minus {
-                            let gap = edge_minus - x1;
-                            if gap < window_dbu && minus.is_none_or(|p| (gap, s) < p) {
-                                minus = Some((gap, s));
-                            }
-                        } else if !same {
-                            if run.passive.is_none() {
-                                stats.foreign_overlaps += 1;
-                            }
-                        } else {
-                            // Same-net metal across a side edge: that side is
-                            // inside the net's metal union, not exposed.
-                            covered_plus |= x1 > edge_plus;
-                            covered_minus |= x0 < edge_minus;
-                        }
-                    } else {
-                        let metal = layer_model(input, sh.layer)?.metal;
-                        let overlap = x1.min(edge_plus) - x0.max(edge_minus);
-                        if overlap <= 0 {
-                            continue;
-                        }
-                        layered.push((metal, x0, x1, s));
-                    }
-                }
-                // A conductor on another layer is a plate for this strip (the
-                // calibration OVER/UNDER contexts) only where its layer's metal
-                // spans the whole strip cross-section and reaches one strip width
-                // beyond both side edges: crossings and clearly wider shapes.
-                // Narrower, offset or barely wider parallel metal is not a plate;
-                // that overlap coupling is not modelled.
-                layered.sort_unstable();
-                let below = plate(&layered, model.metal, false, edge_minus, edge_plus);
-                let above = plate(&layered, model.metal, true, edge_minus, edge_plus);
-                let nearest_below = layered
-                    .iter()
-                    .filter(|e| e.0 < model.metal)
-                    .map(|e| e.0)
-                    .max();
-                let nearest_above = layered
-                    .iter()
-                    .filter(|e| e.0 > model.metal)
-                    .map(|e| e.0)
-                    .min();
-                if run.passive.is_none()
-                    && (nearest_below != below.map(|b| b.0) || nearest_above != above.map(|a| a.0))
-                {
-                    stats.nonspanning_plane_intervals += 1;
-                }
-                let over = below.map_or(0, |b| b.0);
-                let under = above.map(|a| a.0);
-                let exact = ctx_map.get(&(over, under));
-                let (ctx, plane_split) = match exact {
-                    Some(&i) => (i, (below.is_some(), above.is_some())),
-                    None => {
-                        if run.passive.is_none() {
-                            stats.context_fallback_intervals += 1;
-                        }
-                        if let Some(&i) = ctx_map.get(&(over, None)).filter(|_| over > 0) {
-                            (i, (true, false))
-                        } else if let Some(&i) = ctx_map.get(&(0, under)) {
-                            (i, (false, above.is_some()))
-                        } else {
-                            (ctx_map[&(0, None)], (false, false))
-                        }
-                    }
-                };
-                let sub = &model.contexts[ctx_map[&(0, None)]].rows;
-                let rows = &model.contexts[ctx].rows;
-                let below_only = if plane_split.0 && plane_split.1 {
-                    ctx_map.get(&(over, None)).map(|&i| &model.contexts[i].rows)
-                } else {
-                    None
-                };
-                let length = um(tech, t1 - t0);
-                let mid = (t0 + t1) as f64 / 2.0;
-                let w_hi = if span > 0.0 {
-                    (mid - run.lo as f64) / span
-                } else {
-                    0.5
-                };
-                let mid_point = if run.vertical {
-                    [run.cross as f64, mid]
-                } else {
-                    [mid, run.cross as f64]
-                };
-                let mut ground = 0.0f64;
-                // (shape, pF, factor applied when the partner is another run).
-                let mut contributions: Vec<(u32, f64, f64)> = Vec::with_capacity(6);
-                for (k, side, covered) in [(0, plus, covered_plus), (1, minus, covered_minus)] {
-                    if covered {
-                        if run.passive.is_none() {
-                            stats.covered_side_intervals += 1;
-                        }
-                        continue;
-                    }
-                    let spacing = side.map(|(g, _)| um(tech, g));
-                    let touching_same =
-                        side.is_some_and(|(g, s)| g == 0 && same_metal(&shapes.get(s)));
-                    if touching_same {
-                        continue;
-                    }
-                    let (cc, cg) = sample(rows, spacing);
-                    let (_, cg_sub) = sample(sub, spacing);
-                    // Split this side's context value between the substrate and
-                    // the planes. A conductor below is the plate of an OVER
-                    // context: it shields the substrate, so the whole OVER value
-                    // goes to it. A plane above takes only the excess over what
-                    // goes down (the substrate share, or the OVER value).
-                    let cg = cg.max(0.0);
-                    let (g, d_below, d_above) = match plane_split {
-                        (true, true) => {
-                            let down = below_only.map_or(cg_sub, |r| sample(r, spacing).1).min(cg);
-                            (0.0, down, cg - down)
-                        }
-                        (true, false) => (0.0, cg, 0.0),
-                        (false, true) => {
-                            let up = (cg - cg_sub).max(0.0);
-                            (cg - up, 0.0, up)
-                        }
-                        (false, false) => (cg, 0.0, 0.0),
-                    };
-                    let mut g = g;
-                    // Each conductor's own cross-section is authoritative for its
-                    // own field: a crossing is counted from both wires (the upper
-                    // wire's OVER cut over the lower wire's width, the lower wire's
-                    // UNDER cut over the upper wire's width).
-                    for (d, plane) in [(d_below, below), (d_above, above)] {
-                        if d > 0.0 {
-                            match plane {
-                                Some((_, owners)) => {
-                                    contributions.push((owners[k], d * length, 1.0))
-                                }
-                                None => g += d,
-                            }
-                        }
-                    }
-                    ground += g.max(0.0) * length;
-                    // Lateral coupling between two runs is computed from both sides.
-                    if let Some((_, s)) = side
-                        && cc > 0.0
-                    {
-                        contributions.push((s, cc * length, 0.5));
-                    }
-                }
-                // Overlap area of non-plate metal on other layers: a conductor
-                // that covers part of this strip's face (stacked, offset or barely
-                // wider metal) but is not a calibration plate couples over the
-                // covered width, counted once from the upper face; the covered
-                // face no longer sees the substrate. A piece counts its face on
-                // its x strip only.
-                if run.passive.is_none()
-                    && !(run.piece && run.vertical)
-                    && let Some(area_cap) = model.area_cap
-                {
-                    let mut shielded = 0.0;
-                    if below.is_none() {
-                        for (metal, covered, owners) in
-                            face_portions(&layered, model.metal, false, edge_minus, edge_plus)
-                        {
-                            let Some(&(_, ov)) = model.overlap.iter().find(|o| o.0 == metal) else {
-                                stats.overlap_pairs_without_data += 1;
-                                continue;
-                            };
-                            let area = um(tech, covered) * length;
-                            stats.overlap_area_um2 += area;
-                            shielded += area_cap * area;
-                            for (sh, w) in owners {
-                                contributions.push((sh, ov * um(tech, w) * length, 1.0));
-                            }
-                        }
-                    }
-                    if above.is_none() {
-                        // A routed conductor above counts the overlap from its
-                        // own face; passive metal does not model itself.
-                        for (metal, _, owners) in
-                            face_portions(&layered, model.metal, true, edge_minus, edge_plus)
-                        {
-                            let passive: Vec<(u32, i64)> = owners
-                                .into_iter()
-                                .filter(|o| matches!(shapes.get(o.0).owner, Owner::Passive(_)))
-                                .collect();
-                            if passive.is_empty() {
-                                continue;
-                            }
-                            let upper = metal_layer
-                                .get(&metal)
-                                .and_then(|&l| tech.layers[l].as_ref())
-                                .and_then(|u| u.overlap.iter().find(|o| o.0 == model.metal));
-                            let Some(&(_, ov)) = upper else {
-                                stats.overlap_pairs_without_data += 1;
-                                continue;
-                            };
-                            for (sh, w) in passive {
-                                stats.overlap_area_um2 += um(tech, w) * length;
-                                contributions.push((sh, ov * um(tech, w) * length, 1.0));
-                            }
-                        }
-                    }
-                    ground = (ground - shielded).max(0.0);
-                }
-                if run.passive.is_some() {
-                    // Only this conductor's plate shares toward routed conductors
-                    // of other nets: ground and lateral sides are counted from the
-                    // routed side.
-                    for (s, value, run_factor) in contributions {
-                        if run_factor < 1.0 {
-                            continue;
-                        }
-                        let Owner::Run(o) = shapes.get(s).owner else {
-                            continue;
-                        };
-                        let other = &built.runs[o as usize];
-                        if other.passive.is_some() || other.net == run.net {
-                            continue;
-                        }
-                        let pnode = nearer_end(other, mid_point);
-                        let li = net_index[&other.net];
-                        let pin_node = match run.passive {
-                            Some(PassiveOwner::Pin { pin, .. }) => {
-                                built.pin_nodes.get(&pin).copied()
-                            }
-                            _ => None,
-                        };
-                        match pin_node {
-                            Some(a) => {
-                                let b = (other.net, pnode);
-                                let key = if a <= b { (a, b) } else { (b, a) };
-                                *coupling.entry(key).or_insert(0.0) += value;
-                                if coupling.len() > limits.max_couplings {
-                                    return Err(budget("extraction coupling capacitors"));
-                                }
-                            }
-                            None => {
-                                if matches!(run.passive, Some(PassiveOwner::Pin { .. })) {
-                                    stats.unrouted_pin_partners += 1;
-                                }
-                                built.nets[li].ground[pnode as usize] += value;
-                            }
-                        }
-                    }
-                    continue;
-                }
-                // Attach to this run's end nodes by position (pi split).
-                let rc = &mut built.nets[net_local];
-                rc.ground[run.node_lo as usize] += ground * (1.0 - w_hi);
-                rc.ground[run.node_hi as usize] += ground * w_hi;
-                for (s, value, run_factor) in contributions {
-                    let sh = shapes.get(s);
-                    let partner = match sh.owner {
-                        Owner::Run(o) => {
-                            // Every routed-net shape models its own exposed sides,
-                            // so a lateral pair is counted half from each side.
-                            let other = &built.runs[o as usize];
-                            if other.net == run.net {
-                                None
-                            } else {
-                                Some(Some((other.net, nearer_end(other, mid_point), run_factor)))
-                            }
-                        }
-                        Owner::Passive(PassiveOwner::Ground) => Some(None),
-                        Owner::Passive(PassiveOwner::Pin { net, pin }) => {
-                            if net == run.net {
-                                None
-                            } else if let Some(&(n, node)) = built.pin_nodes.get(&pin) {
-                                Some(Some((n, node, 1.0)))
-                            } else {
-                                stats.unrouted_pin_partners += 1;
-                                Some(None)
-                            }
-                        }
-                    };
-                    match partner {
-                        None => {}
-                        Some(None) => {
-                            let rc = &mut built.nets[net_local];
-                            rc.ground[run.node_lo as usize] += value * (1.0 - w_hi);
-                            rc.ground[run.node_hi as usize] += value * w_hi;
-                        }
-                        Some(Some((pnet, pnode, factor))) => {
-                            for (node, weight) in [(run.node_lo, 1.0 - w_hi), (run.node_hi, w_hi)] {
-                                let v = value * factor * weight;
-                                if v <= 0.0 {
-                                    continue;
-                                }
-                                let a = (run.net, node);
-                                let b = (pnet, pnode);
-                                let key = if a <= b { (a, b) } else { (b, a) };
-                                *coupling.entry(key).or_insert(0.0) += v;
-                                if coupling.len() > limits.max_couplings {
-                                    return Err(budget("extraction coupling capacitors"));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            profile.phase(5);
-            if prepared {
-                std::mem::swap(&mut candidates, &mut slot.candidates);
+            let mut work = commit.stats().work;
+            let result = strip::numeric_with(
+                ctx,
+                &run,
+                &cands,
+                &mut sc,
+                &mut commit,
+                &mut work,
+                &mut counts,
+            );
+            commit.stats().work = work;
+            match result {
+                Ok(()) => counts.add_to(commit.stats()),
+                Err(strip::Stop::Error(e)) => return Err(e),
+                Err(strip::Stop::Defer) => return Err(invalid("reference strip deferred")),
             }
         }
     }
-    if limits.query_workers > 1 {
-        stats.parallel_queries = Some(batch.stats);
-    }
-
-    let mut couplings = Vec::new();
-    for ((a, b), pf) in coupling {
-        if pf <= 0.0 {
-            continue;
-        }
-        if pf < limits.min_coupling_pf {
-            // Each side keeps the full value to ground (Miller factor one);
-            // a net's total capacitance is unchanged.
-            for (net, node) in [a, b] {
-                built.nets[net_index[&net]].ground[node as usize] += pf;
-            }
-            stats.grounded_couplings += 1;
-            continue;
-        }
-        couplings.push(RcCoupling { a, b, pf });
-    }
-    stats.couplings = couplings.len();
-    stats.coupling_pf = couplings.iter().map(|c| c.pf).sum();
-    stats.ground_pf = built.nets.iter().flat_map(|n| n.ground.iter()).sum();
-    let elements = stats
-        .resistors
-        .checked_add(stats.nodes)
-        .and_then(|n| n.checked_add(2 * stats.couplings))
-        .ok_or_else(|| budget("extraction elements"))?;
-    if elements > limits.max_elements {
-        return Err(budget("extraction RC elements"));
-    }
-    guard_memory(limits)?;
-    profile.phase(7);
-    profile.report(&stats);
-    Ok(RcNetwork {
-        nets: built.nets,
-        couplings,
-        stats,
-    })
+    Ok(report)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::routing::{Access, LayerRect, Patch, RouteStats, Via, Wire};
+
+    #[test]
+    fn strip_records_stay_compact() {
+        // Millions of strips and transcript records are resident at once.
+        assert_eq!(size_of::<Run>(), 72);
+        assert_eq!(size_of::<Shape>(), 48);
+        assert_eq!(size_of::<strip::Op>(), 16);
+        assert_eq!(size_of::<PieceInfo>(), 8);
+    }
+
+    #[test]
+    fn lazy_piece_and_conductor_strips_match_the_materialized_runs() {
+        // The original construction pushed these records (x strip, then y
+        // strip) per piece and per crossed retained passive conductor.
+        fn materialized(
+            r: Rect,
+            net: u32,
+            layer: u32,
+            shape: u32,
+            passive: Option<PassiveOwner>,
+            node: u32,
+        ) -> Vec<Run> {
+            let mut runs = Vec::new();
+            for vertical in [false, true] {
+                let (lo, hi, minus, plus) = if vertical {
+                    (r.ly, r.uy, r.lx, r.ux)
+                } else {
+                    (r.lx, r.ux, r.ly, r.uy)
+                };
+                runs.push(Run {
+                    net,
+                    layer,
+                    vertical,
+                    lo,
+                    hi,
+                    minus,
+                    plus,
+                    shape,
+                    piece: true,
+                    passive,
+                    node_lo: node,
+                    node_hi: node,
+                });
+            }
+            runs
+        }
+        let fields = |r: &Run| {
+            (
+                r.net,
+                r.layer,
+                r.vertical,
+                (r.lo, r.hi, r.minus, r.plus),
+                r.shape,
+                r.piece,
+                r.passive,
+                (r.node_lo, r.node_hi),
+                r.cross(),
+            )
+        };
+        let rects = [
+            Rect {
+                lx: -7,
+                ly: 3,
+                ux: 5,
+                uy: 4,
+            },
+            Rect {
+                lx: 100,
+                ly: -2_000_000,
+                ux: 101,
+                uy: 2_000_000,
+            },
+            Rect {
+                lx: 0,
+                ly: 0,
+                ux: 9,
+                uy: 9,
+            },
+        ];
+        for (i, &rect) in rects.iter().enumerate() {
+            let (id, layer) = (40 + i as u32, i as u32 % 3);
+            let info = PieceInfo {
+                net: 7 + i as u32,
+                node: 3 * i as u32,
+            };
+            let lazy = [false, true].map(|v| piece_strip(id, rect, layer, info, v));
+            let want = materialized(rect, info.net, layer, id, None, info.node);
+            assert_eq!(
+                lazy.map(|r| fields(&r)).to_vec(),
+                want.iter().map(fields).collect::<Vec<_>>()
+            );
+            for owner in [PassiveOwner::Ground, PassiveOwner::Pin { net: 9, pin: 11 }] {
+                let shape = Shape {
+                    layer,
+                    rect,
+                    owner: Owner::Passive(owner),
+                };
+                let lazy = [false, true].map(|v| conductor_strip(id, shape, v));
+                let net = match owner {
+                    PassiveOwner::Pin { net, .. } => net,
+                    PassiveOwner::Ground => u32::MAX,
+                };
+                let want = materialized(rect, net, layer, id, Some(owner), 0);
+                assert_eq!(
+                    lazy.map(|r| fields(&r)).to_vec(),
+                    want.iter().map(fields).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn global_node_ids_follow_net_then_node_order() {
+        let net = |net: u32, nodes: usize| RcNet {
+            net,
+            nodes: vec![RcNode::Internal(1); nodes],
+            ground: vec![0.0; nodes],
+            resistors: vec![],
+        };
+        // Local order differs from net ID order.
+        let nets = vec![net(30, 2), net(4, 3), net(17, 1), net(1_000_000, 2)];
+        let index: HashMap<u32, usize, BuildFx> =
+            nets.iter().enumerate().map(|(i, n)| (n.net, i)).collect();
+        let ids = NodeIds::new(&nets, &index).unwrap();
+        assert_eq!(ids.total, 8);
+        let mut all = Vec::new();
+        for (l, n) in nets.iter().enumerate() {
+            for node in 0..n.nodes.len() as u32 {
+                let g = ids.local(l, node);
+                assert_eq!(ids.of(&index, n.net, node), g);
+                assert_eq!(ids.decode(g), (l, node));
+                all.push(((n.net, node), g));
+            }
+        }
+        all.sort();
+        assert!(all.windows(2).all(|w| w[0].1 < w[1].1));
+        // Coupling keys sort like the original endpoint tuples.
+        let ends = [
+            ((30, 1), (4, 2)),
+            ((17, 0), (4, 2)),
+            ((4, 0), (1_000_000, 1)),
+        ];
+        let keys = ends.map(|(p, q)| {
+            strip::Op::couple(ids.of(&index, p.0, p.1), ids.of(&index, q.0, q.1), 1.0).key
+        });
+        let tuples = ends.map(|(p, q)| if p <= q { (p, q) } else { (q, p) });
+        for i in 0..3 {
+            assert!(keys[i] < strip::GROUND);
+            for j in 0..3 {
+                assert_eq!(keys[i].cmp(&keys[j]), tuples[i].cmp(&tuples[j]));
+            }
+        }
+    }
 
     #[test]
     fn spatial_header_bound_covers_negative_bins_and_saturates_extreme_extents() {
@@ -2754,6 +3132,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &[],
             passive: &[],
             instances: Some(InstancedPassive {
@@ -2960,34 +3339,83 @@ mod tests {
         let clean = |s: &ExtractStats| {
             let mut value = serde_json::to_value(s).unwrap();
             value.as_object_mut().unwrap().remove("memory");
-            value.as_object_mut().unwrap().remove("parallel_queries");
             value
         };
         assert_eq!(clean(&a.stats), clean(&b.stats));
     }
+    /// One shared pool per size: fresh pools per call would spread test
+    /// allocations over new threads' malloc arenas, raising the process
+    /// peak resident set that other tests' runtime guards observe.
+    fn pool(threads: usize) -> &'static rayon::ThreadPool {
+        static POOLS: [std::sync::OnceLock<rayon::ThreadPool>; 5] =
+            [const { std::sync::OnceLock::new() }; 5];
+        POOLS[threads].get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+        })
+    }
+    /// The serial path: one pool thread, no forced tiles.
+    fn serial(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<RcNetwork> {
+        pool(1).install(|| {
+            extract_cpu_ref(
+                input,
+                &ExtractLimits {
+                    tile_units: 0,
+                    ..limits.clone()
+                },
+            )
+        })
+    }
+    /// Parallel bounds small enough that fixtures defer units to the serial
+    /// path (candidate cap) and fill chunk transcripts.
+    fn tight_bounds() -> parallel::Bounds {
+        parallel::Bounds {
+            candidates: 2,
+            chunk_ops: 24,
+            pending_bytes: 1,
+            virtual_grid: true,
+            net_bin_list: NET_BIN_LIST,
+        }
+    }
+    /// Every pool size and tile size, with default and tight parallel
+    /// bounds, reproduces the serial network and statistics bit for bit.
     fn check_parallel(input: &ExtractInput<'_>, limits: &ExtractLimits, serial: &RcNetwork) {
-        for (workers, batch) in [(2, 3), (4, 8), (4, 64)] {
+        for (threads, tile) in [(1, 1), (1, 3), (2, 0), (2, 7), (3, 1), (4, 0), (4, 64)] {
             let limits = ExtractLimits {
-                query_workers: workers,
-                query_batch_runs: batch,
+                tile_units: tile,
                 ..limits.clone()
             };
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(workers)
-                .build()
-                .unwrap();
-            let parallel = pool.install(|| extract_cpu_ref(input, &limits)).unwrap();
-            assert_network_exact(serial, &parallel);
-            let memory = parallel.stats.memory.unwrap();
-            let stats = parallel.stats.parallel_queries.unwrap();
-            assert_eq!(
-                memory.estimate_bytes,
-                stats.baseline_estimate_bytes + stats.scratch_bytes
-            );
-            assert!(memory.estimate_bytes <= memory.limit_bytes);
-            assert!(stats.admitted_workers <= workers);
-            assert!(stats.scratch_bytes <= limits.query_scratch_mib * (1 << 20));
+            let instance_path = parallel::Bounds {
+                virtual_grid: false,
+                ..tight_bounds()
+            };
+            for bounds in [parallel::Bounds::default(), tight_bounds(), instance_path] {
+                let mut parallel = pool(threads)
+                    .install(|| extract_with_queries(input, &limits, Queries::Indexed(bounds)))
+                    .unwrap();
+                if bounds.virtual_grid {
+                    assert_eq!(serial.stats.work, parallel.stats.work);
+                } else {
+                    // The instance-index path scans other index cells.
+                    parallel.stats.work = serial.stats.work;
+                }
+                assert_network_exact(serial, &parallel);
+                let memory = parallel.stats.memory.unwrap();
+                assert!(memory.estimate_bytes <= memory.limit_bytes);
+            }
         }
+        // Every same-net list bucketed: the same network (only work differs).
+        let bucketed = parallel::Bounds {
+            net_bin_list: 1,
+            ..parallel::Bounds::default()
+        };
+        let mut parallel = pool(2)
+            .install(|| extract_with_queries(input, limits, Queries::Indexed(bucketed)))
+            .unwrap();
+        parallel.stats.work = serial.stats.work;
+        assert_network_exact(serial, &parallel);
     }
     fn run(
         r: &Routes,
@@ -3000,6 +3428,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: r,
+            nets: None,
             terminals: t,
             passive,
             held_bytes: 0,
@@ -3007,8 +3436,8 @@ mod tests {
             tech,
         };
         let limits = ExtractLimits::default();
-        let actual = extract_cpu_ref(&input, &limits)?;
-        let reference = extract_with_queries(&input, &limits, false)?;
+        let actual = serial(&input, &limits)?;
+        let reference = extract_with_queries(&input, &limits, Queries::Reference)?;
         assert_eq!(actual.nets.len(), reference.nets.len());
         for (a, b) in actual.nets.iter().zip(&reference.nets) {
             assert_eq!((a.net, &a.nodes), (b.net, &b.nodes));
@@ -3172,6 +3601,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             held_bytes: 0,
@@ -3310,6 +3740,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             tech: &tech(false),
@@ -3575,6 +4006,7 @@ mod tests {
                 layers: &wide_layers,
                 vias: &v,
                 routes: &r2,
+                nets: None,
                 terminals: &t2,
                 passive: &[],
                 tech: &wide,
@@ -3736,6 +4168,7 @@ mod tests {
                     layers: &l,
                     vias: &v,
                     routes: r,
+                    nets: None,
                     terminals: &t,
                     passive: &[],
                     tech: &tech,
@@ -4220,6 +4653,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             tech: &tk,
@@ -4315,7 +4749,7 @@ mod tests {
     }
 
     #[test]
-    fn parallel_query_budget_errors_and_serial_fallback_match() {
+    fn parallel_budget_errors_and_results_match_the_serial_path() {
         // Three close routed conductors produce distinct couplings; displaced
         // passive edges also create interval boundaries without a direct cap.
         let r = routes(
@@ -4361,6 +4795,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &passive,
             instances: None,
@@ -4368,24 +4803,17 @@ mod tests {
             tech: &tk,
         };
         let limits = ExtractLimits::default();
-        let baseline = extract_cpu_ref(&input, &limits).unwrap();
+        let baseline = serial(&input, &limits).unwrap();
         assert!(baseline.couplings.len() > 1);
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(4)
-            .build()
-            .unwrap();
-        for limits in [
+        assert!(baseline.stats.max_run_candidates > 2);
+        let work = baseline.stats.work;
+        let mut variants = vec![
             limits.clone(),
+            // The old query-worker flags are accepted and have no effect.
             ExtractLimits {
-                max_work: baseline.stats.work,
-                ..limits.clone()
-            },
-            ExtractLimits {
-                max_work: baseline.stats.work - 1,
-                ..limits.clone()
-            },
-            ExtractLimits {
-                max_work: 100,
+                query_workers: 16,
+                query_batch_runs: 64,
+                query_scratch_mib: 1,
                 ..limits.clone()
             },
             ExtractLimits {
@@ -4393,66 +4821,537 @@ mod tests {
                 ..limits.clone()
             },
             ExtractLimits {
+                max_candidates: 2,
+                ..limits.clone()
+            },
+            ExtractLimits {
                 max_couplings: 1,
+                ..limits.clone()
+            },
+            ExtractLimits {
+                max_couplings: 2,
                 ..limits.clone()
             },
             ExtractLimits {
                 max_elements: 1,
                 ..limits.clone()
             },
-            ExtractLimits {
-                query_scratch_mib: 1,
+        ];
+        // Work caps across the whole run, including every unit boundary.
+        for cap in [100, work / 4, work / 2, work - 1, work] {
+            variants.push(ExtractLimits {
+                max_work: cap,
                 ..limits.clone()
-            },
-            ExtractLimits {
-                query_batch_runs: 1,
-                ..limits.clone()
-            },
-        ] {
-            let a = extract_cpu_ref(&input, &limits);
-            let enabled = ExtractLimits {
-                query_workers: 16,
-                ..limits.clone()
-            };
-            let b = pool.install(|| extract_cpu_ref(&input, &enabled));
-            match (a, b) {
-                (Ok(a), Ok(b)) => {
-                    assert_network_exact(&a, &b);
-                    let stats = b.stats.parallel_queries.unwrap();
-                    assert!(stats.admitted_workers <= 4);
-                    if limits.query_scratch_mib == 1 || limits.query_batch_runs == 1 {
-                        assert_eq!(stats.admitted_workers, 1);
-                    }
-                    if limits.max_work == baseline.stats.work {
-                        assert!(stats.serial_tiles > 0);
-                    }
-                    if limits.max_work == ExtractLimits::default().max_work
-                        && limits.query_scratch_mib > 1
-                        && limits.query_batch_runs > 1
-                    {
-                        assert!(stats.parallel_tiles > 0);
+            });
+        }
+        let mut errors = 0;
+        for limits in variants {
+            let a = serial(&input, &limits);
+            for (threads, tile) in [(4, 0), (4, 1), (2, 7), (3, 64), (1, 3)] {
+                for bounds in [parallel::Bounds::default(), tight_bounds()] {
+                    let limits = ExtractLimits {
+                        tile_units: tile,
+                        ..limits.clone()
+                    };
+                    let b = pool(threads).install(|| {
+                        extract_with_queries(&input, &limits, Queries::Indexed(bounds))
+                    });
+                    match (&a, b) {
+                        (Ok(a), Ok(b)) => assert_network_exact(a, &b),
+                        (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
+                        (a, b) => panic!("serial/parallel outcome differs: {a:?} / {b:?}"),
                     }
                 }
-                (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
-                (a, b) => panic!("serial/parallel outcome differs: {a:?} / {b:?}"),
             }
+            errors += usize::from(a.is_err());
         }
-        let one = rayon::ThreadPoolBuilder::new()
-            .num_threads(1)
-            .build()
-            .unwrap()
-            .install(|| {
-                extract_cpu_ref(
+        // Candidate, coupling, element and work caps all fail somewhere.
+        assert!(errors >= 8, "{errors} failing variants");
+    }
+
+    #[test]
+    fn same_net_buckets_report_exactly_the_touching_ids() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move |n: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as i64
+        };
+        let limits = ExtractLimits {
+            max_candidates: MAX_CANDIDATES_CEILING,
+            max_work: 1 << 40,
+            ..Default::default()
+        };
+        // Lattice coordinates make exact edge and corner contacts common.
+        let mut rect = |big: bool, far: bool| {
+            let span = if big { 400 } else { 30 };
+            let origin = if far { (1i64 << 60) - 10_000 } else { 0 };
+            let (x, y) = (origin + 100 * (next(400) - 200), 100 * (next(400) - 200));
+            Rect {
+                lx: x,
+                ly: y,
+                ux: x + 100 * (1 + next(span)),
+                uy: y + 100 * (1 + next(span)),
+            }
+        };
+        for (cell, capacity) in [
+            (1000, usize::MAX),
+            (2500, usize::MAX),
+            (1 << 40, usize::MAX),
+            (700, 3000),
+            (1 << 40, 50),
+        ] {
+            let mut bins = NetBins::new(cell, capacity);
+            let mut rects: Vec<(u32, Rect)> = Vec::new();
+            let mut complete = [true, true];
+            let mut work = 0usize;
+            for id in 0..1200u32 {
+                let r = rect(id % 97 == 0, id % 211 == 0);
+                let key = id % 2;
+                let before = bins.entries.len();
+                if bins.insert(key, id, r, &mut work, &limits).unwrap() {
+                    rects.push((key, r));
+                } else {
+                    // Nothing is added when the admitted entries run out.
+                    assert_eq!(bins.entries.len(), before);
+                    complete[key as usize] = false;
+                    rects.push((u32::MAX, r));
+                }
+            }
+            assert!(bins.entries.len() <= capacity);
+            let rect_of = |id: u32| rects[id as usize].1;
+            let mut checked = 0;
+            for q in 0..300 {
+                let query = rect(q % 13 == 0, q % 17 == 0);
+                for key in [0u32, 1] {
+                    if !complete[key as usize] {
+                        continue;
+                    }
+                    let mut found = Vec::new();
+                    bins.touching(key, query, rect_of, &mut found, &mut work, &limits)
+                        .unwrap();
+                    let n = found.len();
+                    found.sort_unstable();
+                    found.dedup();
+                    assert_eq!(found.len(), n, "an ID is reported once");
+                    let expected: Vec<u32> = (0..rects.len() as u32)
+                        .filter(|&id| {
+                            let (k, r) = rects[id as usize];
+                            k == key
+                                && r.lx <= query.ux
+                                && query.lx <= r.ux
+                                && r.ly <= query.uy
+                                && query.ly <= r.uy
+                        })
+                        .collect();
+                    assert_eq!(found, expected, "cell {cell} key {key} query {query:?}");
+                    checked += 1;
+                }
+            }
+            // Unbounded buckets answer every query; tight ones run out.
+            assert_eq!(checked == 600, capacity == usize::MAX, "{checked}");
+        }
+        // Candidate and work budgets fail like the list scan.
+        let mut bins = NetBins::new(1000, usize::MAX);
+        let mut work = 0;
+        let big = Rect {
+            lx: 0,
+            ly: 0,
+            ux: 5000,
+            uy: 5000,
+        };
+        for id in 0..10 {
+            bins.insert(0, id, big, &mut work, &limits).unwrap();
+        }
+        let tight = ExtractLimits {
+            max_candidates: 9,
+            ..limits.clone()
+        };
+        let err = bins
+            .touching(0, big, |_| big, &mut Vec::new(), &mut 0, &tight)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("candidates per metal piece"),
+            "{err}"
+        );
+        let tight = ExtractLimits {
+            max_work: 5,
+            ..limits.clone()
+        };
+        let err = bins
+            .touching(0, big, |_| big, &mut Vec::new(), &mut 0, &tight)
+            .unwrap_err();
+        assert!(err.to_string().contains("extraction work"), "{err}");
+    }
+
+    /// One net: a trunk with `n` same-layer stubs (every stub and trunk run
+    /// is on the net's single M1 list).
+    fn comb(n: i64) -> Routes {
+        let (pitch, stub) = (2000, 1000);
+        let mut wires = vec![Wire {
+            net: 0,
+            layer: 0,
+            start: [0, 0],
+            end: [n * pitch, 0],
+        }];
+        for i in 1..=n {
+            let x = i * pitch - pitch / 2;
+            wires.push(Wire {
+                net: 0,
+                layer: 0,
+                start: [x, 0],
+                end: [x, stub],
+            });
+        }
+        routes(
+            wires,
+            vec![],
+            vec![Access {
+                pin: 0,
+                net: 0,
+                layer: 0,
+                at: [0, 0],
+            }],
+            vec![0],
+        )
+    }
+
+    #[test]
+    fn a_giant_net_costs_its_local_density_not_its_length() {
+        // 2,001 runs on one net and layer (an unbuffered clock or reset):
+        // the linear scan's work grows with the square of the list, the
+        // bucketed lookups' with its length, for the same network.
+        let (l, v, tk) = (layers(), vias(), tech(false));
+        let t = [terminal(0, 0, true)];
+        let r = comb(1000);
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &[],
+            instances: None,
+            held_bytes: 0,
+            tech: &tk,
+        };
+        let run = |max_work, net_bin_list| {
+            pool(1).install(|| {
+                extract_with_queries(
                     &input,
                     &ExtractLimits {
-                        query_workers: 16,
-                        ..limits
+                        max_work,
+                        ..Default::default()
                     },
+                    Queries::Indexed(parallel::Bounds {
+                        net_bin_list,
+                        ..parallel::Bounds::default()
+                    }),
                 )
             })
-            .unwrap();
-        assert_network_exact(&baseline, &one);
-        assert_eq!(one.stats.parallel_queries.unwrap().admitted_workers, 1);
+        };
+        let mut bucketed = run(1 << 40, NET_BIN_LIST).unwrap();
+        let scanned = run(1 << 40, usize::MAX).unwrap();
+        assert_eq!(bucketed.stats.wire_runs, 2001);
+        assert!(
+            bucketed.stats.work * 8 < scanned.stats.work,
+            "{} vs {}",
+            bucketed.stats.work,
+            scanned.stats.work
+        );
+        let cap = bucketed.stats.work;
+        bucketed.stats.work = scanned.stats.work;
+        assert_network_exact(&scanned, &bucketed);
+        run(cap, NET_BIN_LIST).unwrap();
+        let err = run(cap, usize::MAX).unwrap_err();
+        assert!(err.to_string().contains("extraction work"), "{err}");
+    }
+
+    #[test]
+    fn retained_grid_coarsens_to_fit_the_entry_cap() {
+        // Small squares and a long rail make base-cell entries exceed the
+        // shape count; a cap between them coarsens the cells instead of
+        // failing, and only a cap below the shape count fails.
+        let mut wires = straight(0, 0, 10);
+        wires.extend(straight(1, 600, 10));
+        let r = routes(
+            wires,
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 1,
+                    net: 1,
+                    layer: 0,
+                    at: [0, 600],
+                },
+            ],
+            vec![0, 1],
+        );
+        let t = [terminal(0, 0, true), terminal(1, 1, true)];
+        let mut passive: Vec<PassiveShape> = (0..400)
+            .map(|i| PassiveShape {
+                layer: 0,
+                rect: Rect {
+                    lx: -200_000 + i * 1000,
+                    ly: 20_000,
+                    ux: -199_500 + i * 1000,
+                    uy: 20_500,
+                },
+                owner: PassiveOwner::Ground,
+            })
+            .collect();
+        passive.push(PassiveShape {
+            layer: 0,
+            rect: Rect {
+                lx: -200_000,
+                ly: 5000,
+                ux: 200_000,
+                uy: 5100,
+            },
+            owner: PassiveOwner::Ground,
+        });
+        let (l, v, tk) = (layers(), vias(), tech(false));
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &passive,
+            instances: None,
+            held_bytes: 0,
+            tech: &tk,
+        };
+        let limits = ExtractLimits::default();
+        let base = serial(&input, &limits).unwrap();
+        let shapes = base.stats.shapes;
+        let capped = ExtractLimits {
+            max_bin_entries: shapes,
+            ..limits.clone()
+        };
+        let mut coarse = serial(&input, &capped).unwrap();
+        // Rejected cell sizes are charged: the cells did change.
+        assert!(coarse.stats.work > base.stats.work);
+        coarse.stats.work = base.stats.work;
+        assert_network_exact(&base, &coarse);
+        check_parallel(&input, &capped, &serial(&input, &capped).unwrap());
+        let err = serial(
+            &input,
+            &ExtractLimits {
+                max_bin_entries: shapes - 1,
+                ..limits
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("spatial-bin entries"), "{err}");
+    }
+
+    #[test]
+    fn a_pair_reports_its_x_strip_before_a_y_strip_error() {
+        // The end piece at x = 10 um (a pair unit): its x strip couples to
+        // two pins of net 1 above and below it (two new coupling keys); its
+        // y strip sees the wire body and eight ground slivers to its right
+        // (nine candidates). With max_candidates 8 and max_couplings 1 the
+        // x strip's coupling budget fails first, as for separate strips.
+        let mut wires = straight(0, 0, 10);
+        wires.extend(straight(1, 100_000, 10));
+        let r = routes(
+            wires,
+            vec![],
+            vec![
+                Access {
+                    pin: 0,
+                    net: 0,
+                    layer: 0,
+                    at: [0, 0],
+                },
+                Access {
+                    pin: 5,
+                    net: 1,
+                    layer: 0,
+                    at: [0, 100_000],
+                },
+                Access {
+                    pin: 6,
+                    net: 1,
+                    layer: 0,
+                    at: [10_000, 100_000],
+                },
+            ],
+            vec![0, 1],
+        );
+        let t = [
+            terminal(0, 0, true),
+            terminal(5, 1, true),
+            terminal(6, 1, false),
+        ];
+        let mut passive: Vec<PassiveShape> = (0..8)
+            .map(|i| PassiveShape {
+                layer: 0,
+                rect: Rect {
+                    lx: 10_100 + 20 * i,
+                    ly: -50,
+                    ux: 10_110 + 20 * i,
+                    uy: 50,
+                },
+                owner: PassiveOwner::Ground,
+            })
+            .collect();
+        for (pin, ly) in [(5, 300), (6, -400)] {
+            passive.push(PassiveShape {
+                layer: 0,
+                rect: Rect {
+                    lx: 10_005,
+                    ly,
+                    ux: 10_045,
+                    uy: ly + 100,
+                },
+                owner: PassiveOwner::Pin { net: 1, pin },
+            });
+        }
+        let (l, v, tk) = (layers(), vias(), tech(false));
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &passive,
+            instances: None,
+            held_bytes: 0,
+            tech: &tk,
+        };
+        let limits = ExtractLimits::default();
+        let ok = serial(&input, &limits).unwrap();
+        assert_eq!(ok.couplings.len(), 2);
+        assert_eq!(ok.stats.max_run_candidates, 9);
+        for (max_candidates, max_couplings, expected) in [
+            (8, 1, "extraction coupling capacitors"),
+            (8, 2, "extraction candidates per wire run"),
+            (9, 1, "extraction coupling capacitors"),
+        ] {
+            let limits = ExtractLimits {
+                max_candidates,
+                max_couplings,
+                ..limits.clone()
+            };
+            for (threads, tile) in [(1, 0), (1, 1), (2, 0), (3, 1), (4, 7)] {
+                for bounds in [parallel::Bounds::default(), tight_bounds()] {
+                    let limits = ExtractLimits {
+                        tile_units: tile,
+                        ..limits.clone()
+                    };
+                    let err = pool(threads)
+                        .install(|| extract_with_queries(&input, &limits, Queries::Indexed(bounds)))
+                        .unwrap_err();
+                    assert!(err.to_string().contains(expected), "{err} vs {expected}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_net_trees_fail_at_the_serial_net_and_checkpoint() {
+        // Five nets of different sizes; budgets on graph and RC nodes fail at
+        // different nets, and a later net lacks its pin access. The batch of
+        // concurrently built trees must report the serial loop's first error.
+        let sizes = [3i64, 9, 2, 6, 4];
+        let wires: Vec<Wire> = sizes
+            .iter()
+            .enumerate()
+            .flat_map(|(n, &k)| straight(n as u32, n as i64 * 600, k))
+            .collect();
+        let access_for = |skip: Option<u32>| -> Vec<Access> {
+            sizes
+                .iter()
+                .enumerate()
+                .filter(|&(n, _)| Some(n as u32) != skip)
+                .flat_map(|(n, &k)| {
+                    let n = n as u32;
+                    [
+                        Access {
+                            pin: 2 * n,
+                            net: n,
+                            layer: 0,
+                            at: [0, i64::from(n) * 600],
+                        },
+                        Access {
+                            pin: 2 * n + 1,
+                            net: n,
+                            layer: 0,
+                            at: [k * 1000, i64::from(n) * 600],
+                        },
+                    ]
+                })
+                .collect()
+        };
+        let t: Vec<_> = (0..sizes.len() as u32)
+            .flat_map(|n| [terminal(2 * n, n, true), terminal(2 * n + 1, n, false)])
+            .collect();
+        let (l, v, tk) = (layers(), vias(), tech(false));
+        let nets: Vec<u32> = (0..sizes.len() as u32).collect();
+        let complete = routes(wires.clone(), vec![], access_for(None), nets.clone());
+        let broken = routes(wires, vec![], access_for(Some(3)), nets);
+        let mut errors = std::collections::BTreeSet::new();
+        for r in [&complete, &broken] {
+            let input = ExtractInput {
+                layers: &l,
+                vias: &v,
+                routes: r,
+                nets: None,
+                terminals: &t,
+                passive: &[],
+                instances: None,
+                held_bytes: 0,
+                tech: &tk,
+            };
+            let nodes = serial(
+                &complete_input(&input, &complete),
+                &ExtractLimits::default(),
+            )
+            .unwrap()
+            .stats
+            .nodes;
+            for max_nodes in [1, 2, 3, 5, nodes / 3, nodes / 2, nodes - 1, nodes] {
+                let limits = ExtractLimits {
+                    max_nodes,
+                    ..Default::default()
+                };
+                let a = serial(&input, &limits);
+                for threads in [2, 3, 4] {
+                    let b = pool(threads).install(|| extract_cpu_ref(&input, &limits));
+                    match (&a, b) {
+                        (Ok(a), Ok(b)) => assert_network_exact(a, &b),
+                        (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
+                        (a, b) => panic!("serial/parallel outcome differs: {a:?} / {b:?}"),
+                    }
+                }
+                if let Err(e) = a {
+                    errors.insert(e.to_string());
+                }
+            }
+        }
+        // Graph-node, RC-node and missing-access errors all occur.
+        assert!(
+            errors.iter().any(|e| e.contains("graph nodes")),
+            "{errors:?}"
+        );
+        assert!(errors.iter().any(|e| e.contains("RC nodes")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("pin access")),
+            "{errors:?}"
+        );
+    }
+    /// The same input over another routing table.
+    fn complete_input<'a>(input: &ExtractInput<'a>, routes: &'a Routes) -> ExtractInput<'a> {
+        ExtractInput { routes, ..*input }
     }
 
     #[test]
@@ -4488,6 +5387,7 @@ mod tests {
             layers: &layers,
             vias: &vias,
             routes: &r,
+            nets: None,
             terminals: &terminals,
             passive: &passive,
             tech: &tech,
@@ -4605,6 +5505,7 @@ mod tests {
                 layers: &l,
                 vias: &v,
                 routes: &r,
+                nets: None,
                 terminals: &t,
                 passive: &[],
                 held_bytes: 0,
@@ -4622,6 +5523,7 @@ mod tests {
                 layers: &l,
                 vias: &v,
                 routes: &r,
+                nets: None,
                 terminals: &t,
                 passive: &[],
                 held_bytes: 0,
@@ -4739,6 +5641,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             held_bytes: 0,
@@ -4788,6 +5691,7 @@ mod tests {
             layers: &l,
             vias: &v,
             routes: &r,
+            nets: None,
             terminals: &t,
             passive: &[],
             instances: None,

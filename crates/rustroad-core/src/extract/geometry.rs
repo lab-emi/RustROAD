@@ -58,11 +58,19 @@ impl<'a> Shapes<'a> {
     pub(super) fn len(&self) -> usize {
         self.values.len() + self.virtual_count
     }
+    /// Retained shapes (wire bodies, passive shapes, pieces), in index order.
+    pub(super) fn retained(&self) -> &[Shape] {
+        &self.values
+    }
     pub(super) fn retained_len(&self) -> usize {
         self.values.len()
     }
     pub(super) fn push(&mut self, shape: Shape) {
         self.values.push(shape);
+    }
+    /// Releases growth slack once every retained shape exists.
+    pub(super) fn shrink_to_fit(&mut self) {
+        self.values.shrink_to_fit();
     }
     pub(super) fn virtual_count(&self) -> usize {
         self.virtual_count
@@ -85,6 +93,24 @@ impl<'a> Shapes<'a> {
             )
         })
     }
+    /// Every virtual shape with its ID, decoded instance by instance.
+    pub(super) fn virtual_shapes(&self) -> impl Iterator<Item = (u32, Shape)> + '_ {
+        let instances = self.first.len().saturating_sub(1);
+        (0..instances).flat_map(move |instance| {
+            let count = (self.first[instance + 1] - self.first[instance]) as usize;
+            (0..count).map(move |ordinal| {
+                let input = self.source.expect("virtual shape has a source");
+                let (shape, pin) = input
+                    .geometry
+                    .shape(instance, ordinal)
+                    .expect("validated virtual shape geometry");
+                (
+                    self.virtual_id(instance, ordinal),
+                    Self::passive_shape(input, shape, pin),
+                )
+            })
+        })
+    }
     pub(super) fn passive_shape(
         input: InstancedPassive<'_>,
         blockage: crate::routing::Blockage,
@@ -102,6 +128,7 @@ impl<'a> Shapes<'a> {
             owner: Owner::Passive(owner),
         }
     }
+    #[inline]
     pub(super) fn get(&self, id: u32) -> Shape {
         let id = id as usize;
         if id < self.front {
@@ -111,6 +138,12 @@ impl<'a> Shapes<'a> {
         if offset >= self.virtual_count {
             return self.values[id - self.virtual_count];
         }
+        self.decode_virtual(offset)
+    }
+    /// Decodes one virtual shape; candidate queries carry decoded shapes
+    /// with their IDs, so strips never repeat this lookup per interval.
+    #[inline(never)]
+    fn decode_virtual(&self, offset: usize) -> Shape {
         let instance = self.first.partition_point(|&p| p as usize <= offset) - 1;
         let ordinal = offset - self.first[instance] as usize;
         let input = self.source.expect("virtual shape has a source");
@@ -181,6 +214,7 @@ impl<'a> InstanceGeometry<'a> {
         };
         Ok(
             crate::routing::instance_geometry_bytes(input.geometry, die, bin, layers, &bounds)?
+                .saturating_add(crate::routing::instance_cache_bytes(input.geometry.len()))
                 .saturating_add((input.geometry.len() as u64 + 1).saturating_mul(4))
                 .saturating_add(
                     input
@@ -190,38 +224,6 @@ impl<'a> InstanceGeometry<'a> {
                         .saturating_mul(8),
                 ),
         )
-    }
-    pub(super) fn visit(
-        &mut self,
-        shapes: &Shapes<'_>,
-        layer: u32,
-        query: Rect,
-        work: &mut usize,
-        mut visitor: impl FnMut(u32, Shape) -> Result<bool>,
-    ) -> Result<bool> {
-        let input = shapes.source.expect("indexed geometry has a source");
-        let query = Self::expanded_query(query)?;
-        self.index
-            .visit_cells(layer, query, work, &self.limits, |instance, work| {
-                input.geometry.visit_near(
-                    instance,
-                    layer,
-                    query,
-                    || {
-                        *work = work
-                            .checked_add(1)
-                            .filter(|&n| n <= self.limits.max_comparisons)
-                            .ok_or_else(|| super::budget("instance extraction work"))?;
-                        Ok(())
-                    },
-                    |ordinal, blockage, pin| {
-                        visitor(
-                            shapes.virtual_id(instance, ordinal),
-                            Shapes::passive_shape(input, blockage, pin),
-                        )
-                    },
-                )
-            })
     }
     fn expanded_query(query: Rect) -> Result<Rect> {
         Ok(Rect {
@@ -242,18 +244,6 @@ impl<'a> InstanceGeometry<'a> {
                 .checked_add(1)
                 .ok_or_else(|| super::budget("instance query coordinate"))?,
         })
-    }
-    pub(super) fn query_work_bound(
-        &self,
-        shapes: &Shapes<'_>,
-        layer: u32,
-        query: Rect,
-    ) -> Option<usize> {
-        self.index.query_work_bound(
-            layer,
-            Self::expanded_query(query).ok()?,
-            shapes.virtual_count(),
-        )
     }
     pub(super) fn visit_shared(
         &self,

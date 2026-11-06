@@ -92,6 +92,26 @@ and fillers, preserves the clock topology and original logical order, and
 rebuilds the same geometry. Older profiles without either feature still publish
 schema 3 snapshots.
 
+Every commit runs the checks a full read runs (routing geometry, connectivity
+and rules on the read-time routing input, the bundle link, the placement and the
+prepared layout) and then writes a receipt to `receipts/<rev>.json`: the
+validator epoch and build identity (package version plus a digest of the
+validator sources, the compiler version and the build profile), the revision
+name, the length and XXH3-128 of every revision file, and a digest of the
+technology, physical and routing configuration. Receipts live beside the
+revisions, never inside one, so a revision directory holds exactly its format's
+files, and every file is an independent inode (unchanged side tables are
+written again, never hard-linked to the parent's). A read whose receipt matches
+all of them (hashed in parallel with the design.json parse) skips the semantic
+re-derivations and keeps only O(n) index bounds, table lengths and the instance
+identity checks; a missing, foreign-build or mismatching receipt, or any file
+in the revision directory the receipt does not list, means full validation, as
+does `--verify-workspace` or `RUSTROAD_FORCE_VALIDATE=1`.
+`rustroad verify-workspace --write-receipt` validates HEAD fully and stamps
+revisions committed before receipts existed (or by another build). A receipt
+is an integrity cache, not an authenticity proof: whoever can write the
+workspace can also rewrite a receipt.
+
 Readers hold shared locks for the lifetime of their mapped snapshot; a writer
 holds an exclusive lock through calculation and publication. This intentionally
 simple first version serializes publication behind active readers. A production
