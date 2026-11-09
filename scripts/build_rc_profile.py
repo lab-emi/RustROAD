@@ -20,11 +20,11 @@ Inputs are PDK *data* files, read as data and fingerprinted (path + sha256):
   The GF180 technology LEF states its parasitic values are placeholders; they
   are never read into a profile.
 
-No coefficient is fitted to any extractor output. The fourth column of every
-calibration row is not used: it is inconsistent with the foundry sheet
-resistance of both other sources (see docs/extraction.md), so resistance comes
-from the Magic extract section. The physical model is documented in
-docs/extraction.md.
+No coefficient is fitted to an extractor output. The default Magic resistance
+model preserves the SKY130/GF180 profiles. The explicit IHP ``openrcx-pdk``
+model reads constant RESOVER resistance per nanometre and original LEF cut
+resistance; Magic values remain independent cross-checks. The physical model
+is documented in docs/extraction.md.
 
 Usage:
   scripts/build_rc_profile.py [--pdk-root DIR] [--out-dir fixtures/pdk] [--check]
@@ -50,6 +50,21 @@ CORNERS = ("min", "nom", "max")
 MAGIC_VARIANT = {"nom": "()", "max": "(hrhc)", "min": "(lrlc)"}
 
 PDKS = {
+    "ihp": dict(
+        library="ez130_8t",
+        base="ihp-sg13g2",
+        technology_lef="libs.ref/sg13g2_stdcell/lef/sg13g2_tech.lef",
+        rules="libs.tech/librelane/openrcx/ihp-sg13g2.{corner}.magic.rules",
+        magic="libs.tech/magic/ihp-sg13g2.tech",
+        magic_extract="libs.tech/magic/ihp-sg13g2-extract.tech",
+        routing=["Metal1", "Metal2", "Metal3", "Metal4", "Metal5", "TopMetal1", "TopMetal2"],
+        magic_types=[f"allm{i}" for i in range(1, 8)],
+        magic_planes=[f"metal{i}" for i in range(1, 8)],
+        cuts=dict(zip(["Via1", "Via2", "Via3", "Via4", "TopVia1", "TopVia2"],
+                      [f"via{i}" for i in range(1, 7)])),
+        lef_rc_valid=True,
+        pdk_version="5cccb161f7492697cfa52eb14dc03beb00bdca9e",
+    ),
     "sky130": dict(
         library="sky130_fd_sc_hd",
         base=f"sky130/versions/{PDK_VERSION}/sky130A",
@@ -86,7 +101,7 @@ def read_text(path: Path) -> str:
         fail(f"missing PDK data file {path}")
     if path.stat().st_size > MAX_INPUT_BYTES:
         fail(f"input over byte cap: {path}")
-    return path.read_text(encoding="ascii", errors="strict")
+    return path.read_text(encoding="utf-8", errors="strict")
 
 
 def fingerprint(role: str, path: Path) -> dict:
@@ -135,7 +150,7 @@ def parse_rules(text: str) -> dict:
     if not lines or lines[0].strip() != "Extraction Rules for OpenRCX":
         fail("unexpected calibration-table header")
     count = None
-    tables, widths, ignored = {}, {}, set()
+    tables, widths, ignored, resover = {}, {}, set(), {}
     i = 0
     while i < len(lines):
         line = lines[i].strip()
@@ -177,7 +192,11 @@ def parse_rules(text: str) -> dict:
             i += 3 + n
             if n == 0:
                 continue
-            if kind in ("RESOVER", "DIAGUNDER"):
+            if kind == "RESOVER":
+                resover[(metal, a)] = [r[3] for r in rows]
+                ignored.add(kind)
+                continue
+            if kind == "DIAGUNDER":
                 ignored.add(kind)
                 continue
             if kind == "OVER":
@@ -201,7 +220,8 @@ def parse_rules(text: str) -> dict:
         i += 1
     if count is None:
         fail("LayerCount missing")
-    return dict(layer_count=count, widths=widths, tables=tables, ignored=sorted(ignored))
+    return dict(layer_count=count, widths=widths, tables=tables,
+                resover=resover, ignored=sorted(ignored))
 
 
 def parse_magic(text: str, variant: str, types: list[str], cut_types: list[str]) -> dict:
@@ -280,7 +300,12 @@ def rel(a: float, b: float) -> float | None:
     return None if b == 0 else (a - b) / b
 
 
-def build(tag: str, corner: str, pdk_root: Path) -> dict:
+def build(tag: str, corner: str, pdk_root: Path, resistance_model: str = "magic") -> dict:
+    if resistance_model not in ("magic", "openrcx-pdk"):
+        fail(f"unsupported resistance model {resistance_model}")
+    matched = resistance_model == "openrcx-pdk"
+    if matched and tag != "ihp":
+        fail("openrcx-pdk resistance is qualified only for IHP; baseline PDKs use Magic")
     spec = PDKS[tag]
     base = pdk_root / spec["base"]
     lef_path = base / spec["technology_lef"]
@@ -291,6 +316,9 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
     nominal_rules_path = base / spec["rules"].format(corner="nom")
     rules_nom = rules if corner == "nom" else parse_rules(read_text(nominal_rules_path))
     magic_text = read_text(magic_path)
+    extract_path = base / spec["magic_extract"] if "magic_extract" in spec else None
+    if extract_path is not None:
+        magic_text += "\n" + read_text(extract_path)
     check_magic_contacts(magic_text, spec)
     variant = MAGIC_VARIANT[corner]
     magic = parse_magic(magic_text, variant, spec["magic_types"], list(spec["cuts"].values()))
@@ -304,7 +332,10 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
         fail(f"{tag}: calibration LayerCount {rules['layer_count']} != {len(routing)} routing layers")
     by_name = {l["name"]: l for l in lef["layers"]}
     diagnostics = [
-        "calibration column 4 is not used; resistance is taken from the Magic extract section",
+        ("wire resistance is taken from constant IHP RESOVER column4 (Ohm/nm); "
+         "via resistance is the original LEF cut value, fixed across corners"
+         if matched else
+         "calibration column 4 is not used; resistance is taken from the Magic extract section"),
         "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
         "via cut and via landing-pad self capacitance are not modeled",
     ]
@@ -318,6 +349,14 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
         sheet = magic["resist"].get(mtype)
         if sheet is None:
             fail(f"{tag}: magic sheet resistance missing for {mtype} {variant}")
+        sheet_ohm = sheet / 1000.0
+        if matched:
+            resistance = rules["resover"].get((index, 0))
+            if not resistance or not all(0.0 < v < float("inf") for v in resistance):
+                fail(f"{tag}: invalid/missing RESOVER0 resistance for metal {index}")
+            if any(abs(v - resistance[0]) > 1e-15 for v in resistance):
+                fail(f"{tag}: context-dependent RESOVER resistance is not supported")
+            sheet_ohm = resistance[0] * 1000.0 * width
         contexts = []
         for (metal, over, under), rows in sorted(rules["tables"].items(), key=lambda kv: (kv[0][0], kv[0][1], -1 if kv[0][2] is None else kv[0][2])):
             if metal != index:
@@ -327,14 +366,18 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
             fail(f"{tag}: no OVER 0 calibration context for {name}")
         area_cap, overlap = overlap_area(tag, index, spec, rules, rules_nom, nominal)
         layers.append(dict(name=name, rules_metal=index, width_um=width,
-                           sheet_resistance_ohm_per_square=sheet / 1000.0, contexts=contexts,
+                           sheet_resistance_ohm_per_square=sheet_ohm, contexts=contexts,
                            area_cap_pf_per_um2=area_cap, overlap_area=overlap))
         over0 = next(c for c in contexts if c["over"] == 0 and c["under"] is None)["rows"]
         isolated = 2.0 * over0[-1][2]
         s0, cc0 = over0[0][0], over0[0][1]
         check = dict(layer=name, rules_isolated_ground_pf_per_um=isolated,
                      rules_min_spacing_um=s0, rules_coupling_at_min_spacing_pf_per_um=cc0,
-                     sheet_resistance_ohm_per_square=sheet / 1000.0)
+                     sheet_resistance_ohm_per_square=sheet_ohm)
+        if matched:
+            check.update(resistance_source=f"IHP RESOVER metal{index} over0, column4 Ohm/nm",
+                         magic_sheet_resistance_ohm_per_square=sheet / 1000.0,
+                         magic_relative_difference=rel(sheet_ohm, sheet / 1000.0))
         area, perim, side = magic["areacap"].get(mtype), magic["perimeter"].get(mtype), magic["sidewall"].get(mtype)
         if area is not None and perim is not None:
             m_iso = (area * width + 2.0 * perim) * 1e-6
@@ -380,6 +423,12 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
                 f"block distinguishes them, i.e. a placeholder, not corner data; using nominal "
                 f"{fallback:g} mOhm for {ctype}")
             value, source = fallback, f"magic contact {ctype} () fallback (blanket {variant} block)"
+        if matched:
+            lef_cut = by_name[cut].get("resistance")
+            if lef_cut is None or not 0.0 < lef_cut < float("inf"):
+                fail(f"{tag}: LEF cut resistance absent/invalid for {cut}")
+            value = lef_cut * 1000.0
+            source = f"original technology LEF LAYER {cut} RESISTANCE (fixed across RC corners)"
         entry = dict(name=cut, lower=lower, upper=upper, resistance_ohm_per_cut=value / 1000.0, source=source)
         if spec["lef_rc_valid"] and "resistance" in by_name[cut]:
             entry["lef_resistance_ohm_nominal"] = by_name[cut]["resistance"]
@@ -387,14 +436,16 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
     sources = [fingerprint("capacitance_calibration_table", rules_path),
                fingerprint("resistance_and_crosscheck_tech", magic_path),
                fingerprint("technology_lef", lef_path)]
+    if extract_path is not None:
+        sources.append(fingerprint("resistance_extract_tech", extract_path))
     if corner != "nom":
         sources.append(fingerprint("nominal_calibration_table_for_overlap_corner_ratio", nominal_rules_path))
-    return dict(
+    result = dict(
         schema="rustroad.rc-profile.v1",
         pdk=tag,
         library=spec["library"],
         corner=corner,
-        pdk_version=PDK_VERSION,
+        pdk_version=spec.get("pdk_version", PDK_VERSION),
         technology_lef_sha256=sources[2]["sha256"],
         units=dict(length="um", capacitance="pF", resistance="ohm"),
         magic_variant=variant,
@@ -419,6 +470,14 @@ def build(tag: str, corner: str, pdk_root: Path) -> dict:
         diagnostics=diagnostics,
         generator="scripts/build_rc_profile.py",
     )
+    if matched:
+        result["lef_parasitics"] = "cut_resistance_used; routing_RC_is_cross_check_only"
+        result["model"]["resistance_sources"] = dict(
+            wire=f"{rules_path}: constant RESOVER0 column4 Ohm/nm x1000 xwidth_um",
+            cut=f"{lef_path}: LAYER CUT RESISTANCE, fixed across RC corners",
+            independent_cross_check=f"{magic_path} and {extract_path}: Magic sheet/contact values",
+            matching_scope="use one nominal SPEF for TT/SS Liberty PVT comparison")
+    return result
 
 
 def corner_contacts_blanket(magic: dict, nominal: dict) -> int | None:
@@ -509,7 +568,7 @@ def compare_ref(rev: str, out_dir: Path) -> int:
             bad.append(f"{where} changed")
 
     status = 0
-    for tag in PDKS:
+    for tag in ("sky130", "gf180"):
         for corner in CORNERS:
             rel_path = f"fixtures/pdk/{tag}-rc-{corner}.json"
             old = json.loads(subprocess.run(["git", "-C", str(ROOT), "show", f"{rev}:{rel_path}"],
@@ -530,16 +589,27 @@ def compare_ref(rev: str, out_dir: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--pdk-root", type=Path, default=DEFAULT_PDK_ROOT)
+    parser.add_argument("--pdk", choices=tuple(PDKS), action="append",
+                        help="selected PDKs; default preserves the sky130/gf180 baseline")
+    parser.add_argument("--technology-lef", type=Path,
+                        help="override the technology LEF for one selected PDK (e.g. EZ130 routing grid)")
     parser.add_argument("--out-dir", type=Path, default=ROOT / "fixtures/pdk")
+    parser.add_argument("--resistance-model", choices=("magic", "openrcx-pdk"), default="magic",
+                        help="IHP matched OpenRCX uses RESOVER wire R and original LEF cut R")
     parser.add_argument("--check", action="store_true", help="fail if tracked profiles differ from a rebuild")
     parser.add_argument("--compare-ref", metavar="REV", help="fail unless all fields at git REV are unchanged")
     args = parser.parse_args()
+    selected = args.pdk or ["sky130", "gf180"]
+    if args.technology_lef:
+        if len(selected) != 1:
+            parser.error("--technology-lef requires exactly one --pdk")
+        PDKS[selected[0]]["technology_lef"] = str(args.technology_lef.resolve())
     if args.compare_ref:
         return compare_ref(args.compare_ref, args.out_dir)
     stale = []
-    for tag in PDKS:
+    for tag in selected:
         for corner in CORNERS:
-            text = render(build(tag, corner, args.pdk_root))
+            text = render(build(tag, corner, args.pdk_root, args.resistance_model))
             path = args.out_dir / f"{tag}-rc-{corner}.json"
             if args.check:
                 if not path.is_file() or path.read_text() != text:

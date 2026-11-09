@@ -66,6 +66,8 @@ fn limits() -> Limits {
 }
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -184,6 +186,7 @@ impl Drop for Fixture {
 fn tapped_fixture() -> Fixture {
     let mut cfg = config();
     cfg.tap = Some(TapConfig {
+        body_view: Default::default(),
         cell: "TAP".into(),
         max_gap: 3000,
         well_layer: "NW".into(),
@@ -206,6 +209,7 @@ fn tapped_fixture() -> Fixture {
 fn clock_fixture(max_buffers: usize) -> Fixture {
     let mut c = config();
     c.clock = Some(rustroad_workspace::clock::ClockConfig {
+        root_net: None,
         port: "a".into(),
         cell: "BUF".into(),
         input_pin: "A".into(),
@@ -220,6 +224,125 @@ fn clock_fixture(max_buffers: usize) -> Fixture {
         "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); BUF b1(.A(a),.Y(h)); BUF b2(.A(a),.Y(l)); endmodule",
         &c,
     )
+}
+
+#[test]
+fn supply_stack_keeps_original_vias_and_enclosed_intermediate_metal() {
+    // Three logic cells and two rows; <1 MiB including the workspace.
+    let mut cfg = config();
+    cfg.strap_layer = "M3".into();
+    cfg.io_layer = "M2".into();
+    cfg.rail_via_stack = vec!["V12".into(), "V23".into()];
+    let f = Fixture::new(LOGIC, &cfg);
+    let via = "LAYER V2 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V2\nVIA V23 DEFAULT\nLAYER M2 ; RECT -0.05 -0.05 0.05 0.05 ;\nLAYER V2 ; RECT -0.03 -0.03 0.03 0.03 ;\nLAYER M3 ; RECT -0.05 -0.05 0.05 0.05 ; END V23\nEND LIBRARY";
+    fs::write(
+        &f.sources.technology_lef,
+        TECHNOLOGY.replace("END LIBRARY", via),
+    )
+    .unwrap();
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let supply = &snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .state
+        .as_ref()
+        .unwrap()
+        .supply;
+    assert!(supply.vias.iter().any(|v| v.name == "V12"));
+    assert!(supply.vias.iter().any(|v| v.name == "V23"));
+    for v in &supply.vias {
+        assert!(
+            supply
+                .wires
+                .iter()
+                .any(|w| w.layer == "M2" && w.polarity == v.polarity && {
+                    let r = rustroad_core::supply::wire_bounds(w).unwrap();
+                    r.lx <= v.at[0] - 50
+                        && r.ly <= v.at[1] - 50
+                        && r.ux >= v.at[0] + 50
+                        && r.uy >= v.at[1] + 50
+                }),
+            "intermediate landing at {:?}",
+            v.at
+        );
+    }
+    let mut def = Vec::new();
+    snapshot.export_def(&mut def).unwrap();
+    let def = String::from_utf8(def).unwrap();
+    for line in def.lines().filter(|line| line.ends_with(" V23")) {
+        assert!(
+            line.contains("+ ROUTED M2 0"),
+            "higher via must start on its own lower layer: {line}"
+        );
+    }
+}
+
+#[test]
+fn internal_clock_tree_preserves_its_original_driver() {
+    // Five cells, two rows and fewer than 32 inserted buffers: <1 MiB. The
+    // externally selected root must not silently bypass the original gate.
+    let mut c = config();
+    c.clock = Some(rustroad_workspace::clock::ClockConfig {
+        root_net: Some("gated".into()),
+        port: "a".into(),
+        cell: "BUF".into(),
+        input_pin: "A".into(),
+        output_pin: "Y".into(),
+        sink_pin: "A".into(),
+        max_fanout: 2,
+        max_buffers: 32,
+        max_work: 1000,
+        level_cells: Vec::new(),
+    });
+    let f = Fixture::new(
+        "module chip(input a, output y, output h, output l); wire gated; BUF gate(.A(a),.Y(gated)); BUF b0(.A(gated),.Y(y)); BUF b1(.A(gated),.Y(h)); BUF b2(.A(gated),.Y(l)); endmodule",
+        &c,
+    );
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    rustroad_workspace::clock::synthesize(&f.workspace, "rev2", &limits()).unwrap();
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let bundle = snapshot.metadata().physical.as_ref().unwrap();
+    let gate = bundle
+        .netlist
+        .instances
+        .iter()
+        .find(|i| i.name == "gate")
+        .unwrap();
+    assert_eq!(gate.connections[0].signal, verilog::Expr::Ident("a".into()));
+    assert_eq!(
+        gate.connections[1].signal,
+        verilog::Expr::Ident("gated".into())
+    );
+    let root = bundle
+        .netlist
+        .instances
+        .iter()
+        .filter(|i| i.name.starts_with("rr_clkbuf_"))
+        .filter(|i| {
+            i.connections
+                .iter()
+                .any(|p| p.pin == "A" && p.signal == verilog::Expr::Ident("gated".into()))
+        })
+        .count();
+    assert_eq!(root, 1, "one tree root must stay behind the original gate");
+    assert!(
+        !bundle
+            .netlist
+            .instances
+            .iter()
+            .filter(|i| i.name.starts_with("rr_clkbuf_"))
+            .any(|i| {
+                i.connections
+                    .iter()
+                    .any(|p| p.pin == "A" && p.signal == verilog::Expr::Ident("a".into()))
+            }),
+        "clock buffering must not bypass the internal root"
+    );
 }
 
 fn input_policy() -> rustroad_workspace::input_buffer::Config {
@@ -263,6 +386,7 @@ fn input_trees_preserve_bus_bits_and_clock_ownership_after_replacement() {
         cfg.max_added_cells = 128;
         cfg.input_buffer = Some(input_policy());
         cfg.clock = Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
             port: "clk".into(),
             cell: "BUF".into(),
             input_pin: "A".into(),
@@ -479,6 +603,7 @@ PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 2 2.1 ; END END
     ] {
         let mut c = config();
         c.clock = Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
             port: "a".into(),
             cell: "BUF".into(),
             input_pin: "A".into(),
@@ -543,6 +668,7 @@ PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M1 ; RECT 0 -0.1 1 0.1 ; END E
 PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 1.9 1 2.1 ; END END VDD\nEND DIO\nEND LIBRARY\n";
     let mut c = config();
     c.clock = Some(rustroad_workspace::clock::ClockConfig {
+        root_net: None,
         port: "a".into(),
         cell: "BUF".into(),
         input_pin: "A".into(),

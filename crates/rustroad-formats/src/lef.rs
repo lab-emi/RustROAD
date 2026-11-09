@@ -186,6 +186,9 @@ pub struct LefMacro {
     pub symmetry: Vec<String>,
     pub pins: Vec<LefPin>,
     pub obstructions: Vec<LefGeometry>,
+    /// Explicit per-layer OBS spacing in DBU. Retained separately from shapes.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub obstruction_spacing: std::collections::BTreeMap<String, i64>,
     /// `FOREIGN name [x y [orient]]` bindings to an external (GDS) cell.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<LefForeign>,
@@ -212,6 +215,8 @@ pub struct LefPin {
 pub struct LefPort {
     pub class: Option<String>,
     pub geometries: Vec<LefGeometry>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub layer_spacing: std::collections::BTreeMap<String, i64>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -975,6 +980,7 @@ impl<'a> Parser<'a, '_> {
         let mut result = LefPort {
             class: None,
             geometries: Vec::new(),
+            layer_spacing: Default::default(),
         };
         loop {
             let key = self.next()?;
@@ -996,7 +1002,30 @@ impl<'a> Parser<'a, '_> {
                     if values.is_empty() {
                         return Err(error("LEF_SYNTAX", key.line, "LAYER missing name"));
                     }
-                    self.arity(&values, 1, key.line)?;
+                    if scope == "OBS" && values.len() == 3 && values[1].is("SPACING") {
+                        let spacing = self.coord(values[2])?;
+                        if spacing < 0 {
+                            return Err(error(
+                                "LEF_GEOMETRY",
+                                key.line,
+                                "OBS spacing must be nonnegative",
+                            ));
+                        }
+                        let name = self.owned(values[0])?;
+                        if result
+                            .layer_spacing
+                            .insert(name, spacing)
+                            .is_some_and(|old| old != spacing)
+                        {
+                            return Err(error(
+                                "LEF_UNSUPPORTED",
+                                key.line,
+                                "different spacing on repeated OBS layer",
+                            ));
+                        }
+                    } else {
+                        self.arity(&values, 1, key.line)?;
+                    }
                     current_layer = self.owned(values[0])?;
                 }
                 "RECT" | "POLYGON" => {
@@ -1127,6 +1156,7 @@ impl<'a> Parser<'a, '_> {
             symmetry: Vec::new(),
             pins: Vec::new(),
             obstructions: Vec::new(),
+            obstruction_spacing: Default::default(),
             foreign: Vec::new(),
         };
         let mut size_seen = false;
@@ -1158,7 +1188,9 @@ impl<'a> Parser<'a, '_> {
                     return Err(error("LEF_SYNTAX", key.line, "duplicate OBS block"));
                 }
                 obs_seen = true;
-                result.obstructions = self.geometry_block(None, "OBS")?.geometries;
+                let obs = self.geometry_block(None, "OBS")?;
+                result.obstructions = obs.geometries;
+                result.obstruction_spacing = obs.layer_spacing;
                 continue;
             }
             let values = self.statement()?;

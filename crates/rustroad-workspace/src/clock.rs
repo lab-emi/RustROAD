@@ -13,6 +13,10 @@ use std::path::Path;
 #[serde(deny_unknown_fields)]
 pub struct ClockConfig {
     pub port: String,
+    /// Optional already-gated internal clock net. `port` still identifies the
+    /// source clock in SDC; buffering this net preserves the gating logic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_net: Option<String>,
     pub cell: String,
     pub input_pin: String,
     pub output_pin: String,
@@ -47,6 +51,13 @@ impl ClockConfig {
         out
     }
     pub fn validate(&self) -> Result<()> {
+        if self
+            .root_net
+            .as_ref()
+            .is_some_and(|n| !rustroad_core::valid_object_name(n))
+        {
+            return Err(Error::Invalid("invalid internal clock root name".into()));
+        }
         if self.level_cells.len() > 32
             || self
                 .level_cells
@@ -108,7 +119,7 @@ fn fail(s: &str) -> Error {
 fn budget(s: &str) -> Error {
     Error::Budget(s.into())
 }
-fn root_net(bundle: &PhysicalBundle, cfg: &ClockConfig) -> Result<u32> {
+pub(crate) fn root_net(bundle: &PhysicalBundle, cfg: &ClockConfig) -> Result<u32> {
     let p = bundle
         .connectivity
         .ports
@@ -133,7 +144,38 @@ fn root_net(bundle: &PhysicalBundle, cfg: &ClockConfig) -> Result<u32> {
             return Err(fail("clock source aliases another top-level port"));
         }
     }
-    Ok(root)
+    let Some(name) = &cfg.root_net else {
+        return Ok(root);
+    };
+    let internal = bundle
+        .connectivity
+        .nets
+        .iter()
+        .position(|n| n.aliases.contains(name))
+        .map(|n| n as u32)
+        .ok_or_else(|| fail("configured internal clock net absent"))?;
+    if internal == root {
+        return Ok(root);
+    }
+    let mut drivers = 0;
+    for pin in &bundle.connectivity.pins {
+        if pin.net != Some(internal) {
+            continue;
+        }
+        let PinOwner::Instance { instance, terminal } = pin.owner else {
+            return Err(fail("internal clock root aliases a top-level port"));
+        };
+        let master = &bundle.connectivity.masters
+            [bundle.connectivity.instance_masters[instance as usize] as usize];
+        let terminal = &master.pins[terminal as usize];
+        if terminal.direction == Some(Direction::Output) && !terminal.use_.is_supply() {
+            drivers += 1;
+        }
+    }
+    if drivers != 1 {
+        return Err(fail("internal clock root must have exactly one driver"));
+    }
+    Ok(internal)
 }
 fn master<'a>(
     bundle: &'a PhysicalBundle,
@@ -426,6 +468,9 @@ pub fn synthesize_with_sdc(
                 continue;
             }
             let p = &m.pins[terminal as usize];
+            if p.direction == Some(Direction::Output) {
+                continue;
+            }
             if p.name != cfg.sink_pin || p.direction != Some(Direction::Input) {
                 return Err(fail("clock root drives an unsupported non-clock pin"));
             }
@@ -555,7 +600,9 @@ pub fn synthesize_with_sdc(
                 connections: vec![
                     verilog::Connection {
                         pin: cfg.input_pin.clone(),
-                        signal: verilog::Expr::Ident(cfg.port.clone()),
+                        signal: verilog::Expr::Ident(
+                            cfg.root_net.as_ref().unwrap_or(&cfg.port).clone(),
+                        ),
                     },
                     verilog::Connection {
                         pin: cfg.output_pin.clone(),
@@ -568,6 +615,7 @@ pub fn synthesize_with_sdc(
                 range: None,
             });
             metadata.design.cells.push(Cell {
+                fixed: None,
                 name: name.clone(),
                 master: cell.clone(),
                 width: size[0],

@@ -1393,6 +1393,47 @@ impl<'a> Router<'a> {
             }
             self.tick(&mut search, "pin access", t.pin, t.net)?;
             let layer = self.graph.layers[slots[li]].layer;
+            let short_run = if slots[li] == pin_slot || self.stack_ok[layer as usize] {
+                false
+            } else {
+                let need = self.min_run[layer as usize];
+                let mut cur = id;
+                let origin = local.at(id).1;
+                let mut short = true;
+                // Intermediate escape metal is fixed during later detail
+                // repair, so it must already have enough area before another
+                // via leaves it. Coordinate extent times wire width is a
+                // lower bound on its union area; total path length would
+                // overcount overlapping metal in short bends.
+                for _ in 0..64 {
+                    self.spatial.work = self
+                        .spatial
+                        .work
+                        .checked_add(1)
+                        .filter(|&n| n <= self.limits.max_comparisons)
+                        .ok_or_else(|| budget("pin access area work"))?;
+                    let (_, parent, kind) = visited[&cur];
+                    if parent == NONE {
+                        short = false;
+                        break;
+                    }
+                    if kind != WIRE {
+                        short = !self.via_pad_ok[layer as usize][kind as usize];
+                        break;
+                    }
+                    let point = local.at(parent).1;
+                    if origin[0]
+                        .abs_diff(point[0])
+                        .max(origin[1].abs_diff(point[1]))
+                        >= need
+                    {
+                        short = false;
+                        break;
+                    }
+                    cur = parent;
+                }
+                short
+            };
             let (xi, yi) = (
                 local.xs.binary_search(&at[0]).unwrap(),
                 local.ys.binary_search(&at[1]).unwrap(),
@@ -1443,7 +1484,7 @@ impl<'a> Router<'a> {
                 }
                 let kind = if let Some(pi) = via {
                     let pair = &self.pairs[pi];
-                    let listed: Vec<usize> = match table_kinds.get(&(layer, at)) {
+                    let mut listed: Vec<usize> = match table_kinds.get(&(layer, at)) {
                         Some(ks) if pair.lower == layer => ks
                             .iter()
                             .copied()
@@ -1451,8 +1492,20 @@ impl<'a> Router<'a> {
                             .collect(),
                         _ => pair.kinds.clone(),
                     };
+                    let (_, parent, incoming) = visited[&id];
+                    if parent != NONE && incoming == WIRE {
+                        let previous = local.at(parent).1;
+                        let vertical = previous[0] == at[0];
+                        // Access vias become fixed obstacles during detail
+                        // repair. Prefer a pad along the incoming wire here,
+                        // before cleanup can create a blocked notch patch.
+                        listed.sort_by_key(|&k| !self.pad_along(k, layer, vertical));
+                    }
                     let mut chosen = None;
                     'kinds: for k in listed {
+                        if short_run && !self.via_pad_ok[layer as usize][k] {
+                            continue;
+                        }
                         for s in &input.vias[k].shapes {
                             let rule = &input.layers[s.layer as usize];
                             let own = pin_shapes(s.layer);
@@ -1514,6 +1567,19 @@ impl<'a> Router<'a> {
             }
         }
         let Some((top, portal)) = found else {
+            trace(
+                "access failed",
+                std::time::Instant::now(),
+                format_args!(
+                    "pin {} net {} shapes {:?} starts {:?} slots {:?} visited {}",
+                    t.pin,
+                    t.net,
+                    t.shapes,
+                    starts,
+                    slots,
+                    visited.len(),
+                ),
+            );
             return Ok(None);
         };
         let top_via = visited[&top].1 != NONE && visited[&top].2 != WIRE;
@@ -1601,6 +1667,25 @@ impl<'a> Router<'a> {
         } else {
             0
         };
+        if std::env::var("RUSTROAD_ROUTE_PIN_TRACE").is_ok_and(|filter| {
+            filter
+                .split(',')
+                .take(16)
+                .filter_map(|p| p.parse::<u32>().ok())
+                .any(|p| p == t.pin)
+        }) {
+            eprintln!(
+                "[troute] escape pin {} net {} access {:?} wires {:?} vias {:?}",
+                t.pin,
+                t.net,
+                at,
+                &wires[..wires.len().min(64)],
+                vias.iter()
+                    .take(64)
+                    .map(|v| (&input.vias[v.kind as usize].name, v.at))
+                    .collect::<Vec<_>>()
+            );
+        }
         Ok(Some(Plan {
             access: Access {
                 pin: t.pin,
@@ -3297,6 +3382,11 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
                 out.patches.len()
             ),
         );
+        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+            for violation in remaining.iter().take(16) {
+                eprintln!("[troute] rule repair {}", violation.describe());
+            }
+        }
         out.stats.comparisons = out
             .stats
             .comparisons
@@ -4108,6 +4198,82 @@ mod tests {
         let mut unpatched = out;
         unpatched.wires.retain(|w| w.layer != 1);
         assert!(validate(&design, &unpatched, &limits()).is_err());
+    }
+
+    #[test]
+    fn multilayer_access_meets_internal_area_before_detailed_routing() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(890, 90, 910, 110)),
+            ],
+            Vec::new(),
+        );
+        design.access_layer = 2;
+        design.layers[1].min_area = Some(1600);
+        let limits = RouteLimits {
+            max_rule_violations: 1,
+            ..limits()
+        };
+        let routes = route_cpu_ref(&design, &limits)
+            .expect("multi-layer escapes must not publish two undersized internal islands");
+        validate(&design, &routes, &limits).unwrap();
+    }
+
+    #[test]
+    fn vertical_access_pad_does_not_force_an_unrepairable_pin_notch() {
+        let mut target = terminal(1, 0, false, rect(1680, 830, 1700, 850));
+        target.shapes[0].layer = 2;
+        let mut design = input(
+            vec![terminal(0, 0, true, rect(265, 270, 535, 605)), target],
+            vec![
+                Blockage {
+                    layer: 0,
+                    rect: rect(200, 785, 250, 900),
+                    net: None,
+                },
+                Blockage {
+                    layer: 1,
+                    rect: rect(0, 0, 495, 2000),
+                    net: None,
+                },
+                Blockage {
+                    layer: 1,
+                    rect: rect(0, 0, 2000, 525),
+                    net: None,
+                },
+            ],
+        );
+        design.die = rect(0, 0, 2000, 2000);
+        design.step = 420;
+        for (i, layer) in design.layers.iter_mut().enumerate() {
+            layer.width = if i == 0 { 160 } else { 200 };
+            layer.spacing = if i == 0 { 180 } else { 210 };
+        }
+        let mut horizontal = via("V12H", 0, 3, 1);
+        horizontal.shapes[0].rect = rect(-145, -105, 145, 105);
+        horizontal.shapes[1].rect = rect(-95, -95, 95, 95);
+        horizontal.shapes[2].rect = rect(-145, -100, 145, 100);
+        let mut vertical = horizontal.clone();
+        vertical.name = "V12V".into();
+        vertical.shapes[0].rect = rect(-105, -145, 105, 145);
+        let mut upper = via("V23", 1, 4, 2);
+        upper.shapes[0].rect = rect(-145, -100, 145, 100);
+        upper.shapes[1].rect = rect(-95, -95, 95, 95);
+        upper.shapes[2].rect = rect(-145, -100, 145, 100);
+        design.vias = vec![horizontal, vertical, upper];
+        let plan = design.tracks.as_mut().unwrap();
+        plan.tracks = vec![
+            Some((420, 100)),
+            Some((420, 10)),
+            Some((420, 0)),
+            None,
+            None,
+        ];
+        plan.gcell = 840;
+        let routes = route_cpu_ref(&design, &limits())
+            .expect("a vertical landing variant permits a connected notch-free escape");
+        validate(&design, &routes, &limits()).unwrap();
     }
 
     #[test]

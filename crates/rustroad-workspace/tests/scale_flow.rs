@@ -79,6 +79,8 @@ fn netlist() -> String {
 
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -417,6 +419,7 @@ END TAP\nEND LIBRARY\n";
     fs::write(f.path("cells.lef"), library().replace("END LIBRARY\n", tap)).unwrap();
     let mut cfg = config();
     cfg.tap = Some(rustroad_workspace::physical::TapConfig {
+        body_view: Default::default(),
         cell: "TAP".into(),
         max_gap: 500,
         well_layer: "NW".into(),

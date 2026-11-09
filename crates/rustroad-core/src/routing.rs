@@ -1136,6 +1136,26 @@ impl<'a> Spatial<'a> {
     pub(crate) fn clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
         Ok(self.probe(layer, rect, net)?.is_some())
     }
+
+    /// Bounded diagnostic for a stored shape rejected by the independent
+    /// validator. Instance-template collisions remain identified by layer.
+    fn stored_collision(&self, layer: u32, rect: Rect, net: u32) -> Result<String> {
+        let query = expand(rect, self.input.layers[layer as usize].spacing)?;
+        let routing = self.input.layers[layer as usize].vertical.is_some();
+        for id in 0..self.len() {
+            if !self.alive(id) {
+                continue;
+            }
+            let b = self.shape(id);
+            if b.layer == layer
+                && overlap(query, b.rect)
+                && !(self.same_net(net, layer, rect, b) && (routing || rect == b.rect))
+            {
+                return Ok(format!("against net {:?} rect {:?}", b.net, b.rect));
+            }
+        }
+        Ok("against instance geometry or die boundary".into())
+    }
     /// Like `probe`, but routed shapes of other nets do not block: their nets
     /// are returned as victims. Fixed shapes of other nets still block.
     pub(crate) fn probe_soft(&mut self, layer: u32, rect: Rect, net: u32) -> Result<Soft> {
@@ -2767,7 +2787,25 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             return Err(invalid("stored via identity/grid"));
         }
         if !spatial.via_clear(v.kind as usize, v.at, v.net)? {
-            return Err(invalid("via collides with blockage/other net"));
+            let kind = &input.vias[v.kind as usize];
+            let mut blocked = Vec::new();
+            for shape in &kind.shapes {
+                let rect = shifted(shape.rect, v.at)?;
+                if !spatial.clear(shape.layer, rect, v.net)? {
+                    let collision = spatial.stored_collision(shape.layer, rect, v.net)?;
+                    blocked.push(format!(
+                        "{} [{},{},{},{}] {collision}",
+                        input.layers[shape.layer as usize].name, rect.lx, rect.ly, rect.ux, rect.uy
+                    ));
+                }
+            }
+            return Err(invalid(&format!(
+                "via {} net {} at {:?} collides with blockage/other net on {}",
+                kind.name,
+                v.net,
+                v.at,
+                blocked.join(", ")
+            )));
         }
         spatial.add_via(v)?;
     }

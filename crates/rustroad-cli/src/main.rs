@@ -170,7 +170,7 @@ enum Command {
         max_rc_elements: usize,
         #[arg(long, default_value_t = 200_000_000)]
         max_extract_work: usize,
-        /// Candidate shapes per wire run (scratch 44 B each; ceiling
+        /// Candidate shapes per wire run (scratch 256 B each; ceiling
         /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 48 MiB of scratch).
         #[arg(long, default_value_t = 4096)]
         max_extract_candidates: usize,
@@ -224,6 +224,9 @@ enum Command {
         /// Override of the profile's cell-LEF path (same SHA-256 required).
         #[arg(long)]
         cell_lef: Option<PathBuf>,
+        /// Explicit {master:{port:[msb,lsb]}} metadata; no bracket-name guessing.
+        #[arg(long)]
+        cell_buses: Option<PathBuf>,
         /// `ruststa report --section hold_fix --target-margin M --limit 0` JSON (repeatable).
         #[arg(long = "hold-report", required = true)]
         hold_reports: Vec<PathBuf>,
@@ -386,6 +389,9 @@ enum Command {
         /// Override of the profile's cell-LEF path (same SHA-256 required).
         #[arg(long)]
         cell_lef: Option<PathBuf>,
+        /// Explicit {master:{port:[msb,lsb]}} metadata, bound into the receipt.
+        #[arg(long)]
+        cell_buses: Option<PathBuf>,
         /// Sizing profile (scripts/build_sizing_profile.py); required for resize_cell
         #[arg(long)]
         sizing_profile: Option<PathBuf>,
@@ -443,6 +449,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             timed_netlist,
             timed_netlist_sha256,
             cell_lef,
+            cell_buses,
             hold_reports,
             setup_reports,
             delay_cells,
@@ -481,6 +488,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     timed_netlist: timed_netlist.clone(),
                     timed_netlist_sha256: timed_netlist_sha256.clone(),
                     cell_lef: cell_lef.clone(),
+                    cell_buses: cell_buses.clone(),
                     pins_reports: pins_reports.clone(),
                     allow_partial: *allow_partial,
                     max_group_sinks: *max_group_sinks,
@@ -530,16 +538,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             plan,
             delay_cells,
             cell_lef,
+            cell_buses,
             sizing_profile,
             out,
         } => {
-            return emit(&rustroad_workspace::eco::apply_plan_with_limits(
+            return emit(&rustroad_workspace::eco::apply_plan_with_options(
                 netlist,
                 plan,
                 delay_cells,
-                cell_lef.as_deref(),
-                sizing_profile.as_deref(),
                 out,
+                &rustroad_workspace::eco::ApplyOptions {
+                    cell_lef: cell_lef.as_deref(),
+                    sizing: sizing_profile.as_deref(),
+                    cell_buses: cell_buses.as_deref(),
+                },
                 &budget.limits(&parser_limits),
             )?);
         }
