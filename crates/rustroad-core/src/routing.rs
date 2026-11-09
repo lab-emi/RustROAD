@@ -227,6 +227,9 @@ pub struct TrackPlan {
     /// track coordinates (vertical layer: x = offset + k * pitch); `None` for
     /// cut layers.
     pub tracks: Vec<Option<(i64, i64)>>,
+    /// Inclusive signal-routing layer indices; lower layers remain available
+    /// to fixed pin escapes. `None` retains all selected routing layers.
+    pub routing_layers: Option<[u32; 2]>,
     /// Square GCell side in DBU for global routing.
     pub gcell: i64,
     pub global_iterations: usize,
@@ -249,6 +252,12 @@ pub struct TrackPlan {
     pub memory_mib: u64,
     /// Separate cap for cumulative congestion-history entries.
     pub max_history_entries: usize,
+}
+impl TrackPlan {
+    pub(crate) fn allows_routing_layer(&self, layer: u32) -> bool {
+        self.routing_layers
+            .is_none_or(|[lower, upper]| lower <= layer && layer <= upper)
+    }
 }
 pub const DEFAULT_MAX_HISTORY_ENTRIES: usize = 4_000_000;
 /// Process baseline counted in every route memory estimate (binary, libc,
@@ -1086,7 +1095,16 @@ impl<'a> Spatial<'a> {
                 .map_or(0, InstanceObstacles::len),
         ) >= self.limits.max_obstacles
         {
-            return Err(budget("routing obstacle count"));
+            return Err(budget(&format!(
+                "routing obstacle count: {} stored plus {} instance shapes, limit {}; {} removed stored shapes",
+                self.len(),
+                self.input
+                    .instances
+                    .as_ref()
+                    .map_or(0, InstanceObstacles::len),
+                self.limits.max_obstacles,
+                self.alive.iter().filter(|alive| !**alive).count()
+            )));
         }
         self.index(self.len(), &b)?;
         self.shapes.push(b);
@@ -1135,6 +1153,26 @@ impl<'a> Spatial<'a> {
     }
     pub(crate) fn clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
         Ok(self.probe(layer, rect, net)?.is_some())
+    }
+
+    /// Bounded diagnostic for a stored shape rejected by the independent
+    /// validator. Instance-template collisions remain identified by layer.
+    pub(crate) fn stored_collision(&self, layer: u32, rect: Rect, net: u32) -> Result<String> {
+        let query = expand(rect, self.input.layers[layer as usize].spacing)?;
+        let routing = self.input.layers[layer as usize].vertical.is_some();
+        for id in 0..self.len() {
+            if !self.alive(id) {
+                continue;
+            }
+            let b = self.shape(id);
+            if b.layer == layer
+                && overlap(query, b.rect)
+                && !(self.same_net(net, layer, rect, b) && (routing || rect == b.rect))
+            {
+                return Ok(format!("against net {:?} rect {:?}", b.net, b.rect));
+            }
+        }
+        Ok("against instance geometry or die boundary".into())
     }
     /// Like `probe`, but routed shapes of other nets do not block: their nets
     /// are returned as victims. Fixed shapes of other nets still block.
@@ -2695,6 +2733,32 @@ fn area_stub(
 /// Independent of search history: check geometry against blockages and bounded
 /// endpoint-graph connectivity. External OpenDB/KLayout are the physical oracle.
 pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Result<()> {
+    validate_geometry(input, routes, limits, None)
+}
+
+/// Validate stored routing under its original telemetry limits, with a separate
+/// cap for the comparisons performed by this geometry validation. A previous
+/// search may legitimately have used more work than this read-only check.
+pub fn validate_with_work_limit(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    max_validation_comparisons: usize,
+) -> Result<()> {
+    if max_validation_comparisons == 0 {
+        return Err(budget(
+            "geometry validation comparison limit must be nonzero",
+        ));
+    }
+    validate_geometry(input, routes, limits, Some(max_validation_comparisons))
+}
+
+fn validate_geometry(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    validation_work: Option<usize>,
+) -> Result<()> {
     preflight(input, limits)?;
     let length = routes.wires.iter().try_fold(0u64, |n, w| {
         n.checked_add(distance(w.start, w.end)?)
@@ -2712,6 +2776,13 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
     {
         return Err(invalid("routing telemetry/geometry mismatch"));
     }
+    let validation_limits = RouteLimits {
+        max_comparisons: limits
+            .max_comparisons
+            .min(validation_work.unwrap_or(limits.max_comparisons)),
+        ..limits.clone()
+    };
+    let limits = &validation_limits;
     if routes.wires.len() + routes.vias.len() + routes.patches.len() > limits.max_segments
         || routes.access.len() > input.terminals.len()
     {
@@ -2767,7 +2838,25 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             return Err(invalid("stored via identity/grid"));
         }
         if !spatial.via_clear(v.kind as usize, v.at, v.net)? {
-            return Err(invalid("via collides with blockage/other net"));
+            let kind = &input.vias[v.kind as usize];
+            let mut blocked = Vec::new();
+            for shape in &kind.shapes {
+                let rect = shifted(shape.rect, v.at)?;
+                if !spatial.clear(shape.layer, rect, v.net)? {
+                    let collision = spatial.stored_collision(shape.layer, rect, v.net)?;
+                    blocked.push(format!(
+                        "{} [{},{},{},{}] {collision}",
+                        input.layers[shape.layer as usize].name, rect.lx, rect.ly, rect.ux, rect.uy
+                    ));
+                }
+            }
+            return Err(invalid(&format!(
+                "via {} net {} at {:?} collides with blockage/other net on {}",
+                kind.name,
+                v.net,
+                v.at,
+                blocked.join(", ")
+            )));
         }
         spatial.add_via(v)?;
     }
@@ -2791,7 +2880,7 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             net: Some(p.net),
         })?;
     }
-    let mut work = 0;
+    let mut work = validation_work.map_or(0, |_| spatial.work);
     let terminals = crate::rule_index::order(
         input.terminals.len(),
         |i| input.terminals[i].pin,
@@ -2842,7 +2931,9 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
     }
     drop(index);
     if input.rules {
-        let mut work = 0usize;
+        if validation_work.is_none() {
+            work = 0;
+        }
         let violations = route_rules::check(input, routes, limits, &mut work)?;
         if let Some(v) = violations.first() {
             return Err(invalid(&format!(
@@ -2858,6 +2949,24 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validation_work_budget_is_separate_from_historical_search_statistics() {
+        let input = fixture();
+        let limits = RouteLimits::default();
+        let mut routes = route_cpu_ref(&input, &limits).unwrap();
+        // Synthetic boundary telemetry for this format/control test. Actual
+        // Ibex evidence retains the original4.53B comparison count unchanged.
+        routes.stats.comparisons = limits.max_comparisons;
+        validate_with_work_limit(&input, &routes, &limits, 1_000_000).unwrap();
+        assert_eq!(routes.stats.comparisons, limits.max_comparisons);
+        let error = validate_with_work_limit(&input, &routes, &limits, 1).unwrap_err();
+        assert!(matches!(error, Error::Budget(_)), "{error}");
+        let mut invalid = routes.clone();
+        invalid.stats.comparisons += 1;
+        let error = validate_with_work_limit(&input, &invalid, &limits, 1_000_000).unwrap_err();
+        assert!(error.to_string().contains("telemetry/geometry mismatch"));
+    }
 
     #[test]
     fn per_net_pruning_matches_whole_graph_with_cycles_branches_and_vias() {

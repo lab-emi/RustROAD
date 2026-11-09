@@ -97,6 +97,12 @@ pub(crate) struct Floorplan {
     pub(crate) core_area: Rect,
     pub(crate) site: Site,
     pub(crate) rows: Vec<Row>,
+    /// Fixed hard macros in DBU; independent of power-grid configuration.
+    #[serde(default)]
+    pub(crate) macro_placements: BTreeMap<String, rustroad_core::fixed::FixedPlacement>,
+    /// Per-master Verilog ranges, bound to the original macro interface by the caller.
+    #[serde(default)]
+    pub(crate) pin_buses: BTreeMap<String, BTreeMap<String, [i64; 2]>>,
 }
 pub(crate) type FloorplanSpec = Floorplan;
 /// `select_technology` for the file-only floorplan command.
@@ -521,7 +527,7 @@ pub fn import_pdk_bounded(
             crate::ties::dissolve_constant_cells_owned(netlist, &specs, high, low, &tie_limits)
                 .map_err(|e| invalid(e.to_string()))?;
         let remaining_cells = limits.max_cells.saturating_sub(dissolved.instances.len());
-        let (updated, mut report) = crate::ties::materialize_constants_owned(
+        let (updated, mut report) = crate::ties::materialize_constants_owned_with_buses(
             dissolved,
             high,
             low,
@@ -529,6 +535,7 @@ pub fn import_pdk_bounded(
                 max_new_cells: cfg.max_added_cells.min(remaining_cells),
                 ..tie_limits
             },
+            &floor.pin_buses,
         )
         .map_err(|e| invalid(e.to_string()))?;
         report.dissolved_cells = count;
@@ -570,6 +577,10 @@ pub fn import_pdk_bounded(
     let (technology, masters) = select_technology(&tech, &cells, &floor, &netlist, &extra)?;
     drop(tech);
     drop(cells);
+    let macro_placements = floor.macro_placements;
+    if macro_placements.len() > 4096 {
+        return Err(budget("fixed macro count exceeds 4096"));
+    }
     let mut design = Design {
         name: floor.name,
         units_per_micron: floor.units_per_micron,
@@ -598,13 +609,36 @@ pub fn import_pdk_bounded(
             .get(inst.cell.as_str())
             .ok_or_else(|| invalid(format!("missing LEF master {}", inst.cell)))?;
         let m = &masters[id as usize];
+        let fixed = macro_placements.get(&inst.name).copied();
+        if m.class
+            .as_deref()
+            .is_some_and(|c| c.split_whitespace().next() == Some("BLOCK"))
+            != fixed.is_some()
+        {
+            return Err(invalid(format!(
+                "instance {} needs an explicit fixed placement exactly when its LEF class is BLOCK",
+                inst.name
+            )));
+        }
         design.cells.push(Cell {
+            fixed,
             name: inst.name.clone(),
             master: inst.cell.clone(),
             width: m.size[0],
             height: m.size[1],
         });
         instance_masters.push(id);
+    }
+    for name in macro_placements.keys() {
+        if !design
+            .cells
+            .iter()
+            .any(|c| c.name == *name && c.fixed.is_some())
+        {
+            return Err(invalid(format!(
+                "macro placement names absent instance {name}"
+            )));
+        }
     }
     design.validate(limits)?;
     let (mut ports, mut nets, mut pins) =
@@ -764,7 +798,11 @@ fn select_technology(
                 m.name
             )));
         }
-        if m.site.as_deref() != Some(floor.site.name.as_str()) {
+        let block = m
+            .class
+            .as_deref()
+            .is_some_and(|c| c.split_whitespace().next() == Some("BLOCK"));
+        if !block && m.site.as_deref() != Some(floor.site.name.as_str()) {
             return Err(invalid(format!(
                 "master {} does not use selected site",
                 m.name
@@ -796,10 +834,12 @@ fn select_technology(
             })
             .collect::<Result<Vec<_>>>()?;
         masters.push(Master {
+            buses: floor.pin_buses.get(&m.name).cloned().unwrap_or_default(),
+            obstruction_spacing: m.obstruction_spacing.clone(),
             name: m.name.clone(),
             class: m.class.clone(),
             symmetry: m.symmetry.clone(),
-            site: floor.site.name.clone(),
+            site: m.site.clone().unwrap_or_default(),
             size: m.size,
             pins,
             obstructions: m.obstructions.iter().map(geometry).collect(),
@@ -849,6 +889,7 @@ fn geometry(value: &lef::LefGeometry) -> Geometry {
         },
     }
 }
+
 fn vdirection(value: verilog::Direction) -> Direction {
     match value {
         verilog::Direction::Input => Direction::Input,
@@ -1106,9 +1147,55 @@ pub(super) fn link(
                 return Err(invalid("duplicate cell pin connection"));
             }
         }
+        let mut bus_bits = HashMap::new();
+        for (name, range) in &master.buses {
+            let width = (i128::from(range[0]) - i128::from(range[1])).unsigned_abs() + 1;
+            if width > 65_536 || width > limits.max_pins as u128 {
+                return Err(budget("macro bus expansion limit"));
+            }
+            let Some(expr) = named.remove(name.as_str()) else {
+                continue;
+            };
+            // A width-N concat has N leaves plus its root (and may have
+            // bounded nested concats); traversal work is not its bit width.
+            let work_budget = (width as usize)
+                .saturating_mul(2)
+                .saturating_add(128)
+                .min(limits.max_pins);
+            let bits = signals.expand(expr, work_budget)?;
+            if !bits.is_empty() && bits.len() != width as usize {
+                return Err(invalid(format!(
+                    "macro port {}.{name} width mismatch",
+                    instance.name
+                )));
+            }
+            connection_work = connection_work
+                .checked_add(width as usize)
+                .ok_or_else(|| budget("bus work overflow"))?;
+            if connection_work > limits.max_pins {
+                return Err(budget("macro bus connection work"));
+            }
+            for bit in 0..width as usize {
+                let index = if range[0] <= range[1] {
+                    range[0] + bit as i64
+                } else {
+                    range[0] - bit as i64
+                };
+                let pin = format!("{name}[{index}]");
+                if named.contains_key(pin.as_str()) {
+                    return Err(invalid("mixed scalar and bus macro port connections"));
+                }
+                if !master.pins.iter().any(|p| p.name == pin) {
+                    return Err(invalid(format!("bus member absent from LEF: {pin}")));
+                }
+                bus_bits.insert(pin, bits.get(bit).copied());
+            }
+        }
         for (terminal, spec) in master.pins.iter().enumerate() {
             let expr = named.remove(spec.name.as_str());
-            let net = if spec.use_.is_supply() {
+            let net = if let Some(bit) = bus_bits.remove(&spec.name) {
+                bit.map(|bit| signal_nets[bit])
+            } else if spec.use_.is_supply() {
                 if expr.is_some() {
                     return Err(invalid(
                         "explicit supply pin wiring requires a supply-network importer",
@@ -1178,4 +1265,86 @@ pub(super) fn link(
         }
     }
     Ok((ports, nets, pins))
+}
+
+#[cfg(test)]
+mod macro_port_tests {
+    use super::*;
+
+    // Four scalar pins, two two-bit buses; <16 KiB, no graph search.
+    fn master(range: [i64; 2]) -> Master {
+        Master {
+            obstruction_spacing: Default::default(),
+            name: "RAM".into(),
+            class: Some("BLOCK".into()),
+            site: String::new(),
+            symmetry: vec![],
+            size: [1000, 2000],
+            obstructions: vec![],
+            buses: BTreeMap::from([("D".into(), range), ("Q".into(), range)]),
+            pins: ["D[0]", "D[1]", "Q[0]", "Q[1]"]
+                .into_iter()
+                .map(|name| MasterPin {
+                    name: name.into(),
+                    direction: Some(if name.starts_with('D') {
+                        Direction::Input
+                    } else {
+                        Direction::Output
+                    }),
+                    use_: PinUse::Signal,
+                    shape: None,
+                    ports: vec![],
+                })
+                .collect(),
+        }
+    }
+    #[test]
+    fn bus_range_maps_msb_to_msb_for_both_directions() {
+        let netlist = verilog::parse_verilog(
+            "module t(input [3:2] a,output [5:4] q); RAM r(.D(a),.Q(q)); endmodule",
+            &verilog::VerilogLimits::default(),
+        )
+        .unwrap();
+        for (range, first, last) in [([1, 0], "a[2]", "a[3]"), ([0, 1], "a[3]", "a[2]")] {
+            let (_, nets, pins) = link(
+                &netlist,
+                &[master(range)],
+                &[0],
+                &ConnectivityLimits::default(),
+            )
+            .unwrap();
+            let pin_net = |terminal| {
+                let p = pins
+                    .iter()
+                    .find(|p| {
+                        p.owner
+                            == PinOwner::Instance {
+                                instance: 0,
+                                terminal,
+                            }
+                    })
+                    .unwrap();
+                nets[p.net.unwrap() as usize].name.as_str()
+            };
+            assert_eq!(pin_net(0), first);
+            assert_eq!(pin_net(1), last);
+        }
+    }
+    #[test]
+    fn bus_width_mismatch_is_not_silently_extended() {
+        let netlist = verilog::parse_verilog(
+            "module t(input a,output [1:0] q); RAM r(.D(a),.Q(q)); endmodule",
+            &verilog::VerilogLimits::default(),
+        )
+        .unwrap();
+        assert!(
+            link(
+                &netlist,
+                &[master([1, 0])],
+                &[0],
+                &ConnectivityLimits::default()
+            )
+            .is_err()
+        );
+    }
 }

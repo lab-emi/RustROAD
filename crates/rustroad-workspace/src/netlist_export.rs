@@ -207,6 +207,7 @@ fn transformed<'a>(
 
 struct Open<'a> {
     pin: &'a str,
+    range: Option<rustroad_formats::verilog::Range>,
     name: String,
     missing: bool,
 }
@@ -231,8 +232,22 @@ fn open_pins<'a>(
         work_limit,
     )?;
     let mut opened = Vec::new();
-    for pin in master.pins.iter().filter(|p| !p.use_.is_supply()) {
-        let connection = instance.connections.iter().find(|c| c.pin == pin.name);
+    let interfaces = master
+        .pins
+        .iter()
+        .filter(|p| !p.use_.is_supply() && master.bus_for_pin(&p.name).is_none())
+        .map(|p| (p.name.as_str(), None))
+        .chain(master.buses.iter().map(|(name, range)| {
+            (
+                name.as_str(),
+                Some(rustroad_formats::verilog::Range {
+                    msb: range[0],
+                    lsb: range[1],
+                }),
+            )
+        }));
+    for (pin, range) in interfaces {
+        let connection = instance.connections.iter().find(|c| c.pin == pin);
         if connection.is_some_and(|c| !matches!(c.signal, Expr::Unconnected)) {
             continue;
         }
@@ -250,7 +265,8 @@ fn open_pins<'a>(
             return Err(budget("open-pin count"));
         }
         opened.push(Open {
-            pin: &pin.name,
+            pin,
+            range,
             name,
             missing: connection.is_none(),
         });
@@ -457,7 +473,7 @@ pub(crate) fn write(
                 work_limit,
             )? {
                 writer
-                    .wire(Cow::Owned(open.name), None)
+                    .wire(Cow::Owned(open.name), open.range)
                     .map_err(format_error)?;
             }
             writer.charge_work(work - before).map_err(format_error)?;

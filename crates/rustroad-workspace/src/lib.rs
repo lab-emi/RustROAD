@@ -11,16 +11,20 @@ use std::path::{Path, PathBuf};
 pub mod access_test;
 pub mod antenna;
 pub mod clock;
+mod connections;
 pub mod eco;
 pub mod extract;
 pub mod floorplan;
 pub mod gds;
 pub mod input_buffer;
+pub mod macro_supply;
 pub mod netlist_export;
 pub mod pdk;
 pub mod physical;
+pub mod placement_seed;
 mod port_ties;
 pub mod routing;
+mod segmented_supply;
 mod storage;
 pub mod ties;
 use rustroad_core::connectivity::{ConnectedDesign, PinOwner};
@@ -1117,6 +1121,7 @@ mod tests {
                 orientation: rustroad_core::Orientation::N,
             }],
             cells: vec![Cell {
+                fixed: None,
                 name: "u0".into(),
                 master: "BUF".into(),
                 width: 10,

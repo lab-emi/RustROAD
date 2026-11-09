@@ -187,6 +187,14 @@ on stdout.
 
 ## Router (`track_router` in the routing profile; needs `lef_rules`)
 
+`track_router.min_routing_layer` and `max_routing_layer` optionally restrict
+global capacity and detailed signal wires/vias by selected LEF layer name.
+The access layer must lie inside that range. Lower layers remain available
+for fixed pin escapes; for example, selecting Metal2 through Metal5 keeps
+Metal1 cell-pin access while reserving TopMetal for the supply grid. Omitting
+both fields retains the previous behavior for existing profiles. Invalid,
+reversed or cut-layer limits are rejected.
+
 1. **Track graph.** Every routing layer has its own tracks from the LEF
    `PITCH`/`OFFSET` (cross axis), replaced by profile `tracks` overrides.
    Along a track the nodes are the tracks of the via-paired perpendicular
