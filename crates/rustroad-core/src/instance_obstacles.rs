@@ -1,6 +1,7 @@
 //! Shared immutable cell geometry for large routing inputs.
 use crate::routing::{Blockage, RouteLimits, budget, invalid};
 use crate::{Orientation, Rect, Result, transform_rect};
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 use std::sync::Arc;
@@ -9,7 +10,7 @@ const MAX_INSTANCES: usize = crate::MAX_PHYSICAL_INSTANCES;
 const MAX_PINS: usize = 256_000_000;
 const NO_NET: u32 = u32::MAX;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TemplateObstacle {
     pub layer: u32,
     pub rect: Rect,
@@ -17,7 +18,7 @@ pub struct TemplateObstacle {
     pub pin: Option<u32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ObstacleTemplate {
     height: i64,
     pin_count: u32,
@@ -63,7 +64,7 @@ impl ObstacleTemplate {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct ObstacleInstance {
     pub template: u32,
     pub pin_start: u32,
@@ -71,7 +72,7 @@ pub struct ObstacleInstance {
     pub orientation: Orientation,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct InstanceObstacles {
     templates: Arc<[ObstacleTemplate]>,
     instances: Arc<[ObstacleInstance]>,

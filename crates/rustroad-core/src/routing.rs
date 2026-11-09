@@ -11,6 +11,7 @@ pub use crate::instance_obstacles::{
 };
 use crate::route_rules;
 pub(crate) use crate::route_rules::Violation;
+pub use crate::troute::replay::{ReplayCapture, ReplayOptions, ReplayPhase, ReplayReport};
 use crate::{Error, Rect, Result};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -19,6 +20,9 @@ use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RouteLimits {
+    /// Optional bounded pre-search diagnostic snapshot; routing semantics are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ReplayCapture>,
     pub max_axis: usize,
     pub max_grid_nodes: usize,
     pub max_obstacles: usize,
@@ -80,6 +84,7 @@ fn default_batch_repair_terminals() -> usize {
 impl Default for RouteLimits {
     fn default() -> Self {
         Self {
+            replay: None,
             max_axis: 1024,
             max_grid_nodes: 2_000_000,
             max_obstacles: 200_000,
@@ -106,6 +111,7 @@ impl RouteLimits {
     /// its upfront memory estimate against `TrackPlan::memory_mib`.
     pub fn ceiling() -> Self {
         Self {
+            replay: None,
             max_axis: 1 << 20,
             max_grid_nodes: u32::MAX as usize - 1,
             max_obstacles: 256_000_000,
@@ -133,6 +139,9 @@ impl RouteLimits {
         self.validate_against(&Self::ceiling())
     }
     fn validate_against(&self, hard: &Self) -> Result<()> {
+        if let Some(capture) = &self.replay {
+            capture.validate()?;
+        }
         if self.max_batch_retries > hard.max_batch_retries {
             return Err(budget("batch retry limit outside hard bounds"));
         }
@@ -198,13 +207,13 @@ pub struct RouteVia {
     pub upper: u32,
     pub shapes: Vec<LayerRect>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Blockage {
     pub layer: u32,
     pub rect: Rect,
     pub net: Option<u32>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Terminal {
     pub pin: u32,
     pub net: u32,
@@ -214,19 +223,22 @@ pub struct Terminal {
     pub class: Option<(u32, [i64; 2])>,
 }
 /// One (master, orientation, pin) access geometry relative to the origin.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AccessClass {
     pub shapes: Vec<LayerRect>,
     /// Other-net geometry of the same master (other pins, OBS) on selected layers.
     pub blockers: Vec<LayerRect>,
 }
 /// Per-layer track grid and router parameters of the track router.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TrackPlan {
     /// Indexed like `RouteInput::layers`: `(pitch, offset)` of the cross-axis
     /// track coordinates (vertical layer: x = offset + k * pitch); `None` for
     /// cut layers.
     pub tracks: Vec<Option<(i64, i64)>>,
+    /// Inclusive signal-routing layer indices; lower layers remain available
+    /// to fixed pin escapes. `None` retains all selected routing layers.
+    pub routing_layers: Option<[u32; 2]>,
     /// Square GCell side in DBU for global routing.
     pub gcell: i64,
     pub global_iterations: usize,
@@ -245,10 +257,162 @@ pub struct TrackPlan {
     /// Integer multiplier of the detailed-search lower bound (1..=16).
     /// Values above one favor progress over shortest-path optimality.
     pub heuristic_weight: u64,
+    /// Optional priority weight for soft rip-up searches only (1..=16).
+    /// Omitted values retain the normal detailed-search weight and encoding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repair_heuristic_weight: Option<u64>,
+    /// Optional bounded one-owner trials before ordinary soft rip-up.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub single_owner_repair: Option<SingleOwnerRepairConfig>,
     /// Upfront memory estimate ceiling for graph, guides and search state.
     pub memory_mib: u64,
     /// Separate cap for cumulative congestion-history entries.
     pub max_history_entries: usize,
+}
+
+/// Explicit bounds for one-owner trials. None in TrackPlan preserves legacy
+/// routing and snapshot encoding; all trials share the router's real ledger.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SingleOwnerRepairConfig {
+    pub max_candidates: usize,
+    pub max_frontier_nodes: usize,
+    pub first_search_expansions: usize,
+    pub max_progress_candidates: usize,
+    pub progress_search_expansions: usize,
+    pub max_total_expansions: usize,
+    /// Refine a completed multi-owner soft candidate under the same local
+    /// allocation. Omitted values preserve the prior route and encoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_soft_refinement: Option<PostSoftRefinement>,
+}
+
+/// Additional selection after ordinary soft routing has supplied real owners.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PostSoftRefinement {
+    /// Try one observed owner at a time, keeping the original route on failure.
+    SingleOwner,
+}
+impl SingleOwnerRepairConfig {
+    /// Validate explicit local caps without enlarging the original global cap.
+    pub fn validate(&self, limits: &RouteLimits) -> Result<()> {
+        if !(1..=16).contains(&self.max_candidates)
+            || !(1..=4096).contains(&self.max_frontier_nodes)
+            || !(1..=50_000).contains(&self.first_search_expansions)
+            || self.max_progress_candidates > 4
+            || self.progress_search_expansions < self.first_search_expansions
+            || self.progress_search_expansions > 200_000
+            || self.progress_search_expansions > limits.max_search_expansions
+            || self.max_total_expansions == 0
+            || self.max_total_expansions > 2_000_000
+        {
+            return Err(invalid("single-owner repair limits"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn working_bytes(&self, limits: &RouteLimits, max_via_shapes: usize) -> u64 {
+        let base = (self.max_frontier_nodes as u64)
+            .saturating_mul(256)
+            .saturating_add((limits.max_active_nodes as u64).saturating_mul(8))
+            .saturating_add(64 << 10);
+        if self.post_soft_refinement.is_none() {
+            return base;
+        }
+        // One retained fallback, its shape handles and reversible history
+        // coexist with the existing trial scratch. Account for Vec growth.
+        let per_node = (std::mem::size_of::<Wire>() as u64)
+            .saturating_add(std::mem::size_of::<Via>() as u64)
+            .saturating_add((max_via_shapes.max(1) as u64).saturating_mul(8))
+            .saturating_add(std::mem::size_of::<(u32, u16)>() as u64)
+            .saturating_mul(2);
+        base.saturating_add((limits.max_active_nodes as u64).saturating_mul(per_node))
+    }
+}
+
+/// Measurements of refinement over an already completed soft candidate.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PostSoftRefinementStats {
+    pub stages: usize,
+    pub candidate_owners: usize,
+    pub attempts: usize,
+    pub successes: usize,
+    pub fallbacks: usize,
+    pub quota_skips: usize,
+}
+impl PostSoftRefinementStats {
+    fn merge(&mut self, other: &Self) -> Result<()> {
+        let sum = |a: usize, b: usize| {
+            a.checked_add(b)
+                .ok_or_else(|| budget("post-soft telemetry overflow"))
+        };
+        *self = Self {
+            stages: sum(self.stages, other.stages)?,
+            candidate_owners: sum(self.candidate_owners, other.candidate_owners)?,
+            attempts: sum(self.attempts, other.attempts)?,
+            successes: sum(self.successes, other.successes)?,
+            fallbacks: sum(self.fallbacks, other.fallbacks)?,
+            quota_skips: sum(self.quota_skips, other.quota_skips)?,
+        };
+        Ok(())
+    }
+}
+
+/// Measured repair-stage counters; absent when the stage was not enabled.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SingleOwnerRepairStats {
+    pub stages: usize,
+    pub candidate_owners: usize,
+    pub attempts: usize,
+    pub successes: usize,
+    pub frontier_skips: usize,
+    pub local_budget_exhaustions: usize,
+    pub trial_expansions: usize,
+    pub trial_comparisons: usize,
+    pub committed_history_updates: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_soft_refinement: Option<PostSoftRefinementStats>,
+}
+impl SingleOwnerRepairStats {
+    pub(crate) fn merge(&mut self, other: &Self) -> Result<()> {
+        let sum = |a: usize, b: usize| {
+            a.checked_add(b)
+                .ok_or_else(|| budget("single-owner telemetry overflow"))
+        };
+        let mut post = self.post_soft_refinement.clone();
+        if let Some(value) = &other.post_soft_refinement {
+            post.get_or_insert_with(Default::default).merge(value)?;
+        }
+        let next = Self {
+            stages: sum(self.stages, other.stages)?,
+            candidate_owners: sum(self.candidate_owners, other.candidate_owners)?,
+            attempts: sum(self.attempts, other.attempts)?,
+            successes: sum(self.successes, other.successes)?,
+            frontier_skips: sum(self.frontier_skips, other.frontier_skips)?,
+            local_budget_exhaustions: sum(
+                self.local_budget_exhaustions,
+                other.local_budget_exhaustions,
+            )?,
+            trial_expansions: sum(self.trial_expansions, other.trial_expansions)?,
+            trial_comparisons: sum(self.trial_comparisons, other.trial_comparisons)?,
+            committed_history_updates: sum(
+                self.committed_history_updates,
+                other.committed_history_updates,
+            )?,
+            post_soft_refinement: post,
+        };
+        *self = next;
+        Ok(())
+    }
+}
+impl TrackPlan {
+    pub(crate) fn allows_routing_layer(&self, layer: u32) -> bool {
+        self.routing_layers
+            .is_none_or(|[lower, upper]| lower <= layer && layer <= upper)
+    }
 }
 pub const DEFAULT_MAX_HISTORY_ENTRIES: usize = 4_000_000;
 /// Process baseline counted in every route memory estimate (binary, libc,
@@ -286,7 +450,7 @@ pub fn loaded_held_estimate(
     }
 }
 
-fn input_heap_estimate(input: &RouteInput) -> u64 {
+pub(crate) fn input_heap_estimate(input: &RouteInput) -> u64 {
     use std::mem::size_of;
     let shapes = |v: &[LayerRect]| std::mem::size_of_val(v) as u64;
     let terminals: u64 = input
@@ -317,12 +481,13 @@ fn input_heap_estimate(input: &RouteInput) -> u64 {
 /// pin and a pseudo-driver on the cell's own rail rectangle `zone`; it is
 /// not a logical net. A routed shape of `net` that overlaps `zone` may touch
 /// (never merely approach) fixed shapes of the supply net `supply`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct SupplyTie {
     pub net: u32,
     pub supply: u32,
     pub zone: LayerRect,
 }
+#[derive(Serialize)]
 pub struct RouteInput {
     pub die: Rect,
     pub grid: i64,
@@ -345,6 +510,7 @@ pub struct RouteInput {
     /// Bytes the caller already holds for this route (loaded workspace and
     /// this input), counted with the router's own estimate against the
     /// track plan's `memory_mib`.
+    #[serde(skip)]
     pub held_bytes: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -385,6 +551,8 @@ pub struct RouteStats {
     pub expansions: usize,
     pub comparisons: usize,
     pub wire_length_dbu: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub single_owner_repair: Option<SingleOwnerRepairStats>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -397,6 +565,19 @@ pub struct Routes {
     pub nets: Vec<u32>,
     pub stats: RouteStats,
 }
+/// Replay a single captured repair without changing a workspace or claiming signoff.
+///
+/// # Errors
+/// Returns a diagnostic for stale views, invalid geometry and bounded work/memory failures.
+pub fn replay_route(
+    input: &RouteInput,
+    limits: &RouteLimits,
+    snapshot: &std::path::Path,
+    options: &ReplayOptions,
+) -> Result<ReplayReport> {
+    crate::troute::replay::replay(input, limits, snapshot, options)
+}
+
 pub(crate) fn budget(s: &str) -> Error {
     Error::Budget(s.into())
 }
@@ -446,6 +627,13 @@ pub(crate) fn contains(r: Rect, p: [i64; 2]) -> bool {
 }
 pub(crate) fn overlap(a: Rect, b: Rect) -> bool {
     a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy
+}
+/// The rectangular envelope is a broad-phase test. Routing-metal corners
+/// use the same integer minimum distance as native rule validation. Cut
+/// spacing keeps its existing conservative envelope.
+fn routing_separated(rule: &RouteLayer, a: Rect, b: Rect) -> bool {
+    rule.vertical.is_some()
+        && route_rules::relation(a, b, rule.spacing) == route_rules::Relation::Far
 }
 
 /// Deterministic multiplicative hasher for spatial bin keys (lookups only;
@@ -899,6 +1087,29 @@ impl<'a> InstanceIndex<'a> {
     }
 }
 
+#[derive(Serialize)]
+pub(crate) struct SpatialCapture<'a> {
+    shapes: &'a [Blockage],
+    alive: &'a [bool],
+    routed: &'a [bool],
+    work: usize,
+    bin: i64,
+    entries: usize,
+    generation: u64,
+    instance_generation: Option<u64>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SpatialState {
+    shapes: Vec<Blockage>,
+    alive: Vec<bool>,
+    routed: Vec<bool>,
+    work: usize,
+    bin: i64,
+    entries: usize,
+    generation: u64,
+    instance_generation: Option<u64>,
+}
 pub(crate) struct Spatial<'a> {
     pub(crate) input: &'a RouteInput,
     limits: &'a RouteLimits,
@@ -946,6 +1157,62 @@ fn same_net_shapes(
 }
 
 impl<'a> Spatial<'a> {
+    pub(crate) fn capture(&self) -> Result<SpatialCapture<'_>> {
+        if self.shapes.len() > 4_000_000 {
+            return Err(budget("replay shape capture limit"));
+        }
+        Ok(SpatialCapture {
+            shapes: &self.shapes,
+            alive: &self.alive,
+            routed: &self.routed,
+            work: self.work,
+            bin: self.bin,
+            entries: self.entries,
+            generation: self.generation,
+            instance_generation: self.instances.as_ref().map(|v| v.generation),
+        })
+    }
+    pub(crate) fn restore_capture(
+        input: &'a RouteInput,
+        limits: &'a RouteLimits,
+        state: SpatialState,
+    ) -> Result<Self> {
+        let n = state.shapes.len();
+        if n > 4_000_000
+            || n != state.alive.len()
+            || n != state.routed.len()
+            || state.work > limits.max_comparisons
+            || state.entries > limits.max_bin_entries
+        {
+            return Err(budget("replay spatial state limits"));
+        }
+        let mut result = Self::new(input, limits)?;
+        for (i, shape) in state.shapes.into_iter().enumerate() {
+            if shape.layer as usize >= input.layers.len() || !shape.rect.valid() {
+                return Err(invalid("replay obstacle geometry"));
+            }
+            let id = if state.routed[i] {
+                result.add_routed(shape)?
+            } else {
+                result.add_fixed(shape)?
+            };
+            if !state.alive[i] {
+                result.remove(id);
+            }
+        }
+        if result.bin != state.bin || result.entries != state.entries {
+            return Err(invalid("replay spatial index differs"));
+        }
+        result.work = state.work;
+        result.generation = state.generation;
+        match (&mut result.instances, state.instance_generation) {
+            (Some(index), Some(generation)) => index.generation = generation,
+            (None, None) => (),
+            _ => return Err(invalid("replay instance index differs")),
+        }
+        Ok(result)
+    }
+
     pub(crate) fn new(input: &'a RouteInput, limits: &'a RouteLimits) -> Result<Self> {
         if input
             .obstacles
@@ -1023,6 +1290,9 @@ impl<'a> Spatial<'a> {
             if !overlap(query, b.rect) {
                 return Ok(true);
             }
+            if rules && routing_separated(&self.input.layers[layer as usize], rect, b.rect) {
+                return Ok(true);
+            }
             let shared = same_net_shapes(ties, net, layer, rect, &b) && (routing || rect == b.rect);
             if !shared {
                 return Ok(false);
@@ -1086,7 +1356,16 @@ impl<'a> Spatial<'a> {
                 .map_or(0, InstanceObstacles::len),
         ) >= self.limits.max_obstacles
         {
-            return Err(budget("routing obstacle count"));
+            return Err(budget(&format!(
+                "routing obstacle count: {} stored plus {} instance shapes, limit {}; {} removed stored shapes",
+                self.len(),
+                self.input
+                    .instances
+                    .as_ref()
+                    .map_or(0, InstanceObstacles::len),
+                self.limits.max_obstacles,
+                self.alive.iter().filter(|alive| !**alive).count()
+            )));
         }
         self.index(self.len(), &b)?;
         self.shapes.push(b);
@@ -1095,7 +1374,7 @@ impl<'a> Spatial<'a> {
         self.routed.push(false);
         Ok(())
     }
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.input.obstacles.len() + self.shapes.len()
     }
     fn shape(&self, id: usize) -> &Blockage {
@@ -1135,6 +1414,65 @@ impl<'a> Spatial<'a> {
     }
     pub(crate) fn clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
         Ok(self.probe(layer, rect, net)?.is_some())
+    }
+    /// Exact clearance for a long capacity span. Sparse fixtures can have
+    /// fewer stored shapes than empty bins along the span; scan those shapes
+    /// directly instead of charging work proportional to empty chip area.
+    pub(crate) fn span_clear(&mut self, layer: u32, rect: Rect, net: u32) -> Result<bool> {
+        let query = expand(rect, self.input.layers[layer as usize].spacing)?;
+        let columns = i128::from(query.ux.div_euclid(self.bin))
+            - i128::from(query.lx.div_euclid(self.bin))
+            + 1;
+        let rows = i128::from(query.uy.div_euclid(self.bin))
+            - i128::from(query.ly.div_euclid(self.bin))
+            + 1;
+        if self.instances.is_some() || columns.saturating_mul(rows) <= self.len() as i128 {
+            return self.clear(layer, rect, net);
+        }
+        if !self.input.die.contains(rect) {
+            return Ok(false);
+        }
+        self.work = self
+            .work
+            .checked_add(self.len().saturating_add(1))
+            .filter(|&n| n <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("capacity span comparison limit"))?;
+        let routing = self.input.layers[layer as usize].vertical.is_some();
+        for id in 0..self.len() {
+            let shape = self.shape(id);
+            if self.alive(id)
+                && shape.layer == layer
+                && overlap(query, shape.rect)
+                && !(self.input.rules
+                    && routing_separated(&self.input.layers[layer as usize], rect, shape.rect))
+                && !(self.same_net(net, layer, rect, shape) && (routing || rect == shape.rect))
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Bounded diagnostic for a stored shape rejected by the independent
+    /// validator. Instance-template collisions remain identified by layer.
+    pub(crate) fn stored_collision(&self, layer: u32, rect: Rect, net: u32) -> Result<String> {
+        let query = expand(rect, self.input.layers[layer as usize].spacing)?;
+        let routing = self.input.layers[layer as usize].vertical.is_some();
+        for id in 0..self.len() {
+            if !self.alive(id) {
+                continue;
+            }
+            let b = self.shape(id);
+            if b.layer == layer
+                && overlap(query, b.rect)
+                && !(self.input.rules
+                    && routing_separated(&self.input.layers[layer as usize], rect, b.rect))
+                && !(self.same_net(net, layer, rect, b) && (routing || rect == b.rect))
+            {
+                return Ok(format!("against net {:?} rect {:?}", b.net, b.rect));
+            }
+        }
+        Ok("against instance geometry or die boundary".into())
     }
     /// Like `probe`, but routed shapes of other nets do not block: their nets
     /// are returned as victims. Fixed shapes of other nets still block.
@@ -1181,6 +1519,11 @@ impl<'a> Spatial<'a> {
                         }
                         let b = self.shape(id);
                         if !overlap(query, b.rect) {
+                            continue;
+                        }
+                        if self.input.rules
+                            && routing_separated(&self.input.layers[layer as usize], rect, b.rect)
+                        {
                             continue;
                         }
                         let shared =
@@ -1281,6 +1624,11 @@ impl<'a> Spatial<'a> {
                         if !overlap(query, b.rect) {
                             continue;
                         }
+                        if self.input.rules
+                            && routing_separated(&self.input.layers[layer as usize], rect, b.rect)
+                        {
+                            continue;
+                        }
                         let shared =
                             self.same_net(net, layer, rect, b) && (routing || rect == b.rect);
                         if !shared {
@@ -1366,6 +1714,9 @@ pub(crate) fn preflight(input: &RouteInput, limits: &RouteLimits) -> Result<()> 
     if let Some(plan) = &input.tracks {
         limits.validate_track()?;
         crate::troute::check_plan(input, plan)?;
+        if let Some(config) = &plan.single_owner_repair {
+            config.validate(limits)?;
+        }
     } else {
         limits.validate()?;
     }
@@ -1783,7 +2134,7 @@ pub(crate) fn access_table_at(
                     let halo = expand(rect, rule.spacing)?;
                     for b in class.blockers.iter().filter(|b| b.layer == s.layer) {
                         *work += 1;
-                        if overlap(halo, b.rect) {
+                        if overlap(halo, b.rect) && !routing_separated(rule, rect, b.rect) {
                             continue 'kind;
                         }
                     }
@@ -2695,6 +3046,32 @@ fn area_stub(
 /// Independent of search history: check geometry against blockages and bounded
 /// endpoint-graph connectivity. External OpenDB/KLayout are the physical oracle.
 pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Result<()> {
+    validate_geometry(input, routes, limits, None)
+}
+
+/// Validate stored routing under its original telemetry limits, with a separate
+/// cap for the comparisons performed by this geometry validation. A previous
+/// search may legitimately have used more work than this read-only check.
+pub fn validate_with_work_limit(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    max_validation_comparisons: usize,
+) -> Result<()> {
+    if max_validation_comparisons == 0 {
+        return Err(budget(
+            "geometry validation comparison limit must be nonzero",
+        ));
+    }
+    validate_geometry(input, routes, limits, Some(max_validation_comparisons))
+}
+
+fn validate_geometry(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    validation_work: Option<usize>,
+) -> Result<()> {
     preflight(input, limits)?;
     let length = routes.wires.iter().try_fold(0u64, |n, w| {
         n.checked_add(distance(w.start, w.end)?)
@@ -2712,6 +3089,13 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
     {
         return Err(invalid("routing telemetry/geometry mismatch"));
     }
+    let validation_limits = RouteLimits {
+        max_comparisons: limits
+            .max_comparisons
+            .min(validation_work.unwrap_or(limits.max_comparisons)),
+        ..limits.clone()
+    };
+    let limits = &validation_limits;
     if routes.wires.len() + routes.vias.len() + routes.patches.len() > limits.max_segments
         || routes.access.len() > input.terminals.len()
     {
@@ -2767,7 +3151,25 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             return Err(invalid("stored via identity/grid"));
         }
         if !spatial.via_clear(v.kind as usize, v.at, v.net)? {
-            return Err(invalid("via collides with blockage/other net"));
+            let kind = &input.vias[v.kind as usize];
+            let mut blocked = Vec::new();
+            for shape in &kind.shapes {
+                let rect = shifted(shape.rect, v.at)?;
+                if !spatial.clear(shape.layer, rect, v.net)? {
+                    let collision = spatial.stored_collision(shape.layer, rect, v.net)?;
+                    blocked.push(format!(
+                        "{} [{},{},{},{}] {collision}",
+                        input.layers[shape.layer as usize].name, rect.lx, rect.ly, rect.ux, rect.uy
+                    ));
+                }
+            }
+            return Err(invalid(&format!(
+                "via {} net {} at {:?} collides with blockage/other net on {}",
+                kind.name,
+                v.net,
+                v.at,
+                blocked.join(", ")
+            )));
         }
         spatial.add_via(v)?;
     }
@@ -2791,7 +3193,7 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
             net: Some(p.net),
         })?;
     }
-    let mut work = 0;
+    let mut work = validation_work.map_or(0, |_| spatial.work);
     let terminals = crate::rule_index::order(
         input.terminals.len(),
         |i| input.terminals[i].pin,
@@ -2842,7 +3244,9 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
     }
     drop(index);
     if input.rules {
-        let mut work = 0usize;
+        if validation_work.is_none() {
+            work = 0;
+        }
         let violations = route_rules::check(input, routes, limits, &mut work)?;
         if let Some(v) = violations.first() {
             return Err(invalid(&format!(
@@ -2858,6 +3262,64 @@ pub fn validate(input: &RouteInput, routes: &Routes, limits: &RouteLimits) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_post_soft_stats_merge_is_checked_and_atomic() {
+        let mut aggregate = SingleOwnerRepairStats::default();
+        assert!(
+            serde_json::to_value(&aggregate)
+                .unwrap()
+                .get("post_soft_refinement")
+                .is_none()
+        );
+        let partial = SingleOwnerRepairStats {
+            attempts: 2,
+            trial_expansions: 123,
+            post_soft_refinement: Some(PostSoftRefinementStats {
+                stages: 1,
+                attempts: 2,
+                successes: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        aggregate.merge(&partial).unwrap();
+        aggregate.merge(&partial).unwrap();
+        assert_eq!(aggregate.attempts, 4);
+        assert_eq!(aggregate.trial_expansions, 246);
+        assert_eq!(
+            aggregate.post_soft_refinement.as_ref().unwrap().successes,
+            2
+        );
+        let before = serde_json::to_value(&aggregate).unwrap();
+        let overflow = SingleOwnerRepairStats {
+            post_soft_refinement: Some(PostSoftRefinementStats {
+                stages: usize::MAX,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(aggregate.merge(&overflow).is_err());
+        assert_eq!(serde_json::to_value(&aggregate).unwrap(), before);
+    }
+
+    #[test]
+    fn validation_work_budget_is_separate_from_historical_search_statistics() {
+        let input = fixture();
+        let limits = RouteLimits::default();
+        let mut routes = route_cpu_ref(&input, &limits).unwrap();
+        // Synthetic boundary telemetry for this format/control test. Actual
+        // Ibex evidence retains the original4.53B comparison count unchanged.
+        routes.stats.comparisons = limits.max_comparisons;
+        validate_with_work_limit(&input, &routes, &limits, 1_000_000).unwrap();
+        assert_eq!(routes.stats.comparisons, limits.max_comparisons);
+        let error = validate_with_work_limit(&input, &routes, &limits, 1).unwrap_err();
+        assert!(matches!(error, Error::Budget(_)), "{error}");
+        let mut invalid = routes.clone();
+        invalid.stats.comparisons += 1;
+        let error = validate_with_work_limit(&input, &invalid, &limits, 1_000_000).unwrap_err();
+        assert!(error.to_string().contains("telemetry/geometry mismatch"));
+    }
 
     #[test]
     fn per_net_pruning_matches_whole_graph_with_cycles_branches_and_vias() {
@@ -3516,6 +3978,7 @@ mod tests {
                     .iter()
                     .map(|w| distance(w.start, w.end).unwrap())
                     .sum(),
+                single_owner_repair: None,
             },
             wires,
             vias: vias
@@ -3640,6 +4103,63 @@ mod tests {
         input.layers[1].min_area = Some(120);
         assert!(validate(&input, &plain, &limits).is_err());
     }
+    #[test]
+    fn routing_corner_spacing_accepts_a_covered_pad_and_rejects_a_closer_corner() {
+        // Integer geometry of the EZ130 AOI211X2 C/B access corner. The lower
+        // pad is wholly inside C:125^2+175^2 >180^2, although its square
+        // spacing envelope overlaps B. Moving B closer reverses that result.
+        let mut input = rules_input();
+        input.die = rect(0, 0, 2000, 2000);
+        input.layers[0].spacing = 180;
+        input.vias[0].shapes[0].rect = rect(-105, -145, 105, 145);
+        input.vias[0].shapes[1].rect = rect(-100, -145, 100, 145);
+        input.vias[0].shapes[2].rect = rect(-95, -95, 95, 95);
+        let pin = rect(1275, 1535, 1575, 1840);
+        input.obstacles.push(Blockage {
+            layer: 0,
+            rect: rect(765, 1155, 1195, 1365),
+            net: Some(1),
+        });
+        let mut class = AccessClass {
+            shapes: vec![LayerRect {
+                layer: 0,
+                rect: pin,
+            }],
+            blockers: vec![LayerRect {
+                layer: 0,
+                rect: input.obstacles[0].rect,
+            }],
+        };
+        let slots = HashMap::from([(0, 0), (1, 1)]);
+        let pairs = via_pairs(&input);
+        let limits = RouteLimits::default();
+        let at = [1425, 1685];
+        let entries =
+            access_table_at(&input, &slots, &pairs, &class, &[(0, at)], &mut 0, &limits).unwrap();
+        assert_eq!(
+            entries[0].kinds,
+            [0],
+            "the original pin already contains the entire pad"
+        );
+        assert!(
+            Spatial::new(&input, &limits)
+                .unwrap()
+                .via_clear(0, at, 0)
+                .unwrap()
+        );
+        input.obstacles[0].rect.ux = 1280;
+        class.blockers[0].rect.ux = 1280;
+        let entries =
+            access_table_at(&input, &slots, &pairs, &class, &[(0, at)], &mut 0, &limits).unwrap();
+        assert!(entries[0].kinds.is_empty());
+        assert!(
+            !Spatial::new(&input, &limits)
+                .unwrap()
+                .via_clear(0, at, 0)
+                .unwrap()
+        );
+    }
+
     #[test]
     fn access_table_picks_the_variant_whose_pad_fits_the_pin() {
         let mut input = rules_input();

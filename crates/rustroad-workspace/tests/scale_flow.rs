@@ -79,6 +79,8 @@ fn netlist() -> String {
 
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -281,6 +283,59 @@ fn batched_routing_persists_complete_coverage_and_failed_batches_keep_head() {
 }
 
 #[test]
+fn explicit_signal_layer_names_survive_export_and_reject_invalid_ranges() {
+    let fixture = Fixture::new();
+    let mut profile = routing(true);
+    profile["track_router"]["min_routing_layer"] = "M2".into();
+    profile["track_router"]["max_routing_layer"] = "M3".into();
+    fs::write(
+        fixture.path("restricted.json"),
+        serde_json::to_vec(&profile).unwrap(),
+    )
+    .unwrap();
+    let ws = fixture.flow("restricted", "restricted.json").unwrap();
+    let snapshot = read(&ws, &limits()).unwrap();
+    let config = snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .routing
+        .as_ref()
+        .unwrap()
+        .config
+        .track_router
+        .as_ref()
+        .unwrap();
+    assert_eq!(config.min_routing_layer.as_deref(), Some("M2"));
+    assert_eq!(config.max_routing_layer.as_deref(), Some("M3"));
+    assert_eq!(snapshot.summary().routed_nets, Some(19));
+    drop(snapshot);
+    for (tag, lower, upper) in [
+        ("absent-layer", "missing", "M3"),
+        ("cut-layer", "M2", "V1"),
+        ("reversed", "M3", "M2"),
+    ] {
+        profile["track_router"]["min_routing_layer"] = lower.into();
+        profile["track_router"]["max_routing_layer"] = upper.into();
+        fs::write(
+            fixture.path("invalid-range.json"),
+            serde_json::to_vec(&profile).unwrap(),
+        )
+        .unwrap();
+        assert!(fixture.flow(tag, "invalid-range.json").is_err(), "{tag}");
+        assert_eq!(
+            read(&fixture.path(&format!("{tag}-ws")), &limits())
+                .unwrap()
+                .summary()
+                .revision,
+            "rev2",
+            "{tag} must not publish partial routing"
+        );
+    }
+}
+
+#[test]
 fn floorplan_place_and_track_route_round_trip_through_schema_6() {
     let f = Fixture::new();
     let report = f.floorplan("a").unwrap();
@@ -417,6 +472,7 @@ END TAP\nEND LIBRARY\n";
     fs::write(f.path("cells.lef"), library().replace("END LIBRARY\n", tap)).unwrap();
     let mut cfg = config();
     cfg.tap = Some(rustroad_workspace::physical::TapConfig {
+        body_view: Default::default(),
         cell: "TAP".into(),
         max_gap: 500,
         well_layer: "NW".into(),

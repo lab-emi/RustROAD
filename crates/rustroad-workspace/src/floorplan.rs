@@ -493,6 +493,8 @@ pub fn floorplan_with_limits(
         .collect();
     // Connectivity: link the netlist against the LEF masters.
     let design_floor = crate::pdk::FloorplanSpec {
+        macro_placements: Default::default(),
+        pin_buses: Default::default(),
         name: netlist.module.clone(),
         units_per_micron: dbu,
         die_area: die,

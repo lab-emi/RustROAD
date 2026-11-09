@@ -461,6 +461,12 @@ pub fn route(
             .comparisons
             .checked_add(done.stats.comparisons)
             .ok_or_else(|| budget("batched routing work"))?;
+        if let Some(stats) = done.stats.single_owner_repair.take() {
+            out.stats
+                .single_owner_repair
+                .get_or_insert_with(Default::default)
+                .merge(&stats)?;
+        }
         out.stats.wire_length_dbu = out
             .stats
             .wire_length_dbu

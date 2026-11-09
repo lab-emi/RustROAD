@@ -629,7 +629,7 @@ pub fn export_gds(workspace: &Path, options: &ExportOptions, limits: &Limits) ->
     for (i, p) in placed.iter().enumerate() {
         let master = &model.masters[model.instance_masters[i] as usize];
         let what = format!("instance {}", design.cells[i].name);
-        match rustroad_core::placed_orientation(design, p)? {
+        match rustroad_core::placed_orientation_for(design, &design.cells[i], p)? {
             Orientation::N => w.sref(&master.name, None, scale.point([p.x, p.y], &what)?)?,
             Orientation::FS => {
                 let y =

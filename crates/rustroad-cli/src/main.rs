@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use rustroad_core::Limits;
 use serde::Serialize;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -110,6 +110,39 @@ enum Command {
         #[arg(long, value_parser=["clock", "all"], default_value="clock")]
         scope: String,
     },
+    /// Read-only local replay; does not publish a routing revision or signoff verdict.
+    ReplayRoute {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        snapshot: PathBuf,
+        #[arg(long)]
+        max_search_expansions: Option<usize>,
+        #[arg(long, num_args = 4, allow_hyphen_values = true)]
+        guide_bounds: Vec<i64>,
+        /// Diagnose immediate terminal geometry without running a route search.
+        #[arg(long)]
+        probe_terminals: bool,
+        /// Explicit bounded search experiment after validating the captured source.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=16))]
+        heuristic_weight: Option<u64>,
+        /// Read-only no-rip-up diagnostic; requires --max-search-expansions.
+        #[arg(
+            long,
+            requires = "max_search_expansions",
+            conflicts_with = "probe_terminals"
+        )]
+        hard_search: bool,
+        /// Report <=4096 discovered states of the final hard diagnostic sink.
+        #[arg(long, requires = "hard_search")]
+        probe_search_frontier: bool,
+        /// Permit only this routed net to be displaced in a bounded soft replay.
+        #[arg(long, requires = "max_search_expansions", conflicts_with_all = ["hard_search", "probe_terminals"])]
+        allowed_victim: Option<u32>,
+        /// Explicit bounded production-stage policy for a read-only replay.
+        #[arg(long, conflicts_with_all = ["allowed_victim", "hard_search", "probe_terminals", "probe_search_frontier"])]
+        single_owner_repair_config: Option<PathBuf>,
+    },
     /// Write checked routed geometry and scope as JSON.
     ExportRoutes,
     /// Write a read-only pin-access test DEF (each used master, orientation
@@ -122,6 +155,8 @@ enum Command {
     Inspect,
     /// Write placed DEF, including imported PINS/NETS when present.
     ExportDef,
+    /// Write a bounded, read-only seed for `place --seed` in a fresh workspace.
+    ExportPlacementSeed,
     /// Write the imported logical netlist to stdout with canonical syntax.
     ExportVerilog {
         #[arg(long)]
@@ -170,7 +205,7 @@ enum Command {
         max_rc_elements: usize,
         #[arg(long, default_value_t = 200_000_000)]
         max_extract_work: usize,
-        /// Candidate shapes per wire run (scratch 44 B each; ceiling
+        /// Candidate shapes per wire run (scratch 256 B each; ceiling
         /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 48 MiB of scratch).
         #[arg(long, default_value_t = 4096)]
         max_extract_candidates: usize,
@@ -224,6 +259,9 @@ enum Command {
         /// Override of the profile's cell-LEF path (same SHA-256 required).
         #[arg(long)]
         cell_lef: Option<PathBuf>,
+        /// Explicit `{master:{port:[msb,lsb]}}` metadata; no bracket-name guessing.
+        #[arg(long)]
+        cell_buses: Option<PathBuf>,
         /// `ruststa report --section hold_fix --target-margin M --limit 0` JSON (repeatable).
         #[arg(long = "hold-report", required = true)]
         hold_reports: Vec<PathBuf>,
@@ -304,12 +342,17 @@ enum Command {
         extra_shapes: Option<PathBuf>,
         #[arg(long, default_value_t = 200_000)]
         max_shapes_per_net: usize,
+        #[arg(long, default_value_t = 2_000_000)]
+        max_total_shapes: usize,
         #[arg(long, default_value_t = 200_000_000)]
         max_pair_checks: usize,
         #[arg(long, default_value_t = 4_000_000)]
         max_union_cells: usize,
         #[arg(long, default_value_t = 100_000)]
         max_rows: usize,
+        /// Total process-stage and geometry-grid work budget.
+        #[arg(long, default_value_t = 200_000_000)]
+        max_work: usize,
         /// Fraction of each LEF limit kept as margin for the native verdict
         /// (default derived from the measured native-vs-deck under-read).
         #[arg(long, default_value_t = rustroad_workspace::antenna::DEFAULT_SAFETY_MARGIN)]
@@ -324,6 +367,10 @@ enum Command {
         /// violated rows required; STALE_REPORT otherwise).
         #[arg(long)]
         antenna_report: Option<PathBuf>,
+        /// JSON array of routed, supported net names. Permits an explicit
+        /// partial-route experiment; requires full independent revalidation.
+        #[arg(long)]
+        selected_nets: Option<PathBuf>,
         #[arg(long, default_value_t = rustroad_workspace::antenna::DEFAULT_SAFETY_MARGIN)]
         safety_margin: f64,
         #[arg(long, default_value_t = 16)]
@@ -336,6 +383,9 @@ enum Command {
         /// Legal candidates evaluated per jumper decision.
         #[arg(long, default_value_t = 32)]
         max_candidates: usize,
+        /// Cumulative model work; also caps planner/validation comparisons.
+        #[arg(long, default_value_t = 200_000_000)]
+        max_work: usize,
     },
     /// Derive die/core/rows and a connectivity-aware I/O plan from cell area,
     /// utilization and aspect (files only; writes a floorplan and a physical
@@ -386,6 +436,9 @@ enum Command {
         /// Override of the profile's cell-LEF path (same SHA-256 required).
         #[arg(long)]
         cell_lef: Option<PathBuf>,
+        /// Explicit `{master:{port:[msb,lsb]}}` metadata, bound into the receipt.
+        #[arg(long)]
+        cell_buses: Option<PathBuf>,
         /// Sizing profile (scripts/build_sizing_profile.py); required for resize_cell
         #[arg(long)]
         sizing_profile: Option<PathBuf>,
@@ -443,6 +496,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             timed_netlist,
             timed_netlist_sha256,
             cell_lef,
+            cell_buses,
             hold_reports,
             setup_reports,
             delay_cells,
@@ -481,6 +535,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     timed_netlist: timed_netlist.clone(),
                     timed_netlist_sha256: timed_netlist_sha256.clone(),
                     cell_lef: cell_lef.clone(),
+                    cell_buses: cell_buses.clone(),
                     pins_reports: pins_reports.clone(),
                     allow_partial: *allow_partial,
                     max_group_sinks: *max_group_sinks,
@@ -530,16 +585,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             plan,
             delay_cells,
             cell_lef,
+            cell_buses,
             sizing_profile,
             out,
         } => {
-            return emit(&rustroad_workspace::eco::apply_plan_with_limits(
+            return emit(&rustroad_workspace::eco::apply_plan_with_options(
                 netlist,
                 plan,
                 delay_cells,
-                cell_lef.as_deref(),
-                sizing_profile.as_deref(),
                 out,
+                &rustroad_workspace::eco::ApplyOptions {
+                    cell_lef: cell_lef.as_deref(),
+                    sizing: sizing_profile.as_deref(),
+                    cell_buses: cell_buses.as_deref(),
+                },
                 &budget.limits(&parser_limits),
             )?);
         }
@@ -675,6 +734,59 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             output.flush()?;
             Ok(())
         }
+        Command::ReplayRoute {
+            config,
+            snapshot,
+            max_search_expansions,
+            guide_bounds,
+            probe_terminals,
+            heuristic_weight,
+            hard_search,
+            probe_search_frontier,
+            allowed_victim,
+            single_owner_repair_config,
+        } => {
+            let single_owner_repair = match single_owner_repair_config {
+                None => None,
+                Some(path) => {
+                    let mut data = Vec::new();
+                    std::fs::File::open(path)?
+                        .take(4097)
+                        .read_to_end(&mut data)?;
+                    if data.len() > 4096 {
+                        return Err("INVALID_ARGUMENT: owner repair policy exceeds4096bytes".into());
+                    }
+                    Some(serde_json::from_slice::<
+                        rustroad_core::routing::SingleOwnerRepairConfig,
+                    >(&data)?)
+                }
+            };
+            let guide = match guide_bounds.as_slice() {
+                [] => None,
+                &[lx, ly, ux, uy] => Some(rustroad_core::Rect { lx, ly, ux, uy }),
+                _ => {
+                    return Err(
+                        "INVALID_ARGUMENT: guide bounds require four DBU coordinates".into(),
+                    );
+                }
+            };
+            emit(&rustroad_workspace::routing::replay_route(
+                &workspace,
+                &config,
+                &snapshot,
+                &rustroad_core::routing::ReplayOptions {
+                    max_search_expansions,
+                    guide_bounds: guide,
+                    probe_terminals,
+                    heuristic_weight,
+                    hard_search,
+                    probe_search_frontier,
+                    allowed_victim,
+                    single_owner_repair,
+                },
+                &limits,
+            )?)
+        }
         Command::Inspect => emit(&rustroad_workspace::read(&workspace, &limits)?.summary()),
         Command::ExportDef => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
@@ -683,6 +795,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             snapshot.export_def(&mut output)?;
             output.flush()?;
             Ok(())
+        }
+        Command::ExportPlacementSeed => {
+            let snapshot = rustroad_workspace::read(&workspace, &limits)?;
+            emit(&rustroad_workspace::placement_seed::from_snapshot(
+                &snapshot,
+            )?)
         }
         Command::ExportVerilog {
             include_power,
@@ -787,18 +905,22 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::CheckAntenna {
             extra_shapes,
             max_shapes_per_net,
+            max_total_shapes,
             max_pair_checks,
             max_union_cells,
             max_rows,
+            max_work,
             safety_margin,
         } => emit(&rustroad_workspace::antenna::check_antenna(
             &workspace,
             &rustroad_workspace::antenna::AntennaRequest {
                 extra_shapes,
                 max_shapes_per_net,
+                max_total_shapes,
                 max_pair_checks,
                 max_union_cells,
                 max_rows,
+                max_work,
                 safety_margin,
             },
             &limits,
@@ -806,20 +928,28 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::RepairAntenna {
             base_rev,
             antenna_report,
+            selected_nets,
             safety_margin,
             max_jumpers_per_net,
             max_jumpers,
             max_positions,
             max_candidates,
+            max_work,
         } => emit(&rustroad_workspace::antenna::repair_antenna(
             &workspace,
             &base_rev,
             &rustroad_workspace::antenna::RepairRequest {
                 antenna: rustroad_workspace::antenna::AntennaRequest {
                     safety_margin,
+                    max_work,
                     ..Default::default()
                 },
                 report: antenna_report,
+                scope: selected_nets
+                    .as_deref()
+                    .map(rustroad_workspace::antenna::read_repair_selection)
+                    .transpose()?
+                    .unwrap_or_default(),
                 max_jumpers_per_net,
                 max_jumpers,
                 jumper: rustroad_core::jumper::JumperLimits {
