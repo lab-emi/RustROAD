@@ -77,6 +77,12 @@ fn default_history(value: &usize) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrackRouterConfig {
+    /// Lowest signal-routing layer. Lower layers remain usable by pin access.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_routing_layer: Option<String>,
+    /// Highest signal-routing layer; omitted uses the highest selected layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_routing_layer: Option<String>,
     /// GCell side in DBU.
     pub gcell: i64,
     /// Path cost of one via (DBU-equivalent).
@@ -103,6 +109,15 @@ pub struct TrackRouterConfig {
         skip_serializing_if = "is_default_heuristic_weight"
     )]
     pub heuristic_weight: u64,
+    /// Optional soft-search priority weight; hard searches retain heuristic_weight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair_heuristic_weight: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub single_owner_repair: Option<routing::SingleOwnerRepairConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_pin_index: Option<routing::OwnPinIndex>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_index: Option<routing::InstanceIndexMode>,
     #[serde(default = "default_memory_mib")]
     pub memory_mib: u64,
     #[serde(
@@ -446,6 +461,9 @@ pub(crate) fn clock_nets(bundle: &PhysicalBundle) -> Result<BTreeSet<u32>> {
     }
     let model = &bundle.connectivity;
     let mut nets = BTreeSet::new();
+    // A selected gated root is also a clock net even though its driver is
+    // an existing functional gate instead of an inserted clock buffer.
+    nets.insert(crate::clock::root_net(bundle, cfg)?);
     for p in &model.pins {
         let source = match p.owner {
             PinOwner::Port { port, .. } => model.ports[port as usize].name == cfg.port,
@@ -688,7 +706,8 @@ pub(crate) fn build_input(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<RouteInput> {
-    build_input_impl(design, bundle, placed, config, scope, true, false).map(|(input, _)| input)
+    build_input_impl(design, bundle, placed, config, scope, GeometryView::Routing)
+        .map(|(input, _)| input)
 }
 
 /// Same routing input plus one owner per obstacle (parallel vector).
@@ -699,7 +718,14 @@ pub(crate) fn build_input_with_owners(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
-    build_input_impl(design, bundle, placed, config, scope, false, false)
+    build_input_impl(
+        design,
+        bundle,
+        placed,
+        config,
+        scope,
+        GeometryView::Explicit,
+    )
 }
 
 /// Shared master geometry with global pin ownership, without expanding cells.
@@ -710,12 +736,63 @@ pub(crate) fn build_compact_input_with_owners(
     config: &RoutingConfig,
     scope: RouteScope,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
-    build_input_impl(design, bundle, placed, config, scope, true, true)
+    build_input_impl(
+        design,
+        bundle,
+        placed,
+        config,
+        scope,
+        GeometryView::Extraction,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GeometryView {
+    Routing,
+    Explicit,
+    Extraction,
+}
+
+/// Keep the exact LEF geometry in the workspace. In the routing view only,
+/// supplement the ordinary spacing by the positive difference to explicit
+/// OBS spacing. A stricter configured layer spacing remains conservative.
+fn obstruction_rect(
+    master: &rustroad_core::connectivity::Master,
+    geometry: &Geometry,
+    layer: &RouteLayer,
+) -> Result<Rect> {
+    let (name, mut rect) = rectangle(geometry)?;
+    let extra = master
+        .obstruction_spacing
+        .get(name)
+        .copied()
+        .unwrap_or(layer.spacing)
+        .saturating_sub(layer.spacing)
+        .max(0);
+    rect.lx = rect
+        .lx
+        .checked_sub(extra)
+        .ok_or_else(|| fail("OBS spacing overflow"))?;
+    rect.ly = rect
+        .ly
+        .checked_sub(extra)
+        .ok_or_else(|| fail("OBS spacing overflow"))?;
+    rect.ux = rect
+        .ux
+        .checked_add(extra)
+        .ok_or_else(|| fail("OBS spacing overflow"))?;
+    rect.uy = rect
+        .uy
+        .checked_add(extra)
+        .ok_or_else(|| fail("OBS spacing overflow"))?;
+    Ok(rect)
 }
 
 fn obstacle_templates(
     masters: &[rustroad_core::connectivity::Master],
     indices: &HashMap<&str, u32>,
+    layers: &[RouteLayer],
+    block_obstructions: bool,
 ) -> Result<Vec<ObstacleTemplate>> {
     masters
         .iter()
@@ -726,7 +803,11 @@ fn obstacle_templates(
                     Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
                 };
                 if let Some(&layer) = indices.get(name.as_str()) {
-                    let (_, rect) = rectangle(geometry)?;
+                    let rect = if pin.is_none() {
+                        obstruction_rect(m, geometry, &layers[layer as usize])?
+                    } else {
+                        rectangle(geometry)?.1
+                    };
                     shapes.push(TemplateObstacle { layer, rect, pin });
                 }
                 Ok(())
@@ -736,8 +817,15 @@ fn obstacle_templates(
                     add(g, Some(pin as u32))?;
                 }
             }
-            for g in &m.obstructions {
-                add(g, None)?;
+            if block_obstructions
+                || !m
+                    .class
+                    .as_deref()
+                    .is_some_and(|c| c.split_whitespace().next() == Some("BLOCK"))
+            {
+                for g in &m.obstructions {
+                    add(g, None)?;
+                }
             }
             ObstacleTemplate::new(m.size[1], m.pins.len() as u32, shapes).map_err(Into::into)
         })
@@ -750,9 +838,10 @@ fn build_input_impl(
     placed: &[Placed],
     config: &RoutingConfig,
     scope: RouteScope,
-    compact_instances: bool,
-    instance_owners: bool,
+    view: GeometryView,
 ) -> Result<(RouteInput, Vec<ObstacleOwner>)> {
+    let compact_instances = view != GeometryView::Explicit;
+    let instance_owners = view == GeometryView::Extraction;
     let trace = std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some();
     config.validate()?;
     let state = bundle
@@ -766,7 +855,12 @@ fn build_input_impl(
         .ok_or_else(|| fail("manufacturing grid missing"))?;
     let (layers, vias, indices) = route_technology(bundle, config)?;
     let templates = if compact_instances {
-        obstacle_templates(&model.masters, &indices)?
+        obstacle_templates(
+            &model.masters,
+            &indices,
+            &layers,
+            view != GeometryView::Extraction,
+        )?
     } else {
         Vec::new()
     };
@@ -850,7 +944,7 @@ fn build_input_impl(
             );
         }
         let master = &model.masters[model.instance_masters[i] as usize];
-        let orientation = rustroad_core::placed_orientation(design, p)?;
+        let orientation = rustroad_core::placed_orientation_for(design, &design.cells[i], p)?;
         let pin_start = u32::try_from(instance_pin_nets.len())
             .map_err(|_| fail("instance pin offset overflow"))?;
         let mut pending: Vec<(u32, u32)> = Vec::new();
@@ -908,7 +1002,7 @@ fn build_input_impl(
             if let Some(n) = net
                 && selected_pin
             {
-                let class = if config.lef_rules {
+                let class = if config.lef_rules && view != GeometryView::Extraction {
                     let key = (
                         model.instance_masters[i],
                         orientation == rustroad_core::Orientation::FS,
@@ -956,7 +1050,7 @@ fn build_input_impl(
                 Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
             };
             if let Some(&li) = indices.get(layer.as_str()) {
-                let (_, r) = rectangle(geometry)?;
+                let r = obstruction_rect(master, geometry, &layers[li as usize])?;
                 push(
                     li,
                     rustroad_core::transform_rect(r, p.x, p.y, p.height, orientation)?,
@@ -1194,6 +1288,26 @@ pub(crate) fn track_plan(
     config: &TrackRouterConfig,
     layers: &[RouteLayer],
 ) -> Result<rustroad_core::routing::TrackPlan> {
+    let routing_layers = if config.min_routing_layer.is_some() || config.max_routing_layer.is_some()
+    {
+        let first = layers.iter().position(|l| l.vertical.is_some());
+        let last = layers.iter().rposition(|l| l.vertical.is_some());
+        let resolve = |name: Option<&str>, default: Option<usize>| {
+            name.map_or(default, |name| {
+                layers
+                    .iter()
+                    .position(|l| l.name == name && l.vertical.is_some())
+            })
+            .and_then(|index| u32::try_from(index).ok())
+            .ok_or_else(|| fail("signal-routing limit names no selected routing layer"))
+        };
+        Some([
+            resolve(config.min_routing_layer.as_deref(), first)?,
+            resolve(config.max_routing_layer.as_deref(), last)?,
+        ])
+    } else {
+        None
+    };
     for o in &config.tracks {
         if !layers
             .iter()
@@ -1228,6 +1342,7 @@ pub(crate) fn track_plan(
     }
     Ok(rustroad_core::routing::TrackPlan {
         tracks,
+        routing_layers,
         gcell: config.gcell,
         global_iterations: config.global_iterations,
         capacity_percent: config.capacity_percent,
@@ -1238,6 +1353,10 @@ pub(crate) fn track_plan(
         via_cost: config.via_cost,
         wrong_way_factor: config.wrong_way_factor,
         heuristic_weight: config.heuristic_weight,
+        repair_heuristic_weight: config.repair_heuristic_weight,
+        single_owner_repair: config.single_owner_repair.clone(),
+        own_pin_index: config.own_pin_index,
+        instance_index: config.instance_index,
         memory_mib: config.memory_mib,
         max_history_entries: config.max_history_entries,
     })
@@ -1256,12 +1375,16 @@ pub(crate) fn access_class(
         shapes: Vec::new(),
         blockers: Vec::new(),
     };
-    let mut add = |g: &Geometry, own: bool| -> Result<()> {
+    let mut add = |g: &Geometry, own: bool, obstruction: bool| -> Result<()> {
         let layer = match g {
             Geometry::Rect { layer, .. } | Geometry::Polygon { layer, .. } => layer,
         };
         if let Some(&li) = indices.get(layer.as_str()) {
-            let (_, r) = rectangle(g)?;
+            let r = if obstruction {
+                obstruction_rect(master, g, &layers[li as usize])?
+            } else {
+                rectangle(g)?.1
+            };
             let rect = rustroad_core::transform_rect(r, 0, 0, height, orientation)?;
             let shape = LayerRect { layer: li, rect };
             if own {
@@ -1276,11 +1399,11 @@ pub(crate) fn access_class(
     };
     for (ti, pin) in master.pins.iter().enumerate() {
         for g in pin.ports.iter().flatten() {
-            add(g, ti == pin_index)?;
+            add(g, ti == pin_index, false)?;
         }
     }
     for g in &master.obstructions {
-        add(g, false)?;
+        add(g, false, true)?;
     }
     Ok(class)
 }
@@ -1628,4 +1751,151 @@ pub(crate) fn write_paths(
         first = false;
     }
     Ok(())
+}
+
+/// Read-only replay from an exactly bound physical compute view.
+///
+/// # Errors
+/// Rejects changed snapshot/config/workspace data and any admitted resource budget violation.
+pub fn replay_route(
+    path: &Path,
+    config_path: &Path,
+    snapshot_path: &Path,
+    options: &rustroad_core::routing::ReplayOptions,
+    limits: &Limits,
+) -> Result<rustroad_core::routing::ReplayReport> {
+    let snapshot = crate::load(path, crate::lock(path, false, false)?, limits)?;
+    let metadata = snapshot.metadata();
+    if metadata.stage != Stage::Placed {
+        return Err(fail("place before route replay"));
+    }
+    let (text, _) = crate::pdk::read_input(config_path, 1024 * 1024, "routing_config")?;
+    let config: RoutingConfig = serde_json::from_str(&text)?;
+    let placed: Vec<_> = snapshot.records().collect();
+    let bundle = metadata
+        .physical
+        .as_ref()
+        .ok_or_else(|| fail("physical design required"))?;
+    let input = build_input(&metadata.design, bundle, &placed, &config, RouteScope::All)?;
+    Ok(rustroad_core::routing::replay_route(
+        &input,
+        &config.limits,
+        snapshot_path,
+        options,
+    )?)
+}
+
+#[cfg(test)]
+mod obstruction_tests {
+    use super::*;
+    use rustroad_core::connectivity::Master;
+
+    #[test]
+    fn rc_macro_view_omits_abstract_obs_but_keeps_pins() {
+        // One macro, one pin and one OBS rectangle: <16 KiB. Independent
+        // OpenRCX controls establish that BLOCK OBS are not RC conductors.
+        let shape = Geometry::Rect {
+            layer: "M2".into(),
+            rect: [0, 0, 100, 100],
+        };
+        let mut master = Master {
+            buses: Default::default(),
+            obstruction_spacing: Default::default(),
+            name: "RAM".into(),
+            class: Some("BLOCK".into()),
+            symmetry: vec![],
+            site: String::new(),
+            size: [1000, 1000],
+            pins: vec![rustroad_core::connectivity::MasterPin {
+                name: "A".into(),
+                direction: Some(Direction::Input),
+                use_: PinUse::Signal,
+                shape: None,
+                ports: vec![vec![shape.clone()]],
+            }],
+            obstructions: vec![shape],
+        };
+        let layers = vec![RouteLayer {
+            name: "M2".into(),
+            width: 20,
+            spacing: 20,
+            vertical: Some(true),
+            min_area: None,
+            min_step: None,
+        }];
+        let indices = HashMap::from([("M2", 0)]);
+        let count = |m: &Master, obs| {
+            let templates =
+                obstacle_templates(std::slice::from_ref(m), &indices, &layers, obs).unwrap();
+            InstanceObstacles::new(
+                templates,
+                vec![ObstacleInstance {
+                    template: 0,
+                    pin_start: 0,
+                    at: [0, 0],
+                    orientation: rustroad_core::Orientation::N,
+                }],
+                vec![0],
+            )
+            .unwrap()
+        };
+        assert_eq!(count(&master, true).shape_count(0), Some(2));
+        let extracted = count(&master, false);
+        assert_eq!(extracted.shape_count(0), Some(1));
+        assert_eq!(extracted.shape(0, 0).unwrap().0.net, Some(0));
+        master.class = Some("CORE".into());
+        assert_eq!(count(&master, false).shape_count(0), Some(2));
+    }
+
+    #[test]
+    fn explicit_obs_spacing_is_not_added_twice_or_written_into_source_geometry() {
+        // One rectangle and no graph: <8 KiB. Full real-macro pin access and
+        // external DRC remain the independent integration checks.
+        let geometry = Geometry::Rect {
+            layer: "M2".into(),
+            rect: [0, 0, 1000, 1000],
+        };
+        let mut master = Master {
+            buses: Default::default(),
+            obstruction_spacing: std::collections::BTreeMap::from([("M2".into(), 210)]),
+            name: "RAM".into(),
+            class: Some("BLOCK".into()),
+            symmetry: Vec::new(),
+            site: String::new(),
+            size: [1000, 1000],
+            pins: Vec::new(),
+            obstructions: vec![geometry.clone()],
+        };
+        let layer = RouteLayer {
+            name: "M2".into(),
+            width: 200,
+            spacing: 240,
+            vertical: Some(true),
+            min_area: None,
+            min_step: None,
+        };
+        assert_eq!(
+            obstruction_rect(&master, &geometry, &layer).unwrap(),
+            Rect {
+                lx: 0,
+                ly: 0,
+                ux: 1000,
+                uy: 1000
+            }
+        );
+        master.obstruction_spacing.insert("M2".into(), 300);
+        assert_eq!(
+            obstruction_rect(&master, &geometry, &layer).unwrap(),
+            Rect {
+                lx: -60,
+                ly: -60,
+                ux: 1060,
+                uy: 1060
+            }
+        );
+        assert_eq!(
+            master.obstructions[0], geometry,
+            "the imported LEF view stays exact"
+        );
+    }
 }

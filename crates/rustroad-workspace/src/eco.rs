@@ -32,13 +32,14 @@
 //! timed source text is not retained: SHA256 and xxh3 cover the exact parsed
 //! stream. No timing graph is built here; slacks come from the timing engine.
 mod binding;
+mod buses;
 pub use binding::BindingSummary;
 
 use crate::pdk::read_input;
 use crate::{Error, Result};
 use rustroad_formats::eco::{
     self, BufferCell, DiodeCell, ECO_PLAN_SCHEMA, EcoCells, EcoLimits, EcoOp, EcoPlan, EcoReport,
-    PinDirections, PinRef, SizeFamily,
+    PinDirections, PinRef, PinView, SizeFamily,
 };
 use rustroad_formats::lef;
 use rustroad_formats::verilog::{self, Expr, Netlist, VerilogLimits};
@@ -272,6 +273,7 @@ impl DelayCellProfile {
                 .collect(),
             // Filled by `load_pin_directions` where an ECO buffers a sink.
             pin_directions: PinDirections::new(),
+            pin_buses: Default::default(),
             // Filled by `load_sizing_profile` where an ECO resizes cells.
             families: Vec::new(),
         };
@@ -674,6 +676,8 @@ pub struct HoldEcoRequest {
     pub timed_netlist_sha256: Option<String>,
     /// Override of the profile's cell-LEF path (same SHA-256 required).
     pub cell_lef: Option<PathBuf>,
+    /// Explicit master/port bus ranges, never inferred from scalar bracket names.
+    pub cell_buses: Option<PathBuf>,
     /// `ruststa report --section pins --corner C --limit 0` of the same STA
     /// revision (one per setup corner; the setup corner is required). Given:
     /// path-aware placement (delay goes on the worst hold path where the
@@ -757,6 +761,8 @@ pub struct HoldPlanInputs {
     pub netlist: Artifact,
     pub timed_netlist: Artifact,
     pub cell_lef: Artifact,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cell_buses: Option<Artifact>,
     pub profile: Artifact,
     pub reports: Vec<ReportInput>,
     pub binding: BindingSummary,
@@ -949,6 +955,7 @@ struct PathInputs<'a> {
     candidates: &'a [&'a ProfiledBuffer],
     cells: &'a EcoCells,
     netlist: &'a Netlist,
+    verilog_limits: &'a VerilogLimits,
     drivers: &'a HashMap<String, &'a verilog::Instance>,
     inputs: &'a HashMap<&'a str, &'a str>,
 }
@@ -986,33 +993,37 @@ fn plan_paths(x: &PathInputs) -> Result<PathResult> {
         .collect();
     // Input-pin sinks of every single-bit net of the edited netlist.
     let mut net_sinks: HashMap<String, Vec<String>> = HashMap::new();
+    let mut view = PinView::new(x.netlist, x.cells, x.verilog_limits)
+        .map_err(|e| fail("ECO_PIN_BINDING", e))?;
+    let mut pin_signals = HashMap::new();
     for i in &x.netlist.instances {
-        for c in &i.connections {
-            if matches!(c.signal, Expr::Ident(_) | Expr::BitSelect { .. })
-                && x.cells.check_sink(&i.cell, &i.name, &c.pin).is_ok()
+        for (pin, signal) in view
+            .connections(i)
+            .map_err(|e| fail("ECO_PIN_BINDING", e))?
+        {
+            let full = format!("{}/{}", i.name, pin);
+            if matches!(signal, Expr::Ident(_) | Expr::BitSelect { .. })
+                && x.cells.check_sink(&i.cell, &i.name, &pin).is_ok()
             {
                 net_sinks
-                    .entry(expr_key(&c.signal))
+                    .entry(expr_key(&signal))
                     .or_default()
-                    .push(format!("{}/{}", i.name, c.pin));
+                    .push(full.clone());
             }
+            pin_signals.insert(full, signal);
         }
     }
     let setup_corners: Vec<&String> = x.pin_slack.keys().collect();
     let pin_point = |pin: &str| -> Option<(Point, String, String)> {
         let (inst, p) = pin.rsplit_once('/')?;
         let i = instances.get(inst)?;
-        let c = i.connections.iter().find(|c| c.pin == p)?;
-        if !matches!(c.signal, Expr::Ident(_) | Expr::BitSelect { .. })
+        let signal = pin_signals.get(pin)?;
+        if !matches!(signal, Expr::Ident(_) | Expr::BitSelect { .. })
             || x.cells.check_sink(&i.cell, inst, p).is_err()
         {
             return None;
         }
-        Some((
-            Point::Pin(pin.to_string()),
-            pin.to_string(),
-            expr_key(&c.signal),
-        ))
+        Some((Point::Pin(pin.into()), pin.into(), expr_key(signal)))
     };
     // Points of one endpoint at one corner, in path order: (point, setup pin).
     let points_of = |stages: &[Stage]| -> Vec<(Point, String)> {
@@ -1533,6 +1544,8 @@ pub fn plan_hold_with_limits(
     )?;
     let mut cells = profile.eco_cells()?;
     cells.pin_directions = directions;
+    let (pin_buses, bus_pin) = buses::load(r.cell_buses.as_deref())?;
+    cells.pin_buses = pin_buses;
     let mut bind = BindingSummary {
         method: "the STA revision the reports name records the timed netlist as its netlist \
                  source (xxh3-64, from <workspace>/revisions/<rev>/meta.json under a shared \
@@ -1555,12 +1568,13 @@ pub fn plan_hold_with_limits(
             ),
         ));
     }
-    let tindex = binding::NetIndex::new(&timed);
+    let tindex = binding::NetIndex::new(&timed, &cells, &input_limits.verilog)?;
     binding::check_refinement(
         &netlist,
         &timed,
         &tindex,
-        &cells.pin_directions,
+        &cells,
+        &input_limits.verilog,
         &r.prefix,
         &mut bind,
     )?;
@@ -1854,6 +1868,7 @@ pub fn plan_hold_with_limits(
             candidates: &candidates,
             cells: &cells,
             netlist: &netlist,
+            verilog_limits: &input_limits.verilog,
             drivers: &drivers,
             inputs: &inputs,
         })?;
@@ -1865,6 +1880,8 @@ pub fn plan_hold_with_limits(
         infeasible = planned.infeasible;
         violating = planned.violating;
     }
+    let mut sink_view = PinView::new(&netlist, &cells, &input_limits.verilog)
+        .map_err(|e| fail("ECO_PIN_BINDING", e))?;
     for (endpoint, t) in timing.iter().filter(|_| !path_aware) {
         let need: BTreeMap<String, f64> = r
             .hold_corners
@@ -1894,19 +1911,12 @@ pub fn plan_hold_with_limits(
                 format!("endpoint {endpoint}: instance absent from the netlist"),
             )
         })?;
-        let conn = inst
-            .connections
-            .iter()
-            .find(|c| c.pin == pin)
-            .ok_or_else(|| {
-                fail(
-                    "STALE_REPORT",
-                    format!("endpoint {endpoint}: pin not connected"),
-                )
-            })?;
+        let signal = sink_view
+            .get(inst, pin)
+            .map_err(|e| fail("STALE_REPORT", e))?;
         // Walk back through earlier ECO cells (bounded).
         let mut existing = Vec::new();
-        let mut net = expr_key(&conn.signal);
+        let mut net = expr_key(&signal);
         while let Some(d) = drivers.get(&net) {
             if !d.name.starts_with(&r.prefix) || existing.len() > r.max_total_chain {
                 break;
@@ -1991,7 +2001,7 @@ pub fn plan_hold_with_limits(
             endpoint: endpoint.clone(),
             instance: instance.to_string(),
             pin: pin.to_string(),
-            driver_net: expr_key(&conn.signal),
+            driver_net: expr_key(&signal),
             existing_chain: existing,
             cells: chosen.iter().map(|b| b.name.clone()).collect(),
             area_um2: chosen.iter().map(|b| b.area_um2).sum(),
@@ -2032,6 +2042,7 @@ pub fn plan_hold_with_limits(
             netlist: netlist_pin,
             timed_netlist: timed_pin,
             cell_lef: lef_pin,
+            cell_buses: bus_pin,
             profile: profile_pin,
             reports,
             binding: bind,
@@ -2236,6 +2247,8 @@ pub struct ApplyReport {
     pub cell_lef: Artifact,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sizing_profile: Option<Artifact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cell_buses: Option<Artifact>,
     pub eco_report: EcoReport,
     pub output: Artifact,
 }
@@ -2271,6 +2284,42 @@ pub fn apply_plan_with_limits(
     out: &Path,
     input_limits: &EcoInputLimits,
 ) -> Result<ApplyReport> {
+    apply_plan_with_options(
+        netlist,
+        plan,
+        profile,
+        out,
+        &ApplyOptions {
+            cell_lef,
+            sizing,
+            cell_buses: None,
+        },
+        input_limits,
+    )
+}
+
+/// Optional, independently hash-bound interface metadata of a file ECO.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ApplyOptions<'a> {
+    pub cell_lef: Option<&'a Path>,
+    pub sizing: Option<&'a Path>,
+    pub cell_buses: Option<&'a Path>,
+}
+
+/// Apply a typed plan with explicit bus metadata and the existing resource caps.
+pub fn apply_plan_with_options(
+    netlist: &Path,
+    plan: &Path,
+    profile: &Path,
+    out: &Path,
+    options: &ApplyOptions<'_>,
+    input_limits: &EcoInputLimits,
+) -> Result<ApplyReport> {
+    let ApplyOptions {
+        cell_lef,
+        sizing,
+        cell_buses,
+    } = *options;
     if same_file(netlist, out) {
         return Err(fail(
             "OUTPUT_PATH",
@@ -2302,6 +2351,8 @@ pub fn apply_plan_with_limits(
     masters.extend(cells.buffers.iter().map(|b| b.name.clone()));
     let (directions, lef_pin) = load_pin_directions(&prof, cell_lef, &masters)?;
     cells.pin_directions = directions;
+    let (pin_buses, bus_pin) = buses::load(cell_buses)?;
+    cells.pin_buses = pin_buses;
     let (edited, report) = eco::apply(
         &n,
         &p,
@@ -2318,6 +2369,7 @@ pub fn apply_plan_with_limits(
         profile: fpin,
         cell_lef: lef_pin,
         sizing_profile,
+        cell_buses: bus_pin,
         eco_report: report,
         output,
     })
