@@ -104,6 +104,64 @@ pub(crate) struct History {
     changed: bool,
 }
 impl History {
+    pub(crate) fn capture(&self) -> Result<Vec<(u32, u16)>> {
+        let count = match &self.records {
+            HistoryRecords::Dense(v) => v.iter().filter(|&&x| x != 0).count(),
+            HistoryRecords::Sparse(v) => v.len(),
+        };
+        if count > self.limit || count > 4_000_000 {
+            return Err(Error::Budget("replay history capture limit".into()));
+        }
+        let mut result = Vec::new();
+        result
+            .try_reserve_exact(count)
+            .map_err(|_| Error::Budget("replay history allocation".into()))?;
+        match &self.records {
+            HistoryRecords::Dense(v) => {
+                for (i, &value) in v.iter().enumerate() {
+                    if value != 0 {
+                        result.push((i as u32, value));
+                    }
+                }
+            }
+            HistoryRecords::Sparse(v) => {
+                result.extend(v.iter().map(|(&id, &value)| (id, value)));
+                result.sort_unstable();
+            }
+        }
+        Ok(result)
+    }
+    pub(crate) fn restore_capture(
+        nodes: usize,
+        limit: usize,
+        entries: &[(u32, u16)],
+    ) -> Result<Self> {
+        if entries.len() > limit || entries.len() > 4_000_000 {
+            return Err(Error::Budget("replay history state limit".into()));
+        }
+        let mut result = Self::new(nodes, limit)?;
+        if let HistoryRecords::Sparse(records) = &mut result.records {
+            records
+                .try_reserve(entries.len())
+                .map_err(|_| Error::Budget("replay history allocation".into()))?;
+        }
+        let mut last = None;
+        for &(id, value) in entries {
+            if id as usize >= nodes || value == 0 || last.is_some_and(|old| old >= id) {
+                return Err(Error::Invalid("invalid replay history entry".into()));
+            }
+            match &mut result.records {
+                HistoryRecords::Dense(v) => v[id as usize] = value,
+                HistoryRecords::Sparse(v) => {
+                    v.insert(id, value);
+                }
+            }
+            last = Some(id);
+        }
+        result.changed = !entries.is_empty();
+        Ok(result)
+    }
+
     pub fn new(nodes: usize, limit: usize) -> Result<Self> {
         let records = if nodes <= DENSE_NODES {
             let mut values = Vec::new();

@@ -82,6 +82,26 @@ its single input pin. An inverting, multi-input or unprofiled cell gives
 `ECO_NOT_BUFFER`. Every operation is checked against a bound
 (`max_operations` 4096) and the Verilog AST limits.
 
+Grouped macro ports require `--cell-buses buses.json` on `hold-eco` and
+`apply-eco`. This explicit schema is `{ "master": { "port": [msb, lsb] } }`;
+bracketed scalar port names are never guessed to be buses. The original LEF
+must describe every member with one uniform direction, and a moved sink must
+still be an input. The planner binds report names such as `mem/A_DIN[0]` to
+the corresponding bit of the grouped `.A_DIN(...)` connection. It rewrites
+only that bit, preserving the grouped port and its siblings. Both descending
+and ascending declarations, exact-width slices, concatenations and sized
+constants are supported; unsupported widths or expressions are rejected.
+
+`buffer_sinks` also follows immutable internal scalar/vector `assign` aliases
+when explicit bus metadata is supplied. Escaped bracketed scalar names remain
+distinct from actual vector bits. The index uses compact IDs, memoized roots,
+cycle and multiple-driver checks, a 64 MiB memory cap and bounded work; output
+port assignments remain roots because an ECO can move them. The alias assigns
+themselves are retained. Schemas are capped at 256 masters, 65,536 member pins
+and 2 MiB JSON, and expression projection has a separate 64 MiB allowance.
+The input receipt records the schema hash. These additions retain the
+`spef_rc`, propagated-clock and revision-provenance gates for hold planning.
+
 ## Delay-cell profiles (`fixtures/pdk/<pdk>-delay-cells.json`)
 
 `scripts/build_delay_cells.py` reads the three owner-fixed corner Liberty

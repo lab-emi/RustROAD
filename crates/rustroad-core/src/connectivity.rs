@@ -98,6 +98,12 @@ pub struct MasterPin {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Master {
+    /// Explicit Verilog port ranges; LEF scalar pin names do not encode direction.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub buses: std::collections::BTreeMap<String, [i64; 2]>,
+    /// Explicit LEF OBS minimum spacing by layer; shapes remain unmodified.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub obstruction_spacing: std::collections::BTreeMap<String, i64>,
     pub name: String,
     pub class: Option<String>,
     pub symmetry: Vec<String>,
@@ -105,6 +111,16 @@ pub struct Master {
     pub size: [i64; 2],
     pub pins: Vec<MasterPin>,
     pub obstructions: Vec<Geometry>,
+}
+
+impl Master {
+    pub fn bus_for_pin(&self, pin: &str) -> Option<(&str, [i64; 2])> {
+        let (base, suffix) = pin.rsplit_once('[')?;
+        let index: i64 = suffix.strip_suffix(']')?.parse().ok()?;
+        let (name, range) = self.buses.get_key_value(base)?;
+        (index >= range[0].min(range[1]) && index <= range[0].max(range[1]))
+            .then_some((name.as_str(), *range))
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -263,7 +279,7 @@ impl ConnectedDesign {
         design.validate(&crate::Limits {
             max_cells: limits.max_instances,
             max_rows: crate::Limits::default().max_rows,
-            max_expansions: 0,
+            max_expansions: 64_000_000,
         })?;
         if design.cells.len() >= u32::MAX as usize
             || self.nets.len() > limits.max_nets
@@ -319,13 +335,26 @@ impl ConnectedDesign {
             }
             if !valid_object_name(&master.name)
                 || !master_names.insert(master.name.as_str())
-                || master.site != design.site.name
                 || master.size[0] <= 0
-                || master.size[1] != design.site.height
-                || master.size[0] % design.site.width != 0
+                || master.size[1] <= 0
+                || (!master
+                    .class
+                    .as_deref()
+                    .is_some_and(|c| c.split_whitespace().next() == Some("BLOCK"))
+                    && (master.site != design.site.name
+                        || master.size[1] != design.site.height
+                        || master.size[0] % design.site.width != 0))
                 || master.pins.len() > limits.max_pins
             {
                 return Err(Error::Invalid("invalid or incompatible LEF master".into()));
+            }
+            if master.obstruction_spacing.len() > self.layers.len()
+                || master
+                    .obstruction_spacing
+                    .iter()
+                    .any(|(layer, spacing)| !layer_names.contains(layer.as_str()) || *spacing < 0)
+            {
+                return Err(Error::Invalid("invalid LEF obstruction spacing".into()));
             }
             let mut pin_names = HashSet::new();
             for pin in &master.pins {
@@ -341,6 +370,28 @@ impl ConnectedDesign {
                     return Err(Error::Budget(
                         "pin PORT count exceeds geometry limit".into(),
                     ));
+                }
+            }
+            let mut bus_members = HashSet::new();
+            for (name, range) in &master.buses {
+                let width = (i128::from(range[0]) - i128::from(range[1])).unsigned_abs() + 1;
+                if !valid_object_name(name) || width > 65_536 || width > master.pins.len() as u128 {
+                    return Err(Error::Invalid(
+                        "invalid or oversized macro port range".into(),
+                    ));
+                }
+                for k in 0..width as i64 {
+                    let index = if range[0] <= range[1] {
+                        range[0] + k
+                    } else {
+                        range[0] - k
+                    };
+                    let member = format!("{name}[{index}]");
+                    if !pin_names.contains(member.as_str()) || !bus_members.insert(member) {
+                        return Err(Error::Invalid(
+                            "macro bus range does not match unique LEF scalar pins".into(),
+                        ));
+                    }
                 }
             }
             for shape in master
@@ -686,6 +737,8 @@ mod pin_index_tests {
 
     fn model() -> ConnectedDesign {
         let master = Master {
+            buses: Default::default(),
+            obstruction_spacing: Default::default(),
             name: "buffer".into(),
             class: None,
             symmetry: Vec::new(),

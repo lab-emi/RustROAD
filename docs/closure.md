@@ -177,6 +177,17 @@ drives returns to the original net).
 * Both are stored with the physical bundle, so the CTS re-placement uses
   them too; integer DBU in and out, deterministic, work-bounded.
 
+`rustroad --workspace <temporary-layout> export-placement-seed > seed.json`
+captures a placed snapshot for a fresh ECO workspace. The command holds a
+shared workspace lock and leaves `HEAD` unchanged. It omits generated filler
+and tap instances by their recorded roles, retaining logical instances,
+fixed macros and clock buffers. The source records the revision, design,
+DBU scale and imported netlist SHA-256. Output is bounded by one million cells
+and a conservative 64 MiB encoded-size limit. A seed is a legalization target;
+new ECO cells still require placement, and final CTS is performed once in the
+fresh workspace. Fresh end-to-end measurements must generate the seed during
+that run and include the temporary placement/CTS and ECO planning costs.
+
 ## Liberty drive data (`scripts/build_sizing_profile.py`)
 
 `cells[].drive.<corner>`: input pin capacitances and, for one-output

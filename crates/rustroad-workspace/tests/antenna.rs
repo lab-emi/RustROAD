@@ -74,6 +74,8 @@ fn limits() -> Limits {
 
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -109,6 +111,7 @@ fn config() -> PhysicalConfig {
         port_buffer: None,
         input_buffer: None,
         clock: Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
             port: "a".into(),
             cell: "BUF".into(),
             input_pin: "A".into(),
@@ -143,6 +146,18 @@ fn routed(netlist: &str) -> Fixture {
 
 /// Import, place, build the clock tree and route every signal net.
 fn routed_with_technology(netlist: &str, technology: &str) -> Fixture {
+    routed_with_scope(
+        netlist,
+        technology,
+        rustroad_workspace::routing::RouteScope::All,
+    )
+}
+
+fn routed_with_scope(
+    netlist: &str,
+    technology: &str,
+    scope: rustroad_workspace::routing::RouteScope,
+) -> Fixture {
     let parent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.work/antenna-tests");
     fs::create_dir_all(&parent).unwrap();
     let root = parent.join(format!(
@@ -196,19 +211,106 @@ fn routed_with_technology(netlist: &str, technology: &str) -> Fixture {
         "layers":[{"name":"M1","spacing":200},{"name":"M2","spacing":200},{"name":"M3","spacing":200}],
         "vias":[{"name":"V12","cut_spacing":60},{"name":"V23","cut_spacing":60}],"max_skew_ns":1.0});
     fs::write(&routing, serde_json::to_vec(&value).unwrap()).unwrap();
-    rustroad_workspace::routing::route(
-        &workspace,
-        &clk.revision,
-        &routing,
-        rustroad_workspace::routing::RouteScope::All,
-        &limits(),
-    )
-    .unwrap();
+    rustroad_workspace::routing::route(&workspace, &clk.revision, &routing, scope, &limits())
+        .unwrap();
     Fixture {
         root,
         workspace,
         sources,
     }
+}
+
+#[test]
+fn clock_only_routing_is_partial_and_cannot_be_repaired_as_a_full_check() {
+    let f = routed_with_scope(
+        PLAIN,
+        TECHNOLOGY,
+        rustroad_workspace::routing::RouteScope::Clock,
+    );
+    let r = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    assert_eq!(r.status, "partial");
+    assert_eq!(r.scope.routing_scope, "clock_nets_only");
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|d| d.contains("ANTENNA_PARTIAL_ROUTING"))
+    );
+    let head = fs::read_to_string(f.workspace.join("HEAD")).unwrap();
+    let error = repair_antenna(
+        &f.workspace,
+        head.trim(),
+        &RepairRequest::default(),
+        &limits(),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("ANTENNA_UNMODELED"));
+    assert_eq!(head, fs::read_to_string(f.workspace.join("HEAD")).unwrap());
+}
+
+#[test]
+fn cumulative_side_and_cut_histories_remain_separate() {
+    let mut tech = TECHNOLOGY.to_string();
+    for end in ["END M1", "END M2", "END M3"] {
+        tech = tech.replace(end, &format!("ANTENNACUMSIDEAREARATIO 1000000 ; {end}"));
+    }
+    tech = tech
+        .replace("END V1\n", "ANTENNACUMAREARATIO 1000000 ; END V1\n")
+        .replace(
+            "END V2\n",
+            "ANTENNAAREARATIO 1000000 ; ANTENNACUMAREARATIO 1000000 ; END V2\n",
+        );
+    let f = routed_with_technology(PLAIN, &tech);
+    let r = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    assert_eq!(r.status, "passed");
+    let sum = |kind: &str, cut: bool| {
+        r.checks
+            .iter()
+            .filter(|c| {
+                c.net == "a" && c.kind == kind && c.layer.starts_with(if cut { 'V' } else { 'M' })
+            })
+            .map(|c| c.ratio)
+            .sum::<f64>()
+    };
+    let side = r
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "M3" && c.kind == "cumulative_side_area")
+        .unwrap();
+    let cut = r
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "V2" && c.kind == "cumulative_area")
+        .unwrap();
+    assert!((side.ratio - sum("side_area", false)).abs() < 1e-10);
+    assert!((cut.ratio - sum("area", true)).abs() < 1e-10);
+}
+
+#[test]
+fn cumulative_diffusion_pwl_changes_the_connected_gate_limit() {
+    let tech = TECHNOLOGY.replace(
+        "END M3",
+        "ANTENNACUMDIFFAREARATIO PWL ( ( 0 1 ) ( 0.1 1000 ) ( 100 1000000 ) ) ; END M3",
+    );
+    let before = routed_with_technology(PLAIN, &tech);
+    let r = check_antenna(&before.workspace, &request(None), &limits()).unwrap();
+    let root = r
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "M3" && c.kind == "cumulative_area")
+        .unwrap();
+    assert_eq!(root.limit, 1.0);
+    assert!(root.violated);
+    let diode = PLAIN.replace("endmodule", "DIO d0(.D(a)); endmodule");
+    let after = routed_with_technology(&diode, &tech);
+    let r = check_antenna(&after.workspace, &request(None), &limits()).unwrap();
+    let root = r
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "M3" && c.kind == "cumulative_area")
+        .unwrap();
+    assert!(root.diff_area_um2 >= 0.4 && root.limit > 1000.0 && !root.violated);
+    assert!(root.rule.starts_with("ANTENNACUMDIFFAREARATIO@diffusion"));
+    assert_eq!(r.status, "passed");
 }
 
 const PLAIN: &str = "module chip(input a, output y, output h, output l); BUF b0(.A(a),.Y(y)); \
@@ -345,15 +447,15 @@ fn changed_sources_unsupported_rules_and_budgets_are_explicit() {
     assert!(check_antenna(&f.workspace, &request(Some(&bad)), &limits()).is_err());
     fs::write(&bad, r#"[{"net":"a","layer":"V1","rect":[0,0,10,10]}]"#).unwrap();
     assert!(check_antenna(&f.workspace, &request(Some(&bad)), &limits()).is_err());
-    // Unmodeled cumulative rules make the verdict partial, never passed.
+    // Unmodeled area-minus-diff rules make the verdict partial, never passed.
     let mut tech = TECHNOLOGY.replace(
         "ANTENNASIDEAREARATIO 400 ; END M1",
-        "ANTENNASIDEAREARATIO 400 ; ANTENNACUMAREARATIO 5000 ; END M1",
+        "ANTENNASIDEAREARATIO 400 ; ANTENNAAREAMINUSDIFF 2 ; END M1",
     );
     let g = routed_with_technology(PLAIN, &tech);
     let r = check_antenna(&g.workspace, &request(None), &limits()).unwrap();
     assert_eq!(r.status, "partial");
-    assert_eq!(r.scope.cumulative, "present_in_lef_unsupported");
+    assert_eq!(r.scope.cumulative, "not_present_in_lef");
     // A technology LEF edited after import is refused.
     tech.push_str("\n# edited\n");
     fs::write(&g.sources.technology_lef, tech).unwrap();
@@ -363,6 +465,125 @@ fn changed_sources_unsupported_rules_and_budgets_are_explicit() {
             .to_string()
             .contains("ANTENNA_SOURCE_CHANGED")
     );
+}
+
+#[test]
+fn cumulative_only_rules_are_checked_and_sum_process_stage_ratios() {
+    let mut tech = TECHNOLOGY.to_string();
+    for end in ["END M1", "END M2", "END M3"] {
+        tech = tech.replace(
+            end,
+            &format!("ANTENNAAREARATIO 1000000 ; ANTENNACUMAREARATIO 100 ; {end}"),
+        );
+    }
+    let f = routed_with_technology(PLAIN, &tech);
+    let r = check_antenna(
+        &f.workspace,
+        &AntennaRequest {
+            safety_margin: 0.0,
+            ..request(Some(&long_wire(&f, 50)))
+        },
+        &limits(),
+    )
+    .unwrap();
+    let area_sum: f64 = r
+        .checks
+        .iter()
+        .filter(|row| row.net == "a" && row.kind == "area" && row.layer.starts_with('M'))
+        .map(|row| row.ratio)
+        .sum();
+    let cumulative = r
+        .checks
+        .iter()
+        .find(|row| row.net == "a" && row.layer == "M3" && row.kind == "cumulative_area")
+        .expect("cumulative-only rules must produce observed rows");
+    assert!(
+        (cumulative.ratio - area_sum).abs() < 1e-10,
+        "routing CAR {} must exclude cut PARs from routing sum {area_sum}",
+        cumulative.ratio
+    );
+    assert!(cumulative.violated && cumulative.ratio > 100.0);
+    assert_eq!(r.scope.cumulative, "per_gate_process_stage_dp");
+    assert!(r.diagnostics.iter().all(|d| !d.contains("cumulative")));
+    // A high cumulative threshold changes the verdict without changing geometry.
+    let clean_tech = tech.replace("ANTENNACUMAREARATIO 100 ;", "ANTENNACUMAREARATIO 1000000 ;");
+    let clean = routed_with_technology(PLAIN, &clean_tech);
+    let report = check_antenna(&clean.workspace, &request(None), &limits()).unwrap();
+    assert_eq!(report.status, "passed");
+}
+
+#[test]
+fn cumulative_rules_reference_fixtures_and_work_guards() {
+    // The exported original LEF/DEF is consumed by an independent OpenROAD
+    // executable in the bounded integration harness, never a translated model.
+    for (name, threshold) in [("positive", 1000000), ("negative", 1)] {
+        let mut tech = TECHNOLOGY.to_string();
+        for end in ["END M1", "END M2", "END M3"] {
+            tech = tech.replace(end, &format!("ANTENNACUMAREARATIO {threshold} ; {end}"));
+        }
+        let fixture = routed_with_technology(PLAIN, &tech);
+        let report = check_antenna(&fixture.workspace, &request(None), &limits()).unwrap();
+        assert_eq!(
+            report.status,
+            if name == "positive" {
+                "passed"
+            } else {
+                "violated"
+            }
+        );
+        if name == "negative" {
+            assert!(
+                report
+                    .checks
+                    .iter()
+                    .any(|r| r.kind == "cumulative_area" && r.violated)
+            );
+        }
+        let mut tight = request(None);
+        tight.max_work = 1;
+        assert!(
+            check_antenna(&fixture.workspace, &tight, &limits())
+                .unwrap_err()
+                .to_string()
+                .contains("max_work")
+        );
+        tight = request(None);
+        tight.max_total_shapes = 1;
+        assert!(
+            check_antenna(&fixture.workspace, &tight, &limits())
+                .unwrap_err()
+                .to_string()
+                .contains("max_total_shapes")
+        );
+        tight = request(None);
+        tight.max_rows = 1;
+        assert!(
+            check_antenna(&fixture.workspace, &tight, &limits())
+                .unwrap_err()
+                .to_string()
+                .contains("max_rows")
+        );
+        if let Some(root) = std::env::var_os("RUSTROAD_ANTENNA_EVIDENCE") {
+            let output = PathBuf::from(root).join(name);
+            fs::create_dir_all(&output).unwrap();
+            for (input, name) in [
+                (&fixture.sources.technology_lef, "tech.lef"),
+                (&fixture.sources.cell_lef, "cells.lef"),
+                (&fixture.sources.netlist, "mapped.v"),
+            ] {
+                fs::copy(input, output.join(name)).unwrap();
+            }
+            let snapshot = read(&fixture.workspace, &limits()).unwrap();
+            let mut def = Vec::new();
+            snapshot.export_def(&mut def).unwrap();
+            fs::write(output.join("design.def"), def).unwrap();
+            fs::write(
+                output.join("native.json"),
+                serde_json::to_vec_pretty(&report).unwrap(),
+            )
+            .unwrap();
+        }
+    }
 }
 
 #[test]

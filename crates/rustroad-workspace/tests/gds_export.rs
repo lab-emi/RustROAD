@@ -72,6 +72,8 @@ fn limits() -> Limits {
 }
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -107,6 +109,7 @@ fn config() -> PhysicalConfig {
         port_buffer: None,
         input_buffer: None,
         clock: Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
             port: "a".into(),
             cell: "BUF".into(),
             input_pin: "A".into(),

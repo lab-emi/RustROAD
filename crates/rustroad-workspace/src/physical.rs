@@ -9,8 +9,8 @@ use rustroad_core::io::{IoConstraints, IoLimits, IoPin, place_boundary_io};
 use rustroad_core::power::{
     PowerCell, PowerRow, RailConfig, RailLimits, RailPolarity, RailReport, validate_rail_continuity,
 };
-use rustroad_core::supply::{LayerSpec, SupplyGrid, SupplyLimits, ViaSpec, build_supply_grid};
-use rustroad_core::{Cell, Design, Limits, Placed, Rect, def_name};
+use rustroad_core::supply::SupplyGrid;
+use rustroad_core::{Cell, Design, Limits, Placed, def_name};
 use rustroad_formats::{lef, verilog};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -70,6 +70,18 @@ pub struct TapConfig {
     pub max_gap: i64,
     pub well_layer: String,
     pub substrate_layer: String,
+    /// Some abstract LEFs expose only metal supply pins. Body contacts then
+    /// require the original GDS and independent extraction/LVS verification.
+    #[serde(default)]
+    pub body_view: TapBodyView,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TapBodyView {
+    #[default]
+    Lef,
+    Gds,
 }
 /// Explicit PDK identity-buffer role for separating aliased output ports.
 /// Functional equivalence must be verified against the selected Liberty.
@@ -83,6 +95,8 @@ pub struct PortBuffer {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhysicalConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macro_supply: Option<crate::macro_supply::Config>,
     pub power_net: String,
     pub ground_net: String,
     pub power_pin: String,
@@ -92,6 +106,10 @@ pub struct PhysicalConfig {
     pub rail_layer: String,
     pub strap_layer: String,
     pub via: String,
+    /// Original fixed vias in order from the rail to the strap layer.
+    /// Empty keeps the single `via` behavior.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rail_via_stack: Vec<String>,
     pub io_layer: String,
     pub tie_high: TieCell,
     pub tie_low: TieCell,
@@ -251,6 +269,18 @@ pub struct WeightUse {
 }
 impl PhysicalConfig {
     pub fn validate(&self) -> Result<()> {
+        if self.rail_via_stack.len() > 8
+            || self
+                .rail_via_stack
+                .iter()
+                .any(|v| !rustroad_core::valid_object_name(v))
+            || self.rail_via_stack.first().is_some_and(|v| *v != self.via)
+        {
+            return Err(Error::Invalid("invalid rail via stack".into()));
+        }
+        if let Some(macro_supply) = &self.macro_supply {
+            macro_supply.validate()?;
+        }
         if self.cell_spacing_sites > 64 || (self.cell_spacing_sites > 0 && self.tap.is_none()) {
             return Err(Error::Invalid(
                 "cell spacing needs tap-reserved rows and <=64 sites".into(),
@@ -440,7 +470,7 @@ pub(super) fn validate_tap_master(bundle: &PhysicalBundle) -> Result<()> {
                 | rustroad_core::connectivity::Geometry::Polygon { layer, .. } => layer == name,
             })
         };
-        if !has(body) || !has(&cfg.rail_layer) {
+        if (tap.body_view == TapBodyView::Lef && !has(body)) || !has(&cfg.rail_layer) {
             return Err(Error::Invalid(
                 "tap must expose both body and primary rail geometry on its supply pin".into(),
             ));
@@ -820,6 +850,19 @@ pub(super) fn distribute_ties(
         Ok(())
     };
     let mut moved_ports = Vec::new();
+    let mut declarations: HashMap<_, _> = bundle
+        .netlist
+        .ports
+        .iter()
+        .map(|p| (p.name.clone(), p.range))
+        .chain(
+            bundle
+                .netlist
+                .wires
+                .iter()
+                .map(|w| (w.name.clone(), w.range)),
+        )
+        .collect();
     for pin in &model.pins {
         if let (Some(net), PinOwner::Port { port, bit }) = (pin.net, pin.owner)
             && let Some(&group) = net_groups.get(&net)
@@ -865,12 +908,14 @@ pub(super) fn distribute_ties(
         let group = &mut groups[group];
         advance(group)?;
         if group.active != group.binding.net {
-            bundle.netlist.instances[instance as usize]
-                .connections
-                .iter_mut()
-                .find(|c| c.pin == spec.name)
-                .ok_or_else(|| Error::Invalid("tie sink connection missing".into()))?
-                .signal = verilog::Expr::Ident(group.active.clone());
+            declarations.insert(group.active.clone(), None);
+            crate::connections::replace_pin(
+                &mut bundle.netlist.instances[instance as usize],
+                &model.masters[model.instance_masters[instance as usize] as usize],
+                &spec.name,
+                verilog::Expr::Ident(group.active.clone()),
+                &declarations,
+            )?;
         }
         group.used += 1;
     }
@@ -878,6 +923,7 @@ pub(super) fn distribute_ties(
     for (cell, binding, master) in additions {
         let size = model.masters[master as usize].size;
         design.cells.push(Cell {
+            fixed: None,
             name: cell.name.clone(),
             master: cell.cell.clone(),
             width: size[0],
@@ -1029,6 +1075,7 @@ pub(super) fn isolate_output_ports(
             ],
         });
         design.cells.push(Cell {
+            fixed: None,
             name: name.clone(),
             master: role.cell.clone(),
             width: master.size[0],
@@ -1266,6 +1313,7 @@ pub(super) fn prepare(
         .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
     validate_tap_master(bundle)?;
     let mut tap_work = 0usize;
+    let row_segments = rustroad_core::fixed::row_segments(design, limits.max_expansions)?;
     let gap = i64::from(cfg.cell_spacing_sites)
         .checked_mul(design.site.width)
         .ok_or_else(|| Error::Budget("cell spacing overflow".into()))?;
@@ -1320,6 +1368,7 @@ pub(super) fn prepare(
                 }
             };
             design.cells.push(Cell {
+                fixed: None,
                 name: name.clone(),
                 master: tap.cell.clone(),
                 width,
@@ -1362,7 +1411,10 @@ pub(super) fn prepare(
         return Err(Error::Invalid("filler list needs a one-site cell".into()));
     }
     let mut occupied = HashMap::<i64, Vec<(i64, i64)>>::new();
-    for cell in &placed {
+    for (cell, spec) in placed.iter().zip(&design.cells) {
+        if spec.fixed.is_some() {
+            continue;
+        }
         occupied.entry(cell.y).or_default().push((
             cell.x,
             cell.x
@@ -1373,12 +1425,18 @@ pub(super) fn prepare(
     let mut names: HashSet<String> = design.cells.iter().map(|c| c.name.clone()).collect();
     let mut new_positions = Vec::new();
     let mut sequence = 0usize;
-    for row in &design.rows {
-        let mut intervals = occupied.remove(&row.y).unwrap_or_default();
+    for intervals in occupied.values_mut() {
         intervals.sort_unstable();
+    }
+    for row in &row_segments {
+        let all = occupied.get(&row.y).map(Vec::as_slice).unwrap_or(&[]);
+        let first = all.partition_point(|p| p.1 <= row.x_start);
+        let last = all.partition_point(|p| p.0 < row.x_end);
+        let intervals = &all[first..last];
         let mut cursor = row.x_start;
         for (a, b) in intervals
-            .into_iter()
+            .iter()
+            .copied()
             .chain(std::iter::once((row.x_end, row.x_end)))
         {
             while cursor < a {
@@ -1409,6 +1467,7 @@ pub(super) fn prepare(
                     }
                 };
                 design.cells.push(Cell {
+                    fixed: None,
                     name: name.clone(),
                     master: master.clone(),
                     width: *width,
@@ -1501,13 +1560,19 @@ pub(super) fn layout(
     )?;
     let mut intervals: Vec<_> = placed
         .iter()
-        .map(|p| (p.y, p.x, p.x.checked_add(p.width).unwrap()))
+        .zip(&design.cells)
+        .filter(|(_, c)| c.fixed.is_none())
+        .map(|(p, _)| (p.y, p.x, p.x.checked_add(p.width).unwrap()))
         .collect();
     intervals.sort_unstable();
     let mut cursor = 0usize;
-    for row in &design.rows {
+    let row_segments = rustroad_core::fixed::row_segments(design, 64_000_000)?;
+    for row in &row_segments {
         let mut x = row.x_start;
-        while cursor < intervals.len() && intervals[cursor].0 == row.y {
+        while cursor < intervals.len()
+            && intervals[cursor].0 == row.y
+            && intervals[cursor].1 < row.x_end
+        {
             if intervals[cursor].1 != x {
                 return Err(Error::Invalid("power row has a placement gap".into()));
             }
@@ -1521,13 +1586,14 @@ pub(super) fn layout(
     let cells = placed
         .iter()
         .enumerate()
+        .filter(|(i, _)| design.cells[*i].fixed.is_none())
         .map(|(i, p)| {
             Ok(PowerCell {
                 instance: i as u32,
                 master: bundle.connectivity.instance_masters[i],
                 x: p.x,
                 y: p.y,
-                orientation: rustroad_core::placed_orientation(design, p)?,
+                orientation: rustroad_core::placed_orientation_for(design, &design.cells[i], p)?,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1543,8 +1609,7 @@ pub(super) fn layout(
             ));
         }
     }
-    let rows = design
-        .rows
+    let rows = row_segments
         .iter()
         .map(|r| PowerRow {
             x_start: r.x_start,
@@ -1578,65 +1643,9 @@ pub(super) fn layout(
             rails.diagnostics
         )));
     }
-    let grid = bundle.technology.manufacturing_grid.ok_or_else(|| {
-        Error::Invalid("manufacturing grid required for physical preparation".into())
-    })?;
     let io_pins = io_pins(design, bundle)?;
-    let rail_layer = layer(&bundle.technology, &cfg.rail_layer)?;
-    let strap_layer = layer(&bundle.technology, &cfg.strap_layer)?;
-    let via = bundle
-        .technology
-        .vias
-        .iter()
-        .find(|v| v.name == cfg.via)
-        .ok_or_else(|| Error::Invalid("fixed supply via absent".into()))?;
-    let rectangles = |name: &str| -> Result<Vec<Rect>> {
-        via.geometries
-            .iter()
-            .filter_map(|g| match g {
-                lef::LefGeometry::Rect { layer, rect } if layer == name => Some(Ok(Rect {
-                    lx: rect[0],
-                    ly: rect[1],
-                    ux: rect[2],
-                    uy: rect[3],
-                })),
-                lef::LefGeometry::Polygon { layer, .. } if layer == name => {
-                    Some(Err(Error::Invalid("polygon supply via unsupported".into())))
-                }
-                _ => None,
-            })
-            .collect()
-    };
-    let supply = build_supply_grid(
-        design.die_area,
-        design.core_area,
-        grid,
-        &rails,
-        &cfg.rail_layer,
-        rail_layer
-            .width
-            .ok_or_else(|| Error::Invalid("rail minimum width absent".into()))?,
-        &LayerSpec {
-            name: cfg.strap_layer.clone(),
-            width: cfg
-                .strap_width
-                .or(strap_layer.width)
-                .ok_or_else(|| Error::Invalid("strap width absent".into()))?
-                .max(strap_layer.width.unwrap_or(0)),
-            spacing: cfg
-                .strap_spacing
-                .or(strap_layer.spacing)
-                .ok_or_else(|| Error::Invalid("strap spacing absent".into()))?
-                .max(strap_layer.spacing.unwrap_or(0)),
-        },
-        &ViaSpec {
-            name: cfg.via.clone(),
-            lower: rectangles(&cfg.rail_layer)?,
-            upper: rectangles(&cfg.strap_layer)?,
-        },
-        &SupplyLimits::default(),
-    )
-    .map_err(|e| Error::Invalid(e.to_string()))?;
+    let mut supply = crate::segmented_supply::build(design, bundle, &rails)?;
+    crate::macro_supply::collect(design, bundle, placed, &mut supply)?;
     let tap_report = if let Some(tap) = &cfg.tap {
         let m = bundle
             .connectivity
@@ -1791,7 +1800,7 @@ pub(crate) fn free_intervals(
             }
         }
     } else {
-        for r in &design.rows {
+        for r in rustroad_core::fixed::row_segments(design, 64_000_000)? {
             out.push(rustroad_core::place::Interval {
                 y: r.y,
                 lx: r.x_start,
@@ -1813,6 +1822,16 @@ fn analytic(
     gap: i64,
     limits: &Limits,
 ) -> Result<PlacementReport> {
+    let moving: Vec<usize> = design
+        .cells
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| c.fixed.is_none().then_some(i))
+        .collect();
+    let mut variable = vec![None; placed.len()];
+    for (j, &i) in moving.iter().enumerate() {
+        variable[i] = Some(j as u32);
+    }
     let cfg = bundle.config.as_ref().unwrap();
     let pc = cfg.placer.as_ref().unwrap();
     let model = &bundle.connectivity;
@@ -1865,7 +1884,15 @@ fn analytic(
                     continue;
                 }
                 if (instance as usize) < placed.len() {
-                    nets[n as usize].push(rustroad_core::place::PinRef::Cell(instance));
+                    if let Some(v) = variable[instance as usize] {
+                        nets[n as usize].push(rustroad_core::place::PinRef::Cell(v));
+                    } else {
+                        let p = placed[instance as usize];
+                        nets[n as usize].push(rustroad_core::place::PinRef::Fixed([
+                            p.x + p.width / 2,
+                            p.y + p.height / 2,
+                        ]));
+                    }
                 }
             }
             PinOwner::Port { port, bit } => {
@@ -1887,7 +1914,7 @@ fn analytic(
     nets.retain(|n| n.len() >= 2);
     let problem = rustroad_core::place::PlaceProblem {
         weights,
-        widths: placed.iter().map(|p| p.width).collect(),
+        widths: moving.iter().map(|&i| placed[i].width).collect(),
         row_height: design.site.height,
         site: design.site.width,
         gap,
@@ -1909,11 +1936,9 @@ fn analytic(
     let result = match &bundle.placement_seed {
         Some(seed) => {
             seed.validate()?;
-            seeds = design
-                .cells
+            seeds = moving
                 .iter()
-                .take(placed.len())
-                .map(|c| seed.cells.get(&c.name).copied())
+                .map(|&i| seed.cells.get(&design.cells[i].name).copied())
                 .collect::<Vec<_>>();
             let seeded = seeds.iter().filter(|s| s.is_some()).count();
             seed_use = Some(SeedUse {
@@ -1936,9 +1961,9 @@ fn analytic(
             }
         }
     }
-    for (p, xy) in placed.iter_mut().zip(&result.positions) {
-        p.x = xy[0];
-        p.y = xy[1];
+    for (&i, xy) in moving.iter().zip(&result.positions) {
+        placed[i].x = xy[0];
+        placed[i].y = xy[1];
     }
     // Baseline: fixed netlist-order packing into the same free intervals.
     let mut baseline = Vec::with_capacity(placed.len());
@@ -2212,7 +2237,6 @@ pub(super) fn export_def(
     output: &mut impl Write,
 ) -> Result<()> {
     validate_state(design, bundle, placed)?;
-    let cfg = bundle.config.as_ref().unwrap();
     let state = bundle.state.as_ref().unwrap();
     let model = &bundle.connectivity;
     rustroad_core::write_def_components(design, placed, output)?;
@@ -2392,10 +2416,32 @@ pub(super) fn export_def(
                     )?;
                 }
                 for v in state.supply.vias.iter().filter(|v| v.polarity == polarity) {
+                    let source = bundle
+                        .technology
+                        .vias
+                        .iter()
+                        .find(|via| via.name == v.name)
+                        .ok_or_else(|| {
+                            std::io::Error::other("supply via missing from technology")
+                        })?;
+                    let lower = bundle
+                        .technology
+                        .layers
+                        .iter()
+                        .find(|layer| {
+                            layer.kind.as_deref() == Some("ROUTING")
+                                && source.geometries.iter().any(|g| match g {
+                                    lef::LefGeometry::Rect { layer: name, .. }
+                                    | lef::LefGeometry::Polygon { layer: name, .. } => {
+                                        name == &layer.name
+                                    }
+                                })
+                        })
+                        .ok_or_else(|| std::io::Error::other("supply via has no routing layer"))?;
                     write!(
                         output,
                         "\n  + ROUTED {} 0 ( {} {} ) {}",
-                        def_name(&cfg.rail_layer),
+                        def_name(&lower.name),
                         v.at[0],
                         v.at[1],
                         def_name(&v.name)

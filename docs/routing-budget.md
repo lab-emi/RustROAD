@@ -1,5 +1,17 @@
 # Constrained routing / extraction verification resource contract
 
+The explicit diagnostic `limits.replay` may select `phase: "post_failure"`,
+`net: null`, `round: null`, an absolute new `path`, and `max_bytes <= 536870912`.
+Only the final limited soft call after bounded alternate-root retries captures
+that state. It includes actual live/dead occupancy, root order, history and
+consumed expansion/work counters. Replaying it starts a **new attempt from the
+post-failure state**; it does not reproduce the inputs to the original failed
+call. Reports retain `source_phase` and `source_failed_pin`. Default `pre_soft`
+continues to require one explicit net; old snapshots without a phase are read
+as pre-soft. Capture remains streaming and never overwrites an existing file.
+Extra capture RAM is <=48 MiB (bounded 4M sorted history plus selected plans);
+spatial geometry and immutable instance templates remain borrowed/shared.
+
 Written before implementing the SDC reader, routing graph or new checker.
 Geometry is i64 DBU; timing constraints use finite f64 in explicit ns units.
 The first router is deterministic CPU reference code, not GPU code.
@@ -236,3 +248,42 @@ wire blocks its only escape; joint routing provides a legal witness. Bounded
 repair must produce a deterministic, fully connected route, and insufficient
 retry, terminal or aggregate search budgets must fail. Real-PDK independent
 physical gates remain necessary before full-design qualification.
+
+
+## Read-only detailed-repair replay
+
+`RouteLimits.replay` optionally writes exactly one pre-soft-search state:
+`{"path":"/absolute/state.json","net":376,"round":671,"max_bytes":268435456}`.
+It is diagnostic output under the existing revision-bound route transaction;
+there is no default capture and existing files are never overwritten. A failed
+route still publishes no partial workspace revision. The bounded snapshot retains
+original dynamic shape IDs (including dead/rip-up records), alive/routed flags,
+work counters, exact guide marks, sorted history, rip-up counts, terminal order
+and the selected net's pin escape plans. The immutable source compute view is
+fingerprinted, including lazy original instance geometry/PG/pins; terminal order
+in that fingerprint is canonical so batching does not change identity.
+
+The source templates remain shared. Streaming uses 64 KiB; extra history scratch
+is at most 4M entries * 8 B, and canonical terminal references at most 1M * 8 B.
+The encoded file has a 512 MiB hard ceiling, dynamic shapes 4M, selected terminals
+100k and history 4M. The independent read-only command checks a conservative
+8 * encoded-bytes + 2 * input-heap + 80 * search-state-limit + 128 * heap-limit
+against 4 GiB before parsing. The caller must additionally apply an OS memory and
+wall-clock guard. No search path set is materialized.
+
+`rustroad --workspace WS replay-route --config ROUTING.json --snapshot state.json`
+reconstructs the same bounded spatial index and calls exactly one existing soft
+search. Optional `--max-search-expansions N` remains within the unchanged hard
+ceiling; `--guide-bounds LX LY UX UY` is an explicit integer-DBU experiment inside
+the original die. Technology rules, layers, pin escapes and fixed/dynamic geometry
+are not relaxed. The report separates source/used guide bounds and includes work,
+expansions, failed pin, victim nets and any candidate wires/vias. `routed` describes
+that local soft attempt only: it is not a committed all-net route, DRC, LVS or
+whole-design acceptance. Changed views and malformed/oversized state reject.
+
+Batched orchestration subtracts earlier aggregate comparisons/expansions before
+calling the router. Replay accepts captured aggregate allowances only when they
+are no greater than the supplied outer limits, then uses those exact smaller
+values. Every other limit must match, apart from explicit per-search overrides.
+A real fresh04 capture deducted2,154,040 comparisons before its first batch; this
+is not a reason to widen budgets or modify the captured snapshot.

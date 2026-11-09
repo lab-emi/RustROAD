@@ -12,8 +12,9 @@
 //! rules. The diffusion-dependent rule (scalar or PWL in the connected
 //! diffusion area) applies when diffusion is connected; otherwise the
 //! non-diffusion rule applies, or the diffusion rule evaluated at zero when
-//! the LEF states only that one. Cumulative rules, other oxide models and
-//! AREAMINUSDIFF are reported as unsupported (status partial), never ignored.
+//! the LEF states only that one. Cumulative area/side ratios retain each gate's
+//! own damage history over process stages; metal and cut histories are separate.
+//! Other oxide models and AREAMINUSDIFF remain explicitly unsupported.
 //!
 //! Conservative verdict: the native model leaves out cell-internal metal and
 //! the foundry decks extract gate area from the layout, so the native ratio
@@ -40,15 +41,18 @@ use crate::{Error, Result};
 use rustroad_core::connectivity::PinOwner;
 use rustroad_core::routing::{self as core_routing, LayerRect};
 use rustroad_core::{Limits, Rect};
-use rustroad_formats::lef::{self, AntennaRatio, LayerAntenna, RATIO_SCALE};
+use rustroad_formats::lef::{self, AntennaRatio, LayerAntenna, PinAntennaKind, RATIO_SCALE};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::mem;
 use std::path::{Path, PathBuf};
 
 pub const ANTENNA_SCHEMA: &str = "rustroad.antenna-check.v1";
 /// Fraction of the LEF limit kept as margin for the native verdict; derived
 /// from the measured native-vs-deck under-read (module documentation).
 pub const DEFAULT_SAFETY_MARGIN: f64 = 0.10;
+/// Hard report-allocation ceiling, including repeated fanout names and PWLs.
+const MAX_REPORT_MEMORY_BYTES: usize = 128 * 1024 * 1024;
 pub const SAFETY_MARGIN_DERIVATION: &str = "native partial-net ratios read low against the \
 foundry deck: sky130 clk/met3 445.6 native vs 470.866 Magic (-5.4 %); planted met3 sweep: \
 native 379.5 already fails Magic, native 366.6 passes (-5.1 % .. -8.4 %). Margin 0.10 exceeds \
@@ -62,9 +66,13 @@ fn fail(code: &str, m: impl std::fmt::Display) -> Error {
 pub struct AntennaRequest {
     pub extra_shapes: Option<PathBuf>,
     pub max_shapes_per_net: usize,
+    /// Total retained conductor shapes across all selected logical nets.
+    pub max_total_shapes: usize,
     pub max_pair_checks: usize,
     pub max_union_cells: usize,
     pub max_rows: usize,
+    /// Total geometry-grid and process-stage work, including cumulative updates.
+    pub max_work: usize,
     /// Fraction of each limit kept as margin (0 ..= 0.5).
     pub safety_margin: f64,
 }
@@ -73,9 +81,11 @@ impl Default for AntennaRequest {
         Self {
             extra_shapes: None,
             max_shapes_per_net: 200_000,
+            max_total_shapes: 2_000_000,
             max_pair_checks: 200_000_000,
             max_union_cells: 4_000_000,
             max_rows: 100_000,
+            max_work: 200_000_000,
             safety_margin: DEFAULT_SAFETY_MARGIN,
         }
     }
@@ -189,7 +199,9 @@ impl RulePair {
 pub struct CheckRow {
     pub net: String,
     pub layer: String,
-    /// side_area | area
+    /// side_area | area | cumulative_side_area | cumulative_area.
+    /// For cumulative rows, `ratio` sums historical partial ratios; `metal_um2`
+    /// and `denominator_um2` describe only the current process-stage component.
     pub kind: String,
     pub gates: Vec<String>,
     pub diffusions: Vec<String>,
@@ -218,6 +230,7 @@ pub struct SourceCheck {
 #[derive(Clone, Debug, Serialize)]
 pub struct AntennaScope {
     pub model: &'static str,
+    pub routing_scope: &'static str,
     pub oxide: &'static str,
     pub cumulative: String,
     pub side_area: &'static str,
@@ -239,6 +252,9 @@ pub struct AntennaStats {
     pub partial_nets_checked: usize,
     pub pair_checks: usize,
     pub union_cells: usize,
+    pub work: usize,
+    pub cumulative_gate_updates: usize,
+    pub report_memory_bytes: usize,
 }
 fn is_zero(n: &usize) -> bool {
     *n == 0
@@ -293,11 +309,21 @@ fn overlap(a: Rect, b: Rect) -> bool {
     a.lx < b.ux && b.lx < a.ux && a.ly < b.uy && b.ly < a.uy
 }
 
+fn charge_work(work: &mut usize, count: usize, maximum: usize) -> Result<()> {
+    *work = work
+        .checked_add(count)
+        .filter(|&total| total <= maximum)
+        .ok_or_else(|| Error::Budget("ANTENNA: max_work".into()))?;
+    Ok(())
+}
+
 /// Union area (DBU^2) and perimeter (DBU) of rectangles by coordinate compression.
 fn union_area_perimeter(
     rects: &[Rect],
     max_cells: usize,
     used: &mut usize,
+    work: &mut usize,
+    max_work: usize,
 ) -> Result<(i128, i128)> {
     let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r.lx, r.ux]).collect();
     let mut ys: Vec<i64> = rects.iter().flat_map(|r| [r.ly, r.uy]).collect();
@@ -315,12 +341,14 @@ fn union_area_perimeter(
         )));
     }
     *used += cells;
+    charge_work(work, cells.saturating_mul(2), max_work)?;
     let mut grid = vec![false; cells];
     for r in rects {
         let x0 = xs.partition_point(|&x| x < r.lx);
         let x1 = xs.partition_point(|&x| x < r.ux);
         let y0 = ys.partition_point(|&y| y < r.ly);
         let y1 = ys.partition_point(|&y| y < r.uy);
+        charge_work(work, (x1 - x0).saturating_mul(y1 - y0), max_work)?;
         for x in x0..x1 {
             for y in y0..y1 {
                 grid[x * ny + y] = true;
@@ -367,7 +395,7 @@ struct Shape {
     terminal: Option<usize>,
 }
 
-fn rules_for(a: &LayerAntenna, dbu2: f64, side: bool) -> RulePair {
+fn rules_for(a: &LayerAntenna, dbu2: f64, side: bool, cumulative: bool) -> RulePair {
     let s = RATIO_SCALE as f64;
     let scalar = |v: &Option<i64>| {
         v.map(|x| Limit::Value {
@@ -376,24 +404,40 @@ fn rules_for(a: &LayerAntenna, dbu2: f64, side: bool) -> RulePair {
     };
     let ratio = |v: &Option<AntennaRatio>| v.as_ref().map(|r| Limit::from_lef(r, dbu2));
     RulePair {
-        keyword_no_diff: if side {
+        keyword_no_diff: if cumulative && side {
+            "ANTENNACUMSIDEAREARATIO"
+        } else if cumulative {
+            "ANTENNACUMAREARATIO"
+        } else if side {
             "ANTENNASIDEAREARATIO"
         } else {
             "ANTENNAAREARATIO"
         }
         .into(),
-        no_diff: if side {
+        no_diff: if cumulative && side {
+            scalar(&a.cum_side_area_ratio)
+        } else if cumulative {
+            scalar(&a.cum_area_ratio)
+        } else if side {
             scalar(&a.side_area_ratio)
         } else {
             scalar(&a.area_ratio)
         },
-        keyword_with_diff: if side {
+        keyword_with_diff: if cumulative && side {
+            "ANTENNACUMDIFFSIDEAREARATIO"
+        } else if cumulative {
+            "ANTENNACUMDIFFAREARATIO"
+        } else if side {
             "ANTENNADIFFSIDEAREARATIO"
         } else {
             "ANTENNADIFFAREARATIO"
         }
         .into(),
-        with_diff: if side {
+        with_diff: if cumulative && side {
+            ratio(&a.cum_diff_side_area_ratio)
+        } else if cumulative {
+            ratio(&a.cum_diff_area_ratio)
+        } else if side {
             ratio(&a.diff_side_area_ratio)
         } else {
             ratio(&a.diff_area_ratio)
@@ -405,12 +449,16 @@ fn rules_for(a: &LayerAntenna, dbu2: f64, side: bool) -> RulePair {
 fn check_budgets(request: &AntennaRequest) -> Result<()> {
     if request.max_shapes_per_net == 0
         || request.max_shapes_per_net > 1_000_000
+        || request.max_total_shapes == 0
+        || request.max_total_shapes > 8_000_000
         || request.max_pair_checks == 0
         || request.max_pair_checks > 2_000_000_000
         || request.max_union_cells == 0
         || request.max_union_cells > 64_000_000
         || request.max_rows == 0
         || request.max_rows > 1_000_000
+        || request.max_work == 0
+        || request.max_work > 2_000_000_000
     {
         return Err(fail(
             "INVALID_ARGUMENT",
@@ -434,15 +482,35 @@ struct Prepared {
     sources: Vec<SourceCheck>,
     input: core_routing::RouteInput,
     order: Vec<u32>,
+    positions: Vec<usize>,
     cut_adjacent: HashMap<u32, (u32, u32)>,
     layer_rules: HashMap<String, LayerAntenna>,
-    pin_area: HashMap<(String, String), (i64, i64, bool)>,
+    pin_area: HashMap<(String, String), PinArea>,
     checked_layers: Vec<String>,
     rule_free_layers: Vec<String>,
     diagnostics: Vec<String>,
     partial: bool,
     cumulative: String,
     unsupported: Vec<lef::AntennaUnsupported>,
+}
+
+struct PinArea {
+    gate: i64,
+    diffusion: i64,
+    values: Vec<(PinAntennaKind, Option<usize>, i64)>,
+    unsupported_qualification: bool,
+}
+
+impl PinArea {
+    fn at(&self, kind: PinAntennaKind, rank: usize, carry: bool) -> i64 {
+        self.values
+            .iter()
+            .filter(|(k, layer, _)| {
+                *k == kind && layer.is_none_or(|l| if carry { l <= rank } else { l == rank })
+            })
+            .max_by_key(|(_, layer, _)| *layer)
+            .map_or(0, |(_, _, value)| *value)
+    }
 }
 
 fn prepare(
@@ -505,12 +573,36 @@ fn prepare(
         .flat_map(|d| d.antenna.layers.iter())
         .map(|a| (a.layer.clone(), a.clone()))
         .collect();
-    let mut pin_area: HashMap<(String, String), (i64, i64, bool)> = HashMap::new();
+    let mut pin_area = HashMap::new();
     for d in &docs {
         for p in &d.antenna.pins {
+            let mut unsupported_qualification = p.layer_qualified && p.values.is_empty();
+            // Preserve complete macro quantities in the parser. Until the
+            // hierarchical PAR/MAXCAR combination is independently qualified,
+            // the native verdict must remain partial for such terminals.
+            unsupported_qualification |= p.values.iter().any(|value| {
+                !matches!(
+                    value.kind,
+                    PinAntennaKind::GateArea | PinAntennaKind::DiffArea
+                )
+            });
+            let values = p
+                .values
+                .iter()
+                .map(|v| {
+                    let rank = v.layer.as_deref().and_then(|name| stack.get(name).copied());
+                    unsupported_qualification |= v.layer.is_some() && rank.is_none();
+                    (v.kind, rank, v.value)
+                })
+                .collect();
             pin_area.insert(
                 (p.macro_name.clone(), p.pin.clone()),
-                (p.gate_area, p.diff_area, p.layer_qualified),
+                PinArea {
+                    gate: p.gate_area,
+                    diffusion: p.diff_area,
+                    values,
+                    unsupported_qualification,
+                },
             );
         }
     }
@@ -546,36 +638,57 @@ fn prepare(
     }
     // Layers to check, bottom-up.
     let mut order: Vec<u32> = (0..input.layers.len() as u32).collect();
+    if order.len() > 256 {
+        return Err(Error::Budget("ANTENNA: at most256 process layers".into()));
+    }
     order.sort_by_key(|&i| position[i as usize]);
     let mut checked_layers = Vec::new();
     let mut rule_free_layers = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut partial = false;
+    let mut partial = state.scope != crate::routing::RouteScope::All;
+    if partial {
+        diagnostics.push("ANTENNA_PARTIAL_ROUTING: only clock nets were routed; data-net antenna verification is incomplete".into());
+    }
+    let cumulative_side = layer_rules
+        .values()
+        .any(|a| a.cum_side_area_ratio.is_some() || a.cum_diff_side_area_ratio.is_some());
     for &i in &order {
         let name = input.layers[i as usize].name.as_str();
+        if layer_rules
+            .get(name)
+            .is_some_and(|a| a.area_minus_diff.is_some())
+        {
+            diagnostics.push(format!(
+                "ANTENNA_UNMODELED: {name} states an AREAMINUSDIFF rule"
+            ));
+            partial = true;
+        }
+        if cumulative_side
+            && input.layers[i as usize].vertical.is_some()
+            && layer_rules.get(name).is_none_or(|a| a.thickness.is_none())
+        {
+            diagnostics.push(format!("ANTENNA_NO_THICKNESS: {name} contributes to cumulative side history but has no THICKNESS"));
+            partial = true;
+        }
         let has_ratio = |a: &&LayerAntenna| {
             a.area_ratio.is_some()
                 || a.diff_area_ratio.is_some()
                 || a.side_area_ratio.is_some()
                 || a.diff_side_area_ratio.is_some()
+                || a.cum_area_ratio.is_some()
+                || a.cum_diff_area_ratio.is_some()
+                || a.cum_side_area_ratio.is_some()
+                || a.cum_diff_side_area_ratio.is_some()
         };
         match layer_rules.get(name).filter(has_ratio) {
             None => rule_free_layers.push(name.to_string()),
             Some(a) => {
-                let side = a.side_area_ratio.is_some() || a.diff_side_area_ratio.is_some();
+                let side = a.side_area_ratio.is_some()
+                    || a.diff_side_area_ratio.is_some()
+                    || a.cum_side_area_ratio.is_some()
+                    || a.cum_diff_side_area_ratio.is_some();
                 if side && a.thickness.is_none() {
                     diagnostics.push(format!("ANTENNA_NO_THICKNESS: {name} has a side-area rule but no THICKNESS; side checks skipped"));
-                    partial = true;
-                }
-                if a.cum_area_ratio.is_some()
-                    || a.cum_diff_area_ratio.is_some()
-                    || a.cum_side_area_ratio.is_some()
-                    || a.cum_diff_side_area_ratio.is_some()
-                    || a.area_minus_diff.is_some()
-                {
-                    diagnostics.push(format!(
-                        "ANTENNA_UNMODELED: {name} states a cumulative or AREAMINUSDIFF rule"
-                    ));
                     partial = true;
                 }
                 if a.model.as_deref().is_some_and(|m| m != "OXIDE1") {
@@ -591,7 +704,7 @@ fn prepare(
             || a.cum_side_area_ratio.is_some()
             || a.cum_diff_side_area_ratio.is_some()
     }) {
-        "present_in_lef_unsupported".to_string()
+        "per_gate_process_stage_dp".to_string()
     } else {
         "not_present_in_lef".to_string()
     };
@@ -608,6 +721,7 @@ fn prepare(
         sources,
         input,
         order,
+        positions: position,
         cut_adjacent,
         layer_rules,
         pin_area,
@@ -638,17 +752,34 @@ fn net_shapes(
     routes: &core_routing::Routes,
     routed: &BTreeSet<u32>,
     only: Option<u32>,
+    request: &AntennaRequest,
 ) -> Result<BTreeMap<u32, Vec<Shape>>> {
     let input = &prep.input;
     let keep = |n: u32| routed.contains(&n) && only.is_none_or(|o| o == n);
     let mut per_net: BTreeMap<u32, Vec<Shape>> = BTreeMap::new();
+    let mut total = 0;
+    let mut push = |net: u32, shape: Shape| -> Result<()> {
+        if total >= request.max_total_shapes {
+            return Err(Error::Budget("ANTENNA: max_total_shapes".into()));
+        }
+        let shapes = per_net.entry(net).or_default();
+        if shapes.len() >= request.max_shapes_per_net {
+            return Err(Error::Budget("ANTENNA: max_shapes_per_net".into()));
+        }
+        shapes.push(shape);
+        total += 1;
+        Ok(())
+    };
     for w in routes.wires.iter().filter(|w| keep(w.net)) {
         let width = input.layers[w.layer as usize].width;
-        per_net.entry(w.net).or_default().push(Shape {
-            layer: w.layer,
-            rect: core_routing::wire_rect(w, width)?,
-            terminal: None,
-        });
+        push(
+            w.net,
+            Shape {
+                layer: w.layer,
+                rect: core_routing::wire_rect(w, width)?,
+                terminal: None,
+            },
+        )?;
     }
     for v in routes.vias.iter().filter(|v| keep(v.net)) {
         let via = input
@@ -656,30 +787,39 @@ fn net_shapes(
             .get(v.kind as usize)
             .ok_or_else(|| fail("ANTENNA_ROUTES", "via kind outside the technology"))?;
         for LayerRect { layer, rect } in &via.shapes {
-            per_net.entry(v.net).or_default().push(Shape {
-                layer: *layer,
-                rect: core_routing::shifted(*rect, v.at)?,
-                terminal: None,
-            });
+            push(
+                v.net,
+                Shape {
+                    layer: *layer,
+                    rect: core_routing::shifted(*rect, v.at)?,
+                    terminal: None,
+                },
+            )?;
         }
     }
     for p in routes.patches.iter().filter(|p| keep(p.net)) {
-        per_net.entry(p.net).or_default().push(Shape {
-            layer: p.layer,
-            rect: p.rect,
-            terminal: None,
-        });
+        push(
+            p.net,
+            Shape {
+                layer: p.layer,
+                rect: p.rect,
+                terminal: None,
+            },
+        )?;
     }
     for (ti, t) in input.terminals.iter().enumerate() {
         if !keep(t.net) {
             continue;
         }
         for s in &t.shapes {
-            per_net.entry(t.net).or_default().push(Shape {
-                layer: s.layer,
-                rect: s.rect,
-                terminal: Some(ti),
-            });
+            push(
+                t.net,
+                Shape {
+                    layer: s.layer,
+                    rect: s.rect,
+                    terminal: Some(ti),
+                },
+            )?;
         }
     }
     Ok(per_net)
@@ -691,17 +831,31 @@ fn terminal_info(
     design: &rustroad_core::Design,
     model: &rustroad_core::connectivity::ConnectedDesign,
     ti: usize,
+    layer: Option<u32>,
 ) -> (String, i64, i64, bool) {
     let t = &prep.input.terminals[ti];
     match model.pins[t.pin as usize].owner {
         PinOwner::Instance { instance, terminal } => {
             let master = &model.masters[model.instance_masters[instance as usize] as usize];
             let pin = &master.pins[terminal as usize].name;
-            let (g, d, q) = prep
-                .pin_area
-                .get(&(master.name.clone(), pin.clone()))
-                .copied()
-                .unwrap_or((0, 0, false));
+            let area = prep.pin_area.get(&(master.name.clone(), pin.clone()));
+            let rank = layer.map_or(usize::MAX, |l| prep.positions[l as usize]);
+            let (g, d, q) = area.map_or((0, 0, false), |a| {
+                let legacy = a.values.is_empty();
+                (
+                    if legacy {
+                        a.gate
+                    } else {
+                        a.at(PinAntennaKind::GateArea, rank, true)
+                    },
+                    if legacy {
+                        a.diffusion
+                    } else {
+                        a.at(PinAntennaKind::DiffArea, rank, true)
+                    },
+                    a.unsupported_qualification,
+                )
+            });
             (
                 format!("{}/{}", design.cells[instance as usize].name, pin),
                 g,
@@ -715,6 +869,32 @@ fn terminal_info(
             0,
             false,
         ),
+    }
+}
+
+#[derive(Default)]
+struct ComponentAreas {
+    gate: i64,
+    diffusion: i64,
+    gates: Vec<(usize, String)>,
+    diffusions: Vec<String>,
+}
+
+#[derive(Default)]
+struct GateDamage {
+    routing: f64,
+    side: f64,
+    cut: f64,
+}
+impl GateDamage {
+    fn for_kind(&mut self, side: bool, cut: bool) -> &mut f64 {
+        if side {
+            &mut self.side
+        } else if cut {
+            &mut self.cut
+        } else {
+            &mut self.routing
+        }
     }
 }
 
@@ -754,6 +934,9 @@ fn evaluate_net(
     }
     let mut dsu = Dsu((0..shapes.len()).collect());
     let mut first_of_terminal: HashMap<usize, usize> = HashMap::new();
+    // A gate has one component at each fabrication step. Its history survives
+    // later component merges; averaging the histories would lose the worst gate.
+    let mut damage: HashMap<usize, GateDamage> = HashMap::new();
     let mut added = vec![false; shapes.len()];
     for &layer in &prep.order {
         // No metal of this net on this layer: nothing to add or check.
@@ -822,26 +1005,36 @@ fn evaluate_net(
             }
         }
         let lname = input.layers[layer as usize].name.as_str();
-        let Some(rule) = prep.layer_rules.get(lname) else {
-            continue;
-        };
+        let default_rule = LayerAntenna::default();
+        let rule = prep.layer_rules.get(lname).unwrap_or(&default_rule);
         if rule.model.as_deref().is_some_and(|m| m != "OXIDE1") {
             continue;
         }
         // Components with gate area: gate/diff sums and pin names.
-        let mut comp: BTreeMap<usize, (i64, i64, Vec<String>, Vec<String>)> = BTreeMap::new();
+        charge_work(
+            &mut stats.work,
+            first_of_terminal.len() + list.len(),
+            request.max_work,
+        )?;
+        let mut comp: BTreeMap<usize, ComponentAreas> = BTreeMap::new();
         for (&t, &first) in &first_of_terminal {
             let root = dsu.find(first);
-            let (name, g, d, q) = terminal_info(prep, design, model, t);
+            let (name, g, d, q) = terminal_info(prep, design, model, t, Some(layer));
             *qualified |= q;
             let e = comp.entry(root).or_default();
-            e.0 += g;
-            e.1 += d;
+            e.gate = e
+                .gate
+                .checked_add(g)
+                .ok_or_else(|| Error::Budget("ANTENNA: gate area overflow".into()))?;
+            e.diffusion = e
+                .diffusion
+                .checked_add(d)
+                .ok_or_else(|| Error::Budget("ANTENNA: diffusion area overflow".into()))?;
             if g > 0 {
-                e.2.push(name.clone());
+                e.gates.push((t, name.clone()));
             }
             if d > 0 {
-                e.3.push(name);
+                e.diffusions.push(name);
             }
         }
         let mut metal: BTreeMap<usize, Vec<Rect>> = BTreeMap::new();
@@ -850,56 +1043,130 @@ fn evaluate_net(
         }
         let is_cut = input.layers[layer as usize].vertical.is_none();
         for (root, rects) in metal {
-            let Some((gate, diff, gates, diffs)) = comp.get(&root) else {
+            let Some(component) = comp.get(&root) else {
                 continue;
             };
-            if *gate <= 0 {
+            if component.gate <= 0 {
                 continue;
             }
             stats.partial_nets_checked += 1;
-            let (area, perimeter) =
-                union_area_perimeter(&rects, request.max_union_cells, &mut stats.union_cells)?;
-            let gate_um2 = *gate as f64 / dbu2;
-            let diff_um2 = *diff as f64 / dbu2;
+            let (area, perimeter) = union_area_perimeter(
+                &rects,
+                request.max_union_cells,
+                &mut stats.union_cells,
+                &mut stats.work,
+                request.max_work,
+            )?;
+            let gate_um2 = component.gate as f64 / dbu2;
+            let diff_um2 = component.diffusion as f64 / dbu2;
             let mut kinds = vec![(false, area as f64 / dbu2)];
             if !is_cut && let Some(t) = rule.thickness {
                 kinds.push((true, (perimeter * i128::from(t)) as f64 / dbu2));
             }
             for (side, metal_um2) in kinds {
-                let rules = rules_for(rule, dbu2, side);
-                let Some((limit, keyword)) = rules.limit(diff_um2) else {
-                    continue;
+                let partial_rules = rules_for(rule, dbu2, side, false);
+                let denominator = partial_rules.denominator(gate_um2, diff_um2);
+                let partial_ratio = metal_um2 / denominator;
+                charge_work(&mut stats.work, component.gates.len(), request.max_work)?;
+                let mut worst: Option<(usize, String, f64)> = None;
+                for (terminal, name) in &component.gates {
+                    let value = damage.entry(*terminal).or_default().for_kind(side, is_cut);
+                    *value += partial_ratio;
+                    stats.cumulative_gate_updates += 1;
+                    if worst.as_ref().is_none_or(|(old, _, ratio)| {
+                        value.total_cmp(ratio).is_gt() || (*value == *ratio && terminal < old)
+                    }) {
+                        worst = Some((*terminal, name.clone(), *value));
+                    }
+                }
+                let mut push_row = |ratio: f64,
+                                    cumulative: bool,
+                                    rules: RulePair,
+                                    worst_gate: Option<&str>|
+                 -> Result<()> {
+                    let Some((limit, keyword)) = rules.limit(diff_um2) else {
+                        return Ok(());
+                    };
+                    if rows.len() >= request.max_rows {
+                        return Err(Error::Budget("ANTENNA: max_rows".into()));
+                    }
+                    let gate_count = worst_gate.map_or(component.gates.len(), |_| 1);
+                    let names = worst_gate.map_or_else(
+                        || {
+                            component
+                                .gates
+                                .iter()
+                                .map(|(_, name)| name.len())
+                                .sum::<usize>()
+                        },
+                        str::len,
+                    ) + component.diffusions.iter().map(String::len).sum::<usize>();
+                    let pwl_bytes = |limit: &Option<Limit>| match limit {
+                        Some(Limit::Pwl { points }) => points.len() * mem::size_of::<[f64; 2]>(),
+                        _ => 0,
+                    };
+                    // Charge before cloning any fanout list or variable-length name.
+                    let bytes = mem::size_of::<CheckRow>()
+                        + 256
+                        + net_name.len()
+                        + lname.len()
+                        + names
+                        + (gate_count + component.diffusions.len()) * 48
+                        + pwl_bytes(&rules.no_diff)
+                        + pwl_bytes(&rules.with_diff);
+                    stats.report_memory_bytes = stats
+                        .report_memory_bytes
+                        .checked_add(bytes)
+                        .filter(|&total| total <= MAX_REPORT_MEMORY_BYTES)
+                        .ok_or_else(|| Error::Budget("ANTENNA: report memory budget".into()))?;
+                    let mut gates = worst_gate.map_or_else(
+                        || {
+                            component
+                                .gates
+                                .iter()
+                                .map(|(_, name)| name.clone())
+                                .collect()
+                        },
+                        |name| vec![name.to_string()],
+                    );
+                    gates.sort();
+                    let mut diffusions = component.diffusions.clone();
+                    diffusions.sort();
+                    let effective_limit = limit * keep;
+                    rows.push(CheckRow {
+                        net: net_name.clone(),
+                        layer: lname.to_string(),
+                        kind: match (cumulative, side) {
+                            (true, true) => "cumulative_side_area",
+                            (true, false) => "cumulative_area",
+                            (false, true) => "side_area",
+                            (false, false) => "area",
+                        }
+                        .into(),
+                        gates,
+                        diffusions,
+                        gate_area_um2: gate_um2,
+                        diff_area_um2: diff_um2,
+                        metal_um2,
+                        denominator_um2: denominator,
+                        ratio,
+                        limit,
+                        effective_limit,
+                        rule: if diff_um2 > 0.0 && rules.with_diff.is_some() {
+                            format!("{keyword}@diffusion {diff_um2:.6}um2")
+                        } else {
+                            keyword
+                        },
+                        rules,
+                        violated: ratio > effective_limit,
+                        exceeds_lef_limit: ratio > limit,
+                    });
+                    Ok(())
                 };
-                let denominator = rules.denominator(gate_um2, diff_um2);
-                let ratio = metal_um2 / denominator;
-                let effective_limit = limit * keep;
-                let violated = ratio > effective_limit;
-                let mut g = gates.clone();
-                g.sort();
-                let mut d = diffs.clone();
-                d.sort();
-                rows.push(CheckRow {
-                    net: net_name.clone(),
-                    layer: lname.to_string(),
-                    kind: if side { "side_area" } else { "area" }.into(),
-                    gates: g,
-                    diffusions: d,
-                    gate_area_um2: gate_um2,
-                    diff_area_um2: diff_um2,
-                    metal_um2,
-                    denominator_um2: denominator,
-                    ratio,
-                    limit,
-                    effective_limit,
-                    rule: if diff_um2 > 0.0 && rules.with_diff.is_some() {
-                        format!("{keyword}@diffusion {diff_um2:.6}um2")
-                    } else {
-                        keyword
-                    },
-                    rules,
-                    violated,
-                    exceeds_lef_limit: ratio > limit,
-                });
+                push_row(partial_ratio, false, partial_rules, None)?;
+                if let Some((_, name, ratio)) = worst {
+                    push_row(ratio, true, rules_for(rule, dbu2, side, true), Some(&name))?;
+                }
             }
         }
     }
@@ -930,9 +1197,17 @@ fn evaluate_all(
     extra: Vec<(u32, Shape)>,
 ) -> Result<(Vec<CheckRow>, BTreeMap<String, (f64, bool)>)> {
     let routed = logical_routed(routes, model.nets.len() as u32);
-    let mut per_net = net_shapes(prep, routes, &routed, None)?;
+    let mut per_net = net_shapes(prep, routes, &routed, None, request)?;
+    let total: usize = per_net.values().map(Vec::len).sum();
+    if extra.len() > request.max_total_shapes.saturating_sub(total) {
+        return Err(Error::Budget("ANTENNA: max_total_shapes".into()));
+    }
     for (net, shape) in extra {
-        per_net.entry(net).or_default().push(shape);
+        let shapes = per_net.entry(net).or_default();
+        if shapes.len() >= request.max_shapes_per_net {
+            return Err(Error::Budget("ANTENNA: max_shapes_per_net".into()));
+        }
+        shapes.push(shape);
     }
     let mut rows = Vec::new();
     let mut worst: BTreeMap<String, (f64, bool)> = BTreeMap::new();
@@ -942,6 +1217,9 @@ fn evaluate_all(
             let w = worst.entry(r.net.clone()).or_insert((0.0, false));
             w.0 = w.0.max(r.ratio / r.limit);
             w.1 |= r.violated;
+        }
+        if net_rows.len() > request.max_rows.saturating_sub(rows.len()) {
+            return Err(Error::Budget("ANTENNA: max_rows".into()));
         }
         rows.extend(net_rows);
     }
@@ -1046,7 +1324,7 @@ pub fn check_antenna(
     )?;
     if qualified {
         partial = true;
-        diagnostics.push("ANTENNA_LAYER_QUALIFIED_PIN: some pin areas are LAYER-qualified and were summed over all layers".into());
+        diagnostics.push("ANTENNA_HIERARCHICAL_PIN_UNMODELED: pin partial-metal/cut or MAXCAR histories, unknown layers or legacy missing qualifiers require independent foundry checking".into());
     }
     sort_rows(&mut rows);
     let violations = rows.iter().filter(|r| r.violated).count();
@@ -1081,7 +1359,11 @@ pub fn check_antenna(
         dbu_per_micron: prep.dbu,
         sources: prep.sources,
         scope: AntennaScope {
-            model: "LEF process-antenna partial-net ratio per routing/cut layer",
+            model: "LEF process-antenna partial ratios and per-gate cumulative process-stage DP",
+            routing_scope: match state.scope {
+                crate::routing::RouteScope::All => "all_signal_nets",
+                crate::routing::RouteScope::Clock => "clock_nets_only",
+            },
             oxide: "OXIDE1",
             cumulative: prep.cumulative,
             side_area: "union perimeter x LEF THICKNESS",
@@ -1322,6 +1604,12 @@ pub fn repair_antenna(
         &mut qualified,
         Vec::new(),
     )?;
+    if prep.partial || qualified {
+        return Err(fail(
+            "ANTENNA_UNMODELED",
+            "repair requires a complete native antenna model; use independent foundry checking for hierarchical pin histories",
+        ));
+    }
     if let Some(report) = &request.report {
         bind_report(
             report,
@@ -1371,14 +1659,14 @@ pub fn repair_antenna(
                 .enumerate()
                 .filter(|(_, t)| t.net == net)
                 .filter_map(|(ti, t)| {
-                    let (name, gate, _, _) = terminal_info(&prep, &design, model, ti);
+                    let (name, gate, _, _) = terminal_info(&prep, &design, model, ti, None);
                     (gate > 0).then_some((name, t.pin))
                 })
                 .collect();
             let mut scratch = AntennaStats::default();
             let eval =
                 |r: &core_routing::Routes, scratch: &mut AntennaStats| -> Result<Vec<CheckRow>> {
-                    let shapes = net_shapes(&prep, r, &routed, Some(net))?;
+                    let shapes = net_shapes(&prep, r, &routed, Some(net), &request.antenna)?;
                     let empty = Vec::new();
                     evaluate_net(
                         &prep,
@@ -1625,26 +1913,44 @@ mod tests {
     #[test]
     fn union_area_and_perimeter_merge_overlaps() {
         let mut used = 0;
+        let mut work = 0;
         // Two overlapping 10x2 bars forming an L: area 10*2 + 2*8 = 36; perimeter 2*(10+10) = 40.
-        let (a, p) =
-            union_area_perimeter(&[r(0, 0, 10, 2), r(0, 0, 2, 10)], 100, &mut used).unwrap();
+        let (a, p) = union_area_perimeter(
+            &[r(0, 0, 10, 2), r(0, 0, 2, 10)],
+            100,
+            &mut used,
+            &mut work,
+            10000,
+        )
+        .unwrap();
         assert_eq!((a, p), (36, 40));
         // Collinear lattice edges with overlapping end extensions = one bar.
         let (a, p) = union_area_perimeter(
             &[r(0, 0, 6, 2), r(4, 0, 10, 2), r(8, 0, 14, 2)],
             100,
             &mut used,
+            &mut work,
+            10000,
         )
         .unwrap();
         assert_eq!((a, p), (28, 32));
         // Disjoint shapes add up; touching edges merge.
-        let (a, p) = union_area_perimeter(&[r(0, 0, 1, 1), r(1, 0, 2, 1)], 100, &mut used).unwrap();
+        let (a, p) = union_area_perimeter(
+            &[r(0, 0, 1, 1), r(1, 0, 2, 1)],
+            100,
+            &mut used,
+            &mut work,
+            10000,
+        )
+        .unwrap();
         assert_eq!((a, p), (2, 6));
         assert!(
             union_area_perimeter(
                 &[r(0, 0, 10, 2), r(1, 1, 3, 9), r(5, 5, 7, 7)],
                 4,
-                &mut used
+                &mut used,
+                &mut work,
+                10000,
             )
             .is_err()
         );
