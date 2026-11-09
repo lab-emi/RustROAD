@@ -29,6 +29,11 @@ pub struct Tables {
     sha256: String,
     logical_version: u32,
 }
+impl Tables {
+    pub(crate) fn bytes(&self) -> u64 {
+        self.bytes
+    }
+}
 
 fn budget(message: &str) -> Error {
     Error::Budget(message.into())

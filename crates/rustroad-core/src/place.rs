@@ -519,6 +519,11 @@ impl Spread<'_> {
             rest -= w;
             k += 1;
         }
+        // Whole-cell rounding can leave a region over-full; its overflow
+        // stays on the side that has rows (a macro may cover the other).
+        if b_cap == 0 {
+            k = cells.len();
+        }
         let (left, right) = cells.split_at_mut(k);
         if vertical_cut {
             self.run(left, pos, r0, r1, x0, cut_x, work)?;
@@ -659,7 +664,14 @@ fn legalize(problem: &PlaceProblem, target: &[[f64; 2]], work: &mut Work) -> Res
                     }
                 }
             }
-            if best.is_some() || (lo == 0 && hi == rows.len()) {
+            // A row outside the window costs at least its own |dy|; a blocked
+            // window (e.g. rows beside a macro) must not hide a nearer row.
+            let outside = [lo.checked_sub(1).map(|r| rows[r]), rows.get(hi).copied()]
+                .into_iter()
+                .flatten()
+                .map(|y| (y as f64 - ty).abs())
+                .fold(f64::INFINITY, f64::min);
+            if best.is_some_and(|b| b.0 <= outside) || (lo == 0 && hi == rows.len()) {
                 break;
             }
             radius *= 2;
@@ -956,19 +968,11 @@ fn detailed(
     Ok(())
 }
 
-/// Validate the legal result independently of the algorithm.
+/// Validate the legal result independently of the algorithm. The gap holds
+/// between neighbours of one free interval; across an interval boundary the
+/// fixed cell (tap) or blockage between them is the separation.
 fn check_legal(problem: &PlaceProblem, pos: &[[i64; 2]]) -> Result<()> {
-    let mut items: Vec<(i64, i64, i64)> = pos
-        .iter()
-        .enumerate()
-        .map(|(c, p)| (p[1], p[0], p[0] + problem.widths[c]))
-        .collect();
-    items.sort_unstable();
-    for w in items.windows(2) {
-        if w[0].0 == w[1].0 && w[0].2 + problem.gap > w[1].1 && w[0].2 > w[1].1 - problem.gap {
-            return Err(invalid("overlap or spacing violation after placement"));
-        }
-    }
+    let mut items: Vec<(usize, i64, i64)> = Vec::with_capacity(pos.len());
     for (c, p) in pos.iter().enumerate() {
         let i = problem
             .intervals
@@ -983,6 +987,13 @@ fn check_legal(problem: &PlaceProblem, pos: &[[i64; 2]]) -> Result<()> {
             || (p[0] - v.lx) % problem.site != 0
         {
             return Err(invalid("cell outside free intervals"));
+        }
+        items.push((i - 1, p[0], p[0] + problem.widths[c]));
+    }
+    items.sort_unstable();
+    for w in items.windows(2) {
+        if w[0].0 == w[1].0 && w[0].2 + problem.gap > w[1].1 {
+            return Err(invalid("overlap or spacing violation after placement"));
         }
     }
     Ok(())
@@ -1324,6 +1335,38 @@ mod tests {
         }
     }
     #[test]
+    fn legalization_looks_past_a_blocked_row_window() {
+        // Rows 3..=7 are open only at the far right (as beside a macro); rows
+        // 2 and 8 are open everywhere. A cell aimed at row 5, x = 90 belongs in
+        // row 2 or 8 near x = 90, not 800 sites away in its own blocked window.
+        let intervals = (0..10)
+            .map(|r| {
+                let lx = if (3..=7).contains(&r) { 900 } else { 0 };
+                Interval {
+                    y: r * 100,
+                    lx,
+                    ux: 1000,
+                }
+            })
+            .collect();
+        let p = PlaceProblem {
+            weights: Vec::new(),
+            widths: vec![20],
+            row_height: 100,
+            site: 10,
+            gap: 0,
+            nets: Vec::new(),
+            intervals,
+        };
+        let mut work = Work {
+            used: 0,
+            max: 1_000_000,
+        };
+        let at = legalize(&p, &[[100.0, 550.0]], &mut work).unwrap()[0];
+        assert!(at[1] == 200 || at[1] == 800, "{at:?}");
+        assert!((at[0] - 90).abs() <= 10, "{at:?}");
+    }
+    #[test]
     fn chain_is_legal_deterministic_and_short() {
         let p = chain(40, 4, 400);
         let a = place(&p, &PlaceConfig::default(), &PlaceLimits::default()).unwrap();
@@ -1454,6 +1497,72 @@ mod tests {
             place(&p, &PlaceConfig::default(), &tight),
             Err(Error::Budget(_))
         ));
+    }
+
+    #[test]
+    fn spacing_applies_within_an_interval_not_across_a_narrower_tap() {
+        // Intervals [0,100) and [130,230) around a 3-site tap; gap is 4 sites.
+        let p = PlaceProblem {
+            weights: Vec::new(),
+            widths: vec![20; 3],
+            row_height: 100,
+            site: 10,
+            gap: 40,
+            nets: Vec::new(),
+            intervals: vec![
+                Interval {
+                    y: 0,
+                    lx: 0,
+                    ux: 100,
+                },
+                Interval {
+                    y: 0,
+                    lx: 130,
+                    ux: 230,
+                },
+            ],
+        };
+        check_legal(&p, &[[80, 0], [130, 0], [190, 0]]).expect("flush against the tap");
+        assert!(check_legal(&p, &[[80, 0], [130, 0], [180, 0]]).is_err());
+        assert!(check_legal(&p, &[[80, 0], [140, 0], [90, 0]]).is_err());
+    }
+
+    #[test]
+    fn spreading_overflow_never_enters_a_region_without_rows() {
+        // Top-right quarter is a macro: rows 2-3 only have [0,110) / [0,100).
+        // Rows 0-1 fit 15 cells of 50, so 5 cells (250) must go up into 210:
+        // the 40 of whole-cell overflow used to be sent into the macro.
+        let p = PlaceProblem {
+            weights: Vec::new(),
+            widths: vec![40; 20],
+            row_height: 100,
+            site: 10,
+            gap: 10,
+            nets: Vec::new(),
+            intervals: Vec::new(),
+        };
+        let mut spread = Spread {
+            problem: &p,
+            rows: vec![
+                (0, vec![(0, 390)]),
+                (100, vec![(0, 400)]),
+                (200, vec![(0, 110)]),
+                (300, vec![(0, 100)]),
+            ],
+            out: vec![[0.0; 2]; 20],
+        };
+        let pos: Vec<[f64; 2]> = (0..20).map(|i| [390.0 - i as f64, 350.0]).collect();
+        let mut cells: Vec<usize> = (0..20).collect();
+        let mut work = Work {
+            used: 0,
+            max: 1_000_000,
+        };
+        spread
+            .run(&mut cells, &pos, 0, 4, 0, 400, &mut work)
+            .expect("overflow stays beside the macro");
+        let upper: Vec<_> = spread.out.iter().filter(|c| c[1] > 200.0).collect();
+        assert_eq!(upper.len(), 5);
+        assert!(upper.iter().all(|c| c[0] < 200.0), "{upper:?}");
     }
 
     #[test]

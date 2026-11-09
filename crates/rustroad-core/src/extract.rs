@@ -95,18 +95,21 @@ pub struct ExtractLimits {
     /// Resistors plus ground and coupling capacitors.
     pub max_elements: usize,
     pub max_couplings: usize,
-    /// Bin-entry scans plus candidate-by-interval comparisons, whole design.
+    /// Bin-entry scans, interval-index work and active-candidate comparisons.
     pub max_work: usize,
     /// Candidate shapes considered for one wire run. Its scratch memory is
     /// `CANDIDATE_SCRATCH_BYTES` per candidate (the per-run candidate list,
-    /// the interval cut points and the plane list); the ceiling keeps that
-    /// below `CANDIDATE_SCRATCH_CEILING_BYTES`. Work (intervals x candidates)
+    /// the interval sweep and the plane list); the ceiling keeps that
+    /// below `CANDIDATE_SCRATCH_CEILING_BYTES`. Work (including active intervals)
     /// is charged to `max_work`.
     pub max_candidates: usize,
     /// Spatial-bin entries.
     pub max_bin_entries: usize,
     /// Straight runs longer than this are split at existing lattice nodes (DBU).
     pub max_segment_length: i64,
+    /// Coupling capacitors below this value (pF) are written as ground
+    /// capacitance at both of their nodes; 0 keeps every coupling.
+    pub min_coupling_pf: f64,
 }
 impl Default for ExtractLimits {
     fn default() -> Self {
@@ -122,16 +125,16 @@ impl Default for ExtractLimits {
             max_candidates: 4096,
             max_bin_entries: 8_000_000,
             max_segment_length: 25_000,
+            min_coupling_pf: 0.0,
         }
     }
 }
-/// Scratch bytes per wire-run candidate: the candidate id (u32), two clamped
-/// cut points (2 x i64) and at most one plane entry (u32, i64, i64, u32).
-pub const CANDIDATE_SCRATCH_BYTES: usize = 4 + 16 + 24;
+/// Conservative scratch bytes per candidate, including vector capacity,
+/// the deduplication hash set, two interval events, active tree and plane list.
+pub const CANDIDATE_SCRATCH_BYTES: usize = 256;
 /// Rule-9 ceiling of the per-run candidate scratch (one run at a time).
 pub const CANDIDATE_SCRATCH_CEILING_BYTES: usize = 48 << 20;
-/// Absolute ceiling of `max_candidates` derived from the scratch ceiling
-/// (1,143,901 candidates; 48 MiB).
+/// Absolute ceiling of `max_candidates` derived from the scratch ceiling.
 pub const MAX_CANDIDATES_CEILING: usize = CANDIDATE_SCRATCH_CEILING_BYTES / CANDIDATE_SCRATCH_BYTES;
 impl ExtractLimits {
     /// Upfront scratch estimate of the per-run candidate buffers (bytes).
@@ -161,6 +164,9 @@ impl ExtractLimits {
         }
         if self.max_segment_length <= 0 {
             return Err(invalid("extraction segment length must be positive"));
+        }
+        if !(self.min_coupling_pf.is_finite() && (0.0..=0.01).contains(&self.min_coupling_pf)) {
+            return Err(invalid("extraction coupling threshold must be within 0..=10 fF"));
         }
         Ok(())
     }
@@ -210,6 +216,8 @@ pub struct ExtractStats {
     /// nodes; each becomes an internal RC node.
     pub segment_cut_nodes: usize,
     pub couplings: usize,
+    /// Couplings below `min_coupling_pf`, written as ground at both nodes.
+    pub grounded_couplings: usize,
     pub shapes: usize,
     pub intervals: usize,
     pub work: usize,
@@ -1841,6 +1849,8 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
     let mut seen = std::collections::HashSet::new();
     let mut candidates: Vec<u32> = Vec::new();
     let mut points: Vec<i64> = Vec::new();
+    let mut events: Vec<(i64, u32, bool)> = Vec::new();
+    let mut active = std::collections::BTreeSet::new();
     // (calibration metal, cross-axis lo, hi, shape) of other-layer conductors.
     let mut layered: Vec<(u32, i64, i64, u32)> = Vec::new();
     let metal_layer: HashMap<u32, usize> = tech
@@ -1950,6 +1960,8 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
         }
         candidates.sort_unstable();
         points.clear();
+        events.clear();
+        active.clear();
         points.push(run.lo);
         points.push(run.hi);
         for &s in &candidates {
@@ -1959,11 +1971,25 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             } else {
                 (r.lx, r.ux)
             };
-            points.push(a0.clamp(run.lo, run.hi));
-            points.push(a1.clamp(run.lo, run.hi));
+            let (lo, hi) = (a0.max(run.lo), a1.min(run.hi));
+            points.push(lo);
+            points.push(hi);
+            events.push((lo, s, true));
+            events.push((hi, s, false));
         }
         points.sort_unstable();
         points.dedup();
+        events.sort_unstable();
+        let index_work = events
+            .len()
+            .checked_mul(3 * events.len().max(1).ilog2() as usize + 4)
+            .ok_or_else(|| budget("extraction interval index work"))?;
+        stats.work = stats
+            .work
+            .checked_add(index_work)
+            .filter(|&n| n <= limits.max_work)
+            .ok_or_else(|| budget("extraction interval index work"))?;
+        let mut event_index = 0;
         let span = (run.hi - run.lo) as f64;
         // Passive strips attach to their routed partners only.
         let net_local = match run.passive {
@@ -1989,6 +2015,15 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             if t1 <= t0 {
                 continue;
             }
+            while event_index < events.len() && events[event_index].0 <= t0 {
+                let (_, shape, enter) = events[event_index];
+                if enter {
+                    active.insert(shape);
+                } else {
+                    active.remove(&shape);
+                }
+                event_index += 1;
+            }
             if run.passive.is_some() {
                 stats.passive_intervals += 1;
             } else {
@@ -1996,7 +2031,7 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             }
             stats.work = stats
                 .work
-                .checked_add(candidates.len().max(1))
+                .checked_add(active.len().max(1))
                 .ok_or_else(|| budget("extraction work"))?;
             if stats.work > limits.max_work {
                 return Err(budget("extraction work"));
@@ -2006,7 +2041,9 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             let mut minus: Option<(i64, u32)> = None;
             let (mut covered_plus, mut covered_minus) = (false, false);
             layered.clear();
-            for &s in &candidates {
+            // Shape-ID order preserves the original floating-point accumulation
+            // and geometric ownership while skipping disjoint axis intervals.
+            for &s in &active {
                 let sh = &shapes.get(s);
                 let r = sh.rect;
                 let (a0, a1, x0, x1) = if run.vertical {
@@ -2316,11 +2353,22 @@ pub fn extract_cpu_ref(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Resu
             }
         }
     }
-    let couplings: Vec<RcCoupling> = coupling
-        .into_iter()
-        .filter(|(_, v)| *v > 0.0)
-        .map(|((a, b), pf)| RcCoupling { a, b, pf })
-        .collect();
+    let mut couplings = Vec::new();
+    for ((a, b), pf) in coupling {
+        if pf <= 0.0 {
+            continue;
+        }
+        if pf < limits.min_coupling_pf {
+            // Each side keeps the full value to ground (Miller factor one);
+            // a net's total capacitance is unchanged.
+            for (net, node) in [a, b] {
+                built.nets[net_index[&net]].ground[node as usize] += pf;
+            }
+            stats.grounded_couplings += 1;
+            continue;
+        }
+        couplings.push(RcCoupling { a, b, pf });
+    }
     stats.couplings = couplings.len();
     stats.coupling_pf = couplings.iter().map(|c| c.pf).sum();
     stats.ground_pf = built.nets.iter().flat_map(|n| n.ground.iter()).sum();
@@ -2421,6 +2469,7 @@ mod tests {
                 vertical: Some(false),
                 min_area: None,
                 min_step: None,
+                wide_spacing: None,
             },
             RouteLayer {
                 name: "M2".into(),
@@ -2429,6 +2478,7 @@ mod tests {
                 vertical: Some(true),
                 min_area: None,
                 min_step: None,
+                wide_spacing: None,
             },
             RouteLayer {
                 name: "V1".into(),
@@ -2437,6 +2487,7 @@ mod tests {
                 vertical: None,
                 min_area: None,
                 min_step: None,
+                wide_spacing: None,
             },
         ]
     }
@@ -2626,6 +2677,58 @@ mod tests {
         let m = run(&r, &t, &[], &tech(false)).unwrap();
         assert_eq!(n.couplings, m.couplings);
         assert_eq!(n.nets[0].ground, m.nets[0].ground);
+    }
+
+    #[test]
+    fn couplings_below_the_threshold_become_ground_on_both_nets() {
+        let mut wires = straight(0, 0, 4);
+        wires.extend(straight(1, 600, 5));
+        let access = [(0, 0, [0, 0]), (1, 0, [10_000, 0]), (2, 1, [0, 600]), (3, 1, [10_000, 600])]
+            .map(|(pin, net, at)| Access {
+                pin,
+                net,
+                layer: 0,
+                at,
+            })
+            .to_vec();
+        let r = routes(wires, vec![], access, vec![0, 1]);
+        let t = [
+            terminal(0, 0, true),
+            terminal(1, 0, false),
+            terminal(2, 1, true),
+            terminal(3, 1, false),
+        ];
+        let kept = run(&r, &t, &[], &tech(false)).unwrap();
+        let (l, v) = (layers(), vias());
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            terminals: &t,
+            passive: &[],
+            held_bytes: 0,
+            instances: None,
+            tech: &tech(false),
+        };
+        let biggest = kept.couplings.iter().map(|c| c.pf).fold(0.0, f64::max);
+        let limits = ExtractLimits {
+            min_coupling_pf: biggest * 1.5,
+            ..ExtractLimits::default()
+        };
+        let grounded = extract_cpu_ref(&input, &limits).unwrap();
+        assert!(grounded.couplings.is_empty());
+        assert_eq!(grounded.stats.grounded_couplings, kept.couplings.len());
+        let coupling: f64 = kept.couplings.iter().map(|c| c.pf).sum();
+        for (a, b) in kept.nets.iter().zip(&grounded.nets) {
+            let before: f64 = a.ground.iter().sum();
+            let after: f64 = b.ground.iter().sum();
+            assert!((after - before - coupling).abs() < 1e-15, "{before} {after}");
+        }
+        let half = ExtractLimits {
+            min_coupling_pf: 0.011,
+            ..ExtractLimits::default()
+        };
+        assert!(extract_cpu_ref(&input, &half).is_err(), "above 10 fF is rejected");
     }
 
     #[test]
@@ -3735,6 +3838,60 @@ mod tests {
             ..input
         };
         assert!(extract_cpu_ref(&input, &ExtractLimits::default()).is_err());
+    }
+
+    #[test]
+    fn disjoint_neighbours_use_bounded_active_interval_work() {
+        let r = routes(
+            vec![Wire {
+                net: 0,
+                layer: 0,
+                start: [0, 0],
+                end: [1_000_000, 0],
+            }],
+            vec![],
+            vec![access(0, 0, [0, 0]), access(1, 0, [1_000_000, 0])],
+            vec![0],
+        );
+        let terminals = [terminal(0, 0, true), terminal(1, 0, false)];
+        let passive: Vec<_> = (0..1000)
+            .map(|i| PassiveShape {
+                layer: 0,
+                rect: Rect {
+                    lx: i * 1000 + 100,
+                    ux: i * 1000 + 200,
+                    ly: 250,
+                    uy: 350,
+                },
+                owner: PassiveOwner::Ground,
+            })
+            .collect();
+        let (layers, vias, tech) = (layers(), vias(), tech(false));
+        let input = ExtractInput {
+            held_bytes: 0,
+            instances: None,
+            layers: &layers,
+            vias: &vias,
+            routes: &r,
+            terminals: &terminals,
+            passive: &passive,
+            tech: &tech,
+        };
+        let limits = ExtractLimits {
+            max_work: 200_000,
+            max_segment_length: 2_000_000,
+            ..Default::default()
+        };
+        let network =
+            extract_cpu_ref(&input, &limits).expect("disjoint local neighbours stay linear");
+        let capacitance: f64 = network.nets[0].ground.iter().sum();
+        // 900 um isolated (two 4e-5 sides), plus100 um with one grounded
+        // neighbour at0.2 um (8.5e-5 coupling +1.5e-5 ground on that side).
+        let expected = 900.0 * 8e-5 + 100.0 * 14e-5 + 1.6e-5;
+        assert!(
+            (capacitance - expected).abs() < 1e-12,
+            "{capacitance} versus {expected}"
+        );
     }
     #[test]
     fn shared_passive_geometry_matches_explicit_crossings_and_pin_coupling() {

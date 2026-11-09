@@ -28,10 +28,11 @@
 //! enumerated beyond the report rows.
 use super::fail;
 use crate::Result;
-use rustroad_formats::eco::PinDirections;
-use rustroad_formats::verilog::{Expr, Netlist};
+use rustroad_formats::eco::{EcoCells, PinDirections, PinView};
+use rustroad_formats::verilog::{Expr, Netlist, VerilogLimits};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{File, TryLockError};
 use std::io::Read;
@@ -64,65 +65,99 @@ pub fn norm(name: &str) -> String {
 /// Net classes (assign aliases merged), pin -> net and instance -> master.
 pub struct NetIndex {
     parent: HashMap<String, String>,
+    remaining_alias_work: Cell<usize>,
+    pin_index_bytes: usize,
     pub pin_net: HashMap<String, String>,
     pub ports: BTreeSet<String>,
     pub master: HashMap<String, String>,
 }
 
 impl NetIndex {
-    pub fn new(n: &Netlist) -> Self {
+    pub fn new(n: &Netlist, cells: &EcoCells, limits: &VerilogLimits) -> Result<Self> {
+        let mut view = PinView::new(n, cells, limits).map_err(|e| fail("ECO_PIN_BINDING", e))?;
         let mut x = NetIndex {
             parent: HashMap::new(),
+            remaining_alias_work: Cell::new(limits.max_expr_nodes),
+            pin_index_bytes: 0,
             pin_net: HashMap::new(),
             ports: BTreeSet::new(),
             master: HashMap::new(),
         };
         for p in &n.ports {
-            match p.range {
-                None => {
-                    x.ports.insert(p.name.clone());
-                }
-                Some(r) => {
-                    for i in r.msb.min(r.lsb)..=r.msb.max(r.lsb) {
-                        x.ports.insert(format!("{}[{i}]", p.name));
-                    }
-                }
+            let bits = view
+                .expand(&Expr::Ident(p.name.clone()), None)
+                .map_err(|e| fail("ECO_PIN_BINDING", e))?;
+            for bit in bits {
+                x.ports.insert(expr_key(&bit));
             }
         }
         for a in &n.assigns {
-            let (l, r) = (expr_key(&a.lhs), expr_key(&a.rhs));
-            x.union(&l, &r);
+            if cells.pin_buses.is_empty() {
+                x.union(&expr_key(&a.lhs), &expr_key(&a.rhs))?;
+                continue;
+            }
+            let left = view
+                .expand(&a.lhs, None)
+                .map_err(|e| fail("ECO_PIN_BINDING", e))?;
+            let right = view
+                .expand(&a.rhs, Some(left.len()))
+                .map_err(|e| fail("ECO_PIN_BINDING", e))?;
+            for (l, r) in left.iter().zip(&right) {
+                x.union(&expr_key(l), &expr_key(r))?;
+            }
         }
         for i in &n.instances {
             x.master.insert(i.name.clone(), i.cell.clone());
-            for c in &i.connections {
-                x.pin_net
-                    .insert(format!("{}/{}", i.name, c.pin), expr_key(&c.signal));
+            for (pin, signal) in view
+                .connections(i)
+                .map_err(|e| fail("ECO_PIN_BINDING", e))?
+            {
+                if !matches!(signal, Expr::Unconnected) {
+                    let key = format!("{}/{}", i.name, pin);
+                    let signal = expr_key(&signal);
+                    x.pin_index_bytes = x
+                        .pin_index_bytes
+                        .checked_add(key.len().saturating_add(signal.len()).saturating_add(128))
+                        .ok_or_else(|| fail("ECO_BINDING_BUDGET", "pin index byte overflow"))?;
+                    if x.pin_index_bytes > 64 * 1024 * 1024 {
+                        return Err(fail(
+                            "ECO_BINDING_BUDGET",
+                            "pin index exceeds64MiB allowance",
+                        ));
+                    }
+                    x.pin_net.insert(key, signal);
+                }
             }
         }
-        x
+        Ok(x)
     }
-    pub fn root(&self, key: &str) -> String {
+    pub fn root(&self, key: &str) -> Result<String> {
         let mut k = key.to_string();
-        // Bounded by the number of union operations (one per assign).
         for _ in 0..=self.parent.len() {
+            let left = self
+                .remaining_alias_work
+                .get()
+                .checked_sub(1)
+                .ok_or_else(|| fail("ECO_BINDING_BUDGET", "alias lookup work exhausted"))?;
+            self.remaining_alias_work.set(left);
             match self.parent.get(&k) {
                 Some(p) if *p != k => k = p.clone(),
-                _ => break,
+                _ => return Ok(k),
             }
         }
-        k
+        Err(fail("ECO_BINDING_BUDGET", "alias component cycle"))
     }
-    fn union(&mut self, a: &str, b: &str) {
-        let (ra, rb) = (self.root(a), self.root(b));
+    fn union(&mut self, a: &str, b: &str) -> Result<()> {
+        let (ra, rb) = (self.root(a)?, self.root(b)?);
         if ra != rb {
             let (lo, hi) = if ra < rb { (ra, rb) } else { (rb, ra) };
             self.parent.insert(hi, lo.clone());
             self.parent.entry(lo.clone()).or_insert(lo);
         }
+        Ok(())
     }
-    pub fn same(&self, a: &str, b: &str) -> bool {
-        a == b || self.root(a) == self.root(b)
+    pub fn same(&self, a: &str, b: &str) -> Result<bool> {
+        Ok(a == b || self.root(a)? == self.root(b)?)
     }
     /// The net key a report pin (`inst/pin` or a port bit) sits on.
     fn pin_key(&self, pin: &str) -> Option<String> {
@@ -359,7 +394,7 @@ pub fn bind_hold_row(t: &NetIndex, row: &serde_json::Value, b: &mut BindingSumma
                 "endpoint {endpoint}: pin not connected in the timed netlist"
             ))
         })?;
-        if !t.same(key, &norm(net)) {
+        if !t.same(key, &norm(net))? {
             return Err(stale(format!(
                 "endpoint {endpoint}: report net {net}, timed netlist net {key}"
             )));
@@ -367,7 +402,7 @@ pub fn bind_hold_row(t: &NetIndex, row: &serde_json::Value, b: &mut BindingSumma
         if let Some(d) = s(row, "net_driver") {
             let d = norm(d);
             match t.pin_key(&d) {
-                Some(k) if t.same(&k, key) => {}
+                Some(k) if t.same(&k, key)? => {}
                 _ => {
                     return Err(stale(format!(
                         "endpoint {endpoint}: report driver {d} is not on net {key} of the timed netlist"
@@ -393,7 +428,7 @@ pub fn bind_hold_row(t: &NetIndex, row: &serde_json::Value, b: &mut BindingSumma
         };
         let pin = norm(pin);
         match t.pin_key(&pin) {
-            Some(k) if t.same(&k, &norm(net)) => b.path_stages_bound += 1,
+            Some(k) if t.same(&k, &norm(net))? => b.path_stages_bound += 1,
             _ => {
                 return Err(stale(format!(
                     "{endpoint}: path stage {pin} on net {net} does not exist in the timed netlist"
@@ -447,10 +482,14 @@ pub fn check_refinement(
     edited: &Netlist,
     timed: &Netlist,
     t: &NetIndex,
-    dirs: &PinDirections,
+    cells: &EcoCells,
+    limits: &VerilogLimits,
     eco_prefix: &str,
     b: &mut BindingSummary,
 ) -> Result<()> {
+    let dirs = &cells.pin_directions;
+    let mut edited_view =
+        PinView::new(edited, cells, limits).map_err(|e| fail("ECO_PIN_BINDING", e))?;
     let edited_names: BTreeSet<&str> = edited.instances.iter().map(|i| i.name.as_str()).collect();
     // Inserted instances: buffers (one input, one output) or ties (no input).
     let mut buffer_input: HashMap<&str, String> = HashMap::new();
@@ -501,8 +540,10 @@ pub fn check_refinement(
         let Some((_, outputs)) = signal_pins(dirs, &i.cell) else {
             continue;
         };
-        for c in i.connections.iter().filter(|c| outputs.contains(&c.pin)) {
-            driver.insert(t.root(&expr_key(&c.signal)), i.name.as_str());
+        for pin in outputs {
+            if let Some(key) = t.pin_net.get(&format!("{}/{}", i.name, pin)) {
+                driver.insert(t.root(key)?, i.name.as_str());
+            }
         }
     }
     let timed_by_name: HashMap<&str, &rustroad_formats::verilog::Instance> = timed
@@ -523,28 +564,33 @@ pub fn check_refinement(
                 i.name, i.cell, ti.cell
             )));
         }
-        for c in &i.connections {
-            let tc = ti
-                .connections
-                .iter()
-                .find(|x| x.pin == c.pin)
+        for (pin, signal) in edited_view
+            .connections(i)
+            .map_err(|e| fail("ECO_PIN_BINDING", e))?
+        {
+            if matches!(signal, Expr::Unconnected) {
+                continue;
+            }
+            let timed_key = t
+                .pin_net
+                .get(&format!("{}/{}", ti.name, pin))
                 .ok_or_else(|| {
                     stale(format!(
-                        "{}/{} is not connected in the timed netlist",
-                        i.name, c.pin
+                        "{}/{pin} is not connected in the timed netlist",
+                        i.name
                     ))
                 })?;
-            let want = expr_key(&c.signal);
-            let mut have = expr_key(&tc.signal);
-            if t.same(&want, &have) {
+            let want = expr_key(&signal);
+            let mut have = timed_key.clone();
+            if t.same(&want, &have)? {
                 continue;
             }
             let mut ok = false;
             for _ in 0..MAX_BUFFER_WALK {
-                let Some(d) = driver.get(&t.root(&have)) else {
+                let Some(d) = driver.get(&t.root(&have)?) else {
                     break;
                 };
-                if ties.contains(d) && matches!(c.signal, Expr::Constant(_)) {
+                if ties.contains(d) && matches!(signal, Expr::Constant(_)) {
                     ok = true;
                     break;
                 }
@@ -552,7 +598,7 @@ pub fn check_refinement(
                     break;
                 };
                 have = input.clone();
-                if t.same(&want, &have) {
+                if t.same(&want, &have)? {
                     ok = true;
                     break;
                 }
@@ -560,10 +606,7 @@ pub fn check_refinement(
             if !ok {
                 return Err(stale(format!(
                     "{}/{} connects {} in the edited netlist but {} in the timed netlist, not through inserted buffers",
-                    i.name,
-                    c.pin,
-                    want,
-                    expr_key(&tc.signal)
+                    i.name, pin, want, timed_key
                 )));
             }
             b.redirected_pins += 1;

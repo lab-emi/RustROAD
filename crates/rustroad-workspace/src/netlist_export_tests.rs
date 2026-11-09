@@ -11,6 +11,8 @@ fn bundle(source: &str) -> PhysicalBundle {
         ports: Vec::new(),
     };
     let master = |name: &str, pins| Master {
+        buses: Default::default(),
+        obstruction_spacing: Default::default(),
         name: name.into(),
         class: Some("CORE".into()),
         symmetry: Vec::new(),

@@ -72,6 +72,8 @@ fn limits() -> Limits {
 }
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -96,6 +98,7 @@ fn config() -> PhysicalConfig {
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,
         cell_spacing_sites: 0,
+        placement_blockages: Vec::new(),
         io_width: None,
         io_min_area: false,
         io_spacing: None,
@@ -107,6 +110,7 @@ fn config() -> PhysicalConfig {
         port_buffer: None,
         input_buffer: None,
         clock: Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
             port: "a".into(),
             cell: "BUF".into(),
             input_pin: "A".into(),
@@ -116,6 +120,8 @@ fn config() -> PhysicalConfig {
             max_buffers: 10,
             max_work: 1000,
             level_cells: Vec::new(),
+            clustering: Default::default(),
+            regroup_prefixes: Vec::new(),
         }),
         placer: None,
         io_plan: None,

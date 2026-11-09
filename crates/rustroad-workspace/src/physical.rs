@@ -9,8 +9,8 @@ use rustroad_core::io::{IoConstraints, IoLimits, IoPin, place_boundary_io};
 use rustroad_core::power::{
     PowerCell, PowerRow, RailConfig, RailLimits, RailPolarity, RailReport, validate_rail_continuity,
 };
-use rustroad_core::supply::{LayerSpec, SupplyGrid, SupplyLimits, ViaSpec, build_supply_grid};
-use rustroad_core::{Cell, Design, Limits, Placed, Rect, def_name};
+use rustroad_core::supply::SupplyGrid;
+use rustroad_core::{Cell, Design, Limits, Placed, def_name};
 use rustroad_formats::{lef, verilog};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -70,6 +70,18 @@ pub struct TapConfig {
     pub max_gap: i64,
     pub well_layer: String,
     pub substrate_layer: String,
+    /// Some abstract LEFs expose only metal supply pins. Body contacts then
+    /// require the original GDS and independent extraction/LVS verification.
+    #[serde(default)]
+    pub body_view: TapBodyView,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TapBodyView {
+    #[default]
+    Lef,
+    Gds,
 }
 /// Explicit PDK identity-buffer role for separating aliased output ports.
 /// Functional equivalence must be verified against the selected Liberty.
@@ -83,6 +95,8 @@ pub struct PortBuffer {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhysicalConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macro_supply: Option<crate::macro_supply::Config>,
     pub power_net: String,
     pub ground_net: String,
     pub power_pin: String,
@@ -92,6 +106,10 @@ pub struct PhysicalConfig {
     pub rail_layer: String,
     pub strap_layer: String,
     pub via: String,
+    /// Original fixed vias in order from the rail to the strap layer.
+    /// Empty keeps the single `via` behavior.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rail_via_stack: Vec<String>,
     pub io_layer: String,
     pub tie_high: TieCell,
     pub tie_low: TieCell,
@@ -102,6 +120,13 @@ pub struct PhysicalConfig {
     pub alternating_rows: bool,
     #[serde(default)]
     pub cell_spacing_sites: u32,
+    /// Core regions (DBU) closed to placed cells: logic, ties, clock and ECO
+    /// buffers. Row intervals inside them are removed before placement, cut
+    /// outwards to whole sites; taps and fillers still cover those rows. A
+    /// narrow channel between macros whose pins face away from it is one:
+    /// every wire of a cell placed there leaves through the channel mouth.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub placement_blockages: Vec<rustroad_core::Rect>,
     #[serde(default)]
     pub io_width: Option<i64>,
     /// Grow square signal I/O pins to at least the I/O layer LEF AREA.
@@ -141,6 +166,8 @@ pub struct PhysicalConfig {
 pub const NET_WEIGHTS_SCHEMA: &str = "rustroad.net-weights.v1";
 /// Largest number of weighted nets in one file.
 pub const MAX_WEIGHTED_NETS: usize = 1_000_000;
+/// Largest number of `placement_blockages` regions.
+pub const MAX_PLACEMENT_BLOCKAGES: usize = 64;
 /// Timing-driven placement weights: net name -> weight in milli-units
 /// (1000 = 1.0, at most `rustroad_core::place::MAX_NET_WEIGHT`). Nets not
 /// listed keep 1000.
@@ -189,6 +216,16 @@ pub struct PlacementSeed {
     #[serde(default)]
     pub source: serde_json::Value,
     pub cells: std::collections::BTreeMap<String, [i64; 2]>,
+    /// Clock sinks of the source revision's tree in leaf order. `clock-tree`
+    /// reuses this order, and so the source topology, when its sink set is
+    /// unchanged; empty for a source without a clock tree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clock_sinks: Vec<String>,
+    /// Sinks (instance, pin) of each buffer regrouped by the source's
+    /// `clock-tree` (`regroup_prefixes`). A level partitioned exactly by these
+    /// lists keeps the partition when it is regrouped again.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub regroup: std::collections::BTreeMap<String, Vec<[String; 2]>>,
 }
 impl PlacementSeed {
     pub fn validate(&self) -> Result<()> {
@@ -198,8 +235,31 @@ impl PlacementSeed {
                 self.schema
             )));
         }
-        if self.cells.len() > MAX_WEIGHTED_NETS {
+        if self.cells.len() > MAX_WEIGHTED_NETS || self.clock_sinks.len() > MAX_WEIGHTED_NETS {
             return Err(Error::Budget("placement seed: too many cells".into()));
+        }
+        let mut seen = std::collections::HashSet::with_capacity(self.clock_sinks.len());
+        if let Some(name) = self.clock_sinks.iter().find(|n| !seen.insert(n.as_str())) {
+            return Err(Error::Invalid(format!(
+                "placement seed: clock sink {name} repeated"
+            )));
+        }
+        let sinks = self.regroup.values().map(Vec::len).sum::<usize>();
+        if self.regroup.len() > MAX_WEIGHTED_NETS || sinks > MAX_WEIGHTED_NETS {
+            return Err(Error::Budget(
+                "placement seed: too many regrouped sinks".into(),
+            ));
+        }
+        let mut seen = std::collections::HashSet::with_capacity(sinks);
+        if let Some([i, p]) = self
+            .regroup
+            .values()
+            .flatten()
+            .find(|s| !seen.insert((s[0].as_str(), s[1].as_str())))
+        {
+            return Err(Error::Invalid(format!(
+                "placement seed: regrouped sink {i}/{p} repeated"
+            )));
         }
         Ok(())
     }
@@ -251,10 +311,35 @@ pub struct WeightUse {
 }
 impl PhysicalConfig {
     pub fn validate(&self) -> Result<()> {
+        if self.rail_via_stack.len() > 8
+            || self
+                .rail_via_stack
+                .iter()
+                .any(|v| !rustroad_core::valid_object_name(v))
+            || self.rail_via_stack.first().is_some_and(|v| *v != self.via)
+        {
+            return Err(Error::Invalid("invalid rail via stack".into()));
+        }
+        if let Some(macro_supply) = &self.macro_supply {
+            macro_supply.validate()?;
+        }
         if self.cell_spacing_sites > 64 || (self.cell_spacing_sites > 0 && self.tap.is_none()) {
             return Err(Error::Invalid(
                 "cell spacing needs tap-reserved rows and <=64 sites".into(),
             ));
+        }
+        // Only the analytic placer reads the blocked intervals; the
+        // fixed-order fallback would ignore them silently.
+        if self.placement_blockages.len() > MAX_PLACEMENT_BLOCKAGES
+            || (!self.placement_blockages.is_empty() && self.placer.is_none())
+            || self
+                .placement_blockages
+                .iter()
+                .any(|b| b.lx >= b.ux || b.ly >= b.uy)
+        {
+            return Err(Error::Invalid(format!(
+                "placement blockages need the analytic placer, lx<ux, ly<uy and at most {MAX_PLACEMENT_BLOCKAGES} regions"
+            )));
         }
         if let Some(c) = &self.clock {
             c.validate()?;
@@ -440,7 +525,7 @@ pub(super) fn validate_tap_master(bundle: &PhysicalBundle) -> Result<()> {
                 | rustroad_core::connectivity::Geometry::Polygon { layer, .. } => layer == name,
             })
         };
-        if !has(body) || !has(&cfg.rail_layer) {
+        if (tap.body_view == TapBodyView::Lef && !has(body)) || !has(&cfg.rail_layer) {
             return Err(Error::Invalid(
                 "tap must expose both body and primary rail geometry on its supply pin".into(),
             ));
@@ -820,6 +905,19 @@ pub(super) fn distribute_ties(
         Ok(())
     };
     let mut moved_ports = Vec::new();
+    let mut declarations: HashMap<_, _> = bundle
+        .netlist
+        .ports
+        .iter()
+        .map(|p| (p.name.clone(), p.range))
+        .chain(
+            bundle
+                .netlist
+                .wires
+                .iter()
+                .map(|w| (w.name.clone(), w.range)),
+        )
+        .collect();
     for pin in &model.pins {
         if let (Some(net), PinOwner::Port { port, bit }) = (pin.net, pin.owner)
             && let Some(&group) = net_groups.get(&net)
@@ -865,12 +963,14 @@ pub(super) fn distribute_ties(
         let group = &mut groups[group];
         advance(group)?;
         if group.active != group.binding.net {
-            bundle.netlist.instances[instance as usize]
-                .connections
-                .iter_mut()
-                .find(|c| c.pin == spec.name)
-                .ok_or_else(|| Error::Invalid("tie sink connection missing".into()))?
-                .signal = verilog::Expr::Ident(group.active.clone());
+            declarations.insert(group.active.clone(), None);
+            crate::connections::replace_pin(
+                &mut bundle.netlist.instances[instance as usize],
+                &model.masters[model.instance_masters[instance as usize] as usize],
+                &spec.name,
+                verilog::Expr::Ident(group.active.clone()),
+                &declarations,
+            )?;
         }
         group.used += 1;
     }
@@ -878,6 +978,7 @@ pub(super) fn distribute_ties(
     for (cell, binding, master) in additions {
         let size = model.masters[master as usize].size;
         design.cells.push(Cell {
+            fixed: None,
             name: cell.name.clone(),
             master: cell.cell.clone(),
             width: size[0],
@@ -1029,6 +1130,7 @@ pub(super) fn isolate_output_ports(
             ],
         });
         design.cells.push(Cell {
+            fixed: None,
             name: name.clone(),
             master: role.cell.clone(),
             width: master.size[0],
@@ -1266,6 +1368,7 @@ pub(super) fn prepare(
         .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
     validate_tap_master(bundle)?;
     let mut tap_work = 0usize;
+    let row_segments = rustroad_core::fixed::row_segments(design, limits.max_expansions)?;
     let gap = i64::from(cfg.cell_spacing_sites)
         .checked_mul(design.site.width)
         .ok_or_else(|| Error::Budget("cell spacing overflow".into()))?;
@@ -1320,6 +1423,7 @@ pub(super) fn prepare(
                 }
             };
             design.cells.push(Cell {
+                fixed: None,
                 name: name.clone(),
                 master: tap.cell.clone(),
                 width,
@@ -1362,7 +1466,10 @@ pub(super) fn prepare(
         return Err(Error::Invalid("filler list needs a one-site cell".into()));
     }
     let mut occupied = HashMap::<i64, Vec<(i64, i64)>>::new();
-    for cell in &placed {
+    for (cell, spec) in placed.iter().zip(&design.cells) {
+        if spec.fixed.is_some() {
+            continue;
+        }
         occupied.entry(cell.y).or_default().push((
             cell.x,
             cell.x
@@ -1373,12 +1480,18 @@ pub(super) fn prepare(
     let mut names: HashSet<String> = design.cells.iter().map(|c| c.name.clone()).collect();
     let mut new_positions = Vec::new();
     let mut sequence = 0usize;
-    for row in &design.rows {
-        let mut intervals = occupied.remove(&row.y).unwrap_or_default();
+    for intervals in occupied.values_mut() {
         intervals.sort_unstable();
+    }
+    for row in &row_segments {
+        let all = occupied.get(&row.y).map(Vec::as_slice).unwrap_or(&[]);
+        let first = all.partition_point(|p| p.1 <= row.x_start);
+        let last = all.partition_point(|p| p.0 < row.x_end);
+        let intervals = &all[first..last];
         let mut cursor = row.x_start;
         for (a, b) in intervals
-            .into_iter()
+            .iter()
+            .copied()
             .chain(std::iter::once((row.x_end, row.x_end)))
         {
             while cursor < a {
@@ -1409,6 +1522,7 @@ pub(super) fn prepare(
                     }
                 };
                 design.cells.push(Cell {
+                    fixed: None,
                     name: name.clone(),
                     master: master.clone(),
                     width: *width,
@@ -1501,13 +1615,19 @@ pub(super) fn layout(
     )?;
     let mut intervals: Vec<_> = placed
         .iter()
-        .map(|p| (p.y, p.x, p.x.checked_add(p.width).unwrap()))
+        .zip(&design.cells)
+        .filter(|(_, c)| c.fixed.is_none())
+        .map(|(p, _)| (p.y, p.x, p.x.checked_add(p.width).unwrap()))
         .collect();
     intervals.sort_unstable();
     let mut cursor = 0usize;
-    for row in &design.rows {
+    let row_segments = rustroad_core::fixed::row_segments(design, 64_000_000)?;
+    for row in &row_segments {
         let mut x = row.x_start;
-        while cursor < intervals.len() && intervals[cursor].0 == row.y {
+        while cursor < intervals.len()
+            && intervals[cursor].0 == row.y
+            && intervals[cursor].1 < row.x_end
+        {
             if intervals[cursor].1 != x {
                 return Err(Error::Invalid("power row has a placement gap".into()));
             }
@@ -1521,13 +1641,14 @@ pub(super) fn layout(
     let cells = placed
         .iter()
         .enumerate()
+        .filter(|(i, _)| design.cells[*i].fixed.is_none())
         .map(|(i, p)| {
             Ok(PowerCell {
                 instance: i as u32,
                 master: bundle.connectivity.instance_masters[i],
                 x: p.x,
                 y: p.y,
-                orientation: rustroad_core::placed_orientation(design, p)?,
+                orientation: rustroad_core::placed_orientation_for(design, &design.cells[i], p)?,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1543,8 +1664,7 @@ pub(super) fn layout(
             ));
         }
     }
-    let rows = design
-        .rows
+    let rows = row_segments
         .iter()
         .map(|r| PowerRow {
             x_start: r.x_start,
@@ -1578,65 +1698,9 @@ pub(super) fn layout(
             rails.diagnostics
         )));
     }
-    let grid = bundle.technology.manufacturing_grid.ok_or_else(|| {
-        Error::Invalid("manufacturing grid required for physical preparation".into())
-    })?;
     let io_pins = io_pins(design, bundle)?;
-    let rail_layer = layer(&bundle.technology, &cfg.rail_layer)?;
-    let strap_layer = layer(&bundle.technology, &cfg.strap_layer)?;
-    let via = bundle
-        .technology
-        .vias
-        .iter()
-        .find(|v| v.name == cfg.via)
-        .ok_or_else(|| Error::Invalid("fixed supply via absent".into()))?;
-    let rectangles = |name: &str| -> Result<Vec<Rect>> {
-        via.geometries
-            .iter()
-            .filter_map(|g| match g {
-                lef::LefGeometry::Rect { layer, rect } if layer == name => Some(Ok(Rect {
-                    lx: rect[0],
-                    ly: rect[1],
-                    ux: rect[2],
-                    uy: rect[3],
-                })),
-                lef::LefGeometry::Polygon { layer, .. } if layer == name => {
-                    Some(Err(Error::Invalid("polygon supply via unsupported".into())))
-                }
-                _ => None,
-            })
-            .collect()
-    };
-    let supply = build_supply_grid(
-        design.die_area,
-        design.core_area,
-        grid,
-        &rails,
-        &cfg.rail_layer,
-        rail_layer
-            .width
-            .ok_or_else(|| Error::Invalid("rail minimum width absent".into()))?,
-        &LayerSpec {
-            name: cfg.strap_layer.clone(),
-            width: cfg
-                .strap_width
-                .or(strap_layer.width)
-                .ok_or_else(|| Error::Invalid("strap width absent".into()))?
-                .max(strap_layer.width.unwrap_or(0)),
-            spacing: cfg
-                .strap_spacing
-                .or(strap_layer.spacing)
-                .ok_or_else(|| Error::Invalid("strap spacing absent".into()))?
-                .max(strap_layer.spacing.unwrap_or(0)),
-        },
-        &ViaSpec {
-            name: cfg.via.clone(),
-            lower: rectangles(&cfg.rail_layer)?,
-            upper: rectangles(&cfg.strap_layer)?,
-        },
-        &SupplyLimits::default(),
-    )
-    .map_err(|e| Error::Invalid(e.to_string()))?;
+    let mut supply = crate::segmented_supply::build(design, bundle, &rails)?;
+    crate::macro_supply::collect(design, bundle, placed, &mut supply)?;
     let tap_report = if let Some(tap) = &cfg.tap {
         let m = bundle
             .connectivity
@@ -1759,7 +1823,8 @@ fn tap_limits(design: &Design, cfg: &PhysicalConfig) -> rustroad_core::tap::TapL
     }
 }
 
-/// Free row intervals between reserved taps (whole rows without taps).
+/// Free row intervals between reserved taps (whole rows without taps), less
+/// the configured placement blockages.
 pub(crate) fn free_intervals(
     design: &Design,
     bundle: &PhysicalBundle,
@@ -1768,6 +1833,66 @@ pub(crate) fn free_intervals(
         .config
         .as_ref()
         .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
+    let out = tap_free_intervals(design, bundle, cfg)?;
+    block_intervals(
+        out,
+        &cfg.placement_blockages,
+        design.site.width,
+        design.site.height,
+    )
+}
+
+/// Remove every blockage from the intervals of the rows it overlaps, cutting
+/// outwards to whole sites from each interval's start (taps and rows are on
+/// the site grid). Work is intervals x blockages, both bounded upstream.
+fn block_intervals(
+    intervals: Vec<rustroad_core::place::Interval>,
+    blockages: &[rustroad_core::Rect],
+    site: i64,
+    row_height: i64,
+) -> Result<Vec<rustroad_core::place::Interval>> {
+    if blockages.is_empty() {
+        return Ok(intervals);
+    }
+    if site <= 0 {
+        return Err(Error::Invalid("nonpositive placement site".into()));
+    }
+    let mut out = Vec::with_capacity(intervals.len());
+    for v in intervals {
+        let mut cuts: Vec<(i64, i64)> = blockages
+            .iter()
+            .filter(|b| v.y < b.uy && b.ly < v.y + row_height && v.lx < b.ux && b.lx < v.ux)
+            .map(|b| {
+                let lo = v.lx + (b.lx - v.lx).max(0) / site * site;
+                let hi = v.lx + ((b.ux - v.lx) + site - 1) / site * site;
+                (lo, hi.min(v.ux))
+            })
+            .collect();
+        cuts.sort_unstable();
+        let mut x = v.lx;
+        for (lo, hi) in cuts {
+            if x < lo {
+                out.push(rustroad_core::place::Interval { ux: lo, ..v });
+            }
+            x = x.max(hi);
+        }
+        if x < v.ux {
+            out.push(rustroad_core::place::Interval { lx: x, ..v });
+        }
+    }
+    if out.is_empty() {
+        return Err(Error::Design(rustroad_core::Error::Capacity(
+            "placement blockages leave no free row interval".into(),
+        )));
+    }
+    Ok(out)
+}
+
+fn tap_free_intervals(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    cfg: &PhysicalConfig,
+) -> Result<Vec<rustroad_core::place::Interval>> {
     let mut out = Vec::new();
     if let Some(tap) = &cfg.tap {
         let m = bundle
@@ -1791,7 +1916,7 @@ pub(crate) fn free_intervals(
             }
         }
     } else {
-        for r in &design.rows {
+        for r in rustroad_core::fixed::row_segments(design, 64_000_000)? {
             out.push(rustroad_core::place::Interval {
                 y: r.y,
                 lx: r.x_start,
@@ -1801,6 +1926,53 @@ pub(crate) fn free_intervals(
     }
     out.sort_unstable_by_key(|v| (v.y, v.lx));
     Ok(out)
+}
+
+/// Placement anchor of a fixed instance's pin: the centre of its oriented LEF
+/// pin geometry (bounding box over every port shape), or the instance centre
+/// for a pin without shapes. A macro's pins sit on its edges, often hundreds
+/// of microns from its centre.
+fn fixed_pin_centre(
+    design: &Design,
+    cell: &Cell,
+    placed: &Placed,
+    pin: &rustroad_core::connectivity::MasterPin,
+) -> Result<[i64; 2]> {
+    let mut bounds: Option<[i64; 4]> = None;
+    for geometry in pin.ports.iter().flatten() {
+        let r = match geometry {
+            rustroad_core::connectivity::Geometry::Rect { rect, .. } => *rect,
+            rustroad_core::connectivity::Geometry::Polygon { points, .. } => {
+                let xs = points.iter().map(|p| p[0]);
+                let ys = points.iter().map(|p| p[1]);
+                match (xs.clone().min(), ys.clone().min(), xs.max(), ys.max()) {
+                    (Some(lx), Some(ly), Some(ux), Some(uy)) => [lx, ly, ux, uy],
+                    _ => continue,
+                }
+            }
+        };
+        bounds = Some(match bounds {
+            None => r,
+            Some(b) => [
+                b[0].min(r[0]),
+                b[1].min(r[1]),
+                b[2].max(r[2]),
+                b[3].max(r[3]),
+            ],
+        });
+    }
+    let Some([lx, ly, ux, uy]) = bounds else {
+        return Ok([placed.x + placed.width / 2, placed.y + placed.height / 2]);
+    };
+    let orientation = rustroad_core::placed_orientation_for(design, cell, placed)?;
+    let r = rustroad_core::transform_rect(
+        rustroad_core::Rect { lx, ly, ux, uy },
+        placed.x,
+        placed.y,
+        placed.height,
+        orientation,
+    )?;
+    Ok([(r.lx + r.ux) / 2, (r.ly + r.uy) / 2])
 }
 
 /// Analytic placement of every current instance (logic, ties and clock
@@ -1813,6 +1985,16 @@ fn analytic(
     gap: i64,
     limits: &Limits,
 ) -> Result<PlacementReport> {
+    let moving: Vec<usize> = design
+        .cells
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| c.fixed.is_none().then_some(i))
+        .collect();
+    let mut variable = vec![None; placed.len()];
+    for (j, &i) in moving.iter().enumerate() {
+        variable[i] = Some(j as u32);
+    }
     let cfg = bundle.config.as_ref().unwrap();
     let pc = cfg.placer.as_ref().unwrap();
     let model = &bundle.connectivity;
@@ -1865,7 +2047,18 @@ fn analytic(
                     continue;
                 }
                 if (instance as usize) < placed.len() {
-                    nets[n as usize].push(rustroad_core::place::PinRef::Cell(instance));
+                    if let Some(v) = variable[instance as usize] {
+                        nets[n as usize].push(rustroad_core::place::PinRef::Cell(v));
+                    } else {
+                        let p = &placed[instance as usize];
+                        let at = fixed_pin_centre(
+                            design,
+                            &design.cells[instance as usize],
+                            p,
+                            &m.pins[terminal as usize],
+                        )?;
+                        nets[n as usize].push(rustroad_core::place::PinRef::Fixed(at));
+                    }
                 }
             }
             PinOwner::Port { port, bit } => {
@@ -1887,7 +2080,7 @@ fn analytic(
     nets.retain(|n| n.len() >= 2);
     let problem = rustroad_core::place::PlaceProblem {
         weights,
-        widths: placed.iter().map(|p| p.width).collect(),
+        widths: moving.iter().map(|&i| placed[i].width).collect(),
         row_height: design.site.height,
         site: design.site.width,
         gap,
@@ -1909,11 +2102,9 @@ fn analytic(
     let result = match &bundle.placement_seed {
         Some(seed) => {
             seed.validate()?;
-            seeds = design
-                .cells
+            seeds = moving
                 .iter()
-                .take(placed.len())
-                .map(|c| seed.cells.get(&c.name).copied())
+                .map(|&i| seed.cells.get(&design.cells[i].name).copied())
                 .collect::<Vec<_>>();
             let seeded = seeds.iter().filter(|s| s.is_some()).count();
             seed_use = Some(SeedUse {
@@ -1936,9 +2127,9 @@ fn analytic(
             }
         }
     }
-    for (p, xy) in placed.iter_mut().zip(&result.positions) {
-        p.x = xy[0];
-        p.y = xy[1];
+    for (&i, xy) in moving.iter().zip(&result.positions) {
+        placed[i].x = xy[0];
+        placed[i].y = xy[1];
     }
     // Baseline: fixed netlist-order packing into the same free intervals.
     let mut baseline = Vec::with_capacity(placed.len());
@@ -2212,7 +2403,6 @@ pub(super) fn export_def(
     output: &mut impl Write,
 ) -> Result<()> {
     validate_state(design, bundle, placed)?;
-    let cfg = bundle.config.as_ref().unwrap();
     let state = bundle.state.as_ref().unwrap();
     let model = &bundle.connectivity;
     rustroad_core::write_def_components(design, placed, output)?;
@@ -2392,10 +2582,32 @@ pub(super) fn export_def(
                     )?;
                 }
                 for v in state.supply.vias.iter().filter(|v| v.polarity == polarity) {
+                    let source = bundle
+                        .technology
+                        .vias
+                        .iter()
+                        .find(|via| via.name == v.name)
+                        .ok_or_else(|| {
+                            std::io::Error::other("supply via missing from technology")
+                        })?;
+                    let lower = bundle
+                        .technology
+                        .layers
+                        .iter()
+                        .find(|layer| {
+                            layer.kind.as_deref() == Some("ROUTING")
+                                && source.geometries.iter().any(|g| match g {
+                                    lef::LefGeometry::Rect { layer: name, .. }
+                                    | lef::LefGeometry::Polygon { layer: name, .. } => {
+                                        name == &layer.name
+                                    }
+                                })
+                        })
+                        .ok_or_else(|| std::io::Error::other("supply via has no routing layer"))?;
                     write!(
                         output,
                         "\n  + ROUTED {} 0 ( {} {} ) {}",
-                        def_name(&cfg.rail_layer),
+                        def_name(&lower.name),
                         v.at[0],
                         v.at[1],
                         def_name(&v.name)
@@ -2495,4 +2707,191 @@ pub(super) fn validate_table(state: &PhysicalState, bytes: &[u8]) -> Result<()> 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod fixed_pin_tests {
+    use super::fixed_pin_centre;
+    use rustroad_core::connectivity::{Geometry, MasterPin, PinUse};
+    use rustroad_core::fixed::FixedPlacement;
+    use rustroad_core::{Cell, Design, Orientation, Placed, Rect, Row, Site};
+
+    #[test]
+    fn a_fixed_pin_is_anchored_at_its_oriented_shape_not_the_macro_centre() {
+        // A 16 x 4 um block with one pin shape at its lower-left edge.
+        let rect = |lx, ly, ux, uy| Rect { lx, ly, ux, uy };
+        let design = Design {
+            name: "d".into(),
+            units_per_micron: 1000,
+            die_area: rect(0, 0, 60_000, 20_000),
+            core_area: rect(0, 0, 60_000, 20_000),
+            site: Site {
+                name: "s".into(),
+                width: 1000,
+                height: 2000,
+            },
+            rows: vec![Row {
+                x_start: 0,
+                x_end: 60_000,
+                y: 0,
+                orientation: Orientation::N,
+            }],
+            cells: Vec::new(),
+        };
+        let cell = |orientation| Cell {
+            name: "m0".into(),
+            master: "M".into(),
+            width: 16_000,
+            height: 4_000,
+            fixed: Some(FixedPlacement {
+                x: 20_000,
+                y: 6_000,
+                orientation,
+                halo: 0,
+            }),
+        };
+        let placed = Placed {
+            id: 0,
+            x: 20_000,
+            y: 6_000,
+            width: 16_000,
+            height: 4_000,
+        };
+        let pin = |ports| MasterPin {
+            name: "Q".into(),
+            direction: None,
+            use_: PinUse::Signal,
+            shape: None,
+            ports,
+        };
+        let shapes = vec![vec![
+            Geometry::Rect {
+                layer: "M2".into(),
+                rect: [400, 0, 600, 200],
+            },
+            Geometry::Polygon {
+                layer: "M3".into(),
+                points: vec![[400, 0], [800, 0], [800, 200], [400, 200]],
+            },
+        ]];
+        assert_eq!(
+            fixed_pin_centre(
+                &design,
+                &cell(Orientation::N),
+                &placed,
+                &pin(shapes.clone())
+            )
+            .unwrap(),
+            [20_600, 6_100]
+        );
+        assert_eq!(
+            fixed_pin_centre(&design, &cell(Orientation::FS), &placed, &pin(shapes)).unwrap(),
+            [20_600, 9_900]
+        );
+        assert_eq!(
+            fixed_pin_centre(&design, &cell(Orientation::N), &placed, &pin(Vec::new())).unwrap(),
+            [28_000, 8_000]
+        );
+    }
+}
+
+#[cfg(test)]
+mod blockage_tests {
+    use super::block_intervals;
+    use rustroad_core::Rect;
+    use rustroad_core::place::Interval;
+
+    #[test]
+    fn a_blockage_removes_whole_sites_only_from_the_rows_it_overlaps() {
+        // Two rows of 100 sites (site 10, row height 50); the blockage covers
+        // x 205..397 of the lower row only and is cut outwards to 200..400.
+        let rows = vec![
+            Interval {
+                y: 0,
+                lx: 0,
+                ux: 1000,
+            },
+            Interval {
+                y: 50,
+                lx: 0,
+                ux: 1000,
+            },
+        ];
+        let b = [Rect {
+            lx: 205,
+            ly: 10,
+            ux: 397,
+            uy: 50,
+        }];
+        let out = block_intervals(rows.clone(), &b, 10, 50).unwrap();
+        assert_eq!(
+            out,
+            vec![
+                Interval {
+                    y: 0,
+                    lx: 0,
+                    ux: 200
+                },
+                Interval {
+                    y: 0,
+                    lx: 400,
+                    ux: 1000
+                },
+                Interval {
+                    y: 50,
+                    lx: 0,
+                    ux: 1000
+                },
+            ]
+        );
+        // No blockage keeps the intervals; a blockage over everything fails.
+        assert_eq!(block_intervals(rows.clone(), &[], 10, 50).unwrap(), rows);
+        let all = [Rect {
+            lx: -5,
+            ly: -5,
+            ux: 2000,
+            uy: 2000,
+        }];
+        assert!(block_intervals(rows, &all, 10, 50).is_err());
+    }
+
+    #[test]
+    fn overlapping_blockages_and_tap_gaps_keep_intervals_disjoint() {
+        // An interval that starts after a tap (lx 30) keeps its own site grid.
+        let rows = vec![Interval {
+            y: 0,
+            lx: 30,
+            ux: 330,
+        }];
+        let b = [
+            Rect {
+                lx: 95,
+                ly: 0,
+                ux: 150,
+                uy: 10,
+            },
+            Rect {
+                lx: 120,
+                ly: 0,
+                ux: 175,
+                uy: 10,
+            },
+        ];
+        let out = block_intervals(rows, &b, 10, 50).unwrap();
+        assert_eq!(
+            out,
+            vec![
+                Interval {
+                    y: 0,
+                    lx: 30,
+                    ux: 90
+                },
+                Interval {
+                    y: 0,
+                    lx: 180,
+                    ux: 330
+                },
+            ]
+        );
+    }
 }
