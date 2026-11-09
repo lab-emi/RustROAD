@@ -1869,6 +1869,25 @@ pub(crate) fn free_intervals(
     )
 }
 
+fn free_intervals_diagnostic(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    admission: &mut DiagnosticPreparation,
+) -> Result<Vec<rustroad_core::place::Interval>> {
+    let cfg = bundle
+        .config
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("physical config absent".into()))?;
+    let out = tap_free_intervals_observed(design, bundle, cfg, Some(&mut *admission))?;
+    block_intervals_observed(
+        out,
+        &cfg.placement_blockages,
+        design.site.width,
+        design.site.height,
+        Some(admission),
+    )
+}
+
 /// Remove every blockage from the intervals of the rows it overlaps, cutting
 /// outwards to whole sites from each interval's start (taps and rows are on
 /// the site grid). Work is intervals x blockages, both bounded upstream.
@@ -1878,14 +1897,52 @@ fn block_intervals(
     site: i64,
     row_height: i64,
 ) -> Result<Vec<rustroad_core::place::Interval>> {
+    block_intervals_observed(intervals, blockages, site, row_height, None)
+}
+
+fn block_intervals_observed(
+    intervals: Vec<rustroad_core::place::Interval>,
+    blockages: &[rustroad_core::Rect],
+    site: i64,
+    row_height: i64,
+    mut diagnostic: Option<&mut DiagnosticPreparation>,
+) -> Result<Vec<rustroad_core::place::Interval>> {
+    let bound = if diagnostic.is_some() {
+        let bound = intervals
+            .len()
+            .checked_mul(
+                blockages
+                    .len()
+                    .checked_add(1)
+                    .ok_or_else(|| Error::Budget("diagnostic blockage count".into()))?,
+            )
+            .filter(|n| *n <= 250_000)
+            .ok_or_else(|| Error::Budget("diagnostic split-interval admission".into()))?;
+        Some(bound)
+    } else {
+        None
+    };
     if blockages.is_empty() {
         return Ok(intervals);
     }
     if site <= 0 {
         return Err(Error::Invalid("nonpositive placement site".into()));
     }
-    let mut out = Vec::with_capacity(intervals.len());
+    let mut out = if let Some(bound) = bound {
+        let mut out = Vec::new();
+        out.try_reserve_exact(bound)
+            .map_err(|_| Error::Budget("diagnostic intervals allocation".into()))?;
+        if out.capacity() > bound {
+            return Err(Error::Budget("diagnostic interval capacity".into()));
+        }
+        out
+    } else {
+        Vec::with_capacity(intervals.len())
+    };
     for v in intervals {
+        if let Some(admission) = diagnostic.as_deref_mut() {
+            admission.charge(blockages.len() as u64 + 1)?;
+        }
         let mut cuts: Vec<(i64, i64)> = blockages
             .iter()
             .filter(|b| v.y < b.uy && b.ly < v.y + row_height && v.lx < b.ux && b.lx < v.ux)
@@ -1920,6 +1977,15 @@ fn tap_free_intervals(
     bundle: &PhysicalBundle,
     cfg: &PhysicalConfig,
 ) -> Result<Vec<rustroad_core::place::Interval>> {
+    tap_free_intervals_observed(design, bundle, cfg, None)
+}
+
+fn tap_free_intervals_observed(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    cfg: &PhysicalConfig,
+    mut diagnostic: Option<&mut DiagnosticPreparation>,
+) -> Result<Vec<rustroad_core::place::Interval>> {
     let mut out = Vec::new();
     if let Some(tap) = &cfg.tap {
         let m = bundle
@@ -1935,7 +2001,21 @@ fn tap_free_intervals(
             tap.pattern.as_ref(),
             &tap_limits(design, cfg),
         )?;
+        if let Some(admission) = diagnostic.as_deref_mut() {
+            admission.charge(report.work_units as u64)?;
+            if report.sites.len() > 250_000 {
+                return Err(Error::Budget("diagnostic tap site count".into()));
+            }
+            out.try_reserve_exact(report.sites.len())
+                .map_err(|_| Error::Budget("diagnostic tap interval allocation".into()))?;
+            if out.capacity() > report.sites.len() {
+                return Err(Error::Budget("diagnostic tap interval capacity".into()));
+            }
+        }
         for pair in report.sites.windows(2) {
+            if let Some(admission) = diagnostic.as_deref_mut() {
+                admission.charge(1)?;
+            }
             if pair[0].row == pair[1].row {
                 let x = pair[0].x + pair[0].width;
                 if x < pair[1].x {
@@ -1948,7 +2028,36 @@ fn tap_free_intervals(
             }
         }
     } else {
+        if let Some(admission) = diagnostic.as_deref_mut() {
+            let fixed = design
+                .cells
+                .iter()
+                .filter(|cell| cell.fixed.is_some())
+                .count();
+            admission.charge(
+                (design.rows.len() as u64)
+                    .checked_mul(fixed as u64)
+                    .ok_or_else(|| Error::Budget("diagnostic row subtraction work".into()))?,
+            )?;
+            let bound = design
+                .rows
+                .len()
+                .checked_mul(fixed + 1)
+                .filter(|n| *n <= 250_000)
+                .ok_or_else(|| Error::Budget("diagnostic row intervals admission".into()))?;
+            out.try_reserve_exact(bound)
+                .map_err(|_| Error::Budget("diagnostic row interval allocation".into()))?;
+            if out.capacity() > bound {
+                return Err(Error::Budget("diagnostic row interval capacity".into()));
+            }
+        }
         for r in rustroad_core::fixed::row_segments(design, 64_000_000)? {
+            if let Some(admission) = diagnostic.as_deref_mut() {
+                admission.charge(1)?;
+                if out.len() >= 250_000 {
+                    return Err(Error::Budget("diagnostic row interval count".into()));
+                }
+            }
             out.push(rustroad_core::place::Interval {
                 y: r.y,
                 lx: r.x_start,
@@ -2007,16 +2116,119 @@ fn fixed_pin_centre(
     Ok([(r.lx + r.ux) / 2, (r.ly + r.uy) / 2])
 }
 
-/// Analytic placement of every current instance (logic, ties and clock
-/// buffers; taps and fillers are added afterwards) plus the fixed-order
-/// baseline on the same intervals for the HPWL report.
-fn analytic(
+/// One owned compute problem borrowing the existing immutable physical config.
+pub(crate) struct AnalyticProblem<'config> {
+    pub(crate) moving: Vec<usize>,
+    pub(crate) problem: rustroad_core::place::PlaceProblem,
+    pub(crate) limits: rustroad_core::place::PlaceLimits,
+    pub(crate) config: &'config rustroad_core::place::PlaceConfig,
+    pub(crate) weight_use: Option<WeightUse>,
+}
+impl std::fmt::Debug for AnalyticProblem<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnalyticProblem")
+            .field("movables", &self.moving.len())
+            .field("nets", &self.problem.nets.len())
+            .field("limits", &self.limits)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Bounded diagnostic-only preparation; default placement passes no admission.
+#[derive(Debug, Default)]
+pub(crate) struct DiagnosticPreparation {
+    pub(crate) work: u64,
+    pub(crate) io_pins: Option<Vec<IoPin>>,
+}
+impl DiagnosticPreparation {
+    fn charge(&mut self, units: u64) -> Result<()> {
+        self.work = self
+            .work
+            .checked_add(units)
+            .filter(|n| *n <= 20_000_000_000)
+            .ok_or_else(|| Error::Budget("diagnostic preparation work".into()))?;
+        Ok(())
+    }
+}
+
+pub(crate) fn diagnostic_problem<'config>(
     design: &Design,
-    bundle: &PhysicalBundle,
-    placed: &mut [Placed],
+    bundle: &'config PhysicalBundle,
+    placed: &[Placed],
+    limits: &Limits,
+    admission: &mut DiagnosticPreparation,
+) -> Result<AnalyticProblem<'config>> {
+    admission.charge(diagnostic_admit(design, bundle)?)?;
+    admission.charge(design.rows.len() as u64)?;
+    let cfg = bundle
+        .config
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("diagnostic missing physical config".into()))?;
+    let gap = i64::from(cfg.cell_spacing_sites)
+        .checked_mul(design.site.width)
+        .ok_or_else(|| Error::Budget("diagnostic spacing overflow".into()))?;
+    analytic_problem(design, bundle, placed, gap, limits, Some(admission))
+}
+
+/// Admit the interval upper bound before even the legacy initial row packing.
+pub(crate) fn diagnostic_admit(design: &Design, bundle: &PhysicalBundle) -> Result<u64> {
+    let cfg = bundle
+        .config
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("diagnostic missing physical config".into()))?;
+    if cfg.max_added_cells > 250_000 || cfg.placement_blockages.len() > 1024 {
+        return Err(Error::Budget("diagnostic preparation scope".into()));
+    }
+    validate_tap_master(bundle)?;
+    let fixed = design
+        .cells
+        .iter()
+        .filter(|cell| cell.fixed.is_some())
+        .count();
+    let pieces = design
+        .rows
+        .len()
+        .checked_mul(
+            fixed
+                .checked_add(1)
+                .ok_or_else(|| Error::Budget("diagnostic fixed count".into()))?,
+        )
+        .ok_or_else(|| Error::Budget("diagnostic row interval bound".into()))?;
+    if pieces > 250_000 {
+        return Err(Error::Budget("diagnostic row interval admission".into()));
+    }
+    let mut pins = 0usize;
+    let mut text = 0usize;
+    for port in &bundle.connectivity.ports {
+        if port.use_.is_supply() {
+            continue;
+        }
+        for name in &port.bits {
+            pins = pins
+                .checked_add(1)
+                .filter(|n| *n <= 4096)
+                .ok_or_else(|| Error::Budget("diagnostic effective I/O count".into()))?;
+            text = text
+                .checked_add(name.len())
+                .and_then(|n| n.checked_add(cfg.io_layer.len()))
+                .filter(|n| *n <= 1 << 20)
+                .ok_or_else(|| Error::Budget("diagnostic effective I/O text".into()))?;
+        }
+    }
+    (design.cells.len() as u64)
+        .checked_add(bundle.connectivity.ports.len() as u64)
+        .and_then(|n| n.checked_add(pins as u64))
+        .ok_or_else(|| Error::Budget("diagnostic input record work".into()))
+}
+
+fn analytic_problem<'config>(
+    design: &Design,
+    bundle: &'config PhysicalBundle,
+    placed: &[Placed],
     gap: i64,
     limits: &Limits,
-) -> Result<PlacementReport> {
+    mut diagnostic: Option<&mut DiagnosticPreparation>,
+) -> Result<AnalyticProblem<'config>> {
     let moving: Vec<usize> = design
         .cells
         .iter()
@@ -2117,7 +2329,10 @@ fn analytic(
         site: design.site.width,
         gap,
         nets,
-        intervals: free_intervals(design, bundle)?,
+        intervals: match diagnostic.as_deref_mut() {
+            Some(admission) => free_intervals_diagnostic(design, bundle, admission)?,
+            None => free_intervals(design, bundle)?,
+        },
     };
     let place_limits = rustroad_core::place::PlaceLimits {
         max_cells: limits.max_cells,
@@ -2129,6 +2344,37 @@ fn analytic(
             .saturating_mul(50_000)
             .max(20_000_000_000),
     };
+    if let Some(admission) = diagnostic {
+        // Retain the already computed exact I/O rectangles only for diagnostics.
+        // The ordinary None path neither clones nor retains an additional view.
+        admission.charge(io.len() as u64)?;
+        drop(centre);
+        admission.io_pins = Some(io);
+    }
+    Ok(AnalyticProblem {
+        moving,
+        problem,
+        limits: place_limits,
+        config: pc,
+        weight_use,
+    })
+}
+
+/// Analytic placement precedes physical tap/filler insertion, as before.
+fn analytic(
+    design: &Design,
+    bundle: &PhysicalBundle,
+    placed: &mut [Placed],
+    gap: i64,
+    limits: &Limits,
+) -> Result<PlacementReport> {
+    let AnalyticProblem {
+        moving,
+        problem,
+        limits: place_limits,
+        config: pc,
+        weight_use,
+    } = analytic_problem(design, bundle, placed, gap, limits, None)?;
     let mut seed_use = None;
     let mut seeds = Vec::new();
     let result = match &bundle.placement_seed {

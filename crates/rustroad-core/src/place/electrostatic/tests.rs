@@ -9,6 +9,7 @@ use serde_json::json;
 fn run_meter<T>(config: &ElectrostaticConfig, f: impl FnOnce(&mut Meter<'_>) -> T) -> T {
     let mut counts = Counters::default();
     let mut work = Work {
+        held: 0,
         used: 0,
         max: 20_000_000_000,
     };
@@ -52,6 +53,7 @@ fn total_and_additional_work_caps_compose_without_spending_the_budget() {
         let cap = super::refinement_work_limit(caller, baseline, additional);
         assert_eq!(cap, expected);
         let mut work = Work {
+            held: 0,
             used: baseline,
             max: cap,
         };
@@ -390,15 +392,16 @@ fn late_stall_retains_checkpoint_but_hard_failure_keeps_baseline() {
     assert_eq!(report.counts.iterations, 0);
 
     // A real accepted checkpoint must not hide a subsequent evaluation cap.
+    let capped = ElectrostaticConfig {
+        max_iterations: 6,
+        max_evaluations: 4,
+        initial_step_milli: 1000,
+        max_backtracks: 4,
+        ..mode
+    };
     let config = PlaceConfig {
-        electrostatic: Some(ElectrostaticConfig {
-            max_iterations: 6,
-            max_evaluations: 4,
-            initial_step_milli: 1000,
-            max_backtracks: 4,
-            ..mode
-        }),
-        ..base
+        electrostatic: Some(capped.clone()),
+        ..base.clone()
     };
     let r = super::super::place(&p, &config, &limits).unwrap();
     assert_eq!(r.positions, legacy.positions);
@@ -411,6 +414,90 @@ fn late_stall_retains_checkpoint_but_hard_failure_keeps_baseline() {
         "P1_HARD_CAP_AFTER_PROGRESS={}",
         serde_json::to_string(&report).unwrap()
     );
+
+    // Only the explicit option keeps that checkpoint, and it says so.
+    let config = PlaceConfig {
+        electrostatic: Some(ElectrostaticConfig {
+            stop_at_evaluation_cap: true,
+            ..capped
+        }),
+        ..base
+    };
+    let r = super::super::place(&p, &config, &limits).unwrap();
+    let report = r.electrostatic.unwrap();
+    assert_eq!(report.termination, "evaluation_horizon_after_checkpoint");
+    assert_eq!(report.counts.evaluations, 4);
+    assert!(report.counts.iterations > 0);
+    assert!(report.status == "accepted_no_worse" || report.status == "fallback_no_improvement");
+    assert!(r.hpwl <= legacy.hpwl);
+}
+
+#[test]
+fn spacing_aware_density_deposits_the_gap_but_keeps_physical_edges_and_defaults_off() {
+    let mut p = problem();
+    p.gap = 2 * p.site;
+    let limits = PlaceLimits::default();
+    let base = PlaceConfig {
+        global_iterations: 2,
+        cg_iterations: 20,
+        detailed_passes: 1,
+        ..PlaceConfig::default()
+    };
+    let mode = ElectrostaticConfig {
+        max_iterations: 12,
+        max_evaluations: 64,
+        workers: 2,
+        ..ElectrostaticConfig::default()
+    };
+    // The options stay out of serialized configs unless explicitly enabled.
+    let text = serde_json::to_string(&mode).unwrap();
+    assert!(!text.contains("spacing_aware_density") && !text.contains("stop_at_evaluation_cap"));
+    let enabled = ElectrostaticConfig {
+        spacing_aware_density: true,
+        ..mode.clone()
+    };
+    assert!(
+        serde_json::to_string(&enabled)
+            .unwrap()
+            .contains("spacing_aware_density")
+    );
+    let domain = Domain::new(super::interval_region(&p).unwrap()).unwrap();
+    let relative = Domain {
+        origin: [0, 0],
+        ..domain
+    };
+    let pins = p.nets.iter().map(Vec::len).sum();
+    let bodies = |mode: &ElectrostaticConfig| {
+        let config = PlaceConfig {
+            electrostatic: Some(mode.clone()),
+            ..base.clone()
+        };
+        let model = super::prepare_model(&p, &config, relative, pins, 2)
+            .ok()
+            .unwrap();
+        let edge = model.project(0, [0.0, 0.0]).ok().unwrap();
+        (model.bodies.clone(), edge)
+    };
+    let (plain, plain_edge) = bodies(&mode);
+    let (padded, padded_edge) = bodies(&enabled);
+    let scale = domain.scale as f64;
+    for (i, (a, b)) in plain.iter().zip(&padded).enumerate() {
+        assert_eq!(a.width, p.widths[i] as f64 / scale);
+        assert_eq!(b.width, (p.widths[i] + p.gap) as f64 / scale);
+        assert!(b.area > a.area);
+    }
+    // Spacing separates neighbours only: a cell may still touch the core edge.
+    assert_eq!(plain_edge, padded_edge);
+    let result = super::super::place(
+        &p,
+        &PlaceConfig {
+            electrostatic: Some(enabled),
+            ..base
+        },
+        &limits,
+    )
+    .unwrap();
+    super::super::check_legal(&p, &result.positions).unwrap();
 }
 #[test]
 fn opt_in_is_bounded_legal_and_thread_deterministic_with_exact_fallback() {

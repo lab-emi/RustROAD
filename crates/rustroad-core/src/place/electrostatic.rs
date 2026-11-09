@@ -2,6 +2,7 @@
 use super::{Interval, PinRef, PlaceConfig, PlaceLimits, PlaceProblem, PlaceResult, Work};
 use crate::{Error, Rect, Result};
 mod density;
+pub(super) mod diagnostics;
 mod optimizer;
 mod poisson;
 mod wire;
@@ -74,6 +75,14 @@ pub struct ElectrostaticConfig {
     pub max_capacity_interactions: u64,
     /// Additional numerical work, also bounded by the original remaining work cap.
     pub max_work: u64,
+    /// Deposit each cell with its mandatory row spacing, so the density target
+    /// describes what the legalizer must actually fit.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub spacing_aware_density: bool,
+    /// End at an exhausted evaluation cap with the last checkpoint, reporting
+    /// `evaluation_horizon_after_checkpoint`, instead of the baseline fallback.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stop_at_evaluation_cap: bool,
 }
 impl Default for ElectrostaticConfig {
     fn default() -> Self {
@@ -102,6 +111,8 @@ impl Default for ElectrostaticConfig {
             max_transform_terms: 1_000_000_000,
             max_capacity_interactions: 64_000_000,
             max_work: 20_000_000_000,
+            spacing_aware_density: false,
+            stop_at_evaluation_cap: false,
         }
     }
 }
@@ -365,10 +376,16 @@ impl Model<'_> {
             return Err(Failure::Numerical("nonfinite_position"));
         }
         let density::Body {
-            width: w,
+            width: deposited,
             height: h,
             ..
         } = self.shape(i);
+        // A cell may touch the core edge: spacing separates neighbours only.
+        let w = if i < self.real {
+            self.problem.widths[i] as f64 / self.domain.scale as f64
+        } else {
+            deposited
+        };
         let lo = [w / 2.0, h / 2.0];
         let hi = [
             self.domain.extent[0] - w / 2.0,
@@ -559,13 +576,21 @@ fn prepare_model<'a>(
         .ok_or(Failure::Numerical("missing_mode"))?;
     let n = problem.widths.len();
     let scale = domain.scale as f64;
+    let padding = if cfg.spacing_aware_density {
+        problem.gap
+    } else {
+        0
+    };
     let bodies: Vec<_> = problem
         .widths
         .iter()
-        .map(|w| density::Body {
-            width: *w as f64 / scale,
-            height: problem.row_height as f64 / scale,
-            area: (i128::from(*w) * i128::from(problem.row_height)) as f64 / (scale * scale),
+        .map(|w| {
+            let w = *w + padding;
+            density::Body {
+                width: w as f64 / scale,
+                height: problem.row_height as f64 / scale,
+                area: (i128::from(w) * i128::from(problem.row_height)) as f64 / (scale * scale),
+            }
         })
         .collect();
     if bodies.iter().any(|a| !a.area.is_finite() || a.area <= 0.0) {
@@ -665,7 +690,7 @@ fn admit_evaluations(
     density: &density::Density,
     cfg: &ElectrostaticConfig,
     meter: &mut Meter<'_>,
-) -> std::result::Result<(), Failure> {
+) -> std::result::Result<u64, Failure> {
     let mut interactions = 0u64;
     meter.work(model.objects() as u64)?;
     for i in 0..model.objects() {
@@ -725,7 +750,7 @@ fn admit_evaluations(
     {
         return Err(Failure::Budget("requested_evaluation_work"));
     }
-    Ok(())
+    Ok(work)
 }
 fn legal_error(error: Error) -> Failure {
     match error {
@@ -737,8 +762,19 @@ pub(super) fn refine(
     problem: &PlaceProblem,
     config: &PlaceConfig,
     limits: &PlaceLimits,
+    baseline: PlaceResult,
+    region: Option<Rect>,
+) -> Result<PlaceResult> {
+    refine_observed(problem, config, limits, baseline, region, None)
+}
+
+fn refine_observed(
+    problem: &PlaceProblem,
+    config: &PlaceConfig,
+    limits: &PlaceLimits,
     mut baseline: PlaceResult,
     region: Option<Rect>,
+    mut capture: Option<&mut diagnostics::Capture<'_>>,
 ) -> Result<PlaceResult> {
     let cfg = config
         .electrostatic
@@ -774,6 +810,7 @@ pub(super) fn refine(
     }
     let mut counts = Counters::default();
     let mut work = Work {
+        held: 0,
         used: baseline_work,
         // Common retarget/legalizer/detail helpers charge this same counter.
         // Their work must obey the configured additional cap as well.
@@ -818,6 +855,21 @@ pub(super) fn refine(
         let base_cost = exact_objective(&shifted, &local_baseline)?;
         report.baseline_hpwl_dbu = base_cost.0;
         report.baseline_weighted_hpwl_milli = Some(base_cost.1);
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.observe_known(
+                diagnostics::Label {
+                    name: "legacy_baseline",
+                    stage: None,
+                    phase: diagnostics::DiagnosticPhase::SourceBaseline,
+                },
+                &baseline.positions,
+                diagnostics::NativeCost {
+                    hpwl_dbu: base_cost.0,
+                    weighted_hpwl_milli: base_cost.1,
+                },
+                &meter,
+            )?;
+        }
         let mut density = density::Density::new(&model, &mut meter)?;
         meter.work((problem.widths.len() + cfg.max_fillers + 4096) as u64)?;
         let initial = initial_positions(&mut model, &local_baseline, &density, cfg)?;
@@ -826,8 +878,50 @@ pub(super) fn refine(
         }
         drop(local_baseline);
         report.numerical_fillers = model.fillers;
-        admit_evaluations(&model, &density, cfg, &mut meter)?;
-        let outcome = optimizer::run(&model, &mut density, initial, cfg, &mut meter, &mut report)?;
+        let admitted_work = admit_evaluations(&model, &density, cfg, &mut meter)?;
+        if let Some(capture) = capture.as_deref_mut() {
+            let hold = diagnostics::Capture::hold_units(model.objects())?;
+            let required = admitted_work
+                .checked_add(cfg.max_evaluations as u64)
+                .and_then(|n| n.checked_add(hold))
+                .ok_or(Failure::Budget("diagnostic_admission_overflow"))?;
+            if required > meter.work.max.saturating_sub(meter.work.used)
+                || required
+                    > cfg
+                        .max_work
+                        .saturating_sub(meter.work.used.saturating_sub(baseline_work))
+            {
+                return Err(Failure::Budget(
+                    "diagnostic_requested_evaluation_and_capture_work",
+                ));
+            }
+            let extra = (model.objects() as u64)
+                .checked_mul(48)
+                .and_then(|n| n.checked_add((model.real as u64).checked_mul(48)?))
+                .and_then(|n| n.checked_add(128 << 10))
+                .ok_or(Failure::Budget("diagnostic_state_overflow"))?;
+            capture.state_bytes = bytes
+                .checked_add(extra)
+                .filter(|n| *n <= cfg.max_state_mib * (1 << 20))
+                .ok_or(Failure::Budget("diagnostic_state_admission"))?;
+            meter
+                .work
+                .reserve(hold)
+                .map_err(|_| Failure::Budget("diagnostic_work_hold"))?;
+            capture.objects = Some(model.objects());
+        }
+        let outcome = optimizer::run(
+            &model,
+            &mut density,
+            initial,
+            cfg,
+            &mut meter,
+            &mut report,
+            capture.as_deref_mut(),
+        )?;
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.released = meter.work.release_reserved();
+        }
         report.termination = outcome.termination;
         let scale = model.domain.scale as f64;
         let mut targets: Vec<[f64; 2]> = outcome.positions[..model.real]
@@ -877,28 +971,78 @@ pub(super) fn refine(
         if candidate_cost.0 > base_cost.0 || candidate_cost.1 > base_cost.1 {
             report.status = "fallback_no_improvement".into();
             report.reason = "post_legalization_exact_objective".into();
-            return Ok(());
-        }
-        for p in &mut legal {
-            for (d, value) in p.iter_mut().enumerate() {
-                *value = i64::try_from(i128::from(*value) + i128::from(domain.origin[d]))
-                    .map_err(|_| Failure::Numerical("published_coordinate_range"))?;
+            if capture.is_none() {
+                return Ok(());
             }
+        } else {
+            for p in &mut legal {
+                for (d, value) in p.iter_mut().enumerate() {
+                    *value = i64::try_from(i128::from(*value) + i128::from(domain.origin[d]))
+                        .map_err(|_| Failure::Numerical("published_coordinate_range"))?;
+                }
+            }
+            super::check_legal(problem, &legal).map_err(legal_error)?;
+            accepted = Some((legal, candidate_cost.0, global_hpwl, anchored));
+            report.status = "accepted_no_worse".into();
+            report.reason = "exact_integer_objective_gate".into();
         }
-        super::check_legal(problem, &legal).map_err(legal_error)?;
-        accepted = Some((legal, candidate_cost.0, global_hpwl, anchored));
-        report.status = "accepted_no_worse".into();
-        report.reason = "exact_integer_objective_gate".into();
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.reference_work = meter.work.used;
+            capture.reference_counts = meter.counts.clone();
+            let reference = accepted
+                .as_ref()
+                .map_or(baseline.positions.as_slice(), |result| result.0.as_slice());
+            capture.emit_global(
+                diagnostics::Label {
+                    name: "default",
+                    stage: None,
+                    phase: diagnostics::DiagnosticPhase::DefaultSelected,
+                },
+                reference,
+                problem,
+                &mut meter,
+            )?;
+            capture.replay(
+                diagnostics::TrialContext {
+                    model: &model,
+                    global_problem: problem,
+                    config,
+                    origin: domain.origin,
+                },
+                &mut meter,
+            )?;
+        }
         Ok(())
     })();
+    if let Some(capture) = capture.as_deref_mut() {
+        capture.released = capture
+            .released
+            .checked_add(work.release_reserved())
+            .ok_or_else(|| super::budget("diagnostic hold settlement overflow"))?;
+        capture.final_work = work.used;
+        capture.final_counts = counts.clone();
+    }
     if let Err(failure) = attempt {
+        if capture.is_some() {
+            return Err(match failure {
+                Failure::Budget(reason) => {
+                    super::budget(&format!("diagnostic unverified: {reason}"))
+                }
+                _ => super::invalid(&format!("diagnostic unverified: {}", failure.reason())),
+            });
+        }
         report.status = failure.status().into();
         report.reason = failure.reason().into();
         report.termination = failure.reason().into();
     }
-    report.counts = counts;
-    report.numerical_and_candidate_work = work.used.saturating_sub(baseline_work);
-    baseline.work = work.used;
+    let reference_work = capture
+        .as_ref()
+        .map_or(work.used, |capture| capture.reference_work);
+    report.counts = capture
+        .as_ref()
+        .map_or(counts, |capture| capture.reference_counts.clone());
+    report.numerical_and_candidate_work = reference_work.saturating_sub(baseline_work);
+    baseline.work = reference_work;
     if let Some((positions, hpwl, global_hpwl, anchored)) = accepted {
         baseline.positions = positions;
         baseline.hpwl = hpwl;

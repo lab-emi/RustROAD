@@ -1107,6 +1107,11 @@ struct Router<'a> {
     /// patched wide-metal pair cannot be rebuilt identically. Empty before
     /// rule repair; at most `MAX_NOTCH_ZONES` in total.
     notch_zones: BTreeMap<u32, Vec<LayerRect>>,
+    /// Rule-repair exclusions by net. A search tests near misses only against
+    /// committed metal, so a notch between two parts of one path survives
+    /// strict re-routing unchanged. Own metal may not enter these rectangles;
+    /// dropped if they wall the net in. Shares `MAX_NOTCH_ZONES`.
+    own_exclusions: BTreeMap<u32, Vec<LayerRect>>,
     /// Trace mode: why prior nets were not kept.
     prior_rejects: Option<BTreeMap<String, usize>>,
 }
@@ -1243,6 +1248,7 @@ impl<'a> Router<'a> {
             access_entries: 0,
             access_cache_bytes: 0,
             notch_zones: BTreeMap::new(),
+            own_exclusions: BTreeMap::new(),
             prior_rejects: std::env::var_os("RUSTROAD_ROUTE_TRACE").map(|_| BTreeMap::new()),
         };
         for (i, l) in input.layers.iter().enumerate() {
@@ -3065,6 +3071,7 @@ impl<'a> Router<'a> {
         let near_cost = via_cost;
         let hist_unit = via_cost / 2;
         let zones = self.notch_zones.get(&net).cloned().unwrap_or_default();
+        let excluded = self.own_exclusions.get(&net).cloned().unwrap_or_default();
         let mut nbuf = Vec::with_capacity(8);
         // Own pin metal, except where a terminal's escape reaches the graph:
         // a path that runs over, or drops a via onto, a pin of its own net
@@ -3493,6 +3500,9 @@ impl<'a> Router<'a> {
                         }
                         let (kind, extra) = match mv {
                             Move::Via(pi) => {
+                                if zoned_point(&excluded, layer, nl, p) {
+                                    continue;
+                                }
                                 // A wire that ends here on this layer wants the
                                 // pad elongated along it (end-of-line enclosure).
                                 let original = self.graph.pairs[pi].kinds.clone();
@@ -3623,6 +3633,9 @@ impl<'a> Router<'a> {
                             }
                             _ => {
                                 let rect = self.edge_rect(layer, p, q, net)?;
+                                if zoned(&excluded, layer, rect) {
+                                    continue;
+                                }
                                 if own.blocks(
                                     layer,
                                     rect,
@@ -4783,6 +4796,14 @@ pub(crate) fn route_with_prior(
                     )));
                 }
                 Outcome::Failed(pin) => {
+                    if r.own_exclusions.remove(&net).is_some() {
+                        // An exclusion walled the net in: route it as before.
+                        if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                            eprintln!("[troute] exclusion walls in net {net} pin {pin}, dropped");
+                        }
+                        queue.push_back(net);
+                        continue;
+                    }
                     // Strict rules (no near misses, no short stacked pads) can
                     // wall in a pin; the ordinary mode plus cleanup and the
                     // final rule check stays sound, so retry once without them.
@@ -5062,6 +5083,28 @@ pub(crate) fn route_with_prior(
                         );
                     }
                     zones.push(zone);
+                    zone_count += 1;
+                }
+            }
+            // A notch that survives a strict re-route lies between two parts of
+            // one path: the search never sees it. Keep the net out of its
+            // smaller shape, so the next path cannot rebuild it.
+            if *seen >= 2
+                && !relaxed.contains(&n)
+                && zone_count < MAX_NOTCH_ZONES
+                && let route_rules::Violation::Spacing { layer, a, b, .. } = *v
+            {
+                let size = |r: Rect| i128::from(r.ux - r.lx) * i128::from(r.uy - r.ly);
+                let rect = if size(a) <= size(b) { a } else { b };
+                let exclusions = r.own_exclusions.entry(n).or_default();
+                if !exclusions
+                    .iter()
+                    .any(|z| z.layer == layer && z.rect == rect)
+                {
+                    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                        eprintln!("[troute] exclusion net {n} layer {layer} {rect:?}");
+                    }
+                    exclusions.push(LayerRect { layer, rect });
                     zone_count += 1;
                 }
             }
@@ -5630,6 +5673,62 @@ mod tests {
             assert_eq!(key(&replay, net), key(&batched, net), "batched net {net}");
         }
         assert!(crate::route_batches::route_with_prior(&design, &limits, 2, Some(&own)).is_err());
+    }
+
+    #[test]
+    fn own_exclusion_keeps_the_net_out_of_a_notch_shape_on_its_own_path() {
+        let design = input(
+            vec![
+                terminal(0, 7, true, rect(90, 90, 110, 110)),
+                terminal(1, 7, false, rect(90, 890, 110, 910)),
+            ],
+            Vec::new(),
+        );
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let route = |exclusions: Vec<LayerRect>| {
+            let graph = Graph::new(&design, plan, &limits).unwrap();
+            let cells = Cells::new(design.die, plan.gcell).unwrap();
+            let mut router = Router::prepared(&design, &limits, graph, cells).unwrap();
+            router.gmark.fill(1);
+            router.gepoch = 1;
+            let terminals: Vec<_> = design.terminals.iter().collect();
+            let plans = router.reserve(&terminals).unwrap();
+            if !exclusions.is_empty() {
+                router.own_exclusions.insert(7, exclusions);
+            }
+            match router
+                .route_net(7, &terminals, &plans, false, false, &BTreeMap::new(), 1)
+                .unwrap()
+            {
+                Outcome::Routed(route, _) => route,
+                _ => panic!("the fixture is open around the exclusion"),
+            }
+        };
+        let free = route(Vec::new());
+        let track = free
+            .wires
+            .iter()
+            .find(|w| w.layer == 1 && w.end[1] - w.start[1] > 400)
+            .expect("fixture premise: a long M2 run");
+        let middle = (track.start[1] + track.end[1]) / 2;
+        let exclusion = LayerRect {
+            layer: 1,
+            rect: rect(
+                track.start[0] - 10,
+                middle - 40,
+                track.start[0] + 10,
+                middle + 40,
+            ),
+        };
+        let moved = route(vec![exclusion.clone()]);
+        assert_ne!(moved.wires, free.wires);
+        for wire in moved.wires.iter().filter(|w| w.layer == 1) {
+            assert!(
+                !crate::routing::overlap(wire_rect(wire, 20).unwrap(), exclusion.rect),
+                "{wire:?}"
+            );
+        }
     }
 
     #[test]
@@ -6529,6 +6628,7 @@ mod tests {
                 access_entries: 0,
                 access_cache_bytes: 0,
                 notch_zones: BTreeMap::new(),
+                own_exclusions: BTreeMap::new(),
                 prior_rejects: std::env::var_os("RUSTROAD_ROUTE_TRACE").map(|_| BTreeMap::new()),
             };
             let terminals: Vec<_> = design.terminals.iter().collect();

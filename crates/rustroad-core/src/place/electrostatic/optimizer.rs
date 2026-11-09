@@ -5,15 +5,16 @@ use super::{
 };
 
 #[derive(Clone, Copy)]
-struct Value {
-    wire: f64,
-    density: f64,
+pub(super) struct Value {
+    pub(super) wire: f64,
+    pub(super) density: f64,
 }
 impl Value {
     fn total(self, weight: f64) -> f64 {
         self.wire + weight * self.density
     }
 }
+const EVALUATION_HORIZON: &str = "evaluation_horizon_after_checkpoint";
 pub(super) struct Output {
     pub positions: Vec<[f64; 2]>,
     pub termination: String,
@@ -91,6 +92,7 @@ pub(super) fn run(
     cfg: &ElectrostaticConfig,
     meter: &mut Meter<'_>,
     report: &mut ElectrostaticReport,
+    mut capture: Option<&mut super::diagnostics::Capture<'_>>,
 ) -> Result<Output, Failure> {
     let n = model.objects();
     let mut x = initial;
@@ -116,6 +118,19 @@ pub(super) fn run(
         if horizon == 0 {
             continue;
         }
+        if cfg.stop_at_evaluation_cap
+            && meter.counts.evaluations >= cfg.max_evaluations
+            && best_cost != baseline_cost
+        {
+            return Ok(Output {
+                positions: best,
+                termination: EVALUATION_HORIZON.into(),
+            });
+        }
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.entered(meter)?;
+        }
+        let mut stage_exit = "iteration_horizon";
         let gamma = f64::from(cfg.smoothing_bins_milli[stage]) / 1000.0
             * density.grid.hx.max(density.grid.hy);
         let mut current_value = evaluate(
@@ -153,10 +168,53 @@ pub(super) fn run(
         previous_gradient.clone_from(&current_gradient);
         let (mut t, mut step, mut history): (f64, f64, bool) =
             (1.0, f64::from(cfg.initial_step_milli) / 1000.0, false);
+        // With `stop_at_evaluation_cap`, running out of evaluations mid-stage
+        // keeps the earlier finite checkpoint; integer legalization still decides.
+        macro_rules! trial_value {
+            ($positions:expr) => {
+                match evaluate(
+                    model,
+                    density,
+                    $positions,
+                    gamma,
+                    (&mut wire_gradient, &mut density_gradient),
+                    meter,
+                    report,
+                ) {
+                    Ok(value) => value,
+                    Err(Failure::Budget("max_evaluations"))
+                        if cfg.stop_at_evaluation_cap && best_cost != baseline_cost =>
+                    {
+                        if let Some(capture) = capture.as_deref_mut() {
+                            let parameters = report
+                                .stages
+                                .last()
+                                .ok_or(Failure::Numerical("diagnostic_stage_parameters"))?;
+                            capture.finish_stage(
+                                super::diagnostics::StageObservation {
+                                    stage,
+                                    positions: &x,
+                                    value: current_value,
+                                    parameters,
+                                    exit: EVALUATION_HORIZON,
+                                },
+                                meter,
+                            )?;
+                        }
+                        return Ok(Output {
+                            positions: best,
+                            termination: EVALUATION_HORIZON.into(),
+                        });
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+        }
         for _ in 0..horizon {
             meter.work((20 * n) as u64)?;
             if norm(&current_gradient) <= 1e-12 {
                 termination = "gradient_tolerance".into();
+                stage_exit = "gradient_tolerance";
                 break;
             }
             if history {
@@ -210,15 +268,7 @@ pub(super) fn run(
                 at_y.clone_from(&current_gradient);
                 at_y_value = current_value;
             } else {
-                at_y_value = evaluate(
-                    model,
-                    density,
-                    &y,
-                    gamma,
-                    (&mut wire_gradient, &mut density_gradient),
-                    meter,
-                    report,
-                )?;
+                at_y_value = trial_value!(&y);
                 combine(&mut at_y, &wire_gradient, &density_gradient, weight)?;
             }
             let mut accepted = None;
@@ -241,15 +291,7 @@ pub(super) fn run(
                         || (trial[i][1] - x[i][1]).abs() > limit * density.grid.hy;
                 }
                 if !excessive {
-                    let value = evaluate(
-                        model,
-                        density,
-                        &trial,
-                        gamma,
-                        (&mut wire_gradient, &mut density_gradient),
-                        meter,
-                        report,
-                    )?;
+                    let value = trial_value!(&trial);
                     let (mut linear, mut quadratic) = (0.0, 0.0);
                     for i in 0..n {
                         let p = diagonal(model, i, weight)?;
@@ -300,6 +342,22 @@ pub(super) fn run(
                     // A later stalled search does not invalidate an earlier
                     // finite checkpoint. Hard/numerical errors above still
                     // propagate, and integer legalization decides acceptance.
+                    if let Some(capture) = capture.as_deref_mut() {
+                        let parameters = report
+                            .stages
+                            .last()
+                            .ok_or(Failure::Numerical("diagnostic_stage_parameters"))?;
+                        capture.finish_stage(
+                            super::diagnostics::StageObservation {
+                                stage,
+                                positions: &x,
+                                value: current_value,
+                                parameters,
+                                exit: "line_search_stalled_after_checkpoint",
+                            },
+                            meter,
+                        )?;
+                    }
                     return Ok(Output {
                         positions: best,
                         termination: "line_search_stalled_after_checkpoint".into(),
@@ -329,6 +387,22 @@ pub(super) fn run(
                 best.clone_from(&x);
                 best_cost = cost;
             }
+        }
+        if let Some(capture) = capture.as_deref_mut() {
+            let parameters = report
+                .stages
+                .last()
+                .ok_or(Failure::Numerical("diagnostic_stage_parameters"))?;
+            capture.finish_stage(
+                super::diagnostics::StageObservation {
+                    stage,
+                    positions: &x,
+                    value: current_value,
+                    parameters,
+                    exit: stage_exit,
+                },
+                meter,
+            )?;
         }
     }
     Ok(Output {
