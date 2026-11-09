@@ -795,10 +795,22 @@ pub fn materialize_constants_with(
 
 /// Rewrite literals in place, retaining all unchanged netlist record allocations.
 pub fn materialize_constants_owned(
+    netlist: verilog::Netlist,
+    high: TieSpec<'_>,
+    low: TieSpec<'_>,
+    limits: &TieLimits,
+) -> TieResult<(verilog::Netlist, TieReport)> {
+    materialize_constants_owned_with_buses(netlist, high, low, limits, &Default::default())
+}
+
+/// The same rewrite with explicitly declared macro bus widths. Scalar-only
+/// callers retain the original strict one-bit destination contract.
+pub fn materialize_constants_owned_with_buses(
     mut netlist: verilog::Netlist,
     high: TieSpec<'_>,
     low: TieSpec<'_>,
     limits: &TieLimits,
+    buses: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, [i64; 2]>>,
 ) -> TieResult<(verilog::Netlist, TieReport)> {
     verilog::validate_netlist(&netlist, &crate::pdk::retained_netlist_limits())
         .map_err(|e| invalid(e.to_string()))?;
@@ -878,13 +890,26 @@ pub fn materialize_constants_owned(
     }
     for instance in &mut netlist.instances {
         for connection in &mut instance.connections {
+            let width = match buses
+                .get(&instance.cell)
+                .and_then(|ports| ports.get(&connection.pin))
+            {
+                Some(range) => {
+                    let width = (i128::from(range[0]) - i128::from(range[1])).unsigned_abs() + 1;
+                    if width > 65_536 || width > limits.max_bits as u128 {
+                        return Err(budget("macro destination width limit"));
+                    }
+                    width as usize
+                }
+                None => 1,
+            };
             connection.signal = match transform.existing_rail(
                 &instance.cell,
                 &connection.pin,
                 &connection.signal,
             )? {
                 Some(rail) => rail,
-                None => transform.rewrite(&connection.signal, Some(1), 1)?,
+                None => transform.rewrite(&connection.signal, Some(width), 1)?,
             };
         }
     }
@@ -922,6 +947,7 @@ mod tests {
     }
     fn cell(name: &str) -> lef::LefMacro {
         lef::LefMacro {
+            obstruction_spacing: Default::default(),
             name: name.into(),
             class: Some("CORE".into()),
             origin: [0, 0],

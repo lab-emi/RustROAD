@@ -156,7 +156,9 @@ on stdout.
   reserved taps: the region is cut at its middle (columns when wider than
   tall), cells sorted along the cut are split so each side's area matches
   its capacity share, down to single-row segments where cells are spread in
-  x with the whitespace shared evenly.
+  x with the whitespace shared evenly. Whole-cell rounding can over-fill a
+  region; a side without capacity (covered by a macro) never receives cells,
+  the overflow stays on the side that has rows and legalization resolves it.
 * **Legalization:** widest cells first, every cell takes the interval of
   least estimated displacement (plus a fill penalty) that still has room;
   inside each interval an order-preserving cluster solve (overlapping
@@ -167,8 +169,9 @@ on stdout.
   the best free gap near the median of the cell's nets, accepted only when
   HPWL drops.
 * **Check:** an independent legality check (inside a free interval, on the
-  site grid, no overlap, spacing kept) runs before the result is used; taps
-  and fillers are then added exactly as before.
+  site grid, no overlap, spacing kept between neighbours of one free
+  interval; across a tap the tap itself separates the cells) runs before the
+  result is used; taps and fillers are then added exactly as before.
 * `place` and `clock-tree` both use it; `inspect`/command summaries carry a
   `placement` report: HPWL (centre to centre, DBU) of the result, of the
   global placement and of fixed-order packing of the same cells into the same
@@ -186,6 +189,14 @@ on stdout.
   them too. The closure loop uses both (`docs/closure.md`).
 
 ## Router (`track_router` in the routing profile; needs `lef_rules`)
+
+`track_router.min_routing_layer` and `max_routing_layer` optionally restrict
+global capacity and detailed signal wires/vias by selected LEF layer name.
+The access layer must lie inside that range. Lower layers remain available
+for fixed pin escapes; for example, selecting Metal2 through Metal5 keeps
+Metal1 cell-pin access while reserving TopMetal for the supply grid. Omitting
+both fields retains the previous behavior for existing profiles. Invalid,
+reversed or cut-layer limits are rejected.
 
 1. **Track graph.** Every routing layer has its own tracks from the LEF
    `PITCH`/`OFFSET` (cross axis), replaced by profile `tracks` overrides.

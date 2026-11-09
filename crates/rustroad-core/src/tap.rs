@@ -82,7 +82,8 @@ pub fn reserve(
     let mut sites = Vec::new();
     let mut work = 0usize;
     let mut actual = 0i64;
-    for (ri, row) in design.rows.iter().enumerate() {
+    let segments = crate::fixed::row_segments(design, limits.max_work)?;
+    for (ri, row) in segments.iter().enumerate() {
         tick(&mut work, limits.max_work)?;
         let length = (i128::from(row.x_end) - i128::from(row.x_start)) / i128::from(site);
         if length < i128::from(width_sites) {
@@ -131,7 +132,7 @@ pub fn reserve(
     }
     Ok(TapReport {
         sites,
-        rows_checked: design.rows.len(),
+        rows_checked: segments.len(),
         max_clear_gap: actual,
         requested_max_gap: max_gap,
         work_units: work,
@@ -169,6 +170,10 @@ pub fn place_with_spacing(
     let mut interval = 0usize;
     let mut x = intervals.first().map_or(0, |p| p.0);
     for cell in &design.cells {
+        if let Some(fixed) = cell.fixed {
+            cells.push([fixed.x, fixed.y]);
+            continue;
+        }
         loop {
             tick(&mut report.work_units, limits.max_work)?;
             let current = intervals.get(interval).ok_or_else(|| {
@@ -232,6 +237,7 @@ mod tests {
             ],
             cells: (0..4)
                 .map(|i| Cell {
+                    fixed: None,
                     name: format!("u{i}"),
                     master: "b".into(),
                     width: 30,

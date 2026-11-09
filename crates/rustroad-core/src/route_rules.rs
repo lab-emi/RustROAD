@@ -70,14 +70,58 @@ pub(crate) enum Violation {
         layer: u32,
         rect: Rect,
     },
+    /// Two same-net rectangles overlap like stairs and their union narrows to
+    /// the diagonal of the overlap, below the layer width (track router only).
+    Neck {
+        net: u32,
+        layer: u32,
+        a: Rect,
+        b: Rect,
+    },
+    /// Metal of `owner` wider than the layer's wide-metal width runs parallel
+    /// to metal of `other` closer than the wide spacing for `run` DBU. `net`
+    /// is the one re-routed: the owner when cleanup patches widened it, else
+    /// a routed neighbour. `wide` bounds every wide part facing `other` on
+    /// that side and `near` every facing shape of `other`.
+    Wide {
+        net: u32,
+        owner: u32,
+        other: u32,
+        layer: u32,
+        wide: Rect,
+        near: Rect,
+        run: i64,
+    },
 }
 impl Violation {
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::Spacing { .. } => "same-net spacing",
+            Self::Area { .. } => "minimum area",
+            Self::Floating { .. } => "floating patch",
+            Self::Hole { .. } => "enclosed hole",
+            Self::Neck { .. } => "minimum width neck",
+            Self::Wide { .. } => "wide-metal spacing",
+        }
+    }
+    pub(crate) fn layer(&self) -> u32 {
+        match self {
+            Self::Spacing { layer, .. }
+            | Self::Area { layer, .. }
+            | Self::Floating { layer, .. }
+            | Self::Hole { layer, .. }
+            | Self::Neck { layer, .. }
+            | Self::Wide { layer, .. } => *layer,
+        }
+    }
     pub(crate) fn net(&self) -> u32 {
         match self {
             Self::Spacing { net, .. }
             | Self::Area { net, .. }
             | Self::Floating { net, .. }
-            | Self::Hole { net, .. } => *net,
+            | Self::Hole { net, .. }
+            | Self::Neck { net, .. }
+            | Self::Wide { net, .. } => *net,
         }
     }
     pub(crate) fn describe(&self) -> String {
@@ -105,6 +149,26 @@ impl Violation {
             Self::Hole { net, layer, rect } => {
                 format!("enclosed hole net {net} layer {layer} {}", r(rect))
             }
+            Self::Neck { net, layer, a, b } => {
+                format!(
+                    "minimum width neck net {net} layer {layer} {} {}",
+                    r(a),
+                    r(b)
+                )
+            }
+            Self::Wide {
+                owner,
+                other,
+                layer,
+                wide,
+                near,
+                run,
+                ..
+            } => format!(
+                "wide-metal spacing net {owner} vs net {other} layer {layer} run {run} {} {}",
+                r(wide),
+                r(near)
+            ),
         }
     }
 }
@@ -142,28 +206,146 @@ pub(crate) fn relation(a: Rect, b: Rect, spacing: i64) -> Relation {
 }
 
 /// The region between two disjoint rectangles: overlap span by gap, or the
-/// corner box; zero-size dimensions are widened by one DBU on each side.
-fn gap_region(a: Rect, b: Rect) -> Rect {
+/// corner box. A zero-size dimension is a contact line (or point); then each
+/// one-DBU strip beside the line (or each free corner square beside the
+/// point) is a candidate. Covering either side joins both rectangles through
+/// one polygon, and any point contact of that cover is its own near pair.
+fn gap_regions(a: Rect, b: Rect) -> [Option<Rect>; 2] {
     let (ox, oy) = (overlap_x(a, b), overlap_y(a, b));
-    let (mut lx, mut ux) = if ox > 0 {
+    let (lx, ux) = if ox > 0 {
         (a.lx.max(b.lx), a.ux.min(b.ux))
     } else {
         (a.ux.min(b.ux), a.lx.max(b.lx))
     };
-    let (mut ly, mut uy) = if oy > 0 {
+    let (ly, uy) = if oy > 0 {
         (a.ly.max(b.ly), a.uy.min(b.uy))
     } else {
         (a.uy.min(b.uy), a.ly.max(b.ly))
     };
-    if lx == ux {
-        lx -= 1;
-        ux += 1;
+    match (lx == ux, ly == uy) {
+        (false, false) => [Some(Rect { lx, ly, ux, uy }), None],
+        (true, false) => [
+            Some(Rect {
+                lx: lx - 1,
+                ux: lx,
+                ly,
+                uy,
+            }),
+            Some(Rect {
+                lx,
+                ux: lx + 1,
+                ly,
+                uy,
+            }),
+        ],
+        (false, true) => [
+            Some(Rect {
+                lx,
+                ux,
+                ly: ly - 1,
+                uy: ly,
+            }),
+            Some(Rect {
+                lx,
+                ux,
+                ly,
+                uy: ly + 1,
+            }),
+        ],
+        (true, true) => {
+            // `a` and `b` hold opposite quadrants around the point.
+            let square = |left: bool, below: bool| Rect {
+                lx: if left { lx - 1 } else { lx },
+                ux: if left { lx } else { lx + 1 },
+                ly: if below { ly - 1 } else { ly },
+                uy: if below { ly } else { ly + 1 },
+            };
+            let (left, below) = (a.ux <= lx, a.uy <= ly);
+            [Some(square(left, !below)), Some(square(!left, below))]
+        }
     }
-    if ly == uy {
-        ly -= 1;
-        uy += 1;
+}
+
+/// True when some gap region of `a` and `b` lies in the union of `covers`.
+fn gap_covered<I: Iterator<Item = Rect>>(
+    a: Rect,
+    b: Rect,
+    mut covers: impl FnMut() -> I,
+    work: &mut usize,
+    cap: usize,
+) -> Result<bool> {
+    for region in gap_regions(a, b).into_iter().flatten() {
+        if covered(region, covers(), work, cap)? {
+            return Ok(true);
+        }
     }
-    Rect { lx, ly, ux, uy }
+    Ok(false)
+}
+
+/// For a diagonal pair: is the corner of `a` that faces `b` no convex corner
+/// of the merged metal, because `covers` continue `a` past it along one of its
+/// two edges? The continuing shape is then nearer `b` and is its own pair.
+fn corner_hidden<I: Iterator<Item = Rect>>(
+    a: Rect,
+    b: Rect,
+    mut covers: impl FnMut() -> I,
+    work: &mut usize,
+    cap: usize,
+) -> Result<bool> {
+    let (right, up) = (b.lx >= a.ux, b.ly >= a.uy);
+    let (x, y) = (
+        if right { a.ux } else { a.lx },
+        if up { a.uy } else { a.ly },
+    );
+    let (outer_x, inner_x) = if right { (x, x + 1) } else { (x - 1, x) };
+    let (outer_y, inner_y) = if up { (y, y + 1) } else { (y - 1, y) };
+    // Just past the corner in x at a's own edge row, and in y at its column.
+    let along_x = Rect {
+        lx: outer_x,
+        ux: inner_x,
+        ly: if up { y - 1 } else { y },
+        uy: if up { y } else { y + 1 },
+    };
+    let along_y = Rect {
+        lx: if right { x - 1 } else { x },
+        ux: if right { x } else { x + 1 },
+        ly: outer_y,
+        uy: inner_y,
+    };
+    Ok(covered(along_x, covers(), work, cap)? || covered(along_y, covers(), work, cap)?)
+}
+
+/// A near pair is a violation unless the metal between it is covered or, for
+/// a diagonal pair, one of the two facing corners is not a real corner.
+fn near_ok<I: Iterator<Item = Rect>>(
+    a: Rect,
+    b: Rect,
+    mut covers: impl FnMut() -> I,
+    work: &mut usize,
+    cap: usize,
+) -> Result<bool> {
+    if overlap_x(a, b) < 0
+        && overlap_y(a, b) < 0
+        && (corner_hidden(a, b, &mut covers, work, cap)?
+            || corner_hidden(b, a, &mut covers, work, cap)?)
+    {
+        return Ok(true);
+    }
+    gap_covered(a, b, covers, work, cap)
+}
+
+/// Bounding box of every candidate gap region of `a` and `b`.
+fn gap_hull(a: Rect, b: Rect) -> Rect {
+    gap_regions(a, b)
+        .into_iter()
+        .flatten()
+        .reduce(|h, r| Rect {
+            lx: h.lx.min(r.lx),
+            ly: h.ly.min(r.ly),
+            ux: h.ux.max(r.ux),
+            uy: h.uy.max(r.uy),
+        })
+        .expect("a gap has a region")
 }
 
 fn intersects(a: Rect, b: Rect) -> bool {
@@ -244,13 +426,14 @@ pub(crate) fn local_ok(
         if relation(rect, *o, spacing) != Relation::Near {
             continue;
         }
-        let region = gap_region(rect, *o);
-        let rest = others
-            .iter()
-            .enumerate()
-            .filter(|(j, _)| *j != i)
-            .map(|(_, r)| *r);
-        if !covered(region, rest, work, cap)? {
+        let rest = || {
+            others
+                .iter()
+                .enumerate()
+                .filter(move |(j, _)| *j != i)
+                .map(|(_, r)| *r)
+        };
+        if !near_ok(rect, *o, rest, work, cap)? {
             return Ok(false);
         }
     }
@@ -357,6 +540,69 @@ pub(crate) fn fill_for_robust(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
         ux: ceil_to(r.ux, grid),
         uy: ceil_to(r.uy, grid),
     }
+}
+
+/// Smaller same-net bridges tried when the `fill_for_robust` box touches
+/// another net (two pads of one net a jog apart). Diagonal pairs: the two
+/// L shapes, each leg as thick as the shape it extends; facing pairs: a bar
+/// across the gap as tall (wide) as either shape, at least one width. The
+/// caller checks clearance and re-runs the rule check on the result.
+pub(crate) fn bridges(a: Rect, b: Rect, width: i64, grid: i64) -> Vec<Vec<Rect>> {
+    let snap = |r: Rect| Rect {
+        lx: floor_to(r.lx, grid),
+        ly: floor_to(r.ly, grid),
+        ux: ceil_to(r.ux, grid),
+        uy: ceil_to(r.uy, grid),
+    };
+    let (ox, oy) = (overlap_x(a, b), overlap_y(a, b));
+    let (lx, ux) = (a.lx.min(b.lx), a.ux.max(b.ux));
+    let (ly, uy) = (a.ly.min(b.ly), a.uy.max(b.uy));
+    // [lo, hi) widened about its centre to at least one width.
+    let span = |lo: i64, hi: i64| -> (i64, i64) {
+        let grow = (width - (hi - lo)).max(0);
+        (lo - grow / 2, hi + grow - grow / 2)
+    };
+    let mut out = Vec::new();
+    if ox <= 0 && oy <= 0 {
+        // `s` runs along y to the other's band, then a bar along x at that band.
+        for (s, o) in [(a, b), (b, a)] {
+            out.push(vec![
+                snap(Rect {
+                    lx: s.lx,
+                    ly,
+                    ux: s.ux,
+                    uy,
+                }),
+                snap(Rect {
+                    lx,
+                    ly: o.ly,
+                    ux,
+                    uy: o.uy,
+                }),
+            ]);
+        }
+    } else if ox <= 0 {
+        for s in [a, b] {
+            let (y0, y1) = span(s.ly, s.uy);
+            out.push(vec![snap(Rect {
+                lx,
+                ly: y0,
+                ux,
+                uy: y1,
+            })]);
+        }
+    } else {
+        for s in [a, b] {
+            let (x0, x1) = span(s.lx, s.ux);
+            out.push(vec![snap(Rect {
+                lx: x0,
+                ly,
+                ux: x1,
+                uy,
+            })]);
+        }
+    }
+    out
 }
 
 /// Bounding boxes of holes enclosed by a rectangle union. Small planes use
@@ -713,26 +959,61 @@ pub(crate) fn check(
                         Relation::Connected => {
                             let (x, y) = (find(&mut parent, i), find(&mut parent, j));
                             parent[x.max(y)] = x.min(y);
+                            if input.tracks.is_none()
+                                || (a.origin == Origin::Pin && b.origin == Origin::Pin)
+                            {
+                                continue;
+                            }
+                            if let Some((probes, _)) = neck(a.rect, b.rect, rule.width) {
+                                charge(work, n, cap)?;
+                                let closed = shapes.iter().enumerate().any(|(k, c)| {
+                                    k != i
+                                        && k != j
+                                        && probes.iter().any(|p| clip(*p, c.rect).is_some())
+                                });
+                                if !closed {
+                                    push_violation(
+                                        &mut out,
+                                        &mut diagnostic_shapes,
+                                        Violation::Neck {
+                                            net,
+                                            layer,
+                                            a: a.rect,
+                                            b: b.rect,
+                                        },
+                                        limits.max_rule_violations,
+                                    )?;
+                                }
+                            }
                         }
                         Relation::Far => {}
                         Relation::Near => {
                             if a.origin == Origin::Pin && b.origin == Origin::Pin {
                                 continue;
                             }
-                            let region = gap_region(a.rect, b.rect);
-                            let rest = shapes
-                                .iter()
-                                .enumerate()
-                                .filter(|(k, c)| {
-                                    *k != i
-                                        && *k != j
-                                        && c.rect.lx < region.ux
-                                        && c.rect.ux > region.lx
-                                        && c.rect.ly < region.uy
-                                        && c.rect.uy > region.ly
-                                })
-                                .map(|(_, c)| c.rect);
-                            if !covered(region, rest, work, cap)? {
+                            // One DBU wider: corner tests look just outside it.
+                            let hull = gap_hull(a.rect, b.rect);
+                            let region = Rect {
+                                lx: hull.lx - 1,
+                                ly: hull.ly - 1,
+                                ux: hull.ux + 1,
+                                uy: hull.uy + 1,
+                            };
+                            let rest = || {
+                                shapes
+                                    .iter()
+                                    .enumerate()
+                                    .filter(move |(k, c)| {
+                                        *k != i
+                                            && *k != j
+                                            && c.rect.lx < region.ux
+                                            && c.rect.ux > region.lx
+                                            && c.rect.ly < region.uy
+                                            && c.rect.uy > region.ly
+                                    })
+                                    .map(|(_, c)| c.rect)
+                            };
+                            if !near_ok(a.rect, b.rect, rest, work, cap)? {
                                 push_violation(
                                     &mut out,
                                     &mut diagnostic_shapes,
@@ -813,6 +1094,513 @@ pub(crate) fn check(
                 }
             }
         }
+    }
+    Ok(out)
+}
+
+fn flip_y(r: Rect) -> Rect {
+    Rect {
+        lx: r.lx,
+        ly: -r.uy,
+        ux: r.ux,
+        uy: -r.ly,
+    }
+}
+
+/// Stair-step overlap of `a` and `b` whose union narrows below `width` at the
+/// overlap diagonal: the two corner probes (unit squares just outside the
+/// union at its concave corners) and two fills, each closing one concave
+/// corner so the remaining corners are at least `width` apart. None when the
+/// pair is no stair step or the diagonal is wide enough.
+pub(crate) fn neck(a: Rect, b: Rect, width: i64) -> Option<([Rect; 2], [Rect; 2])> {
+    let (l, r) = if a.lx < b.lx { (a, b) } else { (b, a) };
+    if !(l.lx < r.lx && r.lx <= l.ux && l.ux < r.ux) {
+        return None;
+    }
+    let lower = r.ly < l.ly;
+    let (l, r) = if lower {
+        (flip_y(l), flip_y(r))
+    } else {
+        (l, r)
+    };
+    if !(l.ly < r.ly && r.ly <= l.uy && l.uy < r.uy) {
+        return None;
+    }
+    let (dx, dy) = (i128::from(l.ux - r.lx), i128::from(l.uy - r.ly));
+    if dx * dx + dy * dy >= i128::from(width) * i128::from(width) {
+        return None;
+    }
+    let probes = [
+        Rect {
+            lx: r.lx - 1,
+            ly: l.uy,
+            ux: r.lx,
+            uy: l.uy + 1,
+        },
+        Rect {
+            lx: l.ux,
+            ly: r.ly - 1,
+            ux: l.ux + 1,
+            uy: r.ly,
+        },
+    ];
+    let lower_right = Rect {
+        lx: l.ux,
+        ly: l.ly.max(r.ly.min(l.uy - width)),
+        ux: r.ux.min(l.ux.max(r.lx + width)),
+        uy: r.ly,
+    };
+    let upper_left = Rect {
+        lx: l.lx.max(r.lx.min(l.ux - width)),
+        ly: l.uy,
+        ux: r.lx,
+        uy: r.uy.min(l.uy.max(r.ly + width)),
+    };
+    let fills = [lower_right, upper_left];
+    Some(if lower {
+        (probes.map(flip_y), fills.map(flip_y))
+    } else {
+        (probes, fills)
+    })
+}
+
+fn clip(a: Rect, b: Rect) -> Option<Rect> {
+    let r = Rect {
+        lx: a.lx.max(b.lx),
+        ly: a.ly.max(b.ly),
+        ux: a.ux.min(b.ux),
+        uy: a.uy.min(b.uy),
+    };
+    (r.lx < r.ux && r.ly < r.uy).then_some(r)
+}
+
+/// The part of one connected same-net component wider than `width`: the
+/// union of all squares of side `width` inside it whose lower-left corners
+/// cover a positive area (a line exactly `width` wide is not wide). Exact;
+/// evaluated per source rectangle on a compressed grid of its `width`
+/// neighbourhood, which holds every square touching it. Output may overlap.
+pub(crate) fn wide_parts(
+    rects: &[Rect],
+    width: i64,
+    work: &mut usize,
+    cap: usize,
+) -> Result<Vec<Rect>> {
+    let mut out = Vec::new();
+    let Some(first) = rects.first() else {
+        return Ok(out);
+    };
+    let bbox = rects.iter().fold(*first, |b, r| Rect {
+        lx: b.lx.min(r.lx),
+        ly: b.ly.min(r.ly),
+        ux: b.ux.max(r.ux),
+        uy: b.uy.max(r.uy),
+    });
+    if bbox.ux - bbox.lx <= width || bbox.uy - bbox.ly <= width {
+        return Ok(out);
+    }
+    let candidates = |cs: &[i64]| -> Vec<i64> {
+        let (lo, hi) = (cs[0], cs[cs.len() - 1] - width);
+        let mut v: Vec<i64> = cs
+            .iter()
+            .flat_map(|&c| [c, c - width])
+            .filter(|&c| c >= lo && c <= hi)
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    for r in rects {
+        let window = Rect {
+            lx: r.lx - width,
+            ly: r.ly - width,
+            ux: r.ux + width,
+            uy: r.uy + width,
+        };
+        charge(work, rects.len(), cap)?;
+        let local: Vec<Rect> = rects.iter().filter_map(|&c| clip(c, window)).collect();
+        let mut xs: Vec<i64> = local.iter().flat_map(|c| [c.lx, c.ux]).collect();
+        let mut ys: Vec<i64> = local.iter().flat_map(|c| [c.ly, c.uy]).collect();
+        xs.sort_unstable();
+        xs.dedup();
+        ys.sort_unstable();
+        ys.dedup();
+        let (px, py) = (candidates(&xs), candidates(&ys));
+        if px.len() < 2 || py.len() < 2 {
+            continue;
+        }
+        let (nx, ny) = (xs.len() - 1, ys.len() - 1);
+        charge(
+            work,
+            (nx + 1) * (ny + 1) + local.len() + px.len() * py.len(),
+            cap,
+        )?;
+        // Prefix sums of uncovered compressed cells.
+        let mut covered = vec![false; nx * ny];
+        for c in &local {
+            let (x0, x1) = (
+                xs.partition_point(|&x| x < c.lx),
+                xs.partition_point(|&x| x < c.ux),
+            );
+            let (y0, y1) = (
+                ys.partition_point(|&y| y < c.ly),
+                ys.partition_point(|&y| y < c.uy),
+            );
+            charge(work, (x1 - x0) * (y1 - y0), cap)?;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    covered[y * nx + x] = true;
+                }
+            }
+        }
+        let mut free = vec![0u32; (nx + 1) * (ny + 1)];
+        for y in 0..ny {
+            for x in 0..nx {
+                free[(y + 1) * (nx + 1) + x + 1] = free[y * (nx + 1) + x + 1]
+                    + free[(y + 1) * (nx + 1) + x]
+                    - free[y * (nx + 1) + x]
+                    + u32::from(!covered[y * nx + x]);
+            }
+        }
+        // Columns/rows met by the open square (p, p + width) for a corner p
+        // inside the candidate cell (doubled coordinates: no breakpoint).
+        let span = |cs: &[i64], a: i64, b: i64| {
+            let p2 = a + b;
+            (
+                cs.partition_point(|&c| 2 * c < p2) - 1,
+                cs.partition_point(|&c| 2 * c < p2 + 2 * width),
+            )
+        };
+        for a in px.windows(2) {
+            let (x0, x1) = span(&xs, a[0], a[1]);
+            for c in py.windows(2) {
+                let (y0, y1) = span(&ys, c[0], c[1]);
+                let gaps = free[y1 * (nx + 1) + x1] + free[y0 * (nx + 1) + x0]
+                    - free[y0 * (nx + 1) + x1]
+                    - free[y1 * (nx + 1) + x0];
+                if gaps == 0 {
+                    let square = Rect {
+                        lx: a[0],
+                        ly: c[0],
+                        ux: a[1] + width,
+                        uy: c[1] + width,
+                    };
+                    if let Some(part) = clip(square, *r) {
+                        out.push(part);
+                    }
+                }
+            }
+        }
+    }
+    out.sort_unstable_by_key(|r| (r.lx, r.ly, r.ux, r.uy));
+    out.dedup();
+    Ok(out)
+}
+
+/// Connected components (overlap or edge contact) of one lx-sorted group.
+fn components(shapes: &[Shape], work: &mut usize, cap: usize) -> Result<Vec<Vec<usize>>> {
+    let n = shapes.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    for i in 0..n {
+        let a = shapes[i].rect;
+        for (j, b) in shapes.iter().enumerate().skip(i + 1) {
+            if b.rect.lx > a.ux {
+                break;
+            }
+            charge(work, 1, cap)?;
+            if relation(a, b.rect, 1) == Relation::Connected {
+                let (x, y) = (find(&mut parent, i), find(&mut parent, j));
+                parent[x.max(y)] = x.min(y);
+            }
+        }
+    }
+    let mut members = BTreeMap::<usize, Vec<usize>>::new();
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        members.entry(root).or_default().push(i);
+    }
+    Ok(members.into_values().collect())
+}
+
+/// Wide-metal spacing on layers with a `wide_spacing` row: the wide part of
+/// every net component (`wide_parts`) against the wires, via pads, patches
+/// and pins on that layer, including notches in the same polygon. Facing
+/// shapes closer than the wide spacing are paired; exposed intervals merge per
+/// (component, other net, side), and a merged run longer than the parallel
+/// run is a violation. Merging runs at slightly different gaps errs
+/// conservative. Fixed obstructions are not compared; the foundry deck stays
+/// the DRC oracle. Candidate scans, corridor subtractions and local grids
+/// all charge the comparison budget.
+pub(crate) fn wide_check(
+    input: &RouteInput,
+    routes: &Routes,
+    limits: &RouteLimits,
+    work: &mut usize,
+) -> Result<Vec<Violation>> {
+    let cap = limits.max_comparisons;
+    let rule = |layer: u32| {
+        input
+            .layers
+            .get(layer as usize)
+            .and_then(|l| l.wide_spacing)
+    };
+    if input.layers.iter().all(|l| l.wide_spacing.is_none()) {
+        return Ok(Vec::new());
+    }
+    struct Part {
+        layer: u32,
+        net: u32,
+        comp: usize,
+        patched: bool,
+        rect: Rect,
+    }
+    let index = crate::rule_index::RuleIndex::new(input, routes, work, cap)?;
+    let mut parts = Vec::new();
+    // Keep only components with wide metal. Their original rectangles tell
+    // which same-net facing spans contain metal instead of a real gap.
+    let mut members: Vec<(Vec<Rect>, i64)> = Vec::new();
+    let mut member_shapes = 0usize;
+    let mut comp = 0usize;
+    for &net in index.nets() {
+        let groups = index.collect(input, routes, net, limits, work)?;
+        for (&(net, layer), shapes) in &groups {
+            let Some(w) = rule(layer) else {
+                continue;
+            };
+            for list in components(shapes, work, cap)? {
+                let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
+                let wide = wide_parts(&rects, w.width, work, cap)?;
+                if wide.is_empty() {
+                    continue;
+                }
+                let patched = list.iter().any(|&i| shapes[i].origin == Origin::Patch);
+                for rect in wide {
+                    parts.push(Part {
+                        layer,
+                        net,
+                        comp,
+                        patched,
+                        rect,
+                    });
+                }
+                let mut metal = rects;
+                member_shapes = member_shapes
+                    .checked_add(metal.len())
+                    .filter(|&n| n <= limits.max_obstacles)
+                    .ok_or_else(|| budget("wide-metal component storage"))?;
+                charge(work, metal.len().saturating_mul(32), cap)?;
+                metal.sort_unstable_by_key(|r| r.lx);
+                let widest = metal.iter().map(|r| r.ux - r.lx).max().unwrap_or(0);
+                members.push((metal, widest));
+                comp += 1;
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Ok(Vec::new());
+    }
+    charge(work, parts.len().saturating_mul(32), cap)?;
+    parts.sort_unstable_by_key(|p| (p.layer, p.rect.lx, p.rect.ly, p.comp));
+    let mut reach = BTreeMap::<u32, i64>::new();
+    for p in &parts {
+        let e = reach.entry(p.layer).or_insert(0);
+        *e = (*e).max(p.rect.ux - p.rect.lx);
+    }
+    // (component, other net, side) -> facing intervals, first pair, bounding
+    // box of the facing shapes of the other net, routed, bounding box of the
+    // facing wide parts.
+    type Key = (usize, u32, u8);
+    let mut runs = BTreeMap::<Key, (Vec<(i64, i64)>, usize, Rect, bool, Rect)>::new();
+    let mut visit = |layer: u32, net: u32, rect: Rect, routed: bool, work: &mut usize| {
+        let Some(w) = rule(layer) else {
+            return Ok(());
+        };
+        let s = w.spacing;
+        let from = rect.lx - s - reach[&layer];
+        let lo = parts.partition_point(|p| (p.layer, p.rect.lx) < (layer, from));
+        let hi = parts.partition_point(|p| (p.layer, p.rect.lx) < (layer, rect.ux + s));
+        charge(work, hi.saturating_sub(lo) + 1, cap)?;
+        for (k, p) in parts.iter().enumerate().take(hi).skip(lo) {
+            let o = p.rect;
+            let (side, gap, a, b) = if rect.ux <= o.lx {
+                (0, o.lx - rect.ux, o.ly.max(rect.ly), o.uy.min(rect.uy))
+            } else if rect.lx >= o.ux {
+                (1, rect.lx - o.ux, o.ly.max(rect.ly), o.uy.min(rect.uy))
+            } else if rect.uy <= o.ly {
+                (2, o.ly - rect.uy, o.lx.max(rect.lx), o.ux.min(rect.ux))
+            } else if rect.ly >= o.uy {
+                (3, rect.ly - o.uy, o.lx.max(rect.lx), o.ux.min(rect.ux))
+            } else {
+                continue;
+            };
+            if gap <= 0 || gap >= s || b <= a {
+                continue;
+            }
+            let mut facing = vec![(a, b)];
+            if p.net == net {
+                // A net can contain a long notch in one polygon. Discard
+                // only facing spans occupied by metal, never the whole
+                // component: a bridge elsewhere does not remove the gap.
+                let corridor = match side {
+                    0 => Rect {
+                        lx: rect.ux,
+                        ly: a,
+                        ux: o.lx,
+                        uy: b,
+                    },
+                    1 => Rect {
+                        lx: o.ux,
+                        ly: a,
+                        ux: rect.lx,
+                        uy: b,
+                    },
+                    2 => Rect {
+                        lx: a,
+                        ly: rect.uy,
+                        ux: b,
+                        uy: o.ly,
+                    },
+                    _ => Rect {
+                        lx: a,
+                        ly: o.uy,
+                        ux: b,
+                        uy: rect.ly,
+                    },
+                };
+                let (metal, widest) = &members[p.comp];
+                let from = metal.partition_point(|r| r.lx < corridor.lx - widest);
+                let mut empty = vec![corridor];
+                for m in &metal[from..] {
+                    if m.lx >= corridor.ux || empty.is_empty() {
+                        break;
+                    }
+                    charge(work, 1, cap)?;
+                    if !intersects(*m, corridor) {
+                        continue;
+                    }
+                    charge(work, empty.len(), cap)?;
+                    let mut next = Vec::new();
+                    for gap in empty {
+                        subtract(gap, *m, &mut next);
+                    }
+                    if next.len() > MAX_PIECES {
+                        return Err(budget("wide-metal empty corridor pieces"));
+                    }
+                    empty = next;
+                }
+                // Project only after subtracting metal in both dimensions.
+                // A tongue which enters part of the gap leaves empty space
+                // at the same height and cannot shorten the parallel run.
+                facing = empty
+                    .iter()
+                    .map(|r| if side < 2 { (r.ly, r.uy) } else { (r.lx, r.ux) })
+                    .collect();
+                if facing.is_empty() {
+                    continue;
+                }
+            }
+            let e = runs
+                .entry((p.comp, net, side))
+                .or_insert_with(|| (Vec::new(), k, rect, false, o));
+            e.2 = Rect {
+                lx: e.2.lx.min(rect.lx),
+                ly: e.2.ly.min(rect.ly),
+                ux: e.2.ux.max(rect.ux),
+                uy: e.2.uy.max(rect.uy),
+            };
+            e.4 = Rect {
+                lx: e.4.lx.min(o.lx),
+                ly: e.4.ly.min(o.ly),
+                ux: e.4.ux.max(o.ux),
+                uy: e.4.uy.max(o.uy),
+            };
+            if e.0.len() >= MAX_PIECES * 64 {
+                charge(work, e.0.len().saturating_mul(8), cap)?;
+                e.0.sort_unstable();
+                let mut merged: Vec<(i64, i64)> = Vec::with_capacity(e.0.len());
+                for &(a, b) in &e.0 {
+                    match merged.last_mut() {
+                        Some(last) if a <= last.1 => last.1 = last.1.max(b),
+                        _ => merged.push((a, b)),
+                    }
+                }
+                if merged.len() >= MAX_PIECES * 64 {
+                    return Err(budget("wide-metal facing intervals"));
+                }
+                e.0 = merged;
+            }
+            e.0.extend(facing);
+            e.3 |= routed;
+        }
+        Ok::<(), Error>(())
+    };
+    let routing = |l: u32| {
+        input
+            .layers
+            .get(l as usize)
+            .is_some_and(|l| l.vertical.is_some())
+    };
+    for wire in &routes.wires {
+        if rule(wire.layer).is_some() {
+            let rect = wire_rect(wire, input.layers[wire.layer as usize].width)?;
+            visit(wire.layer, wire.net, rect, true, work)?;
+        }
+    }
+    for via in &routes.vias {
+        let kind = input
+            .vias
+            .get(via.kind as usize)
+            .ok_or_else(|| Error::Invalid("wide-metal check via kind".into()))?;
+        for s in &kind.shapes {
+            if routing(s.layer) && rule(s.layer).is_some() {
+                visit(s.layer, via.net, shifted(s.rect, via.at)?, true, work)?;
+            }
+        }
+    }
+    for patch in &routes.patches {
+        visit(patch.layer, patch.net, patch.rect, true, work)?;
+    }
+    for t in &input.terminals {
+        for s in &t.shapes {
+            visit(s.layer, t.net, s.rect, false, work)?;
+        }
+    }
+    let mut out = Vec::new();
+    let mut diagnostic_shapes = 0;
+    for ((_, other, _), (mut list, k, near, routed, wide)) in runs {
+        let p = &parts[k];
+        let Some(w) = rule(p.layer) else {
+            continue;
+        };
+        charge(work, list.len().saturating_mul(8), cap)?;
+        list.sort_unstable();
+        let (mut run, mut cur) = (0i64, list[0]);
+        for &(a, b) in &list[1..] {
+            if a <= cur.1 {
+                cur.1 = cur.1.max(b);
+            } else {
+                run = run.max(cur.1 - cur.0);
+                cur = (a, b);
+            }
+        }
+        run = run.max(cur.1 - cur.0);
+        if run <= w.parallel_run {
+            continue;
+        }
+        let net = if p.patched || !routed { p.net } else { other };
+        push_violation(
+            &mut out,
+            &mut diagnostic_shapes,
+            Violation::Wide {
+                net,
+                owner: p.net,
+                other,
+                layer: p.layer,
+                wide,
+                near,
+                run,
+            },
+            limits.max_rule_violations,
+        )?;
     }
     Ok(out)
 }
@@ -900,6 +1688,117 @@ mod tests {
         assert_eq!(relation(f, r(0, 0, 50, 50), 20), Relation::Connected);
         assert_eq!(relation(f, r(55, 55, 100, 100), 20), Relation::Connected);
     }
+    #[test]
+    fn contact_line_gap_is_covered_from_either_side() {
+        // a sits on a third shape c; b lies inside c, its top on c's edge.
+        let a = r(0, 200, 200, 375);
+        let b = r(330, 0, 620, 200);
+        let c = r(0, 0, 620, 200);
+        let mut w = 0;
+        assert_eq!(relation(a, b, 210), Relation::Near);
+        assert!(local_ok(a, &[b, c], 210, &mut w, 10_000).unwrap());
+        // Without c the corner spacing of 130 remains. A strip under the gap
+        // alone covers the a-b pair but meets a at a point, itself near.
+        assert!(!local_ok(a, &[b], 210, &mut w, 10_000).unwrap());
+        let strip = r(200, 0, 330, 200);
+        assert_eq!(relation(a, strip, 210), Relation::Near);
+        assert!(!local_ok(a, &[b, strip], 210, &mut w, 10_000).unwrap());
+        // Point contact: either free corner square joins the pair.
+        let p = r(0, 0, 100, 100);
+        let q = r(100, 100, 200, 200);
+        assert!(!local_ok(p, &[q], 210, &mut w, 10_000).unwrap());
+        assert!(local_ok(p, &[q, r(0, 100, 100, 200)], 210, &mut w, 10_000).unwrap());
+        assert!(local_ok(p, &[q, r(100, 0, 200, 100)], 210, &mut w, 10_000).unwrap());
+    }
+    #[test]
+    fn diagonal_pair_counts_only_real_corners() {
+        // Escape pad `b` under a wire `w` that turns down along `v`: the pocket
+        // between b and w is a notch until `f` fills it. Pad `a` on the wire
+        // has no free corner toward b, so the a-b pair adds nothing.
+        let a = r(65, 500, 355, 700);
+        let b = r(425, 35, 625, 325);
+        let w = r(110, 500, 730, 700);
+        let v = r(530, 80, 730, 700);
+        let f = r(425, 325, 530, 500);
+        let mut work = 0;
+        assert!(!local_ok(a, &[b], 210, &mut work, 10_000).unwrap());
+        assert!(!local_ok(b, &[a, w, v], 210, &mut work, 10_000).unwrap());
+        assert!(local_ok(b, &[a, w, v, f], 210, &mut work, 10_000).unwrap());
+    }
+    #[test]
+    fn stair_step_neck_is_found_and_each_fill_clears_it() {
+        let cap = 1 << 30;
+        // Route end over an off-track boundary pin (130 x 140 overlap).
+        let wire = r(699_830, 849_560, 720_190, 849_760);
+        let pin = r(720_060, 849_620, 720_440, 850_000);
+        let (_, fills) = neck(wire, pin, 200).unwrap();
+        assert_eq!(fills[0], r(720_190, 849_560, 720_260, 849_620));
+        assert_eq!(fills[1], r(719_990, 849_760, 720_060, 849_820));
+        // Diagonal via pads (105 x 170), mirrored order and orientation.
+        let low = r(538_410, 283_700, 538_610, 283_990);
+        let high = r(538_505, 283_820, 538_795, 284_020);
+        assert!(neck(high, low, 200).is_some());
+        let flip = |q: Rect| r(q.lx, -q.uy, q.ux, -q.ly);
+        let (probes, fills) = neck(flip(low), flip(high), 200).unwrap();
+        for f in fills {
+            // Each fill closes one concave corner and leaves no stair step
+            // narrower than the width against either source rectangle.
+            assert!(probes.iter().any(|p| clip(*p, f).is_some()));
+            let a = union_area(&[flip(low), flip(high), f], &mut 0, cap).unwrap();
+            assert!(a > union_area(&[flip(low), flip(high)], &mut 0, cap).unwrap());
+            assert!(neck(f, flip(low), 200).is_none() && neck(f, flip(high), 200).is_none());
+        }
+        // Wide enough diagonals, contained or aligned pairs are no necks.
+        assert!(neck(r(0, 0, 200, 1000), r(100, 500, 300, 1500), 200).is_none());
+        assert!(neck(r(0, 0, 200, 1000), r(-45, 400, 245, 600), 200).is_none());
+        assert!(neck(r(0, 0, 200, 1000), r(0, 900, 2000, 1100), 200).is_none());
+        // Abutting stair step: the neck is the 100-long contact.
+        assert!(neck(r(0, 0, 200, 1000), r(200, 900, 400, 2000), 200).is_some());
+    }
+
+    #[test]
+    fn wide_parts_keep_only_metal_wider_than_the_rule() {
+        let mut w = 0;
+        let cap = 1 << 30;
+        let area = |parts: &[Rect]| union_area(parts, &mut 0, cap).unwrap();
+        // Two 200-wide tracks 220 apart joined by a fill: 620 wide over 1000.
+        let joined = [
+            r(0, 0, 200, 3000),
+            r(420, 1000, 620, 2000),
+            r(200, 1000, 420, 2000),
+        ];
+        let parts = wide_parts(&joined, 390, &mut w, cap).unwrap();
+        assert_eq!(area(&parts), 620 * 1000);
+        assert!(parts.iter().all(|p| p.ly >= 1000 && p.uy <= 2000));
+        // A line exactly 390 wide is not wide; 395 is, all of it.
+        assert!(
+            wide_parts(&[r(0, 0, 390, 5000)], 390, &mut w, cap)
+                .unwrap()
+                .is_empty()
+        );
+        let line = wide_parts(&[r(0, 0, 395, 5000)], 390, &mut w, cap).unwrap();
+        assert_eq!(area(&line), 395 * 5000);
+        // Default-width L and T junctions with an off-axis via pad stay narrow.
+        let junction = [
+            r(0, 0, 200, 3000),
+            r(0, 1400, 3000, 1600),
+            r(-45, 1400, 245, 1600),
+        ];
+        assert!(wide_parts(&junction, 390, &mut w, cap).unwrap().is_empty());
+        // A pad 175 from its own track, filled: 575 wide only where filled.
+        let notch = [
+            r(0, 0, 200, 4000),
+            r(420, 0, 620, 4000),
+            r(-45, 2000, 245, 2200),
+            r(200, 2000, 420, 2200),
+        ];
+        let parts = wide_parts(&notch, 390, &mut w, cap).unwrap();
+        assert!(
+            parts.is_empty(),
+            "200-high bridge is not 390 high: {parts:?}"
+        );
+    }
+
     #[test]
     fn notch_against_own_pin_leg_is_detected_and_covered_gap_is_not() {
         // Pad protrudes 5 DBU past a 375-wide leg; bar above at 222 < 230.

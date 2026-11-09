@@ -82,6 +82,26 @@ its single input pin. An inverting, multi-input or unprofiled cell gives
 `ECO_NOT_BUFFER`. Every operation is checked against a bound
 (`max_operations` 4096) and the Verilog AST limits.
 
+Grouped macro ports require `--cell-buses buses.json` on `hold-eco` and
+`apply-eco`. This explicit schema is `{ "master": { "port": [msb, lsb] } }`;
+bracketed scalar port names are never guessed to be buses. The original LEF
+must describe every member with one uniform direction, and a moved sink must
+still be an input. The planner binds report names such as `mem/A_DIN[0]` to
+the corresponding bit of the grouped `.A_DIN(...)` connection. It rewrites
+only that bit, preserving the grouped port and its siblings. Both descending
+and ascending declarations, exact-width slices, concatenations and sized
+constants are supported; unsupported widths or expressions are rejected.
+
+`buffer_sinks` also follows immutable internal scalar/vector `assign` aliases
+when explicit bus metadata is supplied. Escaped bracketed scalar names remain
+distinct from actual vector bits. The index uses compact IDs, memoized roots,
+cycle and multiple-driver checks, a 64 MiB memory cap and bounded work; output
+port assignments remain roots because an ECO can move them. The alias assigns
+themselves are retained. Schemas are capped at 256 masters, 65,536 member pins
+and 2 MiB JSON, and expression projection has a separate 64 MiB allowance.
+The input receipt records the schema hash. These additions retain the
+`spef_rc`, propagated-clock and revision-provenance gates for hold planning.
+
 ## Delay-cell profiles (`fixtures/pdk/<pdk>-delay-cells.json`)
 
 `scripts/build_delay_cells.py` reads the three owner-fixed corner Liberty
@@ -221,6 +241,29 @@ are unaffected.
 
 LEF `ANTENNACELL` diodes may stay on the clock source net as passive loads.
 They still count toward the fanout limit.
+
+## Hilbert clustering and buffer-tree regrouping
+
+`clock.clustering` is `raster` (default, unchanged) or `hilbert`. Raster order
+sorts sinks by row then x, so a group of `max_fanout` sinks can span the whole
+die width. Hilbert order sorts by position on a square Hilbert curve over the
+sink bounding box, so consecutive sinks, and therefore each group, stay compact
+at every level. In Hilbert mode the placement seed drops the CTS buffers, which
+then start from their own pins' centroid.
+
+`clock.regroup_prefixes` (Hilbert only, at most 16 names) names non-clock
+buffer trees written as `<label>_<depth>_<index>`, depth 0 driving the sinks.
+Buffers of one label and depth carry the same signal, so their sinks may be
+exchanged freely. From the leaves up, each level's sinks are re-split into
+contiguous Hilbert chunks, keeping every buffer's sink count. Buffer inputs are
+never changed. A level is skipped when a buffer has other than one output,
+its output net is a port, appears in an `assign`, or is used through a
+bit/part-select or concatenation. Connection work is capped at 4M. The
+regrouped names are listed in the clock report as `regrouped`.
+
+On Ibex/IHP (run05 frontend replay) total signal HPWL fell from 1288 mm to
+1158 mm (Hilbert) and 1050 mm (Hilbert plus regroup); clock leaf HPWL fell
+from 154 mm to 28 mm. Initial unrouted nets fell from 468 to 393 and 305.
 
 ### Evaluation (`scripts/cts_drive_eval.py`, iteration 0, RustSTA, ss+max)
 

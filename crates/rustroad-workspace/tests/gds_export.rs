@@ -72,6 +72,8 @@ fn limits() -> Limits {
 }
 fn config() -> PhysicalConfig {
     PhysicalConfig {
+        macro_supply: None,
+        rail_via_stack: Vec::new(),
         power_net: "VDD".into(),
         ground_net: "VSS".into(),
         power_pin: "VDD".into(),
@@ -96,6 +98,7 @@ fn config() -> PhysicalConfig {
         filler_cells: vec!["FILL".into()],
         alternating_rows: true,
         cell_spacing_sites: 0,
+        placement_blockages: Vec::new(),
         io_width: None,
         io_min_area: false,
         io_spacing: None,
@@ -107,6 +110,7 @@ fn config() -> PhysicalConfig {
         port_buffer: None,
         input_buffer: None,
         clock: Some(rustroad_workspace::clock::ClockConfig {
+            root_net: None,
             port: "a".into(),
             cell: "BUF".into(),
             input_pin: "A".into(),
@@ -116,6 +120,8 @@ fn config() -> PhysicalConfig {
             max_buffers: 10,
             max_work: 1000,
             level_cells: Vec::new(),
+            clustering: Default::default(),
+            regroup_prefixes: Vec::new(),
         }),
         placer: None,
         io_plan: None,
@@ -517,14 +523,45 @@ fn def_and_gds_write_merged_runs_with_the_stored_lattice_metal() {
             Some(&"+") if t.get(1) == Some(&"ROUTED") => 2,
             _ => continue,
         };
-        // `<layer> ( x y ) ( x y )` is a wire; vias and RECT patches differ.
-        if t.len() >= at + 9 && t[at + 1] == "(" && t[at + 5] == "(" {
-            let n = |i: usize| t[at + i].parse::<i64>().unwrap();
-            written
-                .entry((net.clone(), t[at].to_string()))
-                .or_default()
-                .push(rect([n(2), n(3)], [n(6), n(7)]));
-            paths += 1;
+        // A standard connected route may continue after each point/via. Expand
+        // its wire segments independently of the exporter before comparing metal.
+        let mut layer = t[at];
+        assert_eq!(t[at + 1], "(");
+        let mut point = [
+            t[at + 2].parse::<i64>().unwrap(),
+            t[at + 3].parse().unwrap(),
+        ];
+        assert_eq!(t[at + 4], ")");
+        let mut cursor = at + 5;
+        while cursor < t.len() {
+            match t[cursor] {
+                "(" => {
+                    let next = [
+                        t[cursor + 1].parse::<i64>().unwrap(),
+                        t[cursor + 2].parse().unwrap(),
+                    ];
+                    assert_eq!(t[cursor + 3], ")");
+                    written
+                        .entry((net.clone(), layer.to_string()))
+                        .or_default()
+                        .push(rect(point, next));
+                    point = next;
+                    paths += 1;
+                    cursor += 4;
+                }
+                "RECT" | ";" => break,
+                via => {
+                    // These are the two original masters in this fixed LEF fixture.
+                    layer = match (via, layer) {
+                        ("V12", "M1") => "M2",
+                        ("V12", "M2") => "M1",
+                        ("V23", "M2") => "M3",
+                        ("V23", "M3") => "M2",
+                        _ => panic!("unexpected fixture via {via} on {layer}"),
+                    };
+                    cursor += 1;
+                }
+            }
         }
     }
     assert_eq!(
