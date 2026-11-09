@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/rustroad-wordmark.svg" alt="RustROAD" width="440">
+  <img src="docs/assets/rustroad-wordmark.svg" alt="RustROAD" width="360">
 </p>
 
 <h1 align="center">Physical design for the next design iteration.</h1>
@@ -13,7 +13,7 @@
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/rustroad-banner.svg">
-  <img src="docs/assets/rustroad-banner.gif" alt="RustROAD implements placement, clock trees, routing, extraction and GDS export" width="1200" height="360">
+  <img src="docs/assets/rustroad-banner.gif" alt="RustROAD implements placement, clock trees, routing, extraction and GDS export" width="1200">
 </picture>
 
 RustROAD implements placement, clock trees, routing, extraction and GDS export. The recorded small-block baseline spans SKY130 HD and GF180 7T: **15 ordinary passes and one declared deviation**. OpenC910 physical implementation remains unverified.

@@ -2,7 +2,7 @@
 
 ![RustROAD mark](../assets/rustroad-logo.svg)
 
-All six modules share the same chip frame, copper/mint palette and three-second feedback animation. Only the central symbol and product title change.
+All modules share the Signal Forge chip frame, copper/teal palette and 1200 × 400 three-card pipeline animation. Only the central symbol, product title and module workflow diagram change.
 
 [Canonical brand guide](https://lab-emi.github.io/RustEDA/brand/) · [Artwork generator](https://github.com/lab-emi/RustEDA/blob/main/scripts/generate_brand.py)
 
