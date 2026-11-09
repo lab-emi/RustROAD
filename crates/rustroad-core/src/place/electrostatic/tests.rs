@@ -9,6 +9,7 @@ use serde_json::json;
 fn run_meter<T>(config: &ElectrostaticConfig, f: impl FnOnce(&mut Meter<'_>) -> T) -> T {
     let mut counts = Counters::default();
     let mut work = Work {
+        held: 0,
         used: 0,
         max: 20_000_000_000,
     };
@@ -52,6 +53,7 @@ fn total_and_additional_work_caps_compose_without_spending_the_budget() {
         let cap = super::refinement_work_limit(caller, baseline, additional);
         assert_eq!(cap, expected);
         let mut work = Work {
+            held: 0,
             used: baseline,
             max: cap,
         };

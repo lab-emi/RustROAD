@@ -24,10 +24,19 @@
 use crate::{Error, Result};
 use rayon::prelude::*;
 mod electrostatic;
+pub use electrostatic::diagnostics::{
+    DiagnosticContext, DiagnosticPhase, DiagnosticPhaseView, DiagnosticResult, DiagnosticStage,
+    DiagnosticSummary, NativeCost, diagnose_cpu_ref,
+};
 pub use electrostatic::{
     Counters as ElectrostaticCounters, ElectrostaticConfig, ElectrostaticReport,
     StageReport as ElectrostaticStageReport,
 };
+
+/// Actual explicitly installed pool size, without initializing a global pool.
+pub fn diagnostic_pool_threads() -> Option<usize> {
+    rayon::current_thread_index().map(|_| rayon::current_num_threads())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PinRef {
@@ -184,16 +193,57 @@ fn invalid(s: &str) -> Error {
 struct Work {
     used: u64,
     max: u64,
+    // Diagnostic reservations are never reported as completed work.
+    held: u64,
 }
 impl Work {
     fn add(&mut self, n: u64) -> Result<()> {
         let next = self
             .used
             .checked_add(n)
-            .filter(|v| *v <= self.max)
+            .filter(|v| {
+                v.checked_add(self.held)
+                    .is_some_and(|total| total <= self.max)
+            })
             .ok_or_else(|| budget("work limit"))?;
         self.used = next;
         Ok(())
+    }
+
+    fn reserve(&mut self, units: u64) -> Result<()> {
+        let held = self
+            .held
+            .checked_add(units)
+            .filter(|held| {
+                self.used
+                    .checked_add(*held)
+                    .is_some_and(|total| total <= self.max)
+            })
+            .ok_or_else(|| budget("diagnostic work reservation"))?;
+        self.held = held;
+        Ok(())
+    }
+
+    fn consume_reserved(&mut self, units: u64) -> Result<()> {
+        let held = self
+            .held
+            .checked_sub(units)
+            .ok_or_else(|| budget("diagnostic reservation exhausted"))?;
+        let used = self
+            .used
+            .checked_add(units)
+            .filter(|used| {
+                used.checked_add(held)
+                    .is_some_and(|total| total <= self.max)
+            })
+            .ok_or_else(|| budget("diagnostic reserved work overflow"))?;
+        self.held = held;
+        self.used = used;
+        Ok(())
+    }
+
+    fn release_reserved(&mut self) -> u64 {
+        std::mem::take(&mut self.held)
     }
 }
 
@@ -1161,6 +1211,7 @@ pub fn place_seeded(
         return Err(invalid("seed count differs from the cell count"));
     }
     let mut work = Work {
+        held: 0,
         used: 0,
         max: limits.max_work,
     };
@@ -1554,6 +1605,7 @@ fn place_legacy(
     validate(problem, config, limits)?;
     let n = problem.widths.len();
     let mut work = Work {
+        held: 0,
         used: 0,
         max: limits.max_work,
     };
@@ -1757,6 +1809,7 @@ mod tests {
             intervals,
         };
         let mut work = Work {
+            held: 0,
             used: 0,
             max: 1_000_000,
         };
@@ -2074,6 +2127,7 @@ mod tests {
         let pos: Vec<[f64; 2]> = (0..20).map(|i| [390.0 - i as f64, 350.0]).collect();
         let mut cells: Vec<usize> = (0..20).collect();
         let mut work = Work {
+            held: 0,
             used: 0,
             max: 1_000_000,
         };
@@ -2140,6 +2194,7 @@ mod tests {
         let expected: Vec<[i64; 2]> = (0..n).map(|i| [i as i64 * 20, 0]).collect();
         let mut positions = expected.clone();
         let mut work = Work {
+            held: 0,
             used: 0,
             max: 2_000_000,
         };
@@ -2286,6 +2341,7 @@ mod tests {
             }],
         };
         let mut work = Work {
+            held: 0,
             used: 0,
             max: 1_000,
         };

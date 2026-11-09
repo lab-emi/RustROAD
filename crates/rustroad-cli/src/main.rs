@@ -93,6 +93,16 @@ enum Command {
         #[arg(long)]
         seed: Option<PathBuf>,
     },
+    /// Research-only stage-current observations; writes no physical design revision.
+    PlaceP1Diagnose {
+        #[arg(long)]
+        base_rev: String,
+        /// Fresh disjoint private diagnostic workspace (never adopted).
+        #[arg(long)]
+        out_workspace: PathBuf,
+        #[arg(long)]
+        out_base_rev: String,
+    },
     /// Build a bounded level-balanced clock-buffer topology, then replace placement.
     ClockTree {
         #[arg(long)]
@@ -529,6 +539,38 @@ fn emit(value: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn emit_diagnostic(value: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
+    // A broken pipe/serialization failure after publication leaves a provisional
+    // HEAD, not an accepted diagnostic. The outer actual receipt must show exit0.
+    struct Bounded(Vec<u8>);
+    impl Write for Bounded {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self
+                .0
+                .len()
+                .checked_add(bytes.len())
+                .is_none_or(|n| n > 64 << 10)
+            {
+                return Err(io::Error::other("diagnostic CLI receipt cap"));
+            }
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut bytes = Bounded(Vec::new());
+    bytes.0.try_reserve_exact(64 << 10)?;
+    serde_json::to_writer(&mut bytes, value)?;
+    bytes.write_all(b"\n")?;
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    output.write_all(&bytes.0)?;
+    output.flush()?;
+    Ok(())
+}
+
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let parser_limits = rustroad_formats::verilog::VerilogLimits {
         max_input_bytes: cli.max_input_mib as usize * 1024 * 1024,
@@ -761,6 +803,17 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             &limits,
             net_weights.as_deref(),
             seed.as_deref(),
+        )?),
+        Command::PlaceP1Diagnose {
+            base_rev,
+            out_workspace,
+            out_base_rev,
+        } => emit_diagnostic(&rustroad_workspace::placement_diagnostics::diagnose(
+            &workspace,
+            &base_rev,
+            &out_workspace,
+            &out_base_rev,
+            &limits,
         )?),
         Command::ClockTree { base_rev, sdc } => {
             emit(&rustroad_workspace::clock::synthesize_with_sdc(
@@ -1142,6 +1195,14 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     let cli = Cli::parse();
+    if matches!(&cli.command, Command::PlaceP1Diagnose { .. }) && cli.threads > 4 {
+        let _ = writeln!(
+            io::stderr().lock(),
+            "{}",
+            serde_json::json!({"status":"error","code":"BUDGET_EXCEEDED","message":"diagnostic supports at most four numerical pool threads"})
+        );
+        std::process::exit(2);
+    }
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(usize::from(cli.threads))
         .build();
@@ -1168,6 +1229,74 @@ fn main() {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn diagnostic_output_base_reaches_workspace_conflict_before_source_loading() {
+        // Three HEAD-only outputs <128B plus a two-thread local pool. This
+        // exercises CLI dispatch/error variants, not geometry or a PDK oracle.
+        struct Temp(PathBuf);
+        impl Drop for Temp {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = Temp(std::env::temp_dir().join(format!(
+            "rustroad-p1-output-base-{}-{stamp}",
+            std::process::id()
+        )));
+        std::fs::create_dir(&root.0).unwrap();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        for (name, head, base, prefix) in [
+            (
+                "mismatch",
+                b"rev7\n".as_slice(),
+                "empty",
+                "REVISION_CONFLICT:",
+            ),
+            ("matching", b"rev7\n", "rev7", "INVALID_WORKSPACE:"),
+            ("invalid", b"rev07\n", "empty", "INVALID_WORKSPACE:"),
+        ] {
+            let output = root.0.join(name);
+            std::fs::create_dir(&output).unwrap();
+            std::fs::write(output.join("HEAD"), head).unwrap();
+            let mut permissions = std::fs::metadata(output.join("HEAD"))
+                .unwrap()
+                .permissions();
+            permissions.set_readonly(true);
+            std::fs::set_permissions(output.join("HEAD"), permissions).unwrap();
+            let source = root.0.join("source-not-created");
+            let cli = Cli::try_parse_from([
+                "rustroad",
+                "--workspace",
+                source.to_str().unwrap(),
+                "--threads",
+                "2",
+                "place-p1-diagnose",
+                "--base-rev",
+                "rev1",
+                "--out-workspace",
+                output.to_str().unwrap(),
+                "--out-base-rev",
+                base,
+            ])
+            .unwrap();
+            let message = pool.install(|| run(cli).unwrap_err().to_string());
+            assert!(message.starts_with(prefix), "{message}");
+            if name == "matching" {
+                assert!(message.contains("OUTPUT_NOT_FRESH"));
+            }
+            assert_eq!(std::fs::read(output.join("HEAD")).unwrap(), head);
+            assert_eq!(std::fs::read_dir(&output).unwrap().count(), 1);
+            assert!(!source.exists());
+        }
+    }
     #[test]
     fn command_shape_accepts_workspace_after_subcommand() {
         Cli::command().debug_assert();

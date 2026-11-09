@@ -5,9 +5,9 @@ use super::{
 };
 
 #[derive(Clone, Copy)]
-struct Value {
-    wire: f64,
-    density: f64,
+pub(super) struct Value {
+    pub(super) wire: f64,
+    pub(super) density: f64,
 }
 impl Value {
     fn total(self, weight: f64) -> f64 {
@@ -91,6 +91,7 @@ pub(super) fn run(
     cfg: &ElectrostaticConfig,
     meter: &mut Meter<'_>,
     report: &mut ElectrostaticReport,
+    mut capture: Option<&mut super::diagnostics::Capture<'_>>,
 ) -> Result<Output, Failure> {
     let n = model.objects();
     let mut x = initial;
@@ -116,6 +117,10 @@ pub(super) fn run(
         if horizon == 0 {
             continue;
         }
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.entered(meter)?;
+        }
+        let mut stage_exit = "iteration_horizon";
         let gamma = f64::from(cfg.smoothing_bins_milli[stage]) / 1000.0
             * density.grid.hx.max(density.grid.hy);
         let mut current_value = evaluate(
@@ -157,6 +162,7 @@ pub(super) fn run(
             meter.work((20 * n) as u64)?;
             if norm(&current_gradient) <= 1e-12 {
                 termination = "gradient_tolerance".into();
+                stage_exit = "gradient_tolerance";
                 break;
             }
             if history {
@@ -300,6 +306,22 @@ pub(super) fn run(
                     // A later stalled search does not invalidate an earlier
                     // finite checkpoint. Hard/numerical errors above still
                     // propagate, and integer legalization decides acceptance.
+                    if let Some(capture) = capture.as_deref_mut() {
+                        let parameters = report
+                            .stages
+                            .last()
+                            .ok_or(Failure::Numerical("diagnostic_stage_parameters"))?;
+                        capture.finish_stage(
+                            super::diagnostics::StageObservation {
+                                stage,
+                                positions: &x,
+                                value: current_value,
+                                parameters,
+                                exit: "line_search_stalled_after_checkpoint",
+                            },
+                            meter,
+                        )?;
+                    }
                     return Ok(Output {
                         positions: best,
                         termination: "line_search_stalled_after_checkpoint".into(),
@@ -329,6 +351,22 @@ pub(super) fn run(
                 best.clone_from(&x);
                 best_cost = cost;
             }
+        }
+        if let Some(capture) = capture.as_deref_mut() {
+            let parameters = report
+                .stages
+                .last()
+                .ok_or(Failure::Numerical("diagnostic_stage_parameters"))?;
+            capture.finish_stage(
+                super::diagnostics::StageObservation {
+                    stage,
+                    positions: &x,
+                    value: current_value,
+                    parameters,
+                    exit: stage_exit,
+                },
+                meter,
+            )?;
         }
     }
     Ok(Output {

@@ -21,6 +21,7 @@ pub mod macro_supply;
 pub mod netlist_export;
 pub mod pdk;
 pub mod physical;
+pub mod placement_diagnostics;
 pub mod placement_seed;
 mod port_ties;
 pub mod routing;
