@@ -598,6 +598,14 @@ pub struct Straighten {
     /// walled-in chains as they are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub neighbors: Option<StraightenNeighbors>,
+    /// Before the rewrites, a pin escape whose access-layer stub runs
+    /// straight from its via to its top, where the route turns, takes the
+    /// turn at its via instead: the stub moves onto the route's next track
+    /// and the route's jog at the top disappears (`escape_jogs` in
+    /// `route_straighten`). One wire piece fewer per escape; off keeps the
+    /// escapes as pin access made them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub escape_jogs: bool,
 }
 impl Straighten {
     pub(crate) fn validate(&self) -> Result<()> {
