@@ -190,7 +190,7 @@ same-path routing near misses receive bounded repair.
 ## Build and try
 
 Read the [memory budgets](docs/memory-budget.md) before running large builds.
-Use the pinned Rust 1.97.1 toolchain; limit CPU concurrency and process memory:
+Use the pinned Rust 1.100.0 toolchain; limit CPU concurrency and process memory:
 
 ```sh
 mkdir -p .work
