@@ -5189,7 +5189,6 @@ pub(crate) fn route_with_prior(
         );
     }
     // Escapes stay fixed from here on, except for `straighten.escape_jogs`.
-    let mut plans = plans;
     if r.plan.qor.as_ref().is_some_and(|q| q.prim_order) {
         for group in groups.values_mut() {
             prim_terminal_order(

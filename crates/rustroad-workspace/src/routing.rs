@@ -2533,7 +2533,9 @@ mod qor_config_tests {
             Some(rustroad_core::routing::Straighten {
                 passes: 2,
                 turn_at_ends: false,
-                reroute: None
+                reroute: None,
+                neighbors: None,
+                escape_jogs: false
             })
         );
         assert!(
@@ -2549,6 +2551,24 @@ mod qor_config_tests {
         let s = route_qor(&rerouted, &layers()).unwrap().straighten.unwrap();
         assert!(s.turn_at_ends);
         assert_eq!(s.reroute.unwrap().weight, 1);
+        // Joint moves and escape jogs: off unless named, one pass of moves by
+        // default (the core route validates the ranges).
+        assert!(s.neighbors.is_none() && !s.escape_jogs);
+        let joint: RouteQorConfig = serde_json::from_str(
+            r#"{"straighten": {"passes": 2, "escape_jogs": true, "neighbors": {"max_victims": 2,
+                "max_terminals": 10, "net_expansions": 10000, "length_per_piece": 420}}}"#,
+        )
+        .unwrap();
+        let s = route_qor(&joint, &layers()).unwrap().straighten.unwrap();
+        assert!(s.escape_jogs);
+        let n = s.neighbors.unwrap();
+        assert_eq!((n.max_victims, n.length_per_piece, n.passes), (2, 420, 1));
+        assert!(
+            serde_json::from_str::<RouteQorConfig>(
+                r#"{"straighten": {"passes": 1, "neighbors": {"max_victims": 2}}}"#
+            )
+            .is_err()
+        );
     }
 }
 
