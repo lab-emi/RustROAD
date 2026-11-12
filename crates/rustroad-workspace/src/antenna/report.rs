@@ -82,7 +82,7 @@ impl Reservation {
             .budget
             .0
             .live
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
                 n.checked_add(bytes).filter(|&n| n <= self.budget.0.limit)
             })
             .map_err(|_| Error::Budget("ANTENNA: live report memory budget".into()))?;
@@ -90,7 +90,7 @@ impl Reservation {
             .budget
             .0
             .allocated
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
                 n.checked_add(bytes)
             })
             .is_err()

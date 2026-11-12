@@ -2283,8 +2283,8 @@ fn virtual_crossings(
                 if scan(part, sc, marked, &mut local).is_err() {
                     failed.store(true, Ordering::Relaxed);
                 }
-                let _ = work.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |w| {
-                    Some(w.saturating_add(local))
+                work.update(Ordering::Relaxed, Ordering::Relaxed, |w| {
+                    w.saturating_add(local)
                 });
             });
             let mut marked = vec![0u64; words];
