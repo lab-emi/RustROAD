@@ -87,6 +87,14 @@ pub(super) struct StraightenTally {
     pub reroute_runs: usize,
     /// Nets skipped: still holding their ECO prior geometry, or too large.
     pub skipped: usize,
+    /// Joint moves (`neighbors`): tried, kept, refused because a ripped net
+    /// did not route again, refused by the acceptance test, and the DEF
+    /// wire pieces kept moves removed.
+    pub moves: usize,
+    pub moves_kept: usize,
+    pub moves_unrouted: usize,
+    pub moves_worse: usize,
+    pub move_pieces: usize,
 }
 
 #[cfg(test)]
@@ -1110,6 +1118,21 @@ pub(super) fn straighten(
             break;
         }
     }
+    if let Some(moves) = &cfg.neighbors {
+        neighbor_moves(
+            r,
+            moves,
+            cfg.turn_at_ends,
+            groups,
+            plans,
+            region,
+            routed,
+            retained_edges,
+            prior,
+            &mut total,
+            t0,
+        )?;
+    }
     trace(
         "straighten",
         t0,
@@ -1153,6 +1176,311 @@ fn fixed_of<'p>(terminals: &[&Terminal], plans: &'p HashMap<u32, Plan>) -> Fixed
             .flat_map(|t| t.shapes.iter().map(|s| (s.layer, s.rect)))
             .collect(),
     }
+}
+
+/// DEF wire pieces of one net (its escapes and `route`): the wires merged
+/// into maximal collinear runs split at every via landing, access point and
+/// branch strictly inside them (`wire_runs`, as `export-def` writes them).
+/// This is the count the reference extractor's work follows
+/// (`scripts/def_pieces.py`).
+pub(super) fn net_pieces(
+    r: &mut Router<'_>,
+    route: &NetRoute,
+    terminals: &[&Terminal],
+    plans: &HashMap<u32, Plan>,
+) -> Result<usize> {
+    let fixed = fixed_of(terminals, plans);
+    let wires: Vec<&Wire> = fixed
+        .plan_wires
+        .iter()
+        .copied()
+        .chain(route.wires.iter())
+        .collect();
+    let mut vias: Vec<&Via> = fixed
+        .plan_vias
+        .iter()
+        .copied()
+        .chain(route.vias.iter())
+        .collect();
+    vias.sort_unstable_by_key(|v| (v.kind, v.at));
+    vias.dedup();
+    let cap = r.limits.max_comparisons;
+    charge(
+        &mut r.spatial.work,
+        wires.len().saturating_add(vias.len()).saturating_mul(4),
+        cap,
+    )?;
+    let pairs: Vec<(u32, u32)> = r.input.vias.iter().map(|v| (v.lower, v.upper)).collect();
+    Ok(crate::wire_runs::collinear_runs(&wires, &vias, &pairs, &fixed.access, cap)?.len())
+}
+
+/// The other nets whose routed metal alone refuses a candidate of a chain of
+/// `net` (per chain the first such candidate in the rewrites' order;
+/// `Straighten::neighbors`); `None` when no chain has such a candidate, or
+/// more than `max` nets would have to move.
+fn walling_nets(
+    r: &mut Router<'_>,
+    net: u32,
+    route: &NetRoute,
+    fixed: &Fixed<'_>,
+    turn: bool,
+    max: usize,
+) -> Result<Option<Vec<u32>>> {
+    let chains = r.chains(&route.wires, &route.vias, fixed)?;
+    let mut all: Vec<u32> = Vec::new();
+    for chain in &chains {
+        let width = r.input.layers[chain.layer as usize].width;
+        // The first candidate (rewrite order) that routed metal of other
+        // nets alone refuses; a candidate that fixed metal refuses, or that
+        // no other net refuses (it failed a same-net check), is passed over.
+        let mut found: Option<Vec<u32>> = None;
+        for cand in candidates(chain, &route.wires, turn) {
+            let mut victims: Vec<u32> = Vec::new();
+            let mut blocked = false;
+            for p in cand.windows(2) {
+                let w = Wire {
+                    net,
+                    layer: chain.layer,
+                    start: p[0],
+                    end: p[1],
+                };
+                match r
+                    .spatial
+                    .probe_soft(chain.layer, wire_rect(&w, width)?, net)?
+                {
+                    crate::routing::Soft::Blocked => {
+                        blocked = true;
+                        break;
+                    }
+                    crate::routing::Soft::Clear { victims: v, .. } => victims.extend(v),
+                }
+            }
+            if !blocked && !victims.is_empty() {
+                found = Some(victims);
+                break;
+            }
+        }
+        let Some(victims) = found else {
+            continue;
+        };
+        all.extend(victims);
+        all.sort_unstable();
+        all.dedup();
+        if all.len() > max {
+            return Ok(None);
+        }
+    }
+    Ok((!all.is_empty()).then_some(all))
+}
+
+/// `Straighten::neighbors` (see `routing::StraightenNeighbors`).
+#[allow(clippy::too_many_arguments)]
+fn neighbor_moves(
+    r: &mut Router<'_>,
+    cfg: &crate::routing::StraightenNeighbors,
+    turn: bool,
+    groups: &BTreeMap<u32, Vec<&Terminal>>,
+    plans: &HashMap<u32, Plan>,
+    region: Region<'_>,
+    routed: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    prior: Option<&PriorRoutes>,
+    total: &mut StraightenTally,
+    t0: std::time::Instant,
+) -> Result<()> {
+    if r.trial_search_limit.is_some()
+        || r.trial_expansion_limit.is_some()
+        || r.allowed_victim.is_some()
+        || r.protected.is_some()
+    {
+        return Err(invalid("straightening move inside a trial search"));
+    }
+    let limits = r.limits;
+    let held = |net: u32, routed: &BTreeMap<u32, NetRoute>| {
+        prior
+            .and_then(|p| p.nets.get(&net))
+            .zip(routed.get(&net))
+            .is_some_and(|((w, v), route)| route.wires == *w && route.vias == *v)
+    };
+    let movable = |net: u32, routed: &BTreeMap<u32, NetRoute>| {
+        groups
+            .get(&net)
+            .is_some_and(|t| t.len() <= cfg.max_terminals)
+            && routed
+                .get(&net)
+                .is_some_and(|route| route.wires.len() <= MAX_NET_RUNS)
+            && !held(net, routed)
+    };
+    for pass in 0..cfg.passes {
+        // Nets with chains, most chain runs first.
+        let mut order: Vec<(std::cmp::Reverse<usize>, u32)> = Vec::new();
+        let nets: Vec<u32> = routed.keys().copied().collect();
+        for net in nets {
+            if !movable(net, routed) {
+                continue;
+            }
+            let fixed = fixed_of(&groups[&net], plans);
+            let runs: usize = r
+                .chains(&routed[&net].wires, &routed[&net].vias, &fixed)?
+                .iter()
+                .map(|c| c.wires.len())
+                .sum();
+            if runs > 0 {
+                order.push((std::cmp::Reverse(runs), net));
+            }
+        }
+        order.sort_unstable();
+        charge(
+            &mut r.spatial.work,
+            order
+                .len()
+                .saturating_mul(order.len().max(1).ilog2() as usize + 1),
+            limits.max_comparisons,
+        )?;
+        let kept_before = total.moves_kept;
+        let none = BTreeMap::new();
+        for &(_, net) in &order {
+            // An earlier move may have changed or straightened this net.
+            if !movable(net, routed) {
+                continue;
+            }
+            let terminals = &groups[&net];
+            let victims = {
+                let fixed = fixed_of(terminals, plans);
+                let route = routed[&net].clone();
+                walling_nets(r, net, &route, &fixed, turn, cfg.max_victims)?
+            };
+            let Some(victims) = victims else {
+                continue;
+            };
+            if victims.iter().any(|&v| v == net || !movable(v, routed)) {
+                continue;
+            }
+            total.moves += 1;
+            // Rip up the walling nets.
+            let mut ripped: Vec<(u32, NetRoute)> = Vec::new();
+            for &v in &victims {
+                let old = remove_route(routed, retained_edges, v)
+                    .ok_or_else(|| invalid("straightening move without a route"))?;
+                charge(
+                    &mut r.spatial.work,
+                    old.shapes.len(),
+                    limits.max_comparisons,
+                )?;
+                for &id in &old.shapes {
+                    r.spatial.remove(id);
+                }
+                ripped.push((v, old));
+            }
+            let old = routed[&net].clone();
+            let mut tally = StraightenTally::default();
+            let rewritten = r.straighten_net(net, &old, terminals, plans, turn, &mut tally)?;
+            // Route the ripped nets again (hard searches, all else fixed).
+            let mut rerouted: Vec<(u32, NetRoute)> = Vec::new();
+            let mut unrouted = rewritten.is_none();
+            if !unrouted {
+                for &(v, _) in &ripped {
+                    r.area_level = if r.plan.area_stacks {
+                        2 - region.demoted.get(&v).copied().unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    let guide = &region.guides[&v];
+                    if r.close_expanded {
+                        r.mark_region_corridor(guide, r.plan.expand_margin);
+                    } else {
+                        r.mark_region(guide, Some(r.plan.expand_margin));
+                    }
+                    r.trial_expansion_limit = Some(r.expansions.saturating_add(cfg.net_expansions));
+                    let outcome = r.route_net(v, &groups[&v], plans, false, false, &none, 0);
+                    r.trial_expansion_limit = None;
+                    match outcome? {
+                        Outcome::Routed(new, displaced) => {
+                            if !displaced.is_empty() {
+                                return Err(invalid("hard straightening move displaced a net"));
+                            }
+                            rerouted.push((v, new));
+                        }
+                        Outcome::Limited(_) | Outcome::Failed(_) => {
+                            unrouted = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            // Acceptance: fewer DEF pieces in all, no more routed vias, wire
+            // within the allowance.
+            let mut keep = false;
+            if !unrouted && let Some(new) = &rewritten {
+                let size =
+                    |route: &NetRoute, n: u32, r: &mut Router<'_>| -> Result<(usize, u64, u64)> {
+                        let t = &groups[&n];
+                        let (vias, len) = routed_size(route, t, plans);
+                        Ok((net_pieces(r, route, t, plans)?, vias, len))
+                    };
+                let (mut p0, mut v0, mut l0) = size(&old, net, r)?;
+                let (mut p1, mut v1, mut l1) = size(new, net, r)?;
+                for ((v, before), (_, after)) in ripped.iter().zip(&rerouted) {
+                    let a = size(before, *v, r)?;
+                    let b = size(after, *v, r)?;
+                    (p0, v0, l0) = (p0 + a.0, v0 + a.1, l0 + a.2);
+                    (p1, v1, l1) = (p1 + b.0, v1 + b.1, l1 + b.2);
+                }
+                let allowance = (p0.saturating_sub(p1) as u64).saturating_mul(cfg.length_per_piece);
+                keep = p1 < p0 && v1 <= v0 && l1 <= l0.saturating_add(allowance);
+                if keep {
+                    total.move_pieces += p0 - p1;
+                } else {
+                    total.moves_worse += 1;
+                }
+            } else {
+                total.moves_unrouted += 1;
+            }
+            if keep {
+                total.moves_kept += 1;
+                let new = rewritten.expect("kept move holds the rewrite");
+                retain_route(routed, retained_edges, net, new, limits.max_segments)?;
+                for (v, route) in rerouted {
+                    retain_route(routed, retained_edges, v, route, limits.max_segments)?;
+                }
+                continue;
+            }
+            // Undo: new shapes out, old shapes back, old routes kept.
+            for (_, route) in rerouted {
+                discard_route(r, route)?;
+            }
+            if let Some(new) = rewritten {
+                discard_route(r, new)?;
+                for &id in &old.shapes {
+                    r.spatial.restore(id)?;
+                }
+            }
+            for (v, route) in ripped {
+                for &id in &route.shapes {
+                    r.spatial.restore(id)?;
+                }
+                retain_route(routed, retained_edges, v, route, limits.max_segments)?;
+            }
+        }
+        trace(
+            "straighten",
+            t0,
+            format_args!(
+                "moves pass {pass} tried {} kept {} unrouted {} worse {} pieces -{} work {} exp {}",
+                total.moves,
+                total.moves_kept,
+                total.moves_unrouted,
+                total.moves_worse,
+                total.move_pieces,
+                r.spatial.work,
+                r.expansions
+            ),
+        );
+        if total.moves_kept == kept_before {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// `Straighten::reroute` (see `routing::StraightenReroute`).
