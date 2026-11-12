@@ -94,9 +94,11 @@ for LibreLane's RCX step. Its time is consistent with the wire pieces it
 extracts, which the route topology sets: the native DEF has 192,328 pieces against 129,901
 (`scripts/def_pieces.py`), with 42,789 staircase and 39,398 zigzag pieces
 against 25,925 and 17,576, although it has less wire and fewer vias. The
-latch-up tap-coverage gate is slower on the native layout: median 50.54 s against 45.47 s (1.11×, ranges 49.58–52.77 and 44.51–46.74 s, 5 interleaved runs each); its time follows the notched n-well
-domains of the flip-flop masters that synthesis chose
-([tap integration](tap-integration.md)). Foundry main DRC, antenna DRC and
+latch-up tap-coverage gate was slower on the native layout in the campaign (median 50.54 s against 45.47 s, 1.11×),
+because the checker's time followed the notched n-well domains of the flip-flop masters that synthesis chose;
+with the shared checker of 2026-11-12, which certifies the same boxes and adds an in-well LU.a path, it is
+faster on the native layout: median 4.98 s against 6.49 s (0.77×, ranges 4.63–5.19 and 6.29–7.09 s,
+6 interleaved runs each; [tap integration](tap-integration.md)). Foundry main DRC, antenna DRC and
 LVS are faster on the native layout (benchmark page).
 
 ## Ibex host campaign · 2026-11-02

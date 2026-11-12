@@ -121,15 +121,26 @@ reaches that side) was evaluated on the IHP Ibex layout and removed again
    notch of the same net, 0.62 µm) concerns wells closer than 0.62 µm; the
    strips are 2.92 µm apart.
 
-For the record, the certificate's run time depends on the domain shapes: in
+For the record, the certificate's run time depended on the domain shapes: in
 single diagnostic runs its per-domain intersection took roughly 80 ms for a
 notched (non-rectangular) domain and about 2 ms for a rectangle. On the Ibex
 layout 71 of the 251 LU.a domains are notched (24 of 197 on the LibreLane
 reference layout). The notches belong to six masters placed 1,599 times,
 mostly the mux-input reset flop `DFFMRQX2` (1,344), whose N+ diffusion lies
 closer than NW.d (0.31 µm) to the notch, so the notch cannot be filled. That
-cost follows from cell selection in synthesis, not from the well geometry
+cost followed from cell selection in synthesis, not from the well geometry
 RustROAD draws.
+
+Since 2026-11-12 the shared certificate no longer intersects each domain with
+the whole target layer: it gathers every domain's targets and ties through a
+bounding-box index, reads only the contacts that touch tie diffusion and
+flattens the layers natively, so its time no longer follows the notches. On
+both Ibex final layouts it certifies the same target boxes against the same tie
+points as before, and in a notched domain LU.a now also needs a path inside the
+n-well, as the foundry rule grows the ties inside NWell. In 6 interleaved runs
+at the same load the latch-up gate took a median 4.98 s on this layout against
+6.49 s on LibreLane's (0.77×), where the previous checker took 39.49 s
+against 35.70 s (1.11×); details are on the superproject's benchmark page.
 
 ## Independent physical verification
 
