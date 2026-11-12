@@ -548,9 +548,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.len(), count as usize * 2);
-        for (net, pair) in result.chunks_exact(2).enumerate() {
+        for (net, pair) in result.as_chunks::<2>().0.iter().enumerate() {
             assert_eq!(
-                pair,
+                *pair,
                 [
                     w(net as u32, 0, [0, 0], [10, 0]),
                     w(net as u32, 0, [10, 0], [20, 0])

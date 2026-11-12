@@ -809,7 +809,7 @@ impl<'a> Parser<'a, '_> {
             return Err(bad());
         }
         let mut points: Vec<[i64; 2]> = Vec::with_capacity(body.len() / 4);
-        for q in body.chunks_exact(4) {
+        for q in body.as_chunks::<4>().0 {
             if q[0].text != "(" || q[3].text != ")" {
                 return Err(bad());
             }
@@ -971,7 +971,7 @@ impl<'a> Parser<'a, '_> {
             self.points += count;
             self.charge(2 * count * size_of::<[i64; 2]>(), key.line)?;
             let mut points = Vec::with_capacity(count);
-            for pair in values.chunks_exact(2) {
+            for pair in values.as_chunks::<2>().0 {
                 points.push(self.pair(pair, key.line)?);
             }
             for i in 0..points.len() {

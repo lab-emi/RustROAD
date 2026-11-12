@@ -350,18 +350,20 @@ impl<'a> RawRecord<'a> {
     }
     fn i16s(&self) -> impl Iterator<Item = i16> + 'a {
         self.data
-            .chunks_exact(2)
-            .map(|c| i16::from_be_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| i16::from_be_bytes(*c))
     }
     fn i32s(&self) -> impl Iterator<Item = i32> + 'a {
         self.data
-            .chunks_exact(4)
-            .map(|c| i32::from_be_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| i32::from_be_bytes(*c))
     }
     fn reals(&self) -> impl Iterator<Item = Real8> + 'a {
-        self.data
-            .chunks_exact(8)
-            .map(|c| Real8(c.try_into().expect("exact chunk")))
+        self.data.as_chunks::<8>().0.iter().map(|c| Real8(*c))
     }
     fn i16_array<const N: usize>(&self) -> Result<[i16; N]> {
         let values: Vec<i16> = self.i16s().collect();
@@ -1046,7 +1048,7 @@ impl<'a> Parser<'a, '_> {
             return Err(xy.fail("GDS_BUDGET", "max_points_per_element exceeded"));
         }
         let values: Vec<i32> = xy.i32s().collect();
-        e.xy = values.chunks_exact(2).map(|p| [p[0], p[1]]).collect();
+        e.xy = values.as_chunks::<2>().0.to_vec();
         let closed = e.xy.first() == e.xy.last();
         let points_ok = match kind {
             ElementKind::Boundary => n >= 4 && closed,
@@ -1322,10 +1324,12 @@ impl<W: Write> GdsWriter<W> {
         }
         let mut xy = [0u8; 40];
         for (chunk, v) in xy
-            .chunks_exact_mut(4)
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
             .zip([r[0], r[1], r[2], r[1], r[2], r[3], r[0], r[3], r[0], r[1]])
         {
-            chunk.copy_from_slice(&v.to_be_bytes());
+            *chunk = v.to_be_bytes();
         }
         self.element.clear();
         frame(&mut self.element, rt::BOUNDARY, NO_DATA, &[]);

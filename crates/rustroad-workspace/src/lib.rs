@@ -313,7 +313,11 @@ impl Snapshot {
         Ok(())
     }
     pub fn records(&self) -> impl ExactSizeIterator<Item = Placed> + '_ {
-        self.map.chunks_exact(RECORD_BYTES).map(decode_record)
+        self.map
+            .as_chunks::<RECORD_BYTES>()
+            .0
+            .iter()
+            .map(decode_record)
     }
     pub fn summary(&self) -> Summary {
         let mut summary = self.metadata.summary();
@@ -1456,29 +1460,33 @@ fn read_connection_tables(
     for (bytes, expected) in pins
         .as_deref()
         .unwrap_or(&[])
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .zip(&model.pins)
     {
-        for (b, field) in bytes.chunks_exact(4).zip(owner_record(expected)) {
-            if u32::from_le_bytes(b.try_into().unwrap()) != field {
+        for (b, field) in bytes.as_chunks::<4>().0.iter().zip(owner_record(expected)) {
+            if u32::from_le_bytes(*b) != field {
                 return Err(Error::Invalid(
                     "pin side table differs from metadata".into(),
                 ));
             }
         }
     }
-    for (bytes, expected) in offsets.chunks_exact(8).zip(csr.offsets) {
-        if u64::from_le_bytes(bytes.try_into().unwrap()) != expected {
+    for (bytes, expected) in offsets.as_chunks::<8>().0.iter().zip(csr.offsets) {
+        if u64::from_le_bytes(*bytes) != expected {
             return Err(Error::Invalid("net offsets differ from metadata".into()));
         }
     }
     for (bytes, expected) in net_pins
         .as_deref()
         .unwrap_or(&[])
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .zip(csr.pin_indices)
     {
-        if u32::from_le_bytes(bytes.try_into().unwrap()) != expected {
+        if u32::from_le_bytes(*bytes) != expected {
             return Err(Error::Invalid("net CSR differs from metadata".into()));
         }
     }
@@ -1556,7 +1564,7 @@ fn sync_directory(path: &Path) -> Result<()> {
     let _ = path;
     Ok(())
 }
-fn decode_record(bytes: &[u8]) -> Placed {
+fn decode_record(bytes: &[u8; RECORD_BYTES]) -> Placed {
     fn i64_at(b: &[u8], index: usize) -> i64 {
         i64::from_le_bytes(b[index..index + 8].try_into().expect("fixed record"))
     }

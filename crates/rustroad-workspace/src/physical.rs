@@ -3011,9 +3011,9 @@ pub(super) fn validate_table(state: &PhysicalState, bytes: &[u8]) -> Result<()> 
             "prepared geometry table length mismatch".into(),
         ));
     }
-    for (record, expected) in bytes.chunks_exact(64).zip(table_records(state)) {
-        for (field, value) in record.chunks_exact(8).zip(expected) {
-            if i64::from_le_bytes(field.try_into().expect("eight-byte field")) != value {
+    for (record, expected) in bytes.as_chunks::<64>().0.iter().zip(table_records(state)) {
+        for (field, value) in record.as_chunks::<8>().0.iter().zip(expected) {
+            if i64::from_le_bytes(*field) != value {
                 return Err(Error::Invalid("prepared geometry table mismatch".into()));
             }
         }

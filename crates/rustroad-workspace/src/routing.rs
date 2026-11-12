@@ -452,10 +452,10 @@ pub(crate) fn decode_route_table_with(
         .map_err(|_| bad("net allocation"))?;
     let u32_of = |v: i64| u32::try_from(v).map_err(|_| bad("index out of range"));
     let mut last = 0i64;
-    for chunk in bytes.chunks_exact(64) {
+    for chunk in bytes.as_chunks::<64>().0 {
         let mut r = [0i64; 8];
-        for (i, b) in chunk.chunks_exact(8).enumerate() {
-            r[i] = i64::from_le_bytes(b.try_into().unwrap());
+        for (slot, b) in r.iter_mut().zip(chunk.as_chunks::<8>().0) {
+            *slot = i64::from_le_bytes(*b);
         }
         if r[0] < last || !(1..=5).contains(&r[0]) {
             return Err(bad("record kind/order"));
@@ -2022,8 +2022,8 @@ pub(crate) fn table_bytes(state: &RoutingState) -> Result<Vec<u8>> {
 }
 fn write_record(values: [i64; 8], output: &mut impl Write) -> std::io::Result<()> {
     let mut bytes = [0u8; 64];
-    for (chunk, value) in bytes.chunks_exact_mut(8).zip(values) {
-        chunk.copy_from_slice(&value.to_le_bytes());
+    for (chunk, value) in bytes.as_chunks_mut::<8>().0.iter_mut().zip(values) {
+        *chunk = value.to_le_bytes();
     }
     output.write_all(&bytes)
 }
