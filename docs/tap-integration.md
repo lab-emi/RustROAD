@@ -133,14 +133,18 @@ RustROAD draws.
 
 Since 2026-11-12 the shared certificate no longer intersects each domain with
 the whole target layer: it gathers every domain's targets and ties through a
-bounding-box index, reads only the contacts that touch tie diffusion and
-flattens the layers natively, so its time no longer follows the notches. On
-both Ibex final layouts it certifies the same target boxes against the same tie
-points as before, and in a notched domain LU.a now also needs a path inside the
-n-well, as the foundry rule grows the ties inside NWell. In 6 interleaved runs
-at the same load the latch-up gate took a median 4.98 s on this layout against
-6.49 s on LibreLane's (0.77×), where the previous checker took 39.49 s
-against 35.70 s (1.11×); details are on the superproject's benchmark page.
+bounding-box index, merges them again per domain, reads only the contacts that
+touch tie diffusion and flattens the layers natively, so its time no longer
+follows the notches. The checker changed for both layouts; neither layout did.
+On both Ibex final layouts, and on seven tap-removal mutants of each, it
+examines the same target boxes against the same tie points as before and fails
+the same ones. In a notched domain LU.a now also needs a path inside the
+n-well, as the foundry rule grows the ties inside NWell, so a comb of strips no
+longer certifies a strip through the ties of its neighbours (point 1 above
+describes the certificate of that time). In 6 interleaved runs at the same load
+the latch-up gate took a median 5.70 s on this layout against 7.34 s on
+LibreLane's (0.78×), where the previous checker took 39.02 s against 35.21 s
+(1.11×); details are on the superproject's benchmark page.
 
 ## Independent physical verification
 
