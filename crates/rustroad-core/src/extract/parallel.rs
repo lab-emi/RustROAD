@@ -478,7 +478,14 @@ impl Chunk {
     }
     /// Computes units in order. A unit beyond a parallel bound is deferred;
     /// an error ends the chunk. A complete chunk is split by shard.
-    fn compute(&mut self, ctx: &Ctx<'_, '_>, bounds: Bounds, shift: u32, sc: &mut Scratch) {
+    fn compute(
+        &mut self,
+        ctx: &Ctx<'_, '_>,
+        bounds: Bounds,
+        shift: u32,
+        sc: &mut Scratch,
+        groups: &mut Grouping,
+    ) {
         self.ops.clear();
         self.metas.clear();
         self.complete = false;
@@ -512,22 +519,91 @@ impl Chunk {
             self.buckets.resize_with(shards, Vec::new);
             self.distinct.clear();
             self.distinct.resize(shards, 0);
-            for b in &mut self.buckets {
-                b.clear();
-            }
-            for &op in &self.ops {
-                self.buckets[shard_of(op.key, shift)].push(op);
-            }
+            groups.split(&self.ops, shift, &mut self.buckets, &mut self.distinct);
             self.ops.clear();
-            for (bucket, distinct) in self.buckets.iter_mut().zip(&mut self.distinct) {
-                // Stable: each accumulator's records keep their run order.
-                bucket.sort_by_key(|op| op.key);
-                *distinct = bucket
-                    .iter()
-                    .enumerate()
-                    .filter(|&(i, op)| op.key < GROUND && (i == 0 || bucket[i - 1].key != op.key))
-                    .count();
+        }
+    }
+}
+
+/// Lane scratch that splits a chunk's records by shard, grouped by
+/// accumulator: each accumulator's records stay contiguous and in their run
+/// order (a stable counting sort keyed by first appearance), in one pass
+/// over the records and a chunk-local open-addressing table.
+#[derive(Default)]
+struct Grouping {
+    /// Group index + 1 per slot (0 is empty); a power of two long.
+    table: Vec<u32>,
+    /// Per group: its key, then its record count, then its write cursor.
+    keys: Vec<u64>,
+    cursor: Vec<u32>,
+    /// Group of each record.
+    group_of: Vec<u32>,
+}
+impl Grouping {
+    fn split(&mut self, ops: &[Op], shift: u32, buckets: &mut [Vec<Op>], distinct: &mut [usize]) {
+        let slots = (2 * ops.len()).max(16).next_power_of_two();
+        let bits = slots.trailing_zeros();
+        self.table.clear();
+        self.table.resize(slots, 0);
+        self.keys.clear();
+        self.cursor.clear();
+        self.group_of.clear();
+        for op in ops {
+            if op.key >= GROUND {
+                // Ground and area records apply in emission order: each
+                // accumulator still sees its own records in run order.
+                self.group_of.push(u32::MAX);
+                continue;
             }
+            let mut at = Couplings::bucket(op.key, bits);
+            let group = loop {
+                match self.table[at] {
+                    0 => {
+                        self.keys.push(op.key);
+                        self.cursor.push(0);
+                        self.table[at] = self.keys.len() as u32;
+                        break self.keys.len() - 1;
+                    }
+                    g if self.keys[g as usize - 1] == op.key => break g as usize - 1,
+                    _ => at = (at + 1) & (slots - 1),
+                }
+            };
+            self.cursor[group] += 1;
+            self.group_of.push(group as u32);
+        }
+        // Per shard: the ground and area records first, then each coupling
+        // group, in first-appearance order.
+        let mut lens = [0u32; MAX_SHARDS];
+        for (op, &group) in ops.iter().zip(&self.group_of) {
+            if group == u32::MAX {
+                lens[shard_of(op.key, shift)] += 1;
+            }
+        }
+        let mut grounds = [0u32; MAX_SHARDS];
+        for (key, cursor) in self.keys.iter().zip(&mut self.cursor) {
+            let s = shard_of(*key, shift);
+            let start = lens[s];
+            lens[s] += *cursor;
+            *cursor = start;
+            distinct[s] += usize::from(*key < GROUND);
+        }
+        let blank = Op { key: 0, pf: 0.0 };
+        for (bucket, &len) in buckets.iter_mut().zip(&lens) {
+            bucket.clear();
+            bucket.resize(len as usize, blank);
+        }
+        for (op, &group) in ops.iter().zip(&self.group_of) {
+            if group == u32::MAX {
+                let s = shard_of(op.key, shift);
+                buckets[s][grounds[s] as usize] = *op;
+                grounds[s] += 1;
+                continue;
+            }
+            let group = group as usize;
+            let s = shard_of(self.keys[group], shift);
+            let at = &mut self.cursor[group];
+            buckets[s][*at as usize] = *op;
+            *at += 1;
         }
     }
 }
@@ -998,7 +1074,7 @@ pub(super) fn run(
     let shift = acc.shift;
     let mut scratch = Vec::with_capacity(lanes);
     for _ in 0..lanes {
-        scratch.push(Scratch::new(instances)?);
+        scratch.push((Scratch::new(instances)?, Grouping::default()));
     }
     let source = Mutex::new(Source {
         units,
@@ -1044,7 +1120,7 @@ pub(super) fn run(
         commit_ns: AtomicUsize::new(0),
     };
     rayon::scope(|s| {
-        for (lane, sc) in scratch.iter_mut().enumerate() {
+        for (lane, (sc, groups)) in scratch.iter_mut().enumerate() {
             let (source, pending, space, failed) = (&source, &pending, &space, &failed);
             let (shared, compute_ns) = (&shared, &compute_ns);
             s.spawn(move |_| {
@@ -1095,7 +1171,7 @@ pub(super) fn run(
                         src.next += 1;
                     }
                     let started = std::time::Instant::now();
-                    chunk.compute(ctx, bounds, shift, sc);
+                    chunk.compute(ctx, bounds, shift, sc, groups);
                     compute_ns.fetch_add(started.elapsed().as_nanos() as usize, Ordering::Relaxed);
                     {
                         let mut p = lock(pending);
@@ -1230,6 +1306,59 @@ mod tests {
                 })
                 .collect();
             for (s, shard) in acc.shards.iter_mut().enumerate().rev() {
+                for chunk in &chunks {
+                    shard.apply_grouped(&chunk[s], shift);
+                }
+            }
+            assert_eq!(bits(acc, nodes), want);
+        }
+        // The lane grouping: one pass per chunk, records of each coupling
+        // accumulator contiguous in run order, ground and area records in
+        // emission order, and the exact distinct coupling keys per shard.
+        let mut groups = Grouping::default();
+        for shift in 0..4u32 {
+            let shards = 1usize << shift;
+            let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
+            let mut chunks = Vec::new();
+            for chunk in ops.chunks(777) {
+                let mut buckets = vec![Vec::new(); shards];
+                let mut distinct = vec![0; shards];
+                groups.split(chunk, shift, &mut buckets, &mut distinct);
+                for (s, bucket) in buckets.iter().enumerate() {
+                    let mine: Vec<Op> = chunk
+                        .iter()
+                        .copied()
+                        .filter(|op| shard_of(op.key, shift) == s)
+                        .collect();
+                    assert_eq!(bucket.len(), mine.len());
+                    let keys: std::collections::BTreeSet<u64> = mine
+                        .iter()
+                        .map(|op| op.key)
+                        .filter(|&k| k < GROUND)
+                        .collect();
+                    assert_eq!(distinct[s], keys.len());
+                    for key in mine
+                        .iter()
+                        .map(|op| op.key)
+                        .collect::<std::collections::BTreeSet<_>>()
+                    {
+                        let order = |v: &[Op]| -> Vec<u64> {
+                            v.iter()
+                                .filter(|op| op.key == key)
+                                .map(|op| op.pf.to_bits())
+                                .collect()
+                        };
+                        assert_eq!(order(bucket), order(&mine));
+                        if key < GROUND {
+                            let first = bucket.iter().position(|op| op.key == key).unwrap();
+                            let n = order(&mine).len();
+                            assert!(bucket[first..first + n].iter().all(|op| op.key == key));
+                        }
+                    }
+                }
+                chunks.push(buckets);
+            }
+            for (s, shard) in acc.shards.iter_mut().enumerate() {
                 for chunk in &chunks {
                     shard.apply_grouped(&chunk[s], shift);
                 }
