@@ -8962,7 +8962,10 @@ mod tests {
             });
         }
         let mut design = input(terms, fixed);
-        design.tracks.as_mut().unwrap().memory_mib = 256;
+        // Room for the fixed full-design validation estimate (about 234 MB)
+        // and for the resident memory of the test process, which the guard
+        // counts and which other tests running in it raise.
+        design.tracks.as_mut().unwrap().memory_mib = 1024;
         design.tracks.as_mut().unwrap().single_owner_repair =
             Some(crate::routing::SingleOwnerRepairConfig {
                 max_candidates: 4,
@@ -9022,7 +9025,8 @@ mod tests {
             ],
             Vec::new(),
         );
-        design.tracks.as_mut().unwrap().memory_mib = 256;
+        // As above: the guard counts the whole test process.
+        design.tracks.as_mut().unwrap().memory_mib = 1024;
         let (out, report) = crate::route_batches::route(&design, &limits(), 2).unwrap();
         assert_eq!(report.batches, 2);
         assert_eq!(out.nets, [0, 1]);
