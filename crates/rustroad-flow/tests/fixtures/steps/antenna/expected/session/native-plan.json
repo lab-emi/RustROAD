@@ -1,0 +1,15 @@
+{
+  "schema": "rustroad.antenna-group-repair.v1",
+  "output": "@ROOT@/session/native-reports",
+  "max_rounds": 3,
+  "deadline_seconds": 1800,
+  "policy": {
+    "group_names": 128,
+    "max_groups": 1024,
+    "max_attempts": 64,
+    "max_total_jumpers": 4096,
+    "max_commands": 4096,
+    "max_report_bytes": 8589934592,
+    "max_cumulative_work": 200000000000
+  }
+}

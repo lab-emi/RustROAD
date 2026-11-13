@@ -1,0 +1,81 @@
+[
+  {
+    "id": "EQW_BUFX2",
+    "order": "max_capacitance_pf (min over TT/SS), equal LEF width/height",
+    "pins": {
+      "A": "input",
+      "Y": "output"
+    },
+    "functions": {
+      "Y": "A"
+    },
+    "sequential": [],
+    "cells": [
+      {
+        "name": "BUFX2",
+        "width_dbu": 1440,
+        "area_um2": 5.4,
+        "max_capacitance_pf": 0.2
+      },
+      {
+        "name": "BUFX4",
+        "width_dbu": 1440,
+        "area_um2": 5.4,
+        "max_capacitance_pf": 0.4
+      }
+    ]
+  },
+  {
+    "id": "EQW_INVX2",
+    "order": "max_capacitance_pf (min over TT/SS), equal LEF width/height",
+    "pins": {
+      "A": "input",
+      "Y": "output"
+    },
+    "functions": {
+      "Y": "!A"
+    },
+    "sequential": [],
+    "cells": [
+      {
+        "name": "INVX2",
+        "width_dbu": 960,
+        "area_um2": 0.0,
+        "max_capacitance_pf": null
+      },
+      {
+        "name": "INVX1",
+        "width_dbu": 960,
+        "area_um2": 3.6,
+        "max_capacitance_pf": 0.1
+      }
+    ]
+  },
+  {
+    "id": "EQW_NANDX1",
+    "order": "max_capacitance_pf (min over TT/SS), equal LEF width/height",
+    "pins": {
+      "A": "input",
+      "B": "input",
+      "Y": "output"
+    },
+    "functions": {
+      "Y": "!(A&B)"
+    },
+    "sequential": [],
+    "cells": [
+      {
+        "name": "NANDX1",
+        "width_dbu": 1920,
+        "area_um2": 4.5,
+        "max_capacitance_pf": 0.1
+      },
+      {
+        "name": "NANDX2",
+        "width_dbu": 1920,
+        "area_um2": 4.5,
+        "max_capacitance_pf": 0.2
+      }
+    ]
+  }
+]

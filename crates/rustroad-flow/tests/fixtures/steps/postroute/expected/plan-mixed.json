@@ -1,0 +1,303 @@
+{
+  "ops": [
+    {
+      "net": "n16",
+      "driver": "g16/Y",
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g16/Y",
+          "value": 0.19,
+          "limit": 0.2,
+          "slack": 0.01,
+          "ratio": 0.95
+        },
+        {
+          "corner": "ss",
+          "kind": "max_capacitance",
+          "pin": "g16/Y",
+          "value": 0.3,
+          "limit": 0.2,
+          "slack": -0.1,
+          "ratio": 1.5
+        }
+      ],
+      "instance": "g16",
+      "master": "BUFX2",
+      "cell": "BUFX4",
+      "family": "EQW_BUFX2"
+    },
+    {
+      "net": "n2",
+      "driver": "g2/Y",
+      "violating": false,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_transition",
+          "pin": "g2/Y",
+          "value": 1.4,
+          "limit": 1.5,
+          "slack": 0.1,
+          "ratio": 0.9333
+        }
+      ],
+      "instance": "g2",
+      "master": "BUFX2",
+      "cell": "BUFX4",
+      "family": "EQW_BUFX2"
+    }
+  ],
+  "residual": [
+    {
+      "net": "clk_1",
+      "driver": "clkbuf_1/Y",
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "clkbuf_1/Y",
+          "value": 0.15,
+          "limit": 0.1,
+          "slack": -0.05,
+          "ratio": 1.5
+        }
+      ],
+      "instance": "clkbuf_1",
+      "master": "BUFX1",
+      "reason": "driver is not in the pre-CTS netlist (clock tree)"
+    },
+    {
+      "net": "n1",
+      "driver": "g1/Y",
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g1/Y",
+          "value": 0.12,
+          "limit": 0.1,
+          "slack": -0.02,
+          "ratio": 1.2
+        },
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g1/Y",
+          "value": 0.17,
+          "limit": 0.1,
+          "slack": -0.07,
+          "ratio": 1.7
+        },
+        {
+          "corner": "ss",
+          "kind": "max_capacitance",
+          "pin": "g1/Y",
+          "value": 0.13,
+          "limit": 0.11,
+          "slack": -0.02,
+          "ratio": 1.1818
+        }
+      ],
+      "instance": "g1",
+      "master": "BUFX1",
+      "reason": "BUFX1 has no equal-width sizing family"
+    },
+    {
+      "net": "n11",
+      "driver": "g11/Y",
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g11/Y",
+          "value": 0.2,
+          "limit": 0.1,
+          "slack": -0.1,
+          "ratio": 2.0
+        }
+      ],
+      "instance": "g11",
+      "master": "ONLYTT1",
+      "reason": "ONLYTT1 has no equal-width sizing family"
+    },
+    {
+      "net": "n17",
+      "driver": "g17/Y",
+      "violating": true,
+      "rows": [
+        {
+          "corner": "ss",
+          "kind": "max_transition",
+          "pin": "g17/Y",
+          "value": 2.0,
+          "limit": 1.5,
+          "slack": -0.5,
+          "ratio": 1.3333
+        }
+      ],
+      "instance": "g17",
+      "master": "BUFX4",
+      "reason": "no stronger equal-width member of EQW_BUFX2 than BUFX4"
+    },
+    {
+      "net": "n4",
+      "driver": "g4/Y",
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g4/Y",
+          "value": 0.2,
+          "limit": 0.1,
+          "slack": -0.1,
+          "ratio": 2.0
+        }
+      ],
+      "instance": "g4",
+      "master": "INVX1",
+      "reason": "no stronger equal-width member of EQW_INVX2 than INVX1"
+    },
+    {
+      "net": "q8",
+      "driver": "g8/Q",
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g8/Q",
+          "value": 0.3,
+          "limit": 0.2,
+          "slack": -0.1,
+          "ratio": 1.5
+        }
+      ],
+      "instance": "g8",
+      "master": "DFFX1",
+      "reason": "DFFX1 has no equal-width sizing family"
+    },
+    {
+      "net": "z",
+      "driver": "g9/Y",
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g9/Y",
+          "value": 0.9,
+          "limit": 0.8,
+          "slack": -0.1,
+          "ratio": 1.125
+        }
+      ],
+      "instance": "g9",
+      "master": "BUFX8",
+      "reason": "BUFX8 has no equal-width sizing family"
+    },
+    {
+      "net": "a",
+      "driver": null,
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "a",
+          "value": 0.5,
+          "limit": 0.2,
+          "slack": -0.3,
+          "ratio": 2.5
+        }
+      ],
+      "instance": null,
+      "master": null,
+      "reason": "net driven by a port, macro or undriven"
+    },
+    {
+      "net": "n15",
+      "driver": null,
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g15/Y",
+          "value": 0.2,
+          "limit": 0.1,
+          "slack": -0.1,
+          "ratio": 2.0
+        }
+      ],
+      "instance": null,
+      "master": null,
+      "reason": "net driven by a port, macro or undriven"
+    }
+  ],
+  "skipped": [
+    {
+      "net": "n18",
+      "driver": "g18/Y",
+      "violating": false,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g18/Y",
+          "value": 0.095,
+          "limit": 0.1,
+          "slack": 0.005,
+          "ratio": 0.95
+        }
+      ],
+      "instance": "g18",
+      "master": "BUFX1",
+      "reason": "BUFX1 has no equal-width sizing family"
+    },
+    {
+      "net": "n6",
+      "driver": "g6/Y",
+      "violating": false,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g6/Y",
+          "value": 1,
+          "limit": 1,
+          "slack": 0,
+          "ratio": 1.0
+        }
+      ],
+      "instance": "g6",
+      "master": "NANDX1",
+      "reason": "no stronger equal-width member of EQW_NANDX1 than NANDX1"
+    },
+    {
+      "net": "\\esc.net[3]",
+      "driver": null,
+      "violating": false,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "\\\\g3.x[0] /Y",
+          "value": 0.39,
+          "limit": 0.4,
+          "slack": 0.01,
+          "ratio": 0.975
+        }
+      ],
+      "instance": null,
+      "master": null,
+      "reason": "net driven by a port, macro or undriven"
+    }
+  ]
+}

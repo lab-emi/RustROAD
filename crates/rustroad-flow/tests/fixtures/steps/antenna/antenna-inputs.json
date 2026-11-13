@@ -1,0 +1,29 @@
+{
+  "schema": "rusteda.native-antenna-inputs.v2",
+  "design_workspace": "@ROOT@/ws",
+  "initial_revision": "rev4",
+  "tool": {
+    "path": "@ROOT@/engine/rustroad-standin.sh",
+    "sha256": "129c715ee4f7de0a6c2c39bf711359aaba0e9d188a626558f7aa67dafa629623",
+    "bytes": 718
+  },
+  "limits": {
+    "threads": 2,
+    "max_rounds": 3,
+    "max_selected_nets": 100000,
+    "max_work": 200000000,
+    "max_expansions": 8000000,
+    "deadline_seconds": 1800
+  },
+  "grouping": {
+    "group_names": 128,
+    "max_groups": 1024,
+    "max_attempts": 64,
+    "max_total_jumpers": 4096,
+    "max_commands": 4096,
+    "max_report_bytes": 8589934592,
+    "max_selected_report_bytes": 134217728,
+    "max_metadata_bytes": 4194304,
+    "max_cumulative_work": 200000000000
+  }
+}

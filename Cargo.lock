@@ -277,14 +277,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustroad-antenna-verify"
+version = "0.5.0"
+dependencies = [
+ "fs2",
+ "libc",
+ "rustroad-pyjson",
+]
+
+[[package]]
 name = "rustroad-cli"
 version = "0.5.0"
 dependencies = [
  "clap",
  "rayon",
+ "rustroad-antenna-verify",
  "rustroad-core",
  "rustroad-flow",
  "rustroad-formats",
+ "rustroad-pyjson",
  "rustroad-workspace",
  "serde",
  "serde_json",
@@ -306,7 +317,9 @@ dependencies = [
 name = "rustroad-flow"
 version = "0.5.0"
 dependencies = [
+ "fs2",
  "libc",
+ "rustroad-pyjson",
  "serde",
  "serde_json",
  "sha2",
@@ -320,6 +333,14 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "rustroad-pyjson"
+version = "0.5.0"
+dependencies = [
+ "sha2",
  "thiserror",
 ]
 

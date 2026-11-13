@@ -16,6 +16,8 @@ rayon.workspace = true
 rustroad-core.workspace = true
 rustroad-workspace.workspace = true
 rustroad-flow.workspace = true
+rustroad-pyjson.workspace = true
+rustroad-antenna-verify.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

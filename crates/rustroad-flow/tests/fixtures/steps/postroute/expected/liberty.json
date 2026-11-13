@@ -1,0 +1,486 @@
+{
+ "tt": {
+  "BUFX1": {
+   "area": 5.4,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {},
+    "Y": {
+     "direction": "output",
+     "function": "A",
+     "max_capacitance": "0.1"
+    }
+   }
+  },
+  "BUFX2": {
+   "area": 5.4,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": " A ",
+     "max_capacitance": "0.2",
+     "max_transition": "1.5"
+    }
+   }
+  },
+  "BUFX4": {
+   "area": 5.4,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "A",
+     "max_capacitance": "0.4"
+    }
+   }
+  },
+  "BUFX8": {
+   "area": 10.8,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "A",
+     "max_capacitance": "0.8"
+    }
+   }
+  },
+  "INVX1": {
+   "area": 3.6,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!A",
+     "max_capacitance": "0.1"
+    }
+   }
+  },
+  "INVX2": {
+   "area": 0.0,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!A"
+    }
+   }
+  },
+  "INVX3": {
+   "area": 3.6,
+   "dont_use": true,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!A",
+     "max_capacitance": "0.3"
+    }
+   }
+  },
+  "NANDX1": {
+   "area": 4.5,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "B": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!(A&B)",
+     "max_capacitance": "0.1"
+    }
+   }
+  },
+  "NANDX2": {
+   "area": 4.5,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "B": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!(A & B)",
+     "max_capacitance": "0.2"
+    }
+   }
+  },
+  "DFFX1": {
+   "area": 20.0,
+   "dont_use": false,
+   "unsupported": true,
+   "pins": {
+    "D": {
+     "direction": "input"
+    },
+    "CK": {
+     "direction": "input"
+    },
+    "Q": {
+     "direction": "output",
+     "function": "IQ",
+     "max_capacitance": "0.2"
+    }
+   }
+  },
+  "DFFX2": {
+   "area": 20.0,
+   "dont_use": false,
+   "unsupported": true,
+   "pins": {
+    "D": {
+     "direction": "input"
+    },
+    "CK": {
+     "direction": "input"
+    },
+    "Q": {
+     "direction": "output",
+     "function": "IQ",
+     "max_capacitance": "0.4"
+    }
+   }
+  },
+  "TIEHI": {
+   "area": 1.8,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "Y": {
+     "direction": "output",
+     "function": "1"
+    }
+   }
+  },
+  "TIELO": {
+   "area": 1.8,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "Y": {
+     "direction": "output",
+     "function": "0"
+    }
+   }
+  },
+  "ICGX1": {
+   "area": 9.0,
+   "dont_use": false,
+   "unsupported": true,
+   "pins": {
+    "CK": {
+     "direction": "input"
+    },
+    "GCK": {
+     "direction": "output",
+     "function": "CK"
+    }
+   }
+  },
+  "IOBUF": {
+   "area": 9.0,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "PAD": {
+     "direction": "inout",
+     "function": "A"
+    },
+    "A": {
+     "direction": "input"
+    }
+   }
+  },
+  "ONLYTT1": {
+   "area": 2.0,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "A",
+     "max_capacitance": "0.1"
+    }
+   }
+  },
+  "ONLYTT2": {
+   "area": 2.0,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "A",
+     "max_capacitance": "0.2"
+    }
+   }
+  }
+ },
+ "ss": {
+  "BUFX1": {
+   "area": 5.4,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {},
+    "Y": {
+     "direction": "output",
+     "function": "A",
+     "max_capacitance": "0.09"
+    }
+   }
+  },
+  "BUFX2": {
+   "area": 5.4,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": " A ",
+     "max_capacitance": "0.2",
+     "max_transition": "1.5"
+    }
+   }
+  },
+  "BUFX4": {
+   "area": 5.4,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "A",
+     "max_capacitance": "0.4"
+    }
+   }
+  },
+  "BUFX8": {
+   "area": 10.8,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "A",
+     "max_capacitance": "0.8"
+    }
+   }
+  },
+  "INVX1": {
+   "area": 3.6,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!A",
+     "max_capacitance": "0.1"
+    }
+   }
+  },
+  "INVX2": {
+   "area": 0.0,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!A"
+    }
+   }
+  },
+  "INVX3": {
+   "area": 3.6,
+   "dont_use": true,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!A",
+     "max_capacitance": "0.3"
+    }
+   }
+  },
+  "NANDX1": {
+   "area": 4.5,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "B": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!( A & B )",
+     "max_capacitance": "0.1"
+    }
+   }
+  },
+  "NANDX2": {
+   "area": 4.5,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "A": {
+     "direction": "input"
+    },
+    "B": {
+     "direction": "input"
+    },
+    "Y": {
+     "direction": "output",
+     "function": "!(A & B)",
+     "max_capacitance": "0.2"
+    }
+   }
+  },
+  "DFFX1": {
+   "area": 20.0,
+   "dont_use": false,
+   "unsupported": true,
+   "pins": {
+    "D": {
+     "direction": "input"
+    },
+    "CK": {
+     "direction": "input"
+    },
+    "Q": {
+     "direction": "output",
+     "function": "IQ",
+     "max_capacitance": "0.2"
+    }
+   }
+  },
+  "DFFX2": {
+   "area": 20.0,
+   "dont_use": false,
+   "unsupported": true,
+   "pins": {
+    "D": {
+     "direction": "input"
+    },
+    "CK": {
+     "direction": "input"
+    },
+    "Q": {
+     "direction": "output",
+     "function": "IQ",
+     "max_capacitance": "0.4"
+    }
+   }
+  },
+  "TIEHI": {
+   "area": 1.8,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "Y": {
+     "direction": "output",
+     "function": "1"
+    }
+   }
+  },
+  "TIELO": {
+   "area": 1.8,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "Y": {
+     "direction": "output",
+     "function": "0"
+    }
+   }
+  },
+  "ICGX1": {
+   "area": 9.0,
+   "dont_use": false,
+   "unsupported": true,
+   "pins": {
+    "CK": {
+     "direction": "input"
+    },
+    "GCK": {
+     "direction": "output",
+     "function": "CK"
+    }
+   }
+  },
+  "IOBUF": {
+   "area": 9.0,
+   "dont_use": false,
+   "unsupported": false,
+   "pins": {
+    "PAD": {
+     "direction": "inout",
+     "function": "A"
+    },
+    "A": {
+     "direction": "input"
+    }
+   }
+  }
+ }
+}

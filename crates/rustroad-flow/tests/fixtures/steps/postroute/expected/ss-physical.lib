@@ -1,0 +1,4 @@
+library(physical_ss) { time_unit : "1ns"; capacitive_load_unit(1,pf);
+ cell(FILL1) { area : 0; }
+ cell(FILL2) { area : 0; }
+}

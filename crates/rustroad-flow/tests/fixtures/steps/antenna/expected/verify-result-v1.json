@@ -1,0 +1,117 @@
+{
+  "schema": "rusteda.antenna-v3-independent-lineage-review.v1",
+  "status": "metadata_lineage_verified_requires_full_signoff",
+  "evidence_kind": "protocol_fixture",
+  "lineage": {
+    "path": "@ROOT@/session/lineage.json",
+    "sha256": "@SHA:session/lineage.json@",
+    "bytes": "@BYTES:session/lineage.json@"
+  },
+  "source_manifest": {
+    "path": "@ROOT@/source-manifest.json",
+    "sha256": "@SHA:source-manifest.json@",
+    "bytes": "@BYTES:source-manifest.json@"
+  },
+  "tool": {
+    "path": "@ROOT@/engine/rustroad-standin.sh",
+    "sha256": "129c715ee4f7de0a6c2c39bf711359aaba0e9d188a626558f7aa67dafa629623",
+    "bytes": 718
+  },
+  "workspace": "@ROOT@/ws",
+  "initial_revision": "rev4",
+  "final_revision": "rev6",
+  "initial": {
+    "revision": "rev4",
+    "parent_revision": "rev3",
+    "design_file": {
+      "path": "@ROOT@/ws/revisions/rev4/design.json",
+      "sha256": "6c4d87c1c039ae999aa1af8d4cae2c0dcf25a0f4c15ab0f97cb5bdf3d7e8f376",
+      "bytes": 105
+    }
+  },
+  "final": {
+    "revision": "rev6",
+    "parent_revision": "rev4",
+    "design_file": {
+      "path": "@ROOT@/ws/revisions/rev6/design.json",
+      "sha256": "4463c8cd8326092b47778b6e5d0ee3e2e3091d3b5594b9fe8011d8da8dccf900",
+      "bytes": 105
+    },
+    "materialized": true,
+    "logical_parent_revision": "rev5"
+  },
+  "execution_mode": "single_native_process",
+  "actual_native_processes": 1,
+  "logical_operations": 12,
+  "native_plan": {
+    "path": "@ROOT@/session/native-plan.json",
+    "sha256": "@SHA:session/native-plan.json@",
+    "bytes": "@BYTES:session/native-plan.json@"
+  },
+  "native_summary": {
+    "path": "@ROOT@/session/native-reports/summary.json",
+    "sha256": "@SHA:session/native-reports/summary.json@",
+    "bytes": "@BYTES:session/native-reports/summary.json@"
+  },
+  "controller_inputs": {
+    "path": "@ROOT@/antenna-inputs.json",
+    "sha256": "@SHA:antenna-inputs.json@",
+    "bytes": "@BYTES:antenna-inputs.json@"
+  },
+  "process_report_bytes": @PROCESS_BYTES@,
+  "report_bytes": @REPORT_BYTES@,
+  "workspace_head": {
+    "path": "@ROOT@/session/final-head.txt",
+    "sha256": "b20b8761ec99b0682f4bf3034c611068aa747256bda55f99c9bcbf69c0e1da2a",
+    "bytes": 5
+  },
+  "initial_inventory": {
+    "path": "@ROOT@/session/native-reports/inventory-initial.json",
+    "sha256": "@SHA:session/native-reports/inventory-initial.json@",
+    "bytes": "@BYTES:session/native-reports/inventory-initial.json@"
+  },
+  "final_inventory": {
+    "path": "@ROOT@/session/native-reports/inventory-final.json",
+    "sha256": "@SHA:session/native-reports/inventory-final.json@",
+    "bytes": "@BYTES:session/native-reports/inventory-final.json@"
+  },
+  "policy": {
+    "group_names": 128,
+    "max_groups": 1024,
+    "max_attempts": 64,
+    "max_total_jumpers": 4096,
+    "max_commands": 4096,
+    "max_report_bytes": 8589934592,
+    "max_selected_report_bytes": 134217728,
+    "max_metadata_bytes": 4194304,
+    "max_cumulative_work": 200000000000
+  },
+  "source_lefs": [
+    {
+      "role": "technology_lef",
+      "path": "@ROOT@/tech.lef",
+      "sha256": "00d0f658fa6b07292ccd3a8f9f7fd449c82f738dc2ebae8673cc5b313ae54997"
+    },
+    {
+      "role": "cell_lef",
+      "path": "@ROOT@/cells.lef",
+      "sha256": "f81268c6f2f7ddfef7b16ba57628e7707134a559eff5e27863a97569a8c710f4"
+    }
+  ],
+  "routed_named_nets": 3,
+  "final_group_count": 1,
+  "native_analysis_status": "partial",
+  "observations": {
+    "observed": 3
+  },
+  "macro_touch_nets": 1,
+  "parsed_group_reports": 6,
+  "checked_file_ids": 39,
+  "reported_work": 42015,
+  "unreported_validation_work_upper_bound": 400000000,
+  "work_budget_charge": 400042015,
+  "whole_layout_antenna_status": "unchecked",
+  "engine_qualification": "unverified_by_this_metadata_verifier",
+  "manufacturing_DRC_device_LVS_TTSS_dual_source_parity": "unverified_by_this_metadata_verifier",
+  "benchmark": "not_run"
+}

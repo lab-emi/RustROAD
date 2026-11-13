@@ -1,0 +1,630 @@
+{
+  "schema": "rusteda.native-antenna-lineage.v4",
+  "status": "complete",
+  "scope": "supported_standard_cell_subset",
+  "route_scope": "all_signal_nets",
+  "workspace": "@ROOT@/ws",
+  "tool": {
+    "path": "@ROOT@/engine/rustroad-standin.sh",
+    "sha256": "129c715ee4f7de0a6c2c39bf711359aaba0e9d188a626558f7aa67dafa629623",
+    "bytes": 718
+  },
+  "initial_revision": "rev4",
+  "final_revision": "rev6",
+  "initial": {
+    "revision": "rev4",
+    "parent_revision": "rev3",
+    "design_file": {
+      "path": "@ROOT@/ws/revisions/rev4/design.json",
+      "sha256": "6c4d87c1c039ae999aa1af8d4cae2c0dcf25a0f4c15ab0f97cb5bdf3d7e8f376",
+      "bytes": 105
+    }
+  },
+  "final": {
+    "revision": "rev6",
+    "parent_revision": "rev4",
+    "design_file": {
+      "path": "@ROOT@/ws/revisions/rev6/design.json",
+      "sha256": "4463c8cd8326092b47778b6e5d0ee3e2e3091d3b5594b9fe8011d8da8dccf900",
+      "bytes": 105
+    },
+    "materialized": true,
+    "logical_parent_revision": "rev5"
+  },
+  "workspace_head": {
+    "path": "@ROOT@/session/final-head.txt",
+    "sha256": "b20b8761ec99b0682f4bf3034c611068aa747256bda55f99c9bcbf69c0e1da2a",
+    "bytes": 5
+  },
+  "initial_inventory": {
+    "path": "@ROOT@/session/native-reports/inventory-initial.json",
+    "sha256": "@SHA:session/native-reports/inventory-initial.json@",
+    "bytes": "@BYTES:session/native-reports/inventory-initial.json@"
+  },
+  "final_inventory": {
+    "path": "@ROOT@/session/native-reports/inventory-final.json",
+    "sha256": "@SHA:session/native-reports/inventory-final.json@",
+    "bytes": "@BYTES:session/native-reports/inventory-final.json@"
+  },
+  "initial_model": {
+    "path": "@ROOT@/session/native-reports/model-initial.json",
+    "sha256": "1b6beefa45eb0ce29451e47da5b56baa8573eda0cdfedd9eb5bc3d20291856a5",
+    "bytes": 432
+  },
+  "final_model": {
+    "path": "@ROOT@/session/native-reports/model-final.json",
+    "sha256": "1b6beefa45eb0ce29451e47da5b56baa8573eda0cdfedd9eb5bc3d20291856a5",
+    "bytes": 432
+  },
+  "policy": {
+    "group_names": 128,
+    "max_groups": 1024,
+    "max_attempts": 64,
+    "max_total_jumpers": 4096,
+    "max_commands": 4096,
+    "max_report_bytes": 8589934592,
+    "max_selected_report_bytes": 134217728,
+    "max_metadata_bytes": 4194304,
+    "max_cumulative_work": 200000000000
+  },
+  "rounds": [
+    {
+      "round": 0,
+      "group": 0,
+      "base_revision": "rev4",
+      "revision": "rev5",
+      "planning": {
+        "report": {
+          "path": "@ROOT@/session/native-reports/round-0-group-0.json",
+          "sha256": "@SHA:session/native-reports/round-0-group-0.json@",
+          "bytes": "@BYTES:session/native-reports/round-0-group-0.json@"
+        },
+        "header": {
+          "path": "@ROOT@/session/native-reports/round-0-group-0-header.json",
+          "sha256": "@SHA:session/native-reports/round-0-group-0-header.json@",
+          "bytes": "@BYTES:session/native-reports/round-0-group-0-header.json@"
+        },
+        "selection": {
+          "path": "@ROOT@/session/native-reports/round-0-group-0-selection.json",
+          "sha256": "8468ac2123a8e68d26bda06d5ec01e179e5f243406aa10f85b6586042f46af23",
+          "bytes": 27
+        }
+      },
+      "before": {
+        "report": {
+          "path": "@ROOT@/session/native-reports/repair-0-before.json",
+          "sha256": "@SHA:session/native-reports/repair-0-before.json@",
+          "bytes": "@BYTES:session/native-reports/repair-0-before.json@"
+        },
+        "header": {
+          "path": "@ROOT@/session/native-reports/repair-0-before-header.json",
+          "sha256": "@SHA:session/native-reports/repair-0-before-header.json@",
+          "bytes": "@BYTES:session/native-reports/repair-0-before-header.json@"
+        },
+        "selection": {
+          "path": "@ROOT@/session/native-reports/repair-0-before-selection.json",
+          "sha256": "2f929a4ec750196993a603826e97f564393c1db96111af3a524532f39d211aee",
+          "bytes": 19
+        }
+      },
+      "selected": {
+        "path": "@ROOT@/session/native-reports/repair-0-selection.json",
+        "sha256": "2f929a4ec750196993a603826e97f564393c1db96111af3a524532f39d211aee",
+        "bytes": 19
+      },
+      "repair_report": {
+        "path": "@ROOT@/session/native-reports/repair-0.json",
+        "sha256": "92b9861e8b11a6cdb3ce1bfb9133f80840c5c794cf99bf5da236622f4e51b92a",
+        "bytes": 744
+      },
+      "child": {
+        "revision": "rev5",
+        "parent_revision": "rev4",
+        "materialized": false
+      },
+      "work_accounting": {
+        "reported_antenna_work": 5000,
+        "reported_planner_work": 10000,
+        "unreported_validation_work_upper_bound": 200000000,
+        "budget_charge": 200015000
+      }
+    },
+    {
+      "round": 1,
+      "group": 0,
+      "base_revision": "rev5",
+      "revision": "rev6",
+      "planning": {
+        "report": {
+          "path": "@ROOT@/session/native-reports/round-1-group-0.json",
+          "sha256": "@SHA:session/native-reports/round-1-group-0.json@",
+          "bytes": "@BYTES:session/native-reports/round-1-group-0.json@"
+        },
+        "header": {
+          "path": "@ROOT@/session/native-reports/round-1-group-0-header.json",
+          "sha256": "@SHA:session/native-reports/round-1-group-0-header.json@",
+          "bytes": "@BYTES:session/native-reports/round-1-group-0-header.json@"
+        },
+        "selection": {
+          "path": "@ROOT@/session/native-reports/round-1-group-0-selection.json",
+          "sha256": "8468ac2123a8e68d26bda06d5ec01e179e5f243406aa10f85b6586042f46af23",
+          "bytes": 27
+        }
+      },
+      "before": {
+        "report": {
+          "path": "@ROOT@/session/native-reports/repair-1-before.json",
+          "sha256": "@SHA:session/native-reports/repair-1-before.json@",
+          "bytes": "@BYTES:session/native-reports/repair-1-before.json@"
+        },
+        "header": {
+          "path": "@ROOT@/session/native-reports/repair-1-before-header.json",
+          "sha256": "@SHA:session/native-reports/repair-1-before-header.json@",
+          "bytes": "@BYTES:session/native-reports/repair-1-before-header.json@"
+        },
+        "selection": {
+          "path": "@ROOT@/session/native-reports/repair-1-before-selection.json",
+          "sha256": "b9f96eadf81730bd50aae5e780b4844e446cd5605f1d3e9fe15ad335b2095498",
+          "bytes": 11
+        }
+      },
+      "selected": {
+        "path": "@ROOT@/session/native-reports/repair-1-selection.json",
+        "sha256": "b9f96eadf81730bd50aae5e780b4844e446cd5605f1d3e9fe15ad335b2095498",
+        "bytes": 11
+      },
+      "repair_report": {
+        "path": "@ROOT@/session/native-reports/repair-1.json",
+        "sha256": "f666b6a8de158812df4d8175e7407fc44c6dcd48a263618d75ae728e7926a8c5",
+        "bytes": 734
+      },
+      "child": {
+        "revision": "rev6",
+        "parent_revision": "rev4",
+        "design_file": {
+          "path": "@ROOT@/ws/revisions/rev6/design.json",
+          "sha256": "4463c8cd8326092b47778b6e5d0ee3e2e3091d3b5594b9fe8011d8da8dccf900",
+          "bytes": 105
+        },
+        "materialized": true,
+        "logical_parent_revision": "rev5"
+      },
+      "work_accounting": {
+        "reported_antenna_work": 7000,
+        "reported_planner_work": 14000,
+        "unreported_validation_work_upper_bound": 200000000,
+        "budget_charge": 200021000
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "round": 0,
+      "group": 0,
+      "base_revision": "rev4",
+      "revision": "rev5",
+      "planning": {
+        "report": {
+          "path": "@ROOT@/session/native-reports/round-0-group-0.json",
+          "sha256": "@SHA:session/native-reports/round-0-group-0.json@",
+          "bytes": "@BYTES:session/native-reports/round-0-group-0.json@"
+        },
+        "header": {
+          "path": "@ROOT@/session/native-reports/round-0-group-0-header.json",
+          "sha256": "@SHA:session/native-reports/round-0-group-0-header.json@",
+          "bytes": "@BYTES:session/native-reports/round-0-group-0-header.json@"
+        },
+        "selection": {
+          "path": "@ROOT@/session/native-reports/round-0-group-0-selection.json",
+          "sha256": "8468ac2123a8e68d26bda06d5ec01e179e5f243406aa10f85b6586042f46af23",
+          "bytes": 27
+        }
+      },
+      "before": {
+        "report": {
+          "path": "@ROOT@/session/native-reports/repair-0-before.json",
+          "sha256": "@SHA:session/native-reports/repair-0-before.json@",
+          "bytes": "@BYTES:session/native-reports/repair-0-before.json@"
+        },
+        "header": {
+          "path": "@ROOT@/session/native-reports/repair-0-before-header.json",
+          "sha256": "@SHA:session/native-reports/repair-0-before-header.json@",
+          "bytes": "@BYTES:session/native-reports/repair-0-before-header.json@"
+        },
+        "selection": {
+          "path": "@ROOT@/session/native-reports/repair-0-before-selection.json",
+          "sha256": "2f929a4ec750196993a603826e97f564393c1db96111af3a524532f39d211aee",
+          "bytes": 19
+        }
+      },
+      "selected": {
+        "path": "@ROOT@/session/native-reports/repair-0-selection.json",
+        "sha256": "2f929a4ec750196993a603826e97f564393c1db96111af3a524532f39d211aee",
+        "bytes": 19
+      },
+      "repair_report": {
+        "path": "@ROOT@/session/native-reports/repair-0.json",
+        "sha256": "92b9861e8b11a6cdb3ce1bfb9133f80840c5c794cf99bf5da236622f4e51b92a",
+        "bytes": 744
+      },
+      "child": {
+        "revision": "rev5",
+        "parent_revision": "rev4",
+        "materialized": false
+      },
+      "work_accounting": {
+        "reported_antenna_work": 5000,
+        "reported_planner_work": 10000,
+        "unreported_validation_work_upper_bound": 200000000,
+        "budget_charge": 200015000
+      }
+    },
+    {
+      "round": 1,
+      "group": 0,
+      "base_revision": "rev5",
+      "revision": "rev6",
+      "planning": {
+        "report": {
+          "path": "@ROOT@/session/native-reports/round-1-group-0.json",
+          "sha256": "@SHA:session/native-reports/round-1-group-0.json@",
+          "bytes": "@BYTES:session/native-reports/round-1-group-0.json@"
+        },
+        "header": {
+          "path": "@ROOT@/session/native-reports/round-1-group-0-header.json",
+          "sha256": "@SHA:session/native-reports/round-1-group-0-header.json@",
+          "bytes": "@BYTES:session/native-reports/round-1-group-0-header.json@"
+        },
+        "selection": {
+          "path": "@ROOT@/session/native-reports/round-1-group-0-selection.json",
+          "sha256": "8468ac2123a8e68d26bda06d5ec01e179e5f243406aa10f85b6586042f46af23",
+          "bytes": 27
+        }
+      },
+      "before": {
+        "report": {
+          "path": "@ROOT@/session/native-reports/repair-1-before.json",
+          "sha256": "@SHA:session/native-reports/repair-1-before.json@",
+          "bytes": "@BYTES:session/native-reports/repair-1-before.json@"
+        },
+        "header": {
+          "path": "@ROOT@/session/native-reports/repair-1-before-header.json",
+          "sha256": "@SHA:session/native-reports/repair-1-before-header.json@",
+          "bytes": "@BYTES:session/native-reports/repair-1-before-header.json@"
+        },
+        "selection": {
+          "path": "@ROOT@/session/native-reports/repair-1-before-selection.json",
+          "sha256": "b9f96eadf81730bd50aae5e780b4844e446cd5605f1d3e9fe15ad335b2095498",
+          "bytes": 11
+        }
+      },
+      "selected": {
+        "path": "@ROOT@/session/native-reports/repair-1-selection.json",
+        "sha256": "b9f96eadf81730bd50aae5e780b4844e446cd5605f1d3e9fe15ad335b2095498",
+        "bytes": 11
+      },
+      "repair_report": {
+        "path": "@ROOT@/session/native-reports/repair-1.json",
+        "sha256": "f666b6a8de158812df4d8175e7407fc44c6dcd48a263618d75ae728e7926a8c5",
+        "bytes": 734
+      },
+      "child": {
+        "revision": "rev6",
+        "parent_revision": "rev4",
+        "design_file": {
+          "path": "@ROOT@/ws/revisions/rev6/design.json",
+          "sha256": "4463c8cd8326092b47778b6e5d0ee3e2e3091d3b5594b9fe8011d8da8dccf900",
+          "bytes": 105
+        },
+        "materialized": true,
+        "logical_parent_revision": "rev5"
+      },
+      "work_accounting": {
+        "reported_antenna_work": 7000,
+        "reported_planner_work": 14000,
+        "unreported_validation_work_upper_bound": 200000000,
+        "budget_charge": 200021000
+      }
+    }
+  ],
+  "final_groups": [
+    {
+      "group": 0,
+      "revision": "rev6",
+      "report": {
+        "path": "@ROOT@/session/native-reports/final-group-0.json",
+        "sha256": "@SHA:session/native-reports/final-group-0.json@",
+        "bytes": "@BYTES:session/native-reports/final-group-0.json@"
+      },
+      "header": {
+        "path": "@ROOT@/session/native-reports/final-group-0-header.json",
+        "sha256": "@SHA:session/native-reports/final-group-0-header.json@",
+        "bytes": "@BYTES:session/native-reports/final-group-0-header.json@"
+      },
+      "selection": {
+        "path": "@ROOT@/session/native-reports/final-group-0-selection.json",
+        "sha256": "8468ac2123a8e68d26bda06d5ec01e179e5f243406aa10f85b6586042f46af23",
+        "bytes": 27
+      }
+    }
+  ],
+  "inventory_status": "complete",
+  "native_analysis_status": "partial",
+  "observations": {
+    "observed": 3
+  },
+  "excluded_macro_touch": [],
+  "unresolved_supported_nets": [],
+  "requires_full_revalidation": true,
+  "whole_layout_antenna_status": "unchecked",
+  "commands": [
+    {
+      "command": [
+        "@ROOT@/engine/rustroad-standin.sh",
+        "--workspace",
+        "@ROOT@/ws",
+        "--threads",
+        "2",
+        "--max-expansions",
+        "8000000",
+        "repair-antenna-groups",
+        "--base-rev",
+        "rev4",
+        "--plan",
+        "@ROOT@/session/native-plan.json"
+      ],
+      "exit_code": 0,
+      "stdout": {
+        "path": "@ROOT@/session/native-session.json",
+        "sha256": "@SHA:session/native-session.json@",
+        "bytes": "@BYTES:session/native-session.json@"
+      },
+      "stderr": {
+        "path": "@ROOT@/session/native-session.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "wall_seconds": 0.06632911999997759,
+      "output_bytes": @PROCESS_BYTES@
+    }
+  ],
+  "operations": [
+    {
+      "kind": "native_in_process_operation",
+      "name": "inventory-initial",
+      "operation": "antenna-inventory",
+      "revision": "rev4",
+      "report": {
+        "path": "@ROOT@/session/native-reports/inventory-initial.json",
+        "sha256": "@SHA:session/native-reports/inventory-initial.json@",
+        "bytes": "@BYTES:session/native-reports/inventory-initial.json@"
+      },
+      "selection": null,
+      "selected_report": null,
+      "base_revision": null
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "model-initial",
+      "operation": "export-connectivity",
+      "revision": "rev4",
+      "report": {
+        "path": "@ROOT@/session/native-reports/model-initial.json",
+        "sha256": "1b6beefa45eb0ce29451e47da5b56baa8573eda0cdfedd9eb5bc3d20291856a5",
+        "bytes": 432
+      },
+      "selection": null,
+      "selected_report": null,
+      "base_revision": null
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "round-0-group-0",
+      "operation": "check-antenna",
+      "revision": "rev4",
+      "report": {
+        "path": "@ROOT@/session/native-reports/round-0-group-0.json",
+        "sha256": "@SHA:session/native-reports/round-0-group-0.json@",
+        "bytes": "@BYTES:session/native-reports/round-0-group-0.json@"
+      },
+      "selection": {
+        "path": "@ROOT@/session/native-reports/round-0-group-0-selection.json",
+        "sha256": "8468ac2123a8e68d26bda06d5ec01e179e5f243406aa10f85b6586042f46af23",
+        "bytes": 27
+      },
+      "selected_report": null,
+      "base_revision": null
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "repair-0-before",
+      "operation": "check-antenna",
+      "revision": "rev4",
+      "report": {
+        "path": "@ROOT@/session/native-reports/repair-0-before.json",
+        "sha256": "@SHA:session/native-reports/repair-0-before.json@",
+        "bytes": "@BYTES:session/native-reports/repair-0-before.json@"
+      },
+      "selection": {
+        "path": "@ROOT@/session/native-reports/repair-0-before-selection.json",
+        "sha256": "2f929a4ec750196993a603826e97f564393c1db96111af3a524532f39d211aee",
+        "bytes": 19
+      },
+      "selected_report": null,
+      "base_revision": null
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "repair-0",
+      "operation": "repair-antenna",
+      "revision": "rev4",
+      "report": {
+        "path": "@ROOT@/session/native-reports/repair-0.json",
+        "sha256": "92b9861e8b11a6cdb3ce1bfb9133f80840c5c794cf99bf5da236622f4e51b92a",
+        "bytes": 744
+      },
+      "selection": {
+        "path": "@ROOT@/session/native-reports/repair-0-selection.json",
+        "sha256": "2f929a4ec750196993a603826e97f564393c1db96111af3a524532f39d211aee",
+        "bytes": 19
+      },
+      "selected_report": {
+        "path": "@ROOT@/session/native-reports/repair-0-before.json",
+        "sha256": "@SHA:session/native-reports/repair-0-before.json@",
+        "bytes": "@BYTES:session/native-reports/repair-0-before.json@"
+      },
+      "base_revision": "rev4"
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "round-1-group-0",
+      "operation": "check-antenna",
+      "revision": "rev5",
+      "report": {
+        "path": "@ROOT@/session/native-reports/round-1-group-0.json",
+        "sha256": "@SHA:session/native-reports/round-1-group-0.json@",
+        "bytes": "@BYTES:session/native-reports/round-1-group-0.json@"
+      },
+      "selection": {
+        "path": "@ROOT@/session/native-reports/round-1-group-0-selection.json",
+        "sha256": "8468ac2123a8e68d26bda06d5ec01e179e5f243406aa10f85b6586042f46af23",
+        "bytes": 27
+      },
+      "selected_report": null,
+      "base_revision": null
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "repair-1-before",
+      "operation": "check-antenna",
+      "revision": "rev5",
+      "report": {
+        "path": "@ROOT@/session/native-reports/repair-1-before.json",
+        "sha256": "@SHA:session/native-reports/repair-1-before.json@",
+        "bytes": "@BYTES:session/native-reports/repair-1-before.json@"
+      },
+      "selection": {
+        "path": "@ROOT@/session/native-reports/repair-1-before-selection.json",
+        "sha256": "b9f96eadf81730bd50aae5e780b4844e446cd5605f1d3e9fe15ad335b2095498",
+        "bytes": 11
+      },
+      "selected_report": null,
+      "base_revision": null
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "repair-1",
+      "operation": "repair-antenna",
+      "revision": "rev5",
+      "report": {
+        "path": "@ROOT@/session/native-reports/repair-1.json",
+        "sha256": "f666b6a8de158812df4d8175e7407fc44c6dcd48a263618d75ae728e7926a8c5",
+        "bytes": 734
+      },
+      "selection": {
+        "path": "@ROOT@/session/native-reports/repair-1-selection.json",
+        "sha256": "b9f96eadf81730bd50aae5e780b4844e446cd5605f1d3e9fe15ad335b2095498",
+        "bytes": 11
+      },
+      "selected_report": {
+        "path": "@ROOT@/session/native-reports/repair-1-before.json",
+        "sha256": "@SHA:session/native-reports/repair-1-before.json@",
+        "bytes": "@BYTES:session/native-reports/repair-1-before.json@"
+      },
+      "base_revision": "rev5"
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "round-2-group-0",
+      "operation": "check-antenna",
+      "revision": "rev6",
+      "report": {
+        "path": "@ROOT@/session/native-reports/round-2-group-0.json",
+        "sha256": "@SHA:session/native-reports/round-2-group-0.json@",
+        "bytes": "@BYTES:session/native-reports/round-2-group-0.json@"
+      },
+      "selection": {
+        "path": "@ROOT@/session/native-reports/round-2-group-0-selection.json",
+        "sha256": "8468ac2123a8e68d26bda06d5ec01e179e5f243406aa10f85b6586042f46af23",
+        "bytes": 27
+      },
+      "selected_report": null,
+      "base_revision": null
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "inventory-final",
+      "operation": "antenna-inventory",
+      "revision": "rev6",
+      "report": {
+        "path": "@ROOT@/session/native-reports/inventory-final.json",
+        "sha256": "@SHA:session/native-reports/inventory-final.json@",
+        "bytes": "@BYTES:session/native-reports/inventory-final.json@"
+      },
+      "selection": null,
+      "selected_report": null,
+      "base_revision": null
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "model-final",
+      "operation": "export-connectivity",
+      "revision": "rev6",
+      "report": {
+        "path": "@ROOT@/session/native-reports/model-final.json",
+        "sha256": "1b6beefa45eb0ce29451e47da5b56baa8573eda0cdfedd9eb5bc3d20291856a5",
+        "bytes": 432
+      },
+      "selection": null,
+      "selected_report": null,
+      "base_revision": null
+    },
+    {
+      "kind": "native_in_process_operation",
+      "name": "final-group-0",
+      "operation": "check-antenna",
+      "revision": "rev6",
+      "report": {
+        "path": "@ROOT@/session/native-reports/final-group-0.json",
+        "sha256": "@SHA:session/native-reports/final-group-0.json@",
+        "bytes": "@BYTES:session/native-reports/final-group-0.json@"
+      },
+      "selection": {
+        "path": "@ROOT@/session/native-reports/final-group-0-selection.json",
+        "sha256": "8468ac2123a8e68d26bda06d5ec01e179e5f243406aa10f85b6586042f46af23",
+        "bytes": 27
+      },
+      "selected_report": null,
+      "base_revision": null
+    }
+  ],
+  "execution_mode": "single_native_process",
+  "actual_native_processes": 1,
+  "logical_operations": 12,
+  "native_plan": {
+    "path": "@ROOT@/session/native-plan.json",
+    "sha256": "@SHA:session/native-plan.json@",
+    "bytes": "@BYTES:session/native-plan.json@"
+  },
+  "native_summary": {
+    "path": "@ROOT@/session/native-reports/summary.json",
+    "sha256": "@SHA:session/native-reports/summary.json@",
+    "bytes": "@BYTES:session/native-reports/summary.json@"
+  },
+  "process_report_bytes": @PROCESS_BYTES@,
+  "report_bytes": @REPORT_BYTES@,
+  "reported_work": 42015,
+  "unreported_validation_work_upper_bound": 400000000,
+  "work_budget_charge": 400042015,
+  "total_jumpers": 2,
+  "stop_reason": null,
+  "skipped_futile_groups": 0,
+  "wall_seconds": 0.07318643799999336,
+  "logical_revisions": 2,
+  "committed_revision": "rev6",
+  "check_rows": "violated",
+  "materialized_revisions": [
+    "rev4",
+    "rev6"
+  ]
+}

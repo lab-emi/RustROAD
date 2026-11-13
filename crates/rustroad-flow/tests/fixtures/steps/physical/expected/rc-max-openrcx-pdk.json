@@ -1,0 +1,1613 @@
+{
+ "schema": "rustroad.rc-profile.v1",
+ "pdk": "ihp",
+ "library": "ez130_8t",
+ "corner": "max",
+ "pdk_version": "5cccb161f7492697cfa52eb14dc03beb00bdca9e",
+ "technology_lef_sha256": "e2334ebd1e2350cc5b877e7c8548d437ed90a1defe4cc7406263bc01c92e0e66",
+ "units": {
+  "length": "um",
+  "capacitance": "pF",
+  "resistance": "ohm"
+ },
+ "magic_variant": "(hrhc)",
+ "lef_parasitics": "cut_resistance_used; routing_RC_is_cross_check_only",
+ "sources": [
+  {
+   "role": "capacitance_calibration_table",
+   "path": "@ROOT@/pdk/ihp-sg13g2/libs.tech/librelane/openrcx/ihp-sg13g2.max.magic.rules",
+   "sha256": "3778f08daba6e132ae3d47f2bf51513985edf6d6b5b0e34e6c108a675bffdc18",
+   "bytes": 12519
+  },
+  {
+   "role": "resistance_and_crosscheck_tech",
+   "path": "@ROOT@/pdk/ihp-sg13g2/libs.tech/magic/ihp-sg13g2.tech",
+   "sha256": "1a750076b6ac675b196b2cdc8a40504bf597a0db5ab7ce807da27ed062277c11",
+   "bytes": 414
+  },
+  {
+   "role": "technology_lef",
+   "path": "@ROOT@/pdk/ihp-sg13g2/libs.ref/sg13g2_stdcell/lef/sg13g2_tech.lef",
+   "sha256": "e2334ebd1e2350cc5b877e7c8548d437ed90a1defe4cc7406263bc01c92e0e66",
+   "bytes": 1733
+  },
+  {
+   "role": "resistance_extract_tech",
+   "path": "@ROOT@/pdk/ihp-sg13g2/libs.tech/magic/ihp-sg13g2-extract.tech",
+   "sha256": "ab2518b666edf0da3210259e3729d574e851f99e375da4701e5bc3b76c952db0",
+   "bytes": 3199
+  },
+  {
+   "role": "nominal_calibration_table_for_overlap_corner_ratio",
+   "path": "@ROOT@/pdk/ihp-sg13g2/libs.tech/librelane/openrcx/ihp-sg13g2.nom.magic.rules",
+   "sha256": "144dcf2f347b7d57ae48cdebac29f0685c3bcd562310d52f2585b114d0e67b13",
+   "bytes": 10372
+  }
+ ],
+ "model": {
+  "rows": "[edge_spacing_um, coupling_pf_per_um_to_that_neighbour, ground_pf_per_um_for_that_side]",
+  "per_side": "each wire side is looked up separately; an isolated wire has 2 * ground(last row)",
+  "beyond_last_row": "coupling 0, ground = last-row ground (isolated side)",
+  "context": "over = calibration metal index of the nearest conductor below (0 = substrate), under = nearest above",
+  "resistance": "sheet_resistance * centerline_length / width; via = resistance_ohm_per_cut / cuts",
+  "overlap_area": "metal of another layer that covers part of a wire face without forming a calibration plate couples over the covered width at overlap_area.pf_per_um2 (counted once, from the upper face), and the covered face loses area_cap_pf_per_um2 to the substrate; values are the Magic nominal defaultoverlap/defaultareacap times the calibration table's corner ratio (table_corner_ratio: plate excess of the same pair; substrate row for area_cap)",
+  "resistance_sources": {
+   "wire": "@ROOT@/pdk/ihp-sg13g2/libs.tech/librelane/openrcx/ihp-sg13g2.max.magic.rules: constant RESOVER0 column4 Ohm/nm x1000 xwidth_um",
+   "cut": "@ROOT@/pdk/ihp-sg13g2/libs.ref/sg13g2_stdcell/lef/sg13g2_tech.lef: LAYER CUT RESISTANCE, fixed across RC corners",
+   "independent_cross_check": "@ROOT@/pdk/ihp-sg13g2/libs.tech/magic/ihp-sg13g2.tech and @ROOT@/pdk/ihp-sg13g2/libs.tech/magic/ihp-sg13g2-extract.tech: Magic sheet/contact values",
+   "matching_scope": "use one nominal SPEF for TT/SS Liberty PVT comparison"
+  }
+ },
+ "layers": [
+  {
+   "name": "Metal1",
+   "rules_metal": 1,
+   "width_um": 0.16,
+   "sheet_resistance_ohm_per_square": 0.11,
+   "contexts": [
+    {
+     "over": 0,
+     "under": null,
+     "rows": [
+      [
+       0.16,
+       0.00010169999999999999,
+       2.4859999999999996e-05
+      ],
+      [
+       0.32,
+       5.0849999999999996e-05,
+       2.9831999999999995e-05
+      ],
+      [
+       0.48,
+       3.39e-05,
+       3.4803999999999994e-05
+      ],
+      [
+       0.64,
+       2.5424999999999998e-05,
+       3.977599999999999e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 2,
+     "rows": [
+      [
+       0.16,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.32,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 3,
+     "rows": [
+      [
+       0.16,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.32,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 4,
+     "rows": [
+      [
+       0.16,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.32,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 5,
+     "rows": [
+      [
+       0.16,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.32,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 6,
+     "rows": [
+      [
+       0.16,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.32,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 7,
+     "rows": [
+      [
+       0.16,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.32,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    }
+   ],
+   "area_cap_pf_per_um2": 3.627299999999999e-05,
+   "overlap_area": []
+  },
+  {
+   "name": "Metal2",
+   "rules_metal": 2,
+   "width_um": 0.2,
+   "sheet_resistance_ohm_per_square": 0.098,
+   "contexts": [
+    {
+     "over": 0,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       2.5989999999999997e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       3.1187999999999993e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       3.6385999999999993e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       4.1584e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 3,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 4,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 5,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 6,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 7,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 1,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       2.938e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       3.5255999999999996e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       4.1132e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       4.7008e-05
+      ]
+     ]
+    },
+    {
+     "over": 1,
+     "under": 3,
+     "rows": [
+      [
+       0.2,
+       7.909999999999998e-05,
+       3.729e-05
+      ],
+      [
+       0.4,
+       3.954999999999999e-05,
+       3.729e-05
+      ]
+     ]
+    }
+   ],
+   "area_cap_pf_per_um2": 3.277e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 6.36189999999999e-05,
+     "magic_nominal_af_per_um2": 56.3,
+     "table_corner_ratio": 1.1299999999999983,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
+   ]
+  },
+  {
+   "name": "Metal3",
+   "rules_metal": 3,
+   "width_um": 0.2,
+   "sheet_resistance_ohm_per_square": 0.086,
+   "contexts": [
+    {
+     "over": 0,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       2.7119999999999998e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       3.2544e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       3.796799999999999e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       4.3392e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 4,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 5,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 6,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 7,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 1,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       3.0509999999999998e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       3.6611999999999994e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       4.271399999999999e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       4.8816e-05
+      ]
+     ]
+    },
+    {
+     "over": 2,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       3.389999999999999e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       4.067999999999999e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       4.745999999999998e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       5.423999999999999e-05
+      ]
+     ]
+    },
+    {
+     "over": 2,
+     "under": 4,
+     "rows": [
+      [
+       0.2,
+       7.909999999999998e-05,
+       3.729e-05
+      ],
+      [
+       0.4,
+       3.954999999999999e-05,
+       3.729e-05
+      ]
+     ]
+    }
+   ],
+   "area_cap_pf_per_um2": 2.9266999999999996e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 5.909900000000007e-05,
+     "magic_nominal_af_per_um2": 52.3,
+     "table_corner_ratio": 1.1300000000000014,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 6.361899999999995e-05,
+     "magic_nominal_af_per_um2": 56.3,
+     "table_corner_ratio": 1.1299999999999992,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
+   ]
+  },
+  {
+   "name": "Metal4",
+   "rules_metal": 4,
+   "width_um": 0.2,
+   "sheet_resistance_ohm_per_square": 0.074,
+   "contexts": [
+    {
+     "over": 0,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       2.8249999999999995e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       3.389999999999999e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       3.954999999999999e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       4.5199999999999994e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 5,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 6,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 7,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 1,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       3.1639999999999995e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       3.796799999999999e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       4.429599999999999e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       5.0623999999999995e-05
+      ]
+     ]
+    },
+    {
+     "over": 2,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       3.5029999999999995e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       4.2035999999999995e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       4.904199999999999e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       5.6047999999999996e-05
+      ]
+     ]
+    },
+    {
+     "over": 3,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       3.8419999999999995e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       4.610399999999999e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       5.378799999999999e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       6.1472e-05
+      ]
+     ]
+    },
+    {
+     "over": 3,
+     "under": 5,
+     "rows": [
+      [
+       0.2,
+       7.909999999999998e-05,
+       3.729e-05
+      ],
+      [
+       0.4,
+       3.954999999999999e-05,
+       3.729e-05
+      ]
+     ]
+    }
+   ],
+   "area_cap_pf_per_um2": 2.5764e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 5.457899999999991e-05,
+     "magic_nominal_af_per_um2": 48.3,
+     "table_corner_ratio": 1.1299999999999983,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 5.9098999999999944e-05,
+     "magic_nominal_af_per_um2": 52.3,
+     "table_corner_ratio": 1.129999999999999,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 6.361899999999999e-05,
+     "magic_nominal_af_per_um2": 56.3,
+     "table_corner_ratio": 1.13,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
+   ]
+  },
+  {
+   "name": "Metal5",
+   "rules_metal": 5,
+   "width_um": 0.2,
+   "sheet_resistance_ohm_per_square": 0.062,
+   "contexts": [
+    {
+     "over": 0,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       2.9379999999999997e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       3.5255999999999996e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       4.113199999999999e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       4.7007999999999994e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 6,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 7,
+     "rows": [
+      [
+       0.2,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       0.4,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 1,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       3.277e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       3.9324e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       4.5878e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       5.2432e-05
+      ]
+     ]
+    },
+    {
+     "over": 2,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       3.615999999999999e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       4.339199999999999e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       5.062399999999999e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       5.785599999999999e-05
+      ]
+     ]
+    },
+    {
+     "over": 3,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       3.954999999999999e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       4.745999999999999e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       5.5369999999999987e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       6.327999999999999e-05
+      ]
+     ]
+    },
+    {
+     "over": 4,
+     "under": null,
+     "rows": [
+      [
+       0.2,
+       0.00010169999999999999,
+       4.294e-05
+      ],
+      [
+       0.4,
+       5.0849999999999996e-05,
+       5.1528e-05
+      ],
+      [
+       0.6000000000000001,
+       3.39e-05,
+       6.011599999999999e-05
+      ],
+      [
+       0.8,
+       2.5424999999999998e-05,
+       6.8704e-05
+      ]
+     ]
+    },
+    {
+     "over": 4,
+     "under": 6,
+     "rows": [
+      [
+       0.2,
+       7.909999999999998e-05,
+       3.729e-05
+      ],
+      [
+       0.4,
+       3.954999999999999e-05,
+       3.729e-05
+      ]
+     ]
+    }
+   ],
+   "area_cap_pf_per_um2": 2.2260999999999996e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 5.005900000000005e-05,
+     "magic_nominal_af_per_um2": 44.3,
+     "table_corner_ratio": 1.1300000000000012,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 5.4578999999999994e-05,
+     "magic_nominal_af_per_um2": 48.3,
+     "table_corner_ratio": 1.13,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 5.9098999999999984e-05,
+     "magic_nominal_af_per_um2": 52.3,
+     "table_corner_ratio": 1.13,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 4,
+     "pf_per_um2": 6.361899999999999e-05,
+     "magic_nominal_af_per_um2": 56.3,
+     "table_corner_ratio": 1.13,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
+   ]
+  },
+  {
+   "name": "TopMetal1",
+   "rules_metal": 6,
+   "width_um": 1.64,
+   "sheet_resistance_ohm_per_square": 0.05,
+   "contexts": [
+    {
+     "over": 0,
+     "under": null,
+     "rows": [
+      [
+       1.64,
+       0.00010169999999999999,
+       3.0509999999999998e-05
+      ],
+      [
+       3.28,
+       5.0849999999999996e-05,
+       3.6611999999999994e-05
+      ],
+      [
+       4.92,
+       3.39e-05,
+       4.271399999999999e-05
+      ],
+      [
+       6.56,
+       2.5424999999999998e-05,
+       4.8816e-05
+      ]
+     ]
+    },
+    {
+     "over": 0,
+     "under": 7,
+     "rows": [
+      [
+       1.64,
+       9.04e-05,
+       2.147e-05
+      ],
+      [
+       3.28,
+       4.52e-05,
+       2.3617e-05
+      ]
+     ]
+    },
+    {
+     "over": 1,
+     "under": null,
+     "rows": [
+      [
+       1.64,
+       0.00010169999999999999,
+       3.39e-05
+      ],
+      [
+       3.28,
+       5.0849999999999996e-05,
+       4.068e-05
+      ],
+      [
+       4.92,
+       3.39e-05,
+       4.7459999999999996e-05
+      ],
+      [
+       6.56,
+       2.5424999999999998e-05,
+       5.4239999999999996e-05
+      ]
+     ]
+    },
+    {
+     "over": 2,
+     "under": null,
+     "rows": [
+      [
+       1.64,
+       0.00010169999999999999,
+       3.729e-05
+      ],
+      [
+       3.28,
+       5.0849999999999996e-05,
+       4.474799999999999e-05
+      ],
+      [
+       4.92,
+       3.39e-05,
+       5.2205999999999994e-05
+      ],
+      [
+       6.56,
+       2.5424999999999998e-05,
+       5.9663999999999997e-05
+      ]
+     ]
+    },
+    {
+     "over": 3,
+     "under": null,
+     "rows": [
+      [
+       1.64,
+       0.00010169999999999999,
+       4.067999999999999e-05
+      ],
+      [
+       3.28,
+       5.0849999999999996e-05,
+       4.881599999999999e-05
+      ],
+      [
+       4.92,
+       3.39e-05,
+       5.695199999999998e-05
+      ],
+      [
+       6.56,
+       2.5424999999999998e-05,
+       6.508799999999998e-05
+      ]
+     ]
+    },
+    {
+     "over": 4,
+     "under": null,
+     "rows": [
+      [
+       1.64,
+       0.00010169999999999999,
+       4.4069999999999996e-05
+      ],
+      [
+       3.28,
+       5.0849999999999996e-05,
+       5.2884e-05
+      ],
+      [
+       4.92,
+       3.39e-05,
+       6.169799999999999e-05
+      ],
+      [
+       6.56,
+       2.5424999999999998e-05,
+       7.051199999999999e-05
+      ]
+     ]
+    },
+    {
+     "over": 5,
+     "under": null,
+     "rows": [
+      [
+       1.64,
+       0.00010169999999999999,
+       4.746e-05
+      ],
+      [
+       3.28,
+       5.0849999999999996e-05,
+       5.6952e-05
+      ],
+      [
+       4.92,
+       3.39e-05,
+       6.6444e-05
+      ],
+      [
+       6.56,
+       2.5424999999999998e-05,
+       7.593600000000001e-05
+      ]
+     ]
+    },
+    {
+     "over": 5,
+     "under": 7,
+     "rows": [
+      [
+       1.64,
+       7.909999999999998e-05,
+       3.729e-05
+      ],
+      [
+       3.28,
+       3.954999999999999e-05,
+       3.729e-05
+      ]
+     ]
+    }
+   ],
+   "area_cap_pf_per_um2": 1.8758000000000002e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 4.553899999999993e-05,
+     "magic_nominal_af_per_um2": 40.3,
+     "table_corner_ratio": 1.1299999999999983,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 5.005899999999992e-05,
+     "magic_nominal_af_per_um2": 44.3,
+     "table_corner_ratio": 1.1299999999999983,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 5.4578999999999967e-05,
+     "magic_nominal_af_per_um2": 48.3,
+     "table_corner_ratio": 1.1299999999999994,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 4,
+     "pf_per_um2": 5.9098999999999964e-05,
+     "magic_nominal_af_per_um2": 52.3,
+     "table_corner_ratio": 1.1299999999999994,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 5,
+     "pf_per_um2": 6.3619e-05,
+     "magic_nominal_af_per_um2": 56.3,
+     "table_corner_ratio": 1.1300000000000001,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
+   ]
+  },
+  {
+   "name": "TopMetal2",
+   "rules_metal": 7,
+   "width_um": 2.0,
+   "sheet_resistance_ohm_per_square": 0.03799999999999999,
+   "contexts": [
+    {
+     "over": 0,
+     "under": null,
+     "rows": [
+      [
+       2.0,
+       0.00010169999999999999,
+       3.1639999999999995e-05
+      ],
+      [
+       4.0,
+       5.0849999999999996e-05,
+       3.796799999999999e-05
+      ],
+      [
+       6.0,
+       3.39e-05,
+       4.429599999999999e-05
+      ],
+      [
+       8.0,
+       2.5424999999999998e-05,
+       5.0623999999999995e-05
+      ]
+     ]
+    },
+    {
+     "over": 1,
+     "under": null,
+     "rows": [
+      [
+       2.0,
+       0.00010169999999999999,
+       3.5029999999999995e-05
+      ],
+      [
+       4.0,
+       5.0849999999999996e-05,
+       4.2035999999999995e-05
+      ],
+      [
+       6.0,
+       3.39e-05,
+       4.904199999999999e-05
+      ],
+      [
+       8.0,
+       2.5424999999999998e-05,
+       5.6047999999999996e-05
+      ]
+     ]
+    },
+    {
+     "over": 2,
+     "under": null,
+     "rows": [
+      [
+       2.0,
+       0.00010169999999999999,
+       3.8419999999999995e-05
+      ],
+      [
+       4.0,
+       5.0849999999999996e-05,
+       4.610399999999999e-05
+      ],
+      [
+       6.0,
+       3.39e-05,
+       5.378799999999999e-05
+      ],
+      [
+       8.0,
+       2.5424999999999998e-05,
+       6.1472e-05
+      ]
+     ]
+    },
+    {
+     "over": 3,
+     "under": null,
+     "rows": [
+      [
+       2.0,
+       0.00010169999999999999,
+       4.1809999999999994e-05
+      ],
+      [
+       4.0,
+       5.0849999999999996e-05,
+       5.017199999999999e-05
+      ],
+      [
+       6.0,
+       3.39e-05,
+       5.8533999999999985e-05
+      ],
+      [
+       8.0,
+       2.5424999999999998e-05,
+       6.689599999999999e-05
+      ]
+     ]
+    },
+    {
+     "over": 4,
+     "under": null,
+     "rows": [
+      [
+       2.0,
+       0.00010169999999999999,
+       4.52e-05
+      ],
+      [
+       4.0,
+       5.0849999999999996e-05,
+       5.424e-05
+      ],
+      [
+       6.0,
+       3.39e-05,
+       6.328e-05
+      ],
+      [
+       8.0,
+       2.5424999999999998e-05,
+       7.232e-05
+      ]
+     ]
+    },
+    {
+     "over": 5,
+     "under": null,
+     "rows": [
+      [
+       2.0,
+       0.00010169999999999999,
+       4.859e-05
+      ],
+      [
+       4.0,
+       5.0849999999999996e-05,
+       5.8308e-05
+      ],
+      [
+       6.0,
+       3.39e-05,
+       6.8026e-05
+      ],
+      [
+       8.0,
+       2.5424999999999998e-05,
+       7.7744e-05
+      ]
+     ]
+    },
+    {
+     "over": 6,
+     "under": null,
+     "rows": [
+      [
+       2.0,
+       0.00010169999999999999,
+       5.1979999999999994e-05
+      ],
+      [
+       4.0,
+       5.0849999999999996e-05,
+       6.237599999999999e-05
+      ],
+      [
+       6.0,
+       3.39e-05,
+       7.277199999999999e-05
+      ],
+      [
+       8.0,
+       2.5424999999999998e-05,
+       8.3168e-05
+      ]
+     ]
+    }
+   ],
+   "area_cap_pf_per_um2": 1.5254999999999995e-05,
+   "overlap_area": [
+    {
+     "over": 1,
+     "pf_per_um2": 4.101899999999999e-05,
+     "magic_nominal_af_per_um2": 36.3,
+     "table_corner_ratio": 1.13,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 2,
+     "pf_per_um2": 4.553900000000002e-05,
+     "magic_nominal_af_per_um2": 40.3,
+     "table_corner_ratio": 1.1300000000000006,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 3,
+     "pf_per_um2": 5.005899999999999e-05,
+     "magic_nominal_af_per_um2": 44.3,
+     "table_corner_ratio": 1.13,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 4,
+     "pf_per_um2": 5.4578999999999994e-05,
+     "magic_nominal_af_per_um2": 48.3,
+     "table_corner_ratio": 1.13,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 5,
+     "pf_per_um2": 5.909900000000002e-05,
+     "magic_nominal_af_per_um2": 52.3,
+     "table_corner_ratio": 1.1300000000000003,
+     "table_corner_ratio_source": "plate excess of the pair"
+    },
+    {
+     "over": 6,
+     "pf_per_um2": 6.361900000000002e-05,
+     "magic_nominal_af_per_um2": 56.3,
+     "table_corner_ratio": 1.1300000000000003,
+     "table_corner_ratio_source": "plate excess of the pair"
+    }
+   ]
+  }
+ ],
+ "cuts": [
+  {
+   "name": "Via1",
+   "lower": "Metal1",
+   "upper": "Metal2",
+   "resistance_ohm_per_cut": 20.0,
+   "source": "original technology LEF LAYER Via1 RESISTANCE (fixed across RC corners)",
+   "lef_resistance_ohm_nominal": 20.0
+  },
+  {
+   "name": "Via2",
+   "lower": "Metal2",
+   "upper": "Metal3",
+   "resistance_ohm_per_cut": 17.5,
+   "source": "original technology LEF LAYER Via2 RESISTANCE (fixed across RC corners)",
+   "lef_resistance_ohm_nominal": 17.5
+  },
+  {
+   "name": "Via3",
+   "lower": "Metal3",
+   "upper": "Metal4",
+   "resistance_ohm_per_cut": 15.0,
+   "source": "original technology LEF LAYER Via3 RESISTANCE (fixed across RC corners)",
+   "lef_resistance_ohm_nominal": 15.0
+  },
+  {
+   "name": "Via4",
+   "lower": "Metal4",
+   "upper": "Metal5",
+   "resistance_ohm_per_cut": 12.5,
+   "source": "original technology LEF LAYER Via4 RESISTANCE (fixed across RC corners)",
+   "lef_resistance_ohm_nominal": 12.5
+  },
+  {
+   "name": "TopVia1",
+   "lower": "Metal5",
+   "upper": "TopMetal1",
+   "resistance_ohm_per_cut": 10.0,
+   "source": "original technology LEF LAYER TopVia1 RESISTANCE (fixed across RC corners)",
+   "lef_resistance_ohm_nominal": 10.0
+  },
+  {
+   "name": "TopVia2",
+   "lower": "TopMetal1",
+   "upper": "TopMetal2",
+   "resistance_ohm_per_cut": 7.5,
+   "source": "original technology LEF LAYER TopVia2 RESISTANCE (fixed across RC corners)",
+   "lef_resistance_ohm_nominal": 7.5
+  }
+ ],
+ "cross_checks": [
+  {
+   "layer": "Metal1",
+   "rules_isolated_ground_pf_per_um": 7.955199999999999e-05,
+   "rules_min_spacing_um": 0.16,
+   "rules_coupling_at_min_spacing_pf_per_um": 0.00010169999999999999,
+   "sheet_resistance_ohm_per_square": 0.11,
+   "resistance_source": "IHP RESOVER metal1 over0, column4 Ohm/nm",
+   "magic_sheet_resistance_ohm_per_square": 0.132,
+   "magic_relative_difference": -0.1666666666666667,
+   "magic_isolated_ground_pf_per_um": 8.093599999999999e-05,
+   "isolated_ground_relative_difference": -0.017099930809528506,
+   "magic_coupling_at_min_spacing_pf_per_um": 8.26923076923077e-05,
+   "coupling_relative_difference": 0.22986046511627892,
+   "lef_rpersq_ohm": 0.11,
+   "lef_vs_magic_nominal_resistance_relative_difference": 0.0,
+   "lef_isolated_ground_pf_per_um_nominal": 8.76e-05
+  },
+  {
+   "layer": "Metal2",
+   "rules_isolated_ground_pf_per_um": 8.3168e-05,
+   "rules_min_spacing_um": 0.2,
+   "rules_coupling_at_min_spacing_pf_per_um": 0.00010169999999999999,
+   "sheet_resistance_ohm_per_square": 0.098,
+   "resistance_source": "IHP RESOVER metal2 over0, column4 Ohm/nm",
+   "magic_sheet_resistance_ohm_per_square": 0.1176,
+   "magic_relative_difference": -0.1666666666666666,
+   "magic_isolated_ground_pf_per_um": 7.719999999999999e-05,
+   "isolated_ground_relative_difference": 0.0773056994818654,
+   "magic_coupling_at_min_spacing_pf_per_um": 0.0001125,
+   "coupling_relative_difference": -0.09600000000000004,
+   "lef_rpersq_ohm": 0.098,
+   "lef_vs_magic_nominal_resistance_relative_difference": 0.0,
+   "lef_isolated_ground_pf_per_um_nominal": 8.439999999999999e-05
+  },
+  {
+   "layer": "Metal3",
+   "rules_isolated_ground_pf_per_um": 8.6784e-05,
+   "rules_min_spacing_um": 0.2,
+   "rules_coupling_at_min_spacing_pf_per_um": 0.00010169999999999999,
+   "sheet_resistance_ohm_per_square": 0.086,
+   "resistance_source": "IHP RESOVER metal3 over0, column4 Ohm/nm",
+   "magic_sheet_resistance_ohm_per_square": 0.1032,
+   "magic_relative_difference": -0.16666666666666674,
+   "magic_isolated_ground_pf_per_um": 7.218e-05,
+   "isolated_ground_relative_difference": 0.20232751454696588,
+   "magic_coupling_at_min_spacing_pf_per_um": 7.833333333333333e-05,
+   "coupling_relative_difference": 0.2982978723404255,
+   "lef_rpersq_ohm": 0.086,
+   "lef_vs_magic_nominal_resistance_relative_difference": 0.0,
+   "lef_isolated_ground_pf_per_um_nominal": 7.98e-05
+  },
+  {
+   "layer": "Metal4",
+   "rules_isolated_ground_pf_per_um": 9.039999999999999e-05,
+   "rules_min_spacing_um": 0.2,
+   "rules_coupling_at_min_spacing_pf_per_um": 0.00010169999999999999,
+   "sheet_resistance_ohm_per_square": 0.074,
+   "resistance_source": "IHP RESOVER metal4 over0, column4 Ohm/nm",
+   "magic_sheet_resistance_ohm_per_square": 0.0888,
+   "magic_relative_difference": -0.16666666666666674,
+   "magic_isolated_ground_pf_per_um": 6.715999999999999e-05,
+   "isolated_ground_relative_difference": 0.3460393091125671,
+   "magic_coupling_at_min_spacing_pf_per_um": 0.0001225,
+   "coupling_relative_difference": -0.16979591836734698,
+   "lef_rpersq_ohm": 0.074,
+   "lef_vs_magic_nominal_resistance_relative_difference": 0.0,
+   "lef_isolated_ground_pf_per_um_nominal": 7.52e-05
+  },
+  {
+   "layer": "Metal5",
+   "rules_isolated_ground_pf_per_um": 9.401599999999999e-05,
+   "rules_min_spacing_um": 0.2,
+   "rules_coupling_at_min_spacing_pf_per_um": 0.00010169999999999999,
+   "sheet_resistance_ohm_per_square": 0.062,
+   "resistance_source": "IHP RESOVER metal5 over0, column4 Ohm/nm",
+   "magic_sheet_resistance_ohm_per_square": 0.07440000000000001,
+   "magic_relative_difference": -0.16666666666666677,
+   "magic_isolated_ground_pf_per_um": 6.214e-05,
+   "isolated_ground_relative_difference": 0.512970711297071,
+   "magic_coupling_at_min_spacing_pf_per_um": 8.499999999999998e-05,
+   "coupling_relative_difference": 0.1964705882352943,
+   "lef_rpersq_ohm": 0.062,
+   "lef_vs_magic_nominal_resistance_relative_difference": 0.0,
+   "lef_isolated_ground_pf_per_um_nominal": 7.060000000000001e-05
+  },
+  {
+   "layer": "TopMetal1",
+   "rules_isolated_ground_pf_per_um": 9.7632e-05,
+   "rules_min_spacing_um": 1.64,
+   "rules_coupling_at_min_spacing_pf_per_um": 0.00010169999999999999,
+   "sheet_resistance_ohm_per_square": 0.05,
+   "resistance_source": "IHP RESOVER metal6 over0, column4 Ohm/nm",
+   "magic_sheet_resistance_ohm_per_square": 0.06,
+   "magic_relative_difference": -0.1666666666666666,
+   "magic_isolated_ground_pf_per_um": 8.1024e-05,
+   "isolated_ground_relative_difference": 0.20497630331753555,
+   "magic_coupling_at_min_spacing_pf_per_um": 1.6158536585365855e-05,
+   "coupling_relative_difference": 5.293886792452829,
+   "lef_rpersq_ohm": 0.05,
+   "lef_vs_magic_nominal_resistance_relative_difference": 0.0,
+   "lef_isolated_ground_pf_per_um_nominal": 9.48e-05
+  },
+  {
+   "layer": "TopMetal2",
+   "rules_isolated_ground_pf_per_um": 0.00010124799999999999,
+   "rules_min_spacing_um": 2.0,
+   "rules_coupling_at_min_spacing_pf_per_um": 0.00010169999999999999,
+   "sheet_resistance_ohm_per_square": 0.03799999999999999,
+   "resistance_source": "IHP RESOVER metal7 over0, column4 Ohm/nm",
+   "magic_sheet_resistance_ohm_per_square": 0.0456,
+   "magic_relative_difference": -0.16666666666666688,
+   "magic_isolated_ground_pf_per_um": 7.64e-05,
+   "isolated_ground_relative_difference": 0.3252356020942407,
+   "magic_coupling_at_min_spacing_pf_per_um": 1.3095238095238094e-05,
+   "coupling_relative_difference": 6.766181818181819,
+   "lef_rpersq_ohm": 0.038,
+   "lef_vs_magic_nominal_resistance_relative_difference": 0.0,
+   "lef_isolated_ground_pf_per_um_nominal": 9.2e-05
+  }
+ ],
+ "diagnostics": [
+  "wire resistance is taken from constant IHP RESOVER column4 (Ohm/nm); via resistance is the original LEF cut value, fixed across corners",
+  "DIAGUNDER (diagonal adjacent-layer) tables are not modeled",
+  "via cut and via landing-pad self capacitance are not modeled",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 9 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 20000 mOhm for via1",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 9 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 17500 mOhm for via2",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 9 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 15000 mOhm for via3",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 9 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 12500 mOhm for via4",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 9 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 10000 mOhm for via5",
+  "VIA_R_CORNER_UNAVAILABLE: magic (hrhc) gives every one of its 9 contact types (diffusion, poly, via and MIM contacts alike) the same 15000 mOhm while the nominal block distinguishes them, i.e. a placeholder, not corner data; using nominal 7500 mOhm for via6"
+ ],
+ "generator": "scripts/build_rc_profile.py"
+}

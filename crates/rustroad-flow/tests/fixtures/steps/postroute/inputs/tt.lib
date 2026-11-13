@@ -1,0 +1,206 @@
+/* synthetic sizing library, tt */
+library(fixture_tt) {
+  time_unit : "1ns";
+  capacitive_load_unit(1,pf);
+  cell(BUFX1) {
+    area : 5.4;
+    pin(A) { direction : input; }
+    pin(Y) {
+      direction : output;
+      function : "A";
+      max_capacitance : 0.1;
+      timing() {
+        related_pin : "A";
+        cell_rise(tmpl) { values("0.1, 0.2"); }
+      }
+    }
+  }
+  cell(BUFX2) {
+    area : 5.4;
+    pin(A) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : " A ";
+      max_capacitance : 0.2;
+      max_transition : 1.5;
+    }
+  }
+  cell(BUFX4) {
+    area : 5.4;
+    pin(A) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : "A";
+      max_capacitance : 0.4;
+    }
+  }
+  cell(BUFX8) {
+    area : 10.8;
+    pin(A) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : "A";
+      max_capacitance : 0.8;
+    }
+  }
+  cell(INVX1) {
+    area : 3.6;
+    pin(A) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : "!A";
+      max_capacitance : 0.1;
+    }
+  }
+  cell(INVX2) {
+    area : 0;
+    pin(A) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : "!A";
+    }
+  }
+  cell(INVX3) {
+    dont_use : true;
+    area : 3.6;
+    pin(A) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : "!A";
+      max_capacitance : 0.3;
+    }
+  }
+  cell(NANDX1) {
+    area : 4.5;
+    pin(A) {
+      direction : input;
+    }
+    pin(B) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : "!(A&B)";
+      max_capacitance : 0.1;
+    }
+  }
+  cell(NANDX2) {
+    area : 4.5;
+    pin(A) {
+      direction : input;
+    }
+    pin(B) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : "!(A & B)";
+      max_capacitance : 0.2;
+    }
+  }
+  cell(DFFX1) {
+    area : 20;
+    ff(IQ, IQN) {
+      clocked_on : "CK";
+      next_state : "D";
+    }
+    pin(D) {
+      direction : input;
+    }
+    pin(CK) {
+      direction : input;
+    }
+    pin(Q) {
+      direction : output;
+      function : "IQ";
+      max_capacitance : 0.2;
+    }
+  }
+  cell(DFFX2) {
+    area : 20;
+    ff(IQ, IQN) {
+      clocked_on : "CK";
+      next_state : "D";
+    }
+    pin(D) {
+      direction : input;
+    }
+    pin(CK) {
+      direction : input;
+    }
+    pin(Q) {
+      direction : output;
+      function : "IQ";
+      max_capacitance : 0.4;
+    }
+  }
+  cell(TIEHI) {
+    area : 1.8;
+    pin(Y) {
+      direction : output;
+      function : "1";
+    }
+  }
+  cell(TIELO) {
+    area : 1.8;
+    pin(Y) {
+      direction : output;
+      function : "0";
+    }
+  }
+  cell(ICGX1) {
+    area : 9;
+    clock_gating_integrated_cell : "latch_posedge";
+    pin(CK) {
+      direction : input;
+    }
+    pin(GCK) {
+      direction : output;
+      function : "CK";
+    }
+  }
+  cell(IOBUF) {
+    area : 9;
+    pin(PAD) {
+      direction : inout;
+      function : "A";
+    }
+    pin(A) {
+      direction : input;
+    }
+  }
+  cell(ONLYTT1) {
+    area : 2;
+    pin(A) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : "A";
+      max_capacitance : 0.1;
+    }
+  }
+  cell(ONLYTT2) {
+    area : 2;
+    pin(A) {
+      direction : input;
+    }
+    pin(Y) {
+      direction : output;
+      function : "A";
+      max_capacitance : 0.2;
+    }
+  }
+}

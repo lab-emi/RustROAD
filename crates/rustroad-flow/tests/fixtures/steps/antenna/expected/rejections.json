@@ -1,0 +1,93 @@
+[
+ {
+  "name": "lineage_jumper_ledger",
+  "file": "session/lineage.json",
+  "old": "\"total_jumpers\": 2",
+  "new": "\"total_jumpers\": 3",
+  "error": "NATIVE_SUMMARY_LINEAGE_ACCOUNTING"
+ },
+ {
+  "name": "lineage_status",
+  "file": "session/lineage.json",
+  "old": "\"status\": \"complete\"",
+  "new": "\"status\": \"unresolved\"",
+  "error": "NATIVE_SUMMARY_LINEAGE_ACCOUNTING"
+ },
+ {
+  "name": "lineage_process_count",
+  "file": "session/lineage.json",
+  "old": "\"actual_native_processes\": 1",
+  "new": "\"actual_native_processes\": 2",
+  "error": "NATIVE_EXECUTION_MODE"
+ },
+ {
+  "name": "lineage_materialized_child",
+  "file": "session/lineage.json",
+  "old": "\"materialized\": false",
+  "new": "\"materialized\": true",
+  "error": "ROUND_OR_JUMPER_LEDGER"
+ },
+ {
+  "name": "lineage_work_ledger",
+  "file": "session/lineage.json",
+  "old": "\"reported_antenna_work\": 5000",
+  "new": "\"reported_antenna_work\": 5001",
+  "error": "ROUND_OR_JUMPER_LEDGER"
+ },
+ {
+  "name": "lineage_exit_code",
+  "file": "session/lineage.json",
+  "old": "\"exit_code\": 0",
+  "new": "\"exit_code\": 1",
+  "error": "FAILED_COMMAND_IN_SUCCESS_LINEAGE"
+ },
+ {
+  "name": "lineage_final_group_revision",
+  "file": "session/lineage.json",
+  "old": "\"group\": 0,\n      \"revision\": \"rev6\"",
+  "new": "\"group\": 0,\n      \"revision\": \"rev5\"",
+  "error": "MIXED_FINAL_GROUP_REVISION"
+ },
+ {
+  "name": "report_changed_after_the_session",
+  "file": "session/native-reports/final-group-0.json",
+  "old": "\"violations\":0",
+  "new": "\"violations\":1",
+  "error": "STALE_FILE_ID"
+ },
+ {
+  "name": "header_changed_after_the_session",
+  "file": "session/native-reports/round-2-group-0-header.json",
+  "old": "\"violations\": 0",
+  "new": "\"violations\": 1",
+  "error": "UNREFERENCED_CHECK_HEADER_DIFFERS"
+ },
+ {
+  "name": "workspace_head_moved",
+  "file": "ws/HEAD",
+  "old": "rev6",
+  "new": "rev5",
+  "error": "STALE_FINAL_HEAD"
+ },
+ {
+  "name": "lef_changed",
+  "file": "cells.lef",
+  "old": "MACRO BUF",
+  "new": "MACRO BUFX",
+  "error": "STALE_ORIGINAL_LEF"
+ },
+ {
+  "name": "captured_command_changed",
+  "file": "session/native-session-command.json",
+  "old": "\"--threads\"",
+  "new": "\"--Threads\"",
+  "error": "NATIVE_CAPTURED_COMMAND_DIFFERS"
+ },
+ {
+  "name": "logical_revision_directory",
+  "file": "ws/revisions/rev5/design.json",
+  "old": null,
+  "new": "{}\n",
+  "error": "LOGICAL_REVISION_MATERIALIZED"
+ }
+]
