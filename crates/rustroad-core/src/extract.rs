@@ -1929,15 +1929,147 @@ fn same_net_near(
 
 /// `r` minus every listed shape, as disjoint rectangles (exact integers).
 fn uncovered(r: Rect, covering: &[u32], shapes: &Shapes<'_>) -> Result<Vec<Rect>> {
+    uncovered_by(r, covering.iter().map(|&s| shapes.get(s).rect))
+}
+/// `r` minus each covering rectangle in order.
+fn uncovered_by(r: Rect, covering: impl Iterator<Item = Rect>) -> Result<Vec<Rect>> {
     let mut pieces = vec![r];
-    for &s in covering {
-        let q = shapes.get(s).rect;
+    for q in covering {
         pieces = pieces.into_iter().flat_map(|p| subtract(p, q)).collect();
         if pieces.len() > MAX_PATCH_PIECES {
             return Err(budget("metal pieces per rectangle"));
         }
     }
     Ok(pieces)
+}
+
+/// The pieces of every metal-construction candidate, computed per net in
+/// parallel, exactly as the serial loop computes them, or `None` whenever
+/// the serial loop could behave differently: a same-net list long enough
+/// to be bucketed, an error, or a cumulative work total over the budget.
+/// A candidate sees only its own net's lists: the shapes of that net at
+/// the start plus the pieces it added so far, so nets are independent.
+/// Pieces get increasing shape IDs in candidate order, so within a net the
+/// earlier pieces sort after every initial shape and in creation order,
+/// which is the serial `found` order. Returns per candidate the range of
+/// its pieces in a flat list, and the total charged work.
+#[allow(clippy::type_complexity)]
+fn plan_pieces(
+    candidates: &[(u32, u32, Rect, u32, bool)],
+    near: &NetShapes,
+    shapes: &Shapes<'_>,
+    limits: &ExtractLimits,
+    work: usize,
+) -> Option<(Vec<u32>, Vec<Rect>, usize)> {
+    use rayon::prelude::*;
+    if rayon::current_num_threads() <= 1 || candidates.len() > u32::MAX as usize {
+        return None;
+    }
+    // Candidates of each net, in candidate order.
+    let mut order: Vec<u32> = (0..candidates.len() as u32).collect();
+    order.sort_by_key(|&i| candidates[i as usize].0);
+    let mut groups = Vec::new();
+    let mut start = 0;
+    while start < order.len() {
+        let net = candidates[order[start] as usize].0;
+        let mut end = start + 1;
+        while end < order.len() && candidates[order[end] as usize].0 == net {
+            end += 1;
+        }
+        groups.push(&order[start..end]);
+        start = end;
+    }
+    let planned: Option<Vec<(Vec<(u32, Rect)>, usize)>> = groups
+        .par_iter()
+        .map(|group| {
+            let mut added: Vec<(u32, Vec<Rect>)> = Vec::new();
+            let mut out = Vec::new();
+            let mut charged = 0usize;
+            let mut found = Vec::new();
+            for &i in group.iter() {
+                let (net, layer, rect, _, _) = candidates[i as usize];
+                let initial = near
+                    .lists
+                    .get(&(net, layer))
+                    .map_or(&[][..], |l| &l.ids[..]);
+                let new = added
+                    .iter()
+                    .find(|a| a.0 == layer)
+                    .map_or(&[][..], |a| &a.1[..]);
+                let len = initial.len() + new.len();
+                if len >= near.long {
+                    return None;
+                }
+                charged = charged.checked_add(len.max(1))?;
+                let touches = |q: Rect| {
+                    q.lx <= rect.ux && rect.lx <= q.ux && q.ly <= rect.uy && rect.ly <= q.uy
+                };
+                found.clear();
+                found.extend(
+                    initial
+                        .iter()
+                        .copied()
+                        .filter(|&id| touches(shapes.get(id).rect)),
+                );
+                let fresh = new.iter().filter(|&&q| touches(q)).count();
+                if found.len() + fresh > limits.max_candidates {
+                    return None;
+                }
+                found.sort_unstable();
+                let pieces = uncovered_by(
+                    rect,
+                    found
+                        .iter()
+                        .map(|&id| shapes.get(id).rect)
+                        .chain(new.iter().copied().filter(|&q| touches(q))),
+                )
+                .ok()?;
+                let slot = match added.iter().position(|a| a.0 == layer) {
+                    Some(p) => p,
+                    None => {
+                        added.push((layer, Vec::new()));
+                        added.len() - 1
+                    }
+                };
+                added[slot].1.extend_from_slice(&pieces);
+                out.extend(pieces.into_iter().map(|p| (i, p)));
+            }
+            Some((out, charged))
+        })
+        .collect();
+    let planned = planned?;
+    let mut total = work;
+    let mut counts = vec![0u32; candidates.len() + 1];
+    for (out, charged) in &planned {
+        total = total.checked_add(*charged)?;
+        for &(i, _) in out {
+            counts[i as usize + 1] += 1;
+        }
+    }
+    if total > limits.max_work {
+        return None;
+    }
+    for i in 1..counts.len() {
+        counts[i] += counts[i - 1];
+    }
+    let mut pieces = vec![
+        Rect {
+            lx: 0,
+            ly: 0,
+            ux: 0,
+            uy: 0
+        };
+        counts[candidates.len()] as usize
+    ];
+    let mut cursor = counts.clone();
+    for (out, _) in planned {
+        for (i, p) in out {
+            let at = &mut cursor[i as usize];
+            pieces[*at as usize] = p;
+            *at += 1;
+        }
+    }
+    Some((counts, pieces, total - work))
 }
 
 /// Add one rectangle piece as a conductor shape, all of its capacitance at
@@ -2035,6 +2167,24 @@ fn add_metal_pieces(
         if p.rect.valid() {
             candidates.push((p.net, p.layer, p.rect, p.node, true));
         }
+    }
+    if let Some((offsets, planned, work)) =
+        plan_pieces(&candidates, near, shapes, limits, stats.work)
+    {
+        // The serial loop's charges sum to `work` and none can fail.
+        stats.work += work;
+        for (i, &(net, layer, _, node, is_pad)) in candidates.iter().enumerate() {
+            let pieces = &planned[offsets[i] as usize..offsets[i + 1] as usize];
+            if is_pad {
+                stats.pad_pieces += pieces.len();
+            } else {
+                stats.end_pieces += pieces.len();
+            }
+            for &piece in pieces {
+                add_piece(piece, net, layer, node, built, shapes, near, limits, stats)?;
+            }
+        }
+        return Ok(());
     }
     for (net, layer, rect, node, is_pad) in candidates {
         let covering = same_net_near(rect, net, layer, near, shapes, limits, stats)?;
