@@ -598,6 +598,7 @@ impl PhaseProfile {
         strips: &parallel::Report,
         grid: (usize, u64),
         net_bins: (u32, usize),
+        network: (&[RcNet], &[RcCoupling]),
     ) {
         if self.enabled {
             eprintln!(
@@ -632,10 +633,46 @@ impl PhaseProfile {
                     "work": stats.work,
                     "max_run_candidates": stats.max_run_candidates,
                     "floating_point_order": "unchanged individual additions in run order",
+                    "network_sha256": network_digest(network.0, network.1, stats),
                 })
             );
         }
     }
+}
+/// SHA-256 of every bit of an extracted network (node grounds, resistors,
+/// couplings) and its statistics other than the memory estimate: a stronger
+/// equivalence check than the rounded SPEF text.
+fn network_digest(nets: &[RcNet], couplings: &[RcCoupling], stats: &ExtractStats) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    for n in nets {
+        h.update(n.net.to_le_bytes());
+        h.update((n.nodes.len() as u64).to_le_bytes());
+        for node in &n.nodes {
+            h.update(match *node {
+                RcNode::Pin(p) => (1u64 << 32 | u64::from(p)).to_le_bytes(),
+                RcNode::Internal(k) => u64::from(k).to_le_bytes(),
+            });
+        }
+        for g in &n.ground {
+            h.update(g.to_bits().to_le_bytes());
+        }
+        for &(a, b, ohm) in &n.resistors {
+            h.update(a.to_le_bytes());
+            h.update(b.to_le_bytes());
+            h.update(ohm.to_bits().to_le_bytes());
+        }
+    }
+    for c in couplings {
+        for v in [c.a.0, c.a.1, c.b.0, c.b.1] {
+            h.update(v.to_le_bytes());
+        }
+        h.update(c.pf.to_bits().to_le_bytes());
+    }
+    let mut stats = stats.clone();
+    stats.memory = None;
+    h.update(serde_json::to_vec(&stats).unwrap_or_default());
+    format!("{:x}", h.finalize())
 }
 #[derive(Clone, Copy, Debug)]
 enum EdgeKind {
@@ -2756,7 +2793,7 @@ fn extract_with_queries(
     }
     guard_memory(limits)?;
     profile.phase(7);
-    profile.report(&stats, &report, grid_size, net_bins);
+    profile.report(&stats, &report, grid_size, net_bins, (&nets, &couplings));
     Ok(RcNetwork {
         nets,
         couplings,
