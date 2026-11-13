@@ -1951,8 +1951,9 @@ fn uncovered_by(r: Rect, covering: impl Iterator<Item = Rect>) -> Result<Vec<Rec
 /// the start plus the pieces it added so far, so nets are independent.
 /// Pieces get increasing shape IDs in candidate order, so within a net the
 /// earlier pieces sort after every initial shape and in creation order,
-/// which is the serial `found` order. Returns per candidate the range of
-/// its pieces in a flat list, and the total charged work.
+/// which is the serial `found` order. Returns the group (net) of every
+/// candidate, each group's `(candidate, piece)` list in candidate order,
+/// and the total charged work.
 #[allow(clippy::type_complexity)]
 fn plan_pieces(
     candidates: &[(u32, u32, Rect, u32, bool)],
@@ -1960,7 +1961,7 @@ fn plan_pieces(
     shapes: &Shapes<'_>,
     limits: &ExtractLimits,
     work: usize,
-) -> Option<(Vec<u32>, Vec<Rect>, usize)> {
+) -> Option<(Vec<u32>, Vec<Vec<(u32, Rect)>>, usize)> {
     use rayon::prelude::*;
     if rayon::current_num_threads() <= 1 || candidates.len() > u32::MAX as usize {
         return None;
@@ -2039,37 +2040,21 @@ fn plan_pieces(
         .collect();
     let planned = planned?;
     let mut total = work;
-    let mut counts = vec![0u32; candidates.len() + 1];
-    for (out, charged) in &planned {
+    for (_, charged) in &planned {
         total = total.checked_add(*charged)?;
-        for &(i, _) in out {
-            counts[i as usize + 1] += 1;
-        }
     }
     if total > limits.max_work {
         return None;
     }
-    for i in 1..counts.len() {
-        counts[i] += counts[i - 1];
-    }
-    let mut pieces = vec![
-        Rect {
-            lx: 0,
-            ly: 0,
-            ux: 0,
-            uy: 0
-        };
-        counts[candidates.len()] as usize
-    ];
-    let mut cursor = counts.clone();
-    for (out, _) in planned {
-        for (i, p) in out {
-            let at = &mut cursor[i as usize];
-            pieces[*at as usize] = p;
-            *at += 1;
+    // The group of every candidate, for assembly in candidate order.
+    let mut group_of = vec![0u32; candidates.len()];
+    for (g, group) in groups.iter().enumerate() {
+        for &i in group.iter() {
+            group_of[i as usize] = g as u32;
         }
     }
-    Some((counts, pieces, total - work))
+    let outs = planned.into_iter().map(|(out, _)| out).collect();
+    Some((group_of, outs, total - work))
 }
 
 /// Add one rectangle piece as a conductor shape, all of its capacitance at
@@ -2168,20 +2153,33 @@ fn add_metal_pieces(
             candidates.push((p.net, p.layer, p.rect, p.node, true));
         }
     }
-    if let Some((offsets, planned, work)) =
+    if let Some((group_of, mut planned, work)) =
         plan_pieces(&candidates, near, shapes, limits, stats.work)
     {
         // The serial loop's charges sum to `work` and none can fail.
         stats.work += work;
+        let mut cursor = vec![0usize; planned.len()];
         for (i, &(net, layer, _, node, is_pad)) in candidates.iter().enumerate() {
-            let pieces = &planned[offsets[i] as usize..offsets[i + 1] as usize];
-            if is_pad {
-                stats.pad_pieces += pieces.len();
-            } else {
-                stats.end_pieces += pieces.len();
+            let g = group_of[i] as usize;
+            let out = &planned[g];
+            let start = cursor[g];
+            let mut end = start;
+            while end < out.len() && out[end].0 == i as u32 {
+                end += 1;
             }
-            for &piece in pieces {
+            cursor[g] = end;
+            if is_pad {
+                stats.pad_pieces += end - start;
+            } else {
+                stats.end_pieces += end - start;
+            }
+            for &(_, piece) in &out[start..end] {
                 add_piece(piece, net, layer, node, built, shapes, near, limits, stats)?;
+            }
+            if end == out.len() && end > 0 {
+                // Release each net's plan as soon as it is consumed.
+                planned[g] = Vec::new();
+                cursor[g] = 0;
             }
         }
         return Ok(());
