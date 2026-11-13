@@ -24,16 +24,112 @@ Part of **[RustEDA](https://github.com/lab-emi/RustEDA)**, infrastructure for ch
 
 ## RustROAD vs OpenROAD at a glance
 
-Ibex RTL-to-GDS on IHP SG13G2 with EZ130 cells and two SRAM macros, 2026-11-05: RustEDA and LibreLane 3.0.17 (OpenROAD, Yosys, KLayout, Magic, Netgen) ran one after the other on the same 4-vCPU host from the same prepared inputs, and the same signoff scripts checked both layouts.
+Ibex RTL-to-GDS on IHP SG13G2 with EZ130 cells and two SRAM macros, 2026-11-13: RustEDA and LibreLane 3.0.17 (OpenROAD, Yosys, KLayout, Magic, Netgen) ran one after the other on the same 4-vCPU host from the same prepared inputs, and the same signoff scripts checked both layouts. Every RustEDA engine was built with Rust 1.100.0, and RustEDA's step graph ran under its Rust executor, `rusteda flow exec`.
 
-- **Routing 8.5× faster than OpenROAD** (302.24 s against 2,570.19 s global and detailed), **placement and clock tree 1.7× faster**, and **export 168× faster** than LibreLane's streamout steps.
-- **5.2 % less standard-cell area, 7.4 % less routed wire and 3.0 % fewer vias**, with 52 antenna diodes against 504 and **zero timing violations** against LibreLane's 112.
-- GDS export **2.3× faster than KLayout** with **2.0× less peak memory**; foundry DRC, antenna and LVS run **1.3×, 1.3× and 1.4× faster** on RustROAD's layout (same scripts, same load).
-- The whole RustEDA flow finishes **4.2× sooner end to end**. RustROAD's own extraction is level with OpenRCX at 4 threads and 1.69× slower at 2.
+- **Routing 7.8× faster than OpenROAD** (266.71 s against 2,083.40 s, global and detailed), **placement and clock tree 2.1× faster** (19.56 s against 41.21 s), and **export 159× faster** than LibreLane's streamout steps (1.67 s against 266.29 s).
+- **5.2 % less standard-cell area, 7.7 % less routed wire and 1.3 % fewer vias**, with 52 antenna diodes against 504 and **zero timing violations** against LibreLane's 112.
+- GDS export **2.8× faster than KLayout** with **2.0× less peak memory**. **RustROAD's own extraction is slower than OpenRCX**: 1.22× its time at 4 threads (4.664 s against 3.829 s; the ranges do not overlap) and 2.19× at 2 threads, with 1.60× its peak memory.
+- Foundry DRC, antenna DRC, LVS and the latch-up check run **1.4×, 1.3×, 1.5× and 1.3× faster** on RustROAD's layout (same scripts, same load), and OpenRCX now extracts its DEF in the time it takes on LibreLane's (1.00×, level). The whole RustEDA flow finishes **4.4× sooner end to end** (751.54 s against 3,283.05 s).
 
-LibreLane's layout fails the shared timing gate (112 maximum-capacitance and fanout violations at TT and SS) and its equivalence check does not complete, so the receipt keeps its own ratio fields null under its publication rule; the multiples here divide the recorded times. Stages are paired by phase, not as identical tasks. RustEDA is not faster everywhere: its repair before global routing takes 1.18× LibreLane's two pre-route resizer steps alone, OpenRCX runs 1.36× longer on RustEDA's DEF, and the latch-up check 1.11× longer on its layout. [All stages, gates and losses](https://lab-emi.github.io/RustEDA/benchmarks/)
+LibreLane's layout fails the shared timing gate (112 maximum-capacitance and fanout violations at TT and SS) and its equivalence check does not complete, so the receipt keeps its own ratio fields null under its publication rule; the multiples here divide the recorded times. Stages are paired by phase, not as identical tasks. Against the three losses of 2026-11-05, in same-load runs: repair before global routing now takes 0.73× the time of LibreLane's two pre-route resizer steps (ranges do not overlap; 1.18× on 2026-11-05), OpenRCX on RustROAD's layout is level with its time on LibreLane's (1.00×, ranges overlap; 1.36× on 2026-11-05) and the latch-up check on RustROAD's layout takes 0.76× its time on LibreLane's (1.11× with the checker of that campaign). RustEDA is still not faster or not better everywhere: RustROAD's standalone extraction takes 1.22× OpenRCX's time at 4 threads (2.19× at 2), RustSTA's peak memory at 4 threads is 11.8 % above OpenSTA's, the timing gate is level (0.98×, ranges overlap) and RustROAD's layout keeps less hold margin (TT 0.108 ns against 0.172 ns; both meet hold). [All stages, gates and losses](https://lab-emi.github.io/RustEDA/benchmarks/#ibex-host-campaign-2026-11-13)
 
-## Latest development · 2026-11-05
+## Latest development · 2026-11-13
+
+The RustEDA Ibex host campaign of 2026-11-13 (IHP SG13G2 / EZ130 with two real
+SRAMs, on a 4-vCPU Intel Xeon cloud host reporting 2.10 GHz, with 15.7 GiB RAM
+and no swap; a different virtual machine from 2026-11-05's) ran RustROAD CLI
+0.5.0 (commit [`f90f2dd`](https://github.com/lab-emi/RustROAD/commit/f90f2dd805cbad1ba03dcc4fb84c2d36dfb4d5f7),
+built with Rust 1.100.0) in the repository's current native recipe
+(superproject `820ffc8`) under an 8 GiB memory cap (+2 GiB memsw), with the
+step graph run by the Rust executor `rusteda flow exec`, and OpenROAD 26Q3 in
+LibreLane 3.0.17 Classic under a 10 GiB cap, from the same prepared RTL, SDC
+and floorplan. The same independent scripts checked both final layouts.
+**Both pass foundry main and antenna DRC with 0 violations, latch-up tap
+coverage and full-device LVS; on the shared timing gate the native layout has
+zero setup, hold, slew, capacitance and fanout violations at TT and SS, while
+LibreLane's keeps 28 (TT) and 24 (SS) capacitance and 30 fanout violations.**
+The native layout has less standard-cell area, less routed wire and fewer
+vias, from a different netlist; the receipt keeps its ratio fields null
+because LibreLane's layout fails a gate; divided, the native layout has
+5.2 % less area, 7.7 % less wire and 1.3 % fewer vias.
+
+What changed in RustROAD since 2026-11-05: the router's topology controls
+(RustROAD [`d010664`](https://github.com/lab-emi/RustROAD/commit/d0106647b548a83917c91391a8a105bb78ea238b),
+superproject `3cd3061`) price wrong-way wire higher (`wrong_way_factor` 6
+instead of 3) with a bend surcharge (`bend_cost` 100), run a stronger
+two-pass via reduction, rewrite walled-in same-layer chains jointly with the
+nets that wall them in, move the turn at an escape top to the escape's via,
+and declare the router's track grid in the DEF (`TRACKS` statements). The
+placement and cells are 2026-11-05's; the route changed. The routed DEF went
+from about 192 thousand wire pieces to 160 thousand, at the cost of 2,060
+more vias (120,585 against 118,525), with 895,279.2 µm of wire against
+897,357.3 µm. In that change's interleaved A/B, the shared OpenRCX gate on
+the native layout went from 1.33× to 0.99× its time on LibreLane's
+([routing budget](docs/routing-budget.md#wire-pieces-against-vias-prices-joint-moves-escape-jogs-track-grid)).
+The four Python backend helpers of the recipe (physical inputs, antenna
+session, its review, post-route repair) became `rustroad` commands
+([native flow steps](docs/flow-steps.md)).
+
+| Ibex final layout | RustROAD, native recipe | OpenROAD 26Q3, LibreLane Classic |
+| --- | --- | --- |
+| Standard-cell area | 187,585.2 µm² | 197,913.7 µm² |
+| Routed signal wirelength | 895,279.2 µm | 969,571.6 µm |
+| Vias | 120,585 | 122,194 |
+| Standard cells / antenna diodes / taps / fillers | 14,058 / 52 / 5,934 / 34,322 | 15,191 / 504 / 6,900 / 44,672 |
+| Foundry main / antenna DRC violations | 0 / 0 | 0 / 0 |
+| Latch-up tap coverage (LU.a, LU.b) and full-device LVS | `passed`, `passed` | `passed`, `passed` |
+| Slew / capacitance / fanout violations, TT and SS | 0 / 0 / 0 | 0 / 28 / 30 TT, 0 / 24 / 30 SS |
+| Hold worst slack, TT / SS | 0.108 / 0.206 ns | 0.172 / 0.312 ns |
+| Placement and CTS | 19.56 s | 17.88 s placement + 23.33 s CTS |
+| Routing | 266.71 s at 4 threads, global and detailed | 75.68 s global routing and antenna checks/repair + 2,007.72 s detailed (4 threads) |
+| Repair after routing | 4.74 s post-route + 8.93 s antenna repair and verification | None; its post-GRT repair runs before detailed routing |
+
+Stage times come from one timed run of each flow; the netlists and the repair
+around each stage differ, so the quotients in the summary above pair stages by
+phase, not as identical tasks. The producer completed all
+114 steps, and GDS, DEF, netlists and native SPEF were byte-identical in a
+second producer run through `be_timing`. Both layouts meet hold; the native
+one keeps less hold margin.
+
+On the same final layout, RustROAD's GDS export is faster than KLayout
+0.30.12's DEF-to-GDS streamout (0.498 s against 1.375 s, 2.76×, with
+104,212 KiB against 204,424 KiB peak RSS; timing only: the two GDS files are
+not byte-equivalent). **Its extraction is slower than OpenRCX**: 4.664 s
+against 3.829 s at the recipe's 4 threads (1.22×; the ranges do not overlap)
+and 7.951 s against 3.625 s at 2 threads (2.19×), with about 3.7 times
+OpenRCX's CPU time (13.78–14.04 s against 3.60–3.89 s per run at 4 threads)
+and 1.60× its peak RSS (324,408 against 203,308 KiB). Its total capacitance
+is 6.0 % above OpenRCX's and its total resistance 0.5 % below. Medians are of
+three measured repetitions after one warm-up, interleaved.
+
+As history, not a before/after: 2026-11-05 ran on another host, and with the
+same configuration and byte-identical DEF and netlists every LibreLane stage
+took less time on this one (its flow 0.81× its 2026-11-05 time). On
+2026-11-05 RustROAD's routing took 302.24 s and placement and CTS 28.00 s,
+and its extraction was level with OpenRCX at 4 threads (6.260 s against
+5.944 s, 1.05×, overlapping ranges); since then OpenRCX's median on this
+head-to-head fell from 5.944 s to 3.829 s (0.64×) and RustROAD's from
+6.260 s to 4.664 s (0.75×), on the changed layout. GDS export took 0.831 s
+against KLayout's 1.938 s then.
+
+In interleaved same-load runs of the shared gates after the campaign (on
+another 4-vCPU VM, reporting 2.30 GHz, after a container restart; both
+layouts alike), foundry main DRC, antenna DRC, LVS and latch-up tap coverage
+are faster on the native layout (0.73×, 0.75×, 0.69× and 0.76× of the time on
+LibreLane's; the ranges do not overlap), and OpenRCX extraction (median
+3.37 s against 3.38 s, 1.00×) and RustSTA + OpenSTA timing (0.98×) are level,
+with overlapping ranges. In the flow, `be_openrcx` took 4.23 s on the native
+DEF against 4.541 s for LibreLane's RCX step (6.79 s against 5.557 s on
+2026-11-05).
+
+[Place, CTS and route vs OpenROAD](https://lab-emi.github.io/RustEDA/benchmarks/#rustroad-place-cts-and-route-vs-openroad-2026-11-13) ·
+[Extraction vs OpenRCX](https://lab-emi.github.io/RustEDA/benchmarks/#rustroad-extraction-vs-openrcx-2026-11-13) ·
+[GDS export vs KLayout](https://lab-emi.github.io/RustEDA/benchmarks/#rustroad-gds-export-vs-klayout-2026-11-13) ·
+[Shared gates](https://lab-emi.github.io/RustEDA/benchmarks/#shared-gates-2026-11-13) ·
+[Host campaign 2026-11-13](https://lab-emi.github.io/RustEDA/benchmarks/#ibex-host-campaign-2026-11-13) ·
+[Scope and tables](docs/development-status.md#ibex-host-campaign-2026-11-13)
+
+## Ibex host campaign · 2026-11-05
 
 The RustEDA Ibex host campaign of 2026-11-05 (IHP SG13G2 / EZ130 with two real
 SRAMs, on a 4-vCPU Intel Xeon cloud host with 15.7 GiB RAM and no swap; a
