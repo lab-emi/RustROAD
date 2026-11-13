@@ -1,0 +1,14 @@
+[
+  "@ROOT@/engine/rustroad-standin.sh",
+  "--workspace",
+  "@ROOT@/ws",
+  "--threads",
+  "2",
+  "--max-expansions",
+  "8000000",
+  "repair-antenna-groups",
+  "--base-rev",
+  "rev4",
+  "--plan",
+  "@ROOT@/session/native-plan.json"
+]

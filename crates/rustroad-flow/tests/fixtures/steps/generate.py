@@ -547,6 +547,272 @@ def expected(root, value, text=None):
     return walk(value)
 
 
+ANTENNA_LIMITS = dict(max_shapes_per_net=200000, max_total_shapes=2000000, max_pair_checks=200000000,
+                      max_union_cells=4000000, max_rows=100000, max_work=200000000, report_memory_bytes=128 << 20)
+ANTENNA_POLICY = dict(group_names=128, max_groups=1024, max_attempts=64, max_total_jumpers=4096, max_commands=4096,
+                      max_report_bytes=8 << 30, max_selected_report_bytes=128 << 20, max_metadata_bytes=4 << 20,
+                      max_cumulative_work=200000000000)
+# A stand-in for the engine: it replays recorded reports of one session. The reports name the two
+# LEF files by absolute path, so it writes them for its own location and totals their bytes.
+STANDIN = '''#!/bin/sh
+# usage: <this> --workspace W --threads N --max-expansions E repair-antenna-groups --base-rev R --plan P
+set -eu
+here=$(cd "$(dirname "$0")" && pwd -P)
+root=$(dirname "$here")
+workspace=$2
+plan=${11}
+out=$(dirname "$plan")/native-reports
+mkdir "$out"
+total=0
+for file in "$here"/reports/*.json; do
+  name=$(basename "$file")
+  sed "s|@ROOT@|$root|g" "$file" > "$out/$name"
+  total=$((total + $(wc -c < "$out/$name")))
+done
+sed "s|@REPORT_BYTES@|$total|" "$here/summary.json" > "$out/summary.json"
+mkdir "$workspace/revisions/rev6"
+cp "$here/rev6-design.json" "$workspace/revisions/rev6/design.json"
+printf 'rev6\\n' > "$workspace/HEAD.next"
+mv "$workspace/HEAD.next" "$workspace/HEAD"
+cat "$out/summary.json"
+'''
+
+
+def fingerprint(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+
+
+def antenna_session(root, args):
+    """One grouped session as its files: two mutating repairs (rev5 logical, rev6 committed), three
+    routed nets of which n3 touches a macro, one group. Protocol data only, never EDA results."""
+    out, tree = HERE / 'antenna', root / 'antenna'
+    engine, ws = tree / 'engine', tree / 'ws'
+    write(tree / 'tech.lef', 'VERSION 5.8 ;\nEND LIBRARY\n')
+    write(tree / 'cells.lef', 'MACRO BUF\nEND BUF\nEND LIBRARY\n')
+    write(ws / 'HEAD', 'rev4\n')
+    write(ws / 'revisions/rev4/design.json',
+          '{"format_version":6,"revision":"rev4","parent_revision":"rev3","stage":"routed","design":{"name":"top"}}\n')
+    write(engine / 'rev6-design.json',
+          '{"format_version":6,"revision":"rev6","parent_revision":"rev4","stage":"routed","design":{"name":"top"}}\n')
+    write(engine / 'rustroad-standin.sh', STANDIN)
+    (engine / 'rustroad-standin.sh').chmod(0o755)
+    sources = [dict(role=role, path='@ROOT@/' + name, sha256=hashlib.sha256((tree / name).read_bytes()).hexdigest())
+               for role, name in (('technology_lef', 'tech.lef'), ('cell_lef', 'cells.lef'))]
+    names = ['n1', 'n2', 'n3']
+    state = dict(rev4='4' * 64, rev5='5' * 64, rev6='6' * 64)
+
+    def inventory(rev):
+        nets = [dict(net_id=i, canonical_name=name) for i, name in enumerate(names)]
+        return dict(schema='rustroad.antenna-inventory.v1', status='inventory_only', workspace_revision=rev,
+                    routing_scope='all_signal_nets', source_sha256=state[rev], model_logical_net_count=4,
+                    router_declared_net_count=3, routed_logical_net_count=3, excluded_nonlogical_supply_tie_count=0,
+                    inventory_sha256=fingerprint([rev, 'all_signal_nets', state[rev], nets]), sources=sources, nets=nets)
+
+    model = dict(layers=[], masters=[dict(name='BUF', **{'class': 'CORE'}), dict(name='RAM', **{'class': 'BLOCK'})],
+                 instance_masters=[0, 1], ports=[dict(name='a')],
+                 nets=[dict(name=name) for name in names + ['n4']],
+                 pins=[dict(net=0, owner=dict(kind='instance', instance=0, pin=0)),
+                       dict(net=1, owner=dict(kind='instance', instance=0, pin=1)),
+                       dict(net=2, owner=dict(kind='instance', instance=1, pin=0)),
+                       dict(net=None, owner=dict(kind='port', port=0))])
+
+    def check(rev, selected, bad):
+        rows = dict(n1=2, n2=1, n3=1)
+        coverage = [dict(net=n, shapes=3, rows=rows[n], gate_terminals=1, observation='observed',
+                         model_partial=n == 'n3') for n in selected]
+        checks = [dict(net=n, layer='Metal2', violated=True, exceeds_lef_limit=n == 'n2', gate_area_um2=0.5,
+                       diff_area_um2=0, metal_um2=250.0, denominator_um2=0.5, ratio=500.0, limit=400,
+                       effective_limit=360.0) for n in selected if n in bad]
+        partial = 'n3' in selected
+        return dict(schema='rustroad.antenna-check.v1',
+                    status='subset_violated' if checks else 'subset_partial' if partial else 'subset_clean',
+                    workspace_revision=rev, design='top',
+                    scope=dict(routing_scope='all_signal_nets', extra_shapes=0, drc_status='unchecked'),
+                    safety_margin=dict(fraction=0.1, basis='fixture'), sources=sources, unsupported=[],
+                    nets=[dict(net=n, violated=n in bad, worst_ratio=500.0 if n in bad else 1.5e-05) for n in selected],
+                    violations=len(checks), lef_violations=sum(row['exceeds_lef_limit'] for row in checks),
+                    selection=dict(schema='rustroad.antenna-selected.v1', scope='explicit_routed_net_subset',
+                                   canonical_nets=selected, selection_sha256=fingerprint(selected),
+                                   source_sha256=state[rev], limits=ANTENNA_LIMITS, coverage=coverage),
+                    stats=dict(work=1000 + len(selected), partial_nets_checked=sum(rows[n] for n in selected),
+                               report_memory=dict(limit_bytes=128 << 20, live_bytes=64, peak_live_bytes=128,
+                                                  cumulative_reserved_bytes=256, cumulative_row_bytes=96)),
+                    check_rows='violated', checks=checks)
+
+    def repair(base, child, selected, work):
+        return dict(schema='rustroad.antenna-repair.v1', status='subset_repaired', base_revision=base, revision=child,
+                    routing_scope='all_signal_nets', repair_scope='selected_supported_nets', selected_nets=selected,
+                    requires_full_revalidation=True, drc_status='unchecked',
+                    antenna_status='partial_selected_supported_nets', safety_margin=0.1,
+                    jumpers=[dict(net=selected[-1], layer='Metal3', at=[1200, 3400])],
+                    stats=dict(antenna_work=work, planner_work=2 * work), before=dict(violations=len(selected)),
+                    after=dict(violations=len(selected) - 1),
+                    selected_analysis=dict(canonical_nets=selected, limits=ANTENNA_LIMITS))
+
+    reports = {
+        'inventory-initial': inventory('rev4'), 'model-initial': model,
+        'round-0-group-0': check('rev4', names, {'n1', 'n2'}), 'repair-0-before': check('rev4', ['n1', 'n2'], {'n1', 'n2'}),
+        'repair-0': repair('rev4', 'rev5', ['n1', 'n2'], 5000),
+        'round-1-group-0': check('rev5', names, {'n2'}), 'repair-1-before': check('rev5', ['n2'], {'n2'}),
+        'repair-1': repair('rev5', 'rev6', ['n2'], 7000),
+        'round-2-group-0': check('rev6', names, set()),
+        'inventory-final': inventory('rev6'), 'model-final': model, 'final-group-0': check('rev6', names, set()),
+    }
+    for name, value in reports.items():
+        # Compact, as the engine writes; one number in the engine's own exponent spelling.
+        write(engine / 'reports' / (name + '.json'), json.dumps(value, separators=(',', ':')).replace('1.5e-05', '1.5e-5') + '\n')
+    work = sum(v['stats']['work'] for k, v in reports.items() if 'group' in k or k.endswith('before')) + 3 * (5000 + 7000)
+    summary = dict(schema='rustroad.antenna-group-repair-result.v2', status='complete', initial_revision='rev4',
+                   final_revision='rev6', logical_revisions=2, committed_revision='rev6', check_rows='violated',
+                   scope='supported_standard_cell_subset', route_scope='all_signal_nets', inventory_status='complete',
+                   native_analysis_status='partial', whole_layout_antenna_status='unchecked', drc_status='unchecked',
+                   corner='not_applicable', wire_model='none', unconstrained_endpoints=None,
+                   requires_full_revalidation=True,
+                   attempts=[dict(round=0, group=0, base_revision='rev4', revision='rev5', selected_nets=['n1', 'n2'], jumpers=1),
+                             dict(round=1, group=0, base_revision='rev5', revision='rev6', selected_nets=['n2'], jumpers=1)],
+                   groups=1, observations=dict(observed=3), excluded_macro_touch=[], unresolved_supported_nets=[],
+                   total_jumpers=2, stop_reason=None, skipped_futile_groups=0, reported_work=work,
+                   unreported_validation_work_upper_bound=400000000, work_budget_charge=work + 400000000,
+                   report_bytes='@REPORT_BYTES@', wall_seconds=0.0)
+    write(engine / 'summary.json', json.dumps(summary, indent=2).replace('"@REPORT_BYTES@"', '@REPORT_BYTES@') + '\n')
+    for path in sorted(p for p in tree.rglob('*') if p.is_file()):
+        target = out / 'tree' / path.relative_to(tree)
+        write(target, path.read_bytes())
+        target.chmod(path.stat().st_mode & 0o777)
+    # ---- the reference controller and verifier on that tree ----
+    import subprocess
+    session = args.recipe / 'antenna_session'
+    tool = dict(path=str(engine / 'rustroad-standin.sh'), sha256=hashlib.sha256(STANDIN.encode()).hexdigest(),
+                bytes=len(STANDIN.encode()))
+    inputs = tree / 'antenna-inputs.json'
+    write(inputs, json.dumps(dict(schema='rusteda.native-antenna-inputs.v2', design_workspace=str(ws),
+                                  initial_revision='rev4', tool=tool,
+                                  limits=dict(threads=2, max_rounds=3, max_selected_nets=100000, max_work=200000000,
+                                              max_expansions=8000000, deadline_seconds=1800),
+                                  grouping=ANTENNA_POLICY), indent=2) + '\n')
+    work_dir = tree / 'session'
+    done = subprocess.run([sys.executable, str(session / 'native_antenna_groups.py'), '--inputs', str(inputs),
+                           '--workspace', str(work_dir), '--base-rev', 'empty'], capture_output=True, text=True,
+                          env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
+    assert done.returncode == 0, done.stderr
+    report_bytes = sum((work_dir / 'native-reports' / (name + '.json')).stat().st_size for name in reports)
+    process_bytes = (work_dir / 'native-session.json').stat().st_size
+
+    def template(value):
+        """expected() plus the two byte totals that depend on the length of the root path."""
+        value = expected(tree, value)
+
+        def walk(item, key=None):
+            if isinstance(item, dict):
+                # The engine summary (and its captured copy) holds the report byte total.
+                if set(item) == {'path', 'sha256', 'bytes'} and item['path'].endswith(
+                        ('/native-reports/summary.json', '/native-session.json')):
+                    rel = item['path'].replace('@ROOT@/', '')
+                    return dict(item, sha256=f'@SHA:{rel}@', bytes=f'@BYTES:{rel}@')
+                return {k: walk(v, k) for k, v in item.items()}
+            if isinstance(item, list):
+                return [walk(v) for v in item]
+            if key == 'report_bytes' and item == report_bytes:
+                return '@REPORT_BYTES@'
+            if key in ('process_report_bytes', 'output_bytes') and item == process_bytes:
+                return '@PROCESS_BYTES@'
+            return item
+        return walk(value)
+
+    def render(value, indent=2):
+        text = json.dumps(template(value), indent=indent)
+        for name in ('REPORT_BYTES', 'PROCESS_BYTES'):
+            text = text.replace(f'"@{name}@"', f'@{name}@')
+        return text + '\n'
+
+    write(out / 'antenna-inputs.json', render(json.loads(inputs.read_text())))
+    write(out / 'expected/session-stdout.txt', done.stdout.replace(str(tree), '@ROOT@'))
+    for path in sorted(p for p in work_dir.rglob('*') if p.is_file()):
+        rel = path.relative_to(work_dir)
+        if rel.parts[0] == 'native-reports' and rel.stem in list(reports) + ['summary']:
+            continue   # the engine's own files
+        if path.suffix == '.json' and rel.name != 'native-session.json':
+            write(out / 'expected/session' / rel, render(json.loads(path.read_text())))
+        elif rel.name != 'native-session.json':
+            write(out / 'expected/session' / rel, path.read_bytes())
+    verify_inputs = tree / 'verify-inputs.json'
+    identity = lambda path: dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 bytes=path.stat().st_size)
+    config = dict(schema='rusteda.antenna-v3-independent-verifier-inputs.v2', lineage=identity(work_dir / 'lineage.json'),
+                  tool=tool, design_workspace=str(ws), evidence_kind='protocol_fixture',
+                  controller_inputs=identity(inputs))
+    # The reference verifier reads the v1 form, which also pins a source manifest.
+    manifest = tree / 'source-manifest.json'
+    write(manifest, json.dumps(dict(schema='rusteda.private-source-review.v1', sources=[identity(tree / 'tech.lef')])) + '\n')
+    v1 = dict(config, schema='rusteda.antenna-v3-independent-verifier-inputs.v1', source_manifest=identity(manifest))
+    v1 = {key: v1[key] for key in ('schema', 'lineage', 'tool', 'source_manifest', 'design_workspace', 'evidence_kind',
+                                   'controller_inputs')}
+
+    def review(tag, mutate=None):
+        """Run the reference verifier on a private copy (same absolute paths: the copy is swapped in)."""
+        backup = root / 'antenna-backup'
+        shutil.copytree(tree, backup, symlinks=True)
+        try:
+            if mutate:
+                mutate()
+            current = dict(v1, lineage=identity(work_dir / 'lineage.json'))
+            verify_inputs.write_text(json.dumps(current, indent=2) + '\n')
+            target = tree / ('review-' + tag)
+            done = subprocess.run([sys.executable, str(session / 'verify.py'), '--inputs', str(verify_inputs),
+                                   '--workspace', str(target), '--base-rev', 'empty'], capture_output=True, text=True,
+                                  env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
+            return done.returncode, json.loads((target / 'result.json').read_text())
+        finally:
+            shutil.rmtree(tree)
+            os.rename(backup, tree)
+
+    code, result = review('ok')
+    assert code == 0, result
+    for key in ('verifier_source', 'input_manifest', 'resources'):
+        del result[key]
+    write(out / 'expected/verify-result-v1.json', render(result))
+    write(out / 'verify-inputs-v1.json', render(v1))
+    write(out / 'source-manifest.json', render(json.loads(manifest.read_text()), None))
+
+    def edit(relative, old, new):
+        def apply():
+            path = tree / relative
+            text = path.read_text()
+            assert old in text, (relative, old)
+            path.write_text(text.replace(old, new, 1))
+        return apply
+
+    mutations = [
+        ('lineage_jumper_ledger', 'session/lineage.json', '"total_jumpers": 2', '"total_jumpers": 3'),
+        ('lineage_status', 'session/lineage.json', '"status": "complete"', '"status": "unresolved"'),
+        ('lineage_process_count', 'session/lineage.json', '"actual_native_processes": 1', '"actual_native_processes": 2'),
+        ('lineage_materialized_child', 'session/lineage.json', '"materialized": false', '"materialized": true'),
+        ('lineage_work_ledger', 'session/lineage.json', '"reported_antenna_work": 5000', '"reported_antenna_work": 5001'),
+        ('lineage_exit_code', 'session/lineage.json', '"exit_code": 0', '"exit_code": 1'),
+        ('lineage_final_group_revision', 'session/lineage.json', '"group": 0,\n      "revision": "rev6"',
+         '"group": 0,\n      "revision": "rev5"'),
+        ('report_changed_after_the_session', 'session/native-reports/final-group-0.json', '"violations":0', '"violations":1'),
+        ('header_changed_after_the_session', 'session/native-reports/round-2-group-0-header.json', '"violations": 0',
+         '"violations": 1'),
+        ('workspace_head_moved', 'ws/HEAD', 'rev6', 'rev5'),
+        ('lef_changed', 'cells.lef', 'MACRO BUF', 'MACRO BUFX'),
+        ('captured_command_changed', 'session/native-session-command.json', '"--threads"', '"--Threads"'),
+    ]
+    rejections = []
+    for tag, relative, old, new in mutations:
+        code, result = review(tag, edit(relative, old, new))
+        assert code == 1 and result['status'] == 'rejected_or_unverified', (tag, result)
+        rejections.append(dict(name=tag, file=relative, old=old, new=new, error=result['error']))
+
+    def materialize():
+        write(ws / 'revisions/rev5/design.json', '{}\n')
+    code, result = review('logical_revision_directory', materialize)
+    assert code == 1
+    rejections.append(dict(name='logical_revision_directory', file='ws/revisions/rev5/design.json', old=None,
+                           new='{}\n', error=result['error']))
+    write(out / 'expected/rejections.json', json.dumps(rejections, indent=1) + '\n')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--recipe', type=Path, required=True)
@@ -555,7 +821,7 @@ def main():
     physical_inputs = load(args.recipe / 'native_physical_inputs.py', 'reference_physical_inputs')
     postroute = load(args.recipe / 'native_postroute.py', 'reference_postroute')
     builder = load(args.rc_builder, 'reference_rc_builder')
-    for name in ('physical', 'postroute'):
+    for name in ('physical', 'postroute', 'antenna'):
         shutil.rmtree(HERE / name, ignore_errors=True)
     with tempfile.TemporaryDirectory(prefix='rustroad-step-fixtures-') as temp:
         root = Path(temp).resolve()
@@ -646,6 +912,7 @@ def main():
             ops, residual, skipped = runner.plan({co: dict(rows=rows) for co, rows in corners.items()},
                                                  post / 'netlist.v', dict(RESIZED[name]))
             write(out / f'plan-{name}.json', json.dumps(dict(ops=ops, residual=residual, skipped=skipped), indent=2) + '\n')
+        antenna_session(root, args)
     print('fixtures written under', HERE)
 
 

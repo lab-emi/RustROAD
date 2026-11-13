@@ -1,0 +1,25 @@
+{
+  "schema": "rusteda.antenna-v3-independent-verifier-inputs.v1",
+  "lineage": {
+    "path": "@ROOT@/session/lineage.json",
+    "sha256": "@SHA:session/lineage.json@",
+    "bytes": "@BYTES:session/lineage.json@"
+  },
+  "tool": {
+    "path": "@ROOT@/engine/rustroad-standin.sh",
+    "sha256": "129c715ee4f7de0a6c2c39bf711359aaba0e9d188a626558f7aa67dafa629623",
+    "bytes": 718
+  },
+  "source_manifest": {
+    "path": "@ROOT@/source-manifest.json",
+    "sha256": "@SHA:source-manifest.json@",
+    "bytes": "@BYTES:source-manifest.json@"
+  },
+  "design_workspace": "@ROOT@/ws",
+  "evidence_kind": "protocol_fixture",
+  "controller_inputs": {
+    "path": "@ROOT@/antenna-inputs.json",
+    "sha256": "@SHA:antenna-inputs.json@",
+    "bytes": "@BYTES:antenna-inputs.json@"
+  }
+}

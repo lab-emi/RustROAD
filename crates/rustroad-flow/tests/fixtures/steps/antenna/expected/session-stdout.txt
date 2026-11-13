@@ -1,0 +1,1 @@
+{"schema": "rusteda.native-antenna-lineage.v4", "status": "complete", "initial_revision": "rev4", "final_revision": "rev6", "inventory_status": "complete", "native_analysis_status": "partial", "requires_full_revalidation": true}

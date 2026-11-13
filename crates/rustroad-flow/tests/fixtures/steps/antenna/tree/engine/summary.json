@@ -1,0 +1,56 @@
+{
+  "schema": "rustroad.antenna-group-repair-result.v2",
+  "status": "complete",
+  "initial_revision": "rev4",
+  "final_revision": "rev6",
+  "logical_revisions": 2,
+  "committed_revision": "rev6",
+  "check_rows": "violated",
+  "scope": "supported_standard_cell_subset",
+  "route_scope": "all_signal_nets",
+  "inventory_status": "complete",
+  "native_analysis_status": "partial",
+  "whole_layout_antenna_status": "unchecked",
+  "drc_status": "unchecked",
+  "corner": "not_applicable",
+  "wire_model": "none",
+  "unconstrained_endpoints": null,
+  "requires_full_revalidation": true,
+  "attempts": [
+    {
+      "round": 0,
+      "group": 0,
+      "base_revision": "rev4",
+      "revision": "rev5",
+      "selected_nets": [
+        "n1",
+        "n2"
+      ],
+      "jumpers": 1
+    },
+    {
+      "round": 1,
+      "group": 0,
+      "base_revision": "rev5",
+      "revision": "rev6",
+      "selected_nets": [
+        "n2"
+      ],
+      "jumpers": 1
+    }
+  ],
+  "groups": 1,
+  "observations": {
+    "observed": 3
+  },
+  "excluded_macro_touch": [],
+  "unresolved_supported_nets": [],
+  "total_jumpers": 2,
+  "stop_reason": null,
+  "skipped_futile_groups": 0,
+  "reported_work": 42015,
+  "unreported_validation_work_upper_bound": 400000000,
+  "work_budget_charge": 400042015,
+  "report_bytes": @REPORT_BYTES@,
+  "wall_seconds": 0.0
+}
