@@ -24,10 +24,47 @@ Ibex RTL-to-GDS on IHP SG13G2 with EZ130 cells and two SRAM macros, 2026-11-13: 
 
 - **Routing 7.8× faster than OpenROAD** (266.71 s against 2,083.40 s, global and detailed), **placement and clock tree 2.1× faster** (19.56 s against 41.21 s), and **export 159× faster** than LibreLane's streamout steps (1.67 s against 266.29 s).
 - **5.2 % less standard-cell area, 7.7 % less routed wire and 1.3 % fewer vias**, with 52 antenna diodes against 504 and **zero timing violations** against LibreLane's 112.
-- GDS export **2.8× faster than KLayout** with **2.0× less peak memory**. **RustROAD's own extraction is slower than OpenRCX**: 1.22× its time at 4 threads (4.664 s against 3.829 s; the ranges do not overlap) and 2.19× at 2 threads, with 1.60× its peak memory.
+- GDS export **2.8× faster than KLayout** with **2.0× less peak memory**. RustROAD's own extraction, after the campaign (RustROAD [`fe4b286`](https://github.com/lab-emi/RustROAD/commit/fe4b28610fa1d2ce728fa5456e0b1fa891d821f7)), is **level with OpenRCX at 4 threads, not faster** (3.226 s against 3.014 s, 1.07×; the ranges overlap) and **still 1.85× slower at 2 threads** (5.315 s against 2.874 s), with 1.6× its peak memory and the same SPEF (in the campaign: 1.22× slower at 4 threads, 2.19× at 2).
 - Foundry DRC, antenna DRC, LVS and the latch-up check run **1.4×, 1.3×, 1.5× and 1.3× faster** on RustROAD's layout (same scripts, same load), and OpenRCX now extracts its DEF in the time it takes on LibreLane's (1.00×, level). The whole RustEDA flow finishes **4.4× sooner end to end** (751.54 s against 3,283.05 s).
 
-LibreLane's layout fails the shared timing gate (112 maximum-capacitance and fanout violations at TT and SS) and its equivalence check does not complete, so the receipt keeps its own ratio fields null under its publication rule; the multiples here divide the recorded times. Stages are paired by phase, not as identical tasks. Against the three losses of 2026-11-05, in same-load runs: repair before global routing now takes 0.73× the time of LibreLane's two pre-route resizer steps (ranges do not overlap; 1.18× on 2026-11-05), OpenRCX on RustROAD's layout is level with its time on LibreLane's (1.00×, ranges overlap; 1.36× on 2026-11-05) and the latch-up check on RustROAD's layout takes 0.76× its time on LibreLane's (1.11× with the checker of that campaign). RustEDA is still not faster or not better everywhere: RustROAD's standalone extraction takes 1.22× OpenRCX's time at 4 threads (2.19× at 2), RustSTA's peak memory at 4 threads is 11.8 % above OpenSTA's, the timing gate is level (0.98×, ranges overlap) and RustROAD's layout keeps less hold margin (TT 0.108 ns against 0.172 ns; both meet hold). [All stages, gates and losses](https://lab-emi.github.io/RustEDA/benchmarks/#ibex-host-campaign-2026-11-13)
+LibreLane's layout fails the shared timing gate (112 maximum-capacitance and fanout violations at TT and SS) and its equivalence check does not complete, so the receipt keeps its own ratio fields null under its publication rule; the multiples here divide the recorded times. Stages are paired by phase, not as identical tasks. Against the three losses of 2026-11-05, in same-load runs: repair before global routing now takes 0.73× the time of LibreLane's two pre-route resizer steps (ranges do not overlap; 1.18× on 2026-11-05), OpenRCX on RustROAD's layout is level with its time on LibreLane's (1.00×, ranges overlap; 1.36× on 2026-11-05) and the latch-up check on RustROAD's layout takes 0.76× its time on LibreLane's (1.11× with the checker of that campaign). RustEDA is still not faster or not better everywhere: RustROAD's standalone extraction took 1.22× OpenRCX's time at 4 threads in the campaign (2.19× at 2) and, since RustROAD `fe4b286` after the campaign, is level at 4 threads (1.07×, ranges overlap) and 1.85× slower at 2; the timing gate is level (0.98×, ranges overlap) and RustROAD's layout keeps less hold margin (TT 0.108 ns against 0.172 ns; both meet hold). RustSTA's peak memory at 4 threads, 11.8 % above OpenSTA's in the campaign, is 12.6 % below it since RustSTA `de210a6` ([after the campaign](https://lab-emi.github.io/RustEDA/benchmarks/#ruststa-peak-memory-and-rustroad-extraction-2026-11-13)). [All stages, gates and losses](https://lab-emi.github.io/RustEDA/benchmarks/#ibex-host-campaign-2026-11-13)
+
+## Faster extraction · 2026-11-13
+
+After the 2026-11-13 campaign, RustROAD
+[`fe4b286`](https://github.com/lab-emi/RustROAD/commit/fe4b28610fa1d2ce728fa5456e0b1fa891d821f7)
+(eight commits, `52bc4e9..fe4b286`) extracts the campaign's final Ibex layout
+in **0.83× the campaign binary's time at 4 threads and 0.84× at 2**, with the
+same SPEF. That makes it **level with OpenRCX at 4 threads**, the recipe's
+setting (3.226 s against 3.014 s, 1.07×; the ranges overlap, so it is not
+faster), but **still 1.85× slower at 2 threads** (5.315 s against 2.874 s),
+with 3.4 times OpenRCX's CPU time and 1.6× its peak RSS. In the campaign it
+was 1.22× slower at 4 threads and 2.19× at 2 (below). The eight commits take
+repeated work out of the extractor's phases (grid cells and grid build, chunk
+grouping, candidate roles per strip, metal pieces planned per net in
+parallel, reused interval state, SPEF value formatting); the strips went from
+2.83 s to 2.24 s of wall time at 4 threads in single profiled runs.
+
+| Same-load A/B, 7 runs after a warm-up, interleaved | Campaign binary | New binary | Competitor |
+| --- | ---: | ---: | ---: |
+| **Extraction** (final routed layout, nominal corner) | RustROAD `f90f2dd` | RustROAD `fe4b286` | OpenRCX |
+| Median wall, 4 threads (range) | 3.870 (3.645–4.031) s | **3.226 (3.062–3.397) s** | 3.014 (2.838–3.333) s |
+| Median wall, 2 threads (range) | 6.333 (6.063–6.595) s | **5.315 (5.164–5.461) s** | 2.874 (2.796–2.979) s |
+| Median CPU, 4 threads (range) | 11.73 (11.15–12.15) s | 10.12 (9.58–10.62) s | 2.99 (2.81–3.30) s |
+| Median CPU, 2 threads (range) | 11.47 (10.99–11.90) s | 9.71 (9.47–9.99) s | 2.86 (2.78–2.95) s |
+| Median peak RSS, 4 / 2 threads | 319,616 / 310,932 KiB | 324,552 / 288,896 KiB | 201,696 / 201,276 KiB |
+
+Every run of both binaries wrote the same SPEF (the campaign's), a new digest
+over every bit of the extracted network is the same at 1 to 4 threads, and a
+full native run with the new RustROAD and RustSTA binaries produced a GDS,
+DEF, native SPEF and netlists byte-identical to the campaign's, with all nine
+shared gates passing with the campaign's verdicts. **What remains:** it is
+still 1.85× slower than OpenRCX at 2 threads and not faster at 4; it spends
+3.4 times OpenRCX's CPU time, about 1 s of its 3.3 s at 4 threads is spent
+outside the parallel strip phase, and its peak RSS is 1.6× OpenRCX's.
+
+[Tables, method and identity](development-status.md#faster-extraction-2026-11-13) ·
+[RustSTA peak memory and RustROAD extraction](https://lab-emi.github.io/RustEDA/benchmarks/#ruststa-peak-memory-and-rustroad-extraction-2026-11-13)
 
 ## Ibex host campaign · 2026-11-13
 
@@ -76,11 +113,14 @@ its review, post-route repair) became `rustroad` commands
 | Repair after routing | 4.74 s post-route + 8.93 s antenna repair and verification | None; its post-GRT repair runs before detailed routing |
 
 RustROAD's GDS export took 0.498 s against 1.375 s for KLayout's DEF-to-GDS
-streamout (2.76×). **Its extraction is slower than OpenRCX**: 4.664 s at
-4 threads against 3.829 s (1.22×; the ranges do not overlap) and 7.951 s at
-2 threads against 3.625 s (2.19×), with about 3.7 times OpenRCX's CPU time and
-1.60× its peak RSS; on 2026-11-05, on another host and layout, it was level at
-4 threads (1.05×). In same-load runs OpenRCX now extracts the native DEF in
+streamout (2.76×). **In the campaign its extraction was slower than
+OpenRCX**: 4.664 s at 4 threads against 3.829 s (1.22×; the ranges do not
+overlap) and 7.951 s at 2 threads against 3.625 s (2.19×), with about 3.7 times
+OpenRCX's CPU time and 1.60× its peak RSS; on 2026-11-05, on another host and
+layout, it was level at 4 threads (1.05×). Since the campaign, RustROAD
+`fe4b286` is level with OpenRCX at 4 threads (1.07×, ranges overlap) and still
+1.85× slower at 2, with the same SPEF ([faster extraction](#faster-extraction-2026-11-13)).
+In same-load runs OpenRCX now extracts the native DEF in
 the time it takes on LibreLane's (median 3.37 s against 3.38 s, 1.00×), and
 foundry main DRC, antenna DRC, LVS and latch-up run in 0.73×, 0.75×, 0.69× and
 0.76× of their time on LibreLane's layout. The host differs from 2026-11-05's

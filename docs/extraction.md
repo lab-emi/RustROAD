@@ -213,9 +213,10 @@ Strips are computed on the `--threads` pool. Units (a wire body, or the strip pa
 of one rectangle) are taken from the unit iterator in chunks of 64. Lanes compute
 chunks into bounded transcripts of ordered accumulations (every `ground[node] +=`,
 `coupling[key] +=` and overlap-area addition). A complete chunk's transcript is
-split by shard in its lane, and each shard's records are stably sorted by key, so
-every accumulator's additions stay in run order and are applied with one lookup per
-accumulator. A leader (whichever lane holds it) clears chunks strictly in run order:
+split by shard in its lane; coupling records are grouped by key with a chunk-local
+table in order of first appearance (a stable counting sort), and ground and area
+records keep their emission order, so every accumulator's additions stay in run order
+and are applied with one lookup per accumulator. A leader (whichever lane holds it) clears chunks strictly in run order:
 cumulative work and integer statistics, and a proof that no budget can fail inside
 the chunk (work, and an upper bound of the coupling count). Each shard then applies
 the cleared chunks for its own accumulators, in chunk order, on whichever lane is
