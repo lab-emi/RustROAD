@@ -2702,7 +2702,21 @@ pub(super) fn export_def(
         .as_ref()
         .ok_or_else(|| Error::Invalid("prepared placement state absent".into()))?;
     let model = &bundle.connectivity;
-    rustroad_core::write_def_components(design, placed, output)?;
+    // Opt-in (`track_router.qor.def_tracks`): the router's track grid.
+    let tracks = match &bundle.routing {
+        Some(routing)
+            if routing
+                .config
+                .track_router
+                .as_ref()
+                .and_then(|t| t.qor.as_ref())
+                .is_some_and(|q| q.def_tracks) =>
+        {
+            crate::routing::def_tracks(bundle, &routing.config, design.die_area)?
+        }
+        _ => Vec::new(),
+    };
+    rustroad_core::write_def_components_with(design, placed, &tracks, output)?;
     let aliases: HashMap<_, _> = model
         .nets
         .iter()

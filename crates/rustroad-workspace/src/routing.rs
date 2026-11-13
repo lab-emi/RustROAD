@@ -189,6 +189,12 @@ pub struct RouteQorConfig {
     /// omitted keeps the routes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub straighten: Option<rustroad_core::routing::Straighten>,
+    /// `export-def` declares the track grid this router used: one `TRACKS`
+    /// statement per axis and routing layer (`def_tracks`), as DEF 5.8 places
+    /// them after the rows. Output only; the route is unchanged. Omitted
+    /// keeps the DEF without track statements.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub def_tracks: bool,
 }
 fn is_zero(value: &u64) -> bool {
     *value == 0
@@ -1382,6 +1388,50 @@ impl ExportNets {
             .ok_or_else(|| fail("route net outside connectivity and ties"))
     }
 }
+/// The DEF `TRACKS` statements of the track grid of `config` over `die`, in
+/// routing-layer order, X then Y per layer: every coordinate
+/// `offset + k * pitch` at which a default-width wire of the layer lies inside
+/// the die, which is exactly the track set the track router builds along the
+/// layer's preferred axis (`troute::layer_tracks`); the other axis uses the
+/// same pitch and offset, as the DEF track grids of other tools do. Empty
+/// without a track router.
+pub(crate) fn def_tracks(
+    bundle: &PhysicalBundle,
+    config: &RoutingConfig,
+    die: Rect,
+) -> Result<Vec<String>> {
+    let Some(track) = &config.track_router else {
+        return Ok(Vec::new());
+    };
+    let (layers, _, _) = route_technology(bundle, config)?;
+    let plan = track_plan(bundle, track, &layers)?;
+    let mut out = Vec::new();
+    for (layer, tracks) in layers.iter().zip(&plan.tracks) {
+        let (Some(_), Some((pitch, offset))) = (layer.vertical, *tracks) else {
+            continue;
+        };
+        if pitch <= 0 {
+            return Err(fail("track pitch must be positive"));
+        }
+        let half = i128::from(layer.width / 2);
+        let (pitch, offset) = (i128::from(pitch), i128::from(offset));
+        for (axis, lo, hi) in [("X", die.lx, die.ux), ("Y", die.ly, die.uy)] {
+            let (lo, hi) = (i128::from(lo), i128::from(hi));
+            let k0 = (lo + half - offset + pitch - 1).div_euclid(pitch);
+            let first = offset + k0 * pitch;
+            if first + half > hi {
+                continue;
+            }
+            let count = (hi - half - first).div_euclid(pitch) + 1;
+            out.push(format!(
+                "TRACKS {axis} {first} DO {count} STEP {pitch} LAYER {} ;",
+                rustroad_core::def_name(&layer.name)
+            ));
+        }
+    }
+    Ok(out)
+}
+
 /// Track plan: LEF PITCH/OFFSET per routing layer (vertical: x component,
 /// horizontal: y component), replaced by explicit profile overrides.
 pub(crate) fn track_plan(
@@ -2483,7 +2533,9 @@ mod qor_config_tests {
             Some(rustroad_core::routing::Straighten {
                 passes: 2,
                 turn_at_ends: false,
-                reroute: None
+                reroute: None,
+                neighbors: None,
+                escape_jogs: false
             })
         );
         assert!(
@@ -2499,6 +2551,24 @@ mod qor_config_tests {
         let s = route_qor(&rerouted, &layers()).unwrap().straighten.unwrap();
         assert!(s.turn_at_ends);
         assert_eq!(s.reroute.unwrap().weight, 1);
+        // Joint moves and escape jogs: off unless named, one pass of moves by
+        // default (the core route validates the ranges).
+        assert!(s.neighbors.is_none() && !s.escape_jogs);
+        let joint: RouteQorConfig = serde_json::from_str(
+            r#"{"straighten": {"passes": 2, "escape_jogs": true, "neighbors": {"max_victims": 2,
+                "max_terminals": 10, "net_expansions": 10000, "length_per_piece": 420}}}"#,
+        )
+        .unwrap();
+        let s = route_qor(&joint, &layers()).unwrap().straighten.unwrap();
+        assert!(s.escape_jogs);
+        let n = s.neighbors.unwrap();
+        assert_eq!((n.max_victims, n.length_per_piece, n.passes), (2, 420, 1));
+        assert!(
+            serde_json::from_str::<RouteQorConfig>(
+                r#"{"straighten": {"passes": 1, "neighbors": {"max_victims": 2}}}"#
+            )
+            .is_err()
+        );
     }
 }
 

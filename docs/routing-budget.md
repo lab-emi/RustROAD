@@ -321,9 +321,10 @@ replay of the legacy Metal3-access configuration (no `qor`) writes a
 | `bend_cost` | Surcharge of a same-layer wire step that turns from the axis of the step that reached the node. |
 | `notch_bridge` | Same-net notch repair for facing shapes: cleanup's bridges try the stair bridge and bars clipped to two widths past the gap before the legacy full-length bars, and a notch that repeats after a re-route with every fill blocked gets a reserved fill (repair rung 5 below). Off keeps the legacy bars and repair. Needed with `access_layer` Metal2 on Ibex. |
 | `strict_wide_cycles` | The bounded detail-cycle cut of rule repair (rung 3 below) also runs for an owner whose strict re-route succeeded, before the halos, from the second sighting of a wide pair, at most three cuts per wide region (`MAX_REGION_CUTS`), and several cuts can happen in one pass. Off keeps the cut for relaxed owners only, once per net, after both halos. |
-| `via_reduction` | Post-route via reduction (section below). Omitted keeps the routes of the repair loop. |
+| `via_reduction` | Post-route via reduction (section below). Omitted keeps the routes of the repair loop. With `keep_pieces` a re-route must also not add DEF wire pieces ("Wire pieces against vias" below). |
 | `dedupe_vias` | One via per net, layer pair and point: the pin escapes of a net that land vias at one point share one right after pin access, and the output writes one (section below). |
-| `straighten` | Post-route topology cleanup: same-layer staircases and zigzags become straighter same-net geometry where the clearance and same-net rule checks allow (section below). Omitted keeps the routes. |
+| `straighten` | Post-route topology cleanup: same-layer staircases and zigzags become straighter same-net geometry where the clearance and same-net rule checks allow (section below). Omitted keeps the routes. With `neighbors`, a chain walled in by other nets' routed metal is rewritten together with them ("Wire pieces against vias" below). |
+| `def_tracks` | `export-def` declares the track grid of the router (`TRACKS`, one statement per axis and routing layer). Output only; omitted writes no track statements ("Wire pieces against vias" below). |
 
 #### Post-route via reduction (`track_router.qor.via_reduction`)
 
@@ -736,6 +737,273 @@ it), `straightening_turns_at_a_via_junction_and_the_via_follows_the_new_arrival`
 arrives along the other axis, `orient_vias` re-picks the via variant whose pad
 lies along it, and the result validates with the same vias),
 `straightening_and_dedupe_are_off_by_default_and_reject_out_of_range_passes`.
+
+#### Wire pieces against vias (prices, joint moves, escape jogs, track grid)
+
+After the cleanup above, the final native DEF of the campaign of
+2026-11-05 still held 192,328 wire pieces against LibreLane's 129,901, and
+OpenRCX took 1.36 times as long on it in the shared gate. By layer and
+direction (`scripts/def_pieces.py`, split by layer), almost all of the
+difference is Metal2, the vertical access layer: 121,306 pieces against
+82,748, of them 71,562 in same-layer chains (staircases and zigzags)
+against 34,772. Metal3 holds 47,240 against 42,638, Metal4 and above
+12,651 against 4,515, and Metal1 escape wires 11,131 (LibreLane writes no
+Metal1 wire, but jogs on Metal2 at 10,117 Via1 landings instead). Two
+causes stand out:
+
+* **Escape stubs.** A native escape reaches the Metal2 area of a later
+  stacked via with an 840 DBU stub from its Via1 (`area_stacks`); the
+  route starts at the stub's top, and when it leaves that top along the
+  other axis or back past the Via1, the stub and the route's first runs
+  form a chain that the router never sees as one (the top is a junction of
+  the route). 7,693 Metal2 chains are such Zs from a Via1 to a Via2
+  (vertical, jog, vertical) against 1,911 in LibreLane's DEF, and 2,385 of
+  them only jog to a track because the Via1 sits off the track.
+  LibreLane's access stacks Via2 on Via1 at 11,035 pins and writes the
+  Metal2 minimum-area metal there as `RECT` patches, which OpenRCX does not
+  extract at all (`docs/extraction.md`, "RECT patches are not extracted"):
+  those accesses hold no Metal2 piece for that reader. (Turning the
+  router's area stubs into patches would change the extracted values, so
+  it is not done; `area_stacks: false` leaves pins without legal access on
+  this placement, `NO_ROUTE`.)
+* **Prices.** With `wrong_way_factor` 3 a one-track Metal2 jog (1,260)
+  costs a quarter of a via pair (2 x 2,520), so most track changes near
+  the pins are jogs; each jog is a piece and splits the run it leaves.
+  The previous configuration (factor 4, via cost 1,680) had 172,566 pieces
+  but 130,729 vias.
+
+Route replays of the campaign's `be_route` input (its `road-final` `rev3`
+with the flow's `--threads 4 --max-expansions 80000000` invocation; the
+first row writes the campaign's own `routes.rbin`), QoR from the exported
+DEF with the receipt code, pieces and causes with `scripts/def_pieces.py`,
+route CPU from GNU time (1-minute load 1.2 to 5.8, each replay holding the
+heavy-job lock):
+
+| `be_route` replay (changes to the recipe) | vias | Via2 / Via3 / Via4 | wire µm | wrong-way µm | pieces | staircase / zigzag pieces | route CPU s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| the campaign recipe (`wrong_way_factor` 3) | 118,331 | 49,169 / 13,050 / 2,645 | 897,357.3 | 26,110.3 | 192,134 | 42,774 / 39,411 | 243.2 |
+| `bend_cost` 100 | 118,845 | 49,453 / 13,258 / 2,658 | 896,945.4 | 23,727.8 | 183,602 | 39,707 / 32,438 | 248.2 |
+| no via reduction | 121,504 | 51,685 / 13,680 / 2,670 | 896,560.9 | 22,794.6 | 190,819 | 41,656 / 34,606 | 246.8 |
+| joint moves (`neighbors`) | 118,171 | 49,056 / 13,003 / 2,638 | 896,795.2 | 25,797.5 | 190,618 | 42,480 / 38,042 | 269.1 |
+| factor 4 | 120,627 | 51,409 / 13,156 / 2,570 | 897,758.9 | 17,820.5 | 177,349 | 34,555 / 32,044 | 244.7 |
+| factor 4, `bend_cost` 100 | 120,952 | 51,502 / 13,298 / 2,651 | 897,420.9 | 16,839.3 | 171,959 | 32,171 / 28,726 | 238.4 |
+| factor 5 | 122,571 | 52,663 / 13,781 / 2,613 | 896,763.4 | 14,041.4 | 168,797 | 30,031 / 25,819 | 227.0 |
+| factor 5, `via_milli` 3000 | 120,690 | 51,129 / 13,452 / 2,597 | 898,026.1 | 16,461.4 | 170,658 | 30,782 / 29,586 | 218.2 |
+| factor 5, via reduction B | 118,550 | 50,243 / 12,315 / 2,476 | 898,199.0 | 17,624.5 | 171,155 | 32,149 / 31,530 | 259.6 |
+| factor 5, via reduction B with `keep_pieces` | 124,169 | 53,711 / 14,387 / 2,557 | 896,298.0 | 12,664.0 | 165,826 | 28,403 / 22,043 | 255.0 |
+| factor 5, `bend_cost` 100, via reduction B | 119,040 | 50,188 / 12,616 / 2,691 | 898,295.8 | 16,963.4 | 166,543 | 29,784 / 28,496 | 262.3 |
+| the same with joint moves | 118,964 | 50,136 / 12,596 / 2,689 | 897,928.3 | 16,795.9 | 165,591 | 29,372 / 27,565 | 274.7 |
+| the same with joint moves and escape jogs | 118,975 | 50,142 / 12,599 / 2,691 | 895,863.4 | 16,815.3 | 162,920 | 26,896 / 23,377 | 266.6 |
+| factor 6 | 125,108 | 54,016 / 14,624 / 2,902 | 896,424.7 | 11,489.9 | 164,435 | 27,132 / 21,202 | 248.9 |
+| factor 6, `bend_cost` 100, via reduction B | 120,454 | 51,151 / 12,890 / 2,810 | 897,529.6 | 14,937.4 | 163,465 | 28,763 / 24,708 | 243.5 |
+| the same with joint moves and escape jogs (the new recipe) | 120,377 | 51,086 / 12,888 / 2,800 | 895,279.2 | 14,793.7 | 159,861 | 25,365 / 19,805 | 244.1 |
+| factor 7, `bend_cost` 100, via reduction B, joint moves, escape jogs | 122,280 | 52,319 / 13,485 / 2,855 | 895,686.1 | 11,562.4 | 154,953 | 23,791 / 15,366 | 270.9 |
+| factor 7, `bend_cost` 100, via reduction B with `via_milli` 4000, joint moves, escape jogs | 120,415 | 50,897 / 13,074 / 2,822 | 897,127.5 | 14,011.1 | 156,406 | 24,844 / 18,461 | 271.5 |
+| factor 7, `bend_cost` 100, via reduction C, joint moves, escape jogs | 118,539 | 50,352 / 12,134 / 2,485 | 896,824.0 | 14,782.8 | 156,255 | 25,940 / 19,429 | 379.3 |
+| factor 8, the same | 119,613 | 50,950 / 12,457 / 2,595 | 896,400.0 | 13,440.7 | 154,656 | 24,717 / 17,584 | 354.8 |
+| factor 10, `bend_cost` 100, via reduction D, joint moves, escape jogs | 119,005 | 50,879 / 12,122 / 2,431 | 897,597.3 | 13,362.8 | 152,543 | 23,762 / 17,184 | 402.0 |
+| the same with Metal4 and Metal5 wire at 1.5 and TopMetal wire at 2 times its price (`layer_cost_milli`) | 128,054 | 61,512 / 11,102 / 2,124 | 908,859.1 | 12,812.5 | 162,328 | 25,033 / 16,780 | 1,108.0 |
+
+Via reduction presets: A is the campaign recipe's (`via_milli` 2000, one
+pass, nets up to 10 terminals, 10,000 expansions per net, connections up to
+20 um); B `via_milli` 3000, two passes, 20 terminals, 20,000 expansions,
+40 um; C 4000, three passes, 32 terminals, 40,000 expansions, 60 um; D as C
+with `via_milli` 5000 and 80 um. Rows without a preset use A.
+
+`wrong_way_factor` is the strongest lever: from 3 to 4 it removes 14.8
+thousand pieces and adds 2.3 thousand vias, from 4 to 5 8.6 thousand and
+1.9 thousand, from 5 to 6 4.4 thousand and 2.5 thousand, mostly Via2 (track
+changes near the pins become via pairs or straight runs instead of jogs),
+for about the same wire. The main search's `bend_cost` 100 removes 4.6 to
+8.5 thousand pieces more for at most 0.5 thousand vias (with search states
+that are nodes, the surcharge is a heuristic for fewer bends, not an exact
+minimum; 400 makes rip-up diverge on this placement, net 6284 ripped up
+more than 256 times). A stronger via reduction takes the vias back: at
+factor 5 preset B removes 4.0 thousand more vias than A for 2.4 thousand
+pieces and 1.4 mm of wire, and at factor 7 preset C 3.7 thousand more than
+B for 1.3 thousand pieces and 1.1 mm. It costs route CPU: the pass with D
+tries 34 thousand re-routes in three passes, and the route takes 402 s of
+CPU against 243 s (route CPU in this table varies by about 10 % with the
+host's load). Without any via reduction the campaign recipe has 1.3
+thousand fewer pieces and 3.2 thousand more vias, so the pass itself costs
+few pieces. `via_reduction.keep_pieces` (a re-route must not add pieces)
+keeps only 1,419 of the 3,686 re-routes of preset B at factor 5 and leaves
+124,169 vias, above LibreLane's 122,194, so it is not used. A repair search
+weight of 1 instead of 2 (`repair_heuristic_weight`) changed the factor-5
+line by 22 pieces.
+
+**Joint moves** (`straighten.neighbors`, `routing::StraightenNeighbors`):
+the rewrites refuse most remaining chains because another net's routed
+metal lies on every shorter candidate (21,717 refusals in the campaign recipe's
+replay). A walled-in chain whose candidate only the routed metal of at most
+`max_victims` other nets refuses is rewritten together with those nets:
+they are ripped up, the chain is rewritten with the rewrites' own checks,
+and they are routed again as hard searches; the move is kept only when the
+nets involved hold fewer DEF pieces in all (escape and routed wires merged
+into maximal runs split at every junction), no more routed vias and at
+most `length_per_piece` more wire per piece removed, else every route and
+index shape is restored. This is incremental rip-up and reroute (R. Nair,
+"A simple yet effective technique for global wiring", IEEE TCAD
+6(2):165-172, 1987) in the form of the strong modifications of Mighty
+(H. Shin and A. Sangiovanni-Vincentelli, "A detailed router based on
+incremental routing modifications: Mighty", IEEE TCAD 6(6):942-955, 1987),
+which move the nets in a connection's way instead of detouring around
+them. On the campaign recipe's replay it tried 2,170 moves and kept 452 (530
+found no rewrite or no route for a ripped net, 1,188 were not better):
+1,525 pieces, 160 vias and 0.56 mm of wire fewer for 26 s more route CPU;
+on the new recipe it tried 1,572 and kept 354, 890 pieces fewer in 12.7 s,
+and on the factor-10 line 1,614 and 271, 580 pieces fewer. The gain
+is small because most walls are fixed metal (escapes, pins, via pads of
+access) or nets that cannot route elsewhere without as many pieces.
+
+**Escape jogs** (`straighten.escape_jogs`): before the rewrites, an escape
+whose access-layer stub runs straight from its via landing to its top,
+where the route leaves with a jog to another track and then runs on along
+the stub's axis, takes the jog at its via instead: the escape becomes the
+jog and a stub of the old length on the route's track (to the old corner
+when the route runs on away from the via, else from the via's row toward
+the route), the route keeps the rest of its run and the turn at the top
+disappears. That is one DEF piece fewer per escape, and where the route
+turned back past the via (a U) twice the stub less wire. A move is kept
+only when the new metal is clear of other nets and of wide-metal spacing,
+touches no same-net metal but the via pad and the run it joins, adds no
+same-net rule violation on the access layer, its new top is a graph node
+and the net stays connected; the escape's top then moves to that node, so
+later rule passes route from it. On the factor-5 line it examined 5,815
+escapes and moved 2,904: 2.7 thousand pieces and 2.1 mm of wire fewer, 11
+more vias (rule repair); on the new recipe 5,630 and 2,877, on the
+factor-10 line 4,787 and 2,730.
+
+**Track grid** (`def_tracks`): `export-def` declares the router's track
+grid (`TRACKS`, one statement per axis and routing layer; on Ibex the same
+14 statements as LibreLane's DEF). The route is unchanged. OpenRCX reads
+the DEF faster and extracts a few nets differently with them
+(`docs/extraction.md`, "Track statements change its work and a few
+values"): on the campaign DEF the gate's OpenRCX script alone took a
+median 4.46 s with the statements against 4.87 s without (five interleaved
+runs each in one hold of the heavy-job lock, load 4.1 to 5.9; faster in all
+five pairs, by a median 0.30 s; extraction phase 3,197 ms against 3,591 ms),
+1.30 against 1.42 times its time on LibreLane's DEF in the same batch.
+
+**OpenRCX time against pieces.** The gate's OpenRCX script alone, in one
+hold of the heavy-job lock, five interleaved runs per DEF (load 4.1 to 5.9;
+every DEF with the 14 track statements unless noted; the wires are the count
+OpenRCX reports extracting):
+
+| DEF | pieces | wires | wall s, median (range) | extraction phase ms | × LibreLane |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| campaign native DEF, no track statements | 192,328 | 196,598 | 4.87 (4.50–5.00) | 3,591 | 1.42 |
+| campaign native DEF | 192,328 | 196,598 | 4.46 (4.38–4.70) | 3,197 | 1.30 |
+| replay: factor 5, `bend_cost` 100, via reduction B, joint moves | 165,591 | 169,929 | 3.66 (3.53–3.99) | 2,458 | 1.07 |
+| replay: the new recipe | 159,861 | 164,205 | 3.84 (3.77–4.27) | 2,618 | 1.12 |
+| replay: factor 7, via reduction B at `via_milli` 4000, joint moves, escape jogs | 156,406 | 160,730 | 3.61 (3.46–3.85) | 2,358 | 1.05 |
+| replay: factor 7, via reduction C, joint moves, escape jogs | 156,255 | 160,591 | 3.60 (3.46–3.98) | 2,427 | 1.05 |
+| replay: factor 7, via reduction B, joint moves, escape jogs | 154,953 | 159,260 | 3.90 (3.33–4.35) | 2,512 | 1.14 |
+| full flow: factor 10, via reduction D, joint moves, escape jogs | 152,749 | 157,003 | 3.68 (3.50–3.94) | 2,495 | 1.07 |
+| LibreLane | 129,901 | 133,158 | 3.43 (3.29–3.55) | 1,985 | 1.00 |
+
+From 192 to 152–166 thousand pieces the run gets 0.6 to 0.9 s faster, but
+inside that band the time does not follow the piece count: the extraction
+phase costs 14.5 to 16.3 µs per reported wire on the native DEFs (14.9 on
+LibreLane's), and the arms' ranges overlap. Reading the native DEF takes
+about 0.2 s less than LibreLane's (0.4 s against 0.6 s: 12.5 MB against
+21.3 MB; LibreLane's has 245,538 routing statements and 30,477 patches
+against 44 to 46 thousand statements and under a thousand patches),
+which offsets most of what remains of the extraction phase. At LibreLane's
+per-wire cost the extraction phase would match LibreLane's at about 133
+thousand wires; the native DEFs keep 23 to 30 thousand pieces more, and two
+access choices account for most of them: 9.1 to 9.7 thousand Metal1 escape
+pieces (LibreLane's DEF has no Metal1 wire) and the Metal2 stub of every
+stacked access (LibreLane's 11,035 stacked accesses write that metal as
+`RECT` patches, which OpenRCX does not extract). Both are honest metal of
+the native layout; neither is hidden from the extractor.
+
+**The recipe.** `wrong_way_factor` 6, `bend_cost` 100, via reduction B
+(`via_milli` 3000, two passes, 20 terminals, 20,000 expansions, 40 µm), the
+joint moves (`max_victims` 2, `max_terminals` 10, `net_expansions` 10000,
+`length_per_piece` 420), the escape jogs and `def_tracks`. Factors 7 and 10
+remove 3 to 7 thousand pieces more, but their route is slower (the via
+reduction of the factor-10 line, preset D, takes the route to 402 s of CPU;
+factor 7 with `via_milli` 4000 took 271.5 s in its replay and 264.1 s in a
+full run against 243.1 s for this recipe), and the full run at factor 7
+(without the joint moves) routed one net (`n132`, eight pins, 299.1 µm
+against 281.9 µm in the campaign) to 0.965 of its driver's maximum
+capacitance, so post-route repair resized that driver and took 47.3 s
+instead of 5.1 s; its shared gates all passed, and OpenRCX on its layout
+took 1.13 times LibreLane's time in the gate's script, 1.11 in the gate
+and the `be_openrcx` step (five runs each, load 1.9 to 2.8).
+
+Full flow (the private campaign kit: superproject `3cf7323` with the recipe
+change, RustROAD `261d49c` for `rustroad`, the other binaries of the
+2026-11-05 campaign), two complete runs: the producer completed all 114
+steps of the kit manifest (exit 0; `timing_accuracy` largest RustSTA/OpenSTA
+difference 0.2697 ps) and every shared gate passed (DRC, antenna, latch-up,
+LVS, timing, simulation, both equivalences, density; OpenRCX timing TT
+setup/hold worst slack 49.628/0.108 ns, SS 49.429/0.206 ns, no setup, hold,
+slew, capacitance or fanout violation); post-route repair found nothing to
+resize. The final DEF has 120,585 vias (Via1 53,239, Via2 51,104, Via3
+13,020, Via4 2,846, TopVia1 374, TopVia2 2) against 118,525 (LibreLane
+122,194), 895,279.2 µm of signal wire against 897,357.3 (LibreLane
+969,571.6), 160,069 pieces against 192,328 (LibreLane 129,901; staircase and
+zigzag 25,365 and 19,805 against 42,789 and 39,398) and the 14 track
+statements; area, cells and the synthesis, final and powered netlists are
+byte-identical to the campaign's. The second run wrote byte-identical GDS,
+DEF, netlists and native SPEF; both OpenRCX SPEF files differ between the
+runs, every timing value read from them is equal, and five reruns of the
+`be_openrcx` step on this DEF wrote identical SPEF apart from its date
+line. `be_route` took 243.4 and 221.1 s (243.1 and 220.2 s CPU; the
+campaign's took 302.2 s at its load). In three interleaved pairs of route
+replays (each run holding the heavy-job lock, load 0.9 to 3.1) the recipe
+took a median 230.6 s of CPU (227.5 to 234.0 s) against 220.2 s (212.6 to
+225.8 s) for the campaign recipe with the campaign's binary, 1.05 times
+(paired differences +4.8, +14.9 and +13.8 s), and wrote the `routes.rbin`
+of its row in the table above every time. The higher wrong-way price ends
+negotiated repair 38 to 49 s earlier (155 to 160 s into the route against
+193 to 206 s); the two via-reduction passes (44 to 46 s against 7 to 8 s)
+and the rewrites, joint moves and rule passes after them (27 s against 9 to
+11 s) spend that and 5 to 15 s more.
+
+OpenRCX on the final DEF of the first run (new), the campaign's (old) and
+LibreLane's, in one hold of the heavy-job lock right after that run (five
+interleaved runs each, load 1.5 to 2.9; median wall seconds and range):
+
+| | new | old | LibreLane | new / LibreLane | old / LibreLane |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| shared `extraction` gate | 3.80 (3.63–4.03) | 5.10 (4.80–5.64) | 3.84 (3.44–4.23) | 0.99 | 1.33 |
+| the same, CPU | 3.67 | 4.91 | 3.59 | 1.02 | 1.37 |
+| the producer's `be_openrcx` step | 3.81 (3.77–4.18) | 5.02 (5.00–5.39) | 3.60 (3.45–3.63) | 1.06 | 1.39 |
+| the gate's OpenRCX script alone | 3.32 (3.15–3.51) | 4.43 (4.42–4.64) | 3.29 (3.19–3.35) | 1.01 | 1.35 |
+| its extraction phase (ms) | 2,190 | 3,330 | 1,946 | 1.13 | 1.71 |
+
+A later batch of the script alone on an almost idle host (seven runs each,
+load 0.9 to 1.0) gave 3.48 s (3.21–3.77) on the new DEF against 3.23 s
+(2.93–3.31) on LibreLane's (1.08; slower in 6 of 7 pairs, by a median
+0.27 s) and 4.51 s (1.40) on the campaign's; the final DEF of the factor-7
+run took 3.47 s, not separated from the new one (the new one faster in 4
+of 7 pairs, median paired difference 0.08 s). So OpenRCX takes 0.99 to 1.08
+times LibreLane's time on the new DEF instead of 1.33 to 1.42: parity in
+the shared gate within the run-to-run spread, not a lead, and the in-flow
+step is still 6 % slower with ranges that do not overlap. What remains is
+the extraction phase (1.13 to 1.17 times LibreLane's), offset by the faster
+read of the smaller native DEF; the 23 to 30 thousand pieces more are
+mostly the Metal1 escapes and the stacked accesses' Metal2 stubs described
+above.
+
+Tests: `def_tracks_declare_the_router_track_grid_and_change_nothing_else`
+(`scale_flow`: the same route table, the six statements of a three-layer
+grid before `COMPONENTS`, nothing else in the DEF changed),
+`straightening_moves_the_net_that_walls_a_staircase_in` (a staircase
+walled in by fixed metal and by another net's routed detour: without moves
+it stays; with them the other net is ripped up, the staircase becomes a Z
+and the other net routes straight, 4 pieces fewer, validated and
+deterministic; out-of-range controls are refused),
+`escape_jogs_move_the_turn_at_an_escape_top_to_its_via` (off, the escape
+and the route keep their geometry; on, the escape jogs at its via and the
+route keeps the rest of its run: one Metal2 piece fewer, the same vias,
+deterministic), `via_reduction_with_keep_pieces_never_adds_wire_pieces`,
+and `via_dedupe_and_straightening_parse_and_default_off` (the joint moves
+and the escape jogs parse, default off, and an incomplete `neighbors` is
+refused).
 
 Route records are streamed to `routes.rbin` (at most 8 GiB); the JSON envelope
 remains capped at 64 MiB. Large schema-7 revisions externalize model and prepared

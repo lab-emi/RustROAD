@@ -4881,7 +4881,14 @@ fn reduce_vias_passes(
                     let allowance = old_vias
                         .saturating_sub(new_vias)
                         .saturating_mul(cfg.length_per_via);
-                    if new_vias < old_vias && new_len <= old_len.saturating_add(allowance) {
+                    let pieces_ok = !cfg.keep_pieces
+                        || !(new_vias < old_vias && new_len <= old_len.saturating_add(allowance))
+                        || straighten::net_pieces(r, &new, terminals, plans)?
+                            <= straighten::net_pieces(r, &old, terminals, plans)?;
+                    if new_vias < old_vias
+                        && new_len <= old_len.saturating_add(allowance)
+                        && pieces_ok
+                    {
                         vias_removed += old_vias - new_vias;
                         length_added += new_len.saturating_sub(old_len);
                         length_removed += old_len.saturating_sub(new_len);
@@ -5181,7 +5188,7 @@ pub(crate) fn route_with_prior(
             format_args!("escape vias shared {shared} work {}", r.spatial.work),
         );
     }
-    let plans = plans;
+    // Escapes stay fixed from here on, except for `straighten.escape_jogs`.
     if r.plan.qor.as_ref().is_some_and(|q| q.prim_order) {
         for group in groups.values_mut() {
             prim_terminal_order(
@@ -5953,7 +5960,7 @@ pub(crate) fn route_with_prior(
                 &mut r,
                 cfg,
                 &groups,
-                &plans,
+                &mut plans,
                 straighten::Region {
                     guides: &guides,
                     demoted: &demoted,
@@ -8955,7 +8962,10 @@ mod tests {
             });
         }
         let mut design = input(terms, fixed);
-        design.tracks.as_mut().unwrap().memory_mib = 256;
+        // Room for the fixed full-design validation estimate (about 234 MB)
+        // and for the resident memory of the test process, which the guard
+        // counts and which other tests running in it raise.
+        design.tracks.as_mut().unwrap().memory_mib = 1024;
         design.tracks.as_mut().unwrap().single_owner_repair =
             Some(crate::routing::SingleOwnerRepairConfig {
                 max_candidates: 4,
@@ -9015,7 +9025,8 @@ mod tests {
             ],
             Vec::new(),
         );
-        design.tracks.as_mut().unwrap().memory_mib = 256;
+        // As above: the guard counts the whole test process.
+        design.tracks.as_mut().unwrap().memory_mib = 1024;
         let (out, report) = crate::route_batches::route(&design, &limits(), 2).unwrap();
         assert_eq!(report.batches, 2);
         assert_eq!(out.nets, [0, 1]);
@@ -9797,6 +9808,8 @@ mod tests {
                     net_expansions: 100_000,
                     weight: 1,
                 }),
+                neighbors: None,
+                escape_jogs: false,
             }),
         });
         let a = route_cpu_ref(&design, &limits()).unwrap();
@@ -9859,6 +9872,7 @@ mod tests {
             margin: None,
             min_vias: 1,
             max_connection_length: None,
+            keep_pieces: false,
         }
     }
     fn with_reduction(
@@ -9897,6 +9911,29 @@ mod tests {
         assert_eq!(reduced.wires, again.wires);
         assert_eq!(reduced.vias, again.vias);
         assert_eq!(reduced.patches, again.patches);
+    }
+
+    #[test]
+    fn via_reduction_with_keep_pieces_never_adds_wire_pieces() {
+        // The output's wires are runs split at every junction (DEF pieces).
+        let legacy = route_cpu_ref(&offset_pair(), &limits()).unwrap();
+        let plain_design = with_reduction(offset_pair(), Some(via_reduction(16_000, 1)));
+        let plain = route_cpu_ref(&plain_design, &limits()).unwrap();
+        let keep_design = with_reduction(
+            offset_pair(),
+            Some(crate::routing::ViaReduction {
+                keep_pieces: true,
+                ..via_reduction(16_000, 1)
+            }),
+        );
+        let keep = route_cpu_ref(&keep_design, &limits()).unwrap();
+        crate::routing::validate(&keep_design, &keep, &limits()).unwrap();
+        assert!(keep.wires.len() <= legacy.wires.len(), "{keep:?}");
+        assert!(keep.vias.len() <= legacy.vias.len());
+        assert!(keep.vias.len() >= plain.vias.len());
+        assert!(route_length_of(&keep) <= route_length_of(&legacy));
+        let again = route_cpu_ref(&keep_design, &limits()).unwrap();
+        assert_eq!((keep.wires, keep.vias), (again.wires, again.vias));
     }
 
     #[test]
@@ -10107,6 +10144,8 @@ mod tests {
             passes: 2,
             turn_at_ends: case.turn_at_ends,
             reroute: case.reroute.clone(),
+            neighbors: None,
+            escape_jogs: false,
         };
         {
             let plan = design.tracks.as_mut().unwrap();
@@ -10123,7 +10162,7 @@ mod tests {
         let cells = Cells::new(design.die, plan.gcell).unwrap();
         let mut router = Router::prepared(&design, &limits, graph, cells).unwrap();
         let terminals: Vec<&Terminal> = design.terminals.iter().collect();
-        let plans = router.reserve(&terminals).unwrap();
+        let mut plans = router.reserve(&terminals).unwrap();
         let a = router.graph.point(plans[&0].top).1;
         let b = router.graph.point(plans[&1].top).1;
         assert_eq!(
@@ -10172,7 +10211,7 @@ mod tests {
             &mut router,
             &cfg,
             &groups,
-            &plans,
+            &mut plans,
             straighten::Region {
                 guides: &guides,
                 demoted: &BTreeMap::new(),
@@ -10208,6 +10247,378 @@ mod tests {
             .sum();
         validate(&design, &out, &limits).unwrap();
         (route.wires.clone(), route.vias.clone(), tally, out)
+    }
+
+    /// Net 0's staircase between the escape tops (100, 100) and (660, 620),
+    /// walled in: fixed metal of net 9 refuses every candidate whose last
+    /// leg runs up x 660 below row 440, and net 5's routed detour (pins at
+    /// (220, 300) and (300, 300), routed up to row 700 and back) every
+    /// candidate row from 300 to 700. With `neighbors` (`moves`), returns
+    /// net 0's and net 5's routes, the tally and the validated output.
+    fn walled_staircase(
+        moves: Option<crate::routing::StraightenNeighbors>,
+    ) -> (Vec<Wire>, Vec<Wire>, straighten::StraightenTally, Routes) {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(650, 610, 670, 630)),
+                terminal(2, 5, true, rect(210, 290, 230, 310)),
+                terminal(3, 5, false, rect(290, 290, 310, 310)),
+            ],
+            vec![Blockage {
+                layer: 1,
+                rect: rect(410, 120, 640, 420),
+                net: Some(9),
+            }],
+        );
+        let cfg = crate::routing::Straighten {
+            passes: 2,
+            turn_at_ends: false,
+            reroute: None,
+            neighbors: moves,
+            escape_jogs: false,
+        };
+        {
+            let plan = design.tracks.as_mut().unwrap();
+            plan.routing_layers = Some([1, 1]);
+            plan.wrong_way_factor = 1;
+            plan.qor = Some(crate::routing::RouteQor {
+                straighten: Some(cfg.clone()),
+                ..Default::default()
+            });
+        }
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(&design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let mut router = Router::prepared(&design, &limits, graph, cells).unwrap();
+        let terminals: Vec<&Terminal> = design.terminals.iter().collect();
+        let mut plans = router.reserve(&terminals).unwrap();
+        let tops: Vec<[i64; 2]> = (0..4)
+            .map(|p| router.graph.point(plans[&p].top).1)
+            .collect();
+        assert_eq!(
+            tops,
+            vec![[100, 100], [660, 620], [220, 300], [300, 300]],
+            "escape tops of the fixture"
+        );
+        let mut retained = 0usize;
+        let mut routed = BTreeMap::new();
+        for (net, points) in [
+            (
+                0u32,
+                &[
+                    [100, 100],
+                    [100, 260],
+                    [380, 260],
+                    [380, 460],
+                    [660, 460],
+                    [660, 620],
+                ][..],
+            ),
+            (5, &[[220, 300], [220, 700], [300, 700], [300, 300]][..]),
+        ] {
+            let mut route = NetRoute::default();
+            for p in points.windows(2) {
+                let w = Wire {
+                    net,
+                    layer: 1,
+                    start: p[0],
+                    end: p[1],
+                };
+                let rect = router.edge_rect(1, w.start, w.end, net).unwrap();
+                route.shapes.push(
+                    router
+                        .spatial
+                        .add_routed(Blockage {
+                            layer: 1,
+                            rect,
+                            net: Some(net),
+                        })
+                        .unwrap(),
+                );
+                route.wires.push(w);
+            }
+            retained += route.segments();
+            routed.insert(net, route);
+        }
+        let groups = BTreeMap::from([(0, terminals[..2].to_vec()), (5, terminals[2..].to_vec())]);
+        let all: Vec<u32> = (0..router.cells.len() as u32).collect();
+        let guides = BTreeMap::from([(0, all.clone()), (5, all)]);
+        straighten::straighten(
+            &mut router,
+            &cfg,
+            &groups,
+            &mut plans,
+            straighten::Region {
+                guides: &guides,
+                demoted: &BTreeMap::new(),
+            },
+            &mut routed,
+            &mut retained,
+            None,
+            std::time::Instant::now(),
+        )
+        .unwrap();
+        let tally = straighten::TALLY.with(|t| t.get()).unwrap();
+        assert_eq!(
+            retained,
+            routed.values().map(NetRoute::segments).sum::<usize>()
+        );
+        let via_layers: Vec<(u32, u32)> = design.vias.iter().map(|v| (v.lower, v.upper)).collect();
+        let mut out = assemble(
+            &router,
+            &groups,
+            &plans,
+            &routed,
+            &design,
+            &limits,
+            &via_layers,
+            &mut 0,
+        )
+        .unwrap();
+        crate::routing::cleanup_report(&design, &mut out, &limits).unwrap();
+        out.stats.wire_length_dbu = out
+            .wires
+            .iter()
+            .map(|w| w.start[0].abs_diff(w.end[0]) + w.start[1].abs_diff(w.end[1]))
+            .sum();
+        validate(&design, &out, &limits).unwrap();
+        (
+            routed[&0].wires.clone(),
+            routed[&5].wires.clone(),
+            tally,
+            out,
+        )
+    }
+
+    /// Two pins of net 0 on M1 escaping to M2 with AREA (each escape has a
+    /// stub of its own along M2), and a fabricated route that leaves pin
+    /// 0's escape top with a jog to the next track and then runs up that
+    /// track to pin 1's top. With `escape_jogs` when `on`: returns pin 0's
+    /// access-layer plan wires, net 0's route, the tally and the validated
+    /// output.
+    fn escape_jog_case(on: bool) -> (Vec<Wire>, Vec<Wire>, straighten::StraightenTally, Routes) {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(90, 90, 110, 110)),
+                terminal(1, 0, false, rect(130, 690, 150, 710)),
+            ],
+            Vec::new(),
+        );
+        design.layers[1].min_area = Some(1600);
+        let cfg = crate::routing::Straighten {
+            passes: 1,
+            turn_at_ends: false,
+            reroute: None,
+            neighbors: None,
+            escape_jogs: on,
+        };
+        {
+            let plan = design.tracks.as_mut().unwrap();
+            plan.routing_layers = Some([1, 1]);
+            plan.wrong_way_factor = 1;
+            plan.area_stacks = true;
+            plan.qor = Some(crate::routing::RouteQor {
+                straighten: Some(cfg.clone()),
+                ..Default::default()
+            });
+        }
+        let limits = limits();
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(&design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let mut router = Router::prepared(&design, &limits, graph, cells).unwrap();
+        let terminals: Vec<&Terminal> = design.terminals.iter().collect();
+        let mut plans = router.reserve(&terminals).unwrap();
+        let t0 = router.graph.point(plans[&0].top).1;
+        let t1 = router.graph.point(plans[&1].top).1;
+        // Both stubs run down M2 from their vias (AREA), so the route turns
+        // back past pin 0's via.
+        assert_eq!(
+            (t0, t1),
+            ([100, 20], [140, 620]),
+            "escape tops of the fixture"
+        );
+        let points = [t0, [140, t0[1]], t1];
+        let mut route = NetRoute::default();
+        for p in points.windows(2) {
+            let w = Wire {
+                net: 0,
+                layer: 1,
+                start: p[0],
+                end: p[1],
+            };
+            let rect = router.edge_rect(1, w.start, w.end, 0).unwrap();
+            route.shapes.push(
+                router
+                    .spatial
+                    .add_routed(Blockage {
+                        layer: 1,
+                        rect,
+                        net: Some(0),
+                    })
+                    .unwrap(),
+            );
+            route.wires.push(w);
+        }
+        let mut retained = route.segments();
+        let mut routed = BTreeMap::from([(0, route)]);
+        let groups = BTreeMap::from([(0, terminals)]);
+        let guides = BTreeMap::from([(0, (0..router.cells.len() as u32).collect::<Vec<_>>())]);
+        straighten::straighten(
+            &mut router,
+            &cfg,
+            &groups,
+            &mut plans,
+            straighten::Region {
+                guides: &guides,
+                demoted: &BTreeMap::new(),
+            },
+            &mut routed,
+            &mut retained,
+            None,
+            std::time::Instant::now(),
+        )
+        .unwrap();
+        let tally = straighten::TALLY.with(|t| t.get()).unwrap();
+        assert_eq!(retained, routed[&0].segments());
+        let via_layers: Vec<(u32, u32)> = design.vias.iter().map(|v| (v.lower, v.upper)).collect();
+        let mut out = assemble(
+            &router,
+            &groups,
+            &plans,
+            &routed,
+            &design,
+            &limits,
+            &via_layers,
+            &mut 0,
+        )
+        .unwrap();
+        crate::routing::cleanup_report(&design, &mut out, &limits).unwrap();
+        out.stats.wire_length_dbu = out
+            .wires
+            .iter()
+            .map(|w| w.start[0].abs_diff(w.end[0]) + w.start[1].abs_diff(w.end[1]))
+            .sum();
+        validate(&design, &out, &limits).unwrap();
+        let m2: Vec<Wire> = plans[&0]
+            .wires
+            .iter()
+            .filter(|w| w.layer == 1)
+            .cloned()
+            .collect();
+        (m2, routed[&0].wires.clone(), tally, out)
+    }
+
+    #[test]
+    fn escape_jogs_move_the_turn_at_an_escape_top_to_its_via() {
+        let (stub, route, tally, before) = escape_jog_case(false);
+        assert!(
+            stub.iter().all(|w| w.start[0] == 100 && w.end[0] == 100),
+            "{stub:?}"
+        );
+        assert_eq!(route.len(), 2);
+        assert_eq!((tally.jogs, tally.jogs_kept), (0, 0));
+        let (stub, route, tally, after) = escape_jog_case(true);
+        // The escape now jogs at its via (row 100) and keeps its 80 DBU of
+        // stub along track 140 toward the route, which keeps the rest of its
+        // run up track 140.
+        let legs: Vec<_> = stub.iter().map(|w| (w.start, w.end)).collect();
+        assert_eq!(
+            legs,
+            vec![([100, 100], [140, 100]), ([140, 100], [140, 180])],
+            "{legs:?}"
+        );
+        assert_eq!(
+            route.iter().map(|w| (w.start, w.end)).collect::<Vec<_>>(),
+            vec![([140, 180], [140, 620])]
+        );
+        assert_eq!((tally.jogs, tally.jogs_kept), (1, 1));
+        // One M2 piece fewer in the output, twice the stub less wire, the
+        // same vias.
+        let pieces = |o: &Routes| o.wires.iter().filter(|w| w.layer == 1).count();
+        assert_eq!(pieces(&after) + 1, pieces(&before));
+        assert_eq!(
+            after.stats.wire_length_dbu + 160,
+            before.stats.wire_length_dbu
+        );
+        assert_eq!(after.vias, before.vias);
+        // Deterministic.
+        let (again, route2, _, out2) = escape_jog_case(true);
+        assert_eq!((again, route2), (stub, route));
+        assert_eq!(out2.wires, after.wires);
+    }
+
+    #[test]
+    fn straightening_moves_the_net_that_walls_a_staircase_in() {
+        // Without moves the staircase stays: every candidate is refused.
+        let (net0, net5, tally, _) = walled_staircase(None);
+        assert_eq!((net0.len(), net5.len()), (5, 3));
+        assert_eq!((tally.kept, tally.moves), (0, 0), "{tally:?}");
+        // With moves: net 5 is ripped up, net 0 takes the Z on row 460 and
+        // net 5 routes straight between its tops; fewer pieces, no more
+        // wire, both validated.
+        let moves = crate::routing::StraightenNeighbors {
+            max_victims: 2,
+            max_terminals: 8,
+            net_expansions: 100_000,
+            length_per_piece: 0,
+            passes: 1,
+        };
+        let (net0, net5, tally, out) = walled_staircase(Some(moves.clone()));
+        let mut runs: Vec<_> = net0.iter().map(|w| (w.start, w.end)).collect();
+        runs.sort_unstable();
+        assert_eq!(
+            runs,
+            vec![
+                ([100, 100], [100, 460]),
+                ([100, 460], [660, 460]),
+                ([660, 460], [660, 620]),
+            ]
+        );
+        assert_eq!(net5.len(), 1, "{net5:?}");
+        // Pieces: net 0's five runs and net 5's three become three and one.
+        assert_eq!(
+            (tally.moves, tally.moves_kept, tally.move_pieces),
+            (1, 1, 4),
+            "{tally:?}"
+        );
+        // Deterministic.
+        let (again0, again5, _, out2) = walled_staircase(Some(moves.clone()));
+        assert_eq!((again0, again5), (net0, net5));
+        assert_eq!(out.wires, out2.wires);
+        // Out-of-range controls are refused.
+        for bad in [
+            crate::routing::StraightenNeighbors {
+                max_victims: 0,
+                ..moves.clone()
+            },
+            crate::routing::StraightenNeighbors {
+                max_terminals: 1,
+                ..moves.clone()
+            },
+            crate::routing::StraightenNeighbors {
+                net_expansions: 0,
+                ..moves.clone()
+            },
+            crate::routing::StraightenNeighbors {
+                passes: 5,
+                ..moves.clone()
+            },
+        ] {
+            let qor = crate::routing::RouteQor {
+                straighten: Some(crate::routing::Straighten {
+                    passes: 1,
+                    turn_at_ends: false,
+                    reroute: None,
+                    neighbors: Some(bad.clone()),
+                    escape_jogs: false,
+                }),
+                ..Default::default()
+            };
+            assert!(qor.validate(5).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
@@ -10498,6 +10909,8 @@ mod tests {
                     passes: 2,
                     turn_at_ends: true,
                     reroute: Some(reroute.clone()),
+                    neighbors: None,
+                    escape_jogs: false,
                 }),
                 ..Default::default()
             });
@@ -10560,6 +10973,8 @@ mod tests {
                 passes: 2,
                 turn_at_ends: turn,
                 reroute: None,
+                neighbors: None,
+                escape_jogs: false,
             };
             {
                 let plan = design.tracks.as_mut().unwrap();
@@ -10576,7 +10991,7 @@ mod tests {
             let cells = Cells::new(design.die, plan.gcell).unwrap();
             let mut router = Router::prepared(&design, &limits, graph, cells).unwrap();
             let terminals: Vec<&Terminal> = design.terminals.iter().collect();
-            let plans = router.reserve(&terminals).unwrap();
+            let mut plans = router.reserve(&terminals).unwrap();
             assert_eq!(router.graph.point(plans[&0].top), (1, [100, 100]));
             assert_eq!(router.graph.point(plans[&1].top), (1, [900, 620]));
             let mut route = NetRoute::default();
@@ -10645,7 +11060,7 @@ mod tests {
                 &mut router,
                 &cfg,
                 &groups,
-                &plans,
+                &mut plans,
                 straighten::Region {
                     guides: &guides,
                     demoted: &BTreeMap::new(),
@@ -10954,6 +11369,8 @@ mod tests {
                     passes: 1,
                     turn_at_ends: false,
                     reroute: Some(bad.clone()),
+                    neighbors: None,
+                    escape_jogs: false,
                 }),
                 ..Default::default()
             };
@@ -10965,6 +11382,8 @@ mod tests {
                     passes,
                     turn_at_ends: false,
                     reroute: None,
+                    neighbors: None,
+                    escape_jogs: false,
                 }),
                 ..Default::default()
             };
@@ -10980,6 +11399,8 @@ mod tests {
                     net_expansions: 10_000,
                     weight: 1,
                 }),
+                neighbors: None,
+                escape_jogs: false,
             }),
             ..Default::default()
         };

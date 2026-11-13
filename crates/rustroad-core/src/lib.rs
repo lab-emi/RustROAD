@@ -652,6 +652,18 @@ pub fn write_def_components(
     cells: &[Placed],
     output: &mut impl std::io::Write,
 ) -> std::io::Result<()> {
+    write_def_components_with(design, cells, &[], output)
+}
+
+/// `write_def_components` with `extra` statements (each one complete DEF
+/// line, e.g. `TRACKS`) written after the rows and before `COMPONENTS`, where
+/// DEF 5.8 places the track and GCell grids.
+pub fn write_def_components_with(
+    design: &Design,
+    cells: &[Placed],
+    extra: &[String],
+    output: &mut impl std::io::Write,
+) -> std::io::Result<()> {
     validate_placement(
         design,
         cells,
@@ -687,6 +699,9 @@ pub fn write_def_components(
             row.orientation.def(),
             design.site.width
         )?;
+    }
+    for line in extra {
+        writeln!(output, "{line}")?;
     }
     writeln!(output, "COMPONENTS {} ;", cells.len())?;
     for (cell, placed) in design.cells.iter().zip(cells) {

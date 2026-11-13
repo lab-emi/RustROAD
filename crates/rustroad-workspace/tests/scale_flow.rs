@@ -393,6 +393,54 @@ fn floorplan_place_and_track_route_round_trip_through_schema_6() {
 }
 
 #[test]
+fn def_tracks_declare_the_router_track_grid_and_change_nothing_else() {
+    let f = Fixture::new();
+    let mut tracked = routing(true);
+    tracked["track_router"]["qor"] = serde_json::json!({"def_tracks": true});
+    fs::write(
+        f.path("tracked.json"),
+        serde_json::to_vec(&tracked).unwrap(),
+    )
+    .unwrap();
+    let plain = f.flow("plain", "track.json").unwrap();
+    let with = f.flow("with", "tracked.json").unwrap();
+    // The option is output only: the same route table.
+    assert_eq!(
+        fs::read(head_dir(&plain).join("routes.rbin")).unwrap(),
+        fs::read(head_dir(&with).join("routes.rbin")).unwrap()
+    );
+    let (a, b) = (def(&plain), def(&with));
+    assert!(!a.contains("TRACKS"));
+    // One statement per axis and routing layer (M1, M2, M3: pitch 400,
+    // offset 200, width 200), right before COMPONENTS; nothing else differs.
+    let die: Vec<i64> = b
+        .lines()
+        .find(|l| l.starts_with("DIEAREA"))
+        .unwrap()
+        .split(|c: char| !c.is_ascii_digit() && c != '-')
+        .filter(|t| !t.is_empty())
+        .map(|t| t.parse().unwrap())
+        .collect();
+    let mut expected = Vec::new();
+    for layer in ["M1", "M2", "M3"] {
+        for (axis, lo, hi) in [("X", die[0], die[2]), ("Y", die[1], die[3])] {
+            // Tracks at 200 + 400 k with a 100 DBU half width inside the die.
+            let first = (lo + 100 - 200 + 399).div_euclid(400) * 400 + 200;
+            let count = (hi - 100 - first).div_euclid(400) + 1;
+            expected.push(format!(
+                "TRACKS {axis} {first} DO {count} STEP 400 LAYER {layer} ;"
+            ));
+        }
+    }
+    let tracks: Vec<&str> = b.lines().filter(|l| l.starts_with("TRACKS")).collect();
+    assert_eq!(tracks, expected);
+    let at = b.find("TRACKS").unwrap();
+    assert!(b[at..].find("COMPONENTS").unwrap() > b[at..].rfind("TRACKS").unwrap());
+    let rest: Vec<&str> = b.lines().filter(|l| !l.starts_with("TRACKS")).collect();
+    assert_eq!(rest, a.lines().collect::<Vec<_>>());
+}
+
+#[test]
 fn eco_route_reuses_an_unchanged_prior_and_checks_its_revision() {
     let f = Fixture::new();
     let prior = f.flow("p", "track.json").unwrap();

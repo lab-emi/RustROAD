@@ -590,6 +590,22 @@ pub struct Straighten {
     /// wire. `None` skips the re-route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reroute: Option<StraightenReroute>,
+    /// After the rewrites, a chain with a candidate that only the routed
+    /// metal of a few other nets refuses is rewritten together with those
+    /// nets (`StraightenNeighbors`): they are ripped up, the
+    /// chain is rewritten and they are routed again; the move is kept only
+    /// when the nets involved hold fewer wire pieces in all. `None` leaves
+    /// walled-in chains as they are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub neighbors: Option<StraightenNeighbors>,
+    /// Before the rewrites, a pin escape whose access-layer stub runs
+    /// straight from its via to its top, where the route turns, takes the
+    /// turn at its via instead: the stub moves onto the route's next track
+    /// and the route's jog at the top disappears (`escape_jogs` in
+    /// `route_straighten`). One wire piece fewer per escape; off keeps the
+    /// escapes as pin access made them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub escape_jogs: bool,
 }
 impl Straighten {
     pub(crate) fn validate(&self) -> Result<()> {
@@ -598,6 +614,68 @@ impl Straighten {
         }
         if let Some(reroute) = &self.reroute {
             reroute.validate()?;
+        }
+        if let Some(neighbors) = &self.neighbors {
+            neighbors.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// Joint rewrite of walled-in chains (`Straighten::neighbors`): incremental
+/// rip-up and reroute in the sense of R. Nair, "A simple yet effective
+/// technique for global wiring", IEEE TCAD 6(2):165-172, 1987, and of the
+/// strong modifications of H. Shin and A. Sangiovanni-Vincentelli, "A
+/// detailed router based on incremental routing modifications: Mighty",
+/// IEEE TCAD 6(6):942-955, 1987, which move the nets that block a
+/// connection out of its way instead of detouring around them.
+///
+/// Once the rewrites are done, each net that still holds a chain of three or
+/// more runs (nets in order of decreasing chain runs, then id) is examined:
+/// the candidates of each chain (the straight run, the Ls and the Zs, in the
+/// rewrites' order) are probed against the metal of other nets, and the
+/// first that only routed shapes of other nets refuse (fixed geometry,
+/// pins, escapes and obstructions refuse a candidate outright) names those
+/// nets. When the net's chains name at most
+/// `max_victims` nets in all, each with at most `max_terminals` terminals,
+/// those nets are ripped up, the net's chains are rewritten with the
+/// rewrites' own checks, and the ripped nets are routed again one at a time
+/// in id order as hard (non-rip-up) searches in their guides grown by the
+/// plan's `expand_margin`, every other net fixed, at most `net_expansions`
+/// expansions each. The move is kept only when every ripped net routed, and
+/// the nets involved together hold fewer DEF wire pieces (their escape and
+/// routed wires merged into maximal runs split at every junction, as
+/// `export-def` writes them), no more routed vias and at most
+/// `length_per_piece` DBU more wire per piece removed; otherwise every route
+/// and index shape is restored unchanged. Deterministic: a function of the
+/// routed state. In an ECO route neither the net nor a ripped net may still
+/// hold its prior geometry.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StraightenNeighbors {
+    /// Other nets one move may rip up (1..=4).
+    pub max_victims: usize,
+    /// Nets with more terminals neither move nor are moved (2..=4096).
+    pub max_terminals: usize,
+    /// Search expansions of one ripped net's re-route (1..=10^8).
+    pub net_expansions: usize,
+    /// Wire length (DBU) the move may add per wire piece it removes (0..=2^32).
+    #[serde(default)]
+    pub length_per_piece: u64,
+    /// Passes over the nets (1..=4, default 1); a pass that keeps nothing
+    /// ends them.
+    #[serde(default = "one_usize")]
+    pub passes: usize,
+}
+impl StraightenNeighbors {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !(1..=4).contains(&self.max_victims)
+            || !(2..=4096).contains(&self.max_terminals)
+            || !(1..=100_000_000).contains(&self.net_expansions)
+            || self.length_per_piece > 1 << 32
+            || !(1..=4).contains(&self.passes)
+        {
+            return Err(invalid("track router straightening neighbours"));
         }
         Ok(())
     }
@@ -701,6 +779,12 @@ pub struct ViaReduction {
     /// every length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_connection_length: Option<u64>,
+    /// Also require that the new route holds no more DEF wire pieces than
+    /// the old one (escape and routed wires merged into maximal runs split
+    /// at every junction, as `export-def` writes them). Off keeps the via
+    /// and length test alone.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_pieces: bool,
 }
 fn one_u64() -> u64 {
     1

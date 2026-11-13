@@ -702,6 +702,38 @@ item is a campaign control or a canonical structure, re-run every campaign:
   two designs is not explained. Evidence:
   `docs/evidence/def-openrcx-pieces.json`.
 
+* **Track statements change its work and a few values.** The native
+  `export-def` DEF declared no `TRACKS`; LibreLane's declares one statement
+  per axis and routing layer (14). The campaign's native DEF of 2026-11-05
+  with exactly those 14 statements added before `COMPONENTS` (they equal
+  what `track_router.qor.def_tracks` writes: the router's own grid) gives a
+  nominal SPEF in which 128 of the 14,178 nets have another total C (design
+  total +0.0017 %, largest change +0.094 fF on a 0.78 fF net, no resistance
+  changed); 117 of the 128 moved toward the native extractor's total. Only
+  the Metal2 statements matter (with only them, 122 nets change; with
+  Metal2 tracks at offset 0 instead of the LEF's 0.21 um, 6 nets): without
+  track statements OpenRCX treats the Metal2 grid as if it started at 0,
+  half a pitch from every native Metal2 wire. A layer with one axis declared
+  and not the other makes it abort. In interleaved runs of the gate's
+  OpenRCX script alone (five runs per DEF in one hold of the host's
+  heavy-job lock, load 4.1 to 5.9) the campaign DEF took a median 4.46 s
+  with the statements against 4.87 s without (faster in all five pairs;
+  extraction phase 3,197 ms against 3,591 ms), and in an earlier batch
+  (six runs each, load 0.9 to 2.9) the DEF of a route replay with 165,591
+  pieces took 3.88 s against 4.27 s (extraction 2,651 ms against
+  2,987 ms); reading the DEF and writing the SPEF did not change
+  measurably. The full-flow A/B is in `docs/routing-budget.md` ("Wire
+  pieces against vias").
+* **RECT patches are not extracted.** LibreLane's DEF with its 30,450
+  regular-wiring `RECT` patches removed gives a SPEF identical apart from
+  its date line (all 15,227 nets; 133,158 wires reported either way):
+  OpenRCX takes neither capacitance nor connectivity from them.
+  LibreLane's pin access stacks Via2 on Via1 at 11,035 pins with the
+  Metal2 minimum-area metal written as such a patch, so those accesses hold
+  no Metal2 wire for this reader; a native escape reaches the Metal2 area
+  with an 840 DBU wire, which it extracts (`docs/routing-budget.md`, "Wire
+  pieces against vias").
+
 So OpenRCX is geometry-identical to the native extractor for the routed wires
 and the supply metal, but not for the cell pins, cell obstructions and via
 pads, which the native extractor and Magic both include.

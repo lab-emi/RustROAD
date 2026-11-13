@@ -87,6 +87,18 @@ pub(super) struct StraightenTally {
     pub reroute_runs: usize,
     /// Nets skipped: still holding their ECO prior geometry, or too large.
     pub skipped: usize,
+    /// Joint moves (`neighbors`): tried, kept, refused because a ripped net
+    /// did not route again, refused by the acceptance test, and the DEF
+    /// wire pieces kept moves removed.
+    pub moves: usize,
+    pub moves_kept: usize,
+    pub moves_unrouted: usize,
+    pub moves_worse: usize,
+    pub move_pieces: usize,
+    /// Escape jogs (`escape_jogs`): escapes examined (a straight stub whose
+    /// top the route leaves with a jog) and moved to their via.
+    pub jogs: usize,
+    pub jogs_kept: usize,
 }
 
 #[cfg(test)]
@@ -1026,7 +1038,7 @@ pub(super) fn straighten(
     r: &mut Router<'_>,
     cfg: &crate::routing::Straighten,
     groups: &BTreeMap<u32, Vec<&Terminal>>,
-    plans: &HashMap<u32, Plan>,
+    plans: &mut HashMap<u32, Plan>,
     region: Region<'_>,
     routed: &mut BTreeMap<u32, NetRoute>,
     retained_edges: &mut usize,
@@ -1035,6 +1047,19 @@ pub(super) fn straighten(
 ) -> Result<()> {
     let limits = r.limits;
     let mut total = StraightenTally::default();
+    if cfg.escape_jogs {
+        escape_jogs(
+            r,
+            groups,
+            plans,
+            routed,
+            retained_edges,
+            prior,
+            &mut total,
+            t0,
+        )?;
+    }
+    let plans: &HashMap<u32, Plan> = plans;
     if let Some(reroute) = &cfg.reroute {
         reroute_bends(
             r,
@@ -1110,6 +1135,21 @@ pub(super) fn straighten(
             break;
         }
     }
+    if let Some(moves) = &cfg.neighbors {
+        neighbor_moves(
+            r,
+            moves,
+            cfg.turn_at_ends,
+            groups,
+            plans,
+            region,
+            routed,
+            retained_edges,
+            prior,
+            &mut total,
+            t0,
+        )?;
+    }
     trace(
         "straighten",
         t0,
@@ -1153,6 +1193,740 @@ fn fixed_of<'p>(terminals: &[&Terminal], plans: &'p HashMap<u32, Plan>) -> Fixed
             .flat_map(|t| t.shapes.iter().map(|s| (s.layer, s.rect)))
             .collect(),
     }
+}
+
+/// `Straighten::escape_jogs`: every terminal of a routed net (nets and
+/// terminals in id order) whose escape has a straight access-layer stub from
+/// its via landing `v` to its top `t`, which the route leaves with a jog (a
+/// wire across the stub's axis to a plain corner `c`, then a run `w2` along
+/// the stub's axis), takes the jog at `v` instead: the escape becomes the jog
+/// from `v` to `c`'s track and a stub of the old length along that track (to
+/// `c` when `w2` continues away from `v`, else from `v`'s row toward `w2`'s
+/// far end), the route keeps the rest of `w2`, and the jog at the top goes.
+/// Wire never grows (it shrinks by twice the stub where the route turned
+/// back past `v`) and the DEF loses at least one piece. Kept only when every
+/// new rectangle is clear of other nets' metal and wide-metal spacing, it
+/// touches no same-net metal but the via pad at `v` and `w2`, the net's
+/// same-net rule check on the access layer reports no new violation, the new
+/// top is a graph node, and the net passes the endpoint connectivity check;
+/// otherwise the plan and the route stay as they were. In an ECO route a net
+/// that still holds its prior geometry is left alone.
+#[allow(clippy::too_many_arguments)]
+fn escape_jogs(
+    r: &mut Router<'_>,
+    groups: &BTreeMap<u32, Vec<&Terminal>>,
+    plans: &mut HashMap<u32, Plan>,
+    routed: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    prior: Option<&PriorRoutes>,
+    total: &mut StraightenTally,
+    t0: std::time::Instant,
+) -> Result<()> {
+    let limits = r.limits;
+    let nets: Vec<u32> = routed.keys().copied().collect();
+    for net in nets {
+        let Some(terminals) = groups.get(&net) else {
+            continue;
+        };
+        if routed[&net].wires.len() > MAX_NET_RUNS
+            || prior
+                .and_then(|p| p.nets.get(&net))
+                .is_some_and(|(w, v)| routed[&net].wires == *w && routed[&net].vias == *v)
+        {
+            continue;
+        }
+        for t in terminals {
+            if let Some((plan, route)) =
+                r.escape_jog(net, t.pin, terminals, plans, &routed[&net], total)?
+            {
+                plans.insert(t.pin, plan);
+                retain_route(routed, retained_edges, net, route, limits.max_segments)?;
+            }
+        }
+    }
+    trace(
+        "straighten",
+        t0,
+        format_args!(
+            "escape jogs examined {} kept {} work {}",
+            total.jogs, total.jogs_kept, r.spatial.work
+        ),
+    );
+    Ok(())
+}
+
+impl Router<'_> {
+    /// One terminal of `escape_jogs`: `Some((plan, route))` with the index
+    /// updated when the jog moves to the via, `None` with nothing changed.
+    fn escape_jog(
+        &mut self,
+        net: u32,
+        pin: u32,
+        terminals: &[&Terminal],
+        plans: &HashMap<u32, Plan>,
+        route: &NetRoute,
+        tally: &mut StraightenTally,
+    ) -> Result<Option<(Plan, NetRoute)>> {
+        let input = self.input;
+        let cap = self.limits.max_comparisons;
+        let acc = input.access_layer;
+        let plan = &plans[&pin];
+        let (top_layer, top) = self.graph.point(plan.top);
+        if top_layer != acc {
+            return Ok(None);
+        }
+        charge(
+            &mut self.spatial.work,
+            plan.wires.len() + plan.vias.len() + route.wires.len() + route.vias.len() + 4,
+            cap,
+        )?;
+        // The stub: the plan's access-layer wires, one straight interval on
+        // the top's track ending at the top.
+        let vertical = input.layers[acc as usize].vertical.unwrap_or(true);
+        let ax = usize::from(vertical); // coordinate along the stub
+        let cx = 1 - ax; // coordinate across it
+        let stub: Vec<&Wire> = plan.wires.iter().filter(|w| w.layer == acc).collect();
+        if stub.is_empty()
+            || stub
+                .iter()
+                .any(|w| w.start[cx] != top[cx] || w.end[cx] != top[cx])
+        {
+            return Ok(None);
+        }
+        let mut spans: Vec<(i64, i64)> = stub
+            .iter()
+            .map(|w| (w.start[ax].min(w.end[ax]), w.start[ax].max(w.end[ax])))
+            .collect();
+        spans.sort_unstable();
+        let (lo, mut hi) = spans[0];
+        for &(a, b) in &spans[1..] {
+            if a > hi {
+                return Ok(None);
+            }
+            hi = hi.max(b);
+        }
+        let far = if top[ax] == hi {
+            lo
+        } else if top[ax] == lo {
+            hi
+        } else {
+            return Ok(None);
+        };
+        if far == top[ax] {
+            return Ok(None);
+        }
+        let mut v = top;
+        v[ax] = far;
+        // Exactly one via of the plan lands on the access layer, at `v`.
+        let landing = |via: &Via| {
+            let k = &input.vias[via.kind as usize];
+            k.lower == acc || k.upper == acc
+        };
+        let on_acc: Vec<&Via> = plan.vias.iter().filter(|x| landing(x)).collect();
+        if on_acc.len() != 1 || on_acc[0].at != v {
+            return Ok(None);
+        }
+        // The route at the top: one wire across the stub (the jog), no via,
+        // nothing passing through.
+        let ends_at = |p: [i64; 2]| -> Vec<usize> {
+            route
+                .wires
+                .iter()
+                .enumerate()
+                .filter(|(_, w)| w.layer == acc && (w.start == p || w.end == p))
+                .map(|(i, _)| i)
+                .collect()
+        };
+        let through = |p: [i64; 2]| {
+            route
+                .wires
+                .iter()
+                .any(|w| w.layer == acc && on_wire(w, p) && w.start != p && w.end != p)
+        };
+        let via_at = |p: [i64; 2]| route.vias.iter().any(|x| x.at == p && landing(x));
+        let at_top = ends_at(top);
+        if at_top.len() != 1 || through(top) || via_at(top) {
+            return Ok(None);
+        }
+        let w1 = &route.wires[at_top[0]];
+        let c = if w1.start == top { w1.end } else { w1.start };
+        if c[ax] != top[ax] || c[cx] == top[cx] {
+            return Ok(None);
+        }
+        // A plain corner at `c`, then a run along the stub's axis.
+        let at_c = ends_at(c);
+        if at_c.len() != 2 || through(c) || via_at(c) {
+            return Ok(None);
+        }
+        let i2 = if at_c[0] == at_top[0] {
+            at_c[1]
+        } else {
+            at_c[0]
+        };
+        let w2 = &route.wires[i2];
+        let f = if w2.start == c { w2.end } else { w2.start };
+        if f[cx] != c[cx] || f[ax] == c[ax] {
+            return Ok(None);
+        }
+        // No other terminal's escape metal at the corner.
+        let fixed_all = fixed_of(terminals, plans);
+        if fixed_all
+            .plan_wires
+            .iter()
+            .any(|w| w.layer == acc && on_wire(w, c))
+            || fixed_all.plan_vias.iter().any(|x| x.at == c && landing(x))
+        {
+            return Ok(None);
+        }
+        tally.jogs += 1;
+        let length = (top[ax] - far).abs();
+        let away = (top[ax] - far).signum();
+        let mono = (f[ax] - c[ax]).signum() == away;
+        let mut corner = v;
+        corner[cx] = c[cx];
+        // New top: `c` when w2 leaves away from `v`, else one stub length
+        // from `corner` toward `f` (strictly inside w2).
+        let new_top = if mono {
+            c
+        } else {
+            let mut p = corner;
+            p[ax] = corner[ax] - away * length;
+            if (f[ax] - p[ax]).signum() != -away || p[ax] == f[ax] {
+                return Ok(None);
+            }
+            p
+        };
+        let Some(&slot) = self.graph.slot.get(&acc) else {
+            return Ok(None);
+        };
+        let Some(top_node) = self.graph.find(slot, new_top) else {
+            return Ok(None);
+        };
+        let jog = Wire {
+            net,
+            layer: acc,
+            start: v,
+            end: corner,
+        };
+        let leg = Wire {
+            net,
+            layer: acc,
+            start: corner,
+            end: new_top,
+        };
+        let width = input.layers[acc as usize].width;
+        let wide = input.layers[acc as usize].wide_spacing;
+        let new_rects = [wire_rect(&jog, width)?, wire_rect(&leg, width)?];
+        // (1) Other nets, fixed metal, obstructions, wide metal.
+        for &rect in &new_rects {
+            if self.spatial.probe(acc, rect, net)?.is_none() {
+                return Ok(None);
+            }
+            if let Some(w) = wide
+                && !self.spatial.wide_clear(acc, rect, net, w)?
+            {
+                return Ok(None);
+            }
+        }
+        // (2) Same-net contact: only the via pad at `v` and w2.
+        let mut others: Vec<Rect> = Vec::new();
+        for (i, w) in route.wires.iter().enumerate() {
+            if w.layer == acc && i != at_top[0] && i != i2 {
+                others.push(wire_rect(w, width)?);
+            }
+        }
+        for w in fixed_all.plan_wires.iter().filter(|w| w.layer == acc) {
+            if !stub.iter().any(|s| std::ptr::eq(*s, *w)) {
+                others.push(wire_rect(w, width)?);
+            }
+        }
+        for x in route.vias.iter().chain(fixed_all.plan_vias.iter().copied()) {
+            if x.at == v && std::ptr::eq(x, on_acc[0]) {
+                continue;
+            }
+            for sh in input.vias[x.kind as usize]
+                .shapes
+                .iter()
+                .filter(|sh| sh.layer == acc)
+            {
+                others.push(shifted(sh.rect, x.at)?);
+            }
+        }
+        for &(l, rect) in &fixed_all.pins {
+            if l == acc {
+                others.push(rect);
+            }
+        }
+        charge(&mut self.spatial.work, others.len() * 2, cap)?;
+        if new_rects
+            .iter()
+            .any(|&nr| others.iter().any(|&o| touch(nr, o)))
+        {
+            return Ok(None);
+        }
+        // The new plan and route.
+        let mut new_plan = plan.clone();
+        let mut wires: Vec<Wire> = plan
+            .wires
+            .iter()
+            .filter(|w| w.layer != acc)
+            .cloned()
+            .collect();
+        let kept_shapes: Vec<usize> = plan
+            .wires
+            .iter()
+            .zip(plan.shapes.iter())
+            .filter(|(w, _)| w.layer != acc)
+            .map(|(_, &id)| id)
+            .collect();
+        let dropped_shapes: Vec<usize> = plan
+            .wires
+            .iter()
+            .zip(plan.shapes.iter())
+            .filter(|(w, _)| w.layer == acc)
+            .map(|(_, &id)| id)
+            .collect();
+        wires.push(jog.clone());
+        wires.push(leg.clone());
+        let mut new_route = NetRoute {
+            wires: Vec::with_capacity(route.wires.len()),
+            vias: route.vias.clone(),
+            shapes: Vec::new(),
+        };
+        for (i, w) in route.wires.iter().enumerate() {
+            if i == at_top[0] {
+                continue;
+            }
+            if i == i2 && !mono {
+                new_route.wires.push(Wire {
+                    net,
+                    layer: acc,
+                    start: new_top,
+                    end: f,
+                });
+                continue;
+            }
+            new_route.wires.push(w.clone());
+        }
+        new_plan.wires = wires.into_boxed_slice();
+        new_plan.top = top_node;
+        // (3) No new same-net violation on the access layer.
+        let old_fixed = fixed_all;
+        let new_fixed = {
+            let mut f = fixed_of(terminals, plans);
+            f.plan_wires = terminals
+                .iter()
+                .flat_map(|t| {
+                    if t.pin == pin {
+                        new_plan.wires.iter()
+                    } else {
+                        plans[&t.pin].wires.iter()
+                    }
+                })
+                .collect();
+            f
+        };
+        let all_vias: Vec<&Via> = route
+            .vias
+            .iter()
+            .chain(old_fixed.plan_vias.iter().copied())
+            .collect();
+        let before: Vec<&Wire> = route
+            .wires
+            .iter()
+            .chain(old_fixed.plan_wires.iter().copied())
+            .collect();
+        let after: Vec<&Wire> = new_route
+            .wires
+            .iter()
+            .chain(new_fixed.plan_wires.iter().copied())
+            .collect();
+        let old_set = self.layer_violations(net, acc, &before, &all_vias, terminals)?;
+        let new_set = self.layer_violations(net, acc, &after, &all_vias, terminals)?;
+        if new_set.iter().any(|x| old_set.binary_search(x).is_err()) {
+            return Ok(None);
+        }
+        // (4) Connectivity as `validate` sees it.
+        let pairs: Vec<(u32, u32)> = input.vias.iter().map(|x| (x.lower, x.upper)).collect();
+        let runs = crate::wire_runs::collinear_runs(
+            &new_route.wires.iter().collect::<Vec<_>>(),
+            &new_route
+                .vias
+                .iter()
+                .chain(new_fixed.plan_vias.iter().copied())
+                .collect::<Vec<_>>(),
+            &pairs,
+            &new_fixed.access,
+            cap,
+        )?;
+        if !self.net_connected(net, &runs, &new_route.vias, &new_fixed)? {
+            return Ok(None);
+        }
+        // Top-layer area of the new escape decides whether a later via at
+        // its top stacks (as the escape search records it).
+        new_plan.top_via = !self.stack_ok[acc as usize]
+            && !terminals
+                .iter()
+                .any(|t| t.pin == pin && t.shapes.iter().any(|s| s.layer == acc))
+            && match input.layers[acc as usize].min_area {
+                Some(min) => {
+                    let mut metal = vec![new_rects[0], new_rects[1]];
+                    for sh in &input.vias[on_acc[0].kind as usize].shapes {
+                        if sh.layer == acc {
+                            metal.push(shifted(sh.rect, v)?);
+                        }
+                    }
+                    route_rules::union_area(&metal, &mut self.spatial.work, cap)? < i128::from(min)
+                }
+                None => false,
+            };
+        // Commit: index shapes of the stub and the old route out, new in.
+        charge(
+            &mut self.spatial.work,
+            dropped_shapes.len() + route.shapes.len(),
+            cap,
+        )?;
+        for &id in &dropped_shapes {
+            self.spatial.remove(id);
+        }
+        for &id in &route.shapes {
+            self.spatial.remove(id);
+        }
+        let mut shapes = kept_shapes;
+        for w in [&jog, &leg] {
+            shapes.push(self.spatial.add_fixed(Blockage {
+                layer: acc,
+                rect: wire_rect(w, width)?,
+                net: Some(net),
+            })?);
+        }
+        shapes.extend_from_slice(&plan.shapes[plan.wires.len()..]);
+        new_plan.shapes = shapes.into_boxed_slice();
+        for w in &new_route.wires {
+            let rect = self.edge_rect(w.layer, w.start, w.end, net)?;
+            new_route.shapes.push(self.spatial.add_routed(Blockage {
+                layer: w.layer,
+                rect,
+                net: Some(net),
+            })?);
+        }
+        for x in &new_route.vias {
+            for sh in &input.vias[x.kind as usize].shapes {
+                new_route.shapes.push(self.spatial.add_routed(Blockage {
+                    layer: sh.layer,
+                    rect: shifted(sh.rect, x.at)?,
+                    net: Some(net),
+                })?);
+            }
+        }
+        tally.jogs_kept += 1;
+        Ok(Some((new_plan, new_route)))
+    }
+}
+
+/// DEF wire pieces of one net (its escapes and `route`): the wires merged
+/// into maximal collinear runs split at every via landing, access point and
+/// branch strictly inside them (`wire_runs`, as `export-def` writes them).
+/// This is the count the reference extractor's work follows
+/// (`scripts/def_pieces.py`).
+pub(super) fn net_pieces(
+    r: &mut Router<'_>,
+    route: &NetRoute,
+    terminals: &[&Terminal],
+    plans: &HashMap<u32, Plan>,
+) -> Result<usize> {
+    let fixed = fixed_of(terminals, plans);
+    let wires: Vec<&Wire> = fixed
+        .plan_wires
+        .iter()
+        .copied()
+        .chain(route.wires.iter())
+        .collect();
+    let mut vias: Vec<&Via> = fixed
+        .plan_vias
+        .iter()
+        .copied()
+        .chain(route.vias.iter())
+        .collect();
+    vias.sort_unstable_by_key(|v| (v.kind, v.at));
+    vias.dedup();
+    let cap = r.limits.max_comparisons;
+    charge(
+        &mut r.spatial.work,
+        wires.len().saturating_add(vias.len()).saturating_mul(4),
+        cap,
+    )?;
+    let pairs: Vec<(u32, u32)> = r.input.vias.iter().map(|v| (v.lower, v.upper)).collect();
+    Ok(crate::wire_runs::collinear_runs(&wires, &vias, &pairs, &fixed.access, cap)?.len())
+}
+
+/// The other nets whose routed metal alone refuses a candidate of a chain of
+/// `net` (per chain the first such candidate in the rewrites' order;
+/// `Straighten::neighbors`); `None` when no chain has such a candidate, or
+/// more than `max` nets would have to move.
+fn walling_nets(
+    r: &mut Router<'_>,
+    net: u32,
+    route: &NetRoute,
+    fixed: &Fixed<'_>,
+    turn: bool,
+    max: usize,
+) -> Result<Option<Vec<u32>>> {
+    let chains = r.chains(&route.wires, &route.vias, fixed)?;
+    let mut all: Vec<u32> = Vec::new();
+    for chain in &chains {
+        let width = r.input.layers[chain.layer as usize].width;
+        // The first candidate (rewrite order) that routed metal of other
+        // nets alone refuses; a candidate that fixed metal refuses, or that
+        // no other net refuses (it failed a same-net check), is passed over.
+        let mut found: Option<Vec<u32>> = None;
+        for cand in candidates(chain, &route.wires, turn) {
+            let mut victims: Vec<u32> = Vec::new();
+            let mut blocked = false;
+            for p in cand.windows(2) {
+                let w = Wire {
+                    net,
+                    layer: chain.layer,
+                    start: p[0],
+                    end: p[1],
+                };
+                match r
+                    .spatial
+                    .probe_soft(chain.layer, wire_rect(&w, width)?, net)?
+                {
+                    crate::routing::Soft::Blocked => {
+                        blocked = true;
+                        break;
+                    }
+                    crate::routing::Soft::Clear { victims: v, .. } => victims.extend(v),
+                }
+            }
+            if !blocked && !victims.is_empty() {
+                found = Some(victims);
+                break;
+            }
+        }
+        let Some(victims) = found else {
+            continue;
+        };
+        all.extend(victims);
+        all.sort_unstable();
+        all.dedup();
+        if all.len() > max {
+            return Ok(None);
+        }
+    }
+    Ok((!all.is_empty()).then_some(all))
+}
+
+/// `Straighten::neighbors` (see `routing::StraightenNeighbors`).
+#[allow(clippy::too_many_arguments)]
+fn neighbor_moves(
+    r: &mut Router<'_>,
+    cfg: &crate::routing::StraightenNeighbors,
+    turn: bool,
+    groups: &BTreeMap<u32, Vec<&Terminal>>,
+    plans: &HashMap<u32, Plan>,
+    region: Region<'_>,
+    routed: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    prior: Option<&PriorRoutes>,
+    total: &mut StraightenTally,
+    t0: std::time::Instant,
+) -> Result<()> {
+    if r.trial_search_limit.is_some()
+        || r.trial_expansion_limit.is_some()
+        || r.allowed_victim.is_some()
+        || r.protected.is_some()
+    {
+        return Err(invalid("straightening move inside a trial search"));
+    }
+    let limits = r.limits;
+    let held = |net: u32, routed: &BTreeMap<u32, NetRoute>| {
+        prior
+            .and_then(|p| p.nets.get(&net))
+            .zip(routed.get(&net))
+            .is_some_and(|((w, v), route)| route.wires == *w && route.vias == *v)
+    };
+    let movable = |net: u32, routed: &BTreeMap<u32, NetRoute>| {
+        groups
+            .get(&net)
+            .is_some_and(|t| t.len() <= cfg.max_terminals)
+            && routed
+                .get(&net)
+                .is_some_and(|route| route.wires.len() <= MAX_NET_RUNS)
+            && !held(net, routed)
+    };
+    for pass in 0..cfg.passes {
+        // Nets with chains, most chain runs first.
+        let mut order: Vec<(std::cmp::Reverse<usize>, u32)> = Vec::new();
+        let nets: Vec<u32> = routed.keys().copied().collect();
+        for net in nets {
+            if !movable(net, routed) {
+                continue;
+            }
+            let fixed = fixed_of(&groups[&net], plans);
+            let runs: usize = r
+                .chains(&routed[&net].wires, &routed[&net].vias, &fixed)?
+                .iter()
+                .map(|c| c.wires.len())
+                .sum();
+            if runs > 0 {
+                order.push((std::cmp::Reverse(runs), net));
+            }
+        }
+        order.sort_unstable();
+        charge(
+            &mut r.spatial.work,
+            order
+                .len()
+                .saturating_mul(order.len().max(1).ilog2() as usize + 1),
+            limits.max_comparisons,
+        )?;
+        let kept_before = total.moves_kept;
+        let none = BTreeMap::new();
+        for &(_, net) in &order {
+            // An earlier move may have changed or straightened this net.
+            if !movable(net, routed) {
+                continue;
+            }
+            let terminals = &groups[&net];
+            let victims = {
+                let fixed = fixed_of(terminals, plans);
+                let route = routed[&net].clone();
+                walling_nets(r, net, &route, &fixed, turn, cfg.max_victims)?
+            };
+            let Some(victims) = victims else {
+                continue;
+            };
+            if victims.iter().any(|&v| v == net || !movable(v, routed)) {
+                continue;
+            }
+            total.moves += 1;
+            // Rip up the walling nets.
+            let mut ripped: Vec<(u32, NetRoute)> = Vec::new();
+            for &v in &victims {
+                let old = remove_route(routed, retained_edges, v)
+                    .ok_or_else(|| invalid("straightening move without a route"))?;
+                charge(
+                    &mut r.spatial.work,
+                    old.shapes.len(),
+                    limits.max_comparisons,
+                )?;
+                for &id in &old.shapes {
+                    r.spatial.remove(id);
+                }
+                ripped.push((v, old));
+            }
+            let old = routed[&net].clone();
+            let mut tally = StraightenTally::default();
+            let rewritten = r.straighten_net(net, &old, terminals, plans, turn, &mut tally)?;
+            // Route the ripped nets again (hard searches, all else fixed).
+            let mut rerouted: Vec<(u32, NetRoute)> = Vec::new();
+            let mut unrouted = rewritten.is_none();
+            if !unrouted {
+                for &(v, _) in &ripped {
+                    r.area_level = if r.plan.area_stacks {
+                        2 - region.demoted.get(&v).copied().unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    let guide = &region.guides[&v];
+                    if r.close_expanded {
+                        r.mark_region_corridor(guide, r.plan.expand_margin);
+                    } else {
+                        r.mark_region(guide, Some(r.plan.expand_margin));
+                    }
+                    r.trial_expansion_limit = Some(r.expansions.saturating_add(cfg.net_expansions));
+                    let outcome = r.route_net(v, &groups[&v], plans, false, false, &none, 0);
+                    r.trial_expansion_limit = None;
+                    match outcome? {
+                        Outcome::Routed(new, displaced) => {
+                            if !displaced.is_empty() {
+                                return Err(invalid("hard straightening move displaced a net"));
+                            }
+                            rerouted.push((v, new));
+                        }
+                        Outcome::Limited(_) | Outcome::Failed(_) => {
+                            unrouted = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            // Acceptance: fewer DEF pieces in all, no more routed vias, wire
+            // within the allowance.
+            let mut keep = false;
+            if !unrouted && let Some(new) = &rewritten {
+                let size =
+                    |route: &NetRoute, n: u32, r: &mut Router<'_>| -> Result<(usize, u64, u64)> {
+                        let t = &groups[&n];
+                        let (vias, len) = routed_size(route, t, plans);
+                        Ok((net_pieces(r, route, t, plans)?, vias, len))
+                    };
+                let (mut p0, mut v0, mut l0) = size(&old, net, r)?;
+                let (mut p1, mut v1, mut l1) = size(new, net, r)?;
+                for ((v, before), (_, after)) in ripped.iter().zip(&rerouted) {
+                    let a = size(before, *v, r)?;
+                    let b = size(after, *v, r)?;
+                    (p0, v0, l0) = (p0 + a.0, v0 + a.1, l0 + a.2);
+                    (p1, v1, l1) = (p1 + b.0, v1 + b.1, l1 + b.2);
+                }
+                let allowance = (p0.saturating_sub(p1) as u64).saturating_mul(cfg.length_per_piece);
+                keep = p1 < p0 && v1 <= v0 && l1 <= l0.saturating_add(allowance);
+                if keep {
+                    total.move_pieces += p0 - p1;
+                } else {
+                    total.moves_worse += 1;
+                }
+            } else {
+                total.moves_unrouted += 1;
+            }
+            if keep {
+                total.moves_kept += 1;
+                let new = rewritten.expect("kept move holds the rewrite");
+                retain_route(routed, retained_edges, net, new, limits.max_segments)?;
+                for (v, route) in rerouted {
+                    retain_route(routed, retained_edges, v, route, limits.max_segments)?;
+                }
+                continue;
+            }
+            // Undo: new shapes out, old shapes back, old routes kept.
+            for (_, route) in rerouted {
+                discard_route(r, route)?;
+            }
+            if let Some(new) = rewritten {
+                discard_route(r, new)?;
+                for &id in &old.shapes {
+                    r.spatial.restore(id)?;
+                }
+            }
+            for (v, route) in ripped {
+                for &id in &route.shapes {
+                    r.spatial.restore(id)?;
+                }
+                retain_route(routed, retained_edges, v, route, limits.max_segments)?;
+            }
+        }
+        trace(
+            "straighten",
+            t0,
+            format_args!(
+                "moves pass {pass} tried {} kept {} unrouted {} worse {} pieces -{} work {} exp {}",
+                total.moves,
+                total.moves_kept,
+                total.moves_unrouted,
+                total.moves_worse,
+                total.move_pieces,
+                r.spatial.work,
+                r.expansions
+            ),
+        );
+        if total.moves_kept == kept_before {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// `Straighten::reroute` (see `routing::StraightenReroute`).
