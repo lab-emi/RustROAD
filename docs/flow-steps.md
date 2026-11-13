@@ -29,9 +29,13 @@ Conventions shared by all of them:
   `workspace.lock` exclusively and fail with `REVISION_CONFLICT` if it holds
   anything else. A successful step leaves `HEAD` = `rev1` where the reference
   helper did.
-- **Result**: one line of JSON on stdout (the step result; the same object is
-  stored indented in the output directory). Errors are one JSON object on
-  stderr, `{"status":"error","code":CODE,"message":...}`, exit status 2. A
+- **Result**: JSON on stdout. The four step commands print one line: the
+  step result (`physical-inputs`, `verify-antenna-lineage`; the same object
+  is stored indented as `result.json`) or its summary fields
+  (`antenna-session`, `postroute-repair`; the full record is `lineage.json`,
+  `result.json`). The three single-purpose commands print an indented object.
+  Errors are one JSON object on stderr,
+  `{"status":"error","code":CODE,"message":...}`, exit status 2. A
   failed `postroute-repair`, `antenna-session` or `verify-antenna-lineage`
   also leaves its failure record (`result.json` with `status: "error"`,
   `failure.json`, `result.json` with `status: "rejected_or_unverified"`).
@@ -277,13 +281,63 @@ The same differences appear between two runs of the Python helpers, except
 the provenance records (`rc_builder`, `verifier_source`, `policy_source`,
 `tools.python`, the inputs schema).
 
+A complete producer run with the native steps (2026-11-13, same work path
+and tool paths as a run with the Python helpers the hour before) gives the
+same GDS, DEF, final and powered netlists and native SPEF (SHA-256
+`fba3206d...`, `b0ffd146...`, `a03ce194...`, `f97fe4c5...`, `a8d158e6...`, the
+2026-11-05 campaign's). Of the 2,010 files of the backend, its logs and the
+trial workspace, 1,890 are byte-identical. The other 120 differ in: the
+pinned `rustroad` identity wherever it is recorded (session inputs, lineage,
+review, post-route result, the `build` field of the workspace receipts); the
+dropped Python records listed above and the input schemas (`checked_file_ids`
+of the review is 1,547 instead of 1,554: the manifest of frozen helper
+sources and its six files); run times, time stamps, memory and cgroup
+telemetry and the hashes of files that contain them; and the outputs of the
+external tools that are not byte-deterministic between any two runs (the
+OpenRCX SPEF and what the timing step derives from it, KLayout's LVS
+database).
+
 The rebuild path of `postroute-repair` does not occur on that run (its
-status is `clean`). It is covered by the policy fixtures of
-`crates/rustroad-flow/tests/fixtures/steps` (expected plans written by the
-Python runner) and by the RustEDA repository's protocol test, which runs the
-Python runner and this command against the same stand-in tools.
+status is `clean`). Its policy was checked on the run's real data: for the
+real final and pre-CTS netlists, both Liberty corners, the cell LEF and the
+16,436 DRV rows of the two corners, the plan of the Python runner and the
+native plan are byte-identical at (`near_limit_ratio`, `target_ratio`) =
+(0.9, 0.8): no resize; (0.7, 0.5): 24 resizes, 16 skipped rows; (0.5, 0.3):
+284 resizes, 103 skipped. The loop itself (apply-eco, rebuild, antenna
+session, review, extraction, re-screen, round budget) is compared with the
+Python runner by the RustEDA repository's protocol test
+(`tests/test_native_backend_steps.py`), which runs both against the same
+stand-in tools.
 
 Tests: `crates/rustroad-pyjson/tests` (CPython-written numbers and
-documents), `crates/rustroad-flow/tests/steps_reference.rs` (synthetic PDK
-files, Liberty, LEF, netlists and DRV rows with expectations written by the
-reference helpers; `tests/fixtures/steps/generate.py` regenerates them).
+documents); `crates/rustroad-flow/tests/steps_reference.rs` (synthetic PDK
+files, Liberty, LEF, netlists and DRV rows) and `antenna_session_reference.rs`,
+`crates/rustroad-antenna-verify/tests/review_reference.rs` (one recorded
+session: the Python controller's records, the Python verifier's review and
+its rejection code for thirteen mutations). The expectations were written by
+the reference helpers; `tests/fixtures/steps/generate.py` regenerates them.
+
+## Measurements
+
+Ibex SG13G2/EZ130, 4-vCPU host, 2026-11-13. Each step was replayed in the
+finished producer tree five times with the Python helper and five times with
+the native command, interleaved, under GNU time with the producer's
+environment; both run the same pinned binaries as children (the antenna
+session and the timing engine at 4 threads). One-minute load 1.2-1.7. Median
+(range):
+
+| Step | Python helper, wall s | native, wall s | Python helper, CPU s | native, CPU s |
+| --- | ---: | ---: | ---: | ---: |
+| `be_profiles` (`physical-inputs`) | 0.12 (0.11-0.14) | 0.01 (0.01-0.02) | 0.11 (0.10-0.12) | 0.01 (0.01-0.01) |
+| `be_antenna_repair` (`antenna-session`) | 8.78 (8.31-9.18) | 7.18 (6.83-7.50) | 11.25 (10.54-11.40) | 9.64 (9.31-9.96) |
+| `be_antenna_verify` (`verify-antenna-lineage`) | 2.07 (1.96-2.14) | 1.23 (1.11-1.28) | 2.04 (1.94-2.13) | 1.23 (1.10-1.27) |
+| `be_postroute` (`postroute-repair`) | 4.42 (4.35-4.63) | 4.26 (4.17-4.41) | 7.79 (7.68-7.96) | 7.72 (7.55-7.99) |
+| sum of the medians | 15.39 | 12.68 | 21.19 | 18.60 |
+
+What is left is the children. In the producer run the session's engine child
+took 6.91 s of the step's 7.25 s (40 repair attempts, 528 report
+operations), and the post-route children 4.6 s of 5.10 s (`rusteda import`
+1.11 s, `ruststa run` 3.38 s, the netlist export and four report queries the
+rest). The review is all this command's own time: it decodes every check
+report twice and hashes every pinned file when it is first used and again at
+the end.
