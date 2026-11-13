@@ -83,24 +83,68 @@ struct LayerGrid {
     nx: i64,
     ny: i64,
     cell: i64,
+    /// Exact reciprocal of `cell` for 32-bit offsets (0: none).
+    magic: u64,
+    /// Largest offset of the last column and row (`n * cell - 1`).
+    last_x: i64,
+    last_y: i64,
     /// `nx * ny + 1` CSR offsets into `entries`.
     offsets: Vec<u32>,
     entries: Entries,
 }
+/// `floor(n / d)` for `n < 2^32` and `2 <= d < 2^32` with `magic =
+/// u64::MAX / d + 1` (Lemire, Kaser and Kurz, "Faster remainder by direct
+/// computation", Software: Practice and Experience 49(6), 2019).
+#[inline]
+fn fast_div(n: u64, magic: u64) -> u64 {
+    ((u128::from(magic) * u128::from(n)) >> 64) as u64
+}
 impl LayerGrid {
+    fn new(x0: i64, y0: i64, nx: i64, ny: i64, cell: i64, offsets: Vec<u32>) -> Self {
+        let last = |n: i64| i64::try_from(i128::from(n) * i128::from(cell) - 1).unwrap_or(i64::MAX);
+        let (last_x, last_y) = (last(nx), last(ny));
+        let fits = |v: i64| v <= i64::from(u32::MAX);
+        let magic = if (2..=i64::from(u32::MAX)).contains(&cell) && fits(last_x) && fits(last_y) {
+            u64::MAX / cell as u64 + 1
+        } else {
+            0
+        };
+        Self {
+            x0,
+            y0,
+            nx,
+            ny,
+            cell,
+            magic,
+            last_x,
+            last_y,
+            offsets,
+            entries: Entries::Compact(Vec::new()),
+        }
+    }
+    /// Cell of offset `v` along an axis whose last offset is `last`: the
+    /// original `v.div_euclid(cell).clamp(0, n - 1)`.
+    #[inline]
+    fn axis(&self, v: i64, last: i64, n: i64) -> i64 {
+        if self.magic != 0 {
+            if v <= 0 {
+                0
+            } else {
+                fast_div(v.min(last) as u64, self.magic) as i64
+            }
+        } else {
+            v.div_euclid(self.cell).clamp(0, n - 1)
+        }
+    }
     /// Monotone cell column of `x`, clamped to the grid. Saturation keeps
     /// the order of far-away query coordinates, so clamping stays exact.
     #[inline]
     fn cx(&self, x: i64) -> i64 {
-        x.saturating_sub(self.x0)
-            .div_euclid(self.cell)
-            .clamp(0, self.nx - 1)
+        self.axis(x.saturating_sub(self.x0), self.last_x, self.nx)
     }
     #[inline]
     fn cy(&self, y: i64) -> i64 {
-        y.saturating_sub(self.y0)
-            .div_euclid(self.cell)
-            .clamp(0, self.ny - 1)
+        self.axis(y.saturating_sub(self.y0), self.last_y, self.ny)
     }
     fn cells(&self, r: Rect) -> (i64, i64, i64, i64) {
         (self.cx(r.lx), self.cx(r.ux), self.cy(r.ly), self.cy(r.uy))
@@ -131,6 +175,57 @@ impl LayerGrid {
                         && !visitor(id, r)?
                     {
                         return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+}
+
+impl LayerGrid {
+    /// `scan` over compact entries, compared in the layer's 32-bit offsets:
+    /// the query is translated once (saturating: every entry offset lies in
+    /// `0..2^32`, so each comparison keeps its outcome) instead of every
+    /// entry being translated.
+    #[inline]
+    fn scan_compact(
+        &self,
+        entries: &[Compact],
+        query: Rect,
+        (qx0, qx1, qy0, qy1): (i64, i64, i64, i64),
+        local: &mut usize,
+        visitor: &mut impl FnMut(u32, Rect) -> Result<bool>,
+    ) -> Result<bool> {
+        let (lx, ux) = (
+            query.lx.saturating_sub(self.x0),
+            query.ux.saturating_sub(self.x0),
+        );
+        let (ly, uy) = (
+            query.ly.saturating_sub(self.y0),
+            query.uy.saturating_sub(self.y0),
+        );
+        for y in qy0..=qy1 {
+            let y_lo = y * self.cell;
+            for x in qx0..=qx1 {
+                let x_lo = x * self.cell;
+                let c = (y * self.nx + x) as usize;
+                let (a, b) = (self.offsets[c] as usize, self.offsets[c + 1] as usize);
+                *local += b - a;
+                for e in &entries[a..b] {
+                    let (elx, ely) = (i64::from(e.lx), i64::from(e.ly));
+                    let (eux, euy) = (i64::from(e.ux), i64::from(e.uy));
+                    if (x == qx0 || elx >= x_lo)
+                        && (y == qy0 || ely >= y_lo)
+                        && elx < ux
+                        && lx < eux
+                        && ely < uy
+                        && ly < euy
+                    {
+                        let (r, id) = e.get(self.x0, self.y0);
+                        if !visitor(id, r)? {
+                            return Ok(false);
+                        }
                     }
                 }
             }
@@ -244,13 +339,8 @@ fn indexed<'s>(
     head.chain(virt).chain(tail)
 }
 
-fn fill<E: Entry>(
-    shapes: &Shapes<'_>,
-    virtual_layers: Option<&[bool]>,
-    layer: u32,
-    g: &LayerGrid,
-    total: usize,
-) -> Result<Vec<E>> {
+/// `total` blank entries of grid `g`.
+fn blank_entries<E: Entry>(g: &LayerGrid, total: usize) -> Result<Vec<E>> {
     let mut entries: Vec<E> = Vec::new();
     entries
         .try_reserve_exact(total)
@@ -267,19 +357,65 @@ fn fill<E: Entry>(
         g.y0,
     );
     entries.resize(total, blank);
-    let mut cursor = g.offsets[..g.offsets.len() - 1].to_vec();
-    // Ascending shape ID: entries of a cell stay ID-ordered.
-    for (id, _, rect) in indexed(shapes, virtual_layers).filter(|&(_, l, _)| l == layer) {
-        let (x0, x1, y0, y1) = g.cells(rect);
-        for y in y0..=y1 {
-            for x in x0..=x1 {
-                let at = &mut cursor[(y * g.nx + x) as usize];
-                entries[*at as usize] = E::new(rect, id, g.x0, g.y0);
-                *at += 1;
-            }
+    Ok(entries)
+}
+
+/// Places `(id, rect)` in every cell of `g` it occupies.
+#[inline]
+fn place<E: Entry>(g: &LayerGrid, cursor: &mut [u32], entries: &mut [E], id: u32, rect: Rect) {
+    let (x0, x1, y0, y1) = g.cells(rect);
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let at = &mut cursor[(y * g.nx + x) as usize];
+            entries[*at as usize] = E::new(rect, id, g.x0, g.y0);
+            *at += 1;
         }
     }
-    Ok(entries)
+}
+
+/// Fills every layer's entries in one pass over the indexed shapes, in
+/// ascending shape ID, so the entries of each cell stay ID-ordered (the
+/// order of one pass per layer). `per_layer` holds each layer's entry
+/// count; offsets must already be prefix sums.
+fn fill(
+    shapes: &Shapes<'_>,
+    virtual_layers: Option<&[bool]>,
+    layers: &mut [Option<LayerGrid>],
+    compact: &[bool],
+    per_layer: &[usize],
+) -> Result<()> {
+    let mut fills: Vec<Option<(Entries, Vec<u32>)>> = Vec::with_capacity(layers.len());
+    for (l, g) in layers.iter().enumerate() {
+        fills.push(match g {
+            None => None,
+            Some(g) => {
+                let entries = if compact[l] {
+                    Entries::Compact(blank_entries(g, per_layer[l])?)
+                } else {
+                    Entries::Wide(blank_entries(g, per_layer[l])?)
+                };
+                Some((entries, g.offsets[..g.offsets.len() - 1].to_vec()))
+            }
+        });
+    }
+    for (id, layer, rect) in indexed(shapes, virtual_layers) {
+        let (Some(g), Some((entries, cursor))) = (
+            layers[layer as usize].as_ref(),
+            fills[layer as usize].as_mut(),
+        ) else {
+            return Err(invalid("grid fill outside a planned layer"));
+        };
+        match entries {
+            Entries::Compact(e) => place(g, cursor, e, id, rect),
+            Entries::Wide(e) => place(g, cursor, e, id, rect),
+        }
+    }
+    for (g, f) in layers.iter_mut().zip(fills) {
+        if let (Some(g), Some((entries, _))) = (g.as_mut(), f) {
+            g.entries = entries;
+        }
+    }
+    Ok(())
 }
 
 /// Entries of the grids `plans` over the indexed shapes; counting stops
@@ -393,8 +529,15 @@ impl GridIndex {
         if shapes.virtual_count() == 0 {
             return None;
         }
+        // One pass over the virtual shapes: validity, the indexed count and
+        // the signal-pin owners (a bit per shape and `(net, pin)` per pin).
+        let words = shapes.virtual_count().div_ceil(64);
+        let (mut pin_bits, mut pin_rank, mut pins) = (Vec::new(), Vec::new(), Vec::new());
+        pin_bits.try_reserve_exact(words).ok()?;
+        pin_rank.try_reserve_exact(words).ok()?;
+        pin_bits.resize(words, 0u64);
         let mut indexed_virtual = 0usize;
-        for (_, s) in shapes.virtual_shapes() {
+        for (k, (_, s)) in shapes.virtual_shapes().enumerate() {
             if virtual_layers
                 .get(s.layer as usize)
                 .copied()
@@ -405,15 +548,17 @@ impl GridIndex {
                 }
                 indexed_virtual += 1;
             }
+            if let Owner::Passive(PassiveOwner::Pin { net, pin }) = s.owner {
+                pin_bits[k / 64] |= 1 << (k % 64);
+                pins.try_reserve(1).ok()?;
+                pins.push((net, pin));
+            }
         }
         if indexed_virtual > shapes.retained_len() {
             return None;
         }
-        let words = shapes.virtual_count().div_ceil(64);
-        let pin_count = shapes
-            .virtual_shapes()
-            .filter(|(_, s)| matches!(s.owner, Owner::Passive(PassiveOwner::Pin { .. })))
-            .count();
+        pins.shrink_to_fit();
+        let pin_count = pins.len();
         let owners = (words as u64)
             .saturating_mul(12)
             .saturating_add((pin_count as u64).saturating_mul(8));
@@ -429,17 +574,6 @@ impl GridIndex {
             &mut attempt,
         )
         .ok()?;
-        let (mut pin_bits, mut pin_rank, mut pins) = (Vec::new(), Vec::new(), Vec::new());
-        pin_bits.try_reserve_exact(words).ok()?;
-        pin_rank.try_reserve_exact(words).ok()?;
-        pins.try_reserve_exact(pin_count).ok()?;
-        pin_bits.resize(words, 0u64);
-        for (k, (_, s)) in shapes.virtual_shapes().enumerate() {
-            if let Owner::Passive(PassiveOwner::Pin { net, pin }) = s.owner {
-                pin_bits[k / 64] |= 1 << (k % 64);
-                pins.push((net, pin));
-            }
-        }
         let mut rank = 0u32;
         for w in &pin_bits {
             pin_rank.push(rank);
@@ -530,15 +664,14 @@ impl GridIndex {
                 .try_reserve_exact(cells)
                 .map_err(|_| budget("extraction grid cell allocation"))?;
             offsets.resize(cells, 0u32);
-            layers.push(Some(LayerGrid {
-                x0: p.bounds.lx,
-                y0: p.bounds.ly,
-                nx: p.nx,
-                ny: p.ny,
-                cell: p.cell,
+            layers.push(Some(LayerGrid::new(
+                p.bounds.lx,
+                p.bounds.ly,
+                p.nx,
+                p.ny,
+                p.cell,
                 offsets,
-                entries: Entries::Compact(Vec::new()),
-            }));
+            )));
         }
         // Count pass: entries per cell, capped before any entry allocation.
         let mut total = 0usize;
@@ -572,19 +705,16 @@ impl GridIndex {
         if bytes > allowance {
             return Err(budget("extraction grid index memory"));
         }
-        for (l, g) in layers.iter_mut().enumerate() {
-            let (Some(g), Some(p)) = (g.as_mut(), plans[l]) else {
-                continue;
-            };
+        for g in layers.iter_mut().flatten() {
             for i in 1..g.offsets.len() {
                 g.offsets[i] += g.offsets[i - 1];
             }
-            g.entries = if p.compact() {
-                Entries::Compact(fill(shapes, virtual_layers, l as u32, g, per_layer[l])?)
-            } else {
-                Entries::Wide(fill(shapes, virtual_layers, l as u32, g, per_layer[l])?)
-            };
         }
+        let compact: Vec<bool> = plans
+            .iter()
+            .map(|p| p.is_some_and(|p| p.compact()))
+            .collect();
+        fill(shapes, virtual_layers, &mut layers, &compact, &per_layer)?;
         // Report the resident tables (the fill cursors are released).
         let resident = layers
             .iter()
@@ -606,6 +736,58 @@ impl GridIndex {
             pin_rank: Vec::new(),
             pins: Vec::new(),
         })
+    }
+
+    /// The validation, extent check and work charge `visit` makes for
+    /// `query` (scanned cells plus their entries), without scanning: the
+    /// entries are summed per cell row from the CSR offsets. 0 when the
+    /// layer has no grid.
+    pub(super) fn query_work(
+        &self,
+        layer: u32,
+        query: Rect,
+        limits: &ExtractLimits,
+    ) -> Result<usize> {
+        if query.lx > query.ux || query.ly > query.uy {
+            return Err(invalid("invalid shape-index query"));
+        }
+        let Some(g) = self.layers.get(layer as usize).and_then(Option::as_ref) else {
+            return Ok(0);
+        };
+        let (qx0, qx1, qy0, qy1) = g.cells(query);
+        let cells = (qx1 - qx0 + 1) as u64 * (qy1 - qy0 + 1) as u64;
+        if cells > limits.max_bin_entries as u64 {
+            return Err(budget("extraction query extent"));
+        }
+        let mut local = cells as usize;
+        for y in qy0..=qy1 {
+            let row = (y * g.nx) as usize;
+            local += (g.offsets[row + qx1 as usize + 1] - g.offsets[row + qx0 as usize]) as usize;
+        }
+        Ok(local)
+    }
+
+    /// `visit` without the work charge: the caller charges `query_work` of
+    /// a query covering `query`.
+    #[inline]
+    pub(super) fn visit_uncharged(
+        &self,
+        layer: u32,
+        query: Rect,
+        mut visitor: impl FnMut(u32, Rect) -> Result<bool>,
+    ) -> Result<bool> {
+        if query.lx > query.ux || query.ly > query.uy {
+            return Err(invalid("invalid shape-index query"));
+        }
+        let Some(g) = self.layers.get(layer as usize).and_then(Option::as_ref) else {
+            return Ok(true);
+        };
+        let range = g.cells(query);
+        let mut local = 0usize;
+        match &g.entries {
+            Entries::Compact(e) => g.scan_compact(e, query, range, &mut local, &mut visitor),
+            Entries::Wide(e) => g.scan(e, query, range, &mut local, &mut visitor),
+        }
     }
 
     /// Visit every entry of `layer` strictly intersecting `query` once, as
@@ -635,7 +817,7 @@ impl GridIndex {
         }
         let mut local = cells as usize;
         let result = match &g.entries {
-            Entries::Compact(e) => g.scan(e, query, range, &mut local, &mut visitor),
+            Entries::Compact(e) => g.scan_compact(e, query, range, &mut local, &mut visitor),
             Entries::Wide(e) => g.scan(e, query, range, &mut local, &mut visitor),
         };
         *work = work
@@ -723,6 +905,122 @@ mod tests {
                 .wrapping_add(1_442_695_040_888_963_407);
             ((self.0 >> 33) % n as u64) as i64
         }
+    }
+
+    #[test]
+    fn cell_columns_match_clamped_euclidean_division() {
+        for (cell, n) in [
+            (2i64, 1i64),
+            (2, 9),
+            (3, 7),
+            (2160, 400),
+            (2520, 1_704_000),
+            (65_537, 65_000),
+            (i64::from(u32::MAX), 1),
+            (1, 50),
+            (i64::MAX, 1),
+            (1 << 40, 3),
+        ] {
+            let g = LayerGrid::new(-17, 4, n, n, cell, Vec::new());
+            let last = n.saturating_mul(cell).saturating_sub(1);
+            let mut values = vec![
+                i64::MIN,
+                -1,
+                0,
+                1,
+                cell - 1,
+                cell,
+                cell + 1,
+                last - 1,
+                last,
+                last.saturating_add(1),
+                i64::from(u32::MAX),
+                i64::MAX,
+            ];
+            let mut v = 7i64;
+            for _ in 0..2000 {
+                v = v.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                values.push(v.rem_euclid(last.saturating_add(cell).max(1)));
+            }
+            for v in values {
+                let want = v.div_euclid(cell).clamp(0, n - 1);
+                assert_eq!(g.axis(v, g.last_x, n), want, "cell {cell} n {n} v {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn query_work_and_uncharged_visits_match_charged_visits() {
+        let mut rng = Lcg(3);
+        let mut input = Vec::new();
+        for i in 0..1200 {
+            let (x, y) = (rng.next(300) * 7 - 500, rng.next(300) * 7 - 400);
+            let (w, h) = match i % 5 {
+                0 => (rng.next(3000) + 1, 3),
+                1 => (3, rng.next(3000) + 1),
+                _ => (rng.next(40) + 1, rng.next(40) + 1),
+            };
+            input.push((
+                (i % 3) as u32,
+                Rect {
+                    lx: x,
+                    ly: y,
+                    ux: x + w,
+                    uy: y + h,
+                },
+            ));
+        }
+        let shapes = shapes(input);
+        let limits = ExtractLimits::default();
+        for cell in [5, 64, 900] {
+            let index = build(&shapes, 4, cell);
+            for _ in 0..400 {
+                let (x, y) = (rng.next(400) * 7 - 900, rng.next(400) * 7 - 800);
+                let q = Rect {
+                    lx: x,
+                    ly: y,
+                    ux: x + rng.next(700),
+                    uy: y + rng.next(700),
+                };
+                for layer in 0..4 {
+                    let (mut charged, mut seen) = (0usize, Vec::new());
+                    index
+                        .visit(layer, q, &limits, &mut charged, |id, r| {
+                            seen.push((id, r));
+                            Ok(true)
+                        })
+                        .unwrap();
+                    assert_eq!(index.query_work(layer, q, &limits).unwrap(), charged);
+                    let mut uncharged = Vec::new();
+                    index
+                        .visit_uncharged(layer, q, |id, r| {
+                            uncharged.push((id, r));
+                            Ok(true)
+                        })
+                        .unwrap();
+                    assert_eq!(uncharged, seen);
+                }
+            }
+            // Cell entries stay in ascending shape ID (one fill pass).
+            for g in index.layers.iter().flatten() {
+                let Entries::Compact(e) = &g.entries else {
+                    panic!("compact layer")
+                };
+                for c in 0..g.offsets.len() - 1 {
+                    let cell = &e[g.offsets[c] as usize..g.offsets[c + 1] as usize];
+                    assert!(cell.windows(2).all(|w| w[0].id < w[1].id));
+                }
+            }
+        }
+        let bad = Rect {
+            lx: 1,
+            ly: 0,
+            ux: 0,
+            uy: 0,
+        };
+        let index = build(&shapes, 4, 64);
+        assert!(index.query_work(0, bad, &limits).is_err());
+        assert!(index.visit_uncharged(0, bad, |_, _| Ok(true)).is_err());
     }
 
     #[test]
