@@ -279,13 +279,18 @@ pub(super) struct Scratch {
     other: Vec<Cand>,
     own: Vec<(Cand, u8)>,
     cands: Vec<Cand>,
-    events: Vec<u128>,
+    events: Vec<u64>,
+    wide_events: Vec<u128>,
     active: Vec<u64>,
     layered: Vec<(u32, i64, i64, u32)>,
     contributions: Vec<(u32, f64, f64)>,
     face: FaceScratch,
     probes: Vec<Probe>,
     samples: SampleCache,
+    sweep: Sweep,
+    keys: Vec<u64>,
+    spare: Vec<Cand>,
+    spare_own: Vec<(Cand, u8)>,
 }
 impl Scratch {
     pub(super) fn new(instances: usize) -> Result<Self> {
@@ -295,12 +300,17 @@ impl Scratch {
             own: Vec::new(),
             cands: Vec::new(),
             events: Vec::new(),
+            wide_events: Vec::new(),
             active: Vec::new(),
             layered: Vec::new(),
             contributions: Vec::new(),
             face: FaceScratch::default(),
             probes: Vec::new(),
             samples: SampleCache::default(),
+            sweep: Sweep::default(),
+            keys: Vec::new(),
+            spare: Vec::new(),
+            spare_own: Vec::new(),
         })
     }
 }
@@ -409,6 +419,28 @@ fn over_cap(limits: &ExtractLimits, count: usize) -> Stop {
     }
 }
 
+/// The conductor shape of a grid entry. Wire bodies are shapes `0..runs`
+/// (owner `Run(id)`) and pieces are contiguous from `piece_shape0`: their
+/// owners follow from the ID, so only passive shapes are looked up.
+#[inline]
+fn shape_of(ctx: &Ctx<'_, '_>, id: u32, layer: u32, rect: Rect) -> Shape {
+    if id < ctx.shapes.virtual_offset() as u32 {
+        Shape {
+            layer,
+            rect,
+            owner: Owner::Run(id),
+        }
+    } else if id.wrapping_sub(ctx.piece_shape0) < ctx.pieces.len() as u32 {
+        Shape {
+            layer,
+            rect,
+            owner: Owner::Piece(id - ctx.piece_shape0),
+        }
+    } else {
+        ctx.grid.shape(ctx.shapes, id, layer, rect)
+    }
+}
+
 /// Visit retained and virtual conductors of `layer` strictly intersecting
 /// `q`. `filter` tests the geometry first and returns non-zero flags for an
 /// accepted conductor; only then is its shape fetched and passed to `take`,
@@ -430,7 +462,7 @@ fn visit_layer(
             flags => take(
                 Cand {
                     id,
-                    shape: grid.shape(shapes, id, layer, rect),
+                    shape: shape_of(ctx, id, layer, rect),
                 },
                 flags,
             ),
@@ -486,8 +518,31 @@ fn gather_other(
             return Err(over_cap(ctx.limits, other.len() + 1));
         }
     }
-    sc.other.sort_unstable_by_key(|c| c.id);
+    sort_by_id(&mut sc.other, |c| c.id, &mut sc.keys, &mut sc.spare);
     Ok(())
+}
+
+/// Sorts `v` by unique shape ID through packed `(ID, position)` keys,
+/// moving each element once.
+fn sort_by_id<T: Copy>(
+    v: &mut Vec<T>,
+    id: impl Fn(&T) -> u32,
+    keys: &mut Vec<u64>,
+    out: &mut Vec<T>,
+) {
+    if v.len() <= 1 {
+        return;
+    }
+    keys.clear();
+    keys.extend(
+        v.iter()
+            .enumerate()
+            .map(|(i, c)| u64::from(id(c)) << 32 | i as u64),
+    );
+    keys.sort_unstable();
+    out.clear();
+    out.extend(keys.iter().map(|&k| v[k as u32 as usize]));
+    std::mem::swap(v, out);
 }
 
 /// Merges two ID-sorted lists (IDs are unique across them).
@@ -540,8 +595,8 @@ fn single<S: Sink>(
     if over || !complete {
         return Err(over_cap(ctx.limits, base + own.len() + 1));
     }
-    own.sort_unstable_by_key(|c| c.0.id);
-    counts.max_run_candidates = counts.max_run_candidates.max(base + own.len());
+    sort_by_id(&mut sc.own, |c| c.0.id, &mut sc.keys, &mut sc.spare_own);
+    counts.max_run_candidates = counts.max_run_candidates.max(base + sc.own.len());
     let mut cands = std::mem::take(&mut sc.cands);
     merge(&sc.other, sc.own.iter().map(|c| c.0), &mut cands);
     let result = numeric(ctx, run, &cands, sc, sink, work, counts);
@@ -622,6 +677,56 @@ fn pair_candidates(
         uy: qx.uy.max(qy.uy),
     };
     let base = sc.other.len();
+    let flags_of = |id: u32, r: Rect| {
+        u8::from(accepts(x, Some((cx0, cx1)), id, r))
+            | u8::from(accepts(y, Some((cy0, cy1)), id, r)) << 1
+    };
+    // The grid part: the x window, then the y window for hits the x strip
+    // does not accept (every x hit strictly intersects the x window), so
+    // each hit is taken once with both flags; the union's cells and entries
+    // are charged exactly as one union query. A candidate cap reached here
+    // replays the original union query from the original work count, so
+    // the outcome and its work are the original's.
+    if ctx.instances.is_none() {
+        let charge = ctx.grid.query_work(x.layer, union, ctx.limits)?;
+        let own = &mut sc.own;
+        own.clear();
+        let (mut nx, mut ny) = (0usize, 0usize);
+        let mut fits = true;
+        for (part, q) in [(1u8, qx), (2u8, qy)] {
+            let complete = ctx.grid.visit_uncharged(x.layer, q, |id, r| {
+                let flags = flags_of(id, r);
+                if flags & part == 0 || (part == 2 && flags & 1 != 0) {
+                    return Ok(true);
+                }
+                nx += usize::from(flags & 1);
+                ny += usize::from(flags >> 1);
+                if base + nx.max(ny) > cap {
+                    fits = false;
+                    return Ok(false);
+                }
+                own.push((
+                    Cand {
+                        id,
+                        shape: shape_of(ctx, id, x.layer, r),
+                    },
+                    flags,
+                ));
+                Ok(true)
+            })?;
+            if !complete {
+                break;
+            }
+        }
+        if fits {
+            *work = work
+                .checked_add(charge)
+                .filter(|&n| n <= ctx.limits.max_work)
+                .ok_or_else(|| budget("extraction grid-index work"))?;
+            sort_by_id(&mut sc.own, |c| c.0.id, &mut sc.keys, &mut sc.spare_own);
+            return Ok(base + nx.max(ny));
+        }
+    }
     let own = &mut sc.own;
     own.clear();
     let (mut nx, mut ny) = (0usize, 0usize);
@@ -632,10 +737,7 @@ fn pair_candidates(
         x.layer,
         union,
         work,
-        |id, r| {
-            u8::from(accepts(x, Some((cx0, cx1)), id, r))
-                | u8::from(accepts(y, Some((cy0, cy1)), id, r)) << 1
-        },
+        flags_of,
         |c, flags| {
             nx += usize::from(flags & 1);
             ny += usize::from(flags >> 1);
@@ -650,7 +752,7 @@ fn pair_candidates(
     if over > 0 || !complete {
         return Err(over_cap(ctx.limits, over.max(base + 1)));
     }
-    own.sort_unstable_by_key(|c| c.0.id);
+    sort_by_id(&mut sc.own, |c| c.0.id, &mut sc.keys, &mut sc.spare_own);
     Ok(base + nx.max(ny))
 }
 
@@ -663,36 +765,35 @@ fn event_pos(e: u128) -> i64 {
     ((e >> 64) as u64 ^ (1 << 63)) as i64
 }
 
-struct Bits<'b> {
-    words: &'b [u64],
-    at: usize,
-    current: u64,
+/// A strip's sweep events packed into 64 bits: the offset from the strip
+/// start above `shift` bits of candidate position and enter flag. Packed
+/// order equals the order of `event` (position, then candidate, exit
+/// first) whenever every position lies in `lo..=hi` and the offsets and
+/// candidate positions fit; otherwise the strip keeps the 128-bit events.
+#[derive(Clone, Copy)]
+struct Packing {
+    lo: i64,
+    shift: u32,
 }
-impl<'b> Bits<'b> {
-    fn new(words: &'b [u64]) -> Self {
-        Self {
-            words,
-            at: 0,
-            current: words.first().copied().unwrap_or(0),
-        }
-    }
-}
-impl Iterator for Bits<'_> {
-    type Item = usize;
+impl Packing {
+    /// The packing of a strip `lo..=hi` with `candidates` candidates.
     #[inline]
-    fn next(&mut self) -> Option<usize> {
-        loop {
-            if self.current != 0 {
-                let bit = self.current.trailing_zeros() as usize;
-                self.current &= self.current - 1;
-                return Some(self.at * 64 + bit);
-            }
-            self.at += 1;
-            if self.at >= self.words.len() {
-                return None;
-            }
-            self.current = self.words[self.at];
-        }
+    fn new(lo: i64, hi: i64, candidates: usize) -> Option<Self> {
+        let shift = usize::BITS - candidates.leading_zeros() + 1;
+        let span = u64::try_from(i128::from(hi) - i128::from(lo)).ok()?;
+        (shift < 64 && span >> (64 - shift) == 0).then_some(Self { lo, shift })
+    }
+    #[inline]
+    fn event(self, pos: i64, k: usize, enter: bool) -> u64 {
+        ((pos - self.lo) as u64) << self.shift | (k as u64) << 1 | u64::from(enter)
+    }
+    #[inline]
+    fn pos(self, e: u64) -> i64 {
+        self.lo + (e >> self.shift) as i64
+    }
+    #[inline]
+    fn k(self, e: u64) -> usize {
+        ((e & ((1 << self.shift) - 1)) >> 1) as usize
     }
 }
 
@@ -894,7 +995,107 @@ impl SampleCache {
     }
 }
 
-/// The original per-strip interval sweep over ID-sorted candidates.
+/// A candidate's fixed role in one strip's sweep, decided once per strip
+/// from its geometry (the original loop re-derived it every interval).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Role {
+    /// Never seen by the interval body: degenerate along the strip (it can
+    /// never span an interval), or own-layer metal beyond the window.
+    Ignore,
+    /// Own-layer metal at or beyond the plus side edge, inside the window.
+    Plus,
+    /// Own-layer metal at or beyond the minus side edge, inside the window.
+    Minus,
+    /// Own-layer metal across a side edge of another net or class.
+    Foreign,
+    /// Same metal across a side edge (`cover` names the covered sides).
+    Cover,
+    /// Other-layer metal overlapping the strip face (a `layered` entry).
+    Layered,
+    /// Other-layer metal without an RC model: an error once it spans.
+    NoModel,
+}
+
+/// Ascending sets of small integers (candidate positions or ranks) with a
+/// summary word per 64 words, so iteration costs the occupied words only.
+#[derive(Default)]
+struct Set {
+    words: Vec<u64>,
+    summary: Vec<u64>,
+}
+impl Set {
+    fn reset(&mut self, n: usize) {
+        let words = n.div_ceil(64);
+        self.words.clear();
+        self.words.resize(words, 0);
+        self.summary.clear();
+        self.summary.resize(words.div_ceil(64), 0);
+    }
+    #[inline]
+    fn insert(&mut self, i: usize) {
+        let w = i / 64;
+        self.words[w] |= 1 << (i % 64);
+        self.summary[w / 64] |= 1 << (w % 64);
+    }
+    #[inline]
+    fn remove(&mut self, i: usize) {
+        let w = i / 64;
+        self.words[w] &= !(1 << (i % 64));
+        if self.words[w] == 0 {
+            self.summary[w / 64] &= !(1 << (w % 64));
+        }
+    }
+    /// Calls `f` with every member in ascending order.
+    #[inline]
+    fn for_each(&self, mut f: impl FnMut(usize)) {
+        let mut bits = |w: usize| {
+            let mut word = self.words[w];
+            while word != 0 {
+                f(w * 64 + word.trailing_zeros() as usize);
+                word &= word - 1;
+            }
+        };
+        if self.words.len() == 1 {
+            bits(0);
+            return;
+        }
+        for (s, &summary) in self.summary.iter().enumerate() {
+            let mut summary = summary;
+            while summary != 0 {
+                bits(s * 64 + summary.trailing_zeros() as usize);
+                summary &= summary - 1;
+            }
+        }
+    }
+}
+
+/// Per-strip sweep state reused across strips.
+#[derive(Default)]
+pub(super) struct Sweep {
+    roles: Vec<(Role, u8)>,
+    /// `x0 - plus` (plus side) or `minus - x1` (minus side) per candidate.
+    gaps: Vec<i64>,
+    /// Same metal as the strip (own-layer candidates touching or across a
+    /// side edge only).
+    same: Vec<bool>,
+    /// Routed (wire body or piece) per candidate.
+    routed: Vec<bool>,
+    /// Rank of a layered candidate in `(metal, x0, x1, position)` order,
+    /// and the candidate of each rank.
+    rank: Vec<u32>,
+    by_rank: Vec<u32>,
+    plus: Set,
+    minus: Set,
+    layered: Set,
+}
+
+/// The original per-strip interval sweep over ID-sorted candidates. Each
+/// candidate's role (lateral neighbour per side, covering or foreign metal,
+/// layered metal) depends only on the strip and the candidate, so it is
+/// decided once; the sets of spanning candidates per role change only at
+/// sweep events. Every interval sees exactly the neighbours, flags, counts
+/// and the sorted `layered` list of the original loop, and evaluates the
+/// same f64 expressions in the same order.
 fn numeric<S: Sink>(
     ctx: &Ctx<'_, '_>,
     run: &Run,
@@ -906,12 +1107,14 @@ fn numeric<S: Sink>(
 ) -> Flow {
     let Scratch {
         events,
+        wide_events,
         active,
         layered,
         contributions,
         face,
         probes,
         samples,
+        sweep,
         ..
     } = sc;
     let tech = ctx.tech;
@@ -921,7 +1124,9 @@ fn numeric<S: Sink>(
     let window_dbu = info.window_dbu;
     let (edge_minus, edge_plus) = (run.minus, run.plus);
     events.clear();
+    wide_events.clear();
     probes.clear();
+    let mut packing = Packing::new(run.lo, run.hi, cands.len());
     for (k, c) in cands.iter().enumerate() {
         let r = c.shape.rect;
         let (a0, a1, x0, x1) = if run.vertical {
@@ -941,13 +1146,43 @@ fn numeric<S: Sink>(
             x1,
             metal,
         });
-        events.push(event(a0.max(run.lo), k, true));
-        events.push(event(a1.min(run.hi), k, false));
+        let (enter, exit) = (a0.max(run.lo), a1.min(run.hi));
+        if let Some(p) = packing
+            && enter <= run.hi
+            && exit >= run.lo
+        {
+            events.push(p.event(enter, k, true));
+            events.push(p.event(exit, k, false));
+        } else {
+            if let Some(p) = packing.take() {
+                // Unpack what was packed so far; the strip uses wide events.
+                for &e in events.iter() {
+                    wide_events.push(event(p.pos(e), p.k(e), e & 1 == 1));
+                }
+                events.clear();
+            }
+            wide_events.push(event(enter, k, true));
+            wide_events.push(event(exit, k, false));
+        }
     }
     events.sort_unstable();
-    let index_work = events
-        .len()
-        .checked_mul(3 * events.len().max(1).ilog2() as usize + 4)
+    wide_events.sort_unstable();
+    let event_count = events.len() + wide_events.len();
+    // Position, candidate and enter flag of the i-th sorted event.
+    let at = |i: usize| -> (i64, usize, bool) {
+        match packing {
+            Some(p) => {
+                let e = events[i];
+                (p.pos(e), p.k(e), e & 1 == 1)
+            }
+            None => {
+                let e = wide_events[i];
+                (event_pos(e), ((e as u64) >> 1) as usize, e & 1 == 1)
+            }
+        }
+    };
+    let index_work = event_count
+        .checked_mul(3 * event_count.max(1).ilog2() as usize + 4)
         .ok_or_else(|| budget("extraction interval index work"))?;
     *work = work
         .checked_add(index_work)
@@ -977,31 +1212,139 @@ fn numeric<S: Sink>(
             }
         }
     };
+    // Roles. A candidate spans an interval exactly while it is active and
+    // `a0 < a1`: its clamped ends are then distinct interval boundaries; a
+    // degenerate one (entered at its own exit) never spans.
+    let Sweep {
+        roles,
+        gaps,
+        same,
+        routed,
+        rank,
+        by_rank,
+        plus: plus_set,
+        minus: minus_set,
+        layered: layered_set,
+    } = sweep;
+    roles.clear();
+    gaps.clear();
+    same.clear();
+    routed.clear();
+    by_rank.clear();
+    for (k, p) in probes.iter().enumerate() {
+        let shape = &cands[k].shape;
+        let (mut role, mut cover, mut gap, mut is_same) = (Role::Ignore, 0u8, 0i64, false);
+        if p.a0 < p.a1 {
+            if p.metal == OWN {
+                if p.x0 >= edge_plus {
+                    gap = p.x0 - edge_plus;
+                    if gap < window_dbu {
+                        role = Role::Plus;
+                        is_same = gap == 0 && same_metal(shape);
+                    }
+                } else if p.x1 <= edge_minus {
+                    gap = edge_minus - p.x1;
+                    if gap < window_dbu {
+                        role = Role::Minus;
+                        is_same = gap == 0 && same_metal(shape);
+                    }
+                } else if !same_metal(shape) {
+                    role = Role::Foreign;
+                } else {
+                    role = Role::Cover;
+                    cover = u8::from(p.x1 > edge_plus) | u8::from(p.x0 < edge_minus) << 1;
+                }
+            } else if p.metal == NO_MODEL {
+                role = Role::NoModel;
+            } else if p.x1.min(edge_plus) - p.x0.max(edge_minus) > 0 {
+                role = Role::Layered;
+                by_rank.push(k as u32);
+            }
+        }
+        roles.push((role, cover));
+        gaps.push(gap);
+        same.push(is_same);
+        routed.push(shape.routed());
+    }
+    by_rank.sort_unstable_by_key(|&k| {
+        let p = &probes[k as usize];
+        (p.metal, p.x0, p.x1, k)
+    });
+    rank.clear();
+    rank.resize(cands.len(), 0);
+    for (r, &k) in by_rank.iter().enumerate() {
+        rank[k as usize] = r as u32;
+    }
+    plus_set.reset(cands.len());
+    minus_set.reset(cands.len());
+    layered_set.reset(by_rank.len());
+    // Spanning candidates per counted role.
+    let (mut foreign_n, mut cover_plus_n, mut cover_minus_n) = (0usize, 0usize, 0usize);
+    let (mut no_model_n, mut routed_layered_n) = (0usize, 0usize);
     // Interval boundaries are run.lo, run.hi and every (clamped) candidate
     // end, ascending and distinct: exactly the original sorted point list.
     let mut event_index = 0;
     let mut t0 = run.lo;
     loop {
-        while event_index < events.len() && event_pos(events[event_index]) <= t0 {
-            let e = events[event_index];
-            let k = ((e as u64) >> 1) as usize;
+        let mut next = None;
+        while event_index < event_count {
+            let (pos, k, enter) = at(event_index);
+            if pos > t0 {
+                next = Some(pos);
+                break;
+            }
             let (w, bit) = (k / 64, 1u64 << (k % 64));
-            if e & 1 == 1 {
+            // +1 when the candidate starts spanning, -1 when it stops.
+            let change = if enter {
                 if active[w] & bit == 0 {
                     active_n += 1;
                     active[w] |= bit;
+                    1isize
+                } else {
+                    0
                 }
             } else if active[w] & bit != 0 {
                 active_n -= 1;
                 active[w] &= !bit;
+                -1
+            } else {
+                0
+            };
+            if change != 0 {
+                let add = |n: &mut usize| {
+                    *n = n.wrapping_add_signed(change);
+                };
+                match roles[k] {
+                    (Role::Ignore, _) => {}
+                    (Role::Plus, _) if change > 0 => plus_set.insert(k),
+                    (Role::Plus, _) => plus_set.remove(k),
+                    (Role::Minus, _) if change > 0 => minus_set.insert(k),
+                    (Role::Minus, _) => minus_set.remove(k),
+                    (Role::Foreign, _) => add(&mut foreign_n),
+                    (Role::Cover, cover) => {
+                        if cover & 1 != 0 {
+                            add(&mut cover_plus_n);
+                        }
+                        if cover & 2 != 0 {
+                            add(&mut cover_minus_n);
+                        }
+                    }
+                    (Role::Layered, _) => {
+                        if change > 0 {
+                            layered_set.insert(rank[k] as usize);
+                        } else {
+                            layered_set.remove(rank[k] as usize);
+                        }
+                        if routed[k] {
+                            add(&mut routed_layered_n);
+                        }
+                    }
+                    (Role::NoModel, _) => add(&mut no_model_n),
+                }
             }
             event_index += 1;
         }
-        let t1 = if event_index < events.len() {
-            event_pos(events[event_index])
-        } else {
-            run.hi
-        };
+        let t1 = next.unwrap_or(run.hi);
         if t1 <= t0 {
             break;
         }
@@ -1016,62 +1359,46 @@ fn numeric<S: Sink>(
         if *work > limits.max_work {
             return Err(budget("extraction work").into());
         }
+        if no_model_n > 0 {
+            return Err(invalid("routing layer has no RC profile entry").into());
+        }
+        // A passive strip records only plate shares toward routed metal of
+        // other layers: without spanning routed layered metal the interval
+        // records nothing and changes no other count.
+        if run.passive.is_some() && routed_layered_n == 0 {
+            t0 = t1;
+            continue;
+        }
         // Nearest lateral neighbour per side and nearest planes. Candidate
         // positions are in shape-ID order, so `(gap, position)` breaks ties
-        // exactly like `(gap, shape ID)`.
-        let mut plus: Option<(i64, u32)> = None;
-        let mut minus: Option<(i64, u32)> = None;
-        let (mut covered_plus, mut covered_minus) = (false, false);
-        layered.clear();
-        for k in Bits::new(active) {
-            let Probe {
-                a0,
-                a1,
-                x0,
-                x1,
-                metal,
-            } = probes[k];
-            if a0 > t0 || a1 < t1 {
-                continue;
-            }
-            let k = k as u32;
-            if metal == OWN {
-                if x0 >= edge_plus {
-                    let gap = x0 - edge_plus;
-                    if gap < window_dbu && plus.is_none_or(|p| (gap, k) < p) {
-                        plus = Some((gap, k));
-                    }
-                } else if x1 <= edge_minus {
-                    let gap = edge_minus - x1;
-                    if gap < window_dbu && minus.is_none_or(|p| (gap, k) < p) {
-                        minus = Some((gap, k));
-                    }
-                } else if !same_metal(&cands[k as usize].shape) {
-                    if run.passive.is_none() {
-                        counts.foreign_overlaps += 1;
-                    }
-                } else {
-                    // Same-net metal across a side edge: that side is
-                    // inside the net's metal union, not exposed.
-                    covered_plus |= x1 > edge_plus;
-                    covered_minus |= x0 < edge_minus;
+        // exactly like `(gap, shape ID)`; the first minimal gap in ascending
+        // position is that minimum.
+        let nearest = |set: &Set| -> Option<(i64, u32)> {
+            let mut best: Option<(i64, u32)> = None;
+            set.for_each(|k| {
+                let gap = gaps[k];
+                if best.is_none_or(|b| gap < b.0) {
+                    best = Some((gap, k as u32));
                 }
-            } else {
-                if metal == NO_MODEL {
-                    return Err(invalid("routing layer has no RC profile entry").into());
-                }
-                let overlap = x1.min(edge_plus) - x0.max(edge_minus);
-                if overlap <= 0 {
-                    continue;
-                }
-                layered.push((metal, x0, x1, k));
-            }
+            });
+            best
+        };
+        let plus = nearest(plus_set);
+        let minus = nearest(minus_set);
+        let (covered_plus, covered_minus) = (cover_plus_n > 0, cover_minus_n > 0);
+        if run.passive.is_none() {
+            counts.foreign_overlaps += foreign_n;
         }
+        layered.clear();
+        layered_set.for_each(|r| {
+            let k = by_rank[r];
+            let p = &probes[k as usize];
+            layered.push((p.metal, p.x0, p.x1, k));
+        });
         // A conductor on another layer is a plate for this strip (the
         // calibration OVER/UNDER contexts) only where its layer's metal
         // spans the whole strip cross-section and reaches one strip width
         // beyond both side edges: crossings and clearly wider shapes.
-        layered.sort_unstable();
         let below = plate(layered, model.metal, false, edge_minus, edge_plus);
         let above = plate(layered, model.metal, true, edge_minus, edge_plus);
         let nearest_below = layered
@@ -1137,8 +1464,7 @@ fn numeric<S: Sink>(
                 continue;
             }
             let spacing = side.map(|(g, _)| um(tech, g));
-            let touching_same =
-                side.is_some_and(|(g, s)| g == 0 && same_metal(&cands[s as usize].shape));
+            let touching_same = side.is_some_and(|(g, s)| g == 0 && same[s as usize]);
             if touching_same {
                 continue;
             }
@@ -1386,6 +1712,87 @@ mod tests {
                 (i64::MAX, 2, false)
             ]
         );
+    }
+
+    #[test]
+    fn packed_events_sort_and_decode_like_wide_events() {
+        let mut seed = 5u64;
+        let mut next = move |n: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % n
+        };
+        for (lo, hi, candidates) in [
+            (-7i64, 9i64, 5usize),
+            (0, 0, 1),
+            (1 << 40, (1 << 40) + 3_000_000, 3000),
+            (-(1 << 45), (1 << 45) - 1, 65_536),
+        ] {
+            let p = Packing::new(lo, hi, candidates).unwrap();
+            let span = (hi - lo) as u64 + 1;
+            let raw: Vec<(i64, usize, bool)> = (0..2000)
+                .map(|i| {
+                    let pos = match i % 4 {
+                        0 => lo,
+                        1 => hi,
+                        _ => lo + next(span) as i64,
+                    };
+                    (pos, next(candidates as u64) as usize, next(2) == 1)
+                })
+                .collect();
+            let mut wide: Vec<u128> = raw.iter().map(|&(a, k, e)| event(a, k, e)).collect();
+            let mut packed: Vec<u64> = raw.iter().map(|&(a, k, e)| p.event(a, k, e)).collect();
+            wide.sort_unstable();
+            packed.sort_unstable();
+            let wide: Vec<_> = wide
+                .iter()
+                .map(|&e| (event_pos(e), ((e as u64) >> 1) as usize, e & 1 == 1))
+                .collect();
+            let packed: Vec<_> = packed
+                .iter()
+                .map(|&e| (p.pos(e), p.k(e), e & 1 == 1))
+                .collect();
+            assert_eq!(packed, wide);
+        }
+        // Spans or candidate counts beyond 64 bits keep the wide events.
+        assert!(Packing::new(i64::MIN, i64::MAX, 2).is_none());
+        assert!(Packing::new(0, 1 << 50, 1 << 20).is_none());
+        assert!(Packing::new(5, 4, 1).is_none());
+    }
+
+    #[test]
+    fn sets_visit_their_members_in_ascending_order() {
+        let mut seed = 9u64;
+        let mut next = move |n: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % n
+        };
+        for n in [1usize, 63, 64, 65, 700, 5000] {
+            let mut set = Set::default();
+            set.reset(n);
+            let mut want = std::collections::BTreeSet::new();
+            for _ in 0..3 * n {
+                let i = next(n as u64) as usize;
+                if want.contains(&i) {
+                    set.remove(i);
+                    want.remove(&i);
+                } else {
+                    set.insert(i);
+                    want.insert(i);
+                }
+                if next(17) == 0 {
+                    let mut got = Vec::new();
+                    set.for_each(|i| got.push(i));
+                    assert_eq!(got, want.iter().copied().collect::<Vec<_>>());
+                }
+            }
+            let mut got = Vec::new();
+            set.for_each(|i| got.push(i));
+            assert_eq!(got, want.iter().copied().collect::<Vec<_>>());
+        }
     }
 
     #[test]
