@@ -727,7 +727,8 @@ item is a campaign control or a canonical structure, re-run every campaign:
 * **RECT patches are not extracted.** LibreLane's DEF with its 30,450
   regular-wiring `RECT` patches removed gives a SPEF identical apart from
   its date line (all 15,227 nets; 133,158 wires reported either way):
-  OpenRCX takes neither capacitance nor connectivity from them. LibreLane's pin access stacks Via2 on Via1 at 11,035 pins with the
+  OpenRCX takes neither capacitance nor connectivity from them.
+  LibreLane's pin access stacks Via2 on Via1 at 11,035 pins with the
   Metal2 minimum-area metal written as such a patch, so those accesses hold
   no Metal2 wire for this reader; a native escape reaches the Metal2 area
   with an 840 DBU wire, which it extracts (`docs/routing-budget.md`, "Wire
