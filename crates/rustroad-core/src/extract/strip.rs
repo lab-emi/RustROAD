@@ -954,11 +954,18 @@ fn face_portions(
 /// the strip's own layer, `NO_MODEL` when its layer has no RC model).
 #[derive(Clone, Copy)]
 struct Probe {
-    a0: i64,
-    a1: i64,
-    x0: i64,
-    x1: i64,
-    metal: u32,
+    /// Role in this strip's sweep, with the covered sides of `Cover`.
+    role: Role,
+    cover: u8,
+    /// Same metal as the strip (own-layer metal touching or across a side
+    /// edge only).
+    same: bool,
+    /// Routed (wire body or piece).
+    routed: bool,
+    /// Rank of a layered candidate in `(metal, x0, x1, position)` order.
+    rank: u32,
+    /// `x0 - plus` (plus side) or `minus - x1` (minus side).
+    gap: i64,
 }
 const OWN: u32 = u32::MAX;
 const NO_MODEL: u32 = u32::MAX - 1;
@@ -1069,21 +1076,93 @@ impl Set {
     }
 }
 
+/// The least `(gap, position)` of a set of lateral neighbours, kept across
+/// insertions and recomputed from the set only after the least one leaves.
+#[derive(Default)]
+struct Nearest {
+    best: Option<(i64, u32)>,
+    stale: bool,
+}
+impl Nearest {
+    #[inline]
+    fn insert(&mut self, gap: i64, k: usize) {
+        if !self.stale && self.best.is_none_or(|b| (gap, k as u32) < b) {
+            self.best = Some((gap, k as u32));
+        }
+    }
+    #[inline]
+    fn remove(&mut self, k: usize) {
+        if self.best.is_some_and(|b| b.1 == k as u32) {
+            self.stale = true;
+        }
+    }
+    /// The least member: the first minimal gap in ascending position.
+    #[inline]
+    fn get(&mut self, set: &Set, probes: &[Probe]) -> Option<(i64, u32)> {
+        if self.stale {
+            let mut best: Option<(i64, u32)> = None;
+            set.for_each(|k| {
+                let gap = probes[k].gap;
+                if best.is_none_or(|b| gap < b.0) {
+                    best = Some((gap, k as u32));
+                }
+            });
+            (self.best, self.stale) = (best, false);
+        }
+        self.best
+    }
+}
+
+/// One side's share of the context value per unit length.
+#[derive(Clone, Copy, Default)]
+enum Side {
+    /// Inside same-net metal: not exposed.
+    Covered,
+    /// Touching same metal: not exposed.
+    #[default]
+    Skip,
+    /// Exposed: ground `g` (before `max(0)`), up to two plate shares
+    /// `(owner, d)` and a lateral coupling `(neighbour, cc)`.
+    Open {
+        g: f64,
+        shares: [(u32, f64); 2],
+        n: u8,
+        lateral: Option<(u32, f64)>,
+    },
+}
+
+/// Interval state of the previous interval of one strip.
+type PlateState = (
+    Option<(u32, [u32; 2])>,
+    Option<(u32, [u32; 2])>,
+    usize,
+    (bool, bool),
+    Option<usize>,
+);
+type SideKey = (Option<(i64, u32)>, Option<(i64, u32)>, bool, bool);
+#[derive(Default)]
+struct IntervalCache {
+    plates_valid: bool,
+    layered: Vec<(u32, i64, i64, u32)>,
+    plates: PlateState,
+    nonspanning: bool,
+    fallback: bool,
+    /// Lower face portions `(has data, covered um, owners)`, upper ones
+    /// `(has data, owners)`; owners `(shape, width um, ov * width um)`.
+    lower: Vec<(bool, f64, usize, usize)>,
+    upper: Vec<(bool, usize, usize)>,
+    owners: Vec<(u32, f64, f64)>,
+    sides_valid: bool,
+    sides_key: SideKey,
+    sides: [Side; 2],
+}
+
 /// Per-strip sweep state reused across strips.
 #[derive(Default)]
 pub(super) struct Sweep {
-    roles: Vec<(Role, u8)>,
-    /// `x0 - plus` (plus side) or `minus - x1` (minus side) per candidate.
-    gaps: Vec<i64>,
-    /// Same metal as the strip (own-layer candidates touching or across a
-    /// side edge only).
-    same: Vec<bool>,
-    /// Routed (wire body or piece) per candidate.
-    routed: Vec<bool>,
-    /// Rank of a layered candidate in `(metal, x0, x1, position)` order,
-    /// and the candidate of each rank.
-    rank: Vec<u32>,
-    by_rank: Vec<u32>,
+    cache: IntervalCache,
+    /// Layered candidates in `(metal, x0, x1, position)` order.
+    by_rank: Vec<(u32, i64, i64, u32)>,
     plus: Set,
     minus: Set,
     layered: Set,
@@ -1126,6 +1205,31 @@ fn numeric<S: Sink>(
     events.clear();
     wide_events.clear();
     probes.clear();
+    let Sweep {
+        cache,
+        by_rank,
+        plus: plus_set,
+        minus: minus_set,
+        layered: layered_set,
+    } = sweep;
+    by_rank.clear();
+    cache.plates_valid = false;
+    cache.sides_valid = false;
+    // Same metal as this strip: its own net, or for a passive conductor
+    // the same supply/ground class or the same pin net.
+    let same_metal = |sh: &Shape| -> bool {
+        match (sh.owner, run.passive) {
+            (Owner::Run(o), _) => ctx.runs[o as usize].net == run.net,
+            (Owner::Piece(p), _) => ctx.pieces[p as usize].net == run.net,
+            (Owner::Passive(p), None) => {
+                matches!(p, PassiveOwner::Pin { net, .. } if net == run.net)
+            }
+            (Owner::Passive(p), Some(PassiveOwner::Ground)) => p == PassiveOwner::Ground,
+            (Owner::Passive(p), Some(PassiveOwner::Pin { net, .. })) => {
+                matches!(p, PassiveOwner::Pin { net: other, .. } if other == net)
+            }
+        }
+    };
     let mut packing = Packing::new(run.lo, run.hi, cands.len());
     for (k, c) in cands.iter().enumerate() {
         let r = c.shape.rect;
@@ -1139,12 +1243,45 @@ fn numeric<S: Sink>(
         } else {
             ctx.info(c.shape.layer).map_or(NO_MODEL, |i| i.model.metal)
         };
+        // Roles. A candidate spans an interval exactly while it is active
+        // and `a0 < a1`: its clamped ends are then distinct interval
+        // boundaries; a degenerate one (entered at its own exit) never
+        // spans.
+        let (mut role, mut cover, mut gap, mut same) = (Role::Ignore, 0u8, 0i64, false);
+        if a0 < a1 {
+            if metal == OWN {
+                if x0 >= edge_plus {
+                    gap = x0 - edge_plus;
+                    if gap < window_dbu {
+                        role = Role::Plus;
+                        same = gap == 0 && same_metal(&c.shape);
+                    }
+                } else if x1 <= edge_minus {
+                    gap = edge_minus - x1;
+                    if gap < window_dbu {
+                        role = Role::Minus;
+                        same = gap == 0 && same_metal(&c.shape);
+                    }
+                } else if !same_metal(&c.shape) {
+                    role = Role::Foreign;
+                } else {
+                    role = Role::Cover;
+                    cover = u8::from(x1 > edge_plus) | u8::from(x0 < edge_minus) << 1;
+                }
+            } else if metal == NO_MODEL {
+                role = Role::NoModel;
+            } else if x1.min(edge_plus) - x0.max(edge_minus) > 0 {
+                role = Role::Layered;
+                by_rank.push((metal, x0, x1, k as u32));
+            }
+        }
         probes.push(Probe {
-            a0,
-            a1,
-            x0,
-            x1,
-            metal,
+            role,
+            cover,
+            same,
+            routed: c.shape.routed(),
+            rank: 0,
+            gap,
         });
         let (enter, exit) = (a0.max(run.lo), a1.min(run.hi));
         if let Some(p) = packing
@@ -1164,6 +1301,10 @@ fn numeric<S: Sink>(
             wide_events.push(event(enter, k, true));
             wide_events.push(event(exit, k, false));
         }
+    }
+    by_rank.sort_unstable();
+    for (r, e) in by_rank.iter().enumerate() {
+        probes[e.3 as usize].rank = r as u32;
     }
     events.sort_unstable();
     wide_events.sort_unstable();
@@ -1197,87 +1338,10 @@ fn numeric<S: Sink>(
         None => ctx.net_index[&run.net],
         Some(_) => usize::MAX,
     };
-    // Same metal as this strip: its own net, or for a passive conductor
-    // the same supply/ground class or the same pin net.
-    let same_metal = |sh: &Shape| -> bool {
-        match (sh.owner, run.passive) {
-            (Owner::Run(o), _) => ctx.runs[o as usize].net == run.net,
-            (Owner::Piece(p), _) => ctx.pieces[p as usize].net == run.net,
-            (Owner::Passive(p), None) => {
-                matches!(p, PassiveOwner::Pin { net, .. } if net == run.net)
-            }
-            (Owner::Passive(p), Some(PassiveOwner::Ground)) => p == PassiveOwner::Ground,
-            (Owner::Passive(p), Some(PassiveOwner::Pin { net, .. })) => {
-                matches!(p, PassiveOwner::Pin { net: other, .. } if other == net)
-            }
-        }
-    };
-    // Roles. A candidate spans an interval exactly while it is active and
-    // `a0 < a1`: its clamped ends are then distinct interval boundaries; a
-    // degenerate one (entered at its own exit) never spans.
-    let Sweep {
-        roles,
-        gaps,
-        same,
-        routed,
-        rank,
-        by_rank,
-        plus: plus_set,
-        minus: minus_set,
-        layered: layered_set,
-    } = sweep;
-    roles.clear();
-    gaps.clear();
-    same.clear();
-    routed.clear();
-    by_rank.clear();
-    for (k, p) in probes.iter().enumerate() {
-        let shape = &cands[k].shape;
-        let (mut role, mut cover, mut gap, mut is_same) = (Role::Ignore, 0u8, 0i64, false);
-        if p.a0 < p.a1 {
-            if p.metal == OWN {
-                if p.x0 >= edge_plus {
-                    gap = p.x0 - edge_plus;
-                    if gap < window_dbu {
-                        role = Role::Plus;
-                        is_same = gap == 0 && same_metal(shape);
-                    }
-                } else if p.x1 <= edge_minus {
-                    gap = edge_minus - p.x1;
-                    if gap < window_dbu {
-                        role = Role::Minus;
-                        is_same = gap == 0 && same_metal(shape);
-                    }
-                } else if !same_metal(shape) {
-                    role = Role::Foreign;
-                } else {
-                    role = Role::Cover;
-                    cover = u8::from(p.x1 > edge_plus) | u8::from(p.x0 < edge_minus) << 1;
-                }
-            } else if p.metal == NO_MODEL {
-                role = Role::NoModel;
-            } else if p.x1.min(edge_plus) - p.x0.max(edge_minus) > 0 {
-                role = Role::Layered;
-                by_rank.push(k as u32);
-            }
-        }
-        roles.push((role, cover));
-        gaps.push(gap);
-        same.push(is_same);
-        routed.push(shape.routed());
-    }
-    by_rank.sort_unstable_by_key(|&k| {
-        let p = &probes[k as usize];
-        (p.metal, p.x0, p.x1, k)
-    });
-    rank.clear();
-    rank.resize(cands.len(), 0);
-    for (r, &k) in by_rank.iter().enumerate() {
-        rank[k as usize] = r as u32;
-    }
     plus_set.reset(cands.len());
     minus_set.reset(cands.len());
     layered_set.reset(by_rank.len());
+    let (mut nearest_plus, mut nearest_minus) = (Nearest::default(), Nearest::default());
     // Spanning candidates per counted role.
     let (mut foreign_n, mut cover_plus_n, mut cover_minus_n) = (0usize, 0usize, 0usize);
     let (mut no_model_n, mut routed_layered_n) = (0usize, 0usize);
@@ -1314,32 +1378,45 @@ fn numeric<S: Sink>(
                 let add = |n: &mut usize| {
                     *n = n.wrapping_add_signed(change);
                 };
-                match roles[k] {
-                    (Role::Ignore, _) => {}
-                    (Role::Plus, _) if change > 0 => plus_set.insert(k),
-                    (Role::Plus, _) => plus_set.remove(k),
-                    (Role::Minus, _) if change > 0 => minus_set.insert(k),
-                    (Role::Minus, _) => minus_set.remove(k),
-                    (Role::Foreign, _) => add(&mut foreign_n),
-                    (Role::Cover, cover) => {
-                        if cover & 1 != 0 {
+                let p = &probes[k];
+                match p.role {
+                    Role::Ignore => {}
+                    Role::Plus if change > 0 => {
+                        plus_set.insert(k);
+                        nearest_plus.insert(p.gap, k);
+                    }
+                    Role::Plus => {
+                        plus_set.remove(k);
+                        nearest_plus.remove(k);
+                    }
+                    Role::Minus if change > 0 => {
+                        minus_set.insert(k);
+                        nearest_minus.insert(p.gap, k);
+                    }
+                    Role::Minus => {
+                        minus_set.remove(k);
+                        nearest_minus.remove(k);
+                    }
+                    Role::Foreign => add(&mut foreign_n),
+                    Role::Cover => {
+                        if p.cover & 1 != 0 {
                             add(&mut cover_plus_n);
                         }
-                        if cover & 2 != 0 {
+                        if p.cover & 2 != 0 {
                             add(&mut cover_minus_n);
                         }
                     }
-                    (Role::Layered, _) => {
+                    Role::Layered => {
                         if change > 0 {
-                            layered_set.insert(rank[k] as usize);
+                            layered_set.insert(p.rank as usize);
                         } else {
-                            layered_set.remove(rank[k] as usize);
+                            layered_set.remove(p.rank as usize);
                         }
-                        if routed[k] {
+                        if p.routed {
                             add(&mut routed_layered_n);
                         }
                     }
-                    (Role::NoModel, _) => add(&mut no_model_n),
+                    Role::NoModel => add(&mut no_model_n),
                 }
             }
             event_index += 1;
@@ -1373,74 +1450,200 @@ fn numeric<S: Sink>(
         // positions are in shape-ID order, so `(gap, position)` breaks ties
         // exactly like `(gap, shape ID)`; the first minimal gap in ascending
         // position is that minimum.
-        let nearest = |set: &Set| -> Option<(i64, u32)> {
-            let mut best: Option<(i64, u32)> = None;
-            set.for_each(|k| {
-                let gap = gaps[k];
-                if best.is_none_or(|b| gap < b.0) {
-                    best = Some((gap, k as u32));
-                }
-            });
-            best
-        };
-        let plus = nearest(plus_set);
-        let minus = nearest(minus_set);
+        let plus = nearest_plus.get(plus_set, probes);
+        let minus = nearest_minus.get(minus_set, probes);
         let (covered_plus, covered_minus) = (cover_plus_n > 0, cover_minus_n > 0);
         if run.passive.is_none() {
             counts.foreign_overlaps += foreign_n;
         }
         layered.clear();
-        layered_set.for_each(|r| {
-            let k = by_rank[r];
-            let p = &probes[k as usize];
-            layered.push((p.metal, p.x0, p.x1, k));
-        });
-        // A conductor on another layer is a plate for this strip (the
-        // calibration OVER/UNDER contexts) only where its layer's metal
-        // spans the whole strip cross-section and reaches one strip width
-        // beyond both side edges: crossings and clearly wider shapes.
-        let below = plate(layered, model.metal, false, edge_minus, edge_plus);
-        let above = plate(layered, model.metal, true, edge_minus, edge_plus);
-        let nearest_below = layered
-            .iter()
-            .filter(|e| e.0 < model.metal)
-            .map(|e| e.0)
-            .max();
-        let nearest_above = layered
-            .iter()
-            .filter(|e| e.0 > model.metal)
-            .map(|e| e.0)
-            .min();
-        if run.passive.is_none()
-            && (nearest_below != below.map(|b| b.0) || nearest_above != above.map(|a| a.0))
-        {
-            counts.nonspanning_plane_intervals += 1;
-        }
-        let over = below.map_or(0, |b| b.0);
-        let under = above.map(|a| a.0);
-        let ctx_map = &info.contexts;
-        let (context, plane_split) = match ctx_map.get(over, under) {
-            Some(i) => (i, (below.is_some(), above.is_some())),
-            None => {
-                if run.passive.is_none() {
-                    counts.context_fallback_intervals += 1;
+        layered_set.for_each(|r| layered.push(by_rank[r]));
+        // Plates, context and face coverage depend only on the sorted
+        // `layered` list, and each side's template (its share of the
+        // context value per unit length) only on that state and the side's
+        // neighbour and cover flag: both are reused while unchanged, and
+        // only the length-dependent products are evaluated per interval, as
+        // the same f64 expressions in the same order.
+        let area_cap = model
+            .area_cap
+            .filter(|_| run.passive.is_none() && !(run.piece && run.vertical));
+        let mut plates_changed = false;
+        if !cache.plates_valid || cache.layered != *layered {
+            // A conductor on another layer is a plate for this strip (the
+            // calibration OVER/UNDER contexts) only where its layer's metal
+            // spans the whole strip cross-section and reaches one strip
+            // width beyond both side edges: crossings and clearly wider
+            // shapes.
+            let below = plate(layered, model.metal, false, edge_minus, edge_plus);
+            let above = plate(layered, model.metal, true, edge_minus, edge_plus);
+            let nearest_below = layered
+                .iter()
+                .filter(|e| e.0 < model.metal)
+                .map(|e| e.0)
+                .max();
+            let nearest_above = layered
+                .iter()
+                .filter(|e| e.0 > model.metal)
+                .map(|e| e.0)
+                .min();
+            let nonspanning =
+                nearest_below != below.map(|b| b.0) || nearest_above != above.map(|a| a.0);
+            let over = below.map_or(0, |b| b.0);
+            let under = above.map(|a| a.0);
+            let ctx_map = &info.contexts;
+            let (context, plane_split, fallback) = match ctx_map.get(over, under) {
+                Some(i) => (i, (below.is_some(), above.is_some()), false),
+                None => {
+                    if let Some(i) = ctx_map.get(over, None).filter(|_| over > 0) {
+                        (i, (true, false), true)
+                    } else if let Some(i) = ctx_map.get(0, under) {
+                        (i, (false, above.is_some()), true)
+                    } else {
+                        (info.substrate, (false, false), true)
+                    }
                 }
-                if let Some(i) = ctx_map.get(over, None).filter(|_| over > 0) {
-                    (i, (true, false))
-                } else if let Some(i) = ctx_map.get(0, under) {
-                    (i, (false, above.is_some()))
-                } else {
-                    (info.substrate, (false, false))
+            };
+            let below_only = if plane_split.0 && plane_split.1 {
+                ctx_map.get(over, None)
+            } else {
+                None
+            };
+            let plates = (below, above, context, plane_split, below_only);
+            plates_changed = !cache.plates_valid || plates != cache.plates;
+            cache.plates = plates;
+            cache.nonspanning = nonspanning;
+            cache.fallback = fallback;
+            // Overlap area of non-plate metal on other layers, counted once
+            // from the upper face; a piece counts its face on its x strip
+            // only.
+            cache.lower.clear();
+            cache.upper.clear();
+            cache.owners.clear();
+            if area_cap.is_some() {
+                if below.is_none() {
+                    face_portions(layered, model.metal, false, edge_minus, edge_plus, face);
+                    for &(metal, covered, first, last) in &face.portions {
+                        let ov = model.overlap.iter().find(|o| o.0 == metal).map(|o| o.1);
+                        let start = cache.owners.len();
+                        if let Some(ov) = ov {
+                            for &(sh, w) in &face.owners[first..last] {
+                                cache.owners.push((sh, um(tech, w), ov * um(tech, w)));
+                            }
+                        }
+                        cache.lower.push((
+                            ov.is_some(),
+                            um(tech, covered),
+                            start,
+                            cache.owners.len(),
+                        ));
+                    }
+                }
+                if above.is_none() {
+                    // A routed conductor above counts the overlap from its
+                    // own face; passive metal does not model itself.
+                    face_portions(layered, model.metal, true, edge_minus, edge_plus, face);
+                    let passive = |o: &(u32, i64)| {
+                        matches!(cands[o.0 as usize].shape.owner, Owner::Passive(_))
+                    };
+                    for &(metal, _, first, last) in &face.portions {
+                        let owners = &face.owners[first..last];
+                        if !owners.iter().any(passive) {
+                            continue;
+                        }
+                        let upper = ctx
+                            .metal_layer
+                            .get(&metal)
+                            .and_then(|&l| tech.layers[l].as_ref())
+                            .and_then(|u| u.overlap.iter().find(|o| o.0 == model.metal));
+                        let start = cache.owners.len();
+                        if let Some(&(_, ov)) = upper {
+                            for &(sh, w) in owners.iter().filter(|o| passive(o)) {
+                                cache.owners.push((sh, um(tech, w), ov * um(tech, w)));
+                            }
+                        }
+                        cache
+                            .upper
+                            .push((upper.is_some(), start, cache.owners.len()));
+                    }
                 }
             }
-        };
-        let sub = &model.contexts[info.substrate].rows;
-        let rows = &model.contexts[context].rows;
-        let below_only = if plane_split.0 && plane_split.1 {
-            ctx_map.get(over, None).map(|i| &model.contexts[i].rows)
-        } else {
-            None
-        };
+            cache.layered.clear();
+            cache.layered.extend_from_slice(layered);
+            cache.plates_valid = true;
+        }
+        let (below, above, context, plane_split, below_only) = cache.plates;
+        if run.passive.is_none() && cache.nonspanning {
+            counts.nonspanning_plane_intervals += 1;
+        }
+        if run.passive.is_none() && cache.fallback {
+            counts.context_fallback_intervals += 1;
+        }
+        let sides = (plus, minus, covered_plus, covered_minus);
+        if plates_changed || !cache.sides_valid || cache.sides_key != sides {
+            let sub = &model.contexts[info.substrate].rows;
+            let rows = &model.contexts[context].rows;
+            let below_only = below_only.map(|i| &model.contexts[i].rows);
+            for (k, side, covered) in [(0, plus, covered_plus), (1, minus, covered_minus)] {
+                cache.sides[k] = if covered {
+                    Side::Covered
+                } else if side.is_some_and(|(g, s)| g == 0 && probes[s as usize].same) {
+                    Side::Skip
+                } else {
+                    let spacing = side.map(|(g, _)| um(tech, g));
+                    let (cc, cg) = samples.get(rows, spacing);
+                    let (_, cg_sub) = samples.get(sub, spacing);
+                    // Split this side's context value between the substrate
+                    // and the planes. A conductor below is the plate of an
+                    // OVER context: it shields the substrate, so the whole
+                    // OVER value goes to it. A plane above takes only the
+                    // excess over what goes down (the substrate share, or
+                    // the OVER value).
+                    let cg = cg.max(0.0);
+                    let (g, d_below, d_above) = match plane_split {
+                        (true, true) => {
+                            let down = below_only
+                                .map_or(cg_sub, |r| samples.get(r, spacing).1)
+                                .min(cg);
+                            (0.0, down, cg - down)
+                        }
+                        (true, false) => (0.0, cg, 0.0),
+                        (false, true) => {
+                            let up = (cg - cg_sub).max(0.0);
+                            (cg - up, 0.0, up)
+                        }
+                        (false, false) => (cg, 0.0, 0.0),
+                    };
+                    let mut g = g;
+                    let mut shares = [(0u32, 0.0f64); 2];
+                    let mut n = 0;
+                    // Each conductor's own cross-section is authoritative
+                    // for its own field: a crossing is counted from both
+                    // wires.
+                    for (d, plane) in [(d_below, below), (d_above, above)] {
+                        if d > 0.0 {
+                            match plane {
+                                Some((_, owners)) => {
+                                    shares[n] = (owners[k], d);
+                                    n += 1;
+                                }
+                                None => g += d,
+                            }
+                        }
+                    }
+                    // Lateral coupling between two runs is computed from
+                    // both sides.
+                    let lateral = side.filter(|_| cc > 0.0).map(|(_, s)| (s, cc));
+                    Side::Open {
+                        g,
+                        shares,
+                        n: n as u8,
+                        lateral,
+                    }
+                };
+            }
+            cache.sides_key = sides;
+            cache.sides_valid = true;
+        }
         let length = um(tech, t1 - t0);
         let mid = (t0 + t1) as f64 / 2.0;
         let w_hi = if span > 0.0 {
@@ -1456,105 +1659,52 @@ fn numeric<S: Sink>(
         let mut ground = 0.0f64;
         // (candidate, pF, factor applied when the partner is another run).
         contributions.clear();
-        for (k, side, covered) in [(0, plus, covered_plus), (1, minus, covered_minus)] {
-            if covered {
-                if run.passive.is_none() {
-                    counts.covered_side_intervals += 1;
-                }
-                continue;
-            }
-            let spacing = side.map(|(g, _)| um(tech, g));
-            let touching_same = side.is_some_and(|(g, s)| g == 0 && same[s as usize]);
-            if touching_same {
-                continue;
-            }
-            let (cc, cg) = samples.get(rows, spacing);
-            let (_, cg_sub) = samples.get(sub, spacing);
-            // Split this side's context value between the substrate and
-            // the planes. A conductor below is the plate of an OVER
-            // context: it shields the substrate, so the whole OVER value
-            // goes to it. A plane above takes only the excess over what
-            // goes down (the substrate share, or the OVER value).
-            let cg = cg.max(0.0);
-            let (g, d_below, d_above) = match plane_split {
-                (true, true) => {
-                    let down = below_only
-                        .map_or(cg_sub, |r| samples.get(r, spacing).1)
-                        .min(cg);
-                    (0.0, down, cg - down)
-                }
-                (true, false) => (0.0, cg, 0.0),
-                (false, true) => {
-                    let up = (cg - cg_sub).max(0.0);
-                    (cg - up, 0.0, up)
-                }
-                (false, false) => (cg, 0.0, 0.0),
-            };
-            let mut g = g;
-            // Each conductor's own cross-section is authoritative for its
-            // own field: a crossing is counted from both wires.
-            for (d, plane) in [(d_below, below), (d_above, above)] {
-                if d > 0.0 {
-                    match plane {
-                        Some((_, owners)) => contributions.push((owners[k], d * length, 1.0)),
-                        None => g += d,
+        for side in &cache.sides {
+            match *side {
+                Side::Covered => {
+                    if run.passive.is_none() {
+                        counts.covered_side_intervals += 1;
                     }
                 }
-            }
-            ground += g.max(0.0) * length;
-            // Lateral coupling between two runs is computed from both sides.
-            if let Some((_, s)) = side
-                && cc > 0.0
-            {
-                contributions.push((s, cc * length, 0.5));
+                Side::Skip => {}
+                Side::Open {
+                    g,
+                    shares,
+                    n,
+                    lateral,
+                } => {
+                    for &(owner, d) in &shares[..n as usize] {
+                        contributions.push((owner, d * length, 1.0));
+                    }
+                    ground += g.max(0.0) * length;
+                    if let Some((s, cc)) = lateral {
+                        contributions.push((s, cc * length, 0.5));
+                    }
+                }
             }
         }
-        // Overlap area of non-plate metal on other layers, counted once
-        // from the upper face; a piece counts its face on its x strip only.
-        if run.passive.is_none()
-            && !(run.piece && run.vertical)
-            && let Some(area_cap) = model.area_cap
-        {
+        if let Some(area_cap) = area_cap {
             let mut shielded = 0.0;
-            if below.is_none() {
-                face_portions(layered, model.metal, false, edge_minus, edge_plus, face);
-                for &(metal, covered, first, last) in &face.portions {
-                    let Some(&(_, ov)) = model.overlap.iter().find(|o| o.0 == metal) else {
-                        counts.overlap_pairs_without_data += 1;
-                        continue;
-                    };
-                    let area = um(tech, covered) * length;
-                    sink.op(Op::area(area))?;
-                    shielded += area_cap * area;
-                    for &(sh, w) in &face.owners[first..last] {
-                        contributions.push((sh, ov * um(tech, w) * length, 1.0));
-                    }
+            for &(data, covered, first, last) in &cache.lower {
+                if !data {
+                    counts.overlap_pairs_without_data += 1;
+                    continue;
+                }
+                let area = covered * length;
+                sink.op(Op::area(area))?;
+                shielded += area_cap * area;
+                for &(sh, _, ovw) in &cache.owners[first..last] {
+                    contributions.push((sh, ovw * length, 1.0));
                 }
             }
-            if above.is_none() {
-                // A routed conductor above counts the overlap from its own
-                // face; passive metal does not model itself.
-                face_portions(layered, model.metal, true, edge_minus, edge_plus, face);
-                let passive =
-                    |o: &&(u32, i64)| matches!(cands[o.0 as usize].shape.owner, Owner::Passive(_));
-                for &(metal, _, first, last) in &face.portions {
-                    let owners = &face.owners[first..last];
-                    if !owners.iter().any(|o| passive(&o)) {
-                        continue;
-                    }
-                    let upper = ctx
-                        .metal_layer
-                        .get(&metal)
-                        .and_then(|&l| tech.layers[l].as_ref())
-                        .and_then(|u| u.overlap.iter().find(|o| o.0 == model.metal));
-                    let Some(&(_, ov)) = upper else {
-                        counts.overlap_pairs_without_data += 1;
-                        continue;
-                    };
-                    for &(sh, w) in owners.iter().filter(passive) {
-                        sink.op(Op::area(um(tech, w) * length))?;
-                        contributions.push((sh, ov * um(tech, w) * length, 1.0));
-                    }
+            for &(data, first, last) in &cache.upper {
+                if !data {
+                    counts.overlap_pairs_without_data += 1;
+                    continue;
+                }
+                for &(sh, w, ovw) in &cache.owners[first..last] {
+                    sink.op(Op::area(w * length))?;
+                    contributions.push((sh, ovw * length, 1.0));
                 }
             }
             ground = (ground - shielded).max(0.0);
