@@ -1,0 +1,30 @@
+tech
+ format 35
+ ihp-sg13g2
+end
+
+types
+ metal1 metal1,m1
+ metal2 metal2,m2
+ metal3 metal3,m3
+ metal4 metal4,m4
+ metal5 metal5,m5
+ metal6 metal6,m6
+ metal7 metal7,m7
+ metal1 via1,v1
+ metal2 via2,v2
+ metal3 via3,v3
+ metal4 via4,v4
+ metal5 via5,v5
+ metal6 via6,v6
+end
+
+contact
+ via1 metal1 metal2
+ via2 metal2 metal3
+ via3 metal3 metal4
+ via4 metal4 metal5
+ via5 metal5 metal6
+ via6 metal6 metal7
+ pc poly metal1
+end

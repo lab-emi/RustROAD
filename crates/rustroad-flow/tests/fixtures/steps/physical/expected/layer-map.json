@@ -1,0 +1,514 @@
+{
+  "schema": "rustroad.gds-layer-map.v1",
+  "pdk": "ihp-sg13g2",
+  "library": "ez130_8t_sram",
+  "sources": [
+    {
+      "id": "ihp_map",
+      "role": "klayout_lefdef_layer_map",
+      "path": "@ROOT@/layers.map",
+      "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+      "bytes": 1036
+    }
+  ],
+  "layers": [
+    {
+      "lef": "Metal1",
+      "kind": "routing",
+      "net": [
+        [
+          8,
+          0
+        ]
+      ],
+      "special_net": [
+        [
+          8,
+          0
+        ]
+      ],
+      "via": [
+        [
+          8,
+          0
+        ]
+      ],
+      "pin": [
+        [
+          8,
+          2
+        ]
+      ],
+      "label": [
+        8,
+        25
+      ],
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "Via1",
+      "kind": "cut",
+      "net": [],
+      "special_net": [],
+      "via": [
+        [
+          19,
+          0
+        ]
+      ],
+      "pin": [],
+      "label": null,
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            9,
+            10
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "Metal2",
+      "kind": "routing",
+      "net": [
+        [
+          10,
+          0
+        ]
+      ],
+      "special_net": [
+        [
+          10,
+          0
+        ]
+      ],
+      "via": [
+        [
+          10,
+          0
+        ]
+      ],
+      "pin": [
+        [
+          10,
+          2
+        ],
+        [
+          10,
+          0
+        ]
+      ],
+      "label": [
+        10,
+        25
+      ],
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            11,
+            12,
+            13,
+            14,
+            15
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "Via2",
+      "kind": "cut",
+      "net": [],
+      "special_net": [],
+      "via": [
+        [
+          29,
+          0
+        ]
+      ],
+      "pin": [],
+      "label": null,
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            16,
+            17
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "Metal3",
+      "kind": "routing",
+      "net": [
+        [
+          30,
+          0
+        ]
+      ],
+      "special_net": [
+        [
+          30,
+          0
+        ]
+      ],
+      "via": [
+        [
+          30,
+          0
+        ]
+      ],
+      "pin": [
+        [
+          30,
+          2
+        ],
+        [
+          30,
+          0
+        ]
+      ],
+      "label": [
+        30,
+        25
+      ],
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            18,
+            19,
+            20,
+            21,
+            22
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "Via3",
+      "kind": "cut",
+      "net": [],
+      "special_net": [],
+      "via": [
+        [
+          49,
+          0
+        ]
+      ],
+      "pin": [],
+      "label": null,
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            23,
+            24
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "Metal4",
+      "kind": "routing",
+      "net": [
+        [
+          50,
+          0
+        ]
+      ],
+      "special_net": [
+        [
+          50,
+          0
+        ]
+      ],
+      "via": [
+        [
+          50,
+          0
+        ]
+      ],
+      "pin": [
+        [
+          50,
+          2
+        ],
+        [
+          50,
+          0
+        ]
+      ],
+      "label": [
+        50,
+        25
+      ],
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            25,
+            26,
+            27,
+            28,
+            29
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "Via4",
+      "kind": "cut",
+      "net": [],
+      "special_net": [],
+      "via": [
+        [
+          66,
+          0
+        ]
+      ],
+      "pin": [],
+      "label": null,
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            30,
+            31
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "Metal5",
+      "kind": "routing",
+      "net": [
+        [
+          67,
+          0
+        ]
+      ],
+      "special_net": [
+        [
+          67,
+          0
+        ]
+      ],
+      "via": [
+        [
+          67,
+          0
+        ]
+      ],
+      "pin": [
+        [
+          67,
+          2
+        ],
+        [
+          67,
+          0
+        ]
+      ],
+      "label": [
+        67,
+        25
+      ],
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            32,
+            33,
+            34,
+            35,
+            36
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "TopVia1",
+      "kind": "cut",
+      "net": [],
+      "special_net": [],
+      "via": [
+        [
+          125,
+          0
+        ]
+      ],
+      "pin": [],
+      "label": null,
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            37,
+            38
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "TopMetal1",
+      "kind": "routing",
+      "net": [
+        [
+          126,
+          0
+        ]
+      ],
+      "special_net": [
+        [
+          126,
+          0
+        ]
+      ],
+      "via": [
+        [
+          126,
+          0
+        ]
+      ],
+      "pin": [
+        [
+          126,
+          2
+        ],
+        [
+          126,
+          0
+        ]
+      ],
+      "label": [
+        126,
+        25
+      ],
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            39,
+            40,
+            41,
+            42,
+            43
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "TopVia2",
+      "kind": "cut",
+      "net": [],
+      "special_net": [],
+      "via": [
+        [
+          133,
+          0
+        ]
+      ],
+      "pin": [],
+      "label": null,
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            44,
+            45
+          ]
+        }
+      ]
+    },
+    {
+      "lef": "TopMetal2",
+      "kind": "routing",
+      "net": [
+        [
+          134,
+          0
+        ]
+      ],
+      "special_net": [
+        [
+          134,
+          0
+        ]
+      ],
+      "via": [
+        [
+          134,
+          0
+        ]
+      ],
+      "pin": [
+        [
+          134,
+          2
+        ],
+        [
+          134,
+          0
+        ]
+      ],
+      "label": [
+        134,
+        25
+      ],
+      "cite": [
+        {
+          "source": "ihp_map",
+          "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+          "lines": [
+            46,
+            47,
+            48,
+            49,
+            50
+          ]
+        }
+      ]
+    }
+  ],
+  "boundary": {
+    "layer": [
+      189,
+      4
+    ],
+    "cite": [
+      {
+        "source": "ihp_map",
+        "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+        "lines": [
+          2
+        ]
+      }
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/rustroad-core", "crates/rustroad-formats", "crates/rustroad-workspace", "crates/rustroad-flow", "crates/rustroad-cli"]
+members = ["crates/rustroad-core", "crates/rustroad-formats", "crates/rustroad-workspace", "crates/rustroad-flow", "crates/rustroad-cli", "crates/rustroad-pyjson", "crates/rustroad-antenna-verify"]
 resolver = "3"
 
 [workspace.package]
@@ -14,6 +14,8 @@ rustroad-core = { path = "crates/rustroad-core" }
 rustroad-formats = { path = "crates/rustroad-formats" }
 rustroad-workspace = { path = "crates/rustroad-workspace" }
 rustroad-flow = { path = "crates/rustroad-flow" }
+rustroad-pyjson = { path = "crates/rustroad-pyjson" }
+rustroad-antenna-verify = { path = "crates/rustroad-antenna-verify" }
 serde = { version = "=1.0.228", features = ["derive", "rc"] }
 serde_json = { version = "=1.0.149", features = ["raw_value"] }
 thiserror = "=2.0.18"

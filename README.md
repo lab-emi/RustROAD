@@ -427,6 +427,21 @@ and ff+min on both PDKs:
 
 See [docs/hold-closure.md](docs/hold-closure.md).
 
+## Flow steps without Python
+
+`physical-inputs`, `antenna-session`, `verify-antenna-lineage` and
+`postroute-repair` are file-only step commands for a producer manifest: PDK
+collateral (cell GDS bundle, GDS layer map, nominal RC profile; also as
+`bundle-cell-gds`, `gds-layer-map` and `rc-profile`), one captured
+`repair-antenna-groups` session with its lineage record, the independent
+review of that record, and the post-route screen/upsize/ECO-rebuild loop.
+They write, byte for byte, the files of the Python helpers they replace in the
+Ibex SG13G2 recipe; provenance records and run times are the only
+differences. `postroute-repair` runs the pinned `rusteda`/`ruststa`
+executables as child processes; RustSTA is not linked.
+
+See [docs/flow-steps.md](docs/flow-steps.md).
+
 ## Verification and research
 
 - [REA/OpenROAD study and placement evidence](docs/openroad-blackbox.md)
@@ -438,6 +453,7 @@ See [docs/hold-closure.md](docs/hold-closure.md).
 - [Native GDSII streamout and black-box acceptance](docs/gds-export.md)
 - [Integration fixes and dual-PDK requalification on the native GDS](docs/requalification.md)
 - [Hold closure, CTS drive selection and antenna repair](docs/hold-closure.md)
+- [Native flow steps](docs/flow-steps.md)
 - [Chinese physical-preparation report](docs/power-io-integration.md)
 - [Earlier PDK integration report](docs/pdk-import.md)
 - [Earlier bootstrap report](docs/architecture.md)

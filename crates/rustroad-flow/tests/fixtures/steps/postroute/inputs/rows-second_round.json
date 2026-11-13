@@ -1,0 +1,27 @@
+{
+ "resized": {
+  "g1": "BUFX2",
+  "g2": "BUFX4"
+ },
+ "corners": {
+  "tt": [
+   {
+    "kind": "max_capacitance",
+    "net": "n1",
+    "pin": "g1/Y",
+    "value": 0.19,
+    "limit": 0.2,
+    "slack": 0.01
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n2",
+    "pin": "g2/Y",
+    "value": 0.5,
+    "limit": 0.4,
+    "slack": -0.1
+   }
+  ],
+  "ss": []
+ }
+}

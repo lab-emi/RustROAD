@@ -1,0 +1,66 @@
+{
+  "status": "prepared_not_qualified",
+  "inputs": {
+    "std_gds": {
+      "path": "@ROOT@/cells-a.gds",
+      "sha256": "6d18500f5228e6137865484291e01803438f873d2a17a9764b6edcf1cc35b3dc",
+      "bytes": 446
+    },
+    "ram_gds": {
+      "path": "@ROOT@/cells-b.gds",
+      "sha256": "ce072445e2b689eaa95db076df3713cfa0eb11ef13e93250be206c6966694ad4",
+      "bytes": 514
+    },
+    "layer_map": {
+      "path": "@ROOT@/layers.map",
+      "sha256": "7a6bb4e910d055bcb455f980c2aeb6df281030d4526e420506aa3a66975153b3",
+      "bytes": 1036
+    },
+    "tech_lef": {
+      "path": "@ROOT@/pdk/ihp-sg13g2/libs.ref/sg13g2_stdcell/lef/sg13g2_tech.lef",
+      "sha256": "e2334ebd1e2350cc5b877e7c8548d437ed90a1defe4cc7406263bc01c92e0e66",
+      "bytes": 1733
+    },
+    "rules_nom": {
+      "path": "@ROOT@/pdk/ihp-sg13g2/libs.tech/librelane/openrcx/IHP_rcx_patterns.rules",
+      "sha256": "48a2a28aa0be6c76935acc0ea950249c9c5f20fb50cd21cb34baf5fe45c9916a",
+      "bytes": 12722
+    },
+    "magic_tech": {
+      "path": "@ROOT@/pdk/ihp-sg13g2/libs.tech/magic/ihp-sg13g2.tech",
+      "sha256": "1a750076b6ac675b196b2cdc8a40504bf597a0db5ab7ce807da27ed062277c11",
+      "bytes": 414
+    },
+    "magic_extract": {
+      "path": "@ROOT@/pdk/ihp-sg13g2/libs.tech/magic/ihp-sg13g2-extract.tech",
+      "sha256": "ab2518b666edf0da3210259e3729d574e851f99e375da4701e5bc3b76c952db0",
+      "bytes": 3199
+    }
+  },
+  "artifacts": {
+    "cell_gds": {
+      "path": "@ROOT@/step/combined-cells.gds",
+      "sha256": "bf89a32f9b604e39184526278fd7ede92fb08c080d82254c50766203a58acd41",
+      "bytes": 782
+    },
+    "gds_map": {
+      "path": "@ROOT@/step/gds-map.json",
+      "sha256": "@SHA:step/gds-map.json@",
+      "bytes": "@BYTES:step/gds-map.json@"
+    },
+    "rc_nom": {
+      "path": "@ROOT@/step/ihp-rc-nom.json",
+      "sha256": "@SHA:step/ihp-rc-nom.json@",
+      "bytes": "@BYTES:step/ihp-rc-nom.json@"
+    }
+  },
+  "unverified": [
+    "layout",
+    "routing",
+    "DRC",
+    "antenna",
+    "LVS",
+    "extracted_timing",
+    "benchmark"
+  ]
+}

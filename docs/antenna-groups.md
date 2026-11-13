@@ -69,6 +69,10 @@ hard link of `model-initial` once their fingerprints match. The summary schema i
 successfully with `status: "unresolved"`, matching the legacy pre-screen policy.
 Foundry antenna, DRC, LVS and timing signoff remain separate checks.
 
+The session's capture and lineage records are written by
+[`antenna-session`](flow-steps.md), which runs this command as its one child
+process, and reviewed by `verify-antenna-lineage`.
+
 Failure commits nothing; partial reports remain and a successful summary is
 required to accept the run. There is no background process or stdin protocol.
 The exclusive workspace lock covers decisions, the revision publication and the

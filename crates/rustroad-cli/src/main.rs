@@ -4,6 +4,8 @@ use serde::Serialize;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
+mod steps;
+
 #[derive(Parser)]
 #[command(version, about = "Bounded clean-room physical-design workspace")]
 struct Cli {
@@ -560,6 +562,8 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    #[command(flatten)]
+    Step(steps::StepCommand),
 }
 
 fn emit(value: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
@@ -603,6 +607,11 @@ fn emit_diagnostic(value: &impl Serialize) -> Result<(), Box<dyn std::error::Err
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    // Flow steps are file-only and open no workspace in this process.
+    let cli = match cli.command {
+        Command::Step(step) => return steps::run(step),
+        command => Cli { command, ..cli },
+    };
     let parser_limits = rustroad_formats::verilog::VerilogLimits {
         max_input_bytes: cli.max_input_mib as usize * 1024 * 1024,
         max_tokens: (cli.max_input_mib as usize * 1024 * 1024).clamp(2_000_000, 500_000_000),
@@ -1244,7 +1253,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::HoldEco { .. }
         | Command::ApplyEco { .. }
         | Command::AntennaEco { .. }
-        | Command::Floorplan { .. } => {
+        | Command::Floorplan { .. }
+        | Command::Step(_) => {
             unreachable!("file-only commands return before the workspace check")
         }
     }

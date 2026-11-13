@@ -14,6 +14,7 @@ RustROAD implements placement, clock trees, routing, extraction and GDS export. 
 - [Current qualification](closeout-2026-10-25.md)
 - [PDK import](pdk-import.md)
 - [Timing and extraction](postroute-timing.md)
+- [Native flow steps](flow-steps.md)
 - [Signoff scope](signoff.md)
 
 

@@ -1,0 +1,102 @@
+extract
+ style ngspice variants (),(hrhc),(lrlc)
+ cscale 1
+
+ variants ()
+ resist (allm1)/metal1 110.0   # mOhm/sq
+ resist (allm2)/metal2 98.0   # mOhm/sq
+ resist (allm3)/metal3 86.0   # mOhm/sq
+ resist (allm4)/metal4 74.0   # mOhm/sq
+ resist (allm5)/metal5 62.0   # mOhm/sq
+ resist (allm6)/metal6 50.0   # mOhm/sq
+ resist (allm7)/metal7 38.0   # mOhm/sq
+ contact via1 20000
+ contact via2 17500
+ contact via3 15000
+ contact via4 12500
+ contact via5 10000
+ contact via6 7500
+ contact pc 5000
+ contact ndc 2500
+ contact mimcc 0
+
+ variants (hrhc)
+ resist (allm1)/metal1 132.0   # mOhm/sq
+ resist (allm2)/metal2 117.6   # mOhm/sq
+ resist (allm3)/metal3 103.2   # mOhm/sq
+ resist (allm4)/metal4 88.8   # mOhm/sq
+ resist (allm5)/metal5 74.4   # mOhm/sq
+ resist (allm6)/metal6 60.0   # mOhm/sq
+ resist (allm7)/metal7 45.6   # mOhm/sq
+ contact via1 15000
+ contact via2 15000
+ contact via3 15000
+ contact via4 15000
+ contact via5 15000
+ contact via6 15000
+ contact pc 15000
+ contact ndc 15000
+ contact mimcc 15000
+
+ variants (lrlc)
+ resist (allm1)/metal1 88.0   # mOhm/sq
+ resist (allm2)/metal2 78.4   # mOhm/sq
+ resist (allm3)/metal3 68.8   # mOhm/sq
+ resist (allm4)/metal4 59.2   # mOhm/sq
+ resist (allm5)/metal5 49.6   # mOhm/sq
+ resist (allm6)/metal6 40.0   # mOhm/sq
+ resist (allm7)/metal7 30.4   # mOhm/sq
+ contact via1 0
+ contact via2 0
+ contact via3 0
+ contact via4 0
+ contact via5 0
+ contact via6 0
+ contact pc 0
+ contact ndc 0
+ contact mimcc 0
+
+ variants *
+ defaultareacap allm1 metal1 32.1
+ defaultperimeter allm1 metal1 37.9
+ defaultsidewall allm1 metal1 21.5 0.1
+ defaultareacap allm2 metal2 29.0
+ defaultperimeter allm2 metal2 35.7
+ defaultsidewall allm2 metal2 22.5
+ defaultoverlap allm2 metal2 allm1 metal1 56.3
+ defaultareacap allm3 metal3 25.9
+ defaultperimeter allm3 metal3 33.5
+ defaultsidewall allm3 metal3 23.5 0.1
+ defaultoverlap allm3 metal3 allm1 metal1 52.3
+ defaultoverlap allm3 metal3 allm2 metal2 56.3
+ defaultareacap allm4 metal4 22.8
+ defaultperimeter allm4 metal4 31.3
+ defaultsidewall allm4 metal4 24.5
+ defaultoverlap allm4 metal4 allm1 metal1 48.3
+ defaultoverlap allm4 metal4 allm2 metal2 52.3
+ defaultoverlap allm4 metal4 allm3 metal3 56.3
+ defaultareacap allm5 metal5 19.7
+ defaultperimeter allm5 metal5 29.1
+ defaultsidewall allm5 metal5 25.5 0.1
+ defaultoverlap allm5 metal5 allm1 metal1 44.3
+ defaultoverlap allm5 metal5 allm2 metal2 48.3
+ defaultoverlap allm5 metal5 allm3 metal3 52.3
+ defaultoverlap allm5 metal5 allm4 metal4 56.3
+ defaultareacap allm6 metal6 16.6
+ defaultperimeter allm6 metal6 26.9
+ defaultsidewall allm6 metal6 26.5
+ defaultoverlap allm6 metal6 allm1 metal1 40.3
+ defaultoverlap allm6 metal6 allm2 metal2 44.3
+ defaultoverlap allm6 metal6 allm3 metal3 48.3
+ defaultoverlap allm6 metal6 allm4 metal4 52.3
+ defaultoverlap allm6 metal6 allm5 metal5 56.3
+ defaultareacap allm7 metal7 13.5
+ defaultperimeter allm7 metal7 24.7
+ defaultsidewall allm7 metal7 27.5 0.1
+ defaultoverlap allm7 metal7 allm1 metal1 36.3
+ defaultoverlap allm7 metal7 allm2 metal2 40.3
+ defaultoverlap allm7 metal7 allm3 metal3 44.3
+ defaultoverlap allm7 metal7 allm4 metal4 48.3
+ defaultoverlap allm7 metal7 allm5 metal5 52.3
+ defaultoverlap allm7 metal7 allm6 metal6 56.3
+end

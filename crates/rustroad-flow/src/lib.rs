@@ -2,6 +2,8 @@
 //!
 //! Availability is never a correctness verdict. Engine adapters must attach
 //! independent evidence before a stage can be considered verified.
+pub mod steps;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{

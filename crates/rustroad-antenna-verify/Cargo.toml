@@ -1,0 +1,18 @@
+[package]
+name = "rustroad-antenna-verify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Deliberately no dependency on the crates that run or record the antenna
+# session (rustroad-workspace, rustroad-flow): this crate re-derives every
+# fact from the files on disk.
+[dependencies]
+rustroad-pyjson.workspace = true
+fs2.workspace = true
+libc = "=0.2.191"
+
+[lints]
+workspace = true

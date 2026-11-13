@@ -1,0 +1,177 @@
+{
+ "resized": {},
+ "corners": {
+  "tt": [
+   {
+    "kind": "max_capacitance",
+    "net": "n1",
+    "pin": "g1/Y",
+    "value": 0.12,
+    "limit": 0.1,
+    "slack": -0.02
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n1",
+    "pin": "g1/Y",
+    "value": 0.17,
+    "limit": 0.1,
+    "slack": -0.07
+   },
+   {
+    "kind": "max_transition",
+    "net": "n2",
+    "pin": "g2/Y",
+    "value": 1.4,
+    "limit": 1.5,
+    "slack": 0.1
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "\\\\esc.net[3] ",
+    "pin": "\\\\g3.x[0] /Y",
+    "value": 0.39,
+    "limit": 0.4,
+    "slack": 0.01
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n4",
+    "pin": "g4/Y",
+    "value": 0.2,
+    "limit": 0.1,
+    "slack": -0.1
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n6",
+    "pin": "g6/Y",
+    "value": 0.05,
+    "limit": 0.1,
+    "slack": 0.05
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n6",
+    "pin": "g6/Y",
+    "value": 1,
+    "limit": 1,
+    "slack": 0
+   },
+   {
+    "kind": "max_fanout",
+    "net": "n1",
+    "pin": "g1/Y",
+    "value": 30,
+    "limit": 20,
+    "slack": -10
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "q8",
+    "pin": "g8/Q",
+    "value": 0.3,
+    "limit": 0.2,
+    "slack": -0.1
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "a",
+    "pin": "a",
+    "value": 0.5,
+    "limit": 0.2,
+    "slack": -0.3
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "clk_1",
+    "pin": "clkbuf_1/Y",
+    "value": 0.15,
+    "limit": 0.1,
+    "slack": -0.05
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n16",
+    "pin": "g16/Y",
+    "value": 0.19,
+    "limit": 0.2,
+    "slack": 0.01
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "z",
+    "pin": "g9/Y",
+    "value": 0.9,
+    "limit": 0.8,
+    "slack": -0.1
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n11",
+    "pin": "g11/Y",
+    "value": 0.2,
+    "limit": 0.1,
+    "slack": -0.1
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n15",
+    "pin": "g15/Y",
+    "value": 0.2,
+    "limit": 0.1,
+    "slack": -0.1
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n18",
+    "pin": "g18/Y",
+    "value": 0.095,
+    "limit": 0.1,
+    "slack": 0.005
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n14",
+    "pin": "g14/Y",
+    "value": 0.12,
+    "limit": 0,
+    "slack": -0.1
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n14",
+    "pin": "g14/Y",
+    "value": 0.12,
+    "limit": null,
+    "slack": -0.1
+   }
+  ],
+  "ss": [
+   {
+    "kind": "max_capacitance",
+    "net": "n1",
+    "pin": "g1/Y",
+    "value": 0.13,
+    "limit": 0.11,
+    "slack": -0.02
+   },
+   {
+    "kind": "max_transition",
+    "net": "n17",
+    "pin": "g17/Y",
+    "value": 2.0,
+    "limit": 1.5,
+    "slack": -0.5
+   },
+   {
+    "kind": "max_capacitance",
+    "net": "n16",
+    "pin": "g16/Y",
+    "value": 0.3,
+    "limit": 0.2,
+    "slack": -0.1
+   }
+  ]
+ }
+}

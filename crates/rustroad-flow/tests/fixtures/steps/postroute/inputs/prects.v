@@ -1,0 +1,28 @@
+module top (a, b, clk, z, \bus[1] );
+  input a;
+  input b;
+  input clk;
+  output z;
+  output \bus[1] ;
+  wire n1;
+  wire \esc.net[3] ;
+  BUFX1 g1 (.A(a), .Y(n1));
+  BUFX2 g2 (.A(n1), .Y(n2));
+  BUFX4 \g3.x[0]  (.A(n2), .Y(\esc.net[3] ));
+  INVX1 g4 (.A(\esc.net[3] ), .Y(n4));
+  INVX2 g5 ( .A( n4 ) , .Y( n5 ) );
+  NANDX1 g6 (.A(n5), .B(b), .Y(n6));
+  NANDX2 g7 (.A(n6), .B(1'b1), .Y(n7));
+  DFFX1 g8 (.D(n7), .CK(clk), .Q(q8));
+  BUFX8 g9 (.A(q8), .Y(z));
+  BUFX1 g10 (.A(n1), .Y());
+  ONLYTT1 g11 (.A(a), .Y(n11));
+  BUFX1 g12 (.A({a, b}), .Y(\bus[1] ));
+  TIEHI g13 (.Y(hi));
+  BUFX1 g14 (.A(hi), .Y(n14));	
+  UNKNOWN g15 (.A(n14), .Y(n15));
+  BUFX2 g16 (.A(n15), .Y(n16));
+  BUFX4 g17 (.A(n16), .Y(n17));
+ BUFX1 g18(.A(n17),.Y(n18));
+  FILL1 fill_1 ();
+endmodule

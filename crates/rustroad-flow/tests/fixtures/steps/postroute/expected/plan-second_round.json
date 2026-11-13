@@ -1,0 +1,46 @@
+{
+  "ops": [
+    {
+      "net": "n1",
+      "driver": "g1/Y",
+      "violating": false,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g1/Y",
+          "value": 0.19,
+          "limit": 0.2,
+          "slack": 0.01,
+          "ratio": 0.95
+        }
+      ],
+      "instance": "g1",
+      "master": "BUFX2",
+      "cell": "BUFX4",
+      "family": "EQW_BUFX2"
+    }
+  ],
+  "residual": [
+    {
+      "net": "n2",
+      "driver": "g2/Y",
+      "violating": true,
+      "rows": [
+        {
+          "corner": "tt",
+          "kind": "max_capacitance",
+          "pin": "g2/Y",
+          "value": 0.5,
+          "limit": 0.4,
+          "slack": -0.1,
+          "ratio": 1.25
+        }
+      ],
+      "instance": "g2",
+      "master": "BUFX4",
+      "reason": "no stronger equal-width member of EQW_BUFX2 than BUFX4"
+    }
+  ],
+  "skipped": []
+}

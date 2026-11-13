@@ -1,0 +1,22 @@
+{
+  "sources": [
+    {
+      "path": "@ROOT@/cells-a.gds",
+      "sha256": "6d18500f5228e6137865484291e01803438f873d2a17a9764b6edcf1cc35b3dc",
+      "bytes": 446
+    },
+    {
+      "path": "@ROOT@/cells-b.gds",
+      "sha256": "ce072445e2b689eaa95db076df3713cfa0eb11ef13e93250be206c6966694ad4",
+      "bytes": 514
+    }
+  ],
+  "output": {
+    "path": "@ROOT@/bundle/combined.gds",
+    "sha256": "bf89a32f9b604e39184526278fd7ede92fb08c080d82254c50766203a58acd41",
+    "bytes": 782
+  },
+  "structures": 5,
+  "records": 73,
+  "scope": "byte-identical original structures; EZ header; no geometric edits"
+}
