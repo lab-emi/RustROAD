@@ -81,22 +81,12 @@ pub fn escape(name: &str) -> String {
     out
 }
 
-/// Six significant digits, deterministic.
-fn value(v: f64) -> Result<(String, f64)> {
-    if !v.is_finite() || v < 0.0 {
-        return Err(SpefError::Invalid(format!(
-            "non-finite or negative value {v}"
-        )));
-    }
-    let text = if v == 0.0 {
-        "0".to_string()
-    } else {
-        format!("{v:.5e}")
-    };
-    let parsed: f64 = text
-        .parse()
-        .map_err(|_| SpefError::Invalid("value formatting".into()))?;
-    Ok((text, parsed))
+/// Six significant digits, deterministic: the text in `text` (reused
+/// scratch) and the value it denotes.
+fn value(v: f64, text: &mut String) -> Result<f64> {
+    value_text(v, text)?;
+    text.parse()
+        .map_err(|_| SpefError::Invalid("value formatting".into()))
 }
 
 fn quoted(s: &str) -> Result<String> {
@@ -150,24 +140,52 @@ fn escape_into(out: &mut Vec<u8>, name: &str) {
     }
 }
 
-/// The text of a resistance value (validated like `value`, not parsed back).
-fn value_text(v: f64) -> Result<String> {
+/// The text of a value in `text` (reused scratch; validated like `value`,
+/// not parsed back).
+fn value_text(v: f64, text: &mut String) -> Result<()> {
+    use std::fmt::Write as _;
     if !v.is_finite() || v < 0.0 {
         return Err(SpefError::Invalid(format!(
             "non-finite or negative value {v}"
         )));
     }
-    Ok(if v == 0.0 {
-        "0".to_string()
+    text.clear();
+    if v == 0.0 {
+        text.push('0');
     } else {
-        format!("{v:.5e}")
-    })
+        write!(text, "{v:.5e}").map_err(|_| SpefError::Invalid("value formatting".into()))?;
+    }
+    Ok(())
 }
+
+/// FxHash-style hasher for instance names (a lookup table, not a security
+/// boundary; iteration order is never observed).
+#[derive(Default)]
+struct NameHasher(u64);
+impl std::hash::Hasher for NameHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        const K: u64 = 0x517c_c1b7_2722_0a95;
+        let (words, rest) = bytes.as_chunks::<8>();
+        for &w in words {
+            self.0 = (self.0.rotate_left(5) ^ u64::from_le_bytes(w)).wrapping_mul(K);
+        }
+        for &b in rest {
+            self.0 = (self.0.rotate_left(5) ^ u64::from(b)).wrapping_mul(K);
+        }
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+type NameIndex<'a> =
+    std::collections::HashMap<&'a str, usize, std::hash::BuildHasherDefault<NameHasher>>;
 
 /// Name map shared by every net of one document.
 struct NameMap<'a> {
     nets: usize,
-    instances: std::collections::HashMap<&'a str, usize>,
+    instances: NameIndex<'a>,
 }
 impl NameMap<'_> {
     fn node(&self, out: &mut Vec<u8>, ni: usize, n: &Node) -> Result<()> {
@@ -225,8 +243,9 @@ fn net_section(
     cap.clear();
     let mut count = 0usize;
     let mut total = 0.0f64;
+    let mut text = String::new();
     for (i, g) in net.ground.iter().enumerate() {
-        let (text, parsed) = value(*g)?;
+        let parsed = value(*g, &mut text)?;
         total += parsed;
         count += 1;
         write!(cap, "{count} ")?;
@@ -237,7 +256,7 @@ fn net_section(
         if other == ni {
             return Err(SpefError::Invalid("coupling within one net".into()));
         }
-        let (text, parsed) = value(pf)?;
+        let parsed = value(pf, &mut text)?;
         if parsed == 0.0 {
             continue;
         }
@@ -289,7 +308,7 @@ fn net_section(
     out.extend_from_slice(cap);
     writeln!(out, "*RES")?;
     for (i, &(a, b, ohm)) in net.resistors.iter().enumerate() {
-        let text = value_text(ohm)?;
+        value_text(ohm, &mut text)?;
         let na = net
             .nodes
             .get(a as usize)
@@ -320,7 +339,7 @@ fn preamble<'a>(
         return Err(SpefError::Invalid("net-name budget".into()));
     }
     let mut instances = Vec::new();
-    let mut instance_index = std::collections::HashMap::new();
+    let mut instance_index = NameIndex::default();
     for (visited, name) in instance_names.into_iter().enumerate() {
         if visited >= 256_000_000 {
             return Err(SpefError::Invalid("instance-name budget".into()));

@@ -645,6 +645,24 @@ fn extract_impl(
             Some(design.cells[instance as usize].name.as_str())
         });
         let label = |pin| pin_label(pin).map_err(|e| spef::SpefError::Invalid(e.to_string()));
+        // A coupling endpoint needs only the node name (no master clone).
+        let node_label = |pin: u32| -> std::result::Result<spef::Node, spef::SpefError> {
+            let c = model.pins.get(pin as usize).ok_or_else(|| {
+                spef::SpefError::Invalid(fail("pin index outside connectivity").to_string())
+            })?;
+            Ok(match c.owner {
+                PinOwner::Instance { instance, terminal } => {
+                    let master = &model.masters[model.instance_masters[instance as usize] as usize];
+                    spef::Node::Pin {
+                        instance: design.cells[instance as usize].name.clone(),
+                        pin: master.pins[terminal as usize].name.clone(),
+                    }
+                }
+                PinOwner::Port { port, bit } => {
+                    spef::Node::Port(model.ports[port as usize].bits[bit as usize].clone())
+                }
+            })
+        };
         spef::write_streamed_parallel(
             &header,
             &ports,
@@ -700,7 +718,7 @@ fn extract_impl(
                 .get(row)
                 .and_then(|n| n.nodes.get(node as usize))
             {
-                Some(RcNode::Pin(pin)) => label(*pin).map(|p| p.0),
+                Some(RcNode::Pin(pin)) => node_label(*pin),
                 Some(RcNode::Internal(k)) => Ok(spef::Node::Internal(*k)),
                 None => Err(spef::SpefError::Invalid("coupling node index".into())),
             },
