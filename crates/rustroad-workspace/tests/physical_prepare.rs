@@ -303,6 +303,7 @@ fn split_rail_stacks_above_the_last_full_row_land_on_a_spine() {
         via_stack: vec!["V23".into()],
         wire_width: 200,
         wire_spacing: None,
+        nearest_spine: false,
     });
     let f = Fixture::new(
         "module chip(input a, output y, output h, output l);\n\
@@ -381,6 +382,7 @@ fn ring_macro_fixture(wire_spacing: Option<i64>) -> Fixture {
         via_stack: vec!["V23".into()],
         wire_width: 200,
         wire_spacing,
+        nearest_spine: false,
     });
     let f = Fixture::new(
         "module chip(input a, output y, output h, output l);\n\
@@ -481,6 +483,100 @@ fn concentric_macro_supply_rings_fail_when_no_row_clears_the_spacing() {
         "{error}"
     );
     assert_eq!(f.head(), "rev1\n");
+}
+
+#[test]
+fn nearest_spine_collectors_stay_beside_their_macro() {
+    // A block with its power ring on the right and its ground ring on the
+    // left, nearer to a macro-free channel with its own spines on its right
+    // than to the left-margin spines. By default both collectors run to the
+    // left-margin spines; with `nearest_spine` both run to the channel's
+    // spines, and the ground collector, which now shares the power
+    // collector's x range, takes the next row. Seven cells, six rows: <1 MiB.
+    let ram = "MACRO RAM\nCLASS BLOCK ; ORIGIN 0 0 ; SIZE 4 BY 8 ; SYMMETRY X Y ;\n\
+PIN D DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M2 ; RECT 1.9 0 2.1 0.2 ; END END D\n\
+PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M2 ; RECT 3.4 0.4 3.6 7.6 ; END END VDD\n\
+PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M2 ; RECT 0.1 0.1 0.3 7.9 ; END END VSS\n\
+OBS LAYER M1 ; RECT 0 0 4 8 ; END\nEND RAM\nEND LIBRARY";
+    let run = |nearest: bool| {
+        let f = ring_macro_fixture(None);
+        let mut cfg: PhysicalConfig =
+            serde_json::from_slice(&fs::read(&f.config_path).unwrap()).unwrap();
+        cfg.macro_supply.as_mut().unwrap().nearest_spine = nearest;
+        fs::write(&f.config_path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+        fs::write(&f.sources.cell_lef, library().replace("END LIBRARY", ram)).unwrap();
+        f.import().unwrap();
+        place(&f.workspace, "rev1", &limits()).unwrap();
+        let snapshot = read(&f.workspace, &limits()).unwrap();
+        let supply = snapshot
+            .metadata()
+            .physical
+            .as_ref()
+            .unwrap()
+            .state
+            .as_ref()
+            .unwrap()
+            .supply
+            .clone();
+        drop(snapshot);
+        supply
+    };
+    use rustroad_core::power::RailPolarity::{Ground, Power};
+    let collector = |supply: &rustroad_core::supply::SupplyGrid, polarity| {
+        supply
+            .wires
+            .iter()
+            .find(|w| w.layer == "M3" && w.start[1] == w.end[1] && w.polarity == polarity)
+            .unwrap()
+            .clone()
+    };
+    let spine_xs = |supply: &rustroad_core::supply::SupplyGrid, polarity| -> Vec<i64> {
+        supply
+            .wires
+            .iter()
+            .filter(|w| w.layer == "M2" && w.start[0] == w.end[0] && w.polarity == polarity)
+            .map(|w| w.start[0])
+            .collect()
+    };
+    let legacy = run(false);
+    let near = run(true);
+    // The left-margin spines lie left of the core (x < 5 um), the channel
+    // ones right of the block (x > 13 um).
+    let power_spines = spine_xs(&near, Power);
+    assert!(power_spines.iter().any(|&x| x < 5000) && power_spines.iter().any(|&x| x > 13000));
+    assert!(
+        collector(&legacy, Power).start[0] < 5000,
+        "legacy: left margin"
+    );
+    assert!(collector(&legacy, Ground).start[0] < 5000);
+    let p = collector(&near, Power);
+    assert!(p.start[0] > 13000, "power runs to the channel spine: {p:?}");
+    assert_eq!(p.end, [12500, 11000], "the ring centre on the right side");
+    let g = collector(&near, Ground);
+    assert!(
+        g.start[0] > 13000,
+        "ground runs to the channel spine: {g:?}"
+    );
+    assert_eq!(
+        g.end,
+        [9200, 13000],
+        "it clears the power collector one row up"
+    );
+    assert_eq!(
+        collector(&legacy, Ground).end,
+        [9200, 13000],
+        "legacy overlaps too"
+    );
+    // Every pin via lands on its collector and the channel spine reaches it.
+    let channel = near
+        .wires
+        .iter()
+        .find(|w| w.layer == "M2" && w.start[0] == p.start[0] && w.polarity == Power)
+        .unwrap();
+    assert!(
+        channel.start[1].min(channel.end[1]) <= 11000
+            && channel.end[1].max(channel.start[1]) >= 11000
+    );
 }
 
 #[test]

@@ -27,6 +27,14 @@ pub struct Config {
     /// (zero when the technology states its spacing only as a table).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wire_spacing: Option<i64>,
+    /// Draw each collector to the supply spine of its polarity nearest to
+    /// the pin access (primary or channel spine; ties: the earlier spine).
+    /// Off (the default) draws every collector to the first spine of its
+    /// polarity, the left-margin one, so a collector of a macro far from
+    /// the left edge crosses everything between them on the collection
+    /// layer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub nearest_spine: bool,
 }
 
 fn invalid(s: impl Into<String>) -> Error {
@@ -159,14 +167,38 @@ pub(crate) fn collect(
         return Err(invalid("macro pin via connects the wrong layers"));
     }
     let mut spines = BTreeMap::new();
+    let mut all_spines: BTreeMap<RailPolarity, Vec<usize>> = BTreeMap::new();
     for (i, w) in supply.wires.iter().enumerate() {
         if w.layer == physical.strap_layer && w.start[0] == w.end[0] {
             spines.entry(w.polarity).or_insert(i);
+            all_spines.entry(w.polarity).or_default().push(i);
         }
     }
     if spines.len() != 2 {
         return Err(invalid("macro collection requires both supply spines"));
     }
+    // Spine of `polarity` a collector to `at` is drawn from (see
+    // `Config::nearest_spine`); its scan is budgeted with the access search.
+    let pick = |wires: &[SupplyWire],
+                polarity: RailPolarity,
+                at: [i64; 2],
+                search: &mut usize|
+     -> Result<usize> {
+        if !cfg.nearest_spine {
+            return Ok(spines[&polarity]);
+        }
+        let mut best = spines[&polarity];
+        for &i in &all_spines[&polarity] {
+            *search = search
+                .checked_add(1)
+                .filter(|n| *n <= 2_000_000)
+                .ok_or_else(|| Error::Budget("macro supply spine search".into()))?;
+            if wires[i].start[0].abs_diff(at[0]) < wires[best].start[0].abs_diff(at[0]) {
+                best = i;
+            }
+        }
+        Ok(best)
+    };
     let lef_spacing = layer.spacing.unwrap_or(0);
     let collection_spacing = cfg.wire_spacing.map_or(lef_spacing, |s| s.max(lef_spacing));
     let grow = |r: Rect, by: i64| -> Result<Rect> {
@@ -275,8 +307,9 @@ pub(crate) fn collect(
             // The first enclosed access is kept whenever its collector clears
             // the opposite supply. Concentric supply rings (both pins centred on
             // the same row) need another row of the same pin shape.
-            let spine_x = supply.wires[spines[&polarity]].start[0];
             let mut clear = |at: [i64; 2]| -> Result<bool> {
+                let spine_x =
+                    supply.wires[pick(&supply.wires, polarity, at, &mut search)?].start[0];
                 let candidate = wire_bounds(&SupplyWire {
                     polarity,
                     layer: cfg.collection_layer.clone(),
@@ -354,7 +387,8 @@ pub(crate) fn collect(
                     cell.name, pin.name
                 ))
             })?;
-            let spine = &supply.wires[spines[&polarity]];
+            let index = pick(&supply.wires, polarity, at, &mut search)?;
+            let spine = &supply.wires[index];
             let trunk = [spine.start[0], at[1]];
             let wire = SupplyWire {
                 polarity,
@@ -436,7 +470,6 @@ pub(crate) fn collect(
                     at: trunk,
                 });
             }
-            let index = spines[&polarity];
             supply.wires[index].end[1] = supply.wires[index].end[1].max(
                 at[1]
                     .checked_add(cfg.wire_width)

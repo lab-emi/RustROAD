@@ -33,7 +33,12 @@ the same rectangle instead, nearest first, upwards before downwards; if none
 clears, the placement fails with the spacing error. `wire_spacing` states the
 clearance between collectors of opposite supplies; without it the collection
 layer's unconditional LEF `SPACING` applies, which is zero for a technology
-that gives its spacing only as a table (SKY130).
+that gives its spacing only as a table (SKY130). With `nearest_spine` a
+collector runs to the spine of its polarity nearest to the pin (a channel
+spine between macros, or the one right of the last macro) instead of the
+left-margin one: on SKY130 the left-margin collectors of the right-hand SRAM
+crossed the other SRAM on met5, the only layer above the macros, and walled
+off every route to the macros' north pins.
 `TapConfig.body_view = "gds"` records that the original
 GDS contains the contacts omitted from an abstract LEF; independent extraction
 and LVS remain required before claiming body-bias connectivity.
