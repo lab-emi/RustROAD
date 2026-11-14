@@ -2,8 +2,8 @@
 //! serialization. Bounded row and overlap work; no path enumeration.
 use rustroad_core::fixed::FixedPlacement;
 use rustroad_core::{
-    Cell, Design, Limits, Orientation, Rect, Row, Site, place_design_cpu_ref, validate_placement,
-    write_def,
+    Cell, Design, Limits, Orientation, Placed, Rect, Row, Site, place_design_cpu_ref,
+    validate_placement, write_def,
 };
 fn design() -> Design {
     Design {
@@ -127,4 +127,72 @@ fn macro_power_pin_exclamation_is_a_literal_def_name() {
     assert_eq!(rustroad_core::def_name("VDD!"), "VDD!");
     assert_eq!(rustroad_core::def_name("VDDARRAY!"), "VDDARRAY!");
     assert_eq!(rustroad_core::def_name("VSS!"), "VSS!");
+}
+
+#[test]
+fn placement_validation_scales_with_cells_times_macros() {
+    // Eight macros above 50 rows of 1000 unit cells: 400k cell-by-macro
+    // comparisons, above the default 350k expansion limit that used to bound
+    // them (fillers on a floorplan with eight SRAMs). About 8 MiB.
+    let mut d = design();
+    d.die_area.ux = 100_000;
+    d.die_area.uy = 100_000;
+    d.core_area = d.die_area;
+    d.rows = (0..50)
+        .map(|i| Row {
+            x_start: 0,
+            x_end: 100_000,
+            y: i * 1000,
+            orientation: Orientation::N,
+        })
+        .collect();
+    d.cells.clear();
+    let mut placed = Vec::new();
+    for i in 0..8i64 {
+        d.cells.push(Cell {
+            name: format!("ram{i}"),
+            master: "SRAM".into(),
+            width: 5000,
+            height: 5000,
+            fixed: Some(FixedPlacement {
+                x: 2000 + i * 12_000,
+                y: 60_000,
+                orientation: if i % 2 == 0 {
+                    Orientation::N
+                } else {
+                    Orientation::FS
+                },
+                halo: 1000,
+            }),
+        });
+        placed.push(Placed {
+            id: i as u64,
+            x: 2000 + i * 12_000,
+            y: 60_000,
+            width: 5000,
+            height: 5000,
+        });
+    }
+    for row in 0..50i64 {
+        for site in 0..1000i64 {
+            let id = d.cells.len() as u64;
+            d.cells.push(Cell {
+                name: format!("u{id}"),
+                master: "BUF".into(),
+                width: 100,
+                height: 1000,
+                fixed: None,
+            });
+            placed.push(Placed {
+                id,
+                x: site * 100,
+                y: row * 1000,
+                width: 100,
+                height: 1000,
+            });
+        }
+    }
+    let limits = Limits::default();
+    assert!(placed.len() * 8 > limits.max_expansions);
+    validate_placement(&d, &placed, &limits).unwrap();
 }

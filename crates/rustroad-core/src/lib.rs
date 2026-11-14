@@ -561,6 +561,10 @@ pub fn placed_orientation(design: &Design, placed: &Placed) -> Result<Orientatio
     Ok(design.rows[index].orientation)
 }
 
+/// Cell-against-macro-halo comparisons one placement validation may make; the
+/// bound `fixed::row_segments` callers use for the same cell-by-macro product.
+const MAX_FIXED_OVERLAP_WORK: usize = 64_000_000;
+
 /// Bounded order-independent validation permits physical-only filler instances
 /// to be appended after logical cells without changing their IDs/order.
 pub fn validate_placement(design: &Design, cells: &[Placed], limits: &Limits) -> Result<()> {
@@ -596,7 +600,9 @@ pub fn validate_placement(design: &Design, cells: &[Placed], limits: &Limits) ->
         };
         for &b in &blocked {
             work += 1;
-            if work > limits.max_expansions {
+            // One comparison per cell and macro: the generic expansion limit
+            // (350k by default) is below fillers times eight macros.
+            if work > limits.max_expansions.max(MAX_FIXED_OVERLAP_WORK) {
                 return Err(Error::Budget("fixed macro placement overlap work".into()));
             }
             if fixed::overlaps(rect, b) {
