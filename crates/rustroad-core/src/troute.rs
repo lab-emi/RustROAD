@@ -5799,6 +5799,16 @@ pub(crate) fn route_with_prior(
                         queue.push_back(net);
                         continue;
                     }
+                    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                        for t in &groups[&net] {
+                            eprintln!(
+                                "[troute] unroutable net {net}: pin {} top {:?} shapes {:?}",
+                                t.pin,
+                                plans.get(&t.pin).map(|plan| r.graph.point(plan.top)),
+                                t.shapes
+                            );
+                        }
+                    }
                     return Err(no_route(&format!(
                         "pin {pin} net {net}: no path even with rip-up (fixed geometry blocks)"
                     )));
