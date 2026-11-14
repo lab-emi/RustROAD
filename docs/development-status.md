@@ -1,12 +1,85 @@
 # Development status
 
-Updated **2026-11-14**. The first two sections report the two extraction
+Updated **2026-11-14**. The first three sections report the three extraction
 changes made after the RustEDA host campaign of 2026-11-13, newest first, each
 measured against the campaign's binary in the same runs; the next reports that
 campaign and the 2026-11-05
 section the campaign before it; the rest of this page describes the source
 published with the RustEDA development update. Use the superproject’s exact
 gitlinks and the repository lockfile when reproducing a run.
+
+## Faster extraction, third round · 2026-11-14
+
+After the second round, RustROAD
+[`e623e82`](https://github.com/lab-emi/RustROAD/commit/e623e8299c2be32d8455d9ce38f75df514caef49)
+(four extraction commits and a docs commit, `8d29a61..e623e82`) extracts the
+campaign's final Ibex layout in **0.66× the campaign binary's time at 4 threads
+and 0.70× at 2** (0.93× and 0.91× of `8d29a61`'s, faster than `8d29a61` in all
+15 paired runs at both), with 8–9 % less CPU time than `8d29a61` and the same
+SPEF. Against OpenRCX it was **faster in all 15 runs at 4 threads** (median
+2.620 s against 3.081 s, 0.85×) with the ranges apart (2.419–2.856 s against
+2.927–3.385 s). An earlier A/B on a development build of the same sources was
+faster in all 15 runs too (0.84×), but its ranges overlapped by 47 ms, so
+RustROAD is **narrowly faster** at 4 threads. At 2 threads it is **still 1.52×
+slower** (4.770 s against 3.143 s), with 2.9 times OpenRCX's CPU time and 1.31×
+its peak RSS at 4 threads.
+
+**What changed.** The four commits remove work inside the parallel strip phase
+that changes no accumulated value; instruction counts are whole-run totals from
+cachegrind (this VM has no hardware counters). Passive strips that cannot
+record anything are counted instead of swept, with the same work charged
+(362,336 of 872,538); the sweep re-evaluates its state only when its inputs
+change; the gathering predicates and the grid cell scan are specialized; and
+ground records that are exactly zero (4.63 million of 23.5 million) are no
+longer stored by the parallel workers, since no accumulator ever holds −0.0
+(IEEE 754-2019, section 6.3), while each chunk is grouped by shard through an
+open-addressing table (Knuth, TAOCP vol. 3, section 6.4) whose slots carry the
+chunk's generation, so it is never cleared (compare Briggs and Torczon, 1993).
+Together: 63.82 to 58.52 billion instructions at 1 thread (−8.3 %) and 68.43 to
+60.60 billion at 2 threads (−11.4 %). [Extraction](extraction.md) describes each.
+
+| Same-load A/B, 15 runs after a warm-up, order rotated | Campaign binary | Second round | New binary | Competitor |
+| --- | ---: | ---: | ---: | ---: |
+| **Extraction** (final routed layout, nominal corner) | RustROAD `f90f2dd` | RustROAD `8d29a61` | RustROAD `e623e82` | OpenRCX |
+| Median wall, 4 threads (range) | 3.997 (3.833–4.198) s | 2.821 (2.713–3.040) s | **2.620 (2.419–2.856) s** | 3.081 (2.927–3.385) s |
+| Median wall, 2 threads (range) | 6.798 (6.432–7.363) s | 5.231 (4.884–5.651) s | **4.770 (4.370–4.995) s** | 3.143 (2.933–3.351) s |
+| Median CPU, 4 threads (range) | 12.15 (11.50–12.63) s | 9.85 (9.51–10.64) s | 9.06 (8.49–10.01) s | 3.07 (2.92–3.36) s |
+| Median CPU, 2 threads (range) | 12.18 (11.65–13.28) s | 9.94 (9.30–10.68) s | 9.05 (8.33–9.43) s | 3.12 (2.92–3.31) s |
+| Median peak RSS, 4 threads (range) | 319,520 (292,828–322,724) KiB | 262,628 (259,200–265,736) KiB | 264,848 (262,964–271,576) KiB | 201,828 (201,516–202,260) KiB |
+| Median peak RSS, 2 threads (range) | 311,276 (285,056–312,212) KiB | 249,036 (247,928–249,904) KiB | 250,808 (249,532–253,248) KiB | 201,496 (201,076–201,832) KiB |
+| Runs in which `e623e82` was faster, 4 / 2 threads | 15 / 15 of 15 | 15 / 15 of 15 | — | 15 / 0 of 15 |
+
+**How it was measured.** As in the second round: per repetition and thread
+count, the four contenders ran one after another in an order shifted by one
+place each repetition, one warm-up and 15 measured repetitions, with the host's
+measurement and build locks held; each RustROAD on a private copy of a routed
+workspace whose validation receipt that same binary wrote, with the campaign's
+recorded command and RC profile, its SPEF at one shared work path; OpenRCX on
+the shared extraction gate's script. The earlier A/B ran the development build
+of the same sources the same way (2.643 s, range 2.521–2.917 s, against
+3.163 s, range 2.870–3.418 s, at 4 threads; 4.677 s against 3.185 s at 2).
+
+**Same results.** Every run of the RustROAD binaries in both A/Bs wrote the
+campaign's SPEF (SHA-256 `468051be…`), and the digest over every bit of the
+extracted network and the report's statistics, the work counters of the
+extraction budget included, are unchanged at 1 to 4 threads. A full native run
+with `e623e82` (114 of 114 steps, the campaign's prepared inputs, recipe and
+executor) produced a GDS, DEF, native SPEF, netlists and mapped netlist
+byte-identical to the campaign's, and all nine shared gates passed with the
+campaign's verdicts. The full test suite passes (587 tests, 11 ignored; three
+new), and every serial-against-parallel check also compares the swept path.
+
+**What remains.** RustROAD's extraction still spends 2.9 times OpenRCX's CPU
+time (about 9.1 s against 3.1 s), so it is 1.52× slower at 2 threads; to be
+faster there, about 3.3 s more CPU would have to go. The interval sweep is 30 %
+of that time with a flat profile, candidate gathering (17 %) waits on memory for
+about 17 million grid-cell visits, and the ordered commit of the strips is
+13 %. The order of the units fixes every floating-point sum, so neither can be
+reordered without changing the SPEF. Peak RSS is unchanged at 1.31× OpenRCX's
+at 4 threads, and the SPEF's total capacitance stays 6.0 % above OpenRCX's.
+
+[RustROAD extraction, third round](https://lab-emi.github.io/RustEDA/benchmarks/#rustroad-extraction-third-round-2026-11-14) ·
+[Runs and summary](https://lab-emi.github.io/RustEDA/benchmarks/evidence/ibex-host-20261114-extraction-r3/summary.json)
 
 ## Faster extraction, second round · 2026-11-14
 
@@ -275,7 +348,9 @@ SPEF, in same-load runs on another VM: level with OpenRCX at 4 threads (1.07×,
 ranges overlap) and still 1.85× slower at 2
 ([faster extraction](#faster-extraction-2026-11-13)); since `8d29a61`,
 0.71× and 0.75×, level at 4 threads (0.91×, ranges overlap) and 1.64× slower at
-2 ([second round](#faster-extraction-second-round-2026-11-14)).
+2 ([second round](#faster-extraction-second-round-2026-11-14)); since `e623e82`,
+0.66× and 0.70×, narrowly faster at 4 threads (0.85×) and 1.52× slower at 2
+([third round](#faster-extraction-third-round-2026-11-14)).
 
 ### GDS export against KLayout · 2026-11-13
 
