@@ -57,16 +57,16 @@ rustroad extract --workspace W --rc-profile fixtures/pdk/sky130-rc-max.json \
 * Candidate shapes per wire run (`--max-extract-candidates`, default 4,096)
   were a fixed cap; they are a budget now. Per run the extractor holds the
   candidate list, interval events, ordered active set and plane list, with
-  vector growth and hash/tree occupancy included: 256 B per candidate
+  independently retained vector capacities included: 2,048 B per candidate
   (`CANDIDATE_SCRATCH_BYTES`) for the serial path; parallel lanes are admitted
-  separately (see "Strips and parallel computation"). The ceiling is 48 MiB of
+  separately (see "Strips and parallel computation"). The ceiling is 384 MiB of
   that scratch, 196,608 candidates (`MAX_CANDIDATES_CEILING`). An interval sweep
   skips disjoint candidates while keeping shape-ID accumulation order. Index
   work and active-candidate comparisons debit `--max-extract-work`. The report states `max_candidates_per_run`,
   `candidate_scratch_bytes` and the observed `stats.max_run_candidates`.
   `--max-rc-elements` (resistors + nodes + 2 x couplings, explicitly bounded by the
   whole-process memory allowance) is a command-line budget too. The track
-  recipe of the gate passes 65,536 candidates (16 MiB scratch with the
+  recipe of the gate passes 65,536 candidates (128 MiB scratch with the
   interval sweep) and 8 M elements.
 
 Cell pin and obstruction geometry is shared per master and decoded only for
@@ -105,10 +105,11 @@ JSON report carries provenance.
 Candidate queries use the lateral calibration window on the wire's own layer
 and its exact footprint on every other modelled layer. All accepted shape IDs
 and interval boundaries are retained, including shapes with no direct final
-capacitance contribution; removing such boundaries can change f64 rounding.
-Candidates are still processed in shape-ID order. The run16 replay estimate is
-3.46 GiB, including 16 MiB serial scratch (65,536 candidates at 256 bytes) and
-one corner. Builds and tests use two workers under a 4 GiB OS cap.
+capacitance contribution. The historical run16 estimate of 3.46 GiB used the
+older 256-byte scratch charge. Current admission includes 128 MiB for 65,536
+serial candidates, fixed scratch, and the separately admitted unit schedule;
+old memory allowances may therefore need to increase even when measured RSS
+decreases. Builds and tests use two workers under an 8 GiB OS cap.
 
 Metal construction (end extensions, via pads and patches minus same-net metal)
 looks up same-net conductors in per-`(net, layer)` lists of retained shape IDs and
@@ -172,8 +173,8 @@ instead of visiting instances and transforming their templates: the strict
 intersection with the query reports exactly the conductors the instance query plus
 the acceptance predicate reported, so candidates, interval boundaries and the SPEF
 are unchanged (`stats.work` counts the cells and entries scanned). The instance
-index computes the virtual crossing marks and is then released. Otherwise cell
-geometry stays virtual and is queried per instance, as before. The two paths scan
+index is then released; each cell conductor tests its own crossing (below).
+Otherwise cell geometry stays virtual and is queried per instance, as before. The two paths scan
 different cells, so for a given input `stats.work` (and whether a
 `--max-extract-work` cap passes) depends on `--max-extract-bin-entries`. The
 same-net buckets, the virtual grid and the grid cell sizes are chosen from the
@@ -186,8 +187,8 @@ threads or chunk size.
 
 Each strip's candidates are the conductors that overlap it along its axis and lie
 within the lateral calibration window on its own layer or under its face on every
-other modelled layer. They are processed in shape-ID order exactly as before, so
-interval boundaries and every f64 expression are unchanged. A piece or passive
+other modelled layer. Their order carries no meaning (see "Summation order"):
+wherever shape order decides between candidates, shape IDs are compared. A piece or passive
 conductor contributes an x strip and a y strip of one rectangle; both accept exactly
 the conductors overlapping that rectangle on other layers, so the pair queries other
 layers once, and its own layer once for the union of both lateral windows (each hit
@@ -197,8 +198,7 @@ recomputed one after the other from the unit's starting work count, so the x
 strip's accumulations and budget checks come before any y strip error, as when
 they were separate strips. Virtual cell shapes are decoded once per
 query and travel with the candidate; no design-sized decoded-shape cache is kept.
-The interval sweep uses a bitset of candidate positions (ascending position is
-ascending shape ID), per-layer dense context tables, reused buffers and packed
+The interval sweep uses bitsets of candidate positions, per-layer dense context tables, reused buffers and packed
 event keys; each candidate's extents along and across the strip and its layer's
 calibration metal are computed once per strip, and calibration-row samples are
 memoized by `(rows, spacing)` (a pure function). `stats.work` counts index cells and entries actually scanned, so it is
@@ -229,24 +229,42 @@ work included.
 
 Only wire bodies are stored as strip records. A piece (end extension, via pad or
 patch piece) is its shape plus its net and node (8 bytes); a crossed retained
-passive conductor is its shape ID. Their x and y strips are generated from the
+passive conductor is its shape ID, and so is a cell conductor. Their x and y strips are generated from the
 shape when the unit is computed, with the same fields in the same order as the
 records the construction used to store (unit test
-`lazy_piece_and_conductor_strips_match_the_materialized_runs`). Units run in the
-original order: wire bodies, pieces in creation order, crossed virtual conductors,
-then crossed retained passive conductors.
+`lazy_piece_and_conductor_strips_match_the_materialized_runs`). Units run in tile
+order (see "Summation order"): wire bodies, pieces, cell conductors and crossed
+retained passive conductors together.
+
+A cell conductor is crossed when routed metal on another routing layer strictly
+overlaps it. When cell geometry is indexed in the grid, every cell conductor on a
+routing layer with an RC model is a unit, and its unit first runs the face query
+its strips need anyway: the other-layer candidates of a rectangle's face are the
+conductors strictly overlapping it, so the conductor has its two strips exactly
+when one of them is routed (the set the scan from the routed side marked before;
+strict intersection is symmetric). An uncrossed conductor ends there. If the face
+query overflows the candidate cap, a grid query that stops at the first routed
+shape decides: an uncrossed conductor fails nothing, a crossed one reports the
+cap error as before. This replaces the design-wide scan of every routed shape's
+other layers (0.08 to 0.19 s wall on the Ibex layout). It changes `stats.work`:
+the work of the face queries of the 171,130 uncrossed conductors is charged and
+the work of the scan is not (Ibex layout: 1,772,976,701 before, 1,738,948,834
+after); every other statistic, the network and the SPEF are unchanged. When cell
+geometry stays in the instance index (and in the test oracle), the scan from
+the routed side still marks the crossed conductors, which are the units.
 
 Every RC node has a global ID: nets in ascending net ID, then the net's local node
-order, so ID order is `(net, node)` order. An accumulation is a 16-byte record: a
+order, so ID order is `(net, node)` order. An accumulation (one per partial sum of a
+strip, see "Summation order") is a 16-byte record: a
 coupling between global nodes `a <= b` is keyed `a << 32 | b` (key order is the
 original endpoint order), ground at node `g` and the overlap-area statistic have
-reserved key ranges. The accumulators are split into shards (one on the serial
-path, otherwise the lane count rounded up to a power of two): ground nodes by
-`g mod shards`, coupling keys by a hash of the key, the area statistic in shard 0.
-Each shard holds a dense ground array and a chained hash table of coupling keys whose
-20-byte entries live in fixed 32,768-entry arena chunks: growth appends a chunk and
-rebuilds only the 4-byte head array (at most two entries per head), so the table
-never holds two copies of its entries.
+reserved key ranges. The accumulators are split into four shards at every thread
+count: ground nodes by `g mod 4`, coupling keys by a hash of the key, the area
+statistic in shard 0. Each shard holds a dense ground array and a chained hash table
+of the open coupling keys whose 28-byte entries live in fixed 32,768-entry arena
+chunks: growth appends a chunk and rebuilds only the 4-byte head array (at most two
+entries per head), so the table never holds two copies of its entries, and the slot
+of a finalized key is reused (below).
 
 Strips are computed on the `--threads` pool. Units (a wire body, or the strip pair
 of one rectangle) are taken from the unit iterator in chunks of 64 (a crossed
@@ -259,20 +277,83 @@ split by shard in its lane: ground and area records go to their shard in emissio
 order, and coupling records are chained per key (keys found through a chunk-local
 open-addressing table whose slots carry the chunk's generation, so it is never
 cleared) and appended per shard key by key in order of first appearance. Every
-accumulator's additions stay in run order and are applied with one lookup per
+accumulator's additions stay in unit order and are applied with one lookup per
 accumulator. A transcript stores no ground record adding zero: every ground accumulator
 starts at +0.0 and a sum is -0.0 only when both operands are, so no accumulator
-holds -0.0, and adding a zero of either sign leaves its bits unchanged (4,626,618 of
-the 23,482,900 ground records on the Ibex layout). Coupling records are always
+holds -0.0, and adding a zero of either sign leaves its bits unchanged. Coupling records are always
 stored, since one creates its key and the coupling budget counts keys. A leader (whichever lane holds it) clears chunks strictly in run order:
 cumulative work and integer statistics, and a proof that no budget can fail inside
 the chunk (work, and an upper bound of the coupling count). Each shard then applies
 the cleared chunks for its own accumulators, in chunk order, on whichever lane is
-free; shards never touch each other's accumulators. At the end the coupling entries
-are sorted by key (keys are unique) and thresholded and grounded in that order, as
-before. Every accumulator therefore receives the identical sequence of f64
-additions at any thread count, chunk size and shard count, and the SPEF bytes are
-identical.
+free; shards never touch each other's accumulators. Every accumulator therefore
+receives the identical sequence of f64 additions at any thread count and chunk
+size, and the SPEF bytes are identical.
+
+A coupling key is finalized as soon as no strip can add to it. Every coupling a strip
+records joins one of the strip's own nodes (a body's end nodes, a piece's node, a
+crossed pin's node), so with `last[g]` the last unit whose strips have node `g` as
+their own, nothing is added to the key `(a, b)` after unit `due = max(last[a],
+last[b])`. A new key is listed under its due unit's granule (64 units). When a shard
+has applied a chunk (or the serial path a granule of units), it takes every key due
+before the chunk's end out of its table, in ascending `(due, key)`, and applies the
+minimum-coupling rule to it: a positive coupling below the threshold is added to
+both its nodes in the shard's own per-node sums of grounded couplings (the lower
+node first), every other positive one is kept. Those sums are a function of the
+input only (every shard sees its keys in global `(due, key)` order whatever the
+chunking), and at the end each node's ground is its strip ground plus the four
+shards' grounded sums in shard order; the kept couplings are sorted by key. The
+tables thus hold only the keys still open: on the Ibex layout at most the
+`open_coupling_peak` the profile reports, instead of all 2,327,801 keys.
+
+### Summation order (2026-11-14)
+
+Each contribution of each interval is computed with the same expression as
+before and added exactly once; only the grouping of the additions changed, so
+low-order digits of the SPEF may change. Since SPEF values have six significant
+digits, crossing a formatting boundary can change the last printed digit even
+when the f64 difference is near machine precision. Compare a baseline and a
+candidate with `scripts/compare_extraction_reorder.py`: it reports changed
+values and their maximum absolute/relative differences separately for net
+totals, ground, coupling and resistance, while requiring the same record
+structure, connectivity, units and resistance values. This is a bounded
+same-format output comparison, not a replacement for the physical oracles.
+
+* **Per-strip partial sums.** A strip adds its contributions, in sweep order, to
+  sums of its own: its ground toward its low and its high end node (one sum
+  when both are one node, as for a piece), the overlap-area statistic, and per
+  contributing candidate the coupling toward each end node of the partner from
+  each own end (a passive strip: toward each partner end). The partner end of
+  an interval is still the one nearer to that interval's midpoint, and values
+  that are not positive are still not recorded. When the sweep ends, each sum
+  is one accumulation: the strip's own ground (low end, then high end), the
+  area, then the candidates in order of their first contribution. A
+  candidate's target (which nodes, or ground, or nothing) is decided once per
+  strip. Records on the Ibex layout: 43,548,634 before, 6,708,622 after.
+  Summing n non-negative terms in any fixed grouping stays within (n - 1) units
+  of relative rounding error (Higham, "The accuracy of floating point
+  summation", SIAM J. Sci. Comput. 14(4), 1993).
+* **Tile order of the units.** Units are computed and committed in ascending
+  Morton code of the 8 um tile of their shape's lower-left corner, then shape ID
+  (`unit_order`; Morton, IBM 1966). The order is a function of the geometry
+  alone; it fixes the order in which each accumulator receives the strips'
+  sums, and consecutive units share index cells and accumulators.
+* **No candidate sorts.** Candidates are used in query order. Where shape order
+  decided between candidates, the sweep compares shape IDs: the nearer of two
+  equally near lateral neighbours is the lower shape ID, the owner of a plate
+  edge among equal extents is the lower shape ID, and the spanning other-layer
+  metal is ordered by metal, cross extent and shape ID.
+* **Grounded couplings in completion order.** A coupling below the threshold is
+  added to its two nodes when its key is finalized, in each shard's own per-node
+  sums in `(due, key)` order, and those sums join the strip ground at the end
+  (see the accumulators above); before, every grounded coupling was added to the
+  node's ground accumulator in ascending key order after all strips.
+
+The result is a fixed function of the input at every thread count, chunk size
+and shard count (unit tests
+`networks_are_bit_identical_at_one_to_four_threads_and_pin_the_accumulation_order`,
+which pins the bits of a fixture, and the serial-against-parallel checks of every
+fixture). The SPEF of the Ibex layout against the previous order, value by value,
+is in the commit that introduced it.
 
 A unit a lane cannot finish within its parallel bounds (16,384 candidates, 131,072
 transcript records) or that fails, and any chunk whose committed work or exact
@@ -299,15 +380,13 @@ ordered result. The per-net record lists (wires, vias, access points) are one
 table sorted in parallel. Net trees are computed in batches of 2,048 nets and
 merged in net order; the serial loop's cumulative budgets (graph nodes, wire length, RC nodes) are
 replayed at the checkpoint each net reached, so errors are those of the serial loop.
-The virtual-conductor crossing marks are a set: each pool thread owns one bitset
+Where that scan runs, the crossing marks are a set: each pool thread owns one bitset
 and instance-mark scratch (admitted, for all threads, against the unused index
 allowance plus the remaining headroom like the lanes, otherwise the scan is
 serial), OR-merged at the end; their work total is order-independent; any query
-error or a work total over the budget reruns the serial scan for the exact error. At the end each shard drains and
-sorts its coupling entries in parallel and the sorted lists are merged while
-couplings are thresholded and grounded in key order, into one ground array indexed
-by global node ID that is filled from the accumulators and copied back into the nets
-in parallel. Geometry, strip records, the routes and the passive copy are released
+error or a work total over the budget reruns the serial scan for the exact error. At the end the keys still open are
+finalized, each node's ground is summed from its shards in parallel, and the kept
+couplings are sorted by key. Geometry, strip records, the routes and the passive copy are released
 before the SPEF is written. Once the extraction input is built, the command keeps
 only the routes, the design's name and cells and the connectivity of the snapshot
 (and the workspace lock, to the end); the rest of the parsed metadata, the mapped
@@ -549,35 +628,41 @@ and `cell_internal_metal` describe the overlap-area term.
 
 ## Resources (Rule 9)
 
-Estimate made before implementation, at the default caps with one corner and
-one thread (the extractor is deterministic at every thread count):
+Admission starts from the loaded process footprint with 25% headroom, then
+charges the configured caps: 64 B/node, 16 B/element, 320 B/retained shape,
+128 B/coupling, 24 B/spatial-index entry, populated-bin headers and net state,
+the instance geometry/index and one bit per virtual shape. These are conservative
+allocation allowances, not measured resident sizes. A coupling table holds only
+open keys, but admission still covers the configured total coupling cap and the
+kept output list.
 
-* 2 M shapes x 56 B = 112 MiB (bodies, pieces and passive shapes share this
-  cap; a run adds at most two end pieces and a via at most one pad per routing
-  layer before subtraction);
-* passive strips: at most 2 per passive shape, bounded by 2 x the shape cap,
-  64 B each = 256 MiB worst case;
-* the spatial-index allowance, 8 M bin entries x 24 B = 192 MB: per-layer grid
-  entries of 20 B (40 B on a layer wider than 2^32 DBU) plus 4-byte cell offsets
-  (no more cells than entries), or, during metal construction, the same-net lists
-  and their buckets (128 B admitted per bucket entry); a larger grid's excess is
-  added to the estimate;
-* 500 k nodes (virtual cut nodes included) with keys and adjacency, about
-  64 MiB;
-* 1 M couplings x about 30 B (20-byte arena entries plus heads, then one
-  16-byte sorted list per shard) = 30 MiB;
-* SPEF model strings < 64 MiB; the file is streamed through a 256 KiB buffer;
-* the workspace read itself is under 16 MiB of `design.json`, about 200 MiB
-  parsed.
+Candidate scratch is 2,048 B/candidate plus fixed scratch. Its inventory includes
+the other-layer list, the own-layer union of both strips (up to twice one strip's
+cap), the combined list, packed and wide interval events, partial sums and their
+slots, face partitions, probes, ranked lists, cached spans and active bitsets.
+Each reusable vector can retain growth slack from an earlier strip. The numerical
+unit tests also measure every scratch vector's retained capacity at each unit
+boundary and check it against admission. The candidate-count ceiling stays
+196,608; its corrected scratch ceiling is 384 MiB.
 
-That is under 1 GiB peak, under the 2 GiB per-test-binary limit. There are no
-paths, cuts or cones. Each net is one linear walk; the neighbour search is
-bounded by the window, `max_candidates` and `max_work`; the passive-strip
-search and the face coverage are charged to `max_work`.
+Before materializing the geometry-ordered unit sequence, a separate admission
+reserves 32 B/unit plus 48 B/RC node, one rounded arena slab per shard (3.5 MiB
+total), and 64 KiB. This covers Morton keys, parallel
+collection growth, the u32 order, last-unit positions, four completion-granule
+lists and all shard ground sums. The selected virtual conductors count here too;
+the virtual-shape bitset alone is not enough. These arrays coexist with strip
+lanes. Their charge is taken from the unused spatial-index allowance and then
+the remaining memory headroom, before lanes are admitted. Insufficient room
+returns `BUDGET_EXCEEDED: extraction unit order memory` before allocating the
+unit sequence. There are no materialized paths, cuts or cones.
 
-The estimate stays under 4 GiB, so no scale lock is needed. Builds and tests
-use `CARGO_BUILD_JOBS=4`, `RUST_TEST_THREADS=4` and
-`systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G`.
+One corner runs at a time. Extra strip lanes are admitted with their candidate
+scratch, bounded transcripts and pending-chunk allowance; output bits do not
+depend on the admitted lane count. Runs estimated above 4 GiB use the shared
+scale lock. Development uses `CARGO_BUILD_JOBS=2`, `RUST_TEST_THREADS=2`, GNU time,
+an 8 GiB cgroup and a wall-clock deadline. Test binaries must remain below
+2 GiB measured peak RSS; PDK runs below 8 GiB. Keep actual measurements separate
+from these worst-case admission limits.
 
 ## Verification
 
@@ -989,7 +1074,7 @@ The native column is the extractor, not a formula.
 
 ```sh
 free -h
-export CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4
+export CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2
 systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=2G timeout 900s \
   cargo build --release --bins --examples
 python3 scripts/build_rc_profile.py --check

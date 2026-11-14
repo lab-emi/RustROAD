@@ -7,15 +7,15 @@
 //!
 //! Every accumulator (the ground capacitance of one RC node, one coupling
 //! capacitor, the overlap-area statistic) belongs to exactly one shard.
-//! A complete chunk's transcript is split by shard, and within a shard it is
-//! stably grouped by accumulator, so each accumulator keeps the run order of
-//! its additions. A leader clears chunks strictly in run order: it applies
-//! integer statistics and cumulative work and proves that no budget can fail
-//! inside the chunk. Each shard then applies the cleared chunks' records for
-//! its own accumulators, in chunk order, on whichever lane is free. Shards
-//! never touch each other's accumulators, so every accumulator sees the
-//! identical sequence of f64 additions as the serial loop at any thread
-//! count, chunk size and shard count.
+//! A complete chunk's transcript is split by shard in emission order, so
+//! each accumulator keeps the run order of its additions. A leader clears
+//! chunks strictly in run order: it applies integer statistics and
+//! cumulative work and proves that no budget can fail inside the chunk.
+//! Each shard then applies the cleared chunks' records for its own
+//! accumulators, in chunk order, on whichever lane is free, and finalizes
+//! the coupling keys due before the chunk's end. Shards never touch each
+//! other's accumulators, so every accumulator sees the identical sequence of
+//! f64 additions as the serial loop at any thread count and chunk size.
 //!
 //! A chunk the leader cannot clear (a unit a lane did not finish, or a work
 //! or coupling budget that could overflow inside it) is committed at a
@@ -37,8 +37,6 @@ const CHUNK_UNITS: usize = 64;
 const SPARE_BYTES: usize = 512 << 10;
 /// Hidden `--extract-tile-units` ceiling.
 pub const MAX_TILE_UNITS: usize = 1 << 20;
-/// Largest shard count (a power of two).
-const MAX_SHARDS: usize = 64;
 
 /// Parallel-only bounds. Units beyond them run serially at their commit;
 /// results never depend on them.
@@ -74,18 +72,36 @@ impl Default for Bounds {
     }
 }
 
-/// Entries per arena chunk of a coupling table (20 bytes each).
+/// Entries per arena chunk of a coupling table (28 bytes each).
 const CHUNK_ENTRIES: usize = 1 << 15;
 const NIL: u32 = u32::MAX;
+/// `due` of a free slot.
+const FREE: u32 = u32::MAX;
+/// `due` of a key without a completion unit: finalized at the end.
+const NEVER: u32 = u32::MAX - 1;
+/// Completion granules hold the keys due within `1 << GRANULE_SHIFT` units.
+const GRANULE_SHIFT: u32 = 6;
+/// Accumulator shards at every thread count. Each shard sums the couplings
+/// it grounds per node, and the per-node totals are added in shard order,
+/// so the shard count is fixed: it may not follow the lanes.
+pub(super) const SHARDS: usize = 4;
+const SHARD_SHIFT: u32 = SHARDS.trailing_zeros();
 
-/// One coupling accumulator: key and value bits in 32-bit halves (20
-/// bytes, 4-byte aligned) and the bucket chain link.
+/// One coupling accumulator: key and value bits in 32-bit halves, the
+/// bucket chain link (the free-list link of a free slot), the unit after
+/// which no strip records toward the key, and the next key of its
+/// completion granule (28 bytes, 4-byte aligned).
 #[derive(Clone, Copy)]
 struct Cell {
     key: [u32; 2],
     value: [u32; 2],
     next: u32,
+    due: u32,
+    next_due: u32,
 }
+/// One partially occupied arena chunk per shard, beyond the live-key charge.
+pub(super) const ARENA_SLACK_BYTES: u64 =
+    (SHARDS * CHUNK_ENTRIES * std::mem::size_of::<Cell>()) as u64;
 impl Cell {
     #[inline]
     fn key(&self) -> u64 {
@@ -97,15 +113,22 @@ impl Cell {
     }
 }
 
-/// The coupling accumulators of one shard: a chained hash table whose
-/// entries live in fixed-size arena chunks. Growth appends a chunk and now
-/// and then rebuilds the 4-byte head array; entries are never moved, so
-/// the table never holds two generations of its entries.
+/// The open coupling accumulators of one shard: a chained hash table whose
+/// entries live in fixed-size arena chunks. A finalized key's slot goes to
+/// a free list and is reused, so the arena holds at most the largest
+/// number of keys open at once. Growth rebuilds only the 4-byte head array;
+/// entries never move.
 pub(super) struct Couplings {
     heads: Vec<u32>,
     bits: u32,
     chunks: Vec<Vec<Cell>>,
+    /// Slots ever used.
     len: usize,
+    /// Live keys, and the most at once.
+    open: usize,
+    peak: usize,
+    /// First free slot (`NIL`: none), linked through `next`.
+    free: u32,
 }
 impl Couplings {
     const MIN_BITS: u32 = 10;
@@ -115,6 +138,9 @@ impl Couplings {
             bits: Self::MIN_BITS,
             chunks: Vec::new(),
             len: 0,
+            open: 0,
+            peak: 0,
+            free: NIL,
         }
     }
     #[inline]
@@ -134,9 +160,10 @@ impl Couplings {
     fn slot_mut(&mut self, i: u32) -> &mut Cell {
         &mut self.chunks[i as usize / CHUNK_ENTRIES][i as usize % CHUNK_ENTRIES]
     }
-    /// Index of `key`'s accumulator (created at 0.0) and whether it is new.
+    /// Index of `key`'s accumulator (created at 0.0 with completion unit
+    /// `due()`) and whether it is new.
     #[inline]
-    fn find_or_insert(&mut self, key: u64) -> (u32, bool) {
+    fn find_or_insert(&mut self, key: u64, due: impl FnOnce() -> u32) -> (u32, bool) {
         let mut i = self.heads[Self::bucket(key, self.bits)];
         while i != NIL {
             let slot = self.slot(i);
@@ -145,25 +172,38 @@ impl Couplings {
             }
             i = slot.next;
         }
-        if self.len >= 2 << self.bits {
+        if self.open >= 2 << self.bits {
             self.grow();
         }
         let b = Self::bucket(key, self.bits);
-        let index = u32::try_from(self.len)
-            .ok()
-            .filter(|&i| i != NIL)
-            .expect("coupling count is bounded by max_couplings");
-        if self.len.is_multiple_of(CHUNK_ENTRIES) {
-            self.chunks.push(Vec::with_capacity(CHUNK_ENTRIES));
-        }
         let zero = 0.0f64.to_bits();
-        self.chunks.last_mut().expect("chunk").push(Cell {
+        let cell = Cell {
             key: [key as u32, (key >> 32) as u32],
             value: [zero as u32, (zero >> 32) as u32],
             next: self.heads[b],
-        });
+            due: due(),
+            next_due: NIL,
+        };
+        let index = if self.free != NIL {
+            let index = self.free;
+            self.free = self.slot(index).next;
+            *self.slot_mut(index) = cell;
+            index
+        } else {
+            let index = u32::try_from(self.len)
+                .ok()
+                .filter(|&i| i < NEVER)
+                .expect("coupling count is bounded by max_couplings");
+            if self.len.is_multiple_of(CHUNK_ENTRIES) {
+                self.chunks.push(Vec::with_capacity(CHUNK_ENTRIES));
+            }
+            self.chunks.last_mut().expect("chunk").push(cell);
+            self.len += 1;
+            index
+        };
         self.heads[b] = index;
-        self.len += 1;
+        self.open += 1;
+        self.peak = self.peak.max(self.open);
         (index, true)
     }
     #[inline]
@@ -175,7 +215,27 @@ impl Couplings {
         let bits = v.to_bits();
         self.slot_mut(i).value = [bits as u32, (bits >> 32) as u32];
     }
-    /// Doubles the head array and relinks every entry in place.
+    /// Unlinks the live entry `i` and frees its slot.
+    fn remove(&mut self, i: u32) {
+        let b = Self::bucket(self.slot(i).key(), self.bits);
+        let next = self.slot(i).next;
+        if self.heads[b] == i {
+            self.heads[b] = next;
+        } else {
+            let mut at = self.heads[b];
+            while self.slot(at).next != i {
+                at = self.slot(at).next;
+            }
+            self.slot_mut(at).next = next;
+        }
+        let free = self.free;
+        let slot = self.slot_mut(i);
+        slot.due = FREE;
+        slot.next = free;
+        self.free = i;
+        self.open -= 1;
+    }
+    /// Doubles the head array and relinks every live entry in place.
     fn grow(&mut self) {
         self.bits += 1;
         self.heads.clear();
@@ -185,20 +245,22 @@ impl Couplings {
         let mut index = 0u32;
         for chunk in &mut self.chunks {
             for slot in chunk.iter_mut() {
-                let b = Self::bucket(slot.key(), bits);
-                slot.next = self.heads[b];
-                self.heads[b] = index;
+                if slot.due != FREE {
+                    let b = Self::bucket(slot.key(), bits);
+                    slot.next = self.heads[b];
+                    self.heads[b] = index;
+                }
                 index += 1;
             }
         }
     }
-    /// Every `(key, value)`, releasing chunks as they are read.
-    fn drain_into(self, out: &mut Vec<(u64, f64)>) {
-        let Self { heads, chunks, .. } = self;
-        drop(heads);
-        for chunk in chunks {
-            out.extend(chunk.iter().map(|s| (s.key(), s.value())));
-        }
+    /// Every live `(due, key, value)`.
+    fn live(&self) -> impl Iterator<Item = (u32, u64, f64)> + '_ {
+        self.chunks
+            .iter()
+            .flatten()
+            .filter(|s| s.due != FREE)
+            .map(|s| (s.due, s.key(), s.value()))
     }
 }
 
@@ -224,49 +286,95 @@ pub(super) fn shard_of(key: u64, shift: u32) -> usize {
     }
 }
 
+/// Completion unit of coupling `key`: the last unit whose strips have one
+/// of its two nodes as their own node (`NEVER` without a schedule).
+#[inline]
+fn due(last: &[u32], key: u64) -> u32 {
+    if last.is_empty() {
+        NEVER
+    } else {
+        last[(key >> 32) as usize].max(last[key as u32 as usize])
+    }
+}
+
 /// Accumulators owned by one shard: ground at the global nodes `g` with
 /// `g % shards == s` (stored at `g / shards`), the coupling keys whose
-/// selector picks `s`, and in shard 0 the overlap-area statistic.
+/// selector picks `s`, and in shard 0 the overlap-area statistic. A
+/// coupling key is finalized once its completion unit is committed: it
+/// leaves the table and is grounded into this shard's per-node sums or
+/// kept.
 pub(super) struct Shard {
     ground: Vec<f64>,
     couplings: Couplings,
     area: f64,
+    /// Coupling keys created (finalized ones included).
     keys: usize,
+    /// Per completion granule: its first key, linked through `next_due`.
+    due_heads: Vec<u32>,
+    /// Granules before this one are finalized.
+    next_granule: usize,
+    /// Couplings this shard grounded, per global node, in completion order.
+    grounded: Vec<f64>,
+    grounded_count: usize,
+    /// Kept couplings in completion order.
+    kept: Vec<(u64, f64)>,
+    batch: Vec<(u32, u64, f64)>,
 }
 impl Shard {
-    fn new(index: usize, shift: u32, nodes: usize) -> Result<Self> {
+    fn new(index: usize, shift: u32, nodes: usize, units: usize) -> Result<Self> {
         let count = (nodes + (1 << shift) - 1 - index) >> shift;
-        let mut ground = Vec::new();
-        ground
-            .try_reserve_exact(count)
-            .map_err(|_| budget("extraction ground accumulator allocation"))?;
-        ground.resize(count, 0.0);
+        let alloc = |n: usize, what| -> Result<Vec<f64>> {
+            let mut v = Vec::new();
+            v.try_reserve_exact(n).map_err(|_| budget(what))?;
+            v.resize(n, 0.0);
+            Ok(v)
+        };
         Ok(Self {
-            ground,
+            ground: alloc(count, "extraction ground accumulator allocation")?,
             couplings: Couplings::new(),
             area: 0.0,
             keys: 0,
+            due_heads: vec![NIL; (units >> GRANULE_SHIFT) + 1],
+            next_granule: 0,
+            grounded: alloc(nodes, "extraction grounded coupling allocation")?,
+            grounded_count: 0,
+            kept: Vec::new(),
+            batch: Vec::new(),
         })
+    }
+    /// Index of `key`'s accumulator, scheduled by its completion unit when
+    /// new; whether it is new.
+    #[inline]
+    fn find_or_insert(&mut self, key: u64, last: &[u32]) -> (u32, bool) {
+        let (i, new) = self.couplings.find_or_insert(key, || due(last, key));
+        if new {
+            self.keys += 1;
+            let due = self.couplings.slot(i).due;
+            if let Some(head) = self.due_heads.get_mut((due >> GRANULE_SHIFT) as usize) {
+                self.couplings.slot_mut(i).next_due = *head;
+                *head = i;
+            }
+        }
+        (i, new)
     }
     /// `coupling[key] += pf` (created at 0.0); whether the key is new.
     #[inline]
-    fn couple(&mut self, key: u64, pf: f64) -> bool {
-        let (i, new) = self.couplings.find_or_insert(key);
-        self.keys += usize::from(new);
+    fn couple(&mut self, key: u64, pf: f64, last: &[u32]) -> bool {
+        let (i, new) = self.find_or_insert(key, last);
         let v = self.couplings.get(i) + pf;
         self.couplings.set(i, v);
         new
     }
-    /// Applies one shard's grouped records (consecutive records of one
-    /// accumulator are in their run order). Returns the new coupling keys.
-    fn apply_grouped(&mut self, ops: &[Op], shift: u32) -> usize {
+    /// Applies one shard's records (each accumulator's in their run order;
+    /// consecutive records of one key take one lookup). Returns the new
+    /// coupling keys.
+    fn apply_grouped(&mut self, ops: &[Op], shift: u32, last: &[u32]) -> usize {
         let mut fresh = 0;
         let mut at = 0;
         while at < ops.len() {
             let key = ops[at].key;
             if key < GROUND {
-                let (i, new) = self.couplings.find_or_insert(key);
-                self.keys += usize::from(new);
+                let (i, new) = self.find_or_insert(key, last);
                 fresh += usize::from(new);
                 let mut v = self.couplings.get(i);
                 while at < ops.len() && ops[at].key == key {
@@ -288,24 +396,100 @@ impl Shard {
         }
         fresh
     }
+    /// Finalizes every key due before unit `end` (every unit before it is
+    /// committed, so no record toward such a key remains): they leave the
+    /// table in `(due, key)` order and are grounded or kept (`settle`).
+    fn finalize(&mut self, end: u32, min: f64) {
+        let full = ((end >> GRANULE_SHIFT) as usize).min(self.due_heads.len());
+        while self.next_granule < full {
+            let mut i = std::mem::replace(&mut self.due_heads[self.next_granule], NIL);
+            while i != NIL {
+                let slot = *self.couplings.slot(i);
+                self.batch.push((slot.due, slot.key(), slot.value()));
+                self.couplings.remove(i);
+                i = slot.next_due;
+            }
+            self.next_granule += 1;
+        }
+        // The granule of `end` itself: its keys due before `end`.
+        if let Some(head) = self.due_heads.get(full).copied()
+            && end & ((1 << GRANULE_SHIFT) - 1) != 0
+        {
+            let (mut i, mut keep) = (head, NIL);
+            while i != NIL {
+                let slot = *self.couplings.slot(i);
+                if slot.due < end {
+                    self.batch.push((slot.due, slot.key(), slot.value()));
+                    self.couplings.remove(i);
+                } else {
+                    self.couplings.slot_mut(i).next_due = keep;
+                    keep = i;
+                }
+                i = slot.next_due;
+            }
+            self.due_heads[full] = keep;
+        }
+        self.settle(min);
+    }
+    /// Grounds or keeps the finalized keys in ascending `(due, key)`: a
+    /// positive coupling below `min` is added to this shard's grounded sum
+    /// of both its nodes (the lower node first), every other positive one
+    /// is kept.
+    fn settle(&mut self, min: f64) {
+        self.batch.sort_unstable_by_key(|&(due, key, _)| (due, key));
+        for &(_, key, pf) in &self.batch {
+            if pf <= 0.0 {
+                continue;
+            }
+            if pf < min {
+                self.grounded[(key >> 32) as usize] += pf;
+                self.grounded[key as u32 as usize] += pf;
+                self.grounded_count += 1;
+            } else {
+                self.kept.push((key, pf));
+            }
+        }
+        self.batch.clear();
+    }
+    /// Finalizes every key still open (keys without a completion unit, and
+    /// any the sweep did not reach), in `(due, key)` order.
+    fn finalize_all(&mut self, min: f64) {
+        let mut batch = std::mem::take(&mut self.batch);
+        batch.extend(self.couplings.live());
+        self.batch = batch;
+        self.couplings = Couplings::new();
+        self.settle(min);
+    }
 }
 
-/// Every network accumulator of the strip phase, split into shards.
+/// Every network accumulator of the strip phase, split into `SHARDS`
+/// shards.
 pub(super) struct Accumulators {
     shards: Vec<Shard>,
     shift: u32,
+    /// Per global node: the last unit whose strips have it as their own
+    /// node (empty: every key is finalized at the end).
+    last: Vec<u32>,
+    /// Couplings below this (pF) are grounded.
+    min: f64,
 }
 impl Accumulators {
-    /// `shards` is rounded up to a power of two; `area` seeds the overlap
-    /// statistic.
-    pub(super) fn new(shards: usize, nodes: usize, area: f64) -> Result<Self> {
-        let count = shards.clamp(1, MAX_SHARDS).next_power_of_two();
-        let shift = count.trailing_zeros();
+    /// `area` seeds the overlap statistic; `last` schedules every key's
+    /// finalization over `units` units.
+    pub(super) fn new(
+        nodes: usize,
+        area: f64,
+        last: Vec<u32>,
+        units: usize,
+        min: f64,
+    ) -> Result<Self> {
         let mut out = Self {
-            shards: (0..count)
-                .map(|s| Shard::new(s, shift, nodes))
+            shards: (0..SHARDS)
+                .map(|s| Shard::new(s, SHARD_SHIFT, nodes, units))
                 .collect::<Result<_>>()?,
-            shift,
+            shift: SHARD_SHIFT,
+            last,
+            min,
         };
         out.shards[0].area = area;
         Ok(out)
@@ -316,111 +500,61 @@ impl Accumulators {
     pub(super) fn area(&self) -> f64 {
         self.shards[0].area
     }
-    /// Accumulated ground capacitance at global node `g`.
+    /// Accumulated strip ground at global node `g`.
+    #[cfg(test)]
     pub(super) fn ground(&self, g: u32) -> f64 {
         let g = g as usize;
         self.shards[g & ((1 << self.shift) - 1)].ground[g >> self.shift]
     }
-    /// Every coupling `(key, pF)` in ascending key order (keys are unique).
-    /// Shards are drained and sorted in parallel, each map released as soon
-    /// as it is moved out; the sorted shard lists are merged lazily.
-    pub(super) fn into_sorted_couplings(self) -> Result<Sorted> {
-        use rayon::prelude::*;
-        let lists = self
-            .shards
-            .into_par_iter()
-            .map(|shard| -> Result<Vec<(u64, f64)>> {
-                let Shard {
-                    ground,
-                    couplings,
-                    keys,
-                    ..
-                } = shard;
-                drop(ground);
-                let mut list = Vec::new();
-                list.try_reserve_exact(keys)
-                    .map_err(|_| budget("extraction coupling list allocation"))?;
-                couplings.drain_into(&mut list);
-                list.sort_unstable_by_key(|c| c.0);
-                Ok(list)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Sorted {
-            heads: lists
-                .into_iter()
-                .map(|l| l.into_iter().peekable())
-                .collect(),
-        })
+    /// Live keys over all shards (keys not yet finalized).
+    #[cfg(test)]
+    pub(super) fn open(&self) -> usize {
+        self.shards.iter().map(|s| s.couplings.open).sum()
+    }
+    /// The sum over the shards of the most keys each held open at once.
+    pub(super) fn open_peak(&self) -> usize {
+        self.shards.iter().map(|s| s.couplings.peak).sum()
     }
 }
 
 impl Accumulators {
-    /// Finishes the network accumulators exactly as the serial loop does:
-    /// every node's ground is its accumulated ground, then, over the
-    /// couplings in ascending key order, each coupling for which
-    /// `grounded(pF)` holds is added to the ground of both its nodes (the
-    /// lower node first) and each other positive coupling is kept.
-    /// `nets` holds the ground of each net's nodes with the global ID of its
-    /// node 0 (a net's nodes have consecutive IDs). Returns the kept
-    /// couplings in ascending key order and the count of grounded ones.
-    ///
-    /// The loop adds into one flat array by global node (no node decoding,
-    /// a cache-resident target) over the merged shard lists; the shards are
-    /// drained and sorted, and the nets read and written, in parallel.
+    /// Finishes the network accumulators: every key still open is
+    /// finalized, then each node's ground is its accumulated strip ground
+    /// plus, shard by shard in shard order, the couplings that shard
+    /// grounded at it (each shard adds them in `(due, key)` order). `nets`
+    /// holds the ground of each net's nodes with the global ID of its node
+    /// 0 (a net's nodes have consecutive IDs). Returns the kept couplings
+    /// in ascending key order and the count of grounded ones.
     pub(super) fn finish(
-        self,
-        grounded: impl Fn(f64) -> bool,
+        mut self,
         nets: &mut [(u32, &mut [f64])],
     ) -> Result<(Vec<(u64, f64)>, usize)> {
         use rayon::prelude::*;
-        let total = nets
-            .iter()
-            .map(|(base, g)| *base as usize + g.len())
-            .max()
-            .unwrap_or(0);
-        let mut flat: Vec<f64> = Vec::new();
-        flat.try_reserve_exact(total)
-            .map_err(|_| budget("extraction ground accumulator allocation"))?;
-        flat.par_extend((0..total as u32).into_par_iter().map(|g| self.ground(g)));
-        let mut count = 0usize;
-        let mut kept = Vec::new();
-        for (key, pf) in self.into_sorted_couplings()? {
-            if pf <= 0.0 {
-                continue;
-            }
-            if grounded(pf) {
-                flat[(key >> 32) as usize] += pf;
-                flat[key as u32 as usize] += pf;
-                count += 1;
-                continue;
-            }
-            kept.push((key, pf));
-        }
+        let min = self.min;
+        self.shards
+            .par_iter_mut()
+            .for_each(|shard| shard.finalize_all(min));
+        let shards = &self.shards;
+        let shift = self.shift;
         nets.par_iter_mut().for_each(|(base, ground)| {
-            let base = *base as usize;
-            ground.copy_from_slice(&flat[base..base + ground.len()]);
-        });
-        Ok((kept, count))
-    }
-}
-
-/// Ascending merge of per-shard sorted coupling lists.
-pub(super) struct Sorted {
-    heads: Vec<std::iter::Peekable<std::vec::IntoIter<(u64, f64)>>>,
-}
-impl Iterator for Sorted {
-    type Item = (u64, f64);
-    #[inline]
-    fn next(&mut self) -> Option<(u64, f64)> {
-        let mut best: Option<(usize, u64)> = None;
-        for (i, h) in self.heads.iter_mut().enumerate() {
-            if let Some(&(key, _)) = h.peek()
-                && best.is_none_or(|(_, k)| key < k)
-            {
-                best = Some((i, key));
+            for (k, g) in ground.iter_mut().enumerate() {
+                let node = *base as usize + k;
+                let mut v = shards[node & ((1 << shift) - 1)].ground[node >> shift];
+                for shard in shards {
+                    v += shard.grounded[node];
+                }
+                *g = v;
             }
+        });
+        let count = shards.iter().map(|s| s.grounded_count).sum();
+        let mut kept = Vec::new();
+        kept.try_reserve_exact(shards.iter().map(|s| s.kept.len()).sum())
+            .map_err(|_| budget("extraction coupling list allocation"))?;
+        for shard in &mut self.shards {
+            kept.append(&mut shard.kept);
         }
-        self.heads[best?.0].next()
+        kept.par_sort_unstable_by_key(|c| c.0);
+        Ok((kept, count))
     }
 }
 
@@ -429,6 +563,8 @@ impl Iterator for Sorted {
 pub(super) struct Commit<'n> {
     shards: Vec<&'n mut Shard>,
     shift: u32,
+    last: &'n [u32],
+    min: f64,
     stats: &'n mut ExtractStats,
     max_couplings: usize,
     keys: usize,
@@ -440,9 +576,17 @@ impl<'n> Commit<'n> {
         max_couplings: usize,
     ) -> Self {
         let keys = acc.keys();
+        let Accumulators {
+            shards,
+            shift,
+            last,
+            min,
+        } = acc;
         Self {
-            shift: acc.shift,
-            shards: acc.shards.iter_mut().collect(),
+            shift: *shift,
+            shards: shards.iter_mut().collect(),
+            last: last.as_slice(),
+            min: *min,
             stats,
             max_couplings,
             keys,
@@ -450,6 +594,12 @@ impl<'n> Commit<'n> {
     }
     pub(super) fn stats(&mut self) -> &mut ExtractStats {
         self.stats
+    }
+    /// Finalizes, in every shard, the keys due before unit `end`.
+    fn finalize(&mut self, end: u32) {
+        for shard in &mut self.shards {
+            shard.finalize(end, self.min);
+        }
     }
     #[inline]
     fn apply(&mut self, op: Op) -> Result<()> {
@@ -459,7 +609,7 @@ impl<'n> Commit<'n> {
         } else if op.key >= GROUND {
             shard.ground[(op.key as u32 as usize) >> self.shift] += op.pf;
         } else {
-            let new = shard.couple(op.key, op.pf);
+            let new = shard.couple(op.key, op.pf, self.last);
             if new {
                 self.keys += 1;
                 if self.keys > self.max_couplings {
@@ -506,13 +656,15 @@ struct Meta {
 #[derive(Default)]
 struct Chunk {
     index: u64,
+    /// Index of the unit after this chunk's last one.
+    end: u32,
     units: Vec<UnitRef>,
     /// Ordered accumulations in run order. Emptied once a complete chunk
     /// is split into `buckets`.
     ops: Vec<Op>,
-    /// A complete chunk's records per shard, stably grouped by accumulator.
+    /// A complete chunk's records per shard, in emission order.
     buckets: Vec<Vec<Op>>,
-    /// Distinct coupling keys per bucket (an upper bound of new keys).
+    /// Coupling records per bucket (an upper bound of new keys).
     distinct: Vec<usize>,
     /// Per computed unit: its record, or `None` when it was deferred to the
     /// serial path. A unit that failed ends the list (the serial path
@@ -535,14 +687,7 @@ impl Chunk {
     }
     /// Computes units in order. A unit beyond a parallel bound is deferred;
     /// an error ends the chunk. A complete chunk is split by shard.
-    fn compute(
-        &mut self,
-        ctx: &Ctx<'_, '_>,
-        bounds: Bounds,
-        shift: u32,
-        sc: &mut Scratch,
-        groups: &mut Grouping,
-    ) {
+    fn compute(&mut self, ctx: &Ctx<'_, '_>, bounds: Bounds, shift: u32, sc: &mut Scratch) {
         self.ops.clear();
         self.metas.clear();
         self.complete = false;
@@ -576,104 +721,31 @@ impl Chunk {
             self.buckets.resize_with(shards, Vec::new);
             self.distinct.clear();
             self.distinct.resize(shards, 0);
-            groups.split(&self.ops, shift, &mut self.buckets, &mut self.distinct);
+            split(&self.ops, shift, &mut self.buckets, &mut self.distinct);
             self.ops.clear();
         }
     }
 }
 
-/// Lane scratch that splits a chunk's records by shard, grouped by
-/// accumulator: each accumulator's records stay contiguous and in their run
-/// order. Ground and area records go to their shard in emission order;
-/// coupling records are chained per key (keys found through a chunk-local
-/// open-addressing table) and appended per shard key by key, in order of
-/// first appearance. The table's slots carry the chunk's generation, so it
-/// is never cleared between chunks.
-#[derive(Default)]
-struct Grouping {
-    /// Per slot: `(generation, group)`; a slot of another generation is
-    /// empty. A power of two long, at least twice the coupling records.
-    table: Vec<(u32, u32)>,
-    generation: u32,
-    /// Per group: its key, its first and last record.
-    keys: Vec<u64>,
-    first: Vec<u32>,
-    last: Vec<u32>,
-    /// Next record of the same key (`u32::MAX` ends a chain).
-    next: Vec<u32>,
-}
-impl Grouping {
-    fn split(&mut self, ops: &[Op], shift: u32, buckets: &mut [Vec<Op>], distinct: &mut [usize]) {
-        const END: u32 = u32::MAX;
-        // Each bucket is sized once, to its exact record count.
-        let mut lens = [0usize; MAX_SHARDS];
-        let mut couplings = 0;
-        for op in ops {
-            lens[shard_of(op.key, shift)] += 1;
-            couplings += usize::from(op.key < GROUND);
-        }
-        for (bucket, &len) in buckets.iter_mut().zip(&lens) {
-            bucket.clear();
-            bucket.reserve_exact(len);
-        }
-        let slots = (2 * couplings).max(16).next_power_of_two();
-        if self.table.len() < slots {
-            self.table.resize(slots, (0, 0));
-        }
-        self.generation = self.generation.wrapping_add(1);
-        if self.generation == 0 {
-            // Every stamp is stale again only after a full cycle.
-            self.table.fill((0, 0));
-            self.generation = 1;
-        }
-        let generation = self.generation;
-        let bits = slots.trailing_zeros();
-        let table = &mut self.table[..slots];
-        self.keys.clear();
-        self.first.clear();
-        self.last.clear();
-        if self.next.len() < ops.len() {
-            self.next.resize(ops.len(), END);
-        }
-        let next = &mut self.next[..ops.len()];
-        for (i, op) in ops.iter().enumerate() {
-            if op.key >= GROUND {
-                // Ground and area records apply in emission order: each
-                // accumulator still sees its own records in run order.
-                buckets[shard_of(op.key, shift)].push(*op);
-                continue;
-            }
-            next[i] = END;
-            let mut at = Couplings::bucket(op.key, bits);
-            loop {
-                let (stamp, group) = table[at];
-                if stamp != generation {
-                    table[at] = (generation, self.keys.len() as u32);
-                    self.keys.push(op.key);
-                    self.first.push(i as u32);
-                    self.last.push(i as u32);
-                    break;
-                }
-                if self.keys[group as usize] == op.key {
-                    let tail = &mut self.last[group as usize];
-                    next[*tail as usize] = i as u32;
-                    *tail = i as u32;
-                    break;
-                }
-                at = (at + 1) & (slots - 1);
-            }
-        }
-        // Then each coupling key's records, in first-appearance order.
-        for (&key, &first) in self.keys.iter().zip(&self.first) {
-            let s = shard_of(key, shift);
-            distinct[s] += 1;
-            let bucket = &mut buckets[s];
-            let mut i = first;
-            while i != END {
-                bucket.push(ops[i as usize]);
-                i = next[i as usize];
-            }
-        }
+/// Splits a chunk's records by shard, each shard's in emission order, so
+/// every accumulator sees its records in run order. A strip records one
+/// value per accumulator (`strip::Sums`), so records of one key rarely
+/// repeat within a chunk and are not grouped. `distinct[s]` receives the
+/// shard's coupling records, an upper bound of the keys they create.
+fn split(ops: &[Op], shift: u32, buckets: &mut [Vec<Op>], distinct: &mut [usize]) {
+    // Each bucket is sized once, to its exact record count.
+    let mut lens = [0usize; SHARDS];
+    for op in ops {
+        let s = shard_of(op.key, shift);
+        lens[s] += 1;
+        distinct[s] += usize::from(op.key < GROUND);
+    }
+    for (bucket, &len) in buckets.iter_mut().zip(&lens) {
+        bucket.clear();
+        bucket.reserve_exact(len);
+    }
+    for op in ops {
+        buckets[shard_of(op.key, shift)].push(*op);
     }
 }
 
@@ -749,16 +821,6 @@ pub(super) fn parallel_bytes(
         .saturating_mul(lane_bytes(bounds, limits, instances))
         .saturating_add(bounds.pending_bytes as u64)
 }
-/// Accumulator shards for `lanes`: one for the serial path, otherwise the
-/// lane count rounded up to a power of two.
-pub(super) fn shard_count(lanes: usize, limits: &ExtractLimits) -> usize {
-    if lanes <= 1 && limits.tile_units == 0 {
-        1
-    } else {
-        lanes.clamp(1, MAX_SHARDS).next_power_of_two()
-    }
-}
-
 /// Phase timings and unit counts for the private profile.
 #[derive(Default)]
 pub(super) struct Report {
@@ -770,6 +832,8 @@ pub(super) struct Report {
     /// Chunks committed at a barrier.
     pub barriers: usize,
     pub ops: usize,
+    /// Coupling keys open at once (sum of the shards' peaks).
+    pub open_peak: usize,
     pub compute_ns: u128,
     pub commit_ns: u128,
 }
@@ -805,6 +869,8 @@ fn serial_unit(
 struct Source<I> {
     units: I,
     next: u64,
+    /// Units taken so far.
+    taken: u32,
     done: bool,
 }
 struct Pending {
@@ -832,6 +898,9 @@ struct Leader<'n> {
 
 struct Shared<'s, 'n> {
     shift: u32,
+    /// Completion schedule of the coupling keys (`Accumulators::last`).
+    last: &'n [u32],
+    min: f64,
     max_couplings: usize,
     instances: usize,
     shards: Vec<Mutex<Slot<'n>>>,
@@ -839,7 +908,7 @@ struct Shared<'s, 'n> {
     turns: Vec<AtomicU64>,
     /// Chunks below this are cleared (or committed at a barrier).
     cleared: AtomicU64,
-    /// Over applied shard records: distinct keys minus new keys.
+    /// Over applied shard records: coupling records minus new keys.
     savings: AtomicUsize,
     leader: Mutex<Leader<'n>>,
     pending: &'s Mutex<Pending>,
@@ -869,7 +938,10 @@ impl<'n> Shared<'_, 'n> {
             .get(&index)
             .cloned()
             .expect("a cleared chunk stays pending until every shard applied it");
-        let fresh = slot.acc.apply_grouped(&chunk.buckets[s], self.shift);
+        let fresh = slot
+            .acc
+            .apply_grouped(&chunk.buckets[s], self.shift, self.last);
+        slot.acc.finalize(chunk.end, self.min);
         self.savings
             .fetch_add(chunk.distinct[s] - fresh, Ordering::AcqRel);
         slot.turn += 1;
@@ -1044,6 +1116,8 @@ impl<'n> Shared<'_, 'n> {
         let mut commit = Commit {
             shards: guards.iter_mut().map(|g| &mut *g.acc).collect(),
             shift: self.shift,
+            last: self.last,
+            min: self.min,
             stats,
             max_couplings: self.max_couplings,
             keys,
@@ -1105,6 +1179,7 @@ impl<'n> Shared<'_, 'n> {
     ) -> Result<()> {
         let next = leader.turn + 1;
         for (s, mut g) in guards.into_iter().enumerate() {
+            g.acc.finalize(chunk.end, self.min);
             g.turn = next;
             self.turns[s].store(next, Ordering::Release);
         }
@@ -1154,7 +1229,11 @@ pub(super) fn run(
             serial_unit(ctx, u, &mut sc, &mut commit)?;
             report.units += 1;
             report.serial_units += 1;
+            if (n + 1).is_multiple_of(1 << GRANULE_SHIFT) {
+                commit.finalize((n + 1) as u32);
+            }
         }
+        commit.finalize(report.units as u32);
         report.compute_ns = started.elapsed().as_nanos();
         return Ok(report);
     }
@@ -1163,11 +1242,12 @@ pub(super) fn run(
     let shift = acc.shift;
     let mut scratch = Vec::with_capacity(lanes);
     for _ in 0..lanes {
-        scratch.push((Scratch::new(instances)?, Grouping::default()));
+        scratch.push(Scratch::new(instances)?);
     }
     let source = Mutex::new(Source {
         units,
         next: 0,
+        taken: 0,
         done: false,
     });
     let pending = Mutex::new(Pending {
@@ -1179,12 +1259,19 @@ pub(super) fn run(
     let failed = AtomicBool::new(false);
     let compute_ns = AtomicUsize::new(0);
     let shard_count = acc.shards.len();
+    let Accumulators {
+        shards: acc_shards,
+        last,
+        min,
+        ..
+    } = acc;
     let shared = Shared {
         shift,
+        last: last.as_slice(),
+        min: *min,
         max_couplings: limits.max_couplings,
         instances,
-        shards: acc
-            .shards
+        shards: acc_shards
             .iter_mut()
             .map(|acc| Mutex::new(Slot { acc, turn: 0 }))
             .collect(),
@@ -1209,7 +1296,7 @@ pub(super) fn run(
         commit_ns: AtomicUsize::new(0),
     };
     rayon::scope(|s| {
-        for (lane, (sc, groups)) in scratch.iter_mut().enumerate() {
+        for (lane, sc) in scratch.iter_mut().enumerate() {
             let (source, pending, space, failed) = (&source, &pending, &space, &failed);
             let (shared, compute_ns) = (&shared, &compute_ns);
             s.spawn(move |_| {
@@ -1263,9 +1350,11 @@ pub(super) fn run(
                         }
                         chunk.index = src.next;
                         src.next += 1;
+                        src.taken += chunk.units.len() as u32;
+                        chunk.end = src.taken;
                     }
                     let started = std::time::Instant::now();
-                    chunk.compute(ctx, bounds, shift, sc, groups);
+                    chunk.compute(ctx, bounds, shift, sc);
                     compute_ns.fetch_add(started.elapsed().as_nanos() as usize, Ordering::Relaxed);
                     {
                         let mut p = lock(pending);
@@ -1355,22 +1444,99 @@ mod tests {
             area.to_bits(),
         )
     }
-    fn bits(acc: Accumulators, nodes: usize) -> (Vec<u64>, Vec<(u64, u64)>, u64) {
+    /// Raw accumulators of an unscheduled set (nothing finalized yet).
+    fn bits(acc: &Accumulators, nodes: usize) -> (Vec<u64>, Vec<(u64, u64)>, u64) {
         let ground = (0..nodes as u32).map(|g| acc.ground(g).to_bits()).collect();
-        let area = acc.area().to_bits();
-        let couplings = acc
-            .into_sorted_couplings()
-            .unwrap()
-            .map(|(k, v)| (k, v.to_bits()))
+        let mut couplings: Vec<(u64, u64)> = acc
+            .shards
+            .iter()
+            .flat_map(|s| s.couplings.live().map(|(_, k, v)| (k, v.to_bits())))
             .collect();
-        (ground, couplings, area)
+        couplings.sort_unstable();
+        (ground, couplings, acc.area().to_bits())
+    }
+    /// The stream as units of `per` records, with the last unit of every node.
+    fn schedule(ops: &[Op], nodes: usize, per: usize) -> Vec<u32> {
+        let mut last = vec![0u32; nodes];
+        for (i, op) in ops.iter().enumerate() {
+            if op.key < GROUND {
+                for g in [(op.key >> 32) as usize, op.key as u32 as usize] {
+                    last[g] = last[g].max((i / per) as u32);
+                }
+            }
+        }
+        last
+    }
+    /// The finished network written out: strip ground, then per shard in
+    /// shard order the couplings it grounds in `(due, key)` order.
+    fn expected(
+        ops: &[Op],
+        nodes: usize,
+        last: &[u32],
+        min: f64,
+    ) -> (Vec<u64>, Vec<(u64, u64)>, usize) {
+        let mut ground = vec![0.0f64; nodes];
+        let mut coupling = BTreeMap::<u64, f64>::new();
+        for op in ops {
+            if op.key >= GROUND {
+                if op.key != AREA {
+                    ground[op.key as u32 as usize] += op.pf;
+                }
+            } else {
+                *coupling.entry(op.key).or_insert(0.0) += op.pf;
+            }
+        }
+        let mut order: Vec<(u32, u64, f64)> = coupling
+            .iter()
+            .map(|(&k, &v)| (due(last, k), k, v))
+            .collect();
+        order.sort_by_key(|&(d, k, _)| (d, k));
+        let mut per_shard = vec![vec![0.0f64; nodes]; SHARDS];
+        let (mut kept, mut count) = (Vec::new(), 0);
+        for &(_, key, pf) in &order {
+            if pf <= 0.0 {
+                continue;
+            }
+            if pf < min {
+                let s = &mut per_shard[shard_of(key, SHARD_SHIFT)];
+                s[(key >> 32) as usize] += pf;
+                s[key as u32 as usize] += pf;
+                count += 1;
+            } else {
+                kept.push((key, pf.to_bits()));
+            }
+        }
+        kept.sort_unstable();
+        for (g, v) in ground.iter_mut().enumerate() {
+            for s in &per_shard {
+                *v += s[g];
+            }
+        }
+        (ground.iter().map(|g| g.to_bits()).collect(), kept, count)
+    }
+    fn finished(acc: Accumulators, sizes: &[usize]) -> (Vec<u64>, Vec<(u64, u64)>, usize) {
+        let mut grounds: Vec<Vec<f64>> = sizes.iter().map(|&n| vec![f64::NAN; n]).collect();
+        let mut base = 0u32;
+        let mut nets: Vec<(u32, &mut [f64])> = grounds
+            .iter_mut()
+            .map(|g| {
+                base += g.len() as u32;
+                (base - g.len() as u32, &mut g[..])
+            })
+            .collect();
+        let (kept, count) = acc.finish(&mut nets).unwrap();
+        (
+            grounds.iter().flatten().map(|g| g.to_bits()).collect(),
+            kept.iter().map(|&(k, v)| (k, v.to_bits())).collect(),
+            count,
+        )
     }
 
     #[test]
-    fn finish_matches_the_serial_grounding_loop_bit_for_bit() {
+    fn finish_grounds_each_shards_couplings_in_completion_order() {
         let nodes = 97usize;
         let mut ops = stream(30_000, nodes as u32);
-        // Some couplings end below zero (the loop skips them); the stream
+        // Some couplings end below zero (finishing drops them); the stream
         // also couples some nodes with themselves.
         ops.extend((0..40u32).map(|k| Op::couple(k, (k * 7 + 1) % nodes as u32, -1e3)));
         let sizes = [10usize, 1, 30, 55, 1];
@@ -1383,56 +1549,54 @@ mod tests {
         positive.sort_by(f64::total_cmp);
         assert!(positive.len() > 10 && positive.len() < totals.len());
         let median = positive[positive.len() / 2];
+        let per = 50;
+        let units = ops.len().div_ceil(per);
+        let scheduled = schedule(&ops, nodes, per);
         for min in [0.0, positive[3], median, f64::INFINITY] {
-            // The original loop over the couplings in ascending key order.
-            let mut ground = vec![0.0f64; nodes];
-            let mut coupling = BTreeMap::<u64, f64>::new();
-            for op in &ops {
-                if op.key >= GROUND {
-                    if op.key != AREA {
-                        ground[op.key as u32 as usize] += op.pf;
+            for last in [Vec::new(), scheduled.clone()] {
+                let want = expected(&ops, nodes, &last, min);
+                assert!(min != median || (want.2 > 0 && !want.1.is_empty()));
+                // The serial sink, finalizing after every unit, after every
+                // seventh, or only at the end.
+                for every in [1usize, 7, usize::MAX] {
+                    let mut acc = Accumulators::new(nodes, 0.0, last.clone(), units, min).unwrap();
+                    let mut stats = ExtractStats::default();
+                    let mut commit = Commit::new(&mut acc, &mut stats, usize::MAX);
+                    for (i, &op) in ops.iter().enumerate() {
+                        commit.apply(op).unwrap();
+                        let unit = i / per + 1;
+                        if (i + 1) % per == 0 && unit % every.min(units) == 0 {
+                            commit.finalize(unit as u32);
+                        }
                     }
-                } else {
-                    *coupling.entry(op.key).or_insert(0.0) += op.pf;
+                    if every == 1 && !last.is_empty() {
+                        commit.finalize(units as u32);
+                        // Every scheduled key has left the tables.
+                        assert_eq!(acc.open(), 0);
+                    }
+                    assert_eq!(finished(acc, &sizes), want, "{min} {every}");
                 }
-            }
-            let (mut kept, mut count) = (Vec::new(), 0usize);
-            for (&key, &pf) in &coupling {
-                if pf <= 0.0 {
-                    continue;
+                // Grouped chunks applied shard by shard, each shard
+                // finalizing at its chunk ends (shards progress apart).
+                for chunk_units in [1usize, 3, 64] {
+                    let mut acc = Accumulators::new(nodes, 0.0, last.clone(), units, min).unwrap();
+                    let mut chunks = Vec::new();
+                    for (c, chunk) in ops.chunks(per * chunk_units).enumerate() {
+                        let mut buckets = vec![Vec::new(); SHARDS];
+                        let mut distinct = vec![0; SHARDS];
+                        split(chunk, SHARD_SHIFT, &mut buckets, &mut distinct);
+                        let end = ((c + 1) * chunk_units).min(units) as u32;
+                        chunks.push((buckets, end));
+                    }
+                    let Accumulators { shards, last, .. } = &mut acc;
+                    for (s, shard) in shards.iter_mut().enumerate().rev() {
+                        for (buckets, end) in &chunks {
+                            shard.apply_grouped(&buckets[s], SHARD_SHIFT, last);
+                            shard.finalize(*end, min);
+                        }
+                    }
+                    assert_eq!(finished(acc, &sizes), want, "{min} {chunk_units}");
                 }
-                if pf < min {
-                    ground[(key >> 32) as usize] += pf;
-                    ground[key as u32 as usize] += pf;
-                    count += 1;
-                    continue;
-                }
-                kept.push((key, pf.to_bits()));
-            }
-            assert!(min != median || (count > 0 && !kept.is_empty()));
-            let want: Vec<u64> = ground.iter().map(|g| g.to_bits()).collect();
-            for shards in [1, 2, 4, 8] {
-                let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
-                let mut stats = ExtractStats::default();
-                let mut commit = Commit::new(&mut acc, &mut stats, usize::MAX);
-                for &op in &ops {
-                    commit.apply(op).unwrap();
-                }
-                let mut grounds: Vec<Vec<f64>> = sizes.iter().map(|&n| vec![f64::NAN; n]).collect();
-                let mut base = 0u32;
-                let mut nets: Vec<(u32, &mut [f64])> = grounds
-                    .iter_mut()
-                    .map(|g| {
-                        base += g.len() as u32;
-                        (base - g.len() as u32, &mut g[..])
-                    })
-                    .collect();
-                let (got, grounded) = acc.finish(|pf| pf > 0.0 && pf < min, &mut nets).unwrap();
-                assert_eq!(grounded, count, "{min} {shards}");
-                let got: Vec<(u64, u64)> = got.iter().map(|&(k, v)| (k, v.to_bits())).collect();
-                assert_eq!(got, kept, "{min} {shards}");
-                let flat: Vec<u64> = grounds.iter().flatten().map(|g| g.to_bits()).collect();
-                assert_eq!(flat, want, "{min} {shards}");
             }
         }
     }
@@ -1443,93 +1607,88 @@ mod tests {
         let ops = stream(30_000, nodes as u32);
         let want = reference(&ops, nodes);
         let mut stats = ExtractStats::default();
-        // The serial sink, one record at a time, at every shard count.
-        for shards in [1, 2, 4, 8] {
-            let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
-            let mut commit = Commit::new(&mut acc, &mut stats, usize::MAX);
-            for &op in &ops {
-                commit.apply(op).unwrap();
-            }
-            assert_eq!(acc.keys(), want.1.len());
-            assert_eq!(bits(acc, nodes), want);
+        // The serial sink, one record at a time.
+        let mut acc = Accumulators::new(nodes, 0.0, Vec::new(), 0, 0.0).unwrap();
+        let mut commit = Commit::new(&mut acc, &mut stats, usize::MAX);
+        for &op in &ops {
+            commit.apply(op).unwrap();
         }
+        assert_eq!(acc.keys(), want.1.len());
+        assert_eq!(bits(&acc, nodes), want);
         // Chunks split by shard and grouped by accumulator, applied shard
         // by shard in chunk order (shards progress independently).
-        for shift in 0..4u32 {
-            let mut acc = Accumulators::new(1 << shift, nodes, 0.0).unwrap();
-            let chunks: Vec<Vec<Vec<Op>>> = ops
-                .chunks(777)
-                .map(|chunk| {
-                    let mut buckets = vec![Vec::new(); 1 << shift];
-                    for &op in chunk {
-                        buckets[shard_of(op.key, shift)].push(op);
-                    }
-                    for b in &mut buckets {
-                        b.sort_by_key(|op| op.key);
-                    }
-                    buckets
-                })
-                .collect();
-            for (s, shard) in acc.shards.iter_mut().enumerate().rev() {
-                for chunk in &chunks {
-                    shard.apply_grouped(&chunk[s], shift);
+        let mut acc = Accumulators::new(nodes, 0.0, Vec::new(), 0, 0.0).unwrap();
+        let chunks: Vec<Vec<Vec<Op>>> = ops
+            .chunks(777)
+            .map(|chunk| {
+                let mut buckets = vec![Vec::new(); SHARDS];
+                for &op in chunk {
+                    buckets[shard_of(op.key, SHARD_SHIFT)].push(op);
                 }
+                for b in &mut buckets {
+                    b.sort_by_key(|op| op.key);
+                }
+                buckets
+            })
+            .collect();
+        for (s, shard) in acc.shards.iter_mut().enumerate().rev() {
+            for chunk in &chunks {
+                shard.apply_grouped(&chunk[s], SHARD_SHIFT, &[]);
             }
-            assert_eq!(bits(acc, nodes), want);
         }
-        // The lane grouping: one pass per chunk, records of each coupling
-        // accumulator contiguous in run order, ground and area records in
-        // emission order, and the exact distinct coupling keys per shard.
-        let mut groups = Grouping::default();
-        for shift in 0..4u32 {
-            let shards = 1usize << shift;
-            let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
-            let mut chunks = Vec::new();
-            for chunk in ops.chunks(777) {
-                let mut buckets = vec![Vec::new(); shards];
-                let mut distinct = vec![0; shards];
-                groups.split(chunk, shift, &mut buckets, &mut distinct);
-                for (s, bucket) in buckets.iter().enumerate() {
-                    let mine: Vec<Op> = chunk
-                        .iter()
-                        .copied()
-                        .filter(|op| shard_of(op.key, shift) == s)
-                        .collect();
-                    assert_eq!(bucket.len(), mine.len());
-                    let keys: std::collections::BTreeSet<u64> = mine
-                        .iter()
-                        .map(|op| op.key)
-                        .filter(|&k| k < GROUND)
-                        .collect();
-                    assert_eq!(distinct[s], keys.len());
-                    for key in mine
-                        .iter()
-                        .map(|op| op.key)
-                        .collect::<std::collections::BTreeSet<_>>()
-                    {
-                        let order = |v: &[Op]| -> Vec<u64> {
-                            v.iter()
-                                .filter(|op| op.key == key)
-                                .map(|op| op.pf.to_bits())
-                                .collect()
-                        };
-                        assert_eq!(order(bucket), order(&mine));
-                        if key < GROUND {
-                            let first = bucket.iter().position(|op| op.key == key).unwrap();
-                            let n = order(&mine).len();
-                            assert!(bucket[first..first + n].iter().all(|op| op.key == key));
-                        }
-                    }
-                }
-                chunks.push(buckets);
+        assert_eq!(bits(&acc, nodes), want);
+        // The lane split: one pass per chunk, each shard's records in
+        // emission order, its coupling records counted.
+        let mut acc = Accumulators::new(nodes, 0.0, Vec::new(), 0, 0.0).unwrap();
+        for chunk in ops.chunks(777) {
+            let mut buckets = vec![Vec::new(); SHARDS];
+            let mut distinct = vec![0; SHARDS];
+            split(chunk, SHARD_SHIFT, &mut buckets, &mut distinct);
+            for (s, bucket) in buckets.iter().enumerate() {
+                let mine: Vec<(u64, u64)> = chunk
+                    .iter()
+                    .filter(|op| shard_of(op.key, SHARD_SHIFT) == s)
+                    .map(|op| (op.key, op.pf.to_bits()))
+                    .collect();
+                let got: Vec<(u64, u64)> =
+                    bucket.iter().map(|op| (op.key, op.pf.to_bits())).collect();
+                assert_eq!(got, mine);
+                assert_eq!(distinct[s], mine.iter().filter(|m| m.0 < GROUND).count());
+                acc.shards[s].apply_grouped(bucket, SHARD_SHIFT, &[]);
             }
-            for (s, shard) in acc.shards.iter_mut().enumerate() {
-                for chunk in &chunks {
-                    shard.apply_grouped(&chunk[s], shift);
-                }
-            }
-            assert_eq!(bits(acc, nodes), want);
         }
+        assert_eq!(bits(&acc, nodes), want);
+    }
+
+    #[test]
+    fn finalized_slots_are_reused_and_the_table_shrinks_to_the_open_keys() {
+        let mut table = Couplings::new();
+        // Keys come and go: at most 3,000 are open at once.
+        let mut open = std::collections::VecDeque::new();
+        for k in 0..60_000u64 {
+            let key = k * 0x1_0000_0001 % 1_000_003;
+            let (i, new) = table.find_or_insert(key, || k as u32);
+            assert!(new);
+            table.set(i, k as f64);
+            open.push_back((i, key, k));
+            if open.len() > 3_000 {
+                let (i, key, v) = open.pop_front().unwrap();
+                assert_eq!(table.slot(i).key(), key);
+                assert_eq!(table.get(i).to_bits(), (v as f64).to_bits());
+                table.remove(i);
+            }
+        }
+        assert_eq!(table.open, 3_000);
+        assert!(table.len <= 3_001, "{}", table.len);
+        for &(i, key, v) in &open {
+            assert_eq!(table.find_or_insert(key, || 0), (i, false));
+            assert_eq!(table.get(i).to_bits(), (v as f64).to_bits());
+        }
+        let mut live: Vec<u64> = table.live().map(|(_, k, _)| k).collect();
+        live.sort_unstable();
+        let mut want: Vec<u64> = open.iter().map(|o| o.1).collect();
+        want.sort_unstable();
+        assert_eq!(live, want);
     }
 
     #[test]
@@ -1566,16 +1725,14 @@ mod tests {
             .filter(|op| !op.is_null_ground())
             .collect();
         assert_eq!(reference(&kept, nodes), want);
-        for shards in [1, 2, 4] {
-            let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
-            let mut stats = ExtractStats::default();
-            let mut commit = Commit::new(&mut acc, &mut stats, usize::MAX);
-            for &op in &ops {
-                commit.apply(op).unwrap();
-            }
-            assert_eq!(bits(acc, nodes), want);
+        let mut acc = Accumulators::new(nodes, 0.0, Vec::new(), 0, 0.0).unwrap();
+        let mut stats = ExtractStats::default();
+        let mut commit = Commit::new(&mut acc, &mut stats, usize::MAX);
+        for &op in &ops {
+            commit.apply(op).unwrap();
         }
-        // A transcript stores none of them; its grouped records give the
+        assert_eq!(bits(&acc, nodes), want);
+        // A transcript stores none of them; its split records give the
         // same bits.
         let mut stored = Vec::new();
         let mut transcript = Transcript {
@@ -1586,54 +1743,16 @@ mod tests {
             assert!(transcript.op(op).is_ok());
         }
         assert_eq!(stored.len(), ops.len() - nulls);
-        let shift = 2;
-        let mut acc = Accumulators::new(1 << shift, nodes, 0.0).unwrap();
-        let mut groups = Grouping::default();
+        let mut acc = Accumulators::new(nodes, 0.0, Vec::new(), 0, 0.0).unwrap();
         for chunk in stored.chunks(777) {
-            let mut buckets = vec![Vec::new(); 1 << shift];
-            let mut distinct = vec![0; 1 << shift];
-            groups.split(chunk, shift, &mut buckets, &mut distinct);
+            let mut buckets = vec![Vec::new(); SHARDS];
+            let mut distinct = vec![0; SHARDS];
+            split(chunk, SHARD_SHIFT, &mut buckets, &mut distinct);
             for (s, shard) in acc.shards.iter_mut().enumerate() {
-                shard.apply_grouped(&buckets[s], shift);
+                shard.apply_grouped(&buckets[s], SHARD_SHIFT, &[]);
             }
         }
-        assert_eq!(bits(acc, nodes), want);
-    }
-
-    #[test]
-    fn grouping_reuses_its_table_across_chunks_and_generation_wraps() {
-        let nodes = 61usize;
-        let ops = stream(9_000, nodes as u32);
-        let shift = 1;
-        let split = |groups: &mut Grouping, chunk: &[Op]| {
-            let mut buckets = vec![Vec::new(); 1 << shift];
-            let mut distinct = vec![0; 1 << shift];
-            groups.split(chunk, shift, &mut buckets, &mut distinct);
-            (
-                buckets
-                    .iter()
-                    .map(|b| b.iter().map(|op| (op.key, op.pf.to_bits())).collect())
-                    .collect::<Vec<Vec<_>>>(),
-                distinct,
-            )
-        };
-        // Chunks of growing and shrinking size through one table, the
-        // generation passing its wrap, against a fresh table per chunk.
-        let mut reused = Grouping {
-            generation: u32::MAX - 2,
-            ..Grouping::default()
-        };
-        let mut at = 0;
-        for len in [5, 900, 17, 3000, 1, 0, 2500, 40, 2537] {
-            let chunk = &ops[at..at + len];
-            at += len;
-            assert_eq!(
-                split(&mut reused, chunk),
-                split(&mut Grouping::default(), chunk)
-            );
-        }
-        assert_eq!(at, ops.len());
-        assert!(reused.generation < 10);
+        assert_eq!(bits(&acc, nodes), want);
     }
 
     #[test]
@@ -1641,9 +1760,9 @@ mod tests {
         let nodes = 50usize;
         let ops = stream(5_000, nodes as u32);
         let keys = reference(&ops, nodes).1.len();
-        for shards in [1, 4] {
+        for last in [Vec::new(), schedule(&ops, nodes, 10)] {
             let mut stats = ExtractStats::default();
-            let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
+            let mut acc = Accumulators::new(nodes, 0.0, last, ops.len() / 10 + 1, 0.0).unwrap();
             let mut commit = Commit::new(&mut acc, &mut stats, keys - 1);
             let failed = ops.iter().position(|&op| commit.apply(op).is_err());
             // The first record that creates key number `keys`.
@@ -1682,21 +1801,11 @@ mod tests {
         assert_eq!(admit(b, 1, u64::MAX, &limits, 20_000), 1);
         assert_eq!(admit(b, 64, 1 << 40, &limits, usize::MAX), 1);
         assert_eq!(admit(b, 64, u64::MAX, &limits, usize::MAX), 64);
-        assert!(need(4) < 64 << 20);
+        assert!(need(4) < 256 << 20);
     }
 
     #[test]
-    fn shard_counts_are_powers_of_two_and_serial_uses_one() {
-        let serial = ExtractLimits::default();
-        let forced = ExtractLimits {
-            tile_units: 7,
-            ..Default::default()
-        };
-        assert_eq!(shard_count(1, &serial), 1);
-        assert_eq!(shard_count(1, &forced), 1);
-        assert_eq!(shard_count(3, &serial), 4);
-        assert_eq!(shard_count(4, &serial), 4);
-        assert_eq!(shard_count(1000, &serial), MAX_SHARDS);
+    fn shards_own_their_accumulators_at_every_shift() {
         for shift in 0..6u32 {
             for key in [0u64, 7, 1 << 40, GROUND | 5, GROUND | 0xFFFF_FFFE, AREA] {
                 assert!(shard_of(key, shift) < 1 << shift);
@@ -1704,5 +1813,6 @@ mod tests {
             assert_eq!(shard_of(AREA, shift), 0);
             assert_eq!(shard_of(GROUND | 13, shift), 13 & ((1 << shift) - 1));
         }
+        assert_eq!(1 << SHARD_SHIFT, SHARDS);
     }
 }

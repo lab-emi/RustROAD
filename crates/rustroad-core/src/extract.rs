@@ -156,11 +156,14 @@ impl Default for ExtractLimits {
         }
     }
 }
-/// Conservative scratch bytes per candidate, including vector capacity,
-/// the deduplication hash set, two interval events, active tree and plane list.
-pub const CANDIDATE_SCRATCH_BYTES: usize = 256;
+/// Conservative scratch bytes per candidate, including retained query buffers,
+/// packed and wide events, partial sums, face partitions and cached sweep state.
+/// The two-strip own-layer union can hold twice the per-strip candidate cap;
+/// every vector also retains up to twice its largest length as growth slack.
+pub const CANDIDATE_SCRATCH_BYTES: usize = 2048;
 /// Rule-9 ceiling of the per-run candidate scratch (one run at a time).
-pub const CANDIDATE_SCRATCH_CEILING_BYTES: usize = 48 << 20;
+/// The candidate-count ceiling remains 196,608; only its memory charge changes.
+pub const CANDIDATE_SCRATCH_CEILING_BYTES: usize = 384 << 20;
 /// Absolute ceiling of `max_candidates` derived from the scratch ceiling.
 pub const MAX_CANDIDATES_CEILING: usize = CANDIDATE_SCRATCH_CEILING_BYTES / CANDIDATE_SCRATCH_BYTES;
 impl ExtractLimits {
@@ -476,7 +479,9 @@ fn memory_estimate(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<E
                 .count() as u64)
                 .saturating_mul(192),
         )
-        .saturating_add(limits.candidate_scratch_bytes() as u64);
+        .saturating_add(limits.candidate_scratch_bytes() as u64)
+        // Serial strip scratch also holds fixed sample tables and context state.
+        .saturating_add(1 << 20);
     let mut geometry =
         InstanceGeometry::estimated_bytes(input.instances, bin, input.layers.len(), limits)?;
     let mut selected_bin = bin;
@@ -623,6 +628,7 @@ impl PhaseProfile {
                     "units": strips.units,
                     "serial_units": strips.units.min(strips.serial_units),
                     "committed_ops": strips.ops,
+                    "open_coupling_peak": strips.open_peak,
                     "grid_entries": grid.0,
                     "grid_bytes": grid.1,
                     "same_net_bucketed_lists": net_bins.0,
@@ -632,7 +638,7 @@ impl PhaseProfile {
                     "passive_intervals": stats.passive_intervals,
                     "work": stats.work,
                     "max_run_candidates": stats.max_run_candidates,
-                    "floating_point_order": "unchanged individual additions in run order",
+                    "floating_point_order": "per-strip partial sums, recorded in unit (tile) order",
                     "network_sha256": network_digest(network.0, network.1, stats),
                 })
             );
@@ -2405,10 +2411,10 @@ fn add_patches(
     Ok(())
 }
 
-/// The end node of a strip nearer to `point` (Manhattan distance; ties go to
-/// the lower end).
-fn nearer_end(run: &Run, point: [f64; 2]) -> u32 {
-    let ends = if run.vertical {
+/// The two end points of a strip's centreline, low end first.
+#[inline]
+fn strip_ends(run: &Run) -> [[f64; 2]; 2] {
+    if run.vertical {
         [
             [run.cross() as f64, run.lo as f64],
             [run.cross() as f64, run.hi as f64],
@@ -2418,13 +2424,15 @@ fn nearer_end(run: &Run, point: [f64; 2]) -> u32 {
             [run.lo as f64, run.cross() as f64],
             [run.hi as f64, run.cross() as f64],
         ]
-    };
-    let d = |p: [f64; 2]| (p[0] - point[0]).abs() + (p[1] - point[1]).abs();
-    if d(ends[1]) < d(ends[0]) {
-        run.node_hi
-    } else {
-        run.node_lo
     }
+}
+
+/// Whether the high end of `ends` is nearer to `point` than the low end
+/// (Manhattan distance; ties go to the lower end).
+#[inline]
+fn high_end_nearer(ends: [[f64; 2]; 2], point: [f64; 2]) -> bool {
+    let d = |p: [f64; 2]| (p[0] - point[0]).abs() + (p[1] - point[1]).abs();
+    d(ends[1]) < d(ends[0])
 }
 
 /// Passive conductors (pins, obstructions, supply metal) that a routed
@@ -2628,6 +2636,206 @@ fn virtual_crossings(
         )
         .ok_or_else(|| budget("virtual passive strips"))?;
     Ok((marked, used))
+}
+
+/// Tile side of the unit order, in micrometres.
+const UNIT_TILE_UM: f64 = 8.0;
+
+/// Interleaves the bits of two 16-bit tile coordinates (Morton, "A computer
+/// oriented geodetic data base and a new technique in file sequencing",
+/// IBM, 1966): nearby keys are nearby tiles.
+#[inline]
+fn morton(x: u32, y: u32) -> u32 {
+    let spread = |v: u32| {
+        let mut v = v & 0xFFFF;
+        v = (v | (v << 8)) & 0x00FF_00FF;
+        v = (v | (v << 4)) & 0x0F0F_0F0F;
+        v = (v | (v << 2)) & 0x3333_3333;
+        (v | (v << 1)) & 0x5555_5555
+    };
+    spread(x) | (spread(y) << 1)
+}
+
+/// Order key of the unit of shape `id` with rectangle `r`: the Morton code
+/// of the tile of its lower-left corner (tiles of `tile` DBU counted from
+/// -2^15 tiles, clamped to 16 bits per axis), then the shape ID.
+#[inline]
+fn unit_key(r: Rect, id: u32, tile: i64) -> u64 {
+    let t = |v: i64| (v.div_euclid(tile).saturating_add(1 << 15)).clamp(0, 0xFFFF) as u32;
+    u64::from(morton(t(r.lx), t(r.ly))) << 32 | u64::from(id)
+}
+
+/// Count the selected units before allocating their order; completion positions
+/// share the u32 representation with two reserved sentinel values.
+fn unit_count(built: &Built, virtual_units: &[u64]) -> Result<usize> {
+    let virtual_count = virtual_units
+        .iter()
+        .try_fold(0usize, |n, bits| n.checked_add(bits.count_ones() as usize));
+    virtual_count
+        .and_then(|n| n.checked_add(built.runs.len()))
+        .and_then(|n| n.checked_add(built.pieces.len()))
+        .and_then(|n| n.checked_add(built.passive_units.len()))
+        .filter(|&n| n < (u32::MAX - 1) as usize)
+        .ok_or_else(|| budget("extraction unit order count"))
+}
+
+/// Additional peak memory of the fixed unit order and completion schedule.
+/// 32 B/unit covers the u64 keys, parallel collection growth, u32 order,
+/// and four completion-granule heads. 48 B/node covers two last-unit arrays,
+/// strip ground and the four per-shard grounded sums. Arena slab rounding is
+/// charged separately from the live coupling-key allowance. These arrays
+/// coexist with strip lanes and are admitted before either allocation.
+fn unit_schedule_bytes(units: usize, nodes: usize) -> u64 {
+    (units as u64)
+        .saturating_mul(32)
+        .saturating_add((nodes as u64).saturating_mul(48))
+        .saturating_add(parallel::ARENA_SLACK_BYTES)
+        .saturating_add(64 << 10)
+}
+
+fn admit_unit_schedule(units: usize, nodes: usize, available: u64) -> Result<u64> {
+    let bytes = unit_schedule_bytes(units, nodes);
+    if bytes > available {
+        return Err(budget("extraction unit order memory"));
+    }
+    Ok(bytes)
+}
+
+/// The shape IDs of the strip units in the order they are computed and
+/// committed: ascending tile key, then shape ID. The units are every wire
+/// body and piece, the virtual conductors marked in `virtual_units` and
+/// every crossed retained passive conductor. The order is a function of
+/// the geometry alone (never of threads, chunks or index cells); it fixes
+/// the order in which every accumulator receives its per-strip sums, and
+/// it keeps consecutive units, their index cells and their accumulators
+/// near each other.
+fn unit_order(
+    shapes: &Shapes<'_>,
+    built: &Built,
+    virtual_units: &[u64],
+    tech: &RcTech,
+    total: usize,
+) -> Result<Vec<u32>> {
+    use rayon::prelude::*;
+    let tile = ((UNIT_TILE_UM * tech.dbu_per_um).ceil() as i64).max(1);
+    let offset = shapes.virtual_offset();
+    let mut keys: Vec<u64> = Vec::new();
+    keys.try_reserve_exact(total)
+        .map_err(|_| budget("extraction unit order allocation"))?;
+    keys.par_extend(
+        built
+            .runs
+            .par_iter()
+            .enumerate()
+            .map(|(i, r)| unit_key(body_rect(r), i as u32, tile)),
+    );
+    keys.par_extend((0..built.pieces.len() as u32).into_par_iter().map(|p| {
+        let id = built.piece_shape0 + p;
+        unit_key(shapes.get(id).rect, id, tile)
+    }));
+    keys.par_extend(
+        virtual_units
+            .par_iter()
+            .enumerate()
+            .flat_map_iter(|(w, &bits)| {
+                (0..64)
+                    .filter(move |b| bits & (1 << b) != 0)
+                    .map(move |b| (offset + w * 64 + b) as u32)
+            })
+            .map(|id| unit_key(shapes.get(id).rect, id, tile)),
+    );
+    keys.extend(
+        built
+            .passive_units
+            .iter()
+            .map(|&id| unit_key(shapes.get(id).rect, id, tile)),
+    );
+    debug_assert_eq!(keys.len(), total, "unit count changed after admission");
+    keys.par_sort_unstable();
+    let mut order = Vec::new();
+    order
+        .try_reserve_exact(keys.len())
+        .map_err(|_| budget("extraction unit order allocation"))?;
+    order.extend(keys.iter().map(|&k| k as u32));
+    Ok(order)
+}
+
+/// Per global RC node: the last position in `order` of a unit whose strips
+/// have that node as their own node (a wire body's two end nodes, a piece's
+/// node, a crossed signal pin's node). Every coupling a unit records joins
+/// one of its own nodes, so after the units up to `max(last[a], last[b])`
+/// nothing more is added to the coupling between `a` and `b`.
+fn last_units(
+    order: &[u32],
+    built: &Built,
+    shapes: &Shapes<'_>,
+    grid: &index::GridIndex,
+    nodes: &NodeIds,
+    net_index: &HashMap<u32, usize, BuildFx>,
+) -> Result<Vec<u32>> {
+    use rayon::prelude::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let mut last = Vec::new();
+    last.try_reserve_exact(nodes.total)
+        .map_err(|_| budget("extraction completion schedule allocation"))?;
+    last.resize_with(nodes.total, || AtomicU32::new(0));
+    let (runs, piece0, pieces) = (
+        built.runs.len() as u32,
+        built.piece_shape0,
+        built.pieces.len() as u32,
+    );
+    order.par_iter().enumerate().for_each(|(n, &id)| {
+        let own = |g: u32| {
+            last[g as usize].fetch_max(n as u32, Ordering::Relaxed);
+        };
+        if id < runs {
+            let r = &built.runs[id as usize];
+            let l = net_index[&r.net];
+            own(nodes.local(l, r.node_lo));
+            own(nodes.local(l, r.node_hi));
+        } else if id.wrapping_sub(piece0) < pieces {
+            let info = built.pieces[(id - piece0) as usize];
+            own(nodes.of(net_index, info.net, info.node));
+        } else {
+            let owner = if grid.is_virtual(id) {
+                let none = Rect {
+                    lx: 0,
+                    ly: 0,
+                    ux: 0,
+                    uy: 0,
+                };
+                grid.shape(shapes, id, 0, none).owner
+            } else {
+                shapes.get(id).owner
+            };
+            if let Owner::Passive(PassiveOwner::Pin { pin, .. }) = owner
+                && let Some(&(net, node)) = built.pin_nodes.get(&pin)
+            {
+                own(nodes.of(net_index, net, node));
+            }
+        }
+    });
+    Ok(last.into_iter().map(AtomicU32::into_inner).collect())
+}
+
+/// One bit per virtual shape: set for the shapes on a routing layer with an
+/// RC model (the candidates of the per-unit crossing test).
+fn modelled_virtual_shapes(shapes: &Shapes<'_>, tech: &RcTech) -> Vec<u64> {
+    use rayon::prelude::*;
+    let (offset, count) = (shapes.virtual_offset(), shapes.virtual_count());
+    (0..count.div_ceil(64))
+        .into_par_iter()
+        .map(|w| {
+            let mut bits = 0u64;
+            for i in w * 64..(w * 64 + 64).min(count) {
+                let layer = shapes.get((offset + i) as u32).layer;
+                if tech.layers.get(layer as usize).is_some_and(Option::is_some) {
+                    bits |= 1 << (i % 64);
+                }
+            }
+            bits
+        })
+        .collect()
 }
 
 /// One strip (x or y) of a crossed passive conductor (retained or virtual).
@@ -2890,15 +3098,25 @@ fn extract_with_queries(
     }
     add_passive_strips(input, limits, &mut built, &shapes, &grid, &mut stats)?;
     profile.phase(4);
-    let (crossed, crossing_bytes) = virtual_crossings(
-        &shapes,
-        &grid,
-        instances.as_ref(),
-        &routing_layers,
-        limits,
-        headroom.saturating_add(unused),
-        &mut stats,
-    )?;
+    // Cell conductors indexed in the grid are tested for a crossing when
+    // their unit is computed (`strip::UnitRef::Virtual`): every one on a
+    // modelled routing layer is a unit. Otherwise (cell geometry kept in the
+    // instance index, and the test oracle) the crossed ones are marked by a
+    // scan from the routed side.
+    let lazy_crossings = grid.has_virtual() && matches!(queries, Queries::Indexed(_));
+    let (virtual_units, crossing_bytes) = if lazy_crossings {
+        (modelled_virtual_shapes(&shapes, tech), 0)
+    } else {
+        virtual_crossings(
+            &shapes,
+            &grid,
+            instances.as_ref(),
+            &routing_layers,
+            limits,
+            headroom.saturating_add(unused),
+            &mut stats,
+        )?
+    };
     // After the crossings, the instance index serves only the strip queries
     // the grid does not cover (the test oracle keeps its own).
     #[cfg(test)]
@@ -2918,10 +3136,15 @@ fn extract_with_queries(
         #[cfg(test)]
         Queries::Reference => (parallel::Bounds::default(), 1),
     };
+    let nodes = NodeIds::new(&built.nets, &net_index)?;
+    let units = unit_count(&built, &virtual_units)?;
+    let schedule_bytes = admit_unit_schedule(units, nodes.total, headroom.saturating_add(unused))?;
     let lanes = parallel::admit(
         bounds,
         threads,
-        headroom.saturating_add(unused),
+        headroom
+            .saturating_add(unused)
+            .saturating_sub(schedule_bytes),
         limits,
         instance_count,
     );
@@ -2932,7 +3155,10 @@ fn extract_with_queries(
     };
     // The crossing marks are released before the lanes start: the larger
     // excess over the unused allowance is the peak.
-    let excess = lane_bytes.max(crossing_bytes).saturating_sub(unused);
+    let excess = lane_bytes
+        .saturating_add(schedule_bytes)
+        .max(crossing_bytes)
+        .saturating_sub(unused);
     if excess > 0
         && let Some(estimate) = stats.memory.as_mut()
     {
@@ -2942,30 +3168,39 @@ fn extract_with_queries(
             return Err(budget("extraction tile memory"));
         }
     }
-    let nodes = NodeIds::new(&built.nets, &net_index)?;
+    // Units in tile order (`unit_order`): every wire body and piece, the
+    // virtual conductors (crossed, or tested per unit) and every crossed
+    // retained passive conductor.
+    let order = unit_order(&shapes, &built, &virtual_units, tech, units)?;
     let mut acc = parallel::Accumulators::new(
-        parallel::shard_count(lanes, limits),
         nodes.total,
         stats.overlap_area_um2,
+        last_units(&order, &built, &shapes, &grid, &nodes, &net_index)?,
+        order.len(),
+        limits.min_coupling_pf,
     )?;
     let report = {
-        // Units in the original run order: wire bodies, pieces, crossed
-        // virtual conductors, then crossed retained passive conductors.
-        let (offset, count) = (shapes.virtual_offset(), shapes.virtual_count());
-        let mut units = (0..built.runs.len() as u32)
-            .map(strip::UnitRef::Body)
-            .chain((0..built.pieces.len() as u32).map(strip::UnitRef::Piece))
-            .chain(
-                (0..count)
-                    .filter(|&i| crossed[i / 64] & (1 << (i % 64)) != 0)
-                    .map(|i| strip::UnitRef::Conductor((offset + i) as u32)),
-            )
-            .chain(
-                built
-                    .passive_units
-                    .iter()
-                    .map(|&id| strip::UnitRef::Conductor(id)),
-            );
+        let virtual_unit: fn(u32) -> strip::UnitRef = if lazy_crossings {
+            strip::UnitRef::Virtual
+        } else {
+            strip::UnitRef::Conductor
+        };
+        let (runs, piece0, pieces) = (
+            built.runs.len() as u32,
+            built.piece_shape0,
+            built.pieces.len() as u32,
+        );
+        let mut units = order.iter().map(|&id| {
+            if id < runs {
+                strip::UnitRef::Body(id)
+            } else if id.wrapping_sub(piece0) < pieces {
+                strip::UnitRef::Piece(id - piece0)
+            } else if shapes.is_virtual(id) {
+                virtual_unit(id)
+            } else {
+                strip::UnitRef::Conductor(id)
+            }
+        });
         let mut ctx = strip::Ctx::new(
             input,
             &shapes,
@@ -3007,12 +3242,14 @@ fn extract_with_queries(
         }
     };
     profile.phase(6);
+    let mut report = report;
+    report.open_peak = acc.open_peak();
     let grid_size = (grid.entries(), grid.bytes());
     // Geometry is no longer needed: release it before the coupling list.
     drop(grid);
     drop(instances);
     drop(shapes);
-    drop(crossed);
+    drop(virtual_units);
     let Built {
         mut nets,
         runs,
@@ -3027,14 +3264,13 @@ fn extract_with_queries(
     // the threshold is grounded: each side keeps the full value to ground
     // (Miller factor one), so a net's total capacitance is unchanged; the
     // others are kept.
-    let min = limits.min_coupling_pf;
     let (kept, grounded) = {
         let mut grounds: Vec<(u32, &mut [f64])> = nets
             .iter_mut()
             .enumerate()
             .map(|(l, net)| (nodes.local(l, 0), &mut net.ground[..]))
             .collect();
-        acc.finish(|pf| pf > 0.0 && pf < min, &mut grounds)?
+        acc.finish(&mut grounds)?
     };
     stats.grounded_couplings += grounded;
     let mut couplings = Vec::with_capacity(kept.len());
@@ -5839,6 +6075,382 @@ mod tests {
             "{capacitance} versus {expected}"
         );
     }
+    /// Six horizontal M1 nets at 0.3 um pitch crossed by three vertical M2
+    /// nets, with two placed cells: each has an M1 pin under an M2 wire, an
+    /// M1 obstruction that nothing crosses, an M2 obstruction over the M1
+    /// wires and a cut-layer shape.
+    fn weave() -> (
+        Routes,
+        Vec<Terminal>,
+        crate::instance_obstacles::InstanceObstacles,
+        RcTech,
+    ) {
+        use crate::instance_obstacles::{
+            InstanceObstacles, ObstacleInstance, ObstacleTemplate, TemplateObstacle,
+        };
+        let mut tk = tech(true);
+        tk.layers[0].as_mut().unwrap().contexts.push(RcContext {
+            over: 0,
+            under: Some(2),
+            rows: vec![[0.1, 8e-5, 1.5e-5], [0.5, 3e-5, 4.5e-5], [1.0, 0.0, 5e-5]],
+        });
+        let (mut wires, mut pins, mut terminals) = (Vec::new(), Vec::new(), Vec::new());
+        for (net, pieces) in [4, 5, 10, 8, 2, 5].into_iter().enumerate() {
+            let (net, y) = (net as u32, net as i64 * 300);
+            wires.extend(straight(net, y, pieces));
+            pins.push(access(2 * net, net, [0, y]));
+            pins.push(access(2 * net + 1, net, [10_000, y]));
+        }
+        for j in 0..3i64 {
+            let (net, x) = (6 + j as u32, 2500 + j * 2600);
+            wires.extend((0..7).map(|k| Wire {
+                net,
+                layer: 1,
+                start: [x, k * 500 - 1000],
+                end: [x, (k + 1) * 500 - 1000],
+            }));
+            for (pin, y) in [(2 * net, -1000), (2 * net + 1, 2500)] {
+                pins.push(Access {
+                    pin,
+                    net,
+                    layer: 1,
+                    at: [x, y],
+                });
+            }
+        }
+        for net in 0..9 {
+            terminals.push(terminal(2 * net, net, true));
+            terminals.push(terminal(2 * net + 1, net, false));
+        }
+        let rect = |lx, ly, ux, uy| Rect { lx, ly, ux, uy };
+        let template = vec![
+            TemplateObstacle {
+                layer: 0,
+                rect: rect(-150, -700, 150, -500),
+                pin: Some(0),
+            },
+            TemplateObstacle {
+                layer: 0,
+                rect: rect(800, -900, 1000, -600),
+                pin: None,
+            },
+            TemplateObstacle {
+                layer: 1,
+                rect: rect(-1200, -100, -1000, 1700),
+                pin: None,
+            },
+            TemplateObstacle {
+                layer: 2,
+                rect: rect(-50, -50, 50, 50),
+                pin: None,
+            },
+        ];
+        let cell = |x, pin_start| ObstacleInstance {
+            template: 0,
+            pin_start,
+            at: [x, 0],
+            orientation: crate::Orientation::N,
+        };
+        let source = InstanceObstacles::new(
+            vec![ObstacleTemplate::new(3000, 1, template).unwrap()],
+            vec![cell(2500, 0), cell(7700, 1)],
+            vec![1, 2],
+        )
+        .unwrap()
+        .with_pin_ids(vec![2, 4])
+        .unwrap();
+        (
+            routes(wires, vec![], pins, (0..9).collect()),
+            terminals,
+            source,
+            tk,
+        )
+    }
+
+    /// SHA-256 of every ground and coupling value's bits.
+    fn value_digest(n: &RcNetwork) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        for net in &n.nets {
+            for g in &net.ground {
+                h.update(g.to_bits().to_le_bytes());
+            }
+        }
+        for c in &n.couplings {
+            for v in [c.a.0, c.a.1, c.b.0, c.b.1] {
+                h.update(v.to_le_bytes());
+            }
+            h.update(c.pf.to_bits().to_le_bytes());
+        }
+        format!("{:x}", h.finalize())
+    }
+
+    #[test]
+    fn networks_are_bit_identical_at_one_to_four_threads_and_pin_the_accumulation_order() {
+        let (r, t, source, tk) = weave();
+        let (l, v) = (layers(), vias());
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &[],
+            held_bytes: 0,
+            instances: Some(InstancedPassive {
+                geometry: &source,
+                signal_nets: &[true; 9],
+            }),
+            tech: &tk,
+        };
+        // Half of the couplings below the threshold: they are grounded.
+        let all = serial(&input, &ExtractLimits::default()).unwrap();
+        let mut pf: Vec<f64> = all.couplings.iter().map(|c| c.pf).collect();
+        pf.sort_by(f64::total_cmp);
+        let limits = ExtractLimits {
+            min_coupling_pf: pf[pf.len() / 2],
+            ..Default::default()
+        };
+        let one = serial(&input, &limits).unwrap();
+        // The fixture exercises lateral pairs, crossings from both wires,
+        // pieces and passive strips, with several intervals per strip.
+        assert!(all.couplings.len() >= 20 && one.stats.intervals > 100);
+        assert!(one.stats.passive_intervals > 0);
+        assert_eq!(one.stats.grounded_couplings, pf.len() / 2);
+        let digest = network_digest(&one.nets, &one.couplings, &one.stats);
+        for threads in 1..=4 {
+            for _ in 0..2 {
+                let again = pool(threads)
+                    .install(|| extract_cpu_ref(&input, &limits))
+                    .unwrap();
+                assert_network_exact(&one, &again);
+                assert_eq!(
+                    network_digest(&again.nets, &again.couplings, &again.stats),
+                    digest
+                );
+            }
+        }
+        // Every pool and chunk size, the instance-index path (which marks
+        // crossed cell conductors from the routed side) and the swept
+        // passive strips give the same bits and statistics.
+        check_parallel(&input, &limits, &one);
+        // The values' bits: per-strip partial sums in sweep order, recorded
+        // strip by strip in tile order (lower-left tile, then shape ID), and
+        // the grounded couplings summed per shard in completion order.
+        assert_eq!(
+            value_digest(&one),
+            "1825c6e56c83bb6272d6d2249e68673bcb5d7e2c2497d01af3a01d005a69d24b"
+        );
+    }
+
+    #[test]
+    fn unit_schedule_refuses_large_virtual_materialization_before_allocation() {
+        // Counts alone must reject a billion virtual units under an 8 GiB
+        // allowance; the test never allocates those units or their graph.
+        assert!(matches!(
+            admit_unit_schedule(1_000_000_000, 64_000_000, 8 << 30),
+            Err(Error::Budget(message)) if message == "extraction unit order memory"
+        ));
+        assert!(matches!(
+            admit_unit_schedule(usize::MAX, usize::MAX, 8 << 30),
+            Err(Error::Budget(_))
+        ));
+        let admitted = admit_unit_schedule(4096, 1024, 4 << 20).unwrap();
+        assert!(admitted >= 4096 * 12 + 1024 * 40);
+        assert!(admit_unit_schedule(4096, 1024, admitted - 1).is_err());
+        assert!(admit_unit_schedule(4096, 1024, admitted).is_ok());
+    }
+
+    #[test]
+    fn unit_keys_order_units_by_morton_tile_then_shape_id() {
+        assert_eq!(
+            [
+                morton(0, 0),
+                morton(1, 0),
+                morton(0, 1),
+                morton(1, 1),
+                morton(2, 0),
+                morton(0, 2),
+                morton(3, 3)
+            ],
+            [0, 1, 2, 3, 4, 8, 15]
+        );
+        assert_eq!(morton(0xFFFF, 0xFFFF), u32::MAX);
+        assert_eq!(morton(0xFFFF, 0), 0x5555_5555);
+        let tile = 8000;
+        let key = |lx: i64, ly: i64, id: u32| {
+            unit_key(
+                Rect {
+                    lx,
+                    ly,
+                    ux: lx.saturating_add(1),
+                    uy: ly.saturating_add(1),
+                },
+                id,
+                tile,
+            )
+        };
+        // The tile of the lower-left corner, then the shape ID.
+        assert_eq!(key(0, 0, 7) >> 32, key(7999, 7999, 7) >> 32);
+        assert!(key(0, 0, 7) < key(7999, 7999, 8));
+        assert!(key(7999, 7999, u32::MAX) < key(8000, 0, 0));
+        assert!(key(8000, 0, u32::MAX) < key(0, 8000, 0));
+        assert!(key(0, 8000, u32::MAX) < key(8000, 8000, 0));
+        // Coordinates below zero floor to the tiles before tile 0.
+        assert!(key(-1, 0, u32::MAX) < key(0, 0, 0));
+        assert_eq!(key(-8000, -8000, 3) >> 32, key(-1, -1, 9) >> 32);
+        assert_eq!(key(-8000, 0, 5) >> 32, u64::from(morton(0x7FFF, 0x8000)));
+        // Far-away corners clamp to the outermost tiles.
+        assert_eq!(key(i64::MIN, i64::MIN, 3), 3);
+        assert_eq!(key(i64::MAX, i64::MAX, 3), u64::from(u32::MAX) << 32 | 3);
+        assert_eq!(key(-(1 << 40), 0, 1) >> 32, u64::from(morton(0, 0x8000)));
+    }
+
+    #[test]
+    fn cell_conductors_are_units_only_where_routed_metal_crosses_them() {
+        let (r, t, source, tk) = weave();
+        let (l, v) = (layers(), vias());
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &[],
+            held_bytes: 0,
+            instances: Some(InstancedPassive {
+                geometry: &source,
+                signal_nets: &[true; 9],
+            }),
+            tech: &tk,
+        };
+        let limits = ExtractLimits::default();
+        // Per cell: the pin under an M2 wire and the M2 obstruction over the
+        // M1 wires are crossed; the M1 obstruction and the cut-layer shape
+        // are not. Each crossed conductor has two strips.
+        let lazy = serial(&input, &limits).unwrap();
+        assert_eq!(lazy.stats.passive_strips, 8);
+        // The scan from the routed side (cell geometry kept out of the
+        // grid) marks the same conductors: same network, same statistics
+        // apart from the index work.
+        let scanned = parallel::Bounds {
+            virtual_grid: false,
+            ..parallel::Bounds::default()
+        };
+        let mut eager = pool(1)
+            .install(|| extract_with_queries(&input, &limits, Queries::Indexed(scanned)))
+            .unwrap();
+        assert_eq!(eager.stats.passive_strips, 8);
+        eager.stats.work = lazy.stats.work;
+        assert_network_exact(&lazy, &eager);
+        // Without the routed M2 nets nothing crosses the pins; the M2
+        // obstructions still lie over the M1 wires.
+        let mut fewer = r.clone();
+        fewer.wires.retain(|w| w.layer == 0);
+        fewer.access.retain(|a| a.layer == 0);
+        fewer.nets.truncate(6);
+        let input = ExtractInput {
+            routes: &fewer,
+            terminals: &t[..12],
+            ..input
+        };
+        let n = serial(&input, &limits).unwrap();
+        assert_eq!(n.stats.passive_strips, 4);
+        check_parallel(&input, &limits, &n);
+    }
+
+    #[test]
+    fn an_uncrossed_cell_conductor_over_the_candidate_cap_fails_nothing() {
+        use crate::instance_obstacles::{
+            InstanceObstacles, ObstacleInstance, ObstacleTemplate, TemplateObstacle,
+        };
+        let rect = |lx, ly, ux, uy| Rect { lx, ly, ux, uy };
+        // An M2 obstruction over three M1 obstructions, 20 um away from the
+        // one routed net: its face has three other-layer candidates.
+        let mut template = vec![TemplateObstacle {
+            layer: 1,
+            rect: rect(0, 0, 3000, 400),
+            pin: None,
+        }];
+        template.extend((0..3).map(|i| TemplateObstacle {
+            layer: 0,
+            rect: rect(i * 1000 + 100, 100, i * 1000 + 300, 300),
+            pin: None,
+        }));
+        let source = InstanceObstacles::new(
+            vec![ObstacleTemplate::new(1000, 0, template).unwrap()],
+            vec![ObstacleInstance {
+                template: 0,
+                pin_start: 0,
+                at: [0, 20_000],
+                orientation: crate::Orientation::N,
+            }],
+            vec![],
+        )
+        .unwrap()
+        .with_pin_ids(vec![])
+        .unwrap();
+        let r = routes(
+            straight(0, 0, 2),
+            vec![],
+            vec![access(0, 0, [0, 0]), access(1, 0, [10_000, 0])],
+            vec![0],
+        );
+        let t = [terminal(0, 0, true), terminal(1, 0, false)];
+        let (l, v, tk) = (layers(), vias(), tech(true));
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &[],
+            held_bytes: 0,
+            instances: Some(InstancedPassive {
+                geometry: &source,
+                signal_nets: &[true],
+            }),
+            tech: &tk,
+        };
+        let limits = ExtractLimits {
+            max_candidates: 2,
+            ..Default::default()
+        };
+        let n = serial(&input, &limits).unwrap();
+        assert_eq!(n.stats.passive_strips, 0);
+        check_parallel(&input, &limits, &n);
+        // Routed M1 metal under the obstruction makes it a unit: its face now
+        // has more candidates than the cap allows.
+        let mut crossing = r.clone();
+        crossing.wires.push(Wire {
+            net: 1,
+            layer: 0,
+            start: [-2000, 20_200],
+            end: [600, 20_200],
+        });
+        crossing.access.push(access(2, 1, [-2000, 20_200]));
+        crossing.access.push(access(3, 1, [600, 20_200]));
+        crossing.nets.push(1);
+        let mut t = t.to_vec();
+        t.extend([terminal(2, 1, true), terminal(3, 1, false)]);
+        let input = ExtractInput {
+            routes: &crossing,
+            terminals: &t,
+            instances: Some(InstancedPassive {
+                geometry: &source,
+                signal_nets: &[true, true],
+            }),
+            ..input
+        };
+        let wide = ExtractLimits {
+            max_candidates: 64,
+            ..Default::default()
+        };
+        assert_eq!(serial(&input, &wide).unwrap().stats.passive_strips, 2);
+        let err = serial(&input, &limits).unwrap_err().to_string();
+        assert!(err.contains("extraction candidates per wire run"), "{err}");
+    }
+
     #[test]
     fn shared_passive_geometry_matches_explicit_crossings_and_pin_coupling() {
         use crate::instance_obstacles::{

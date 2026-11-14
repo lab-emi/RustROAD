@@ -262,8 +262,8 @@ enum Command {
         max_rc_elements: usize,
         #[arg(long, default_value_t = 200_000_000)]
         max_extract_work: usize,
-        /// Candidate shapes per wire run (scratch 256 B each; ceiling
-        /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 48 MiB of scratch).
+        /// Candidate shapes per wire run (scratch 2,048 B each; ceiling
+        /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 384 MiB of scratch).
         #[arg(long, default_value_t = 4096)]
         max_extract_candidates: usize,
         /// Accepted for compatibility (1..=16); no effect. Strips are
