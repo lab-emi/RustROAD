@@ -2168,7 +2168,53 @@ impl<'a> Router<'a> {
                             self.limits.max_comparisons,
                         )?
                     {
-                        continue;
+                        // The step lies within spacing of its own pin without
+                        // touching it. The escape wires that lead here are
+                        // same-net metal too: a straight continuation out of
+                        // an off-track pin has its gap to the pin covered by
+                        // the previous step (opt-in, `path_aware_access`).
+                        if !self.plan.qor.as_ref().is_some_and(|q| q.path_aware_access) {
+                            continue;
+                        }
+                        let mut metal = own.clone();
+                        let mut cur = id;
+                        for _ in 0..64 {
+                            self.spatial.work = self
+                                .spatial
+                                .work
+                                .checked_add(1)
+                                .filter(|&n| n <= self.limits.max_comparisons)
+                                .ok_or_else(|| budget("pin access path work"))?;
+                            let (_, parent, kind) = visited[&cur];
+                            if parent == NONE || kind != WIRE {
+                                break;
+                            }
+                            let (pl, pp) = local.at(parent);
+                            if pl != li {
+                                break;
+                            }
+                            metal.push(wire_rect(
+                                &Wire {
+                                    net: t.net,
+                                    layer,
+                                    start: pp,
+                                    end: local.at(cur).1,
+                                },
+                                self.width(layer),
+                            )?);
+                            cur = parent;
+                        }
+                        if metal.len() == own.len()
+                            || !route_rules::local_ok(
+                                rect,
+                                &metal,
+                                input.layers[layer as usize].spacing,
+                                &mut self.spatial.work,
+                                self.limits.max_comparisons,
+                            )?
+                        {
+                            continue;
+                        }
                     }
                     if overlaps_any(
                         avoid,
@@ -9745,6 +9791,82 @@ mod tests {
         assert_eq!(aware.unwrap(), legacy.unwrap());
     }
 
+    /// A block pin on the access layer M2, between two M2 tracks, at the
+    /// lower edge of its block: obstructions leave a pin-wide slot that only
+    /// opens downwards (the layout of generated memory macros).
+    fn off_track_block_pin(path_aware: bool) -> RouteInput {
+        let mut pin = terminal(0, 0, true, rect(145, 200, 175, 270));
+        pin.shapes[0].layer = 1;
+        let far = terminal(1, 0, false, rect(590, 610, 630, 630));
+        let block = [
+            rect(0, 225, 115, 400),
+            rect(205, 225, 400, 400),
+            rect(115, 290, 205, 400),
+        ]
+        .map(|rect| Blockage {
+            layer: 1,
+            rect,
+            net: None,
+        })
+        .to_vec();
+        let mut design = input(vec![pin, far], block);
+        design.tracks.as_mut().unwrap().qor = Some(crate::routing::RouteQor {
+            path_aware_access: path_aware,
+            ..Default::default()
+        });
+        design
+    }
+
+    #[test]
+    fn path_aware_access_leaves_an_off_track_pin_through_its_own_wire() {
+        // M2 tracks are x = 140 and 180, the pin spans 145..175 and its block
+        // closes every jog above y = 205. A wire can only leave downwards; its
+        // second step (and the jog to a track) lies 10 DBU below the pin, less
+        // than the 20 DBU spacing, with the gap covered by the first step.
+        // Pin shapes alone do not cover it, so the legacy access fails.
+        let (legacy, _) = access_only(&off_track_block_pin(false), false, false);
+        assert!(
+            matches!(legacy, Err(crate::Error::PinAccess { .. })),
+            "legacy access must fail: {:?}",
+            legacy.map(|p| p.len())
+        );
+        let (aware, _) = access_only(&off_track_block_pin(true), false, false);
+        let aware = aware.unwrap();
+        let (_, _, wires, vias) = &aware[&0];
+        assert!(vias.is_empty(), "the escape stays on the pin's own layer");
+        assert!(!wires.is_empty() && wires.iter().all(|w| w.layer == 1));
+        let end = wires
+            .iter()
+            .flat_map(|w| [w.start, w.end])
+            .find(|p| (p[0] == 140 || p[0] == 180) && p[1] < 200 && (p[1] - 20) % 40 == 0)
+            .expect("the escape ends on a track node below the block edge");
+        assert!(end[1] <= 180);
+        // Every wire is clear of the block and the union with the pin has no
+        // uncovered gap: the full same-net rule check accepts it.
+        let pin = rect(145, 200, 175, 270);
+        let mut metal = vec![pin];
+        for w in wires {
+            metal.push(wire_rect(w, 20).unwrap());
+        }
+        let mut work = 0usize;
+        for (i, r) in metal.iter().enumerate() {
+            let others: Vec<Rect> = metal
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(_, r)| *r)
+                .collect();
+            assert!(route_rules::local_ok(*r, &others, 20, &mut work, 1_000_000).unwrap());
+        }
+        // Deterministic.
+        assert_eq!(
+            access_only(&off_track_block_pin(true), false, false)
+                .0
+                .unwrap(),
+            aware
+        );
+    }
+
     fn crossing_nets() -> RouteInput {
         let mut t = Vec::new();
         // A four-sink net, two crossing two-pin nets and a three-pin net.
@@ -9790,6 +9912,7 @@ mod tests {
             release_portals: true,
             drop_portals: true,
             net_aware_access: true,
+            path_aware_access: true,
             layer_cost_milli: vec![1000, 1000, 1300, 1000, 1000],
             via_cost_milli: vec![1000, 1000, 1500, 1000, 1000],
             bend_cost: 40,

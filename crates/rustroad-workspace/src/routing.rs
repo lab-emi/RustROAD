@@ -153,6 +153,10 @@ pub struct RouteQorConfig {
     /// Pin access of small nets leans toward the net's other terminals.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub net_aware_access: bool,
+    /// Pin access accepts a step near its own pin when the escape wires
+    /// behind it cover the gap (needed by off-track pins on their own layer).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub path_aware_access: bool,
     /// Wire-step cost multiplier per routing layer, thousandths (>= 1000).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub layer_cost_milli: BTreeMap<String, u32>,
@@ -1545,6 +1549,7 @@ fn route_qor(
         release_portals: config.release_portals,
         drop_portals: config.drop_portals,
         net_aware_access: config.net_aware_access,
+        path_aware_access: config.path_aware_access,
         layer_cost_milli: resolve(&config.layer_cost_milli)?,
         via_cost_milli: resolve(&config.via_cost_milli)?,
         bend_cost: config.bend_cost,

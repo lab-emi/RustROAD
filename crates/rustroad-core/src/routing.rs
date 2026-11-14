@@ -454,6 +454,15 @@ pub struct RouteQor {
     /// nearest the net's other terminals (so aligned pins share a track).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub net_aware_access: bool,
+    /// Pin access counts the escape wires that lead to a step as same-net
+    /// metal next to the pin's own shapes: a step within spacing of its pin
+    /// is legal when the gap is covered by the pin and those wires. Without
+    /// it only the pin shapes cover a gap, and a pin that is off the track
+    /// grid of its own layer (a macro pin above the access layer) cannot
+    /// leave: the second step of a straight wire out of the pin is near the
+    /// pin, not on it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub path_aware_access: bool,
     /// Wire-step cost multiplier per input layer in thousandths (indexed like
     /// `RouteInput::layers`, at least 1000; empty means 1000 everywhere).
     #[serde(skip_serializing_if = "Vec::is_empty")]
