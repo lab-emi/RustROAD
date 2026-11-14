@@ -168,7 +168,10 @@ explicit 0.001 um DBU rule).
 
 FOREIGN: the cell LEF recorded at import (sha256-pinned; `--cell-lef` may
 relocate it) is re-read; each used master must have exactly one `FOREIGN`
-naming itself, offset 0 0, orientation N/absent, and `ORIGIN 0 0`. The LEF
+naming itself, offset 0 0, orientation N/absent, and `ORIGIN 0 0`. A
+`CLASS BLOCK` master without any `FOREIGN` statement and with `ORIGIN 0 0`
+binds to the GDS cell of its own name (the LEF default; OpenRAM macro LEFs
+carry neither statement); a standard cell must state the binding. The LEF
 reader now retains `FOREIGN name [x y [orient]]` as `LefMacro.foreign:
 Vec<LefForeign>`; import still uses LEF geometry and records a diagnostic.
 
