@@ -68,6 +68,9 @@ impl<'a> Shapes<'a> {
     pub(super) fn push(&mut self, shape: Shape) {
         self.values.push(shape);
     }
+    pub(super) fn reserve_exact(&mut self, additional: usize) {
+        self.values.reserve_exact(additional);
+    }
     /// Releases growth slack once every retained shape exists.
     pub(super) fn shrink_to_fit(&mut self) {
         self.values.shrink_to_fit();

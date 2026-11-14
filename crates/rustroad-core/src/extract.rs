@@ -1013,28 +1013,20 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
         .filter(|t| input.extracts(t.net))
         .map(|t| (t.pin, t))
         .collect();
-    let mut wires = BTreeMap::<u32, Vec<usize>>::new();
-    let mut vias = BTreeMap::<u32, Vec<usize>>::new();
-    let mut access = BTreeMap::<u32, Vec<usize>>::new();
-    for (i, w) in routes.wires.iter().enumerate() {
-        if input.extracts(w.net) {
-            wires.entry(w.net).or_default().push(i);
-        }
+    if routes
+        .vias
+        .par_iter()
+        .any(|v| input.extracts(v.net) && v.kind as usize >= input.vias.len())
+    {
+        return Err(invalid("via kind outside routing input"));
     }
-    for (i, v) in routes.vias.iter().enumerate() {
-        if !input.extracts(v.net) {
-            continue;
-        }
-        if v.kind as usize >= input.vias.len() {
-            return Err(invalid("via kind outside routing input"));
-        }
-        vias.entry(v.net).or_default().push(i);
-    }
-    for (i, a) in routes.access.iter().enumerate() {
-        if input.extracts(a.net) {
-            access.entry(a.net).or_default().push(i);
-        }
-    }
+    let wires = NetRecords::new(routes.wires.par_iter().map(|w| w.net), |n| {
+        input.extracts(n)
+    });
+    let vias = NetRecords::new(routes.vias.par_iter().map(|v| v.net), |n| input.extracts(n));
+    let access = NetRecords::new(routes.access.par_iter().map(|a| a.net), |n| {
+        input.extracts(n)
+    });
     let route_nets: Vec<u32> = routes
         .nets
         .iter()
@@ -1112,11 +1104,50 @@ fn build_trees(input: &ExtractInput<'_>, limits: &ExtractLimits) -> Result<(Buil
     Ok((out, stats))
 }
 
-type NetLists<'m> = (
-    &'m BTreeMap<u32, Vec<usize>>,
-    &'m BTreeMap<u32, Vec<usize>>,
-    &'m BTreeMap<u32, Vec<usize>>,
-);
+/// Record indices of each net in ascending order: the per-net lists one
+/// ordered pass over the records would build, in one table. A net without
+/// records has no list.
+struct NetRecords {
+    /// Distinct nets in ascending order, and the start of each net's
+    /// records (one more start ends the table).
+    nets: Vec<u32>,
+    starts: Vec<usize>,
+    records: Vec<usize>,
+}
+impl NetRecords {
+    fn new(
+        nets: impl rayon::iter::IndexedParallelIterator<Item = u32>,
+        keep: impl Fn(u32) -> bool + Sync,
+    ) -> Self {
+        use rayon::prelude::*;
+        let mut pairs: Vec<(u32, usize)> = nets
+            .enumerate()
+            .filter(|&(_, net)| keep(net))
+            .map(|(i, net)| (net, i))
+            .collect();
+        pairs.par_sort_unstable();
+        let mut out = Self {
+            nets: Vec::new(),
+            starts: Vec::new(),
+            records: Vec::with_capacity(pairs.len()),
+        };
+        for (net, i) in pairs {
+            if out.nets.last() != Some(&net) {
+                out.nets.push(net);
+                out.starts.push(out.records.len());
+            }
+            out.records.push(i);
+        }
+        out.starts.push(out.records.len());
+        out
+    }
+    fn get(&self, net: u32) -> Option<&[usize]> {
+        let k = self.nets.binary_search(&net).ok()?;
+        Some(&self.records[self.starts[k]..self.starts[k + 1]])
+    }
+}
+
+type NetLists<'m> = (&'m NetRecords, &'m NetRecords, &'m NetRecords);
 
 /// One net's graph, straight runs, tree order, resistors, runs and pads.
 /// `probe` records the serial loop's budget checkpoints this net reached.
@@ -1130,10 +1161,10 @@ fn net_tree(
 ) -> Result<NetTree> {
     let routes = input.routes;
     let mut counts = NetCounts::default();
-    let net_wires = wires.get(&net).map(Vec::as_slice).unwrap_or(&[]);
-    let net_vias = vias.get(&net).map(Vec::as_slice).unwrap_or(&[]);
+    let net_wires = wires.get(net).unwrap_or(&[]);
+    let net_vias = vias.get(net).unwrap_or(&[]);
     let net_access = access
-        .get(&net)
+        .get(net)
         .ok_or_else(|| invalid("routed net without pin access"))?;
     // Graph nodes in key order.
     let mut keys: Vec<Key> = Vec::with_capacity(2 * (net_wires.len() + net_vias.len()) + 1);
@@ -1775,11 +1806,26 @@ impl NetShapes {
                 lists.entry((net, s.layer)).or_default().ids.push(id);
             }
         }
-        for (id, s) in shapes.virtual_shapes() {
-            if let Some(net) = s.net() {
-                virtual_pins += 1;
-                lists.entry((net, s.layer)).or_default().ids.push(id);
-            }
+        // Virtual signal pins, decoded by instance parts in parallel and
+        // listed in ID order.
+        let pins: Vec<Vec<(u32, u32, u32)>> = {
+            use rayon::prelude::*;
+            const PART: usize = 1024;
+            let instances = shapes.virtual_instances();
+            (0..instances.div_ceil(PART))
+                .into_par_iter()
+                .map(|part| {
+                    let start = part * PART;
+                    shapes
+                        .virtual_shapes_of(start..instances.min(start + PART))
+                        .filter_map(|(id, s)| s.net().map(|net| (net, s.layer, id)))
+                        .collect()
+                })
+                .collect()
+        };
+        for (net, layer, id) in pins.into_iter().flatten() {
+            virtual_pins += 1;
+            lists.entry((net, layer)).or_default().ids.push(id);
         }
         // Later pieces grow the lists up to the retained-shape budget.
         let bound = Self::bound(limits.max_shapes, virtual_pins, lists.len());
@@ -1968,7 +2014,7 @@ fn plan_pieces(
     }
     // Candidates of each net, in candidate order.
     let mut order: Vec<u32> = (0..candidates.len() as u32).collect();
-    order.sort_by_key(|&i| candidates[i as usize].0);
+    order.par_sort_by_key(|&i| candidates[i as usize].0);
     let mut groups = Vec::new();
     let mut start = 0;
     while start < order.len() {
@@ -2073,6 +2119,26 @@ fn add_piece(
     limits: &ExtractLimits,
     stats: &mut ExtractStats,
 ) -> Result<()> {
+    add_piece_listed(
+        piece, net, layer, node, built, shapes, near, true, limits, stats,
+    )
+}
+
+/// `add_piece` that adds the piece to its same-net list only when
+/// `listed` (a list that is never read again need not grow).
+#[allow(clippy::too_many_arguments)]
+fn add_piece_listed(
+    piece: Rect,
+    net: u32,
+    layer: u32,
+    node: u32,
+    built: &mut Built,
+    shapes: &mut Shapes<'_>,
+    near: &mut NetShapes,
+    listed: bool,
+    limits: &ExtractLimits,
+    stats: &mut ExtractStats,
+) -> Result<()> {
     let shape = shapes.len() as u32;
     let index = built.pieces.len() as u32;
     if index == 0 {
@@ -2089,8 +2155,15 @@ fn add_piece(
     if shapes.retained_len() > limits.max_shapes {
         return Err(budget("extraction shape count"));
     }
+    if !listed {
+        return Ok(());
+    }
     near.push(net, layer, shape, piece, limits, stats)
 }
+
+/// `(net, layer, rect, node, is_pad)` of a piece of routed metal before
+/// same-net metal is subtracted.
+type PieceCandidate = (u32, u32, Rect, u32, bool);
 
 /// Metal of routed nets beyond the wire bodies, as capacitance-only pieces:
 /// first each wire run's half-width end extensions (DEF default extension, at
@@ -2107,12 +2180,12 @@ fn add_metal_pieces(
     near: &mut NetShapes,
     stats: &mut ExtractStats,
 ) -> Result<()> {
+    use rayon::prelude::*;
     // (net, layer, rect, node, is_pad) in a fixed order.
-    let mut candidates: Vec<(u32, u32, Rect, u32, bool)> = Vec::new();
-    for r in &built.runs {
+    let end_pieces = |r: &Run| -> Option<[PieceCandidate; 2]> {
         let e = input.layers[r.layer as usize].width / 2;
         if e <= 0 {
-            continue;
+            return None;
         }
         let ends = if r.vertical {
             [
@@ -2145,19 +2218,59 @@ fn add_metal_pieces(
                 },
             ]
         };
-        candidates.push((r.net, r.layer, ends[0], r.node_lo, false));
-        candidates.push((r.net, r.layer, ends[1], r.node_hi, false));
-    }
-    for p in &built.pads {
-        if p.rect.valid() {
-            candidates.push((p.net, p.layer, p.rect, p.node, true));
-        }
+        Some([
+            (r.net, r.layer, ends[0], r.node_lo, false),
+            (r.net, r.layer, ends[1], r.node_hi, false),
+        ])
+    };
+    let mut candidates: Vec<PieceCandidate> = Vec::new();
+    let pad = |p: &Pad| (p.net, p.layer, p.rect, p.node, true);
+    if built
+        .runs
+        .par_iter()
+        .all(|r| input.layers[r.layer as usize].width / 2 > 0)
+        && built.pads.par_iter().all(|p| p.rect.valid())
+    {
+        // Every run has both ends and every pad a rectangle: the list is
+        // written in place, in order.
+        let runs = &built.runs;
+        candidates.reserve_exact(2 * runs.len() + built.pads.len());
+        candidates.par_extend(
+            (0..2 * runs.len())
+                .into_par_iter()
+                .map(|i| end_pieces(&runs[i / 2]).expect("run with ends")[i % 2]),
+        );
+        candidates.par_extend(built.pads.par_iter().map(pad));
+    } else {
+        candidates.par_extend(
+            built
+                .runs
+                .par_iter()
+                .filter_map(end_pieces)
+                .flat_map_iter(|ends| ends.into_iter()),
+        );
+        candidates.par_extend(built.pads.par_iter().filter(|p| p.rect.valid()).map(pad));
     }
     if let Some((group_of, mut planned, work)) =
         plan_pieces(&candidates, near, shapes, limits, stats.work)
     {
         // The serial loop's charges sum to `work` and none can fail.
         stats.work += work;
+        // No same-net list is bucketed on this path, so adding a piece to
+        // its list only appends its ID, and only the patches read the lists
+        // from here on: the lists of their `(net, layer)` keys are kept
+        // complete, the others are not extended.
+        debug_assert_eq!(near.bins.lists, 0);
+        let read: std::collections::HashSet<(u32, u32), BuildFx> = input
+            .routes
+            .patches
+            .iter()
+            .filter(|p| input.extracts(p.net))
+            .map(|p| (p.net, p.layer))
+            .collect();
+        let pieces = planned.iter().map(Vec::len).sum::<usize>();
+        built.pieces.reserve_exact(pieces);
+        shapes.reserve_exact(pieces);
         let mut cursor = vec![0usize; planned.len()];
         for (i, &(net, layer, _, node, is_pad)) in candidates.iter().enumerate() {
             let g = group_of[i] as usize;
@@ -2173,8 +2286,11 @@ fn add_metal_pieces(
             } else {
                 stats.end_pieces += end - start;
             }
+            let listed = read.contains(&(net, layer));
             for &(_, piece) in &out[start..end] {
-                add_piece(piece, net, layer, node, built, shapes, near, limits, stats)?;
+                add_piece_listed(
+                    piece, net, layer, node, built, shapes, near, listed, limits, stats,
+                )?;
             }
             if end == out.len() && end > 0 {
                 // Release each net's plan as soon as it is consumed.
