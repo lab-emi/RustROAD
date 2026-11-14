@@ -64,6 +64,17 @@ impl Op {
     pub(super) fn area(um2: f64) -> Self {
         Self { key: AREA, pf: um2 }
     }
+    /// A ground record adding zero (either sign), which a lane's transcript
+    /// does not store.
+    /// Every ground accumulator starts at +0.0, and a sum is -0.0 only when
+    /// both operands are -0.0 (an exact cancellation rounds to +0.0), so no
+    /// accumulator ever holds -0.0, and adding +0.0 or -0.0 to any other
+    /// value leaves its bits unchanged. Coupling records are always stored
+    /// (one creates its key, which the coupling budget counts).
+    #[inline]
+    pub(super) fn is_null_ground(&self) -> bool {
+        self.key >= GROUND && self.key != AREA && self.pf == 0.0
+    }
 }
 
 /// Why a strip stopped: a real error, or a parallel-only bound (candidate

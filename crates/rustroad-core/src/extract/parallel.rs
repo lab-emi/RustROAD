@@ -485,6 +485,9 @@ struct Transcript<'t> {
 impl Sink for Transcript<'_> {
     #[inline]
     fn op(&mut self, op: Op) -> Flow {
+        if op.is_null_ground() {
+            return Ok(());
+        }
         if self.ops.len() >= self.cap {
             return Err(Stop::Defer);
         }
@@ -581,83 +584,95 @@ impl Chunk {
 
 /// Lane scratch that splits a chunk's records by shard, grouped by
 /// accumulator: each accumulator's records stay contiguous and in their run
-/// order (a stable counting sort keyed by first appearance), in one pass
-/// over the records and a chunk-local open-addressing table.
+/// order. Ground and area records go to their shard in emission order;
+/// coupling records are chained per key (keys found through a chunk-local
+/// open-addressing table) and appended per shard key by key, in order of
+/// first appearance. The table's slots carry the chunk's generation, so it
+/// is never cleared between chunks.
 #[derive(Default)]
 struct Grouping {
-    /// Group index + 1 per slot (0 is empty); a power of two long.
-    table: Vec<u32>,
-    /// Per group: its key, then its record count, then its write cursor.
+    /// Per slot: `(generation, group)`; a slot of another generation is
+    /// empty. A power of two long, at least twice the coupling records.
+    table: Vec<(u32, u32)>,
+    generation: u32,
+    /// Per group: its key, its first and last record.
     keys: Vec<u64>,
-    cursor: Vec<u32>,
-    /// Group of each record.
-    group_of: Vec<u32>,
+    first: Vec<u32>,
+    last: Vec<u32>,
+    /// Next record of the same key (`u32::MAX` ends a chain).
+    next: Vec<u32>,
 }
 impl Grouping {
     fn split(&mut self, ops: &[Op], shift: u32, buckets: &mut [Vec<Op>], distinct: &mut [usize]) {
-        let slots = (2 * ops.len()).max(16).next_power_of_two();
-        let bits = slots.trailing_zeros();
-        self.table.clear();
-        self.table.resize(slots, 0);
-        self.keys.clear();
-        self.cursor.clear();
-        self.group_of.clear();
+        const END: u32 = u32::MAX;
+        // Each bucket is sized once, to its exact record count.
+        let mut lens = [0usize; MAX_SHARDS];
+        let mut couplings = 0;
         for op in ops {
+            lens[shard_of(op.key, shift)] += 1;
+            couplings += usize::from(op.key < GROUND);
+        }
+        for (bucket, &len) in buckets.iter_mut().zip(&lens) {
+            bucket.clear();
+            bucket.reserve_exact(len);
+        }
+        let slots = (2 * couplings).max(16).next_power_of_two();
+        if self.table.len() < slots {
+            self.table.resize(slots, (0, 0));
+        }
+        self.generation = self.generation.wrapping_add(1);
+        if self.generation == 0 {
+            // Every stamp is stale again only after a full cycle.
+            self.table.fill((0, 0));
+            self.generation = 1;
+        }
+        let generation = self.generation;
+        let bits = slots.trailing_zeros();
+        let table = &mut self.table[..slots];
+        self.keys.clear();
+        self.first.clear();
+        self.last.clear();
+        if self.next.len() < ops.len() {
+            self.next.resize(ops.len(), END);
+        }
+        let next = &mut self.next[..ops.len()];
+        for (i, op) in ops.iter().enumerate() {
             if op.key >= GROUND {
                 // Ground and area records apply in emission order: each
                 // accumulator still sees its own records in run order.
-                self.group_of.push(u32::MAX);
+                buckets[shard_of(op.key, shift)].push(*op);
                 continue;
             }
+            next[i] = END;
             let mut at = Couplings::bucket(op.key, bits);
-            let group = loop {
-                match self.table[at] {
-                    0 => {
-                        self.keys.push(op.key);
-                        self.cursor.push(0);
-                        self.table[at] = self.keys.len() as u32;
-                        break self.keys.len() - 1;
-                    }
-                    g if self.keys[g as usize - 1] == op.key => break g as usize - 1,
-                    _ => at = (at + 1) & (slots - 1),
+            loop {
+                let (stamp, group) = table[at];
+                if stamp != generation {
+                    table[at] = (generation, self.keys.len() as u32);
+                    self.keys.push(op.key);
+                    self.first.push(i as u32);
+                    self.last.push(i as u32);
+                    break;
                 }
-            };
-            self.cursor[group] += 1;
-            self.group_of.push(group as u32);
-        }
-        // Per shard: the ground and area records first, then each coupling
-        // group, in first-appearance order.
-        let mut lens = [0u32; MAX_SHARDS];
-        for (op, &group) in ops.iter().zip(&self.group_of) {
-            if group == u32::MAX {
-                lens[shard_of(op.key, shift)] += 1;
+                if self.keys[group as usize] == op.key {
+                    let tail = &mut self.last[group as usize];
+                    next[*tail as usize] = i as u32;
+                    *tail = i as u32;
+                    break;
+                }
+                at = (at + 1) & (slots - 1);
             }
         }
-        let mut grounds = [0u32; MAX_SHARDS];
-        for (key, cursor) in self.keys.iter().zip(&mut self.cursor) {
-            let s = shard_of(*key, shift);
-            let start = lens[s];
-            lens[s] += *cursor;
-            *cursor = start;
-            distinct[s] += usize::from(*key < GROUND);
-        }
-        let blank = Op { key: 0, pf: 0.0 };
-        for (bucket, &len) in buckets.iter_mut().zip(&lens) {
-            bucket.clear();
-            bucket.resize(len as usize, blank);
-        }
-        for (op, &group) in ops.iter().zip(&self.group_of) {
-            if group == u32::MAX {
-                let s = shard_of(op.key, shift);
-                buckets[s][grounds[s] as usize] = *op;
-                grounds[s] += 1;
-                continue;
+        // Then each coupling key's records, in first-appearance order.
+        for (&key, &first) in self.keys.iter().zip(&self.first) {
+            let s = shard_of(key, shift);
+            distinct[s] += 1;
+            let bucket = &mut buckets[s];
+            let mut i = first;
+            while i != END {
+                bucket.push(ops[i as usize]);
+                i = next[i as usize];
             }
-            let group = group as usize;
-            let s = shard_of(self.keys[group], shift);
-            let at = &mut self.cursor[group];
-            buckets[s][*at as usize] = *op;
-            *at += 1;
         }
     }
 }
@@ -1515,6 +1530,110 @@ mod tests {
             }
             assert_eq!(bits(acc, nodes), want);
         }
+    }
+
+    #[test]
+    fn null_ground_records_change_no_accumulator_bit() {
+        let nodes = 97usize;
+        // Every ground record is followed by +0.0, by -0.0, or by a
+        // cancellation through -0.0 back to its value.
+        let mut ops = Vec::new();
+        for (i, op) in stream(20_000, nodes as u32).into_iter().enumerate() {
+            ops.push(op);
+            if op.key >= GROUND && op.key != AREA {
+                let g = op.key as u32;
+                match i % 3 {
+                    0 => ops.push(Op::ground(g, 0.0)),
+                    1 => ops.push(Op::ground(g, -0.0)),
+                    _ => ops.extend([
+                        Op::ground(g, -op.pf),
+                        Op::ground(g, -0.0),
+                        Op::ground(g, op.pf),
+                    ]),
+                }
+            }
+        }
+        let nulls = ops.iter().filter(|op| op.is_null_ground()).count();
+        assert!(nulls > 3000);
+        assert!(!Op::area(0.0).is_null_ground() && !Op::couple(1, 2, 0.0).is_null_ground());
+        // The original accumulators add every record; none ends at -0.0.
+        let want = reference(&ops, nodes);
+        assert!(want.0.iter().all(|&g| g != (-0.0f64).to_bits()));
+        // Without the null records, the serial sink gives the same bits.
+        let kept: Vec<Op> = ops
+            .iter()
+            .copied()
+            .filter(|op| !op.is_null_ground())
+            .collect();
+        assert_eq!(reference(&kept, nodes), want);
+        for shards in [1, 2, 4] {
+            let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
+            let mut stats = ExtractStats::default();
+            let mut commit = Commit::new(&mut acc, &mut stats, usize::MAX);
+            for &op in &ops {
+                commit.apply(op).unwrap();
+            }
+            assert_eq!(bits(acc, nodes), want);
+        }
+        // A transcript stores none of them; its grouped records give the
+        // same bits.
+        let mut stored = Vec::new();
+        let mut transcript = Transcript {
+            ops: &mut stored,
+            cap: usize::MAX,
+        };
+        for &op in &ops {
+            assert!(transcript.op(op).is_ok());
+        }
+        assert_eq!(stored.len(), ops.len() - nulls);
+        let shift = 2;
+        let mut acc = Accumulators::new(1 << shift, nodes, 0.0).unwrap();
+        let mut groups = Grouping::default();
+        for chunk in stored.chunks(777) {
+            let mut buckets = vec![Vec::new(); 1 << shift];
+            let mut distinct = vec![0; 1 << shift];
+            groups.split(chunk, shift, &mut buckets, &mut distinct);
+            for (s, shard) in acc.shards.iter_mut().enumerate() {
+                shard.apply_grouped(&buckets[s], shift);
+            }
+        }
+        assert_eq!(bits(acc, nodes), want);
+    }
+
+    #[test]
+    fn grouping_reuses_its_table_across_chunks_and_generation_wraps() {
+        let nodes = 61usize;
+        let ops = stream(9_000, nodes as u32);
+        let shift = 1;
+        let split = |groups: &mut Grouping, chunk: &[Op]| {
+            let mut buckets = vec![Vec::new(); 1 << shift];
+            let mut distinct = vec![0; 1 << shift];
+            groups.split(chunk, shift, &mut buckets, &mut distinct);
+            (
+                buckets
+                    .iter()
+                    .map(|b| b.iter().map(|op| (op.key, op.pf.to_bits())).collect())
+                    .collect::<Vec<Vec<_>>>(),
+                distinct,
+            )
+        };
+        // Chunks of growing and shrinking size through one table, the
+        // generation passing its wrap, against a fresh table per chunk.
+        let mut reused = Grouping {
+            generation: u32::MAX - 2,
+            ..Grouping::default()
+        };
+        let mut at = 0;
+        for len in [5, 900, 17, 3000, 1, 0, 2500, 40, 2537] {
+            let chunk = &ops[at..at + len];
+            at += len;
+            assert_eq!(
+                split(&mut reused, chunk),
+                split(&mut Grouping::default(), chunk)
+            );
+        }
+        assert_eq!(at, ops.len());
+        assert!(reused.generation < 10);
     }
 
     #[test]
