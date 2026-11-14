@@ -95,6 +95,15 @@ pub struct AntennaRequest {
     pub max_work: usize,
     /// Fraction of each limit kept as margin (0 ..= 0.5).
     pub safety_margin: f64,
+    /// Also check every net as one conductor per layer (`whole_net_*` rows):
+    /// all of the net's metal on that layer over all of its gate area, with
+    /// all of its diffusion. A checker that evaluates a hierarchical
+    /// extraction node by node sees the net this way: Magic's `antennacheck`
+    /// on a hierarchical extraction ignores the fabrication order of the top
+    /// cell's wiring, so a layer jumper does not lower its ratio, while
+    /// diffusion anywhere on the net (a driver, a diode) does. Off (the
+    /// default) keeps the process-stage rows only.
+    pub whole_net: bool,
 }
 impl Default for AntennaRequest {
     fn default() -> Self {
@@ -108,6 +117,7 @@ impl Default for AntennaRequest {
             max_rows: 100_000,
             max_work: 200_000_000,
             safety_margin: DEFAULT_SAFETY_MARGIN,
+            whole_net: false,
         }
     }
 }
@@ -220,7 +230,8 @@ impl RulePair {
 pub struct CheckRow {
     pub net: String,
     pub layer: String,
-    /// side_area | area | cumulative_side_area | cumulative_area.
+    /// side_area | area | cumulative_side_area | cumulative_area, and with
+    /// `AntennaRequest::whole_net` also whole_net_side_area | whole_net_area.
     /// For cumulative rows, `ratio` sums historical partial ratios; `metal_um2`
     /// and `denominator_um2` describe only the current process-stage component.
     pub kind: String,
@@ -1310,7 +1321,154 @@ fn evaluate_net(
             }
         }
     }
+    if request.whole_net {
+        whole_net_rows(
+            prep,
+            design,
+            model,
+            &net_name,
+            shapes,
+            &by_layer,
+            &first_of_terminal,
+            request,
+            stats,
+            qualified,
+            &mut rows,
+        )?;
+    }
     Ok(rows)
+}
+
+/// `whole_net_*` rows of one net: per checked layer, the union of all of the
+/// net's shapes on it over the gate and diffusion area of all its terminals
+/// (`AntennaRequest::whole_net`).
+#[allow(clippy::too_many_arguments)]
+fn whole_net_rows(
+    prep: &Prepared,
+    design: &rustroad_core::Design,
+    model: &rustroad_core::connectivity::ConnectedDesign,
+    net_name: &str,
+    shapes: &[Shape],
+    by_layer: &HashMap<u32, Vec<usize>>,
+    terminals: &HashMap<usize, usize>,
+    request: &AntennaRequest,
+    stats: &mut AntennaStats,
+    qualified: &mut bool,
+    rows: &mut Rows,
+) -> Result<()> {
+    let input = &prep.input;
+    let dbu2 = prep.dbu2;
+    let keep = 1.0 - request.safety_margin;
+    let mut order: Vec<usize> = terminals.keys().copied().collect();
+    order.sort_unstable();
+    for &layer in &prep.order {
+        let Some(list) = by_layer.get(&layer) else {
+            continue;
+        };
+        let lname = input.layers[layer as usize].name.as_str();
+        let default_rule = LayerAntenna::default();
+        let rule = prep.layer_rules.get(lname).unwrap_or(&default_rule);
+        if rule.model.as_deref().is_some_and(|m| m != "OXIDE1") {
+            continue;
+        }
+        charge_work(&mut stats.work, order.len() + list.len(), request.max_work)?;
+        let (mut gate, mut diffusion) = (0i64, 0i64);
+        let mut gates = Vec::new();
+        let mut diffusions = Vec::new();
+        for &t in &order {
+            let (name, g, d, q) = terminal_info(prep, design, model, t, Some(layer));
+            *qualified |= q;
+            gate = gate
+                .checked_add(g)
+                .ok_or_else(|| Error::Budget("ANTENNA: gate area overflow".into()))?;
+            diffusion = diffusion
+                .checked_add(d)
+                .ok_or_else(|| Error::Budget("ANTENNA: diffusion area overflow".into()))?;
+            if g > 0 {
+                gates.push(name.clone());
+            }
+            if d > 0 {
+                diffusions.push(name);
+            }
+        }
+        if gate <= 0 {
+            continue;
+        }
+        let rects: Vec<Rect> = list.iter().map(|&i| shapes[i].rect).collect();
+        let (area, perimeter) = union_area_perimeter(
+            &rects,
+            request.max_union_cells,
+            &mut stats.union_cells,
+            &mut stats.work,
+            request.max_work,
+        )?;
+        let gate_um2 = gate as f64 / dbu2;
+        let diff_um2 = diffusion as f64 / dbu2;
+        let is_cut = input.layers[layer as usize].vertical.is_none();
+        let mut kinds = vec![(false, area as f64 / dbu2)];
+        if !is_cut && let Some(t) = rule.thickness {
+            kinds.push((true, (perimeter * i128::from(t)) as f64 / dbu2));
+        }
+        gates.sort();
+        diffusions.sort();
+        for (side, metal_um2) in kinds {
+            let rules = rules_for(rule, dbu2, side, false);
+            let Some((limit, keyword)) = rules.limit(diff_um2) else {
+                continue;
+            };
+            if rows.data.len() >= request.max_rows {
+                return Err(Error::Budget("ANTENNA: max_rows".into()));
+            }
+            let pwl_bytes = |limit: &Option<Limit>| match limit {
+                Some(Limit::Pwl { points }) => points.len() * mem::size_of::<[f64; 2]>(),
+                _ => 0,
+            };
+            let bytes = mem::size_of::<CheckRow>()
+                + 256
+                + net_name.len()
+                + lname.len()
+                + gates
+                    .iter()
+                    .chain(&diffusions)
+                    .map(String::len)
+                    .sum::<usize>()
+                + (gates.len() + diffusions.len()) * 48
+                + pwl_bytes(&rules.no_diff)
+                + pwl_bytes(&rules.with_diff);
+            rows.charge_row(bytes, stats)?;
+            let denominator = rules.denominator(gate_um2, diff_um2);
+            let ratio = metal_um2 / denominator;
+            let effective_limit = limit * keep;
+            rows.data.push(CheckRow {
+                net: net_name.to_string(),
+                layer: lname.to_string(),
+                kind: if side {
+                    "whole_net_side_area"
+                } else {
+                    "whole_net_area"
+                }
+                .into(),
+                gates: gates.clone(),
+                diffusions: diffusions.clone(),
+                gate_area_um2: gate_um2,
+                diff_area_um2: diff_um2,
+                metal_um2,
+                denominator_um2: denominator,
+                ratio,
+                limit,
+                effective_limit,
+                rule: if diff_um2 > 0.0 && rules.with_diff.is_some() {
+                    format!("{keyword}@diffusion {diff_um2:.6}um2")
+                } else {
+                    keyword
+                },
+                rules,
+                violated: ratio > effective_limit,
+                exceeds_lef_limit: ratio > limit,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn sort_rows(rows: &mut [CheckRow]) {
@@ -1764,7 +1922,12 @@ fn check_prepared(
         dbu_per_micron: prep.dbu,
         sources: prep.sources.clone(),
         scope: AntennaScope {
-            model: "LEF process-antenna partial ratios and per-gate cumulative process-stage DP",
+            model: if request.whole_net {
+                "LEF process-antenna partial ratios, per-gate cumulative process-stage DP and \
+                 whole-net per-layer ratios"
+            } else {
+                "LEF process-antenna partial ratios and per-gate cumulative process-stage DP"
+            },
             routing_scope: match state.scope {
                 crate::routing::RouteScope::All => "all_signal_nets",
                 crate::routing::RouteScope::Clock => "clock_nets_only",

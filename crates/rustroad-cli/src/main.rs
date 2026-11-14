@@ -450,6 +450,13 @@ enum Command {
         /// (default derived from the measured native-vs-deck under-read).
         #[arg(long, default_value_t = rustroad_workspace::antenna::DEFAULT_SAFETY_MARGIN)]
         safety_margin: f64,
+        /// Also report every net as one conductor per layer (`whole_net_*`
+        /// rows: all its metal on the layer over all its gate area, with all
+        /// its diffusion), as a node-by-node check of a hierarchical
+        /// extraction sees it. Layer jumpers do not lower these rows; a
+        /// diode does.
+        #[arg(long)]
+        whole_net: bool,
     },
     /// Stream ordered selected checks while decoding and preparing HEAD once.
     CheckAntennaBatch {
@@ -1174,6 +1181,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             max_rows,
             max_work,
             safety_margin,
+            whole_net,
         } => emit(&rustroad_workspace::antenna::check_antenna(
             &workspace,
             &rustroad_workspace::antenna::AntennaRequest {
@@ -1189,6 +1197,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 max_rows,
                 max_work,
                 safety_margin,
+                whole_net,
             },
             &limits,
         )?),
