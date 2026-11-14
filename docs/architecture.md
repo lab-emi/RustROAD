@@ -107,8 +107,11 @@ re-derivations and keeps only O(n) index bounds, table lengths and the instance
 identity checks; a missing, foreign-build or mismatching receipt, or any file
 in the revision directory the receipt does not list, means full validation, as
 does `--verify-workspace` or `RUSTROAD_FORCE_VALIDATE=1`.
-`rustroad verify-workspace --write-receipt` validates HEAD fully and stamps
-revisions committed before receipts existed (or by another build). A receipt
+`rustroad verify-workspace --write-receipt --base-rev rev42` validates HEAD fully
+and stamps revisions committed before receipts existed (or by another build).
+The base revision is required for writes and checked under the exclusive lock;
+a mismatch returns `REVISION_CONFLICT` without changing HEAD or its receipt.
+Without `--write-receipt`, verification remains read-only and takes no base revision. A receipt
 is an integrity cache, not an authenticity proof: whoever can write the
 workspace can also rewrite a receipt.
 
