@@ -191,6 +191,9 @@ pub(super) struct Ctx<'c, 'a> {
     pub pin_nodes: &'c HashMap<u32, (u32, u32), BuildFx>,
     pub net_index: &'c HashMap<u32, usize, BuildFx>,
     pub nodes: &'c NodeIds,
+    /// Count passive strips that cannot record anything without sweeping
+    /// them (`passive_without_plates`).
+    pub passive_shortcut: bool,
     layers: Vec<Option<LayerInfo<'a>>>,
     metal_layer: HashMap<u32, usize, BuildFx>,
 }
@@ -255,6 +258,7 @@ impl<'c, 'a> Ctx<'c, 'a> {
             pin_nodes,
             net_index,
             nodes,
+            passive_shortcut: true,
             layers,
             metal_layer,
         })
@@ -639,6 +643,29 @@ fn pair<S: Sink>(
     counts.max_run_candidates = counts.max_run_candidates.max(widest);
     let mut cands = std::mem::take(&mut sc.cands);
     for (run, flag) in [(x, 1u8), (y, 2u8)] {
+        if run.passive.is_some() && ctx.passive_shortcut {
+            match passive_without_plates(
+                ctx,
+                run,
+                &sc.other,
+                &sc.own,
+                flag,
+                &mut sc.events,
+                work,
+                counts,
+            ) {
+                Ok(true) => {
+                    #[cfg(test)]
+                    SHORTCUTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    continue;
+                }
+                Ok(false) => {}
+                Err(stop) => {
+                    sc.cands = cands;
+                    return Err(stop);
+                }
+            }
+        }
         merge(
             &sc.other,
             sc.own.iter().filter(|c| c.1 & flag != 0).map(|c| c.0),
@@ -755,6 +782,151 @@ fn pair_candidates(
     sort_by_id(&mut sc.own, |c| c.0.id, &mut sc.keys, &mut sc.spare_own);
     Ok(base + nx.max(ny))
 }
+
+/// A passive strip records only plate shares toward routed conductors on
+/// other layers: a share goes to the conductor under a side edge of the
+/// nearest plate, the nearest calibration metal whose conductors, merged
+/// across the strip, cover its cross-section with one strip width of margin
+/// on each side. When no metal level can do that while it has routed metal
+/// under a side edge, every interval of the strip records nothing, and only
+/// its interval count and work charges remain (`Ok(true)`). Both follow
+/// from the candidates' clamped extents along the strip: the intervals are
+/// bounded by the strip ends and the distinct extents, and a candidate is
+/// active from its entry to its exit, a degenerate one (entered at its own
+/// exit) from its entry on. Errors and charges are those of `numeric`.
+/// `Ok(false)` charges nothing: the strip may record something, or it has a
+/// candidate on a layer without a model (an error once it spans), or its
+/// extents do not pack; the full sweep then runs.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the strip's candidates come as the shared pair lists"
+)]
+fn passive_without_plates(
+    ctx: &Ctx<'_, '_>,
+    run: &Run,
+    other: &[Cand],
+    own: &[(Cand, u8)],
+    flag: u8,
+    events: &mut Vec<u64>,
+    work: &mut usize,
+    counts: &mut Counts,
+) -> std::result::Result<bool, Stop> {
+    let cross = |r: Rect| {
+        if run.vertical {
+            (r.ly, r.uy, r.lx, r.ux)
+        } else {
+            (r.lx, r.ux, r.ly, r.uy)
+        }
+    };
+    let (minus, plus) = (run.minus, run.plus);
+    let margin = plus - minus;
+    let (need_lo, need_hi) = (minus - margin, plus + margin);
+    // Per metal level of the layered candidates: the hull of their cross
+    // extents (a merged span lies inside it) and whether a routed one lies
+    // under a side edge (the only owners a share can go to).
+    let mut levels: [(u32, i64, i64, bool); 8] = [(0, 0, 0, false); 8];
+    let mut used = 0;
+    for c in other {
+        let (a0, a1, x0, x1) = cross(c.shape.rect);
+        if a0 >= a1 {
+            continue;
+        }
+        let Some(metal) = ctx
+            .layers
+            .get(c.shape.layer as usize)
+            .and_then(Option::as_ref)
+            .map(|i| i.model.metal)
+        else {
+            return Ok(false);
+        };
+        if x1.min(plus) - x0.max(minus) <= 0 {
+            continue;
+        }
+        let edge = c.shape.routed() && ((x0 < plus && x1 >= plus) || (x1 > minus && x0 <= minus));
+        match levels[..used].iter().position(|l| l.0 == metal) {
+            Some(i) => {
+                let l = &mut levels[i];
+                l.1 = l.1.min(x0);
+                l.2 = l.2.max(x1);
+                l.3 |= edge;
+            }
+            None if used < levels.len() => {
+                levels[used] = (metal, x0, x1, edge);
+                used += 1;
+            }
+            None => return Ok(false),
+        }
+    }
+    if levels[..used]
+        .iter()
+        .any(|l| l.3 && l.1 <= need_lo && l.2 >= need_hi)
+    {
+        return Ok(false);
+    }
+    let span = match u64::try_from(i128::from(run.hi) - i128::from(run.lo)) {
+        Ok(span) if span >> 62 == 0 => span,
+        _ => return Ok(false),
+    };
+    // Entries (+1, low bit set) and exits (-1) relative to the strip start.
+    events.clear();
+    let mut n = 0usize;
+    let cands = other
+        .iter()
+        .chain(own.iter().filter(|c| c.1 & flag != 0).map(|c| &c.0));
+    for c in cands {
+        let (a0, a1, _, _) = cross(c.shape.rect);
+        let (enter, exit) = (a0.max(run.lo), a1.min(run.hi));
+        if enter > exit || enter > run.hi || exit < run.lo {
+            return Ok(false);
+        }
+        n += 1;
+        events.push(((enter - run.lo) as u64) << 1 | 1);
+        if enter < exit {
+            events.push(((exit - run.lo) as u64) << 1);
+        }
+    }
+    let event_count = 2 * n;
+    let index_work = event_count
+        .checked_mul(3 * event_count.max(1).ilog2() as usize + 4)
+        .ok_or_else(|| budget("extraction interval index work"))?;
+    *work = work
+        .checked_add(index_work)
+        .filter(|&w| w <= ctx.limits.max_work)
+        .ok_or_else(|| budget("extraction interval index work"))?;
+    events.sort_unstable();
+    let (mut at, mut active, mut t0) = (0usize, 0usize, 0u64);
+    let (mut intervals, mut charge) = (0usize, 0usize);
+    loop {
+        while at < events.len() && events[at] >> 1 <= t0 {
+            if events[at] & 1 == 1 {
+                active += 1;
+            } else {
+                active -= 1;
+            }
+            at += 1;
+        }
+        let t1 = events.get(at).map_or(span, |e| e >> 1);
+        if t1 <= t0 {
+            break;
+        }
+        intervals += 1;
+        charge = charge
+            .checked_add(active.max(1))
+            .ok_or_else(|| budget("extraction work"))?;
+        t0 = t1;
+    }
+    *work = work
+        .checked_add(charge)
+        .filter(|&w| w <= ctx.limits.max_work)
+        .ok_or_else(|| budget("extraction work"))?;
+    counts.passive_intervals += intervals;
+    Ok(true)
+}
+
+/// Passive strips counted by `passive_without_plates` (tests).
+#[cfg(test)]
+pub(super) static SHORTCUTS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 #[inline]
 fn event(pos: i64, k: usize, enter: bool) -> u128 {

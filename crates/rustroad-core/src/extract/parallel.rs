@@ -57,6 +57,9 @@ pub(super) struct Bounds {
     /// Same-net construction lists this long are bucketed; `usize::MAX`
     /// scans every list linearly (tests).
     pub net_bin_list: usize,
+    /// Count passive strips that cannot record anything without sweeping
+    /// them; `false` sweeps every strip (tests).
+    pub passive_shortcut: bool,
 }
 impl Default for Bounds {
     fn default() -> Self {
@@ -66,6 +69,7 @@ impl Default for Bounds {
             pending_bytes: 4 << 20,
             virtual_grid: true,
             net_bin_list: super::NET_BIN_LIST,
+            passive_shortcut: true,
         }
     }
 }

@@ -2966,7 +2966,7 @@ fn extract_with_queries(
                     .iter()
                     .map(|&id| strip::UnitRef::Conductor(id)),
             );
-        let ctx = strip::Ctx::new(
+        let mut ctx = strip::Ctx::new(
             input,
             &shapes,
             &grid,
@@ -2979,6 +2979,11 @@ fn extract_with_queries(
             &net_index,
             &nodes,
         )?;
+        ctx.passive_shortcut = match queries {
+            Queries::Indexed(bounds) => bounds.passive_shortcut,
+            #[cfg(test)]
+            Queries::Reference => false,
+        };
         match queries {
             Queries::Indexed(bounds) => parallel::run(
                 &ctx,
@@ -3675,6 +3680,7 @@ mod tests {
             pending_bytes: 1,
             virtual_grid: true,
             net_bin_list: NET_BIN_LIST,
+            passive_shortcut: true,
         }
     }
     /// Every pool size and tile size, with default and tight parallel
@@ -3689,7 +3695,17 @@ mod tests {
                 virtual_grid: false,
                 ..tight_bounds()
             };
-            for bounds in [parallel::Bounds::default(), tight_bounds(), instance_path] {
+            // Every passive strip swept: the same network and statistics.
+            let swept = parallel::Bounds {
+                passive_shortcut: false,
+                ..parallel::Bounds::default()
+            };
+            for bounds in [
+                parallel::Bounds::default(),
+                tight_bounds(),
+                instance_path,
+                swept,
+            ] {
                 let mut parallel = pool(threads)
                     .install(|| extract_with_queries(input, &limits, Queries::Indexed(bounds)))
                     .unwrap();
@@ -4210,6 +4226,123 @@ mod tests {
         assert!((sum(&lattice) - sum(&compact)).abs() < 1e-15);
         assert_eq!(lattice.stats.wire_runs, compact.stats.wire_runs);
         assert_eq!(lattice.stats.pad_pieces, compact.stats.pad_pieces);
+    }
+
+    #[test]
+    fn passive_strips_without_plates_count_like_the_full_sweep() {
+        // Vertical M2 wires and horizontal M1 wires over M1 pins and
+        // obstructions of every shape: narrow, long either way and square,
+        // abutting, overlapping and beyond the wires' ends. A crossed pin's
+        // strip across a narrow wire has no plate there; the strip along it
+        // has one. The shortcut must give the full sweep's network,
+        // statistics and work.
+        let mut tech = tech(true);
+        if let Some(m1) = tech.layers[0].as_mut() {
+            m1.contexts.push(RcContext {
+                over: 0,
+                under: Some(2),
+                rows: vec![[0.1, 9e-5, 3e-5], [0.5, 3e-5, 6e-5], [1.0, 0.0, 7e-5]],
+            });
+        }
+        let mut seed = 0x5eed_u64;
+        let mut next = move |n: i64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 33) % n as u64) as i64
+        };
+        let (mut wires, mut access, mut t) = (Vec::new(), Vec::new(), Vec::new());
+        for net in 0..12u32 {
+            let (layer, start, end) = if net < 8 {
+                let x = i64::from(net) * 1300 + next(400);
+                (1, [x, 0], [x, 8000 + next(4000)])
+            } else {
+                let y = i64::from(net - 8) * 2700 + 500 + next(300);
+                (0, [0, y], [9000 + next(2000), y])
+            };
+            wires.push(Wire {
+                net,
+                layer,
+                start,
+                end,
+            });
+            access.push(Access {
+                pin: 2 * net,
+                net,
+                layer,
+                at: start,
+            });
+            access.push(Access {
+                pin: 2 * net + 1,
+                net,
+                layer,
+                at: end,
+            });
+            t.extend([
+                terminal(2 * net, net, true),
+                terminal(2 * net + 1, net, false),
+            ]);
+        }
+        let r = routes(wires, vec![], access, (0..12).collect());
+        let passive: Vec<PassiveShape> = (0..80u32)
+            .map(|i| {
+                let (x, y) = (next(11_000) - 500, next(12_000) - 500);
+                let (w, h) = match i % 4 {
+                    0 => (next(300) + 50, next(300) + 50),
+                    1 => (next(3000) + 100, next(200) + 100),
+                    2 => (next(200) + 100, next(3000) + 100),
+                    _ => (1500, 1500),
+                };
+                let pin = next(24) as u32;
+                let owner = match i % 3 {
+                    0 => PassiveOwner::Ground,
+                    1 => PassiveOwner::Pin { net: pin / 2, pin },
+                    _ => PassiveOwner::Pin {
+                        net: 100,
+                        pin: 900 + i,
+                    },
+                };
+                PassiveShape {
+                    layer: 0,
+                    rect: Rect {
+                        lx: x,
+                        ly: y,
+                        ux: x + w,
+                        uy: y + h,
+                    },
+                    owner,
+                }
+            })
+            .collect();
+        let (l, v) = (layers(), vias());
+        let input = ExtractInput {
+            layers: &l,
+            vias: &v,
+            routes: &r,
+            nets: None,
+            terminals: &t,
+            passive: &passive,
+            held_bytes: 0,
+            instances: None,
+            tech: &tech,
+        };
+        let limits = ExtractLimits::default();
+        let swept = parallel::Bounds {
+            passive_shortcut: false,
+            ..parallel::Bounds::default()
+        };
+        let before = strip::SHORTCUTS.load(std::sync::atomic::Ordering::Relaxed);
+        for threads in [1, 2, 4] {
+            let [a, b] = [parallel::Bounds::default(), swept].map(|bounds| {
+                pool(threads)
+                    .install(|| extract_with_queries(&input, &limits, Queries::Indexed(bounds)))
+                    .unwrap()
+            });
+            assert_network_exact(&a, &b);
+            assert!(a.stats.passive_strips > 40 && a.stats.passive_intervals > 0);
+            assert!(!a.couplings.is_empty());
+        }
+        assert!(strip::SHORTCUTS.load(std::sync::atomic::Ordering::Relaxed) > before);
     }
 
     #[test]
