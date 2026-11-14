@@ -285,7 +285,6 @@ pub(super) struct Scratch {
     cands: Vec<Cand>,
     events: Vec<u64>,
     wide_events: Vec<u128>,
-    active: Vec<u64>,
     layered: Vec<(u32, i64, i64, u32)>,
     contributions: Vec<(u32, f64, f64)>,
     face: FaceScratch,
@@ -305,7 +304,6 @@ impl Scratch {
             cands: Vec::new(),
             events: Vec::new(),
             wide_events: Vec::new(),
-            active: Vec::new(),
             layered: Vec::new(),
             contributions: Vec::new(),
             face: FaceScratch::default(),
@@ -1311,7 +1309,8 @@ type PlateState = (
     (bool, bool),
     Option<usize>,
 );
-type SideKey = (Option<(i64, u32)>, Option<(i64, u32)>, bool, bool);
+/// A side's nearest lateral neighbour and cover flag.
+type SideKey = (Option<(i64, u32)>, bool);
 #[derive(Default)]
 struct IntervalCache {
     plates_valid: bool,
@@ -1325,7 +1324,7 @@ struct IntervalCache {
     upper: Vec<(bool, usize, usize)>,
     owners: Vec<(u32, f64, f64)>,
     sides_valid: bool,
-    sides_key: SideKey,
+    sides_key: [SideKey; 2],
     sides: [Side; 2],
 }
 
@@ -1359,7 +1358,6 @@ fn numeric<S: Sink>(
     let Scratch {
         events,
         wide_events,
-        active,
         layered,
         contributions,
         face,
@@ -1455,13 +1453,21 @@ fn numeric<S: Sink>(
             rank: 0,
             gap,
         });
+        // A candidate has one entry and one exit, the exit no earlier: it
+        // spans from its entry until its exit. A degenerate one (entered at
+        // its own exit, which is ordered first and finds it inactive) stays
+        // active from its entry on, so its exit is never stored.
         let (enter, exit) = (a0.max(run.lo), a1.min(run.hi));
+        let degenerate = enter == exit;
         if let Some(p) = packing
             && enter <= run.hi
             && exit >= run.lo
+            && enter <= exit
         {
             events.push(p.event(enter, k, true));
-            events.push(p.event(exit, k, false));
+            if !degenerate {
+                events.push(p.event(exit, k, false));
+            }
         } else {
             if let Some(p) = packing.take() {
                 // Unpack what was packed so far; the strip uses wide events.
@@ -1471,7 +1477,9 @@ fn numeric<S: Sink>(
                 events.clear();
             }
             wide_events.push(event(enter, k, true));
-            wide_events.push(event(exit, k, false));
+            if !degenerate {
+                wide_events.push(event(exit, k, false));
+            }
         }
     }
     by_rank.sort_unstable();
@@ -1480,7 +1488,10 @@ fn numeric<S: Sink>(
     }
     events.sort_unstable();
     wide_events.sort_unstable();
-    let event_count = events.len() + wide_events.len();
+    // Every candidate counts two events in the index work, as when both
+    // were stored.
+    let event_count = 2 * cands.len();
+    let stored = events.len() + wide_events.len();
     // Position, candidate and enter flag of the i-th sorted event.
     let at = |i: usize| -> (i64, usize, bool) {
         match packing {
@@ -1501,15 +1512,23 @@ fn numeric<S: Sink>(
         .checked_add(index_work)
         .filter(|&n| n <= limits.max_work)
         .ok_or_else(|| budget("extraction interval index work"))?;
-    active.clear();
-    active.resize(cands.len().div_ceil(64), 0);
     let mut active_n = 0usize;
     let span = (run.hi - run.lo) as f64;
-    // Passive strips attach to their routed partners only.
-    let net_local = match run.passive {
-        None => ctx.net_index[&run.net],
-        Some(_) => usize::MAX,
+    // Passive strips attach to their routed partners only; a routed strip
+    // attaches to its end nodes by position (pi split).
+    let ends = match run.passive {
+        None => {
+            let local = ctx.net_index[&run.net];
+            Some((
+                ctx.nodes.local(local, run.node_lo),
+                ctx.nodes.local(local, run.node_hi),
+            ))
+        }
+        Some(_) => None,
     };
+    let area_cap = model
+        .area_cap
+        .filter(|_| run.passive.is_none() && !(run.piece && run.vertical));
     plus_set.reset(cands.len());
     minus_set.reset(cands.len());
     layered_set.reset(by_rank.len());
@@ -1517,36 +1536,29 @@ fn numeric<S: Sink>(
     // Spanning candidates per counted role.
     let (mut foreign_n, mut cover_plus_n, mut cover_minus_n) = (0usize, 0usize, 0usize);
     let (mut no_model_n, mut routed_layered_n) = (0usize, 0usize);
+    // Whether the layered set changed since `layered` was last built.
+    let mut layered_dirty = true;
     // Interval boundaries are run.lo, run.hi and every (clamped) candidate
     // end, ascending and distinct: exactly the original sorted point list.
     let mut event_index = 0;
     let mut t0 = run.lo;
     loop {
         let mut next = None;
-        while event_index < event_count {
+        while event_index < stored {
             let (pos, k, enter) = at(event_index);
             if pos > t0 {
                 next = Some(pos);
                 break;
             }
-            let (w, bit) = (k / 64, 1u64 << (k % 64));
             // +1 when the candidate starts spanning, -1 when it stops.
             let change = if enter {
-                if active[w] & bit == 0 {
-                    active_n += 1;
-                    active[w] |= bit;
-                    1isize
-                } else {
-                    0
-                }
-            } else if active[w] & bit != 0 {
-                active_n -= 1;
-                active[w] &= !bit;
-                -1
+                active_n += 1;
+                1isize
             } else {
-                0
+                active_n -= 1;
+                -1
             };
-            if change != 0 {
+            {
                 let add = |n: &mut usize| {
                     *n = n.wrapping_add_signed(change);
                 };
@@ -1584,6 +1596,7 @@ fn numeric<S: Sink>(
                         } else {
                             layered_set.remove(p.rank as usize);
                         }
+                        layered_dirty = true;
                         if p.routed {
                             add(&mut routed_layered_n);
                         }
@@ -1628,19 +1641,23 @@ fn numeric<S: Sink>(
         if run.passive.is_none() {
             counts.foreign_overlaps += foreign_n;
         }
-        layered.clear();
-        layered_set.for_each(|r| layered.push(by_rank[r]));
         // Plates, context and face coverage depend only on the sorted
         // `layered` list, and each side's template (its share of the
         // context value per unit length) only on that state and the side's
         // neighbour and cover flag: both are reused while unchanged, and
         // only the length-dependent products are evaluated per interval, as
         // the same f64 expressions in the same order.
-        let area_cap = model
-            .area_cap
-            .filter(|_| run.passive.is_none() && !(run.piece && run.vertical));
         let mut plates_changed = false;
-        if !cache.plates_valid || cache.layered != *layered {
+        // The sorted `layered` list changes only when a layered candidate
+        // enters or leaves; until then it equals the cached list.
+        let mut recompute = false;
+        if layered_dirty || !cache.plates_valid {
+            layered.clear();
+            layered_set.for_each(|r| layered.push(by_rank[r]));
+            layered_dirty = false;
+            recompute = !cache.plates_valid || cache.layered != *layered;
+        }
+        if recompute {
             // A conductor on another layer is a plate for this strip (the
             // calibration OVER/UNDER contexts) only where its layer's metal
             // spans the whole strip cross-section and reaches one strip
@@ -1739,8 +1756,7 @@ fn numeric<S: Sink>(
                     }
                 }
             }
-            cache.layered.clear();
-            cache.layered.extend_from_slice(layered);
+            std::mem::swap(&mut cache.layered, layered);
             cache.plates_valid = true;
         }
         let (below, above, context, plane_split, below_only) = cache.plates;
@@ -1750,12 +1766,19 @@ fn numeric<S: Sink>(
         if run.passive.is_none() && cache.fallback {
             counts.context_fallback_intervals += 1;
         }
-        let sides = (plus, minus, covered_plus, covered_minus);
-        if plates_changed || !cache.sides_valid || cache.sides_key != sides {
+        // Each side's template depends only on the plates and the side's
+        // own neighbour and cover flag: a side is re-evaluated when either
+        // changed.
+        let keys = [(plus, covered_plus), (minus, covered_minus)];
+        let all = plates_changed || !cache.sides_valid;
+        if all || cache.sides_key != keys {
             let sub = &model.contexts[info.substrate].rows;
             let rows = &model.contexts[context].rows;
             let below_only = below_only.map(|i| &model.contexts[i].rows);
-            for (k, side, covered) in [(0, plus, covered_plus), (1, minus, covered_minus)] {
+            for (k, (side, covered)) in keys.into_iter().enumerate() {
+                if !all && cache.sides_key[k] == (side, covered) {
+                    continue;
+                }
                 cache.sides[k] = if covered {
                     Side::Covered
                 } else if side.is_some_and(|(g, s)| g == 0 && probes[s as usize].same) {
@@ -1813,7 +1836,7 @@ fn numeric<S: Sink>(
                     }
                 };
             }
-            cache.sides_key = sides;
+            cache.sides_key = keys;
             cache.sides_valid = true;
         }
         let length = um(tech, t1 - t0);
@@ -1881,7 +1904,7 @@ fn numeric<S: Sink>(
             }
             ground = (ground - shielded).max(0.0);
         }
-        if run.passive.is_some() {
+        let Some((g_lo, g_hi)) = ends else {
             // Only this conductor's plate shares toward routed conductors
             // of other nets: ground and lateral sides are counted from the
             // routed side.
@@ -1927,12 +1950,8 @@ fn numeric<S: Sink>(
             }
             t0 = t1;
             continue;
-        }
+        };
         // Attach to this run's end nodes by position (pi split).
-        let (g_lo, g_hi) = (
-            ctx.nodes.local(net_local, run.node_lo),
-            ctx.nodes.local(net_local, run.node_hi),
-        );
         sink.op(Op::ground(g_lo, ground * (1.0 - w_hi)))?;
         sink.op(Op::ground(g_hi, ground * w_hi))?;
         for &(s, value, run_factor) in contributions.iter() {
