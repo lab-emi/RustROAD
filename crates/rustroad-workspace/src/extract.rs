@@ -175,6 +175,47 @@ fn fail(s: impl Into<String>) -> Error {
     Error::Invalid(s.into())
 }
 
+/// Private wall-clock and resident-memory marks of the command's phases,
+/// one JSON line on stderr when `RUSTROAD_EXTRACT_PROFILE` is set (like the
+/// core's phase profile); never changes results.
+struct Timeline {
+    start: Option<std::time::Instant>,
+    marks: Vec<(&'static str, u128, Option<u64>)>,
+}
+impl Timeline {
+    fn new() -> Self {
+        Self {
+            start: std::env::var_os("RUSTROAD_EXTRACT_PROFILE")
+                .is_some()
+                .then(std::time::Instant::now),
+            marks: Vec::new(),
+        }
+    }
+    fn mark(&mut self, what: &'static str) {
+        if let Some(start) = self.start {
+            let rss = rustroad_core::memory::rss_bytes();
+            self.marks.push((what, start.elapsed().as_nanos(), rss));
+        }
+    }
+    fn report(&self) {
+        if self.start.is_some() {
+            let marks: Vec<_> = self
+                .marks
+                .iter()
+                .map(|(what, ns, rss)| serde_json::json!({"phase": what, "end_ns": ns, "rss_bytes": rss}))
+                .collect();
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "schema": "rustroad.extract-command-profile.v1",
+                    "marks": marks,
+                    "peak_rss_bytes": rustroad_core::memory::peak_rss_bytes(),
+                })
+            );
+        }
+    }
+}
+
 /// Two incidence ids per coupling, preserving original per-net insertion order.
 /// No second copy of the RC network or per-pin names is retained.
 struct CouplingIndex {
@@ -334,6 +375,7 @@ fn extract_impl(
     if request.max_spef_bytes == 0 || request.max_spef_bytes > HARD_MAX_SPEF_BYTES {
         return Err(Error::Budget("SPEF byte cap outside hard bounds".into()));
     }
+    let mut timeline = Timeline::new();
     let out = output_outside_workspace(workspace, &request.out)?;
     let (profile, profile_pin) = load_profile(&request.profile)?;
     if profile.corner != request.corner {
@@ -343,6 +385,7 @@ fn extract_impl(
         )));
     }
     let snapshot = crate::read(workspace, limits)?;
+    timeline.mark("workspace_read");
     let metadata = snapshot.metadata();
     let design = &metadata.design;
     let mut effective = request.clone();
@@ -505,6 +548,7 @@ fn extract_impl(
             ground(patch.layer, patch.rect);
         }
     }
+    timeline.mark("extraction_input");
     let network = extract::extract_cpu_ref(
         &extract::ExtractInput {
             held_bytes: rustroad_core::memory::live_bytes().unwrap_or(
@@ -566,6 +610,7 @@ fn extract_impl(
             }
         })
     };
+    timeline.mark("extraction");
     let coupling_index = CouplingIndex::new(&network, model.nets.len(), &request.limits)?;
     let mut ports = BTreeMap::<u32, (String, spef::Direction)>::new();
     for rc in &network.nets {
@@ -741,6 +786,7 @@ fn extract_impl(
         file.sync_all()?;
         Ok((bytes, digest))
     })();
+    timeline.mark("spef_write");
     let (bytes, sha256) = match written {
         Ok(v) => v,
         Err(e) => {
@@ -809,7 +855,7 @@ fn extract_impl(
             single.len()
         ));
     }
-    Ok(ExtractReport {
+    let report = ExtractReport {
         status: "ok",
         schema: "rustroad.extract.v1",
         workspace_revision: metadata.revision.clone(),
@@ -867,7 +913,10 @@ fn extract_impl(
         pinless_signal_nets: pinless,
         single_pin_signal_nets: single,
         diagnostics,
-    })
+    };
+    timeline.mark("report");
+    timeline.report();
+    Ok(report)
 }
 
 #[cfg(test)]
