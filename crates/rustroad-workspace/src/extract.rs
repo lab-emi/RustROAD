@@ -175,6 +175,73 @@ fn fail(s: impl Into<String>) -> Error {
     Error::Invalid(s.into())
 }
 
+/// The parts of a snapshot an extraction reads once its input is built,
+/// with the workspace lock held until they are dropped.
+struct Retained {
+    _lock: File,
+    revision: String,
+    design_name: String,
+    cells: Vec<rustroad_core::Cell>,
+    model: rustroad_core::connectivity::ConnectedDesign,
+    routes: rustroad_core::routing::Routes,
+}
+impl Retained {
+    /// Moves the design's name and cells, the connectivity and the routes
+    /// out of `snapshot`; the rest (the parsed metadata and the mapped
+    /// tables) is returned to be released.
+    fn split(snapshot: crate::Snapshot) -> Result<(Self, Box<dyn Send>)> {
+        let crate::Snapshot {
+            _lock,
+            mut metadata,
+            map,
+            _connections,
+            _layout,
+            _routing,
+            ..
+        } = snapshot;
+        let physical = metadata
+            .physical
+            .as_mut()
+            .ok_or_else(|| fail("NO_PHYSICAL: import a PDK design first"))?;
+        let empty = rustroad_core::connectivity::ConnectedDesign {
+            layers: Vec::new(),
+            masters: Vec::new(),
+            instance_masters: Vec::new(),
+            ports: Vec::new(),
+            nets: Vec::new(),
+            pins: Vec::new(),
+        };
+        let model = std::mem::replace(&mut physical.connectivity, empty);
+        let routing = physical
+            .routing
+            .as_mut()
+            .ok_or_else(|| fail("NO_ROUTING: route before extraction"))?;
+        let routes = std::mem::replace(
+            &mut routing.routes,
+            rustroad_core::routing::Routes {
+                wires: Vec::new(),
+                vias: Vec::new(),
+                access: Vec::new(),
+                patches: Vec::new(),
+                nets: Vec::new(),
+                stats: Default::default(),
+            },
+        );
+        let retained = Self {
+            _lock,
+            revision: metadata.revision.clone(),
+            design_name: std::mem::take(&mut metadata.design.name),
+            cells: std::mem::take(&mut metadata.design.cells),
+            model,
+            routes,
+        };
+        Ok((
+            retained,
+            Box::new((metadata, map, _connections, _layout, _routing)),
+        ))
+    }
+}
+
 /// Private wall-clock and resident-memory marks of the command's phases,
 /// one JSON line on stderr when `RUSTROAD_EXTRACT_PROFILE` is set (like the
 /// core's phase profile); never changes results.
@@ -414,7 +481,7 @@ fn extract_impl(
         )));
     }
     let placed: Vec<_> = snapshot.records().collect();
-    let (input, owners) =
+    let (mut input, owners) =
         build_compact_input_with_owners(design, bundle, &placed, &state.config, state.scope)?;
     // Bind the profile to the routing layers by name.
     let dbu = f64::from(design.units_per_micron);
@@ -548,12 +615,31 @@ fn extract_impl(
             ground(patch.layer, patch.rect);
         }
     }
+    // From here on the extraction reads the input's layers, vias, terminals
+    // and cell geometry and the snapshot's routes; the SPEF reads the
+    // design and the connectivity. Everything else is released before the
+    // extraction's peak (the workspace lock stays held to the end).
+    drop(std::mem::take(&mut input.obstacles));
+    drop(std::mem::take(&mut input.access_classes));
+    drop(input.tracks.take());
+    let (retained, rest) = Retained::split(snapshot)?;
+    // Freeing the rest takes a pool thread a moment; the extraction starts
+    // meanwhile.
+    rayon::spawn(move || drop(rest));
+    let Retained {
+        _lock,
+        revision,
+        design_name,
+        cells,
+        model: kept_model,
+        routes,
+    } = retained;
+    let model = &kept_model;
     timeline.mark("extraction_input");
     let network = extract::extract_cpu_ref(
         &extract::ExtractInput {
-            held_bytes: rustroad_core::memory::live_bytes().unwrap_or(
-                crate::routing::revision_bytes(workspace, &metadata.revision)?.saturating_mul(3),
-            ),
+            held_bytes: rustroad_core::memory::live_bytes()
+                .unwrap_or(crate::routing::revision_bytes(workspace, &revision)?.saturating_mul(3)),
             instances: input
                 .instances
                 .as_ref()
@@ -563,7 +649,7 @@ fn extract_impl(
                 }),
             layers: &input.layers,
             vias: &input.vias,
-            routes: &state.routes,
+            routes: &routes,
             nets: has_ties.then_some(signal_nets.as_slice()),
             terminals: &input.terminals,
             passive: &passive,
@@ -571,8 +657,9 @@ fn extract_impl(
         },
         &request.limits,
     )?;
-    // The passive copy is no longer needed while the SPEF is written.
-    drop(passive);
+    // The passive copy and the routes are no longer needed while the SPEF
+    // is written.
+    drop((passive, routes));
     // Names: nets by connectivity name, pins as instance/pin, ports by bit.
     let pin_label = |pin: u32| -> Result<(spef::Node, spef::Direction, Option<String>)> {
         let c = model
@@ -585,7 +672,7 @@ fn extract_impl(
                 let mp = &master.pins[terminal as usize];
                 (
                     spef::Node::Pin {
-                        instance: design.cells[instance as usize].name.clone(),
+                        instance: cells[instance as usize].name.clone(),
                         pin: mp.name.clone(),
                     },
                     match mp.direction {
@@ -653,7 +740,7 @@ fn extract_impl(
         }
     }
     let header = spef::Header {
-        design: design.name.clone(),
+        design: design_name.clone(),
         vendor: "RustROAD".into(),
         program: "rustroad extract".into(),
         version: env!("CARGO_PKG_VERSION").into(),
@@ -666,7 +753,7 @@ fn extract_impl(
         out.file_name().and_then(|n| n.to_str()).unwrap_or("spef"),
         std::process::id()
     ));
-    let written = (|| -> Result<(u64, String)> {
+    let written = (|| -> Result<(u64, String, File)> {
         let file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -687,7 +774,7 @@ fn extract_impl(
             let PinOwner::Instance { instance, .. } = model.pins[pin as usize].owner else {
                 return None;
             };
-            Some(design.cells[instance as usize].name.as_str())
+            Some(cells[instance as usize].name.as_str())
         });
         let label = |pin| pin_label(pin).map_err(|e| spef::SpefError::Invalid(e.to_string()));
         // A coupling endpoint needs only the node name (no master clone).
@@ -699,7 +786,7 @@ fn extract_impl(
                 PinOwner::Instance { instance, terminal } => {
                     let master = &model.masters[model.instance_masters[instance as usize] as usize];
                     spef::Node::Pin {
-                        instance: design.cells[instance as usize].name.clone(),
+                        instance: cells[instance as usize].name.clone(),
                         pin: master.pins[terminal as usize].name.clone(),
                     }
                 }
@@ -783,38 +870,53 @@ fn extract_impl(
             .inner
             .into_inner()
             .map_err(|e| Error::Io(e.into_error()))?;
-        file.sync_all()?;
-        Ok((bytes, digest))
+        Ok((bytes, digest, file))
     })();
-    timeline.mark("spef_write");
-    let (bytes, sha256) = match written {
+    let (bytes, sha256, file) = match written {
         Ok(v) => v,
         Err(e) => {
             let _ = fs::remove_file(&temp);
             return Err(e);
         }
     };
+    // Nothing reads the network tables, the design or the connectivity
+    // from here on: they are released while the SPEF is synced to disk.
+    let routed_nets = network.nets.len();
+    let extract::RcNetwork {
+        nets,
+        couplings,
+        stats,
+    } = network;
+    let (synced, ()) = rayon::join(
+        || file.sync_all(),
+        move || drop((nets, couplings, coupling_index, cells, kept_model)),
+    );
+    timeline.mark("spef_write");
+    if let Err(e) = synced {
+        let _ = fs::remove_file(&temp);
+        return Err(e.into());
+    }
     if let Err(e) = fs::rename(&temp, &out) {
         let _ = fs::remove_file(&temp);
         return Err(e.into());
     }
     let mut diagnostics = profile.diagnostics.clone();
-    if network.stats.opened_loop_resistors > 0 {
+    if stats.opened_loop_resistors > 0 {
         diagnostics.push(format!(
             "RC_LOOP_OPENED: {} loop-closing conductors kept their capacitance but not their resistance",
-            network.stats.opened_loop_resistors
+            stats.opened_loop_resistors
         ));
     }
-    if network.stats.context_fallback_intervals > 0 {
+    if stats.context_fallback_intervals > 0 {
         diagnostics.push(format!(
             "RC_CONTEXT_FALLBACK: {} intervals used a reduced over/under calibration context",
-            network.stats.context_fallback_intervals
+            stats.context_fallback_intervals
         ));
     }
-    if network.stats.foreign_overlaps > 0 {
+    if stats.foreign_overlaps > 0 {
         diagnostics.push(format!(
             "RC_FOREIGN_OVERLAP: {} interval checks found a different-net shape overlapping a wire",
-            network.stats.foreign_overlaps
+            stats.foreign_overlaps
         ));
     }
     let without_area: Vec<&str> = profile
@@ -830,11 +932,11 @@ fn extract_impl(
             without_area.join(", ")
         ));
     }
-    if network.stats.overlap_pairs_without_data > 0 {
+    if stats.overlap_pairs_without_data > 0 {
         diagnostics.push(format!(
             "OVERLAP_PAIR_UNAVAILABLE: {} non-plate overlaps have no layer-pair overlap data and \
              are not extracted",
-            network.stats.overlap_pairs_without_data
+            stats.overlap_pairs_without_data
         ));
     }
     if !unannotated.is_empty() {
@@ -858,8 +960,8 @@ fn extract_impl(
     let report = ExtractReport {
         status: "ok",
         schema: "rustroad.extract.v1",
-        workspace_revision: metadata.revision.clone(),
-        design: design.name.clone(),
+        workspace_revision: revision,
+        design: design_name,
         output: ArtifactPin {
             path: out,
             sha256,
@@ -907,8 +1009,8 @@ fn extract_impl(
             drc_status: "unchecked",
             lvs_status: "unchecked",
         },
-        stats: network.stats,
-        routed_nets: network.nets.len(),
+        stats,
+        routed_nets,
         unannotated_signal_nets: unannotated,
         pinless_signal_nets: pinless,
         single_pin_signal_nets: single,
