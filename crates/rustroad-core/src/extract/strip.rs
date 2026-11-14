@@ -1,18 +1,22 @@
 //! Electrical contributions of one strip (or one x/y strip pair) as a pure
 //! function of immutable extraction inputs.
 //!
-//! A strip's arithmetic is unchanged from the original serial loop: the same
-//! candidates in shape-ID order, the same interval boundaries, the same f64
-//! expressions. Every accumulation (`ground[node] += v`, `coupling[key] += v`,
-//! `overlap_area_um2 += a`) is emitted to a `Sink` in its original order. The
-//! serial path applies them immediately; parallel tiles record them and apply
-//! the records in run order, so every accumulator sees the identical sequence
-//! of f64 additions at any thread count.
+//! A strip is swept over its candidates: the interval boundaries are the
+//! strip ends and every candidate's extent along it, and every interval
+//! evaluates each contribution with one fixed f64 expression. The strip adds
+//! its contributions, in sweep order, to partial sums of its own (`Sums`) and
+//! then emits each sum to a `Sink` as one accumulation (`ground[node] += v`,
+//! `coupling[key] += v`, `overlap_area_um2 += a`). Candidate order carries no
+//! meaning: where shape order decides between candidates, shape IDs are
+//! compared. The serial path applies a strip's accumulations immediately;
+//! parallel chunks record them and apply the records in unit order, so every
+//! accumulator sees the identical sequence of f64 additions at any thread
+//! count.
 use super::index::GridIndex;
 use super::{
     ExtractInput, ExtractLimits, ExtractStats, InstanceGeometry, NodeIds, Owner, PassiveOwner,
-    PieceInfo, RcLayer, RcTech, Run, Shape, Shapes, body_rect, budget, conductor_strip, invalid,
-    nearer_end, piece_strip, sample, um,
+    PieceInfo, RcLayer, RcTech, Run, Shape, Shapes, body_rect, budget, conductor_strip,
+    high_end_nearer, invalid, piece_strip, sample, strip_ends, um,
 };
 use crate::routing::{BuildFx, InstanceQueryScratch};
 use crate::{Error, Rect, Result};
@@ -98,6 +102,8 @@ pub(super) trait Sink {
 /// Integer statistics of one unit (added to `ExtractStats` at commit).
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Counts {
+    /// Strips of cell conductors found crossed by routed metal.
+    pub passive_strips: usize,
     pub intervals: usize,
     pub passive_intervals: usize,
     pub foreign_overlaps: usize,
@@ -110,6 +116,7 @@ pub(super) struct Counts {
 }
 impl Counts {
     pub(super) fn add_to(&self, stats: &mut ExtractStats) {
+        stats.passive_strips += self.passive_strips;
         stats.intervals += self.intervals;
         stats.passive_intervals += self.passive_intervals;
         stats.foreign_overlaps += self.foreign_overlaps;
@@ -297,14 +304,11 @@ pub(super) struct Scratch {
     events: Vec<u64>,
     wide_events: Vec<u128>,
     layered: Vec<(u32, i64, i64, u32)>,
-    contributions: Vec<(u32, f64, f64)>,
+    sums: Sums,
     face: FaceScratch,
     probes: Vec<Probe>,
     samples: SampleCache,
     sweep: Sweep,
-    keys: Vec<u64>,
-    spare: Vec<Cand>,
-    spare_own: Vec<(Cand, u8)>,
 }
 impl Scratch {
     pub(super) fn new(instances: usize) -> Result<Self> {
@@ -316,14 +320,11 @@ impl Scratch {
             events: Vec::new(),
             wide_events: Vec::new(),
             layered: Vec::new(),
-            contributions: Vec::new(),
+            sums: Sums::default(),
             face: FaceScratch::default(),
             probes: Vec::new(),
             samples: SampleCache::default(),
             sweep: Sweep::default(),
-            keys: Vec::new(),
-            spare: Vec::new(),
-            spare_own: Vec::new(),
         })
     }
 }
@@ -337,6 +338,10 @@ pub(super) enum UnitRef {
     Body(u32),
     Piece(u32),
     Conductor(u32),
+    /// A virtual cell conductor on a modelled routing layer: a strip pair
+    /// only where routed metal on another routing layer crosses it, which
+    /// is decided when the unit is computed (`virtual_conductor`).
+    Virtual(u32),
 }
 
 /// The strips of one unit, in their original order: a body alone, or a
@@ -353,7 +358,7 @@ pub(super) fn strips(ctx: &Ctx<'_, '_>, unit: UnitRef) -> (Run, Option<Run>) {
                 Some(piece_strip(id, shape.rect, shape.layer, info, true)),
             )
         }
-        UnitRef::Conductor(id) => {
+        UnitRef::Conductor(id) | UnitRef::Virtual(id) => {
             let shape = ctx.shapes.get(id);
             (
                 conductor_strip(id, shape, false),
@@ -374,10 +379,72 @@ pub(super) fn unit<S: Sink>(
     work: &mut usize,
     counts: &mut Counts,
 ) -> Flow {
+    if let UnitRef::Virtual(id) = unit {
+        return virtual_conductor(ctx, id, cap, sc, sink, work, counts);
+    }
     match strips(ctx, unit) {
         (run, None) => single(ctx, &run, cap, sc, sink, work, counts),
-        (x, Some(y)) => pair(ctx, &x, &y, cap, sc, sink, work, counts),
+        (x, Some(y)) => pair(ctx, &x, &y, cap, sc, sink, work, counts, None),
     }
+}
+
+/// A virtual cell conductor gets its two passive strips when routed metal
+/// on another routing layer strictly overlaps it. Those are exactly the
+/// conductors the design-wide scan from the routed side marks (strict
+/// intersection is symmetric), and the test is the strips' own face query:
+/// its other-layer candidates are the conductors strictly overlapping the
+/// shape. A crossed conductor therefore pays nothing extra, an uncrossed
+/// one one face query, and no scan of every routed shape runs.
+fn virtual_conductor<S: Sink>(
+    ctx: &Ctx<'_, '_>,
+    id: u32,
+    cap: usize,
+    sc: &mut Scratch,
+    sink: &mut S,
+    work: &mut usize,
+    counts: &mut Counts,
+) -> Flow {
+    let shape = ctx.shapes.get(id);
+    let start = *work;
+    let x = conductor_strip(id, shape, false);
+    if let Err(stop) = gather_other(ctx, &x, cap, sc, work) {
+        // Too many candidates (or a query budget): a conductor that no
+        // routed metal crosses is no unit and fails nothing.
+        *work = start;
+        return if crossed(ctx, &shape, work)? {
+            Err(stop)
+        } else {
+            Ok(())
+        };
+    }
+    if !sc.other.iter().any(|c| c.shape.routed()) {
+        return Ok(());
+    }
+    counts.passive_strips += 2;
+    let y = conductor_strip(id, shape, true);
+    pair(ctx, &x, &y, cap, sc, sink, work, counts, Some(start))
+}
+
+/// Whether routed metal on another routing layer strictly overlaps
+/// `shape`; each layer's grid query stops at the first such conductor.
+fn crossed(ctx: &Ctx<'_, '_>, shape: &Shape, work: &mut usize) -> Result<bool> {
+    let mut found = false;
+    for &layer in ctx.routing_layers {
+        if layer == shape.layer {
+            continue;
+        }
+        ctx.grid
+            .visit(layer, shape.rect, ctx.limits, work, |other, _| {
+                // Wire bodies and pieces are the routed shapes (`shape_of`).
+                found = (other as usize) < ctx.shapes.virtual_offset()
+                    || other.wrapping_sub(ctx.piece_shape0) < ctx.pieces.len() as u32;
+                Ok(!found)
+            })?;
+        if found {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Lateral window rectangle of a strip on its own layer.
@@ -543,46 +610,18 @@ fn gather_other(
             return Err(over_cap(ctx.limits, other.len() + 1));
         }
     }
-    sort_by_id(&mut sc.other, |c| c.id, &mut sc.keys, &mut sc.spare);
     Ok(())
 }
 
-/// Sorts `v` by unique shape ID through packed `(ID, position)` keys,
-/// moving each element once.
-fn sort_by_id<T: Copy>(
-    v: &mut Vec<T>,
-    id: impl Fn(&T) -> u32,
-    keys: &mut Vec<u64>,
-    out: &mut Vec<T>,
-) {
-    if v.len() <= 1 {
-        return;
-    }
-    keys.clear();
-    keys.extend(
-        v.iter()
-            .enumerate()
-            .map(|(i, c)| u64::from(id(c)) << 32 | i as u64),
-    );
-    keys.sort_unstable();
+/// A strip's candidates: the face's other-layer candidates, then its
+/// own-layer ones. Candidate order carries no meaning: wherever shape order
+/// decides between candidates (the nearer of two equally near neighbours,
+/// the owner of a plate edge, the order of a metal level's face portions),
+/// the sweep compares shape IDs.
+fn join(other: &[Cand], own: impl Iterator<Item = Cand>, out: &mut Vec<Cand>) {
     out.clear();
-    out.extend(keys.iter().map(|&k| v[k as u32 as usize]));
-    std::mem::swap(v, out);
-}
-
-/// Merges two ID-sorted lists (IDs are unique across them).
-fn merge(a: &[Cand], b: impl Iterator<Item = Cand>, out: &mut Vec<Cand>) {
-    out.clear();
-    let mut i = 0;
-    for c in b {
-        while i < a.len() && a[i].id < c.id {
-            out.push(a[i]);
-            i += 1;
-        }
-        debug_assert!(i >= a.len() || a[i].id != c.id, "duplicate candidate");
-        out.push(c);
-    }
-    out.extend_from_slice(&a[i..]);
+    out.extend_from_slice(other);
+    out.extend(own);
 }
 
 fn single<S: Sink>(
@@ -620,10 +659,9 @@ fn single<S: Sink>(
     if over || !complete {
         return Err(over_cap(ctx.limits, base + own.len() + 1));
     }
-    sort_by_id(&mut sc.own, |c| c.0.id, &mut sc.keys, &mut sc.spare_own);
     counts.max_run_candidates = counts.max_run_candidates.max(base + sc.own.len());
     let mut cands = std::mem::take(&mut sc.cands);
-    merge(&sc.other, sc.own.iter().map(|c| c.0), &mut cands);
+    join(&sc.other, sc.own.iter().map(|c| c.0), &mut cands);
     let result = numeric(ctx, run, &cands, sc, sink, work, counts);
     sc.cands = cands;
     result
@@ -635,6 +673,8 @@ fn single<S: Sink>(
 /// possibly the y strip's alone), the strips are recomputed one after the
 /// other from the original work count, so the x strip's accumulations and
 /// budgets come before any y strip error, as for two separate strips.
+/// `gathered` holds the unit's starting work count when the other-layer
+/// candidates are already in the scratch.
 #[expect(
     clippy::too_many_arguments,
     reason = "a pair shares one scratch, sink and work counter"
@@ -648,11 +688,12 @@ fn pair<S: Sink>(
     sink: &mut S,
     work: &mut usize,
     counts: &mut Counts,
+    gathered: Option<usize>,
 ) -> Flow {
     debug_assert!(x.shape == y.shape && !x.vertical && y.vertical);
     debug_assert!(body_rect(x) == body_rect(y));
-    let start = *work;
-    let widest = match pair_candidates(ctx, x, y, cap, sc, work) {
+    let start = gathered.unwrap_or(*work);
+    let widest = match pair_candidates(ctx, x, y, cap, sc, work, gathered.is_some()) {
         Ok(widest) => widest,
         Err(Stop::Error(_)) => {
             *work = start;
@@ -687,7 +728,7 @@ fn pair<S: Sink>(
                 }
             }
         }
-        merge(
+        join(
             &sc.other,
             sc.own.iter().filter(|c| c.1 & flag != 0).map(|c| c.0),
             &mut cands,
@@ -702,8 +743,9 @@ fn pair<S: Sink>(
 }
 
 /// Shared candidate queries of a pair: other-layer candidates in
-/// `sc.other`, own-layer hits with per-strip flags (1: x, 2: y) in
-/// `sc.own`, both ID-sorted. Returns the larger strip's candidate count.
+/// `sc.other` (queried here unless `gathered`), own-layer hits with
+/// per-strip flags (1: x, 2: y) in `sc.own`, in query order. Returns the
+/// larger strip's candidate count.
 fn pair_candidates(
     ctx: &Ctx<'_, '_>,
     x: &Run,
@@ -711,9 +753,12 @@ fn pair_candidates(
     cap: usize,
     sc: &mut Scratch,
     work: &mut usize,
+    gathered: bool,
 ) -> std::result::Result<usize, Stop> {
     let w = ctx.info(x.layer)?.window_dbu;
-    gather_other(ctx, x, cap, sc, work)?;
+    if !gathered {
+        gather_other(ctx, x, cap, sc, work)?;
+    }
     // One own-layer query covers both lateral windows; each hit is tested
     // with each strip's own predicate.
     let (qx, cx0, cx1) = window(x, w);
@@ -781,7 +826,6 @@ fn pair_candidates(
                 .checked_add(charge)
                 .filter(|&n| n <= ctx.limits.max_work)
                 .ok_or_else(|| budget("extraction grid-index work"))?;
-            sort_by_id(&mut sc.own, |c| c.0.id, &mut sc.keys, &mut sc.spare_own);
             return Ok(base + nx.max(ny));
         }
     }
@@ -810,7 +854,6 @@ fn pair_candidates(
     if over > 0 || !complete {
         return Err(over_cap(ctx.limits, over.max(base + 1)));
     }
-    sort_by_id(&mut sc.own, |c| c.0.id, &mut sc.keys, &mut sc.spare_own);
     Ok(base + nx.max(ny))
 }
 
@@ -1050,9 +1093,12 @@ impl Iterator for Groups<'_> {
 /// calibration metal whose conductors (merged along the strip's cross axis)
 /// cover `minus..plus` and extend at least one strip width beyond each side
 /// edge, with the conductor under each side edge (`[plus side, minus side]`).
-/// `layered` is sorted by metal, then cross extent.
+/// `layered` is sorted by metal, then cross extent, then shape ID; its last
+/// field is the candidate's position in `cands`. Between equal extents the
+/// lower shape ID owns an edge.
 fn plate(
     layered: &[(u32, i64, i64, u32)],
+    cands: &[Cand],
     own: u32,
     upper: bool,
     minus: i64,
@@ -1081,11 +1127,11 @@ fn plate(
         let plus_owner = on
             .iter()
             .filter(|e| e.1 < plus && e.2 >= plus)
-            .max_by_key(|e| (e.2, std::cmp::Reverse(e.3)))?;
+            .max_by_key(|e| (e.2, std::cmp::Reverse(cands[e.3 as usize].id)))?;
         let minus_owner = on
             .iter()
             .filter(|e| e.2 > minus && e.1 <= minus)
-            .min_by_key(|e| (e.1, e.3))?;
+            .min_by_key(|e| (e.1, cands[e.3 as usize].id))?;
         return Some((metal, [plus_owner.3, minus_owner.3]));
     }
     None
@@ -1157,6 +1203,8 @@ fn face_portions(
 /// the strip's own layer, `NO_MODEL` when its layer has no RC model).
 #[derive(Clone, Copy)]
 struct Probe {
+    /// Shape ID: decides wherever shape order decides between candidates.
+    id: u32,
     /// Role in this strip's sweep, with the covered sides of `Cover`.
     role: Role,
     cover: u8,
@@ -1279,40 +1327,42 @@ impl Set {
     }
 }
 
-/// The least `(gap, position)` of a set of lateral neighbours, kept across
-/// insertions and recomputed from the set only after the least one leaves.
+/// The least `(gap, shape ID)` of a set of lateral neighbours (with its
+/// candidate position), kept across insertions and recomputed from the set
+/// only after the least one leaves.
 #[derive(Default)]
 struct Nearest {
-    best: Option<(i64, u32)>,
+    best: Option<(i64, u32, u32)>,
     stale: bool,
 }
 impl Nearest {
     #[inline]
-    fn insert(&mut self, gap: i64, k: usize) {
-        if !self.stale && self.best.is_none_or(|b| (gap, k as u32) < b) {
-            self.best = Some((gap, k as u32));
+    fn insert(&mut self, gap: i64, id: u32, k: usize) {
+        if !self.stale && self.best.is_none_or(|b| (gap, id) < (b.0, b.1)) {
+            self.best = Some((gap, id, k as u32));
         }
     }
     #[inline]
     fn remove(&mut self, k: usize) {
-        if self.best.is_some_and(|b| b.1 == k as u32) {
+        if self.best.is_some_and(|b| b.2 == k as u32) {
             self.stale = true;
         }
     }
-    /// The least member: the first minimal gap in ascending position.
+    /// The least member as `(gap, position)`: the lowest shape ID among the
+    /// minimal gaps.
     #[inline]
     fn get(&mut self, set: &Set, probes: &[Probe]) -> Option<(i64, u32)> {
         if self.stale {
-            let mut best: Option<(i64, u32)> = None;
+            let mut best: Option<(i64, u32, u32)> = None;
             set.for_each(|k| {
-                let gap = probes[k].gap;
-                if best.is_none_or(|b| gap < b.0) {
-                    best = Some((gap, k as u32));
+                let p = &probes[k];
+                if best.is_none_or(|b| (p.gap, p.id) < (b.0, b.1)) {
+                    best = Some((p.gap, p.id, k as u32));
                 }
             });
             (self.best, self.stale) = (best, false);
         }
-        self.best
+        self.best.map(|b| (b.0, b.2))
     }
 }
 
@@ -1372,13 +1422,175 @@ pub(super) struct Sweep {
     layered: Set,
 }
 
-/// The original per-strip interval sweep over ID-sorted candidates. Each
-/// candidate's role (lateral neighbour per side, covering or foreign metal,
-/// layered metal) depends only on the strip and the candidate, so it is
-/// decided once; the sets of spanning candidates per role change only at
-/// sweep events. Every interval sees exactly the neighbours, flags, counts
-/// and the sorted `layered` list of the original loop, and evaluates the
-/// same f64 expressions in the same order.
+/// Where the values a strip records toward one candidate go, decided once
+/// per strip when the candidate first contributes.
+#[derive(Clone, Copy)]
+enum Target {
+    /// Nothing is recorded: same-net metal, or (for a passive strip) metal
+    /// that is not routed.
+    Nothing,
+    /// Grounded metal: the value joins the strip's own ground. `unrouted`
+    /// marks a signal pin without an RC node, counted per contribution.
+    Ground { unrouted: bool },
+    /// RC nodes of another net: the two end nodes of a wire body with its
+    /// end points (the end nearer to an interval's midpoint takes that
+    /// interval's value), or one node twice. `pin` partners take the full
+    /// value whatever the contribution's run factor.
+    Nodes {
+        nodes: [u32; 2],
+        ends: Option<[[f64; 2]; 2]>,
+        pin: bool,
+    },
+}
+
+/// One contributing candidate of a strip: its target and the strip's
+/// partial sums toward it.
+#[derive(Clone, Copy)]
+struct Partial {
+    target: Target,
+    /// By `2 * partner end + own end` (a passive strip has one own end).
+    sums: [f64; 4],
+    /// Bit per slot of `sums` that received a contribution.
+    hit: u8,
+    /// Contributions received (passive strips).
+    count: usize,
+}
+
+/// The partial sums of one strip. Every contribution of the strip's
+/// intervals is evaluated with its own expression and added once, in sweep
+/// order, to a sum that belongs to this strip alone: the two shares of its
+/// own ground, the overlap-area statistic, and per contributing candidate
+/// the coupling toward each partner node from each own end. The strip then
+/// records each sum with one accumulation, so an accumulator receives one
+/// value per strip instead of one per interval (Higham, "The accuracy of
+/// floating point summation", SIAM J. Sci. Comput. 14(4), 1993: any fixed
+/// grouping of a sum of n non-negative terms stays within (n - 1) units
+/// of relative rounding error).
+#[derive(Default)]
+struct Sums {
+    /// Per candidate position: its index in `partials` (`UNSEEN`: none).
+    slot: Vec<u32>,
+    /// Contributing candidates in order of first contribution.
+    partials: Vec<Partial>,
+    /// Own ground toward the low and the high end node.
+    ground: [f64; 2],
+    area: f64,
+    area_hit: bool,
+}
+const UNSEEN: u32 = u32::MAX;
+impl Sums {
+    fn reset(&mut self, candidates: usize) {
+        self.slot.clear();
+        self.slot.resize(candidates, UNSEEN);
+        self.partials.clear();
+        self.ground = [0.0; 2];
+        self.area = 0.0;
+        self.area_hit = false;
+    }
+    #[inline]
+    fn add_area(&mut self, um2: f64) {
+        self.area += um2;
+        self.area_hit = true;
+    }
+}
+
+/// Target of candidate `shape` for a routed strip `run`.
+fn routed_target(ctx: &Ctx<'_, '_>, run: &Run, shape: &Shape) -> Target {
+    match shape.owner {
+        Owner::Run(o) => {
+            let other = &ctx.runs[o as usize];
+            if other.net == run.net {
+                Target::Nothing
+            } else {
+                Target::Nodes {
+                    nodes: [other.node_lo, other.node_hi]
+                        .map(|n| ctx.nodes.of(ctx.net_index, other.net, n)),
+                    ends: Some(strip_ends(other)),
+                    pin: false,
+                }
+            }
+        }
+        // A piece's two end nodes are its one node.
+        Owner::Piece(p) => {
+            let info = ctx.pieces[p as usize];
+            if info.net == run.net {
+                Target::Nothing
+            } else {
+                Target::Nodes {
+                    nodes: [ctx.nodes.of(ctx.net_index, info.net, info.node); 2],
+                    ends: None,
+                    pin: false,
+                }
+            }
+        }
+        Owner::Passive(PassiveOwner::Ground) => Target::Ground { unrouted: false },
+        Owner::Passive(PassiveOwner::Pin { net, pin }) => {
+            if net == run.net {
+                Target::Nothing
+            } else if let Some(&(n, node)) = ctx.pin_nodes.get(&pin) {
+                Target::Nodes {
+                    nodes: [ctx.nodes.of(ctx.net_index, n, node); 2],
+                    ends: None,
+                    pin: true,
+                }
+            } else {
+                Target::Ground { unrouted: true }
+            }
+        }
+    }
+}
+
+/// Target of candidate `shape` for a passive strip `run`: only routed
+/// conductors of other nets take its plate shares.
+fn passive_target(ctx: &Ctx<'_, '_>, run: &Run, shape: &Shape) -> Target {
+    let (net, nodes, ends) = match shape.owner {
+        Owner::Run(o) => {
+            let other = &ctx.runs[o as usize];
+            if other.passive.is_some() {
+                return Target::Nothing;
+            }
+            (
+                other.net,
+                [other.node_lo, other.node_hi],
+                Some(strip_ends(other)),
+            )
+        }
+        Owner::Piece(p) => {
+            let info = ctx.pieces[p as usize];
+            (info.net, [info.node; 2], None)
+        }
+        Owner::Passive(_) => return Target::Nothing,
+    };
+    if net == run.net {
+        return Target::Nothing;
+    }
+    Target::Nodes {
+        nodes: nodes.map(|n| ctx.nodes.of(ctx.net_index, net, n)),
+        ends,
+        pin: false,
+    }
+}
+
+/// One interval of a strip as its contributions see it.
+#[derive(Clone, Copy)]
+struct At {
+    /// Midpoint of the interval on the strip's centreline.
+    mid_point: [f64; 2],
+    /// Pi-split weights of the low and the high end node.
+    weights: [f64; 2],
+    /// Slot of each own end: one slot when both ends are one node.
+    own: [usize; 2],
+}
+
+/// The per-strip interval sweep over the strip's candidates (in any order).
+/// Each candidate's role (lateral neighbour per side, covering or foreign
+/// metal, layered metal) depends only on the strip and the candidate, so it
+/// is decided once; the sets of spanning candidates per role change only at
+/// sweep events. Every interval sees its nearest neighbours (the lower shape
+/// ID between equal gaps), flags, counts and the `layered` list sorted by
+/// metal, cross extent and shape ID, and evaluates each contribution with
+/// its f64 expression; the contributions join the strip's partial sums,
+/// which `record` emits when the sweep ends.
 fn numeric<S: Sink>(
     ctx: &Ctx<'_, '_>,
     run: &Run,
@@ -1392,7 +1604,7 @@ fn numeric<S: Sink>(
         events,
         wide_events,
         layered,
-        contributions,
+        sums,
         face,
         probes,
         samples,
@@ -1479,6 +1691,7 @@ fn numeric<S: Sink>(
             }
         }
         probes.push(Probe {
+            id: c.id,
             role,
             cover,
             same,
@@ -1515,7 +1728,7 @@ fn numeric<S: Sink>(
             }
         }
     }
-    by_rank.sort_unstable();
+    by_rank.sort_unstable_by_key(|e| (e.0, e.1, e.2, cands[e.3 as usize].id));
     for (r, e) in by_rank.iter().enumerate() {
         probes[e.3 as usize].rank = r as u32;
     }
@@ -1562,6 +1775,9 @@ fn numeric<S: Sink>(
     let area_cap = model
         .area_cap
         .filter(|_| run.passive.is_none() && !(run.piece && run.vertical));
+    // Both ends of a piece are one node: its two pi shares join one sum.
+    let own = [0, usize::from(ends.is_some_and(|(lo, hi)| lo != hi))];
+    sums.reset(cands.len());
     plus_set.reset(cands.len());
     minus_set.reset(cands.len());
     layered_set.reset(by_rank.len());
@@ -1600,7 +1816,7 @@ fn numeric<S: Sink>(
                     Role::Ignore => {}
                     Role::Plus if change > 0 => {
                         plus_set.insert(k);
-                        nearest_plus.insert(p.gap, k);
+                        nearest_plus.insert(p.gap, p.id, k);
                     }
                     Role::Plus => {
                         plus_set.remove(k);
@@ -1608,7 +1824,7 @@ fn numeric<S: Sink>(
                     }
                     Role::Minus if change > 0 => {
                         minus_set.insert(k);
-                        nearest_minus.insert(p.gap, k);
+                        nearest_minus.insert(p.gap, p.id, k);
                     }
                     Role::Minus => {
                         minus_set.remove(k);
@@ -1664,10 +1880,8 @@ fn numeric<S: Sink>(
             t0 = t1;
             continue;
         }
-        // Nearest lateral neighbour per side and nearest planes. Candidate
-        // positions are in shape-ID order, so `(gap, position)` breaks ties
-        // exactly like `(gap, shape ID)`; the first minimal gap in ascending
-        // position is that minimum.
+        // Nearest lateral neighbour per side and nearest planes: the least
+        // `(gap, shape ID)`.
         let plus = nearest_plus.get(plus_set, probes);
         let minus = nearest_minus.get(minus_set, probes);
         let (covered_plus, covered_minus) = (cover_plus_n > 0, cover_minus_n > 0);
@@ -1696,8 +1910,8 @@ fn numeric<S: Sink>(
             // spans the whole strip cross-section and reaches one strip
             // width beyond both side edges: crossings and clearly wider
             // shapes.
-            let below = plate(layered, model.metal, false, edge_minus, edge_plus);
-            let above = plate(layered, model.metal, true, edge_minus, edge_plus);
+            let below = plate(layered, cands, model.metal, false, edge_minus, edge_plus);
+            let above = plate(layered, cands, model.metal, true, edge_minus, edge_plus);
             let nearest_below = layered
                 .iter()
                 .filter(|e| e.0 < model.metal)
@@ -1884,9 +2098,12 @@ fn numeric<S: Sink>(
         } else {
             [mid, run.cross() as f64]
         };
+        let here = At {
+            mid_point,
+            weights: [1.0 - w_hi, w_hi],
+            own,
+        };
         let mut ground = 0.0f64;
-        // (candidate, pF, factor applied when the partner is another run).
-        contributions.clear();
         for side in &cache.sides {
             match *side {
                 Side::Covered => {
@@ -1902,11 +2119,15 @@ fn numeric<S: Sink>(
                     lateral,
                 } => {
                     for &(owner, d) in &shares[..n as usize] {
-                        contributions.push((owner, d * length, 1.0));
+                        contribute(ctx, run, cands, sums, counts, here, owner, d * length, 1.0);
                     }
                     ground += g.max(0.0) * length;
-                    if let Some((s, cc)) = lateral {
-                        contributions.push((s, cc * length, 0.5));
+                    // A passive strip's lateral sides are counted from the
+                    // routed side.
+                    if let Some((s, cc)) = lateral
+                        && run.passive.is_none()
+                    {
+                        contribute(ctx, run, cands, sums, counts, here, s, cc * length, 0.5);
                     }
                 }
             }
@@ -1919,10 +2140,10 @@ fn numeric<S: Sink>(
                     continue;
                 }
                 let area = covered * length;
-                sink.op(Op::area(area))?;
+                sums.add_area(area);
                 shielded += area_cap * area;
                 for &(sh, _, ovw) in &cache.owners[first..last] {
-                    contributions.push((sh, ovw * length, 1.0));
+                    contribute(ctx, run, cands, sums, counts, here, sh, ovw * length, 1.0);
                 }
             }
             for &(data, first, last) in &cache.upper {
@@ -1931,115 +2152,219 @@ fn numeric<S: Sink>(
                     continue;
                 }
                 for &(sh, w, ovw) in &cache.owners[first..last] {
-                    sink.op(Op::area(w * length))?;
-                    contributions.push((sh, ovw * length, 1.0));
+                    sums.add_area(w * length);
+                    contribute(ctx, run, cands, sums, counts, here, sh, ovw * length, 1.0);
                 }
             }
             ground = (ground - shielded).max(0.0);
         }
-        let Some((g_lo, g_hi)) = ends else {
-            // Only this conductor's plate shares toward routed conductors
-            // of other nets: ground and lateral sides are counted from the
-            // routed side.
-            for &(s, value, run_factor) in contributions.iter() {
-                if run_factor < 1.0 {
-                    continue;
+        if run.passive.is_none() {
+            // This run's own ground, split between its end nodes by
+            // position (pi split).
+            sums.ground[own[0]] += ground * here.weights[0];
+            sums.ground[own[1]] += ground * here.weights[1];
+        }
+        t0 = t1;
+    }
+    record(ctx, run, ends, sums, sink, counts)
+}
+
+/// Adds one contribution of an interval (`value` pF toward candidate `s`)
+/// to the strip's partial sums; the candidate's target is decided at its
+/// first contribution.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one contribution: the strip, its candidates and sums, the interval, the value"
+)]
+#[inline]
+fn contribute(
+    ctx: &Ctx<'_, '_>,
+    run: &Run,
+    cands: &[Cand],
+    sums: &mut Sums,
+    counts: &mut Counts,
+    at: At,
+    s: u32,
+    value: f64,
+    run_factor: f64,
+) {
+    let mut index = sums.slot[s as usize];
+    if index == UNSEEN {
+        let shape = &cands[s as usize].shape;
+        index = sums.partials.len() as u32;
+        sums.slot[s as usize] = index;
+        sums.partials.push(Partial {
+            target: if run.passive.is_some() {
+                passive_target(ctx, run, shape)
+            } else {
+                routed_target(ctx, run, shape)
+            },
+            sums: [0.0; 4],
+            hit: 0,
+            count: 0,
+        });
+    }
+    sums.add(
+        index as usize,
+        run.passive.is_some(),
+        at,
+        value,
+        run_factor,
+        counts,
+    );
+}
+
+/// The nodes a strip's partial sums are recorded at.
+#[derive(Clone, Copy)]
+enum OwnNodes {
+    /// A routed strip's low and high end node (global IDs).
+    Routed(u32, u32),
+    /// A passive strip: its pin's RC node, or none: then its shares go to
+    /// the partner's ground, and `unrouted_pin` (a signal pin without an RC
+    /// node) counts each of them.
+    Passive {
+        node: Option<u32>,
+        unrouted_pin: bool,
+    },
+}
+
+impl Sums {
+    /// Adds `value` pF toward partial `index` at interval `at`. A routed
+    /// strip splits the value between its end nodes by position, and
+    /// `run_factor` applies when the partner is routed metal (a lateral
+    /// pair is counted half from each side); values that are not positive
+    /// are not recorded. A passive strip adds the whole value toward the
+    /// partner end nearer to the interval.
+    #[inline]
+    fn add(
+        &mut self,
+        index: usize,
+        passive: bool,
+        at: At,
+        value: f64,
+        run_factor: f64,
+        counts: &mut Counts,
+    ) {
+        let partial = &mut self.partials[index];
+        match partial.target {
+            Target::Nothing => {}
+            Target::Ground { unrouted } => {
+                if unrouted {
+                    counts.unrouted_pin_partners += 1;
                 }
-                let (onet, pnode) = match cands[s as usize].shape.owner {
-                    Owner::Run(o) => {
-                        let other = &ctx.runs[o as usize];
-                        if other.passive.is_some() {
-                            continue;
-                        }
-                        (other.net, nearer_end(other, mid_point))
-                    }
-                    // A piece's two end nodes are its one node.
-                    Owner::Piece(p) => {
-                        let info = ctx.pieces[p as usize];
-                        (info.net, info.node)
-                    }
-                    Owner::Passive(_) => continue,
+                self.ground[at.own[0]] += value * at.weights[0];
+                self.ground[at.own[1]] += value * at.weights[1];
+            }
+            Target::Nodes { ends, pin, .. } => {
+                let end = match ends {
+                    Some(ends) => usize::from(high_end_nearer(ends, at.mid_point)),
+                    None => 0,
                 };
-                if onet == run.net {
-                    continue;
+                if passive {
+                    partial.sums[2 * end] += value;
+                    partial.hit |= 1 << (2 * end);
+                    partial.count += 1;
+                    return;
                 }
-                let b = ctx.nodes.of(ctx.net_index, onet, pnode);
-                let pin_node = match run.passive {
-                    Some(PassiveOwner::Pin { pin, .. }) => ctx.pin_nodes.get(&pin).copied(),
-                    _ => None,
-                };
-                match pin_node {
-                    Some((net, node)) => {
-                        let a = ctx.nodes.of(ctx.net_index, net, node);
-                        sink.op(Op::couple(a, b, value))?;
+                let factor = if pin { 1.0 } else { run_factor };
+                for (own, weight) in at.own.into_iter().zip(at.weights) {
+                    let v = value * factor * weight;
+                    if v <= 0.0 {
+                        continue;
                     }
-                    None => {
-                        if matches!(run.passive, Some(PassiveOwner::Pin { .. })) {
-                            counts.unrouted_pin_partners += 1;
-                        }
-                        sink.op(Op::ground(b, value))?;
-                    }
+                    partial.sums[2 * end + own] += v;
+                    partial.hit |= 1 << (2 * end + own);
                 }
             }
-            t0 = t1;
-            continue;
-        };
-        // Attach to this run's end nodes by position (pi split).
-        sink.op(Op::ground(g_lo, ground * (1.0 - w_hi)))?;
-        sink.op(Op::ground(g_hi, ground * w_hi))?;
-        for &(s, value, run_factor) in contributions.iter() {
-            let partner = match cands[s as usize].shape.owner {
-                Owner::Run(o) => {
-                    // Every routed-net shape models its own exposed sides,
-                    // so a lateral pair is counted half from each side.
-                    let other = &ctx.runs[o as usize];
-                    if other.net == run.net {
-                        None
-                    } else {
-                        Some(Some((other.net, nearer_end(other, mid_point), run_factor)))
+        }
+    }
+
+    /// Emits the strip's partial sums, one accumulation each. A routed
+    /// strip: its own ground at the low end node, then at the high end node
+    /// (one record when both are one node), the overlap area if any, then
+    /// per contributing candidate in order of first contribution each
+    /// coupling sum that received a value, the partner's low end before its
+    /// high end and the own low end before the high end. A passive strip:
+    /// per contributing candidate each sum toward the partner's low, then
+    /// high end, as a coupling from its pin's RC node or as the partner's
+    /// ground.
+    fn emit<S: Sink>(&self, own: OwnNodes, sink: &mut S, counts: &mut Counts) -> Flow {
+        let (g_lo, g_hi) = match own {
+            OwnNodes::Routed(lo, hi) => (lo, hi),
+            OwnNodes::Passive { node, unrouted_pin } => {
+                for p in &self.partials {
+                    let Target::Nodes { nodes, .. } = p.target else {
+                        continue;
+                    };
+                    if unrouted_pin {
+                        counts.unrouted_pin_partners += p.count;
                     }
-                }
-                Owner::Piece(p) => {
-                    let info = ctx.pieces[p as usize];
-                    if info.net == run.net {
-                        None
-                    } else {
-                        Some(Some((info.net, info.node, run_factor)))
-                    }
-                }
-                Owner::Passive(PassiveOwner::Ground) => Some(None),
-                Owner::Passive(PassiveOwner::Pin { net, pin }) => {
-                    if net == run.net {
-                        None
-                    } else if let Some(&(n, node)) = ctx.pin_nodes.get(&pin) {
-                        Some(Some((n, node, 1.0)))
-                    } else {
-                        counts.unrouted_pin_partners += 1;
-                        Some(None)
-                    }
-                }
-            };
-            match partner {
-                None => {}
-                Some(None) => {
-                    sink.op(Op::ground(g_lo, value * (1.0 - w_hi)))?;
-                    sink.op(Op::ground(g_hi, value * w_hi))?;
-                }
-                Some(Some((pnet, pnode, factor))) => {
-                    let b = ctx.nodes.of(ctx.net_index, pnet, pnode);
-                    for (a, weight) in [(g_lo, 1.0 - w_hi), (g_hi, w_hi)] {
-                        let v = value * factor * weight;
-                        if v <= 0.0 {
+                    for (end, &b) in nodes.iter().enumerate() {
+                        if p.hit & (1 << (2 * end)) == 0 {
                             continue;
                         }
-                        sink.op(Op::couple(a, b, v))?;
+                        let value = p.sums[2 * end];
+                        sink.op(match node {
+                            Some(a) => Op::couple(a, b, value),
+                            None => Op::ground(b, value),
+                        })?;
+                    }
+                }
+                return Ok(());
+            }
+        };
+        sink.op(Op::ground(g_lo, self.ground[0]))?;
+        if g_hi != g_lo {
+            sink.op(Op::ground(g_hi, self.ground[1]))?;
+        }
+        if self.area_hit {
+            sink.op(Op::area(self.area))?;
+        }
+        for p in &self.partials {
+            let Target::Nodes { nodes, .. } = p.target else {
+                continue;
+            };
+            for (end, &b) in nodes.iter().enumerate() {
+                for (own, a) in [g_lo, g_hi].into_iter().enumerate() {
+                    if p.hit & (1 << (2 * end + own)) != 0 {
+                        sink.op(Op::couple(a, b, p.sums[2 * end + own]))?;
                     }
                 }
             }
         }
-        t0 = t1;
+        Ok(())
     }
-    Ok(())
+}
+
+/// Records a strip's partial sums at its own nodes (`Sums::emit`).
+fn record<S: Sink>(
+    ctx: &Ctx<'_, '_>,
+    run: &Run,
+    ends: Option<(u32, u32)>,
+    sums: &Sums,
+    sink: &mut S,
+    counts: &mut Counts,
+) -> Flow {
+    let own = match ends {
+        Some((lo, hi)) => OwnNodes::Routed(lo, hi),
+        None => {
+            if sums.partials.iter().all(|p| p.hit == 0) {
+                return Ok(());
+            }
+            let pin = match run.passive {
+                Some(PassiveOwner::Pin { pin, .. }) => Some(pin),
+                _ => None,
+            };
+            let node = pin
+                .and_then(|pin| ctx.pin_nodes.get(&pin))
+                .map(|&(net, node)| ctx.nodes.of(ctx.net_index, net, node));
+            OwnNodes::Passive {
+                node,
+                unrouted_pin: pin.is_some() && node.is_none(),
+            }
+        }
+    };
+    sums.emit(own, sink, counts)
 }
 
 /// Numerical body over externally gathered candidates (reference path).
@@ -2059,6 +2384,300 @@ pub(super) fn numeric_with<S: Sink>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sink that keeps every accumulation in order.
+    struct Trace(Vec<Op>);
+    impl Sink for Trace {
+        fn op(&mut self, op: Op) -> Flow {
+            self.0.push(op);
+            Ok(())
+        }
+    }
+    fn partial(target: Target) -> Partial {
+        Partial {
+            target,
+            sums: [0.0; 4],
+            hit: 0,
+            count: 0,
+        }
+    }
+    fn bits(ops: &[Op]) -> Vec<(u64, u64)> {
+        ops.iter().map(|op| (op.key, op.pf.to_bits())).collect()
+    }
+
+    #[test]
+    fn a_routed_strip_records_one_sum_per_accumulator_added_in_sweep_order() {
+        // A wire body from x = 0 to 100 (end nodes 1 and 2) beside a wire
+        // body of another net from x = 0 to 60 (end nodes 10 and 11), over
+        // grounded metal, beside a pin of a third net (node 20). Interval
+        // values differ by many orders of magnitude, so every other order
+        // or grouping of the additions gives other bits.
+        let mut sums = Sums::default();
+        sums.reset(3);
+        sums.partials = vec![
+            partial(Target::Nodes {
+                nodes: [10, 11],
+                ends: Some([[0.0, 0.0], [60.0, 0.0]]),
+                pin: false,
+            }),
+            partial(Target::Ground { unrouted: false }),
+            partial(Target::Nodes {
+                nodes: [20; 2],
+                ends: None,
+                pin: true,
+            }),
+        ];
+        let own = [0, 1];
+        let intervals: [(f64, f64, f64); 6] = [
+            (5.0, 10.0, 1.0e-3),
+            (15.0, 10.0, 7.0e-19),
+            (27.5, 15.0, 3.3e-7),
+            (40.0, 10.0, 0.1),
+            (55.0, 20.0, 1.0e-12),
+            (82.5, 35.0, 4.7e-5),
+        ];
+        let mut counts = Counts::default();
+        let mut want = [[0.0f64; 4]; 3];
+        let mut want_ground = [0.0f64; 2];
+        let mut area = 0.0f64;
+        for &(mid, length, c) in &intervals {
+            let w_hi = mid / 100.0;
+            let at = At {
+                mid_point: [mid, 0.0],
+                weights: [1.0 - w_hi, w_hi],
+                own,
+            };
+            // The interval's contributions, each with its own expression:
+            // a lateral coupling toward the wire (half from this side), a
+            // share toward the grounded metal, a share toward the pin, the
+            // overlap area, then the strip's own ground.
+            sums.add(0, false, at, c * length, 0.5, &mut counts);
+            sums.add(1, false, at, 2.0 * c * length, 1.0, &mut counts);
+            sums.add(2, false, at, 3.0 * c * length, 0.5, &mut counts);
+            sums.add_area(0.1 * length);
+            let ground = 5.0 * c * length;
+            sums.ground[own[0]] += ground * at.weights[0];
+            sums.ground[own[1]] += ground * at.weights[1];
+            // The same contributions, written out.
+            let end = usize::from((60.0 - mid).abs() < mid.abs());
+            for h in 0..2 {
+                want[0][2 * end + h] += c * length * 0.5 * at.weights[h];
+                want[2][h] += 3.0 * c * length * 1.0 * at.weights[h];
+                want_ground[h] += 2.0 * c * length * at.weights[h];
+            }
+            area += 0.1 * length;
+            for h in 0..2 {
+                want_ground[h] += ground * at.weights[h];
+            }
+        }
+        // The low partner end is nearer up to x = 30, the high end beyond.
+        assert!(want[0].iter().all(|&v| v > 0.0));
+        let mut trace = Trace(Vec::new());
+        assert!(
+            sums.emit(OwnNodes::Routed(1, 2), &mut trace, &mut counts)
+                .is_ok()
+        );
+        assert_eq!(
+            bits(&trace.0),
+            bits(&[
+                Op::ground(1, want_ground[0]),
+                Op::ground(2, want_ground[1]),
+                Op::area(area),
+                Op::couple(1, 10, want[0][0]),
+                Op::couple(2, 10, want[0][1]),
+                Op::couple(1, 11, want[0][2]),
+                Op::couple(2, 11, want[0][3]),
+                Op::couple(1, 20, want[2][0]),
+                Op::couple(2, 20, want[2][1]),
+            ])
+        );
+        assert_eq!(counts.unrouted_pin_partners, 0);
+        // One addition of the strip's sum is not the interval-by-interval
+        // accumulation into an accumulator that already holds a value.
+        let held = 0.25f64;
+        let mut by_interval = held;
+        for &(mid, length, c) in intervals.iter().filter(|i| i.0 < 30.0) {
+            by_interval += c * length * 0.5 * (1.0 - mid / 100.0);
+        }
+        assert_ne!((held + want[0][0]).to_bits(), by_interval.to_bits());
+    }
+
+    #[test]
+    fn a_piece_joins_both_pi_shares_and_skips_values_that_are_not_positive() {
+        // Both ends of a piece are one node (7): one ground record, one
+        // coupling record per partner node.
+        let mut sums = Sums::default();
+        sums.reset(2);
+        sums.partials = vec![
+            partial(Target::Nodes {
+                nodes: [30; 2],
+                ends: None,
+                pin: false,
+            }),
+            partial(Target::Nodes {
+                nodes: [40; 2],
+                ends: None,
+                pin: false,
+            }),
+            partial(Target::Ground { unrouted: true }),
+            partial(Target::Nothing),
+        ];
+        let mut counts = Counts::default();
+        let (mut want, mut ground) = (0.0f64, 0.0f64);
+        for (w_hi, value) in [(0.3, 1.0e-3), (0.9, 2.0e-20), (0.5, 0.7)] {
+            let at = At {
+                mid_point: [0.0, 0.0],
+                weights: [1.0 - w_hi, w_hi],
+                own: [0, 0],
+            };
+            sums.add(0, false, at, value, 0.5, &mut counts);
+            // Zero and negative values create no coupling.
+            sums.add(1, false, at, 0.0, 1.0, &mut counts);
+            sums.add(1, false, at, -value, 1.0, &mut counts);
+            sums.add(2, false, at, value, 1.0, &mut counts);
+            sums.add(3, false, at, value, 1.0, &mut counts);
+            want += value * 0.5 * (1.0 - w_hi);
+            want += value * 0.5 * w_hi;
+            ground += value * (1.0 - w_hi);
+            ground += value * w_hi;
+        }
+        let mut trace = Trace(Vec::new());
+        assert!(
+            sums.emit(OwnNodes::Routed(7, 7), &mut trace, &mut counts)
+                .is_ok()
+        );
+        assert_eq!(
+            bits(&trace.0),
+            bits(&[Op::ground(7, ground), Op::couple(7, 30, want)])
+        );
+        // A signal pin without an RC node is counted per contribution.
+        assert_eq!(counts.unrouted_pin_partners, 3);
+    }
+
+    #[test]
+    fn a_passive_strip_records_whole_values_toward_the_nearer_partner_end() {
+        let fill = |sums: &mut Sums, counts: &mut Counts| -> [f64; 3] {
+            sums.reset(2);
+            sums.partials = vec![
+                partial(Target::Nodes {
+                    nodes: [10, 11],
+                    ends: Some([[0.0, 5.0], [0.0, 25.0]]),
+                    pin: false,
+                }),
+                partial(Target::Nothing),
+                partial(Target::Nodes {
+                    nodes: [20; 2],
+                    ends: None,
+                    pin: false,
+                }),
+            ];
+            let mut want = [0.0f64; 3];
+            for (y, value) in [(1.0, 1.0e-3), (14.0, 3.0e-21), (15.0, 0.4), (16.0, 2.0e-9)] {
+                let at = At {
+                    mid_point: [0.0, y],
+                    weights: [0.5, 0.5],
+                    own: [0, 0],
+                };
+                // The run factor does not apply to a passive strip.
+                sums.add(0, true, at, value, 0.5, counts);
+                sums.add(1, true, at, value, 1.0, counts);
+                sums.add(2, true, at, 2.0 * value, 1.0, counts);
+                // A tie goes to the low end.
+                want[usize::from(y > 15.0)] += value;
+                want[2] += 2.0 * value;
+            }
+            want
+        };
+        let (mut sums, mut counts) = (Sums::default(), Counts::default());
+        // A pin with an RC node (global 3) couples to its partners.
+        let want = fill(&mut sums, &mut counts);
+        let mut trace = Trace(Vec::new());
+        let own = OwnNodes::Passive {
+            node: Some(3),
+            unrouted_pin: false,
+        };
+        assert!(sums.emit(own, &mut trace, &mut counts).is_ok());
+        assert_eq!(
+            bits(&trace.0),
+            bits(&[
+                Op::couple(3, 10, want[0]),
+                Op::couple(3, 11, want[1]),
+                Op::couple(3, 20, want[2]),
+            ])
+        );
+        assert_eq!(counts.unrouted_pin_partners, 0);
+        // Without one its shares are the partners' ground, counted per
+        // contribution when it is a signal pin.
+        for (unrouted_pin, count) in [(true, 8), (false, 0)] {
+            let mut counts = Counts::default();
+            let want = fill(&mut sums, &mut counts);
+            let mut trace = Trace(Vec::new());
+            let own = OwnNodes::Passive {
+                node: None,
+                unrouted_pin,
+            };
+            assert!(sums.emit(own, &mut trace, &mut counts).is_ok());
+            assert_eq!(
+                bits(&trace.0),
+                bits(&[
+                    Op::ground(10, want[0]),
+                    Op::ground(11, want[1]),
+                    Op::ground(20, want[2]),
+                ])
+            );
+            assert_eq!(counts.unrouted_pin_partners, count);
+        }
+    }
+
+    #[test]
+    fn equal_neighbours_and_plate_edges_go_to_the_lower_shape_id_in_any_order() {
+        let shape = Shape {
+            layer: 0,
+            rect: Rect {
+                lx: 0,
+                ly: 0,
+                ux: 1,
+                uy: 1,
+            },
+            owner: Owner::Run(0),
+        };
+        let probe = |id: u32, gap: i64| Probe {
+            id,
+            role: Role::Plus,
+            cover: 0,
+            same: false,
+            routed: true,
+            rank: 0,
+            gap,
+        };
+        // Candidates in two orders: positions differ, IDs decide.
+        for ids in [[5u32, 9, 2, 7], [7, 2, 9, 5]] {
+            let gaps = |id: u32| if id == 7 { 30 } else { 10 };
+            let probes: Vec<Probe> = ids.iter().map(|&id| probe(id, gaps(id))).collect();
+            let mut set = Set::default();
+            set.reset(4);
+            let mut nearest = Nearest::default();
+            for (k, p) in probes.iter().enumerate() {
+                set.insert(k);
+                nearest.insert(p.gap, p.id, k);
+            }
+            let id_of = |n: Option<(i64, u32)>| n.map(|(gap, k)| (gap, ids[k as usize]));
+            assert_eq!(id_of(nearest.get(&set, &probes)), Some((10, 2)));
+            // The least one leaves: recomputed from the set.
+            let k = ids.iter().position(|&id| id == 2).unwrap();
+            set.remove(k);
+            nearest.remove(k);
+            assert_eq!(id_of(nearest.get(&set, &probes)), Some((10, 5)));
+            // Plate edges: equal extents under both side edges.
+            let cands: Vec<Cand> = ids.iter().map(|&id| Cand { id, shape }).collect();
+            let mut layered: Vec<(u32, i64, i64, u32)> =
+                (0..4).map(|k| (1, -100, 100, k as u32)).collect();
+            layered.sort_unstable_by_key(|e| (e.0, e.1, e.2, cands[e.3 as usize].id));
+            let (metal, owners) = plate(&layered, &cands, 2, false, -10, 10).unwrap();
+            assert_eq!(metal, 1);
+            assert_eq!(owners.map(|k| ids[k as usize]), [2, 2]);
+        }
+    }
 
     #[test]
     fn events_sort_by_position_then_candidate_then_exit_first() {
