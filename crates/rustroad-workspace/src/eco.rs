@@ -2474,7 +2474,16 @@ pub fn plan_antenna_with_limits(
             format!("schema {} unsupported", report.schema),
         ));
     }
-    if !matches!(report.status.as_str(), "passed" | "violated" | "partial") {
+    // A report of an explicit net subset (`check-antenna --selected-nets`)
+    // plans diodes for the nets it covers exactly as a complete report does;
+    // nets outside the subset are not planned, and the plan says so.
+    let (subset, status) = match report.status.as_str() {
+        "subset_violated" => (true, "violated"),
+        "subset_partial" => (true, "partial"),
+        "subset_clean" => (true, "passed"),
+        other => (false, other),
+    };
+    if !matches!(status, "passed" | "violated" | "partial") {
         return Err(fail(
             "ANTENNA_REPORT",
             format!("unknown report status {:?}", report.status),
@@ -2487,7 +2496,7 @@ pub fn plan_antenna_with_limits(
             format!("safety margin {margin} outside 0 ..= 0.5"),
         ));
     }
-    if report.status == "passed" && report.checks.iter().any(|c| c.violated) {
+    if status == "passed" && report.checks.iter().any(|c| c.violated) {
         return Err(fail(
             "ANTENNA_REPORT",
             "report status passed but it lists violated rows",
@@ -2508,7 +2517,7 @@ pub fn plan_antenna_with_limits(
     for row in report.checks.iter().filter(|c| c.violated) {
         by_net.entry(row.net.as_str()).or_default().push(row);
     }
-    if report.status == "violated" && by_net.is_empty() {
+    if status == "violated" && by_net.is_empty() {
         return Err(fail(
             "ANTENNA_REPORT",
             "violated report lists no violated rows",
@@ -2574,7 +2583,14 @@ pub fn plan_antenna_with_limits(
         operations: ops,
     };
     let mut diagnostics = Vec::new();
-    if report.status == "partial" {
+    if subset {
+        diagnostics.push(
+            "ANTENNA_INPUT_SUBSET: the check-antenna report covers an explicit net subset; \
+             nets outside it are not planned"
+                .to_string(),
+        );
+    }
+    if status == "partial" {
         diagnostics.push(
             "ANTENNA_INPUT_PARTIAL: the check-antenna report is partial (unmodeled LEF antenna \
              statements); this plan cannot certify the layout antenna-clean"
@@ -2585,7 +2601,7 @@ pub fn plan_antenna_with_limits(
         "infeasible"
     } else if !nets.is_empty() {
         "planned"
-    } else if report.status == "partial" {
+    } else if status == "partial" {
         "partial"
     } else {
         "clean"
