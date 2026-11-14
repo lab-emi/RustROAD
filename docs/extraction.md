@@ -124,7 +124,11 @@ the lists' bound leaves of the configured index allowance, capped by
 `--max-extract-bin-entries`; a list that would exceed them is scanned linearly from
 then on. The covering set is the same closed-overlap set in shape-ID order as
 before, so the pieces and their order are unchanged; only `stats.work` (entries
-scanned and bucketed) depends on the bucketing. Cell geometry is indexed once, at the admitted query bin: twice
+scanned and bucketed) depends on the bucketing. With more than one pool thread the
+pieces of each net are planned in parallel (falling back to the serial loop
+whenever it could act differently); no list is bucketed on that path, and since only
+the routing patches read the lists afterwards, the planned pieces are appended only
+to the lists of the patches' `(net, layer)` keys, in order. Cell geometry is indexed once, at the admitted query bin: twice
 the smallest per-layer calibration window when it fits (the selection rule and the
 reported `stats.memory.instance_query_bin_dbu` are unchanged), otherwise the coarse
 bin. The extraction instance index caches every instance's world bounds and a
@@ -139,6 +143,18 @@ window, doubled until a layer has no more cells than shapes. Entries hold the
 rectangle relative to the layer origin in 32 bits plus the shape ID (20 bytes);
 a layer wider than 2^32 DBU stores absolute rectangles (40 bytes). A query reports
 each strictly intersecting entry exactly once, from the first query cell it occupies.
+Within a cell, entries ascend by lower edge, then shape ID (no query depends on the
+order: callers sort the IDs they accept, and every entry of each scanned cell is
+charged), so a scan leaves a cell at the first entry whose lower edge reaches the
+query's upper edge. With more than one pool thread the grid is built by row bands in
+parallel: the shape sequence is cut into parts (16 Ki retained shapes or 1 Ki
+instances) whose bounds are taken in parallel, each part copies its shapes once as
+the entries of the row bands of their layer that they reach, and the count, prefix
+sums and fill run per band, each band owning disjoint slices of the offsets and the
+entry table and reading its shapes in ascending ID. Cells, totals, `stats.work` and
+budget outcomes are those of the serial passes. The copies are made only when they
+fit the index allowance next to the offsets and kept for the fill only when they fit
+next to the entry table; otherwise the serial passes run.
 Grid entries are capped by `--max-extract-bin-entries`; this cap now counts the
 per-layer grid's entries rather than the former 2x-window construction bins. When
 the retained shapes exceed the cap at the base cells, every layer's cell is
@@ -210,7 +226,10 @@ rebuilds only the 4-byte head array (at most two entries per head), so the table
 never holds two copies of its entries.
 
 Strips are computed on the `--threads` pool. Units (a wire body, or the strip pair
-of one rectangle) are taken from the unit iterator in chunks of 64. Lanes compute
+of one rectangle) are taken from the unit iterator in chunks of 64 (a crossed
+retained passive conductor, such as a supply rail, counts as 16, so these large
+strips spread over the lanes instead of overflowing a transcript and running
+serially at a barrier). Lanes compute
 chunks into bounded transcripts of ordered accumulations (every `ground[node] +=`,
 `coupling[key] +=` and overlap-area addition). A complete chunk's transcript is
 split by shard in its lane; coupling records are grouped by key with a chunk-local
@@ -242,11 +261,14 @@ path, until it fits, and any excess over the unused allowance is added to
 sets the chunk size (and forces the chunked path on one thread) for tests; results do
 not depend on it. `RUSTROAD_EXTRACT_PROFILE=1` prints phase timings, lanes, shards,
 chunks, barriers, serially computed units, grid size and same-net bucket counts to
-stderr.
+stderr, and a second line (`rustroad.extract-command-profile.v1`) with the wall
+time and resident memory at the end of the workspace read, the input build, the
+extraction, the SPEF write and the report.
 
 The phases around the strips also run on the `--threads` pool, each with an
-ordered result. Net trees are computed in batches of 2,048 nets and merged in net
-order; the serial loop's cumulative budgets (graph nodes, wire length, RC nodes) are
+ordered result. The per-net record lists (wires, vias, access points) are one
+table sorted in parallel. Net trees are computed in batches of 2,048 nets and
+merged in net order; the serial loop's cumulative budgets (graph nodes, wire length, RC nodes) are
 replayed at the checkpoint each net reached, so errors are those of the serial loop.
 The virtual-conductor crossing marks are a set: each pool thread owns one bitset
 and instance-mark scratch (admitted, for all threads, against the unused index
@@ -254,8 +276,15 @@ allowance plus the remaining headroom like the lanes, otherwise the scan is
 serial), OR-merged at the end; their work total is order-independent; any query
 error or a work total over the budget reruns the serial scan for the exact error. At the end each shard drains and
 sorts its coupling entries in parallel and the sorted lists are merged while
-couplings are thresholded and grounded in key order. Geometry, strip records and
-the passive copy are released before the SPEF is written. The SPEF writer
+couplings are thresholded and grounded in key order, into one ground array indexed
+by global node ID that is filled from the accumulators and copied back into the nets
+in parallel. Geometry, strip records, the routes and the passive copy are released
+before the SPEF is written. Once the extraction input is built, the command keeps
+only the routes, the design's name and cells and the connectivity of the snapshot
+(and the workspace lock, to the end); the rest of the parsed metadata, the mapped
+tables and the input's obstacle, access-class and track lists are released before
+the strips, and the network tables, names and connectivity are freed while the SPEF
+is synced to disk. The SPEF writer
 serializes batches of 256 nets on the pool and writes them in net order (each net's
 bytes depend only on that net and the name map), with the same byte cap, hash and
 error precedence as the streamed writer.
