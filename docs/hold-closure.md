@@ -334,6 +334,20 @@ threshold, and the report carries `safety_margin` and `lef_violations`.
 the signoff gate; scripts/rtl2gds.py re-measures the margin on a planted wire
 in every run (native/(1-m) vs the Magic ratio, docs/rtl2gds.md).
 
+**Whole-net rows (`check-antenna --whole-net`).** Magic's `antennacheck` on
+a hierarchical extraction (cells as subcells, the form the SKY130 shared gate
+runs) does not follow the fabrication order of the top cell's wiring: on a
+clip of a routed SKY130 block it reported a met4 run that a met5 jumper had
+cut off from the gate (954 > 400), and the same clip flattened passed. A net
+with diffusion (a driver, a diode) is judged under the diffusion rule there.
+`--whole-net` adds, per net and checked layer, one `whole_net_side_area` or
+`whole_net_area` row: all of the net's metal on the layer over all of its gate
+area, with all of its diffusion. The process-stage rows are unchanged.
+Jumpers do not lower these rows; `antenna-eco` sizes diodes for them like for
+any row, and `antenna-eco --skip-unknown-nets` plans the netlist nets of a
+report that also lists nets the layout generated (clock tree, rail ties)
+instead of refusing the plan.
+
 **Budgets.** `max_shapes_per_net`, `max_pair_checks` and `max_union_cells`
 bound the work.
 
