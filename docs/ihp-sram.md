@@ -24,7 +24,17 @@ metal. Empty lists retain the single-via configuration.
 layer, original fixed via and a contiguous via stack from the standard-cell
 supply spine. Connections use enclosed access shapes from the macro's real PG
 pins. The generator does not replace a macro with a site-height placeholder or
-waive missing PG access. `TapConfig.body_view = "gds"` records that the original
+waive missing PG access. Each supply pin takes the first pin-layer rectangle
+that encloses the pin via at its centre (moved to a row centre when
+`rail_via_stack` is a stack). When that collector would lie within spacing of
+a collector of the other supply (concentric supply rings, as OpenRAM macros
+draw them, are both centred on the same row), the pin takes another row of
+the same rectangle instead, nearest first, upwards before downwards; if none
+clears, the placement fails with the spacing error. `wire_spacing` states the
+clearance between collectors of opposite supplies; without it the collection
+layer's unconditional LEF `SPACING` applies, which is zero for a technology
+that gives its spacing only as a table (SKY130).
+`TapConfig.body_view = "gds"` records that the original
 GDS contains the contacts omitted from an abstract LEF; independent extraction
 and LVS remain required before claiming body-bias connectivity.
 

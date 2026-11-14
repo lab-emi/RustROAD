@@ -302,6 +302,7 @@ fn split_rail_stacks_above_the_last_full_row_land_on_a_spine() {
         pin_via: "V23".into(),
         via_stack: vec!["V23".into()],
         wire_width: 200,
+        wire_spacing: None,
     });
     let f = Fixture::new(
         "module chip(input a, output y, output h, output l);\n\
@@ -367,6 +368,119 @@ OBS LAYER M1 ; RECT 0 0 2 2 ; END\nEND RAM\nEND LIBRARY";
             v.polarity
         );
     }
+}
+
+/// A block whose two supply pins are concentric rings (both centred on the
+/// same row, as generated memory macros draw them), on a six-row core.
+fn ring_macro_fixture(wire_spacing: Option<i64>) -> Fixture {
+    let mut cfg = config();
+    cfg.macro_supply = Some(rustroad_workspace::macro_supply::Config {
+        collection_layer: "M3".into(),
+        pin_layer: "M2".into(),
+        pin_via: "V23".into(),
+        via_stack: vec!["V23".into()],
+        wire_width: 200,
+        wire_spacing,
+    });
+    let f = Fixture::new(
+        "module chip(input a, output y, output h, output l);\n\
+         BUF b0 (.A(a), .Y(y)); BUF b1 (.A(1'b1), .Y(h)); BUF b2 (.A(1'b0), .Y(l));\n\
+         RAM m0 (.D(a));\nendmodule\n",
+        &cfg,
+    );
+    let via = "LAYER V2 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V2\nVIA V23 DEFAULT\nLAYER M2 ; RECT -0.05 -0.05 0.05 0.05 ;\nLAYER V2 ; RECT -0.03 -0.03 0.03 0.03 ;\nLAYER M3 ; RECT -0.05 -0.05 0.05 0.05 ; END V23\nEND LIBRARY";
+    fs::write(
+        &f.sources.technology_lef,
+        TECHNOLOGY.replace("END LIBRARY", via),
+    )
+    .unwrap();
+    let ram = "MACRO RAM\nCLASS BLOCK ; ORIGIN 0 0 ; SIZE 4 BY 8 ; SYMMETRY X Y ;\n\
+PIN D DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M2 ; RECT 1.9 0 2.1 0.2 ; END END D\n\
+PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M2 ; RECT 0.4 0.4 0.6 7.6 ; END END VDD\n\
+PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M2 ; RECT 0.1 0.1 0.3 7.9 ; END END VSS\n\
+OBS LAYER M1 ; RECT 0 0 4 8 ; END\nEND RAM\nEND LIBRARY";
+    fs::write(&f.sources.cell_lef, library().replace("END LIBRARY", ram)).unwrap();
+    let rows: Vec<_> = (0..6)
+        .map(
+            |i| serde_json::json!({"x_start":5000,"x_end":15000,"y":5000+2000*i,"orientation":"N"}),
+        )
+        .collect();
+    let floorplan = serde_json::json!({
+        "name":"chip", "units_per_micron":1000,
+        "die_area":{"lx":0,"ly":0,"ux":20000,"uy":20000},
+        "core_area":{"lx":5000,"ly":5000,"ux":15000,"uy":17000},
+        "site":{"name":"s","width":1000,"height":2000},
+        "rows": rows,
+        "macro_placements": {"m0": {"x": 9000, "y": 7000, "orientation": "N", "halo": 0}}
+    });
+    fs::write(
+        &f.sources.floorplan,
+        serde_json::to_vec(&floorplan).unwrap(),
+    )
+    .unwrap();
+    f
+}
+
+#[test]
+fn concentric_macro_supply_rings_get_separate_collector_rows() {
+    // Both ring pins are centred on y = 11.0 um: the first access of each
+    // would put the two collectors on top of each other. The second pin must
+    // take another row of its own pin shape, the first keeps its centre.
+    // Seven cells, six rows: <1 MiB.
+    for spacing in [None, Some(1000)] {
+        let f = ring_macro_fixture(spacing);
+        f.import().unwrap();
+        place(&f.workspace, "rev1", &limits()).unwrap();
+        let snapshot = read(&f.workspace, &limits()).unwrap();
+        let supply = &snapshot
+            .metadata()
+            .physical
+            .as_ref()
+            .unwrap()
+            .state
+            .as_ref()
+            .unwrap()
+            .supply;
+        let collectors: Vec<_> = supply
+            .wires
+            .iter()
+            .filter(|w| w.layer == "M3" && w.start[1] == w.end[1])
+            .collect();
+        assert_eq!(collectors.len(), 2, "{collectors:?}");
+        let power = collectors
+            .iter()
+            .find(|w| w.polarity == rustroad_core::power::RailPolarity::Power)
+            .unwrap();
+        let ground = collectors
+            .iter()
+            .find(|w| w.polarity == rustroad_core::power::RailPolarity::Ground)
+            .unwrap();
+        assert_eq!(power.end, [9500, 11000], "first pin keeps its centre");
+        assert_eq!(ground.end, [9200, 13000], "second pin moves one row up");
+        let pin_vias: Vec<_> = supply
+            .vias
+            .iter()
+            .filter(|v| v.name == "V23" && (v.at == power.end || v.at == ground.end))
+            .collect();
+        assert_eq!(pin_vias.len(), 2, "one enclosed via per ring: {pin_vias:?}");
+    }
+}
+
+#[test]
+fn concentric_macro_supply_rings_fail_when_no_row_clears_the_spacing() {
+    // Rows are 2.0 um apart and the rings 7.8 um tall: a 2.5 um clearance
+    // between 0.2 um collectors needs two rows of offset, which leaves the
+    // pin. The explicit spacing error is kept; nothing is published.
+    let f = ring_macro_fixture(Some(2500));
+    f.import().unwrap();
+    let error = place(&f.workspace, "rev1", &limits()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("opposite macro supply collection metals violate spacing"),
+        "{error}"
+    );
+    assert_eq!(f.head(), "rev1\n");
 }
 
 #[test]
