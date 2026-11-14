@@ -29,8 +29,11 @@ that encloses the pin via at its centre (moved to a row centre when
 `rail_via_stack` is a stack). When that collector would lie within spacing of
 a collector of the other supply (concentric supply rings, as OpenRAM macros
 draw them, are both centred on the same row), the pin takes another row of
-the same rectangle instead, nearest first, upwards before downwards; if none
-clears, the placement fails with the spacing error. `wire_spacing` states the
+the same rectangle instead, nearest first, upwards before downwards. If that
+rectangle has no clear access, later pin rectangles are tried in LEF order,
+each at its centre before its other rows (GF180 SRAMs expose supplies on
+several edges). If none clears, placement fails with the spacing error.
+`wire_spacing` states the
 clearance between collectors of opposite supplies; without it the collection
 layer's unconditional LEF `SPACING` applies, which is zero for a technology
 that gives its spacing only as a table (SKY130). With `nearest_spine` a

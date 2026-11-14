@@ -357,6 +357,17 @@ pub(crate) fn collect(
                             cell.fixed.unwrap().orientation,
                         )?;
                         let base = access_point(rect)?;
+                        // A later port rectangle can expose the opposite macro
+                        // edge even when it is too short for a row offset.
+                        if Some(base) != target
+                            && pin_via[&cfg.pin_layer]
+                                .iter()
+                                .all(|r| translate(*r, base).is_ok_and(|r| contains(rect, r)))
+                            && clear(base)?
+                        {
+                            found = Some(base);
+                            break 'shapes;
+                        }
                         let step = i128::from(design.site.height);
                         let span = i128::from(rect.uy) - i128::from(rect.ly);
                         for k in 1..=4096i128 {

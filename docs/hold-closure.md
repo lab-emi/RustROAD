@@ -334,6 +334,13 @@ threshold, and the report carries `safety_margin` and `lef_violations`.
 the signoff gate; scripts/rtl2gds.py re-measures the margin on a planted wire
 in every run (native/(1-m) vs the Magic ratio, docs/rtl2gds.md).
 
+Reports from `check-antenna --selected-nets` are accepted as well:
+`subset_clean`, `subset_violated` and `subset_partial` keep their original
+`input_status` and add `ANTENNA_INPUT_SUBSET`. The plan covers only the nets
+listed in that report; `subset_partial` also carries `ANTENNA_INPUT_PARTIAL`.
+Unknown statuses and clean reports containing violated rows are refused.
+This scope diagnostic remains present when `--skip-unknown-nets` is used.
+
 **Whole-net rows (`check-antenna --whole-net`).** Magic's `antennacheck` on
 a hierarchical extraction (cells as subcells, the form the SKY130 shared gate
 runs) does not follow the fabrication order of the top cell's wiring: on a

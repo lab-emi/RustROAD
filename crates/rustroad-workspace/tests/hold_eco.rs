@@ -1022,6 +1022,111 @@ fn cts_buffered_timed_netlist_refines_the_mapped_netlist() {
 }
 
 #[test]
+fn antenna_eco_plans_a_selected_net_subset_report() {
+    // `check-antenna --selected-nets` writes subset_* statuses; the planner
+    // treats the listed nets as a complete report does and says the plan is
+    // limited to them. Unknown statuses stay refused.
+    use rustroad_workspace::eco::{AntennaEcoRequest, plan_antenna};
+    let d = dir();
+    let netlist = d.join("in.v");
+    fs::write(&netlist, NETLIST).unwrap();
+    let prof = write(&d, "profile.json", &default_profile());
+    let req = |report: &Path, name: &str| AntennaEcoRequest {
+        netlist: netlist.clone(),
+        report: report.to_path_buf(),
+        profile: prof.clone(),
+        cell: None,
+        min_diodes: 1,
+        max_diodes_per_net: 4,
+        prefix: "rr_eco_ant_".into(),
+        out: d.join(format!("{name}.v")),
+        plan_out: d.join(format!("{name}.json")),
+        skip_unknown_nets: false,
+    };
+    let base = antenna_report(
+        "a[1]",
+        1000.0,
+        1.0,
+        0.0,
+        Value::Null,
+        json!({"kind": "value", "ratio": 400.0}),
+        json!(15.0),
+    );
+    let mut violated = base.clone();
+    violated["status"] = json!("subset_violated");
+    let p = write(&d, "subset_violated.json", &violated);
+    let plan = plan_antenna(&req(&p, "subset_violated")).unwrap();
+    assert_eq!(
+        (plan.status, plan.input_status.as_str(), plan.nets[0].diodes),
+        ("planned", "subset_violated", 1)
+    );
+    assert!(plan.diagnostics[0].starts_with("ANTENNA_INPUT_SUBSET"));
+    let mut clean = base.clone();
+    clean["status"] = json!("subset_clean");
+    clean["checks"][0]["violated"] = json!(false);
+    let p = write(&d, "subset_clean.json", &clean);
+    let plan = plan_antenna(&req(&p, "subset_clean")).unwrap();
+    assert_eq!((plan.status, plan.nets.len()), ("clean", 0));
+    let mut partial = clean.clone();
+    partial["status"] = json!("subset_partial");
+    let p = write(&d, "subset_partial.json", &partial);
+    let plan = plan_antenna(&req(&p, "subset_partial")).unwrap();
+    assert_eq!(plan.status, "partial");
+    assert!(plan.diagnostics[1].starts_with("ANTENNA_INPUT_PARTIAL"));
+    // A clean subset that lists a violated row is refused, as a passed report.
+    let mut bad = base.clone();
+    bad["status"] = json!("subset_clean");
+    let p = write(&d, "subset_bad.json", &bad);
+    let e = plan_antenna(&req(&p, "subset_bad"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.starts_with("ANTENNA_REPORT:"), "{e}");
+    bad["status"] = json!("subset_unknown");
+    let p = write(&d, "subset_bad2.json", &bad);
+    assert!(plan_antenna(&req(&p, "subset_bad2")).is_err());
+
+    // A partial subset can also contain layout-generated clock nets. Both
+    // scope diagnostics survive skipping that net, and strict mode refuses it.
+    let mut mixed = base;
+    mixed["status"] = json!("subset_partial");
+    let mut clock = mixed["checks"][0].clone();
+    clock["net"] = json!("rr_clock_7");
+    mixed["checks"].as_array_mut().unwrap().push(clock);
+    let p = write(&d, "subset_mixed.json", &mixed);
+    let error = plan_antenna(&req(&p, "subset_strict"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.starts_with("ANTENNA_ECO_INFEASIBLE") && error.contains("rr_clock_7"),
+        "{error}"
+    );
+    assert!(!d.join("subset_strict.v").exists());
+    let mut skipping = req(&p, "subset_skip");
+    skipping.skip_unknown_nets = true;
+    let plan = plan_antenna(&skipping).unwrap();
+    assert_eq!(
+        (plan.status, plan.input_status.as_str()),
+        ("planned", "subset_partial")
+    );
+    assert_eq!(plan.skipped, vec!["rr_clock_7"]);
+    assert_eq!(plan.nets.len(), 1);
+    assert_eq!(plan.nets[0].net, "a[1]");
+    for code in [
+        "ANTENNA_NETS_SKIPPED",
+        "ANTENNA_INPUT_SUBSET",
+        "ANTENNA_INPUT_PARTIAL",
+    ] {
+        assert!(
+            plan.diagnostics
+                .iter()
+                .any(|message| message.starts_with(code)),
+            "missing {code}: {:?}",
+            plan.diagnostics
+        );
+    }
+}
+
+#[test]
 fn antenna_eco_carries_a_partial_input_status_forward() {
     use rustroad_workspace::eco::{AntennaEcoRequest, plan_antenna};
     let d = dir();

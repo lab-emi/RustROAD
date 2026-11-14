@@ -1146,6 +1146,9 @@ fn check_placed_records(design: &Design, records: &[Placed]) -> Result<()> {
         records,
         &Limits {
             max_cells: design.cells.len().max(250_000),
+            // Match the bounded physical row/halo validation, not the
+            // placement search's default expansion allowance.
+            max_expansions: 64_000_000,
             ..Limits::default()
         },
     )

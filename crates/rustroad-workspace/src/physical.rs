@@ -1631,6 +1631,9 @@ pub(super) fn layout(
         placed,
         &Limits {
             max_cells: design.cells.len().max(250_000),
+            // Validate the cell-by-macro product within the same ceiling as
+            // the row-segment checks below, including physical-only cells.
+            max_expansions: 64_000_000,
             ..Limits::default()
         },
     )?;

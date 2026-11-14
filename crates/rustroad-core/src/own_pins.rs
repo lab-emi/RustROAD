@@ -136,9 +136,24 @@ impl OwnPins {
         )?;
         Ok(order[begin..end].iter().any(|&i| {
             let (_, pin, top) = self.shapes[i as usize];
-            overlap(rect, pin) && !allowed.contains(&top)
+            overlap(rect, pin) && !allowed.contains(&top) && !through_top(allowed, pin, top)
         }))
     }
+}
+
+/// A straight edge on the horizontal or vertical line through the escape top
+/// of the pin shape it overlaps, when that top lies in the shape. A pin longer
+/// than one node pitch (a macro pin several stops deep) is left along that
+/// line: every edge of the run overlaps the pin, and so can the first edge
+/// past its end, by the wire's end cap. The metal still meets the pin through
+/// the top only: an edge off that line, or a via whose node is not the top,
+/// stays blocked.
+fn through_top(edge: &[[i64; 2]], pin: Rect, top: [i64; 2]) -> bool {
+    let &[p, q] = edge else {
+        return false;
+    };
+    crate::routing::contains(pin, top)
+        && ((p[0] == q[0] && p[0] == top[0]) || (p[1] == q[1] && p[1] == top[1]))
 }
 
 #[cfg(test)]
@@ -181,7 +196,10 @@ mod tests {
                     };
                     for allowed in [vec![], vec![[x + 4, 0]], vec![[x + 4, 0], [x + 15, 0]]] {
                         let expected = shapes.iter().any(|(l, r, t)| {
-                            *l == layer && overlap(rect, *r) && !allowed.contains(t)
+                            *l == layer
+                                && overlap(rect, *r)
+                                && !allowed.contains(t)
+                                && !through_top(&allowed, *r, *t)
                         });
                         assert_eq!(
                             indexed.blocks(layer, rect, &allowed, &mut 0, 200).unwrap(),
@@ -233,9 +251,12 @@ mod tests {
                         ux: pin.lx + dx + 2,
                         uy: 5,
                     };
-                    let expected = shapes
-                        .iter()
-                        .any(|(l, r, t)| *l == layer && overlap(query, *r) && !allowed.contains(t));
+                    let expected = shapes.iter().any(|(l, r, t)| {
+                        *l == layer
+                            && overlap(query, *r)
+                            && !allowed.contains(t)
+                            && !through_top(&allowed, *r, *t)
+                    });
                     let mut work = 0;
                     assert_eq!(
                         indexed
@@ -248,5 +269,68 @@ mod tests {
             }
         }
         assert!(indexed.blocks(0, shapes[0].1, &[], &mut 0, 1).is_err());
+    }
+
+    #[test]
+    fn a_long_pin_is_left_along_the_line_through_its_top_only() {
+        // A macro pin two tracks wide and nine stops deep (the GF180 SRAM's
+        // 1.12 um x 5 um Metal2 pins, 2000 DBU per micron) whose escape top is
+        // its lowest stop, 4.4 um from the open end at y = 10000.
+        let pin = Rect {
+            lx: 0,
+            ly: 0,
+            ux: 2240,
+            uy: 10_000,
+        };
+        let top = [560, 1200];
+        let other = Rect {
+            lx: 6000,
+            ly: 0,
+            ux: 8240,
+            uy: 10_000,
+        };
+        let own = OwnPins::new(
+            vec![(1, pin, top), (1, other, [6560, 1200])],
+            3,
+            &mut 0,
+            1000,
+        )
+        .unwrap();
+        let wire = |a: [i64; 2], b: [i64; 2]| Rect {
+            lx: a[0].min(b[0]) - 280,
+            ly: a[1].min(b[1]) - 280,
+            ux: a[0].max(b[0]) + 280,
+            uy: a[1].max(b[1]) + 280,
+        };
+        let blocked =
+            |a: [i64; 2], b: [i64; 2]| own.blocks(1, wire(a, b), &[a, b], &mut 0, 1000).unwrap();
+        // Up the top's track: inside the pin, across its end, and the first
+        // edge past it, whose end cap still overlaps the pin by 120 DBU.
+        assert!(!blocked([560, 1200], [560, 2320]));
+        assert!(!blocked([560, 2320], [560, 3440]));
+        assert!(!blocked([560, 9040], [560, 10_160]));
+        assert!(!blocked([560, 10_160], [560, 11_280]));
+        // The stop row of the top, towards the second track of the pin.
+        assert!(!blocked([560, 1200], [1680, 1200]));
+        assert!(!blocked([1680, 1200], [2800, 1200]));
+        // Off the two lines through the top: the pin's other track, a jog at
+        // another stop, and a turn at the first node past the pin's end.
+        assert!(blocked([1680, 2320], [1680, 3440]));
+        assert!(blocked([560, 2320], [1680, 2320]));
+        assert!(blocked([560, 10_160], [1680, 10_160]));
+        // The neighbouring pin of the net is not on a line through its top.
+        assert!(blocked([5000, 2320], [7000, 2320]));
+        // A via pad off the top stays blocked; on the top it is allowed.
+        let pad = |at: [i64; 2]| Rect {
+            lx: at[0] - 280,
+            ly: at[1] - 380,
+            ux: at[0] + 280,
+            uy: at[1] + 380,
+        };
+        assert!(
+            own.blocks(1, pad([560, 10_160]), &[[560, 10_160]], &mut 0, 1000)
+                .unwrap()
+        );
+        assert!(!own.blocks(1, pad(top), &[top], &mut 0, 1000).unwrap());
     }
 }

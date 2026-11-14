@@ -371,6 +371,114 @@ OBS LAYER M1 ; RECT 0 0 2 2 ; END\nEND RAM\nEND LIBRARY";
     }
 }
 
+/// A macro whose supply pins have the given M2 port rectangles (micron text),
+/// placed above the rows of the two-row fixture.
+fn macro_supply_fixture(vdd_ports: &[&str], vss_ports: &[&str]) -> Fixture {
+    let mut cfg = config();
+    cfg.macro_supply = Some(rustroad_workspace::macro_supply::Config {
+        collection_layer: "M3".into(),
+        pin_layer: "M2".into(),
+        pin_via: "V23".into(),
+        via_stack: vec!["V23".into()],
+        wire_width: 200,
+        wire_spacing: None,
+        nearest_spine: false,
+    });
+    let f = Fixture::new(
+        "module chip(input a, output y, output h, output l);\n\
+         BUF b0 (.A(a), .Y(y)); BUF b1 (.A(1'b1), .Y(h)); BUF b2 (.A(1'b0), .Y(l));\n\
+         RAM m0 (.D(a));\nendmodule\n",
+        &cfg,
+    );
+    let via = "LAYER V2 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V2\nVIA V23 DEFAULT\nLAYER M2 ; RECT -0.05 -0.05 0.05 0.05 ;\nLAYER V2 ; RECT -0.03 -0.03 0.03 0.03 ;\nLAYER M3 ; RECT -0.05 -0.05 0.05 0.05 ; END V23\nEND LIBRARY";
+    fs::write(
+        &f.sources.technology_lef,
+        TECHNOLOGY.replace("END LIBRARY", via),
+    )
+    .unwrap();
+    let ports = |list: &[&str]| -> String {
+        list.iter()
+            .map(|r| format!("PORT LAYER M2 ; RECT {r} ; END "))
+            .collect()
+    };
+    let ram = format!(
+        "MACRO RAM\nCLASS BLOCK ; ORIGIN 0 0 ; SIZE 2 BY 2 ; SYMMETRY X Y ;\n\
+PIN D DIRECTION INPUT ; USE SIGNAL ; PORT LAYER M2 ; RECT 0.9 0.9 1.1 1.1 ; END END D\n\
+PIN VDD DIRECTION INOUT ; USE POWER ; {}END VDD\n\
+PIN VSS DIRECTION INOUT ; USE GROUND ; {}END VSS\n\
+OBS LAYER M1 ; RECT 0 0 2 2 ; END\nEND RAM\nEND LIBRARY",
+        ports(vdd_ports),
+        ports(vss_ports)
+    );
+    fs::write(&f.sources.cell_lef, library().replace("END LIBRARY", &ram)).unwrap();
+    let mut floorplan: serde_json::Value =
+        serde_json::from_slice(&fs::read(&f.sources.floorplan).unwrap()).unwrap();
+    floorplan["macro_placements"] =
+        serde_json::json!({"m0": {"x": 9000, "y": 7000, "orientation": "N", "halo": 0}});
+    fs::write(
+        &f.sources.floorplan,
+        serde_json::to_vec(&floorplan).unwrap(),
+    )
+    .unwrap();
+    f
+}
+
+#[test]
+fn macro_supply_takes_a_later_pin_shape_when_the_first_collectors_would_touch() {
+    // Both supply pins list a shape on the same macro edge first (as the
+    // GF180 foundry SRAM does): two collectors at one height would short.
+    // The ground pin's second shape is used instead; a pin without another
+    // shape still fails the spacing check. <1 MiB per fixture.
+    let f = macro_supply_fixture(
+        &["0.2 1.5 0.8 1.8"],
+        &["1.2 1.5 1.8 1.8", "0.2 0.2 1.8 0.5"],
+    );
+    f.import().unwrap();
+    place(&f.workspace, "rev1", &limits()).unwrap();
+    let snapshot = read(&f.workspace, &limits()).unwrap();
+    let supply = &snapshot
+        .metadata()
+        .physical
+        .as_ref()
+        .unwrap()
+        .state
+        .as_ref()
+        .unwrap()
+        .supply;
+    let collectors: Vec<_> = supply
+        .wires
+        .iter()
+        .filter(|w| w.layer == "M3" && w.start[1] == w.end[1] && w.start[0] != w.end[0])
+        .collect();
+    assert_eq!(collectors.len(), 2, "{collectors:?}");
+    let y = |polarity| {
+        collectors
+            .iter()
+            .find(|w| w.polarity == polarity)
+            .map(|w| w.start[1])
+            .unwrap()
+    };
+    let (power, ground) = (
+        y(rustroad_core::power::RailPolarity::Power),
+        y(rustroad_core::power::RailPolarity::Ground),
+    );
+    assert!((8500..=8800).contains(&power), "first VDD shape: {power}");
+    assert!(
+        (7200..=7500).contains(&ground),
+        "second VSS shape: {ground}"
+    );
+
+    let f = macro_supply_fixture(&["0.2 1.5 0.8 1.8"], &["1.2 1.5 1.8 1.8"]);
+    f.import().unwrap();
+    let error = place(&f.workspace, "rev1", &limits()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("opposite macro supply collection metals violate spacing"),
+        "{error}"
+    );
+}
+
 /// A block whose two supply pins are concentric rings (both centred on the
 /// same row, as generated memory macros draw them), on a six-row core.
 fn ring_macro_fixture(wire_spacing: Option<i64>) -> Fixture {
