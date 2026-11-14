@@ -220,34 +220,39 @@ impl LayerGrid {
             query.ly.saturating_sub(self.y0),
             query.uy.saturating_sub(self.y0),
         );
-        for y in qy0..=qy1 {
-            let y_lo = y * self.cell;
-            for x in qx0..=qx1 {
-                let x_lo = x * self.cell;
-                let c = (y * self.nx + x) as usize;
-                let (a, b) = (self.offsets[c] as usize, self.offsets[c + 1] as usize);
+        let cols = (qx1 - qx0 + 1) as usize;
+        for y in qy0..qy1 + 1 {
+            // An entry is reported from its own first cell, or from the
+            // query's first row/column when it starts before the query
+            // (entry offsets are never negative).
+            let y_min = if y == qy0 { 0 } else { y * self.cell };
+            let row = (y * self.nx + qx0) as usize;
+            let offsets = &self.offsets[row..=row + cols];
+            let mut a = offsets[0] as usize;
+            for (i, &end) in offsets[1..].iter().enumerate() {
+                let b = end as usize;
                 *local += b - a;
+                let x_min = if i == 0 {
+                    0
+                } else {
+                    (qx0 + i as i64) * self.cell
+                };
                 for e in &entries[a..b] {
-                    let (elx, ely) = (i64::from(e.lx), i64::from(e.ly));
+                    let ely = i64::from(e.ly);
                     if ely >= uy {
                         // Entries ascend by lower edge: none further can
                         // intersect.
                         break;
                     }
-                    let (eux, euy) = (i64::from(e.ux), i64::from(e.uy));
-                    if (x == qx0 || elx >= x_lo)
-                        && (y == qy0 || ely >= y_lo)
-                        && elx < ux
-                        && lx < eux
-                        && ely < uy
-                        && ly < euy
-                    {
+                    let (elx, eux, euy) = (i64::from(e.lx), i64::from(e.ux), i64::from(e.uy));
+                    if (elx >= x_min) & (ely >= y_min) & (elx < ux) & (lx < eux) & (ly < euy) {
                         let (r, id) = e.get(self.x0, self.y0);
                         if !visitor(id, r)? {
                             return Ok(false);
                         }
                     }
                 }
+                a = b;
             }
         }
         Ok(true)

@@ -500,22 +500,34 @@ fn gather_other(
         }
         let other = &mut sc.other;
         let mut over = false;
-        let complete = visit_layer(
-            ctx,
-            &mut sc.instances,
-            layer,
-            q,
-            work,
-            |id, r| u8::from(accepts(run, None, id, r)),
-            |c, _| {
-                if other.len() >= cap {
-                    over = true;
-                    return false;
-                }
-                other.push(c);
-                true
-            },
-        )?;
+        let mut take = |c: Cand| {
+            if other.len() >= cap {
+                over = true;
+                return false;
+            }
+            other.push(c);
+            true
+        };
+        // A grid entry strictly intersecting the face is exactly what the
+        // acceptance predicate of another layer accepts: the strip's own
+        // shape is indexed on its own layer only.
+        let complete = ctx.grid.visit(layer, q, ctx.limits, work, |id, rect| {
+            Ok(id == run.shape
+                || take(Cand {
+                    id,
+                    shape: shape_of(ctx, id, layer, rect),
+                }))
+        })? && match ctx.instances {
+            Some(geometry) => geometry.visit_shared(
+                &mut sc.instances,
+                ctx.shapes,
+                layer,
+                q,
+                work,
+                |id, shape| Ok(!accepts(run, None, id, shape.rect) || take(Cand { id, shape })),
+            )?,
+            None => true,
+        };
         if over || !complete {
             return Err(over_cap(ctx.limits, other.len() + 1));
         }
@@ -720,10 +732,20 @@ fn pair_candidates(
         let mut fits = true;
         for (part, q) in [(1u8, qx), (2u8, qy)] {
             let complete = ctx.grid.visit_uncharged(x.layer, q, |id, r| {
-                let flags = flags_of(id, r);
-                if flags & part == 0 || (part == 2 && flags & 1 != 0) {
+                // A hit strictly intersects this part's window, which is
+                // exactly its strip's predicate apart from the strip's own
+                // shape; only the other strip's predicate is evaluated.
+                if id == x.shape {
                     return Ok(true);
                 }
+                let flags = if part == 1 {
+                    1 | u8::from(accepts(y, Some((cy0, cy1)), id, r)) << 1
+                } else if accepts(x, Some((cx0, cx1)), id, r) {
+                    // Taken with both flags from the x window.
+                    return Ok(true);
+                } else {
+                    2
+                };
                 nx += usize::from(flags & 1);
                 ny += usize::from(flags >> 1);
                 if base + nx.max(ny) > cap {
