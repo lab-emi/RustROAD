@@ -360,6 +360,28 @@ fn blank_entries<E: Entry>(g: &LayerGrid, total: usize) -> Result<Vec<E>> {
     Ok(entries)
 }
 
+/// `blank_entries`, written by the pool in parallel.
+fn blank_table<E: Entry + Send + Sync>(g: &LayerGrid, total: usize) -> Result<Vec<E>> {
+    use rayon::prelude::*;
+    let mut entries: Vec<E> = Vec::new();
+    entries
+        .try_reserve_exact(total)
+        .map_err(|_| budget("extraction grid entry allocation"))?;
+    let blank = E::new(
+        Rect {
+            lx: g.x0,
+            ly: g.y0,
+            ux: g.x0,
+            uy: g.y0,
+        },
+        0,
+        g.x0,
+        g.y0,
+    );
+    entries.par_extend(rayon::iter::repeat_n(blank, total));
+    Ok(entries)
+}
+
 /// Places `(id, rect)` in every cell of `g` it occupies.
 #[inline]
 fn place<E: Entry>(g: &LayerGrid, cursor: &mut [u32], entries: &mut [E], id: u32, rect: Rect) {
@@ -440,6 +462,308 @@ fn count_entries(
         }
     }
     total
+}
+
+/// Retained shapes per part of the parallel build.
+const PART_SHAPES: usize = 1 << 14;
+/// Instances per part of the parallel build.
+const PART_INSTANCES: usize = 1 << 10;
+/// Row-band tasks per pool thread of the parallel count and fill.
+const BANDS_PER_THREAD: usize = 4;
+
+/// A contiguous run of the indexed sequence (ascending shape ID).
+#[derive(Clone, Copy, Debug)]
+enum Part {
+    /// Retained shapes `start..end`, whose IDs are their index plus `shift`.
+    Retained {
+        start: usize,
+        end: usize,
+        shift: usize,
+    },
+    /// The virtual shapes of instances `start..end` on the virtual layers.
+    Virtual { start: usize, end: usize },
+}
+
+/// The indexed sequence of `indexed` cut into parts, in ID order.
+fn parts(shapes: &Shapes<'_>, virtual_layers: Option<&[bool]>) -> Vec<Part> {
+    let len = shapes.retained_len();
+    let front = shapes.virtual_offset().min(len);
+    let mut out = Vec::new();
+    let retained = |start: usize, end: usize, shift: usize, out: &mut Vec<Part>| {
+        let mut at = start;
+        while at < end {
+            let next = end.min(at + PART_SHAPES);
+            out.push(Part::Retained {
+                start: at,
+                end: next,
+                shift,
+            });
+            at = next;
+        }
+    };
+    retained(0, front, 0, &mut out);
+    if virtual_layers.is_some() {
+        let instances = shapes.virtual_instances();
+        let mut at = 0;
+        while at < instances {
+            let next = instances.min(at + PART_INSTANCES);
+            out.push(Part::Virtual {
+                start: at,
+                end: next,
+            });
+            at = next;
+        }
+    }
+    retained(front, len, shapes.virtual_count(), &mut out);
+    out
+}
+
+/// Visits the `(id, layer, rect)` of one part in ascending ID, exactly as
+/// `indexed` does.
+fn visit_part(
+    shapes: &Shapes<'_>,
+    virtual_layers: Option<&[bool]>,
+    part: Part,
+    mut f: impl FnMut(u32, u32, Rect),
+) {
+    match part {
+        Part::Retained { start, end, shift } => {
+            for (i, s) in shapes.retained()[start..end].iter().enumerate() {
+                f((start + i + shift) as u32, s.layer, s.rect);
+            }
+        }
+        Part::Virtual { start, end } => {
+            let layers = virtual_layers.unwrap_or(&[]);
+            for (id, s) in shapes.virtual_shapes_of(start..end) {
+                if layers.get(s.layer as usize).copied().unwrap_or(false) {
+                    f(id, s.layer, s.rect);
+                }
+            }
+        }
+    }
+}
+
+/// Bounds and shape count of each layer, per part (`None`: a shape on a
+/// layer past `layer_count` or with an invalid rectangle).
+type LayerBounds = Vec<Option<(Rect, u64)>>;
+fn part_bounds(
+    shapes: &Shapes<'_>,
+    virtual_layers: Option<&[bool]>,
+    parts: &[Part],
+    layer_count: usize,
+) -> Option<Vec<LayerBounds>> {
+    use rayon::prelude::*;
+    parts
+        .par_iter()
+        .map(|&part| {
+            let mut bounds: LayerBounds = vec![None; layer_count];
+            let mut valid = true;
+            visit_part(shapes, virtual_layers, part, |_, layer, rect| {
+                if layer as usize >= layer_count || !rect.valid() {
+                    valid = false;
+                    return;
+                }
+                let item = &mut bounds[layer as usize];
+                *item = Some(match *item {
+                    None => (rect, 1),
+                    Some((b, n)) => (union(b, rect), n + 1),
+                });
+            });
+            valid.then_some(bounds)
+        })
+        .collect()
+}
+
+fn union(a: Rect, b: Rect) -> Rect {
+    Rect {
+        lx: a.lx.min(b.lx),
+        ly: a.ly.min(b.ly),
+        ux: a.ux.max(b.ux),
+        uy: a.uy.max(b.uy),
+    }
+}
+
+impl Entries {
+    fn compact(&self) -> &[Compact] {
+        match self {
+            Entries::Compact(e) => e,
+            Entries::Wide(_) => &[],
+        }
+    }
+    fn wide(&self) -> &[Wide] {
+        match self {
+            Entries::Wide(e) => e,
+            Entries::Compact(_) => &[],
+        }
+    }
+}
+
+/// Every part's shapes of each layer as that layer's entries (ID order),
+/// split by the row bands `band_rows[layer]` they reach (a shape is in
+/// every band its cell rows meet). `None` once the copies exceed `room`
+/// bytes (checked part by part, so at most one part per pool thread more
+/// is held).
+fn part_lists(
+    shapes: &Shapes<'_>,
+    virtual_layers: Option<&[bool]>,
+    parts: &[Part],
+    layers: &[Option<LayerGrid>],
+    compact: &[bool],
+    band_rows: &[Vec<(i64, i64)>],
+    room: u64,
+) -> Option<Vec<Vec<Vec<Entries>>>> {
+    use rayon::prelude::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let used = AtomicU64::new(0);
+    // The band of each cell row.
+    let band_of: Vec<Vec<u32>> = band_rows
+        .iter()
+        .map(|rows| {
+            rows.iter()
+                .enumerate()
+                .flat_map(|(b, &(r0, r1))| (r0..r1).map(move |_| b as u32))
+                .collect()
+        })
+        .collect();
+    parts
+        .par_iter()
+        .map(|&part| {
+            if used.load(Ordering::Relaxed) > room {
+                return None;
+            }
+            let mut lists: Vec<Vec<Entries>> = band_rows
+                .iter()
+                .zip(compact)
+                .map(|(rows, &c)| {
+                    rows.iter()
+                        .map(|_| {
+                            if c {
+                                Entries::Compact(Vec::new())
+                            } else {
+                                Entries::Wide(Vec::new())
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            visit_part(shapes, virtual_layers, part, |id, layer, rect| {
+                let l = layer as usize;
+                if let Some(g) = layers[l].as_ref() {
+                    let (b0, b1) = (
+                        band_of[l][g.cy(rect.ly) as usize],
+                        band_of[l][g.cy(rect.uy) as usize],
+                    );
+                    for list in &mut lists[l][b0 as usize..=b1 as usize] {
+                        match list {
+                            Entries::Compact(e) => e.push(Compact::new(rect, id, g.x0, g.y0)),
+                            Entries::Wide(e) => e.push(Wide::new(rect, id, g.x0, g.y0)),
+                        }
+                    }
+                }
+            });
+            let bytes = list_bytes(lists.iter().flatten());
+            (used.fetch_add(bytes, Ordering::Relaxed) + bytes <= room).then_some(lists)
+        })
+        .collect()
+}
+
+/// Bytes of the entries held by `lists` (capacity included).
+fn list_bytes<'a>(lists: impl Iterator<Item = &'a Entries>) -> u64 {
+    lists
+        .map(|e| match e {
+            Entries::Compact(e) => (e.capacity() * size_of::<Compact>()) as u64,
+            Entries::Wide(e) => (e.capacity() * size_of::<Wide>()) as u64,
+        })
+        .sum()
+}
+
+/// Rows `[r0, r1)` of each band of a layer with `ny` rows.
+fn bands(ny: i64, count: usize) -> Vec<(i64, i64)> {
+    let count = (count as i64).clamp(1, ny.max(1));
+    (0..count)
+        .map(|b| (b * ny / count, (b + 1) * ny / count))
+        .collect()
+}
+
+/// Band count of each populated layer: about `BANDS_PER_THREAD` tasks per
+/// pool thread, shared in proportion to the layers' shapes.
+fn band_counts(layers: &[Option<LayerGrid>], items: &[u64]) -> Vec<usize> {
+    let tasks = (rayon::current_num_threads() * BANDS_PER_THREAD) as u64;
+    let total = items.iter().sum::<u64>().max(1);
+    layers
+        .iter()
+        .zip(items)
+        .map(|(g, &n)| {
+            g.as_ref()
+                .map_or(0, |_| (n * tasks).div_ceil(total).max(1) as usize)
+        })
+        .collect()
+}
+
+/// Counts the entries of the cells in rows `r0..r1` into `counts` (the
+/// offsets `1 + r0 * nx..`), in item order. `None` once the band alone holds
+/// more than `cap` entries (no cell count can then overflow).
+fn count_band<'a, E: Entry + 'a>(
+    g: &LayerGrid,
+    items: impl Iterator<Item = &'a E>,
+    (r0, r1): (i64, i64),
+    counts: &mut [u32],
+    cap: usize,
+) -> Option<usize> {
+    let nx = g.nx as usize;
+    let mut total = 0usize;
+    for e in items {
+        let (rect, _) = e.get(g.x0, g.y0);
+        let (x0, x1, y0, y1) = g.cells(rect);
+        let (a, b) = (y0.max(r0), y1.min(r1 - 1));
+        if a > b {
+            continue;
+        }
+        total = total
+            .checked_add(((x1 - x0 + 1) * (b - a + 1)) as usize)
+            .filter(|&t| t <= cap)?;
+        for y in a..=b {
+            let row = (y - r0) as usize * nx;
+            for x in x0..=x1 {
+                counts[row + x as usize] += 1;
+            }
+        }
+    }
+    Some(total)
+}
+
+/// Places the items in the cells of rows `r0..r1` (`out` holds exactly
+/// those cells' entries), in item order: each cell receives its entries in
+/// ascending shape ID, as the serial fill does.
+fn fill_band<'a, E: Entry + 'a>(
+    g: &LayerGrid,
+    items: impl Iterator<Item = &'a E>,
+    (r0, r1): (i64, i64),
+    out: &mut [E],
+) {
+    let nx = g.nx as usize;
+    let cells = &g.offsets[r0 as usize * nx..r1 as usize * nx];
+    let base = cells.first().copied().unwrap_or(0);
+    let mut cursor: Vec<u32> = cells.iter().map(|&o| o - base).collect();
+    for e in items {
+        let (rect, _) = e.get(g.x0, g.y0);
+        let (x0, x1, y0, y1) = g.cells(rect);
+        let (a, b) = (y0.max(r0), y1.min(r1 - 1));
+        for y in a..=b {
+            let row = (y - r0) as usize * nx;
+            for x in x0..=x1 {
+                let at = &mut cursor[row + x as usize];
+                out[*at as usize] = *e;
+                *at += 1;
+            }
+        }
+    }
+}
+
+/// One layer's entry table, written by row bands in parallel.
+enum BandOut<'a> {
+    Compact(&'a mut [Compact]),
+    Wide(&'a mut [Wide]),
 }
 
 impl GridIndex {
@@ -529,29 +853,56 @@ impl GridIndex {
         if shapes.virtual_count() == 0 {
             return None;
         }
-        // One pass over the virtual shapes: validity, the indexed count and
-        // the signal-pin owners (a bit per shape and `(net, pin)` per pin).
+        // One pass over the virtual shapes, by instance parts in parallel:
+        // validity, the indexed count and the signal-pin owners (a bit per
+        // shape and `(net, pin)` per pin, in shape order).
+        use rayon::prelude::*;
         let words = shapes.virtual_count().div_ceil(64);
         let (mut pin_bits, mut pin_rank, mut pins) = (Vec::new(), Vec::new(), Vec::new());
         pin_bits.try_reserve_exact(words).ok()?;
         pin_rank.try_reserve_exact(words).ok()?;
         pin_bits.resize(words, 0u64);
-        let mut indexed_virtual = 0usize;
-        for (k, (_, s)) in shapes.virtual_shapes().enumerate() {
-            if virtual_layers
-                .get(s.layer as usize)
-                .copied()
-                .unwrap_or(false)
-            {
-                if !s.rect.valid() {
-                    return None;
+        let instances = shapes.virtual_instances();
+        let offset = shapes.virtual_offset();
+        type Scan = Option<(usize, Vec<(u32, (u32, u32))>)>;
+        let scans: Vec<Scan> = (0..instances.div_ceil(PART_INSTANCES))
+            .into_par_iter()
+            .map(|part| {
+                let start = part * PART_INSTANCES;
+                let range = start..instances.min(start + PART_INSTANCES);
+                let (mut indexed, mut found) = (0usize, Vec::new());
+                for (id, s) in shapes.virtual_shapes_of(range) {
+                    if virtual_layers
+                        .get(s.layer as usize)
+                        .copied()
+                        .unwrap_or(false)
+                    {
+                        if !s.rect.valid() {
+                            return None;
+                        }
+                        indexed += 1;
+                    }
+                    if let Owner::Passive(PassiveOwner::Pin { net, pin }) = s.owner {
+                        found.try_reserve(1).ok()?;
+                        found.push((id - offset as u32, (net, pin)));
+                    }
                 }
-                indexed_virtual += 1;
-            }
-            if let Owner::Passive(PassiveOwner::Pin { net, pin }) = s.owner {
+                Some((indexed, found))
+            })
+            .collect();
+        let mut indexed_virtual = 0usize;
+        let found = scans.iter().try_fold(0usize, |n, s| {
+            s.as_ref().map(|(indexed, found)| {
+                indexed_virtual += indexed;
+                n + found.len()
+            })
+        })?;
+        pins.try_reserve_exact(found).ok()?;
+        for (_, part) in scans.into_iter().flatten() {
+            for (k, owner) in part {
+                let k = k as usize;
                 pin_bits[k / 64] |= 1 << (k % 64);
-                pins.try_reserve(1).ok()?;
-                pins.push((net, pin));
+                pins.push(owner);
             }
         }
         if indexed_virtual > shapes.retained_len() {
@@ -601,24 +952,18 @@ impl GridIndex {
         allowance: u64,
         work: &mut usize,
     ) -> Result<Self> {
-        let mut bounds: Vec<Option<(Rect, u64)>> = vec![None; layer_count];
-        for (_, layer, rect) in indexed(shapes, virtual_layers) {
-            if layer as usize >= layer_count || !rect.valid() {
-                return Err(invalid("invalid retained shape-index geometry"));
+        // Bounds and counts per layer, by parts in parallel (minimum,
+        // maximum and sum do not depend on the order).
+        let parts = parts(shapes, virtual_layers);
+        let per_part = part_bounds(shapes, virtual_layers, &parts, layer_count)
+            .ok_or_else(|| invalid("invalid retained shape-index geometry"))?;
+        let mut bounds: LayerBounds = vec![None; layer_count];
+        for part in &per_part {
+            for (item, b) in bounds.iter_mut().zip(part) {
+                if let Some((r, n)) = *b {
+                    *item = Some(item.map_or((r, n), |(a, m)| (union(a, r), m + n)));
+                }
             }
-            let item = &mut bounds[layer as usize];
-            *item = Some(match *item {
-                None => (rect, 1),
-                Some((b, n)) => (
-                    Rect {
-                        lx: b.lx.min(rect.lx),
-                        ly: b.ly.min(rect.ly),
-                        ux: b.ux.max(rect.ux),
-                        uy: b.uy.max(rect.uy),
-                    },
-                    n + 1,
-                ),
-            });
         }
         let cap = limits.max_bin_entries.min(u32::MAX as usize - 1);
         let mut scale = 0u32;
@@ -673,6 +1018,59 @@ impl GridIndex {
                 offsets,
             )));
         }
+        let compact: Vec<bool> = plans
+            .iter()
+            .map(|p| p.is_some_and(|p| p.compact()))
+            .collect();
+        // With more than one pool thread, every layer's shapes are first
+        // copied as its entries (one pass over the shapes, by parts in
+        // parallel) when they fit the allowance next to the offsets; the
+        // count and the fill then run by row bands of each layer in
+        // parallel. Results never depend on the path.
+        let list_bytes: u64 = plans
+            .iter()
+            .zip(&bounds)
+            .map(|(p, b)| match (p, b) {
+                (Some(p), Some((_, n))) => n.saturating_mul(p.entry_bytes()),
+                _ => 0,
+            })
+            .fold(0u64, u64::saturating_add);
+        let lists = (rayon::current_num_threads() > 1
+            && bytes.saturating_add(list_bytes) <= allowance)
+            .then(|| {
+                let items: Vec<u64> = bounds.iter().map(|b| b.map_or(0, |b| b.1)).collect();
+                let band_rows: Vec<Vec<(i64, i64)>> = band_counts(&layers, &items)
+                    .into_iter()
+                    .zip(&layers)
+                    .map(|(n, g)| g.as_ref().map_or_else(Vec::new, |g| bands(g.ny, n)))
+                    .collect();
+                let lists = part_lists(
+                    shapes,
+                    virtual_layers,
+                    &parts,
+                    &layers,
+                    &compact,
+                    &band_rows,
+                    allowance - bytes,
+                )?;
+                Some((lists, band_rows))
+            })
+            .flatten();
+        drop(per_part);
+        if let Some((lists, band_rows)) = lists {
+            return Self::build_banded(
+                shapes,
+                virtual_layers,
+                layers,
+                lists,
+                &compact,
+                &band_rows,
+                bytes,
+                limits,
+                allowance,
+                work,
+            );
+        }
         // Count pass: entries per cell, capped before any entry allocation.
         let mut total = 0usize;
         let mut per_layer = vec![0usize; layer_count];
@@ -710,12 +1108,12 @@ impl GridIndex {
                 g.offsets[i] += g.offsets[i - 1];
             }
         }
-        let compact: Vec<bool> = plans
-            .iter()
-            .map(|p| p.is_some_and(|p| p.compact()))
-            .collect();
         fill(shapes, virtual_layers, &mut layers, &compact, &per_layer)?;
-        // Report the resident tables (the fill cursors are released).
+        Ok(Self::finished(layers, total))
+    }
+
+    /// The index over its filled layers (the fill cursors are released).
+    fn finished(layers: Vec<Option<LayerGrid>>, total: usize) -> Self {
         let resident = layers
             .iter()
             .flatten()
@@ -727,7 +1125,7 @@ impl GridIndex {
                     }
             })
             .sum();
-        Ok(Self {
+        Self {
             layers,
             bytes: resident,
             entries: total,
@@ -735,7 +1133,166 @@ impl GridIndex {
             pin_bits: Vec::new(),
             pin_rank: Vec::new(),
             pins: Vec::new(),
-        })
+        }
+    }
+
+    /// The count, prefix and fill passes of `build_with` from each layer's
+    /// shape entries `lists` (by part, in ascending ID), by row bands in
+    /// parallel. Every cell's count and entry order, the totals, the work
+    /// charge and every budget outcome are those of the serial passes. The
+    /// fill holds the lists next to the table only when both fit
+    /// `allowance`; otherwise the lists are released and the serial fill
+    /// reads the shapes again.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the state of build_with after planning"
+    )]
+    fn build_banded(
+        shapes: &Shapes<'_>,
+        virtual_layers: Option<&[bool]>,
+        mut layers: Vec<Option<LayerGrid>>,
+        lists: Vec<Vec<Vec<Entries>>>,
+        compact: &[bool],
+        band_rows: &[Vec<(i64, i64)>],
+        mut bytes: u64,
+        limits: &ExtractLimits,
+        allowance: u64,
+        work: &mut usize,
+    ) -> Result<Self> {
+        use rayon::prelude::*;
+        let cap = limits.max_bin_entries.min(u32::MAX as usize - 1);
+        // The copied lists hold a shape once per band it reaches.
+        let list_bytes = list_bytes(lists.iter().flatten().flatten());
+        let geometry: Vec<Option<LayerGrid>> = layers
+            .iter()
+            .map(|g| {
+                g.as_ref()
+                    .map(|g| LayerGrid::new(g.x0, g.y0, g.nx, g.ny, g.cell, Vec::new()))
+            })
+            .collect();
+        // Count: each band owns its rows' offset slots.
+        let mut tasks = Vec::new();
+        for (l, g) in layers.iter_mut().enumerate() {
+            let Some(g) = g.as_mut() else { continue };
+            let nx = g.nx as usize;
+            let mut rest = &mut g.offsets[1..];
+            for (b, &(r0, r1)) in band_rows[l].iter().enumerate() {
+                let (head, tail) = rest.split_at_mut((r1 - r0) as usize * nx);
+                tasks.push((l, b, (r0, r1), head));
+                rest = tail;
+            }
+        }
+        let counted: Vec<Option<usize>> = tasks
+            .into_par_iter()
+            .map(|(l, b, rows, counts)| {
+                let g = geometry[l].as_ref().expect("planned populated layer");
+                if compact[l] {
+                    let items = lists.iter().flat_map(|p| p[l][b].compact());
+                    count_band(g, items, rows, counts, cap)
+                } else {
+                    let items = lists.iter().flat_map(|p| p[l][b].wide());
+                    count_band(g, items, rows, counts, cap)
+                }
+            })
+            .collect();
+        drop(geometry);
+        let mut total = 0usize;
+        let mut per_layer = vec![0usize; layers.len()];
+        let mut at = 0;
+        for (l, rows) in band_rows.iter().enumerate() {
+            for _ in rows {
+                let n = counted[at].ok_or_else(|| budget("extraction spatial-bin entries"))?;
+                at += 1;
+                per_layer[l] += n;
+                total = total
+                    .checked_add(n)
+                    .filter(|&t| t <= cap)
+                    .ok_or_else(|| budget("extraction spatial-bin entries"))?;
+            }
+        }
+        *work = work
+            .checked_add(total)
+            .filter(|&n| n <= limits.max_work)
+            .ok_or_else(|| budget("extraction grid-index work"))?;
+        for (l, g) in layers.iter().enumerate() {
+            if g.is_some() {
+                let entry = if compact[l] {
+                    size_of::<Compact>()
+                } else {
+                    size_of::<Wide>()
+                };
+                bytes = bytes.saturating_add(per_layer[l] as u64 * entry as u64);
+            }
+        }
+        if bytes > allowance {
+            return Err(budget("extraction grid index memory"));
+        }
+        layers.par_iter_mut().flatten().for_each(|g| {
+            for i in 1..g.offsets.len() {
+                g.offsets[i] += g.offsets[i - 1];
+            }
+        });
+        if bytes.saturating_add(list_bytes) > allowance {
+            drop(lists);
+            fill(shapes, virtual_layers, &mut layers, compact, &per_layer)?;
+            return Ok(Self::finished(layers, total));
+        }
+        // Fill: each band owns its rows' entries, written in item order.
+        let mut tables: Vec<Option<Entries>> = Vec::with_capacity(layers.len());
+        for (l, g) in layers.iter().enumerate() {
+            tables.push(match g {
+                None => None,
+                Some(g) => Some(if compact[l] {
+                    Entries::Compact(blank_table(g, per_layer[l])?)
+                } else {
+                    Entries::Wide(blank_table(g, per_layer[l])?)
+                }),
+            });
+        }
+        let mut tasks = Vec::new();
+        for (l, (g, table)) in layers.iter().zip(tables.iter_mut()).enumerate() {
+            let (Some(g), Some(table)) = (g.as_ref(), table.as_mut()) else {
+                continue;
+            };
+            let nx = g.nx as usize;
+            let mut out = match table {
+                Entries::Compact(e) => BandOut::Compact(&mut e[..]),
+                Entries::Wide(e) => BandOut::Wide(&mut e[..]),
+            };
+            for (b, &(r0, r1)) in band_rows[l].iter().enumerate() {
+                let len = (g.offsets[r1 as usize * nx] - g.offsets[r0 as usize * nx]) as usize;
+                let (head, tail) = match out {
+                    BandOut::Compact(e) => {
+                        let (h, t) = e.split_at_mut(len);
+                        (BandOut::Compact(h), BandOut::Compact(t))
+                    }
+                    BandOut::Wide(e) => {
+                        let (h, t) = e.split_at_mut(len);
+                        (BandOut::Wide(h), BandOut::Wide(t))
+                    }
+                };
+                tasks.push((l, b, (r0, r1), head));
+                out = tail;
+            }
+        }
+        tasks.into_par_iter().for_each(|(l, b, rows, out)| {
+            let g = layers[l].as_ref().expect("planned populated layer");
+            match out {
+                BandOut::Compact(out) => {
+                    fill_band(g, lists.iter().flat_map(|p| p[l][b].compact()), rows, out)
+                }
+                BandOut::Wide(out) => {
+                    fill_band(g, lists.iter().flat_map(|p| p[l][b].wide()), rows, out)
+                }
+            }
+        });
+        drop(lists);
+        for (g, table) in layers.iter_mut().zip(tables) {
+            if let (Some(g), Some(table)) = (g.as_mut(), table) {
+                g.entries = table;
+            }
+        }
+        Ok(Self::finished(layers, total))
     }
 
     /// The validation, extent check and work charge `visit` makes for
@@ -1086,6 +1643,104 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A layer's offsets and entries (rectangle, ID) in table order.
+    type Table = (Vec<u32>, Vec<(Rect, u32)>);
+    /// Every layer's table.
+    fn tables(index: &GridIndex) -> Vec<Option<Table>> {
+        index
+            .layers
+            .iter()
+            .map(|g| {
+                g.as_ref().map(|g| {
+                    let entries = match &g.entries {
+                        Entries::Compact(e) => e.iter().map(|e| e.get(g.x0, g.y0)).collect(),
+                        Entries::Wide(e) => e.iter().map(|e| e.get(g.x0, g.y0)).collect(),
+                    };
+                    (g.offsets.clone(), entries)
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn banded_parallel_build_matches_the_serial_passes_at_every_pool_size() {
+        let mut rng = Lcg(11);
+        let mut input = Vec::new();
+        for i in 0..40_000 {
+            // Layer 3 spans more than 32 bits (wide entries); layer 0 is
+            // denser than the others (uneven band counts).
+            let layer = [0, 0, 0, 1, 2, 3][i % 6];
+            let scale = if layer == 3 { 1 << 22 } else { 5 };
+            let (x, y) = (rng.next(2000) * scale - 3000, rng.next(2000) * 5 - 2000);
+            let (w, h) = match i % 5 {
+                0 => (rng.next(3000) + 1, 5),
+                1 => (5, rng.next(3000) + 1),
+                _ => (rng.next(40) + 1, rng.next(40) + 1),
+            };
+            input.push((
+                layer as u32,
+                Rect {
+                    lx: x,
+                    ly: y,
+                    ux: x + w,
+                    uy: y + h,
+                },
+            ));
+        }
+        let shapes = shapes(input);
+        let limits = ExtractLimits::default();
+        let run = |threads: usize, allowance: u64| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+                .install(|| {
+                    let mut work = 0;
+                    let index =
+                        GridIndex::build(&shapes, 5, &[64; 5], &limits, allowance, &mut work)
+                            .unwrap();
+                    (tables(&index), index.entries(), index.bytes(), work)
+                })
+        };
+        let serial = run(1, u64::MAX);
+        assert!(serial.1 > 40_000);
+        for threads in [2, 3, 4, 7] {
+            assert!(run(threads, u64::MAX) == serial, "{threads} threads");
+        }
+        // The exact allowance of the serial passes (the table and the fill
+        // cursors) leaves no room for the copied lists during the fill: the
+        // serial fill runs, with the same outcome. One byte less fails
+        // alike on every path.
+        let offsets: u64 = serial
+            .0
+            .iter()
+            .flatten()
+            .map(|t| t.0.len() as u64 * 4)
+            .sum();
+        assert!(run(4, serial.2 + offsets) == serial);
+        let fails = |threads: usize| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+                .install(|| {
+                    let mut work = 0;
+                    GridIndex::build(
+                        &shapes,
+                        5,
+                        &[64; 5],
+                        &limits,
+                        serial.2 + offsets - 1,
+                        &mut work,
+                    )
+                    .err()
+                    .map(|e| e.to_string())
+                })
+        };
+        assert!(fails(1).is_some());
+        assert_eq!(fails(1), fails(4));
     }
 
     #[test]

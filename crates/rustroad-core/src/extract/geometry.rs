@@ -95,8 +95,19 @@ impl<'a> Shapes<'a> {
     }
     /// Every virtual shape with its ID, decoded instance by instance.
     pub(super) fn virtual_shapes(&self) -> impl Iterator<Item = (u32, Shape)> + '_ {
-        let instances = self.first.len().saturating_sub(1);
-        (0..instances).flat_map(move |instance| {
+        self.virtual_shapes_of(0..self.virtual_instances())
+    }
+    /// Instances that own virtual shapes (0 without a source).
+    pub(super) fn virtual_instances(&self) -> usize {
+        self.first.len().saturating_sub(1)
+    }
+    /// The virtual shapes of `instances`, in ID order (`virtual_shapes`
+    /// restricted to a contiguous instance range).
+    pub(super) fn virtual_shapes_of(
+        &self,
+        instances: std::ops::Range<usize>,
+    ) -> impl Iterator<Item = (u32, Shape)> + '_ {
+        instances.flat_map(move |instance| {
             let count = (self.first[instance + 1] - self.first[instance]) as usize;
             (0..count).map(move |ordinal| {
                 let input = self.source.expect("virtual shape has a source");
