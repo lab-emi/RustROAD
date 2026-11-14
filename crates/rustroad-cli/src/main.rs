@@ -424,6 +424,10 @@ enum Command {
         out: PathBuf,
         #[arg(long)]
         plan_out: PathBuf,
+        /// List violating nets that the netlist does not name (clock-tree and
+        /// tie nets of the layout) as skipped instead of refusing the plan.
+        #[arg(long)]
+        skip_unknown_nets: bool,
     },
     /// Read-only native process-antenna check of the routed HEAD (JSON report).
     CheckAntenna {
@@ -776,6 +780,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             prefix,
             out,
             plan_out,
+            skip_unknown_nets,
         } => {
             return emit(&rustroad_workspace::eco::plan_antenna_with_limits(
                 &rustroad_workspace::eco::AntennaEcoRequest {
@@ -788,6 +793,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     prefix: prefix.clone(),
                     out: out.clone(),
                     plan_out: plan_out.clone(),
+                    skip_unknown_nets: *skip_unknown_nets,
                 },
                 &budget.limits(&parser_limits),
             )?);
