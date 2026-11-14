@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 
 const CODE: &str = "GDS_BUNDLE";
 const MAX_BYTES: u64 = 32 << 20;
-const MAX_RECORDS: u64 = 1_000_000;
+// The pinned SKY130 HD and OpenRAM libraries together contain 1,599,351 records.
+// A record is visited in place, so the 32 MiB byte cap still bounds payload storage.
+const MAX_RECORDS: u64 = 2_000_000;
 const MAX_STRUCTURES: usize = 8192;
 
 /// Bundle `sources` into `output` and describe the result
@@ -47,10 +49,11 @@ pub fn bundle(sources: &[PathBuf], output: &Path) -> StepResult<Value> {
         let mut end_library = false;
         while offset < data.len() {
             records += 1;
+            require(records <= MAX_RECORDS, CODE, "GDS record budget exceeded")?;
             require(
-                records <= MAX_RECORDS && offset + 4 <= data.len(),
+                offset + 4 <= data.len(),
                 CODE,
-                "GDS record budget/truncation",
+                "truncated GDS record header",
             )?;
             let size = usize::from(u16::from_be_bytes([data[offset], data[offset + 1]]));
             let (kind, dtype) = (data[offset + 2], data[offset + 3]);
