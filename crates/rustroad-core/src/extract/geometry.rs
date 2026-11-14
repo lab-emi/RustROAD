@@ -81,6 +81,11 @@ impl<'a> Shapes<'a> {
     pub(super) fn virtual_offset(&self) -> usize {
         self.front
     }
+    /// Whether `id` is a virtual (cell) shape.
+    #[inline]
+    pub(super) fn is_virtual(&self, id: u32) -> bool {
+        (id as usize).wrapping_sub(self.front) < self.virtual_count
+    }
     pub(super) fn virtual_id(&self, instance: usize, ordinal: usize) -> u32 {
         (self.front + self.first[instance] as usize + ordinal) as u32
     }

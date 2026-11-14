@@ -679,6 +679,26 @@ pub(super) fn lane_bytes(bounds: Bounds, limits: &ExtractLimits, instances: usiz
         .saturating_add(SPARE_BYTES as u64)
         .saturating_add(1 << 20)
 }
+/// Share of a chunk a unit takes. A retained passive conductor (supply
+/// rails and straps, which cross many cells and often outgrow a chunk's
+/// transcript) takes a quarter of a chunk, so such strips are spread over
+/// the lanes in small chunks instead of ending in a few large ones that a
+/// lane must defer to the serial path. A forced tile size counts units.
+/// Results never depend on the chunking.
+#[inline]
+fn unit_weight(
+    ctx: &Ctx<'_, '_>,
+    unit: UnitRef,
+    per_chunk: usize,
+    limits: &ExtractLimits,
+) -> usize {
+    match unit {
+        UnitRef::Conductor(id) if limits.tile_units == 0 && !ctx.shapes.is_virtual(id) => {
+            per_chunk.div_ceil(4)
+        }
+        _ => 1,
+    }
+}
 fn chunk_units(limits: &ExtractLimits) -> usize {
     if limits.tile_units > 0 {
         limits.tile_units
@@ -1210,9 +1230,14 @@ pub(super) fn run(
                             return;
                         }
                         chunk.units.clear();
-                        chunk.units.extend(src.units.by_ref().take(per_chunk));
-                        if chunk.units.len() < per_chunk {
-                            src.done = true;
+                        let mut weight = 0;
+                        while weight < per_chunk {
+                            let Some(u) = src.units.next() else {
+                                src.done = true;
+                                break;
+                            };
+                            weight += unit_weight(ctx, u, per_chunk, limits);
+                            chunk.units.push(u);
                         }
                         if chunk.units.is_empty() {
                             return;
