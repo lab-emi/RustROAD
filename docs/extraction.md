@@ -203,6 +203,29 @@ event keys; each candidate's extents along and across the strip and its layer's
 calibration metal are computed once per strip, and calibration-row samples are
 memoized by `(rows, spacing)` (a pure function). `stats.work` counts index cells and entries actually scanned, so it is
 smaller than before; all other statistics are unchanged.
+Each candidate has one entry and one exit event (a degenerate one, entered at its
+own exit, stays active from its entry, so its exit is not stored; the index work
+still counts two events per candidate). The sorted list of spanning
+other-layer metal is rebuilt only when such a candidate entered or left, and each
+side's share of the context value is re-evaluated only when the plates, that
+side's nearest neighbour or its cover flag changed; the per-interval expressions
+are unchanged.
+
+A passive strip records only plate shares toward routed conductors: a share goes
+to the conductor under a side edge of its nearest plate. When no metal level of its
+other-layer candidates both reaches across its cross-section with one strip width
+of margin on each side (taking the hull of all of that level's extents, which
+contains any interval's merged span) and has routed metal under a side edge, no
+interval of the strip can record anything. Such a strip (362,336 of the 872,538
+passive strips on the 2026-11-13 Ibex layout) is not swept: its interval count and
+work are counted from the candidates' clamped extents along the strip alone (the
+intervals are bounded by the strip ends and the distinct extents; the active count
+of an interval is the candidates entered and not yet left), with the sweep's
+budget checks and errors. A candidate on a layer without a model sends the strip
+to the full sweep, which reports the error. The unit test
+`passive_strips_without_plates_count_like_the_full_sweep`, and every
+serial-against-parallel check, compare both paths bit for bit, statistics and
+work included.
 
 Only wire bodies are stored as strip records. A piece (end extension, via pad or
 patch piece) is its shape plus its net and node (8 bytes); a crossed retained
@@ -232,10 +255,16 @@ strips spread over the lanes instead of overflowing a transcript and running
 serially at a barrier). Lanes compute
 chunks into bounded transcripts of ordered accumulations (every `ground[node] +=`,
 `coupling[key] +=` and overlap-area addition). A complete chunk's transcript is
-split by shard in its lane; coupling records are grouped by key with a chunk-local
-table in order of first appearance (a stable counting sort), and ground and area
-records keep their emission order, so every accumulator's additions stay in run order
-and are applied with one lookup per accumulator. A leader (whichever lane holds it) clears chunks strictly in run order:
+split by shard in its lane: ground and area records go to their shard in emission
+order, and coupling records are chained per key (keys found through a chunk-local
+open-addressing table whose slots carry the chunk's generation, so it is never
+cleared) and appended per shard key by key in order of first appearance. Every
+accumulator's additions stay in run order and are applied with one lookup per
+accumulator. A transcript stores no ground record adding zero: every ground accumulator
+starts at +0.0 and a sum is -0.0 only when both operands are, so no accumulator
+holds -0.0, and adding a zero of either sign leaves its bits unchanged (4,626,618 of
+the 23,482,900 ground records on the Ibex layout). Coupling records are always
+stored, since one creates its key and the coupling budget counts keys. A leader (whichever lane holds it) clears chunks strictly in run order:
 cumulative work and integer statistics, and a proof that no budget can fail inside
 the chunk (work, and an upper bound of the coupling count). Each shard then applies
 the cleared chunks for its own accumulators, in chunk order, on whichever lane is
