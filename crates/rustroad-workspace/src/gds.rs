@@ -436,29 +436,46 @@ fn check_foreign(
                 format!("master {name} size differs from the imported LEF"),
             ));
         }
-        match m.foreign.as_slice() {
-            [f] if f.name == m.name
-                && f.origin == [0, 0]
-                && m.origin == [0, 0]
-                && f.orientation.as_deref().is_none_or(|o| o == "N") => {}
-            [] => {
-                return Err(fail(
-                    "GDS_FOREIGN_MISSING",
-                    format!("master {name} has no FOREIGN binding to a GDS cell"),
-                ));
-            }
-            _ => {
-                return Err(fail(
-                    "GDS_FOREIGN_MISMATCH",
-                    format!(
-                        "master {name} FOREIGN {:?} / ORIGIN {:?} is not the same-named cell at offset 0 N",
-                        m.foreign, m.origin
-                    ),
-                ));
-            }
-        }
+        foreign_binding(m).map_err(|(code, message)| fail(code, message))?;
     }
     Ok((id, used.len()))
+}
+
+/// A used LEF master must bind to the same-named GDS cell at offset zero,
+/// orientation N. Standard cells state it with `FOREIGN`. A `CLASS BLOCK`
+/// master may omit the statement (generated memory LEFs do): LEF then names
+/// the macro itself as the foreign cell, at its `ORIGIN`, which must be zero.
+fn foreign_binding(m: &lef::LefMacro) -> std::result::Result<(), (&'static str, String)> {
+    let name = &m.name;
+    match m.foreign.as_slice() {
+        [f] if f.name == m.name
+            && f.origin == [0, 0]
+            && m.origin == [0, 0]
+            && f.orientation.as_deref().is_none_or(|o| o == "N") =>
+        {
+            Ok(())
+        }
+        [] if m.origin == [0, 0]
+            && m.class.as_deref().is_some_and(|c| {
+                c.split_whitespace()
+                    .next()
+                    .is_some_and(|w| w.eq_ignore_ascii_case("BLOCK"))
+            }) =>
+        {
+            Ok(())
+        }
+        [] => Err((
+            "GDS_FOREIGN_MISSING",
+            format!("master {name} has no FOREIGN binding to a GDS cell"),
+        )),
+        _ => Err((
+            "GDS_FOREIGN_MISMATCH",
+            format!(
+                "master {name} FOREIGN {:?} / ORIGIN {:?} is not the same-named cell at offset 0 N",
+                m.foreign, m.origin
+            ),
+        )),
+    }
 }
 
 struct Layers<'a> {
@@ -1243,6 +1260,53 @@ pub fn export_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn block_masters_without_foreign_bind_by_name_and_cells_must_state_it() {
+        // Three masters of a few hundred bytes; no workspace, no GDS.
+        let parse = |text: &str| {
+            lef::parse_lef(text, 1000, &lef::LefLimits::default())
+                .unwrap()
+                .macros
+                .remove(0)
+        };
+        let code = |text: &str| foreign_binding(&parse(text)).map_err(|e| e.0);
+        // A generated memory LEF: CLASS BLOCK, no ORIGIN, no FOREIGN.
+        assert_eq!(
+            code("MACRO ram CLASS BLOCK ; SIZE 4 BY 8 ; END ram"),
+            Ok(())
+        );
+        assert_eq!(
+            code("MACRO ram CLASS block ; ORIGIN 0 0 ; SIZE 4 BY 8 ; END ram"),
+            Ok(())
+        );
+        // Its implicit foreign cell sits at the macro origin: only zero binds.
+        assert_eq!(
+            code("MACRO ram CLASS BLOCK ; ORIGIN 1 0 ; SIZE 4 BY 8 ; END ram"),
+            Err("GDS_FOREIGN_MISSING")
+        );
+        // A stated binding is checked for blocks as for cells.
+        assert_eq!(
+            code("MACRO ram CLASS BLOCK ; FOREIGN other ; SIZE 4 BY 8 ; END ram"),
+            Err("GDS_FOREIGN_MISMATCH")
+        );
+        assert_eq!(
+            code("MACRO ram CLASS BLOCK ; FOREIGN ram 0 0 ; SIZE 4 BY 8 ; END ram"),
+            Ok(())
+        );
+        // Standard cells (and class-less masters) keep the explicit rule.
+        assert_eq!(
+            code("MACRO buf CLASS CORE ; SIZE 1 BY 2 ; END buf"),
+            Err("GDS_FOREIGN_MISSING")
+        );
+        assert_eq!(
+            code("MACRO buf SIZE 1 BY 2 ; END buf"),
+            Err("GDS_FOREIGN_MISSING")
+        );
+        assert_eq!(
+            code("MACRO buf CLASS CORE ; FOREIGN buf ; SIZE 1 BY 2 ; END buf"),
+            Ok(())
+        );
+    }
     #[test]
     fn coordinates_divide_exactly_or_fail_explicitly() {
         let half = Scale { divisor: 2 };

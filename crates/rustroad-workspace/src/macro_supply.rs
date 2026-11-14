@@ -22,6 +22,19 @@ pub struct Config {
     /// In order from the standard-cell supply-spine layer to collection_layer.
     pub via_stack: Vec<String>,
     pub wire_width: i64,
+    /// Minimum clearance between collection wires of opposite supplies.
+    /// Absent uses the collection layer's unconditional LEF `SPACING`
+    /// (zero when the technology states its spacing only as a table).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_spacing: Option<i64>,
+    /// Draw each collector to the supply spine of its polarity nearest to
+    /// the pin access (primary or channel spine; ties: the earlier spine).
+    /// Off (the default) draws every collector to the first spine of its
+    /// polarity, the left-margin one, so a collector of a macro far from
+    /// the left edge crosses everything between them on the collection
+    /// layer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub nearest_spine: bool,
 }
 
 fn invalid(s: impl Into<String>) -> Error {
@@ -83,6 +96,9 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         if self.wire_width <= 0 || self.via_stack.is_empty() || self.via_stack.len() > 8 {
             return Err(invalid("invalid macro supply width/via stack"));
+        }
+        if self.wire_spacing.is_some_and(|s| s < 0) {
+            return Err(invalid("macro supply wire spacing must not be negative"));
         }
         for name in [&self.collection_layer, &self.pin_layer, &self.pin_via]
             .into_iter()
@@ -151,17 +167,91 @@ pub(crate) fn collect(
         return Err(invalid("macro pin via connects the wrong layers"));
     }
     let mut spines = BTreeMap::new();
+    let mut all_spines: BTreeMap<RailPolarity, Vec<usize>> = BTreeMap::new();
     for (i, w) in supply.wires.iter().enumerate() {
         if w.layer == physical.strap_layer && w.start[0] == w.end[0] {
             spines.entry(w.polarity).or_insert(i);
+            all_spines.entry(w.polarity).or_default().push(i);
         }
     }
     if spines.len() != 2 {
         return Err(invalid("macro collection requires both supply spines"));
     }
-    let mut wires = Vec::new();
+    // Spine of `polarity` a collector to `at` is drawn from (see
+    // `Config::nearest_spine`); its scan is budgeted with the access search.
+    let pick = |wires: &[SupplyWire],
+                polarity: RailPolarity,
+                at: [i64; 2],
+                search: &mut usize|
+     -> Result<usize> {
+        if !cfg.nearest_spine {
+            return Ok(spines[&polarity]);
+        }
+        let mut best = spines[&polarity];
+        for &i in &all_spines[&polarity] {
+            *search = search
+                .checked_add(1)
+                .filter(|n| *n <= 2_000_000)
+                .ok_or_else(|| Error::Budget("macro supply spine search".into()))?;
+            if wires[i].start[0].abs_diff(at[0]) < wires[best].start[0].abs_diff(at[0]) {
+                best = i;
+            }
+        }
+        Ok(best)
+    };
+    let lef_spacing = layer.spacing.unwrap_or(0);
+    let collection_spacing = cfg.wire_spacing.map_or(lef_spacing, |s| s.max(lef_spacing));
+    let grow = |r: Rect, by: i64| -> Result<Rect> {
+        let sub = |a: i64| {
+            a.checked_sub(by)
+                .ok_or_else(|| invalid("macro spacing overflow"))
+        };
+        let add = |a: i64| {
+            a.checked_add(by)
+                .ok_or_else(|| invalid("macro spacing overflow"))
+        };
+        Ok(Rect {
+            lx: sub(r.lx)?,
+            ly: sub(r.ly)?,
+            ux: add(r.ux)?,
+            uy: add(r.uy)?,
+        })
+    };
+    // Preferred access of one pin rectangle: its centre on the manufacturing
+    // grid, moved to the nearest row centre when the pin via stays enclosed.
+    let access_point = |rect: Rect| -> Result<[i64; 2]> {
+        let mid = |a: i64, b: i64| -> Result<i64> {
+            let n = ((i128::from(a) + i128::from(b)) / 2).div_euclid(i128::from(grid))
+                * i128::from(grid);
+            i64::try_from(n).map_err(|_| invalid("macro access coordinate overflow"))
+        };
+        let mut at = [mid(rect.lx, rect.ux)?, mid(rect.ly, rect.uy)?];
+        // Put horizontal collectors between row-edge via stacks when
+        // the pin permits it. Original pin geometry remains unchanged.
+        if physical.rail_via_stack.len() > 1 {
+            let pitch = i128::from(design.site.height);
+            let origin = i128::from(design.rows[0].y) + pitch / 2;
+            let row_center =
+                origin + ((i128::from(at[1]) - origin + pitch / 2).div_euclid(pitch)) * pitch;
+            let candidate = [
+                at[0],
+                i64::try_from(row_center).map_err(|_| invalid("collector alignment overflow"))?,
+            ];
+            if pin_via[&cfg.pin_layer]
+                .iter()
+                .all(|r| translate(*r, candidate).is_ok_and(|r| contains(rect, r)))
+            {
+                at = candidate;
+            }
+        }
+        Ok(at)
+    };
+    let mut wires: Vec<SupplyWire> = Vec::new();
     let mut vias = Vec::new();
     let mut work = 0usize;
+    // Budget of the alternative-access search; kept out of `work_units`,
+    // which is part of the validated state of existing workspaces.
+    let mut search = 0usize;
     for (i, cell) in design
         .cells
         .iter()
@@ -205,31 +295,7 @@ pub(crate) fn collect(
                     p.height,
                     cell.fixed.unwrap().orientation,
                 )?;
-                let mid = |a: i64, b: i64| -> Result<i64> {
-                    let n = ((i128::from(a) + i128::from(b)) / 2).div_euclid(i128::from(grid))
-                        * i128::from(grid);
-                    i64::try_from(n).map_err(|_| invalid("macro access coordinate overflow"))
-                };
-                let mut at = [mid(rect.lx, rect.ux)?, mid(rect.ly, rect.uy)?];
-                // Put horizontal collectors between row-edge via stacks when
-                // the pin permits it. Original pin geometry remains unchanged.
-                if physical.rail_via_stack.len() > 1 {
-                    let pitch = i128::from(design.site.height);
-                    let origin = i128::from(design.rows[0].y) + pitch / 2;
-                    let row_center = origin
-                        + ((i128::from(at[1]) - origin + pitch / 2).div_euclid(pitch)) * pitch;
-                    let candidate = [
-                        at[0],
-                        i64::try_from(row_center)
-                            .map_err(|_| invalid("collector alignment overflow"))?,
-                    ];
-                    if pin_via[&cfg.pin_layer]
-                        .iter()
-                        .all(|r| translate(*r, candidate).is_ok_and(|r| contains(rect, r)))
-                    {
-                        at = candidate;
-                    }
-                }
+                let at = access_point(rect)?;
                 if pin_via[&cfg.pin_layer]
                     .iter()
                     .all(|r| translate(*r, at).is_ok_and(|r| contains(rect, r)))
@@ -238,13 +304,91 @@ pub(crate) fn collect(
                     break;
                 }
             }
+            // The first enclosed access is kept whenever its collector clears
+            // the opposite supply. Concentric supply rings (both pins centred on
+            // the same row) need another row of the same pin shape.
+            let mut clear = |at: [i64; 2]| -> Result<bool> {
+                let spine_x =
+                    supply.wires[pick(&supply.wires, polarity, at, &mut search)?].start[0];
+                let candidate = wire_bounds(&SupplyWire {
+                    polarity,
+                    layer: cfg.collection_layer.clone(),
+                    width: cfg.wire_width,
+                    start: [spine_x, at[1]],
+                    end: at,
+                })
+                .map_err(|e| invalid(e.to_string()))?;
+                for w in &wires {
+                    search = search
+                        .checked_add(1)
+                        .filter(|n| *n <= 2_000_000)
+                        .ok_or_else(|| Error::Budget("macro supply access search".into()))?;
+                    if w.layer != cfg.collection_layer || w.polarity == polarity {
+                        continue;
+                    }
+                    let b = wire_bounds(w).map_err(|e| invalid(e.to_string()))?;
+                    if rustroad_core::fixed::overlaps(candidate, grow(b, collection_spacing)?) {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            };
+            let target = match target {
+                Some(at) if clear(at)? => Some(at),
+                _ => {
+                    let mut found = None;
+                    'shapes: for shape in pin.ports.iter().flatten() {
+                        let Geometry::Rect { layer, rect } = shape else {
+                            continue;
+                        };
+                        if *layer != cfg.pin_layer {
+                            continue;
+                        }
+                        let rect = transform_rect(
+                            Rect {
+                                lx: rect[0],
+                                ly: rect[1],
+                                ux: rect[2],
+                                uy: rect[3],
+                            },
+                            p.x,
+                            p.y,
+                            p.height,
+                            cell.fixed.unwrap().orientation,
+                        )?;
+                        let base = access_point(rect)?;
+                        let step = i128::from(design.site.height);
+                        let span = i128::from(rect.uy) - i128::from(rect.ly);
+                        for k in 1..=4096i128 {
+                            if k * step > span {
+                                break;
+                            }
+                            for sign in [1i128, -1] {
+                                let y = i64::try_from(i128::from(base[1]) + sign * k * step)
+                                    .map_err(|_| invalid("macro access coordinate overflow"))?;
+                                let at = [base[0], y];
+                                if pin_via[&cfg.pin_layer]
+                                    .iter()
+                                    .all(|r| translate(*r, at).is_ok_and(|r| contains(rect, r)))
+                                    && clear(at)?
+                                {
+                                    found = Some(at);
+                                    break 'shapes;
+                                }
+                            }
+                        }
+                    }
+                    found.or(target)
+                }
+            };
             let at = target.ok_or_else(|| {
                 invalid(format!(
                     "no enclosed macro supply via access on {}.{}",
                     cell.name, pin.name
                 ))
             })?;
-            let spine = &supply.wires[spines[&polarity]];
+            let index = pick(&supply.wires, polarity, at, &mut search)?;
+            let spine = &supply.wires[index];
             let trunk = [spine.start[0], at[1]];
             let wire = SupplyWire {
                 polarity,
@@ -326,7 +470,6 @@ pub(crate) fn collect(
                     at: trunk,
                 });
             }
-            let index = spines[&polarity];
             supply.wires[index].end[1] = supply.wires[index].end[1].max(
                 at[1]
                     .checked_add(cfg.wire_width)
@@ -348,32 +491,17 @@ pub(crate) fn collect(
             if a.layer != b.layer || a.polarity == b.polarity {
                 continue;
             }
-            let spacing = tech
-                .layers
-                .iter()
-                .find(|l| l.name == a.layer)
-                .and_then(|l| l.spacing)
-                .unwrap_or(0);
-            let b = wire_bounds(b).map_err(|e| invalid(e.to_string()))?;
-            let expanded = Rect {
-                lx: b
-                    .lx
-                    .checked_sub(spacing)
-                    .ok_or_else(|| invalid("macro spacing overflow"))?,
-                ly: b
-                    .ly
-                    .checked_sub(spacing)
-                    .ok_or_else(|| invalid("macro spacing overflow"))?,
-                ux: b
-                    .ux
-                    .checked_add(spacing)
-                    .ok_or_else(|| invalid("macro spacing overflow"))?,
-                uy: b
-                    .uy
-                    .checked_add(spacing)
-                    .ok_or_else(|| invalid("macro spacing overflow"))?,
+            let spacing = if a.layer == cfg.collection_layer {
+                collection_spacing
+            } else {
+                tech.layers
+                    .iter()
+                    .find(|l| l.name == a.layer)
+                    .and_then(|l| l.spacing)
+                    .unwrap_or(0)
             };
-            if rustroad_core::fixed::overlaps(a_bounds, expanded) {
+            let b = wire_bounds(b).map_err(|e| invalid(e.to_string()))?;
+            if rustroad_core::fixed::overlaps(a_bounds, grow(b, spacing)?) {
                 return Err(invalid(
                     "opposite macro supply collection metals violate spacing",
                 ));

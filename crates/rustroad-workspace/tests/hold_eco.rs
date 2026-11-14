@@ -620,6 +620,7 @@ fn antenna_eco_counts_diodes_from_the_lef_rule() {
         prefix: "rr_eco_ant_".into(),
         out: d.join(format!("{name}.v")),
         plan_out: d.join(format!("{name}.json")),
+        skip_unknown_nets: false,
     };
     // GF180-like: diff rule 400 with gate-plus-diff 15. 1000 um^2 over 1 um^2 gate:
     // k diodes of 0.4 um^2 give 1000 / (1 + 6k) <= 400 at k = 1.
@@ -1037,6 +1038,7 @@ fn antenna_eco_carries_a_partial_input_status_forward() {
         prefix: "rr_eco_ant_".into(),
         out: d.join(format!("{name}.v")),
         plan_out: d.join(format!("{name}.json")),
+        skip_unknown_nets: false,
     };
     let base = antenna_report(
         "a[1]",
@@ -1101,6 +1103,7 @@ fn antenna_eco_sizes_diodes_against_the_safety_margin() {
         prefix: "rr_eco_ant_".into(),
         out: d.join(format!("{name}.v")),
         plan_out: d.join(format!("{name}.json")),
+        skip_unknown_nets: false,
     };
     // 2600 um^2 over 1 um^2 gate, gate-plus-diff 15, diode diff 0.4:
     // k diodes give 2600 / (1 + 6k): k = 1 -> 371 (> 360 = 0.9 x 400), k = 2 -> 200.
@@ -1423,4 +1426,61 @@ fn reversed_and_duplicate_bus_metadata_cannot_override_report_binding() {
             .contains("ECO_BUS_SCHEMA")
     );
     assert!(!c.req.out.exists());
+}
+
+#[test]
+fn antenna_eco_can_skip_violating_nets_the_netlist_does_not_name() {
+    // A layout-generated clock net violates next to a netlist net: the strict
+    // plan refuses everything, the skipping plan repairs the netlist net and
+    // lists the other one. A few hundred bytes of netlist.
+    use rustroad_workspace::eco::{AntennaEcoRequest, plan_antenna};
+    let d = dir();
+    let netlist = d.join("in.v");
+    fs::write(&netlist, NETLIST).unwrap();
+    let prof = write(&d, "profile.json", &default_profile());
+    let req = |report: &Path, name: &str, skip: bool| AntennaEcoRequest {
+        netlist: netlist.clone(),
+        report: report.to_path_buf(),
+        profile: prof.clone(),
+        cell: None,
+        min_diodes: 1,
+        max_diodes_per_net: 4,
+        prefix: "rr_eco_ant_".into(),
+        out: d.join(format!("{name}.v")),
+        plan_out: d.join(format!("{name}.json")),
+        skip_unknown_nets: skip,
+    };
+    let mut r = antenna_report(
+        "a[1]",
+        1000.0,
+        1.0,
+        0.0,
+        Value::Null,
+        json!({"kind": "value", "ratio": 400.0}),
+        json!(15.0),
+    );
+    let mut clock = r["checks"][0].clone();
+    clock["net"] = json!("rr_clock_7");
+    r["checks"].as_array_mut().unwrap().push(clock);
+    let p = write(&d, "mixed.json", &r);
+    let strict = plan_antenna(&req(&p, "strict", false))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        strict.starts_with("ANTENNA_ECO_INFEASIBLE") && strict.contains("rr_clock_7"),
+        "{strict}"
+    );
+    assert!(!d.join("strict.v").exists());
+    let skip = plan_antenna(&req(&p, "skip", true)).unwrap();
+    assert_eq!(skip.status, "planned");
+    assert_eq!(skip.skipped, vec!["rr_clock_7".to_string()]);
+    assert!(skip.infeasible.is_empty());
+    assert_eq!(skip.nets.len(), 1);
+    assert_eq!(skip.nets[0].net, "a[1]");
+    assert!(skip.diagnostics[0].starts_with("ANTENNA_NETS_SKIPPED: 1"));
+    assert!(
+        fs::read_to_string(d.join("skip.v"))
+            .unwrap()
+            .contains("rr_eco_ant_")
+    );
 }

@@ -1837,3 +1837,110 @@ fn grouped_repair_exact_operation_budget_still_publishes_summary() {
     assert_eq!(summary.wire_model, "none");
     assert_eq!(summary.unconstrained_endpoints, None);
 }
+
+/// Ten 0.2 x 6 um M3 pieces on net `a` between the core and the top edge,
+/// above the west pin's route into the core, touching none of its other
+/// metal (what a long run between two layer jumpers is while M3 is etched).
+fn floating_pieces(f: &Fixture) -> PathBuf {
+    let pieces: Vec<_> = (0..10)
+        .map(|k| serde_json::json!({"net":"a","layer":"M3","rect":[6000 + 400 * k, 12500, 6200 + 400 * k, 18500]}))
+        .collect();
+    let path = f.root.join("floating.json");
+    fs::write(&path, serde_json::to_vec(&pieces).unwrap()).unwrap();
+    path
+}
+
+#[test]
+fn whole_net_rows_see_metal_that_no_process_stage_reaches() {
+    // <1 MiB per fixture. Process-stage rows ignore metal that no gate
+    // reaches at that stage; whole-net rows count all of a net's metal on a
+    // layer, as a node-by-node check of a hierarchical extraction does.
+    let stage = |r: &rustroad_workspace::antenna::AntennaReport| {
+        r.checks
+            .iter()
+            .filter(|c| !c.kind.starts_with("whole_net"))
+            .map(|c| {
+                (
+                    c.net.clone(),
+                    c.layer.clone(),
+                    c.kind.clone(),
+                    c.ratio.to_bits(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let f = routed(PLAIN);
+    let extra = floating_pieces(&f);
+    let base = check_antenna(&f.workspace, &request(None), &limits()).unwrap();
+    let planted = check_antenna(&f.workspace, &request(Some(&extra)), &limits()).unwrap();
+    assert_eq!(stage(&base), stage(&planted), "no stage reaches the pieces");
+    assert!(
+        planted
+            .checks
+            .iter()
+            .all(|c| !c.kind.starts_with("whole_net"))
+    );
+    let whole = AntennaRequest {
+        whole_net: true,
+        ..request(Some(&extra))
+    };
+    let w = check_antenna(&f.workspace, &whole, &limits()).unwrap();
+    assert_eq!(stage(&w), stage(&planted), "stage rows are unchanged");
+    let row = w
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "M3" && c.kind == "whole_net_side_area")
+        .expect("whole-net M3 row of net a");
+    // Ten pieces of 12.4 um perimeter at 0.5 um thickness.
+    assert!(row.metal_um2 >= 62.0 - 1e-6, "{row:?}");
+    assert!(row.violated && row.diff_area_um2 == 0.0, "{row:?}");
+    assert!(w.scope.model.contains("whole-net"));
+    // Every whole-net row covers at least the metal of the stage rows of its
+    // net and layer (side-area rows: each stage row is one component).
+    for r in w.checks.iter().filter(|c| c.kind == "whole_net_side_area") {
+        let parts: f64 = w
+            .checks
+            .iter()
+            .filter(|c| c.kind == "side_area" && c.net == r.net && c.layer == r.layer)
+            .map(|c| c.metal_um2)
+            .sum();
+        assert!(r.metal_um2 + 1e-9 >= parts, "{r:?}");
+    }
+    // A diode anywhere on the net puts the whole net under the diffusion rule.
+    let diode = PLAIN.replace("endmodule", "DIO d0(.D(a)); endmodule");
+    let g = routed(&diode);
+    let extra = floating_pieces(&g);
+    let w = check_antenna(
+        &g.workspace,
+        &AntennaRequest {
+            whole_net: true,
+            ..request(Some(&extra))
+        },
+        &limits(),
+    )
+    .unwrap();
+    let row = w
+        .checks
+        .iter()
+        .find(|c| c.net == "a" && c.layer == "M3" && c.kind == "whole_net_side_area")
+        .unwrap();
+    assert!(
+        row.diff_area_um2 >= 0.4 && row.limit > 2600.0 && !row.violated,
+        "{row:?}"
+    );
+    assert!(row.rule.starts_with("ANTENNADIFFSIDEAREARATIO@diffusion"));
+    // Deterministic.
+    let again = check_antenna(
+        &g.workspace,
+        &AntennaRequest {
+            whole_net: true,
+            ..request(Some(&extra))
+        },
+        &limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_string(&w).unwrap(),
+        serde_json::to_string(&again).unwrap()
+    );
+}

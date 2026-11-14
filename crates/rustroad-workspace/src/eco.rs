@@ -2390,6 +2390,11 @@ pub struct AntennaEcoRequest {
     pub prefix: String,
     pub out: PathBuf,
     pub plan_out: PathBuf,
+    /// Violating nets that the mapped netlist does not name (nets the
+    /// layout generated: clock-tree and rail-tie nets) are listed under
+    /// `skipped` instead of making the whole plan infeasible; the other
+    /// nets are planned. Off (the default) keeps the strict plan.
+    pub skip_unknown_nets: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2430,6 +2435,9 @@ pub struct AntennaPlan {
     pub model: &'static str,
     pub nets: Vec<NetRepair>,
     pub infeasible: Vec<String>,
+    /// Violating nets left out with `skip_unknown_nets` (not in the netlist).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
     pub eco: EcoPlan,
     pub eco_report: Option<EcoReport>,
     pub output: Option<Artifact>,
@@ -2533,8 +2541,13 @@ pub fn plan_antenna_with_limits(
     let mut ops = Vec::new();
     let mut nets = Vec::new();
     let mut infeasible = Vec::new();
+    let mut skipped = Vec::new();
     for (net, rows) in &by_net {
         if eco::resolve_net(&netlist, net).is_err() {
+            if r.skip_unknown_nets {
+                skipped.push(net.to_string());
+                continue;
+            }
             infeasible.push(format!(
                 "{net}: not a net of the mapped netlist (clock-tree or generated nets are not repaired here)"
             ));
@@ -2574,6 +2587,13 @@ pub fn plan_antenna_with_limits(
         operations: ops,
     };
     let mut diagnostics = Vec::new();
+    if !skipped.is_empty() {
+        diagnostics.push(format!(
+            "ANTENNA_NETS_SKIPPED: {} violating nets are not nets of the mapped netlist and are \
+             not repaired by this plan",
+            skipped.len()
+        ));
+    }
     if report.status == "partial" {
         diagnostics.push(
             "ANTENNA_INPUT_PARTIAL: the check-antenna report is partial (unmodeled LEF antenna \
@@ -2608,6 +2628,7 @@ pub fn plan_antenna_with_limits(
                 and the foundry deck verify the result",
         nets,
         infeasible,
+        skipped,
         eco: eco_plan,
         eco_report: None,
         output: None,

@@ -424,6 +424,10 @@ enum Command {
         out: PathBuf,
         #[arg(long)]
         plan_out: PathBuf,
+        /// List violating nets that the netlist does not name (clock-tree and
+        /// tie nets of the layout) as skipped instead of refusing the plan.
+        #[arg(long)]
+        skip_unknown_nets: bool,
     },
     /// Read-only native process-antenna check of the routed HEAD (JSON report).
     CheckAntenna {
@@ -450,6 +454,13 @@ enum Command {
         /// (default derived from the measured native-vs-deck under-read).
         #[arg(long, default_value_t = rustroad_workspace::antenna::DEFAULT_SAFETY_MARGIN)]
         safety_margin: f64,
+        /// Also report every net as one conductor per layer (`whole_net_*`
+        /// rows: all its metal on the layer over all its gate area, with all
+        /// its diffusion), as a node-by-node check of a hierarchical
+        /// extraction sees it. Layer jumpers do not lower these rows; a
+        /// diode does.
+        #[arg(long)]
+        whole_net: bool,
     },
     /// Stream ordered selected checks while decoding and preparing HEAD once.
     CheckAntennaBatch {
@@ -769,6 +780,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             prefix,
             out,
             plan_out,
+            skip_unknown_nets,
         } => {
             return emit(&rustroad_workspace::eco::plan_antenna_with_limits(
                 &rustroad_workspace::eco::AntennaEcoRequest {
@@ -781,6 +793,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     prefix: prefix.clone(),
                     out: out.clone(),
                     plan_out: plan_out.clone(),
+                    skip_unknown_nets: *skip_unknown_nets,
                 },
                 &budget.limits(&parser_limits),
             )?);
@@ -1174,6 +1187,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             max_rows,
             max_work,
             safety_margin,
+            whole_net,
         } => emit(&rustroad_workspace::antenna::check_antenna(
             &workspace,
             &rustroad_workspace::antenna::AntennaRequest {
@@ -1189,6 +1203,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 max_rows,
                 max_work,
                 safety_margin,
+                whole_net,
             },
             &limits,
         )?),
