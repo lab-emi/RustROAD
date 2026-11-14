@@ -1,0 +1,361 @@
+{
+  "schema": "rustroad.extraction-r4-correctness.v1",
+  "source_commit": "3a85bbde4db4f693dedf8bbc39bee3698c880a58",
+  "source_base": "5aecc5ccd89ab60e8ce49ddee84b320ff7888b66",
+  "saved_wip": "62879ce7780c8eb92d823eddda8f838268b26e16",
+  "binary_sha256": "d4b37baa57e1e1f4e54e9dd37d0a06103733aaa9fc70f0a6bd7b74aa78786f66",
+  "status": "correctness_checks_passed_performance_acceptance_pending",
+  "performance_acceptance": "not_run",
+  "host_timing_scope": "untimed correctness runs concurrent with other work; no A/B ratios",
+  "rust_tests": {
+    "passed": 609,
+    "failed": 0,
+    "ignored": 11
+  },
+  "checks": [
+    "cargo fmt --check",
+    "cargo clippy --release --locked --workspace --all-targets --all-features -- -D warnings",
+    "cargo test --release --locked --workspace",
+    "cargo doc --release --locked --workspace --no-deps",
+    "cargo build --release --locked --workspace",
+    "5 streaming-comparator control tests"
+  ],
+  "guards": {
+    "build_jobs": 2,
+    "test_threads": 2,
+    "memory_mib": 4096,
+    "build_deadline_s": 1800,
+    "extraction_deadline_s": 180
+  },
+  "thread_identity": {
+    "baseline": "468051be9b8106541bdf3eee2e203a428cb65ab1e568a2f43f98a36c2b753932",
+    "candidate": {
+      "1": "acffe7e5d13b5170b7d9dd5614b4b376be1e4b6e26f2053be324095fa913bfe8",
+      "2": "acffe7e5d13b5170b7d9dd5614b4b376be1e4b6e26f2053be324095fa913bfe8",
+      "3": "acffe7e5d13b5170b7d9dd5614b4b376be1e4b6e26f2053be324095fa913bfe8",
+      "4": "acffe7e5d13b5170b7d9dd5614b4b376be1e4b6e26f2053be324095fa913bfe8"
+    },
+    "identical": true,
+    "scope": "exact recovered IHP layout; default tile size"
+  },
+  "raw_network_sha256": "b00ce08974fe438fce81dde63ba5b3c1d9efccbf30f05c3bfc799626d356680f",
+  "raw_network_identity_threads": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "comparison": {
+    "schema": "rustroad.extraction-reorder-comparison.v1",
+    "status": "passed",
+    "scope": "same-native-format output comparison; not physical-model qualification",
+    "baseline": {
+      "path": "/home/cgao/git/RustEDA/.work/three-pdk-20261114/extraction-r4/published-native.nom.spef",
+      "bytes": 24192178,
+      "lines": 942026,
+      "sha256": "468051be9b8106541bdf3eee2e203a428cb65ab1e568a2f43f98a36c2b753932"
+    },
+    "candidate": {
+      "path": "/home/cgao/git/RustEDA/.work/three-pdk-20261114/extraction-r4/candidate-t2.spef",
+      "bytes": 24192178,
+      "lines": 942026,
+      "sha256": "acffe7e5d13b5170b7d9dd5614b4b376be1e4b6e26f2053be324095fa913bfe8"
+    },
+    "tolerance": {
+      "relative": "0.00001",
+      "absolute_capacitance_pf": "1E-14",
+      "resistance_ohm": "0"
+    },
+    "structural_differences": 0,
+    "values": {
+      "net_total_pf": {
+        "compared": 14178,
+        "changed": 19,
+        "outside_tolerance": 0,
+        "max_absolute": "1.0E-9",
+        "max_relative": "6.3102101160891626732565049097561580589607910323917952113890226085514589343350979E-8"
+      },
+      "ground_pf": {
+        "compared": 308983,
+        "changed": 22,
+        "outside_tolerance": 0,
+        "max_absolute": "1E-10",
+        "max_relative": "0.0000050391542283543130121040484565070598550739243925299577718875663908569585680739345"
+      },
+      "coupling_pf": {
+        "compared": 170956,
+        "changed": 2,
+        "outside_tolerance": 0,
+        "max_absolute": "1E-9",
+        "max_relative": "0.0000058610463139879731329636966791311584944144228627694616042855970647880059548230550"
+      },
+      "resistance_ohm": {
+        "compared": 294805,
+        "changed": 0,
+        "outside_tolerance": 0,
+        "max_absolute": "0",
+        "max_relative": "0"
+      }
+    },
+    "examples": [
+      {
+        "line": 45289,
+        "kind": "net_total_pf",
+        "identity": [
+          "*D_NET",
+          "*141"
+        ],
+        "baseline": "5.656815794e-3",
+        "candidate": "5.656815795e-3",
+        "absolute": "1E-12",
+        "relative": "1.7677789700769282341462561271185957010643653104847123628143525221506704550558907E-10"
+      },
+      {
+        "line": 45320,
+        "kind": "ground_pf",
+        "identity": [
+          "23",
+          "*14478:A1"
+        ],
+        "baseline": "4.55189e-7",
+        "candidate": "4.55190e-7",
+        "absolute": "1E-12",
+        "relative": "0.0000021968848173290274390913684395527142511918100134009973857070673784573474812715569"
+      },
+      {
+        "line": 45437,
+        "kind": "net_total_pf",
+        "identity": [
+          "*D_NET",
+          "*143"
+        ],
+        "baseline": "7.419322749e-3",
+        "candidate": "7.419322750e-3",
+        "absolute": "1E-12",
+        "relative": "1.3478319163295598644768486449790851867173455959979635607576176680007619293823011E-10"
+      },
+      {
+        "line": 45462,
+        "kind": "ground_pf",
+        "identity": [
+          "18",
+          "*14485:A1"
+        ],
+        "baseline": "4.55189e-7",
+        "candidate": "4.55190e-7",
+        "absolute": "1E-12",
+        "relative": "0.0000021968848173290274390913684395527142511918100134009973857070673784573474812715569"
+      },
+      {
+        "line": 83126,
+        "kind": "net_total_pf",
+        "identity": [
+          "*D_NET",
+          "*786"
+        ],
+        "baseline": "2.508495260e-3",
+        "candidate": "2.508495270e-3",
+        "absolute": "1.0E-11",
+        "relative": "3.9864536001297702267543043842374875197592060837332174838025506821067276718444839E-9"
+      },
+      {
+        "line": 83146,
+        "kind": "ground_pf",
+        "identity": [
+          "15",
+          "*16473:A"
+        ],
+        "baseline": "2.40956e-6",
+        "candidate": "2.40957e-6",
+        "absolute": "1E-11",
+        "relative": "0.0000041501180708591159418485455911220674228181791771975912714716733691073511041389128"
+      },
+      {
+        "line": 102505,
+        "kind": "net_total_pf",
+        "identity": [
+          "*D_NET",
+          "*1104"
+        ],
+        "baseline": "7.968796033e-3",
+        "candidate": "7.968796032e-3",
+        "absolute": "1E-12",
+        "relative": "1.2548947116463358474317722570324946852608192487789830220642566671150233969101766E-10"
+      },
+      {
+        "line": 102541,
+        "kind": "ground_pf",
+        "identity": [
+          "28",
+          "*17356:A"
+        ],
+        "baseline": "3.55123e-7",
+        "candidate": "3.55122e-7",
+        "absolute": "1E-12",
+        "relative": "0.0000028159257496698327058512121152389453794882336542550046040386007101764740667318084"
+      },
+      {
+        "line": 130286,
+        "kind": "net_total_pf",
+        "identity": [
+          "*D_NET",
+          "*1636"
+        ],
+        "baseline": "5.210821053e-3",
+        "candidate": "5.210821052e-3",
+        "absolute": "1E-12",
+        "relative": "1.9190833648456897028661022414887368422551738700054722451049404708851359590144805E-10"
+      },
+      {
+        "line": 130302,
+        "kind": "ground_pf",
+        "identity": [
+          "10",
+          "*18455:A"
+        ],
+        "baseline": "8.40313e-7",
+        "candidate": "8.40312e-7",
+        "absolute": "1E-12",
+        "relative": "0.0000011900327616019269010475858400381762509921898149856065537484246941318294492647383"
+      },
+      {
+        "line": 196892,
+        "kind": "ground_pf",
+        "identity": [
+          "24",
+          "*20668:A1"
+        ],
+        "baseline": "8.13250e-7",
+        "candidate": "8.13249e-7",
+        "absolute": "1E-12",
+        "relative": "0.0000012296341838303104826314171533968644328312327082692898862588379956962803565939133"
+      },
+      {
+        "line": 202156,
+        "kind": "net_total_pf",
+        "identity": [
+          "*D_NET",
+          "*3034"
+        ],
+        "baseline": "1.788641180e-3",
+        "candidate": "1.788641080e-3",
+        "absolute": "1.00E-10",
+        "relative": "5.5908362794151927107034402506600010182031032070948964733105384501993854351491561E-8"
+      },
+      {
+        "line": 202164,
+        "kind": "ground_pf",
+        "identity": [
+          "4",
+          "*3034:3"
+        ],
+        "baseline": "1.98446e-5",
+        "candidate": "1.98445e-5",
+        "absolute": "1E-10",
+        "relative": "0.0000050391542283543130121040484565070598550739243925299577718875663908569585680739345"
+      },
+      {
+        "line": 278219,
+        "kind": "net_total_pf",
+        "identity": [
+          "*D_NET",
+          "*4779"
+        ],
+        "baseline": "1.069775126e-1",
+        "candidate": "1.069775116e-1",
+        "absolute": "1.0E-9",
+        "relative": "9.3477589420040413241016037607888819056351848659453687839812420540426736375622179E-9"
+      },
+      {
+        "line": 278532,
+        "kind": "coupling_pf",
+        "identity": [
+          "300",
+          "*4779:123",
+          "*4791:89"
+        ],
+        "baseline": "1.70618e-4",
+        "candidate": "1.70617e-4",
+        "absolute": "1E-9",
+        "relative": "0.0000058610463139879731329636966791311584944144228627694616042855970647880059548230550"
+      },
+      {
+        "line": 279571,
+        "kind": "net_total_pf",
+        "identity": [
+          "*D_NET",
+          "*4791"
+        ],
+        "baseline": "1.102510967e-1",
+        "candidate": "1.102510957e-1",
+        "absolute": "1.0E-9",
+        "relative": "9.0702045596975907451449414924504782726574002415342867061022169405776078778906151E-9"
+      }
+    ],
+    "limits": {
+      "max_bytes": 536870912,
+      "max_lines": 10000000,
+      "max_line_bytes": 65536,
+      "max_examples": 16
+    }
+  },
+  "resources": {
+    "final-clippy": {
+      "peak_rss_kib": 848536,
+      "exit_code": 0
+    },
+    "final-test": {
+      "peak_rss_kib": 1527804,
+      "exit_code": 0
+    },
+    "final-doc": {
+      "peak_rss_kib": 711368,
+      "exit_code": 0
+    },
+    "final-build": {
+      "peak_rss_kib": 540376,
+      "exit_code": 0
+    },
+    "baseline-full-verify": {
+      "peak_rss_kib": 207184,
+      "exit_code": 0
+    },
+    "candidate-receipt-prepare": {
+      "peak_rss_kib": 226012,
+      "exit_code": 0
+    },
+    "baseline-cold-t2": {
+      "peak_rss_kib": 275136,
+      "exit_code": 0
+    },
+    "candidate-t1": {
+      "peak_rss_kib": 249960,
+      "exit_code": 0
+    },
+    "candidate-t2": {
+      "peak_rss_kib": 230848,
+      "exit_code": 0
+    },
+    "candidate-t3": {
+      "peak_rss_kib": 241760,
+      "exit_code": 0
+    },
+    "candidate-t4": {
+      "peak_rss_kib": 239688,
+      "exit_code": 0
+    }
+  },
+  "receipt_controls": {
+    "missing_base": "rejected_before_workspace_loading",
+    "stale_rev47": "REVISION_CONFLICT; HEAD and receipt unchanged",
+    "matching_rev48": "validated and receipt written; HEAD unchanged",
+    "preparation_time_recorded_separately": true
+  },
+  "input_scope": "Exact restored IHP rev48; baseline cold extraction reproduces published 468051be. Extraction memory allowance raised to4096MiB on both sides; all geometry/work caps unchanged.",
+  "local_evidence_root": "/home/cgao/git/RustEDA/.work/three-pdk-20261114/extraction-r4",
+  "remaining": [
+    "15-rotation interleaved A/B versus OpenRCX on an idle host",
+    "fresh multi-PDK physical/timing differential gates",
+    "final performance and memory acceptance"
+  ]
+}

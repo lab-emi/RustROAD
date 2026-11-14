@@ -207,8 +207,11 @@ enum Command {
     /// with --write-receipt, stamp it so later reads skip re-validation.
     VerifyWorkspace {
         /// Write (or refresh) `receipts/<HEAD>.json` after the check.
-        #[arg(long)]
+        #[arg(long, requires = "base_rev")]
         write_receipt: bool,
+        /// Required for a receipt write; HEAD must match under the exclusive lock.
+        #[arg(long, requires = "write_receipt")]
+        base_rev: Option<String>,
     },
     /// Write placed DEF, including imported PINS/NETS when present.
     ExportDef,
@@ -262,8 +265,8 @@ enum Command {
         max_rc_elements: usize,
         #[arg(long, default_value_t = 200_000_000)]
         max_extract_work: usize,
-        /// Candidate shapes per wire run (scratch 256 B each; ceiling
-        /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 48 MiB of scratch).
+        /// Candidate shapes per wire run (scratch 2,048 B each; ceiling
+        /// rustroad_core::extract::MAX_CANDIDATES_CEILING = 384 MiB of scratch).
         #[arg(long, default_value_t = 4096)]
         max_extract_candidates: usize,
         /// Accepted for compatibility (1..=16); no effect. Strips are
@@ -1037,10 +1040,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             emit(&snapshot.summary())?;
             finish(snapshot)
         }
-        Command::VerifyWorkspace { write_receipt } => emit(&rustroad_workspace::verify_workspace(
+        Command::VerifyWorkspace {
+            write_receipt: _,
+            base_rev,
+        } => emit(&rustroad_workspace::verify_workspace(
             &workspace,
             &limits,
-            write_receipt,
+            base_rev.as_deref(),
         )?),
         Command::ExportDef => {
             let snapshot = rustroad_workspace::read(&workspace, &limits)?;
@@ -1321,6 +1327,21 @@ fn main() {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn receipt_writes_require_an_explicit_base_revision() {
+        let base = ["rustroad", "--workspace", "demo", "verify-workspace"];
+        assert!(Cli::try_parse_from(base).is_ok());
+        assert!(Cli::try_parse_from(base.into_iter().chain(["--write-receipt"])).is_err());
+        assert!(Cli::try_parse_from(base.into_iter().chain(["--base-rev", "rev1"])).is_err());
+        assert!(
+            Cli::try_parse_from(
+                base.into_iter()
+                    .chain(["--write-receipt", "--base-rev", "rev1"])
+            )
+            .is_ok()
+        );
+    }
 
     #[test]
     fn diagnostic_output_base_reaches_workspace_conflict_before_source_loading() {

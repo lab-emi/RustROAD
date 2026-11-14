@@ -586,11 +586,25 @@ pub struct VerifyReport {
 
 /// Fully validate the HEAD revision (ignoring any receipt) and optionally
 /// stamp it with a receipt, so revisions committed before receipts existed
-/// (or by another validator build) are trusted by later reads. Writing takes
-/// the exclusive workspace lock; the revision's own files are not modified.
-pub fn verify_workspace(path: &Path, limits: &Limits, write_receipt: bool) -> Result<VerifyReport> {
+/// (or by another validator build) are trusted by later reads. `base_rev: None`
+/// verifies under a shared lock without writing. `Some(revision)` requires HEAD
+/// to match under the exclusive lock before validation or any receipt write;
+/// the revision's own files are not modified.
+///
+/// # Errors
+/// Returns a revision conflict for a stale base, or the underlying workspace,
+/// validation, resource-budget or I/O error without writing a receipt.
+pub fn verify_workspace(
+    path: &Path,
+    limits: &Limits,
+    base_rev: Option<&str>,
+) -> Result<VerifyReport> {
+    let write_receipt = base_rev.is_some();
     let lock = lock(path, false, write_receipt)?;
     let current = head(path)?;
+    if let Some(expected) = base_rev {
+        check_base(expected, &current)?;
+    }
     let directory = path.join("revisions").join(&current);
     // Whether the receipt on disk (if any) still binds the current bytes.
     let previous = receipt::read(path, &current).and_then(|existing| {

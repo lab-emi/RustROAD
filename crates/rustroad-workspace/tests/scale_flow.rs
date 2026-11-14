@@ -1080,13 +1080,25 @@ fn receipts_gate_trusted_reads_of_routed_revisions() {
         read(&ws, &limits()).unwrap().validation(),
         &Validation::Full("receipt_absent")
     );
-    let checked = verify_workspace(&ws, &limits(), false).unwrap();
+    let checked = verify_workspace(&ws, &limits(), None).unwrap();
     assert_eq!(
         (checked.previous_receipt, checked.receipt),
         ("receipt_absent", "not_requested")
     );
     assert!(!receipt.exists());
-    let stamped = verify_workspace(&ws, &limits(), true).unwrap();
+    let revision = dir.file_name().unwrap().to_str().unwrap();
+    let original_head = fs::read(ws.join("HEAD")).unwrap();
+    assert!(matches!(
+        verify_workspace(&ws, &limits(), Some("rev0")),
+        Err(rustroad_workspace::Error::Conflict { expected, actual })
+            if expected == "rev0" && actual == revision
+    ));
+    assert!(
+        !receipt.exists(),
+        "a stale writer must not stamp current HEAD"
+    );
+    assert_eq!(fs::read(ws.join("HEAD")).unwrap(), original_head);
+    let stamped = verify_workspace(&ws, &limits(), Some(revision)).unwrap();
     assert_eq!(stamped.receipt, "written");
     assert_eq!(
         fs::read(&receipt).unwrap(),
@@ -1098,14 +1110,17 @@ fn receipts_gate_trusted_reads_of_routed_revisions() {
         &Validation::Receipt
     );
     assert_eq!(
-        verify_workspace(&ws, &limits(), true).unwrap().receipt,
+        verify_workspace(&ws, &limits(), Some(revision))
+            .unwrap()
+            .receipt,
         "current"
     );
+    assert_eq!(fs::read(ws.join("HEAD")).unwrap(), original_head);
     // Stamping never writes a receipt for a revision that fails validation.
     fs::write(&table, &moved).unwrap();
     fs::write(&design, serde_json::to_vec(&meta).unwrap()).unwrap();
     fs::remove_file(&receipt).unwrap();
-    assert!(verify_workspace(&ws, &limits(), true).is_err());
+    assert!(verify_workspace(&ws, &limits(), Some(revision)).is_err());
     assert!(!receipt.exists());
     fs::write(&table, &routes).unwrap();
     fs::write(&design, &original).unwrap();
