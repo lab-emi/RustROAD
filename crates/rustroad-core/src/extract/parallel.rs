@@ -350,6 +350,56 @@ impl Accumulators {
     }
 }
 
+impl Accumulators {
+    /// Finishes the network accumulators exactly as the serial loop does:
+    /// every node's ground is its accumulated ground, then, over the
+    /// couplings in ascending key order, each coupling for which
+    /// `grounded(pF)` holds is added to the ground of both its nodes (the
+    /// lower node first) and each other positive coupling is kept.
+    /// `nets` holds the ground of each net's nodes with the global ID of its
+    /// node 0 (a net's nodes have consecutive IDs). Returns the kept
+    /// couplings in ascending key order and the count of grounded ones.
+    ///
+    /// The loop adds into one flat array by global node (no node decoding,
+    /// a cache-resident target) over the merged shard lists; the shards are
+    /// drained and sorted, and the nets read and written, in parallel.
+    pub(super) fn finish(
+        self,
+        grounded: impl Fn(f64) -> bool,
+        nets: &mut [(u32, &mut [f64])],
+    ) -> Result<(Vec<(u64, f64)>, usize)> {
+        use rayon::prelude::*;
+        let total = nets
+            .iter()
+            .map(|(base, g)| *base as usize + g.len())
+            .max()
+            .unwrap_or(0);
+        let mut flat: Vec<f64> = Vec::new();
+        flat.try_reserve_exact(total)
+            .map_err(|_| budget("extraction ground accumulator allocation"))?;
+        flat.par_extend((0..total as u32).into_par_iter().map(|g| self.ground(g)));
+        let mut count = 0usize;
+        let mut kept = Vec::new();
+        for (key, pf) in self.into_sorted_couplings()? {
+            if pf <= 0.0 {
+                continue;
+            }
+            if grounded(pf) {
+                flat[(key >> 32) as usize] += pf;
+                flat[key as u32 as usize] += pf;
+                count += 1;
+                continue;
+            }
+            kept.push((key, pf));
+        }
+        nets.par_iter_mut().for_each(|(base, ground)| {
+            let base = *base as usize;
+            ground.copy_from_slice(&flat[base..base + ground.len()]);
+        });
+        Ok((kept, count))
+    }
+}
+
 /// Ascending merge of per-shard sorted coupling lists.
 pub(super) struct Sorted {
     heads: Vec<std::iter::Peekable<std::vec::IntoIter<(u64, f64)>>>,
@@ -1270,6 +1320,77 @@ mod tests {
             .map(|(k, v)| (k, v.to_bits()))
             .collect();
         (ground, couplings, area)
+    }
+
+    #[test]
+    fn finish_matches_the_serial_grounding_loop_bit_for_bit() {
+        let nodes = 97usize;
+        let mut ops = stream(30_000, nodes as u32);
+        // Some couplings end below zero (the loop skips them); the stream
+        // also couples some nodes with themselves.
+        ops.extend((0..40u32).map(|k| Op::couple(k, (k * 7 + 1) % nodes as u32, -1e3)));
+        let sizes = [10usize, 1, 30, 55, 1];
+        assert_eq!(sizes.iter().sum::<usize>(), nodes);
+        let mut totals = BTreeMap::<u64, f64>::new();
+        for op in ops.iter().filter(|op| op.key < GROUND) {
+            *totals.entry(op.key).or_insert(0.0) += op.pf;
+        }
+        let mut positive: Vec<f64> = totals.values().copied().filter(|&v| v > 0.0).collect();
+        positive.sort_by(f64::total_cmp);
+        assert!(positive.len() > 10 && positive.len() < totals.len());
+        let median = positive[positive.len() / 2];
+        for min in [0.0, positive[3], median, f64::INFINITY] {
+            // The original loop over the couplings in ascending key order.
+            let mut ground = vec![0.0f64; nodes];
+            let mut coupling = BTreeMap::<u64, f64>::new();
+            for op in &ops {
+                if op.key >= GROUND {
+                    if op.key != AREA {
+                        ground[op.key as u32 as usize] += op.pf;
+                    }
+                } else {
+                    *coupling.entry(op.key).or_insert(0.0) += op.pf;
+                }
+            }
+            let (mut kept, mut count) = (Vec::new(), 0usize);
+            for (&key, &pf) in &coupling {
+                if pf <= 0.0 {
+                    continue;
+                }
+                if pf < min {
+                    ground[(key >> 32) as usize] += pf;
+                    ground[key as u32 as usize] += pf;
+                    count += 1;
+                    continue;
+                }
+                kept.push((key, pf.to_bits()));
+            }
+            assert!(min != median || (count > 0 && !kept.is_empty()));
+            let want: Vec<u64> = ground.iter().map(|g| g.to_bits()).collect();
+            for shards in [1, 2, 4, 8] {
+                let mut acc = Accumulators::new(shards, nodes, 0.0).unwrap();
+                let mut stats = ExtractStats::default();
+                let mut commit = Commit::new(&mut acc, &mut stats, usize::MAX);
+                for &op in &ops {
+                    commit.apply(op).unwrap();
+                }
+                let mut grounds: Vec<Vec<f64>> = sizes.iter().map(|&n| vec![f64::NAN; n]).collect();
+                let mut base = 0u32;
+                let mut nets: Vec<(u32, &mut [f64])> = grounds
+                    .iter_mut()
+                    .map(|g| {
+                        base += g.len() as u32;
+                        (base - g.len() as u32, &mut g[..])
+                    })
+                    .collect();
+                let (got, grounded) = acc.finish(|pf| pf > 0.0 && pf < min, &mut nets).unwrap();
+                assert_eq!(grounded, count, "{min} {shards}");
+                let got: Vec<(u64, u64)> = got.iter().map(|&(k, v)| (k, v.to_bits())).collect();
+                assert_eq!(got, kept, "{min} {shards}");
+                let flat: Vec<u64> = grounds.iter().flatten().map(|g| g.to_bits()).collect();
+                assert_eq!(flat, want, "{min} {shards}");
+            }
+        }
     }
 
     #[test]

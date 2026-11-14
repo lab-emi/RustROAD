@@ -2902,26 +2902,23 @@ fn extract_with_queries(
     } = built;
     drop((runs, pieces, passive_units, pin_nodes));
     stats.overlap_area_um2 = acc.area();
-    for (l, net) in nets.iter_mut().enumerate() {
-        for (node, ground) in net.ground.iter_mut().enumerate() {
-            *ground = acc.ground(nodes.local(l, node as u32));
-        }
-    }
-    let sorted = acc.into_sorted_couplings()?;
-    let mut couplings = Vec::new();
-    for (key, pf) in sorted {
-        if pf <= 0.0 {
-            continue;
-        }
+    // Over the couplings in ascending key order, a positive coupling below
+    // the threshold is grounded: each side keeps the full value to ground
+    // (Miller factor one), so a net's total capacitance is unchanged; the
+    // others are kept.
+    let min = limits.min_coupling_pf;
+    let (kept, grounded) = {
+        let mut grounds: Vec<(u32, &mut [f64])> = nets
+            .iter_mut()
+            .enumerate()
+            .map(|(l, net)| (nodes.local(l, 0), &mut net.ground[..]))
+            .collect();
+        acc.finish(|pf| pf > 0.0 && pf < min, &mut grounds)?
+    };
+    stats.grounded_couplings += grounded;
+    let mut couplings = Vec::with_capacity(kept.len());
+    for (key, pf) in kept {
         let ((la, na), (lb, nb)) = (nodes.decode((key >> 32) as u32), nodes.decode(key as u32));
-        if pf < limits.min_coupling_pf {
-            // Each side keeps the full value to ground (Miller factor one);
-            // a net's total capacitance is unchanged.
-            nets[la].ground[na as usize] += pf;
-            nets[lb].ground[nb as usize] += pf;
-            stats.grounded_couplings += 1;
-            continue;
-        }
         couplings.push(RcCoupling {
             a: (nets[la].net, na),
             b: (nets[lb].net, nb),
