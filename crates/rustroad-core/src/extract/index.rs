@@ -4,9 +4,9 @@
 //! passive conductors) exists. Virtual cell geometry stays in
 //! `InstanceGeometry`; this index never materializes it. Each layer's grid
 //! stores `(rect, id)` entries inline in CSR order: cell-major, ascending
-//! shape ID within a cell. Rectangles are stored relative to the layer's
-//! origin in 32 bits when the layer's extent allows (20 bytes per entry),
-//! otherwise absolutely. A query reports every entry that strictly
+//! lower edge (then shape ID) within a cell. Rectangles are stored relative
+//! to the layer's origin in 32 bits when the layer's extent allows (20 bytes
+//! per entry), otherwise absolutely. A query reports every entry that strictly
 //! intersects it exactly once, from the first query cell the entry occupies.
 //! Report order has no electrical meaning: callers sort the accepted IDs.
 use super::{ExtractLimits, Owner, PassiveOwner, Shape, Shapes, budget, invalid};
@@ -35,6 +35,8 @@ struct Wide {
 trait Entry: Copy {
     fn new(rect: Rect, id: u32, x0: i64, y0: i64) -> Self;
     fn get(&self, x0: i64, y0: i64) -> (Rect, u32);
+    /// Order of the entries of one cell: lower edge, then shape ID.
+    fn order(&self) -> (i64, u32);
 }
 impl Entry for Compact {
     #[inline]
@@ -47,6 +49,10 @@ impl Entry for Compact {
             uy: (r.uy - y0) as u32,
             id,
         }
+    }
+    #[inline]
+    fn order(&self) -> (i64, u32) {
+        (i64::from(self.ly), self.id)
     }
     #[inline]
     fn get(&self, x0: i64, y0: i64) -> (Rect, u32) {
@@ -69,6 +75,10 @@ impl Entry for Wide {
     #[inline]
     fn get(&self, _: i64, _: i64) -> (Rect, u32) {
         (self.rect, self.id)
+    }
+    #[inline]
+    fn order(&self) -> (i64, u32) {
+        (self.rect.ly, self.id)
     }
 }
 
@@ -169,6 +179,11 @@ impl LayerGrid {
                 *local += b - a;
                 for e in &entries[a..b] {
                     let (r, id) = e.get(self.x0, self.y0);
+                    if r.ly >= query.uy {
+                        // Entries ascend by lower edge: none further can
+                        // intersect.
+                        break;
+                    }
                     if (x == qx0 || r.lx >= x_lo)
                         && (y == qy0 || r.ly >= y_lo)
                         && intersects(r, query)
@@ -214,6 +229,11 @@ impl LayerGrid {
                 *local += b - a;
                 for e in &entries[a..b] {
                     let (elx, ely) = (i64::from(e.lx), i64::from(e.ly));
+                    if ely >= uy {
+                        // Entries ascend by lower edge: none further can
+                        // intersect.
+                        break;
+                    }
                     let (eux, euy) = (i64::from(e.ux), i64::from(e.uy));
                     if (x == qx0 || elx >= x_lo)
                         && (y == qy0 || ely >= y_lo)
@@ -433,11 +453,29 @@ fn fill(
         }
     }
     for (g, f) in layers.iter_mut().zip(fills) {
-        if let (Some(g), Some((entries, _))) = (g.as_mut(), f) {
+        if let (Some(g), Some((mut entries, _))) = (g.as_mut(), f) {
+            match &mut entries {
+                Entries::Compact(e) => order_cells(&g.offsets, 0, e),
+                Entries::Wide(e) => order_cells(&g.offsets, 0, e),
+            }
             g.entries = entries;
         }
     }
     Ok(())
+}
+
+/// Orders the entries of every cell of `offsets` by `Entry::order` (the
+/// cells' entries start at `base` in `entries`). Queries report the same
+/// entries in any order within a cell, and charge every entry of each
+/// scanned cell; ascending lower edges let a scan stop at the first entry
+/// above the query.
+fn order_cells<E: Entry>(offsets: &[u32], base: u32, entries: &mut [E]) {
+    for w in offsets.windows(2) {
+        let cell = &mut entries[(w[0] - base) as usize..(w[1] - base) as usize];
+        if cell.len() > 1 {
+            cell.sort_unstable_by_key(|e| e.order());
+        }
+    }
 }
 
 /// Entries of the grids `plans` over the indexed shapes; counting stops
@@ -758,6 +796,8 @@ fn fill_band<'a, E: Entry + 'a>(
             }
         }
     }
+    drop(cursor);
+    order_cells(&g.offsets[r0 as usize * nx..=r1 as usize * nx], base, out);
 }
 
 /// One layer's entry table, written by row bands in parallel.
@@ -1558,14 +1598,14 @@ mod tests {
                     assert_eq!(uncharged, seen);
                 }
             }
-            // Cell entries stay in ascending shape ID (one fill pass).
+            // Cell entries ascend by lower edge, then shape ID.
             for g in index.layers.iter().flatten() {
                 let Entries::Compact(e) = &g.entries else {
                     panic!("compact layer")
                 };
                 for c in 0..g.offsets.len() - 1 {
                     let cell = &e[g.offsets[c] as usize..g.offsets[c + 1] as usize];
-                    assert!(cell.windows(2).all(|w| w[0].id < w[1].id));
+                    assert!(cell.windows(2).all(|w| w[0].order() < w[1].order()));
                 }
             }
         }
