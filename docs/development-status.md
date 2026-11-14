@@ -1,11 +1,94 @@
 # Development status
 
-Updated **2026-11-13**. The first section reports the extraction change made
-after the RustEDA host campaign of 2026-11-13, measured against the campaign's
-binary in the same runs; the next reports that campaign and the 2026-11-05
+Updated **2026-11-14**. The first two sections report the two extraction
+changes made after the RustEDA host campaign of 2026-11-13, newest first, each
+measured against the campaign's binary in the same runs; the next reports that
+campaign and the 2026-11-05
 section the campaign before it; the rest of this page describes the source
 published with the RustEDA development update. Use the superproject’s exact
 gitlinks and the repository lockfile when reproducing a run.
+
+## Faster extraction, second round · 2026-11-14
+
+After the 2026-11-13 follow-up, RustROAD
+[`8d29a61`](https://github.com/lab-emi/RustROAD/commit/8d29a61f82b47c9cb26726134d8eec24823ae359)
+(seven extraction commits and a docs commit, `fe4b286..8d29a61`) extracts the
+campaign's final Ibex layout in **0.71× the campaign binary's time at 4 threads
+and 0.75× at 2** (0.85× and 0.90× of `fe4b286`'s), with **18.6 % less peak
+memory than `fe4b286`** at 4 threads and the same SPEF. Against OpenRCX it was
+**faster in all 15 runs at 4 threads** (median 2.776 s against 3.047 s, 0.91×),
+but the ranges overlap (2.665–3.086 s against 2.861–3.741 s), so it is level
+there, not faster beyond noise; at 2 threads it is **still 1.64× slower**
+(4.991 s against 3.049 s), with 3.2 times OpenRCX's CPU time and 1.31× its peak
+RSS.
+
+**What changed.** The seven commits cut serial work around the parallel
+strip phase and release memory earlier, without changing the output. In single
+profiled runs at 4 threads: the grid index is built by row bands in parallel, a
+parallel counting sort (Zagha and Blelloch, 1991) in which each band owns
+disjoint slices of the offsets and entries (0.22–0.27 s to 0.07 s); entries in
+a grid cell ascend by lower edge, so a scan leaves the cell at the first entry
+above the query (user CPU −3 %); small couplings are grounded through one flat
+node array (finalization 0.09–0.11 s to 0.07 s); net-tree records are sorted in
+parallel and metal pieces go only to the lists read later (metal construction
+0.17 s to 0.12 s); crossed supply rails and other retained passive conductors
+weigh 16 units in the strip chunks, which removes a serial barrier of
+0.08–0.09 s at the end of the strip phase; and once the extraction input is
+built, the workspace snapshot is freed except for the routes, the design's
+cells and the connectivity, which takes the peak RSS from 294–332 MB to
+263–270 MB and makes it steady.
+
+| Same-load A/B, 15 runs after a warm-up, order rotated | Campaign binary | Previous | New binary | Competitor |
+| --- | ---: | ---: | ---: | ---: |
+| **Extraction** (final routed layout, nominal corner) | RustROAD `f90f2dd` | RustROAD `fe4b286` | RustROAD `8d29a61` | OpenRCX |
+| Median wall, 4 threads (range) | 3.894 (3.639–4.313) s | 3.267 (3.089–3.699) s | **2.776 (2.665–3.086) s** | 3.047 (2.861–3.741) s |
+| Median wall, 2 threads (range) | 6.659 (6.297–7.180) s | 5.553 (5.337–5.862) s | **4.991 (4.786–5.415) s** | 3.049 (2.902–3.370) s |
+| Median CPU, 4 threads (range) | 11.84 (11.08–13.31) s | 10.32 (9.68–11.20) s | 9.76 (9.28–10.65) s | 3.03 (2.84–3.71) s |
+| Median CPU, 2 threads (range) | 12.01 (11.37–13.00) s | 10.23 (9.78–10.78) s | 9.50 (9.14–10.29) s | 3.03 (2.89–3.35) s |
+| Median peak RSS, 4 threads (range) | 322,356 (294,380–325,824) KiB | 325,740 (298,844–331,192) KiB | **265,084 (262,936–270,052) KiB** | 201,736 (201,560–202,204) KiB |
+| Median peak RSS, 2 threads (range) | 312,836 (287,540–314,364) KiB | 288,312 (286,504–290,560) KiB | **251,464 (250,592–252,804) KiB** | 201,400 (201,052–202,024) KiB |
+| Runs in which `8d29a61` was faster, 4 / 2 threads | 15 / 15 of 15 | 15 / 14 of 15 | — | 15 / 0 of 15 |
+
+The new binary's wall ranges do not overlap with the campaign binary's at
+either thread count, nor with `fe4b286`'s at 4 threads (by 3 ms); at 2 threads
+they overlap with `fe4b286`'s, which was faster in one run. Its peak RSS ranges
+are apart from both. On this host the campaign binary takes 1.28× OpenRCX's
+time at 4 threads, as in the previous follow-up.
+
+**How it was measured.** Per repetition and thread count the four
+contenders ran one after another, in an order shifted by one place each
+repetition, one warm-up and 15 measured repetitions, on the 4-vCPU VM of the
+previous follow-up (a Xeon reporting 2.30 GHz), with the host's measurement and
+build locks held so that nothing else ran. Each RustROAD replays the campaign's
+recorded command with the campaign's RC profile, under GNU time, on a private
+copy of a routed workspace whose validation receipt that same binary wrote in a
+full native run, and writes its SPEF at one shared work path; OpenRCX replays
+the shared extraction gate's script.
+
+**Same results.** Every run of the three RustROAD binaries wrote the same SPEF
+(SHA-256 `468051be…`, the campaign's); the digest over every bit of the
+extracted network and the report's statistics are unchanged at 1 to 4 threads.
+A full native run with `8d29a61` (114 of 114 steps, the campaign's prepared
+inputs, recipe and executor) produced a GDS, DEF, native SPEF, netlists and
+mapped netlist byte-identical to the campaign's, and all nine shared gates
+passed with the campaign's verdicts. 584 tests pass. glibc's allocator keeps at
+most 8 MiB of freed memory resident here, so RustSTA's allocator settings were
+not added.
+
+**What remains.** RustROAD's extraction still spends 3.2 times OpenRCX's CPU
+time (9.5 to 9.8 s against 3.0 s), so it is 1.64× slower at 2 threads and only
+level at 4. At 4 threads about 2.1 s of its 2.8 s is the parallel strip phase,
+evenly loaded, with a flat profile (interval sweep 31 %, candidate queries and
+gathering 17 %, record grouping 6.5 %), and about 0.75 s is spent outside it
+(workspace read 0.12 s, net trees 0.13 s, metal construction 0.12 s, virtual
+crossings 0.08–0.15 s, and smaller phases). Its peak RSS is 1.31× OpenRCX's at
+4 threads; at the peak about 73 MiB are snapshot remainder and input, 55 MiB
+coupling accumulators, 49 MiB grid, 45 MiB net trees and 35 MiB retained
+shapes. The SPEF is unchanged, so its total capacitance stays 6.0 % above
+OpenRCX's.
+
+[RustROAD extraction, second round](https://lab-emi.github.io/RustEDA/benchmarks/#rustroad-extraction-second-round-2026-11-14) ·
+[Runs and summary](https://lab-emi.github.io/RustEDA/benchmarks/evidence/ibex-host-20261114-extraction/summary.json)
 
 ## Faster extraction · 2026-11-13
 
@@ -190,7 +273,9 @@ then OpenRCX's median fell from 5.944 s to 3.829 s (0.64×) and RustROAD's from
 0.83× the campaign binary's time at 4 threads and 0.84× at 2, with the same
 SPEF, in same-load runs on another VM: level with OpenRCX at 4 threads (1.07×,
 ranges overlap) and still 1.85× slower at 2
-([faster extraction](#faster-extraction-2026-11-13)).
+([faster extraction](#faster-extraction-2026-11-13)); since `8d29a61`,
+0.71× and 0.75×, level at 4 threads (0.91×, ranges overlap) and 1.64× slower at
+2 ([second round](#faster-extraction-second-round-2026-11-14)).
 
 ### GDS export against KLayout · 2026-11-13
 
