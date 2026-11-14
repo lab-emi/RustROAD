@@ -1,0 +1,98 @@
+tech
+ format 35
+ gf180
+end
+
+types
+ metal1 metal1,metal1wire
+ metal2 metal2,metal2wire
+ metal3 metal3,metal3wire
+ metal4 metal4,metal4wire
+ metal5 metal5,metal5wire
+ metal1 m2c,via1,v1
+ metal2 m3c,via2,v2
+ metal3 via3,v3
+ metal4 via4,v4
+end
+
+contact
+ m2c metal1 metal2
+ m3c metal2 metal3
+ via3 metal3 metal4
+ via4 metal4 metal5
+ pc poly metal1
+end
+
+extract
+ style ngspice variants (),(hrhc),(lrlc)
+ cscale 1
+
+ variants ()
+ resist (allm1)/metal1 125.0   # mOhm/sq
+ resist (allm2)/metal2 105.0   # mOhm/sq
+ resist (allm3)/metal3 85.0   # mOhm/sq
+ resist (allm4)/metal4 65.0   # mOhm/sq
+ resist (allm5)/metal5 45.0   # mOhm/sq
+ contact m2c 9300
+ contact m3c 7800
+ contact via3 6300
+ contact via4 4800
+ contact pc 3300
+ contact ndc 1800
+ contact pdc 300
+
+ variants (hrhc)
+ resist (allm1)/metal1 156.25   # mOhm/sq
+ resist (allm2)/metal2 131.25   # mOhm/sq
+ resist (allm3)/metal3 106.25   # mOhm/sq
+ resist (allm4)/metal4 81.25   # mOhm/sq
+ resist (allm5)/metal5 56.25   # mOhm/sq
+ contact m2c 15000
+ contact m3c 15000
+ contact via3 15000
+ contact via4 15000
+ contact pc 15000
+ contact ndc 15000
+ contact pdc 15000
+
+ variants (lrlc)
+ resist (allm1)/metal1 93.75   # mOhm/sq
+ resist (allm2)/metal2 78.75   # mOhm/sq
+ resist (allm3)/metal3 63.75   # mOhm/sq
+ resist (allm4)/metal4 48.75   # mOhm/sq
+ resist (allm5)/metal5 33.75   # mOhm/sq
+ contact m2c 0
+ contact m3c 0
+ contact via3 0
+ contact via4 0
+ contact pc 0
+ contact ndc 0
+ contact pdc 0
+
+ variants *
+ defaultareacap allm1 metal1 32.8
+ defaultperimeter allm1 metal1 38.1
+ defaultsidewall allm1 metal1 28.5 -0.05
+ defaultareacap allm2 metal2 28.7
+ defaultperimeter allm2 metal2 35.5
+ defaultsidewall allm2 metal2 31.5
+ defaultoverlap allm2 metal2 allm1 metal1 49.3
+ defaultareacap allm3 metal3 24.6
+ defaultperimeter allm3 metal3 32.9
+ defaultsidewall allm3 metal3 34.5 -0.05
+ defaultoverlap allm3 metal3 allm1 metal1 43.3
+ defaultoverlap allm3 metal3 allm2 metal2 49.3
+ defaultareacap allm4 metal4 20.5
+ defaultperimeter allm4 metal4 30.3
+ defaultsidewall allm4 metal4 37.5
+ defaultoverlap allm4 metal4 allm1 metal1 37.3
+ defaultoverlap allm4 metal4 allm2 metal2 43.3
+ defaultoverlap allm4 metal4 allm3 metal3 49.3
+ defaultareacap allm5 metal5 16.4
+ defaultperimeter allm5 metal5 27.7
+ defaultsidewall allm5 metal5 40.5 -0.05
+ defaultoverlap allm5 metal5 allm1 metal1 31.3
+ defaultoverlap allm5 metal5 allm2 metal2 37.3
+ defaultoverlap allm5 metal5 allm3 metal3 43.3
+ defaultoverlap allm5 metal5 allm4 metal4 49.3
+end

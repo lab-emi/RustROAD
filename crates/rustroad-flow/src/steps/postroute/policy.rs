@@ -23,7 +23,6 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 const CODE: &str = "POSTROUTE";
-pub const CORNERS: [&str; 2] = ["tt", "ss"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FamilyCell {
@@ -42,7 +41,8 @@ pub struct Family {
 }
 
 impl Family {
-    pub fn to_value(&self) -> Value {
+    /// The family record; `first` and `second` name the two corners (`TT`, `SS`).
+    pub fn to_value(&self, first: &str, second: &str) -> Value {
         let pairs = |items: &[(String, String)]| {
             Value::Dict(
                 items
@@ -56,7 +56,9 @@ impl Family {
                 .with("id", self.id.as_str())
                 .with(
                     "order",
-                    "max_capacitance_pf (min over TT/SS), equal LEF width/height",
+                    format!(
+                        "max_capacitance_pf (min over {first}/{second}), equal LEF width/height"
+                    ),
                 )
                 .with("pins", pairs(&self.pins))
                 .with("functions", pairs(&self.functions))

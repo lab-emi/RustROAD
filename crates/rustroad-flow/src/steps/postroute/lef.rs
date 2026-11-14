@@ -176,12 +176,13 @@ fn size(body: &str) -> Option<(&str, &str)> {
     None
 }
 
-/// `{macro: (width_dbu, height_dbu)}` at 1000 DBU per micron, rounding half
-/// to even as Python's `round` does.
+/// `{macro: (width_dbu, height_dbu)}` at `dbu_per_um` database units per
+/// micron (1000 in the Ibex SG13G2 recipe), rounding half to even as Python's
+/// `round` does.
 ///
 /// # Errors
 /// `POSTROUTE` if a size is not a decimal number (`1.2.3`).
-pub fn sizes(text: &str) -> StepResult<Vec<(String, (i64, i64))>> {
+pub fn sizes(text: &str, dbu_per_um: i64) -> StepResult<Vec<(String, (i64, i64))>> {
     let mut out: Vec<(String, (i64, i64))> = Vec::new();
     for block in macros(text) {
         let Some((width, height)) = size(block.body) else {
@@ -191,7 +192,7 @@ pub fn sizes(text: &str) -> StepResult<Vec<(String, (i64, i64))>> {
             let value: f64 = field
                 .parse()
                 .map_err(|_| fail(CODE, format!("LEF SIZE is not a number: {field}")))?;
-            Ok((value * 1000.0).round_ties_even() as i64)
+            Ok((value * dbu_per_um as f64).round_ties_even() as i64)
         };
         let value = (dbu(width)?, dbu(height)?);
         match out.iter_mut().find(|(name, _)| name == block.name) {

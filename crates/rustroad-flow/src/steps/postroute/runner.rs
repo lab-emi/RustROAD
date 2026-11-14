@@ -3,7 +3,7 @@ use super::super::{
     StepError, StepResult, dict_of, fail, file_id, key, peak_rss_kib, read_json, read_text, render,
     require, str_of,
 };
-use super::policy::{CORNERS, Families, Thresholds, families, plan};
+use super::policy::{Families, Thresholds, families, plan};
 use super::{lef, liberty, netlist};
 use rustroad_pyjson::{Dict, FileId, Layout, Value, list, pure_path, sha256_hex};
 use std::collections::HashSet;
@@ -97,8 +97,106 @@ struct Screen {
     record: Value,
 }
 
+/// The PDK identity of the flow: the optional `profile` member of the inputs.
+/// Without it the step is the Ibex SG13G2/EZ130 recipe's.
+struct FlowProfile {
+    pdk: String,
+    /// The two timing corners, in the order of the Liberty tables.
+    corners: [String; 2],
+    /// Liberty groups of the timing libraries: `std`, then one per macro
+    /// master; the library of a group at a corner is `timing.<group>_<corner>`.
+    groups: Vec<String>,
+    /// Database units per micron of the design workspaces.
+    dbu_per_um: i64,
+}
+
+impl FlowProfile {
+    fn ihp() -> Self {
+        Self {
+            pdk: "ihp-sg13g2".into(),
+            corners: ["tt".into(), "ss".into()],
+            groups: vec!["std".into(), "ram".into()],
+            dbu_per_um: 1000,
+        }
+    }
+
+    /// `[a-z][a-z0-9]{0,7}`: a corner name or a Liberty group.
+    fn short(name: &str) -> bool {
+        let bytes = name.as_bytes();
+        (1..=8).contains(&bytes.len())
+            && bytes[0].is_ascii_lowercase()
+            && bytes
+                .iter()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    }
+
+    fn parse(value: Option<&Value>) -> StepResult<Self> {
+        let Some(value) = value else {
+            return Ok(Self::ihp());
+        };
+        let profile = dict_of(value, CODE, "profile")?;
+        need(
+            profile.has_exactly(&["pdk", "corners", "groups", "dbu_per_um"]),
+            "post-route profile schema",
+        )?;
+        let pdk = text(get(profile, "pdk")?, "profile.pdk")?;
+        let corners = strings(get(profile, "corners")?, "profile.corners")?;
+        let groups = strings(get(profile, "groups")?, "profile.groups")?;
+        let dbu_per_um = get(profile, "dbu_per_um")?
+            .as_int()
+            .and_then(|units| i64::try_from(units).ok())
+            .filter(|units| (1..=100_000).contains(units))
+            .ok_or_else(|| fail(CODE, "profile.dbu_per_um"))?;
+        need(
+            (1..=64).contains(&pdk.len())
+                && pdk
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-')),
+            "profile.pdk",
+        )?;
+        need(
+            groups.first().map(String::as_str) == Some("std")
+                && groups.len() <= 9
+                && groups.iter().all(|group| Self::short(group))
+                && groups
+                    .iter()
+                    .enumerate()
+                    .all(|(at, group)| !groups[..at].contains(group)),
+            "profile.groups: std first, then one per macro master",
+        )?;
+        need(
+            corners.iter().all(|corner| Self::short(corner)),
+            "profile.corners",
+        )?;
+        let corners = <[String; 2]>::try_from(corners)
+            .ok()
+            .filter(|corners| corners[0] != corners[1])
+            .ok_or_else(|| {
+                fail(
+                    CODE,
+                    "profile.corners: the repair policy needs exactly two corners",
+                )
+            })?;
+        Ok(Self {
+            pdk: pdk.to_owned(),
+            corners,
+            groups,
+            dbu_per_um,
+        })
+    }
+
+    /// The corners as a label reads them: `TT`, `SS`.
+    fn labels(&self) -> [String; 2] {
+        [
+            self.corners[0].to_uppercase(),
+            self.corners[1].to_uppercase(),
+        ]
+    }
+}
+
 struct Runner {
     c: Dict,
+    profile: FlowProfile,
     out: PathBuf,
     inputs: FileId,
     started: Instant,
@@ -115,27 +213,33 @@ impl Runner {
     fn new(inputs_path: &Path, out: &Path) -> StepResult<Self> {
         let config = read(inputs_path, 4 << 20)?;
         let c = dict_of(&config, CODE, "inputs")?.clone();
+        const MEMBERS: [&str; 14] = [
+            "schema",
+            "top",
+            "trial",
+            "final_workspace",
+            "prects_netlist",
+            "recipe",
+            "profiles",
+            "timing",
+            "tools",
+            "policy",
+            "limits",
+            "final_spef",
+            "screen",
+            "antenna",
+        ];
+        // `profile` is the one optional member: the PDK identity of a flow
+        // that is not the Ibex SG13G2/EZ130 recipe.
+        let members: Vec<&str> = c.keys().filter(|name| *name != "profile").collect();
         need(
             c.get("schema").and_then(Value::as_str) == Some(SCHEMA)
-                && c.has_exactly(&[
-                    "schema",
-                    "top",
-                    "trial",
-                    "final_workspace",
-                    "prects_netlist",
-                    "recipe",
-                    "profiles",
-                    "timing",
-                    "tools",
-                    "policy",
-                    "limits",
-                    "final_spef",
-                    "screen",
-                    "antenna",
-                ])
+                && members.len() == MEMBERS.len()
+                && MEMBERS.iter().all(|name| c.contains_key(name))
                 && sub(&c, "tools")?.has_exactly(&["rustroad", "rusteda", "ruststa"]),
             "post-route input schema",
         )?;
+        let profile = FlowProfile::parse(c.get("profile"))?;
         let p = sub(&c, "policy")?;
         let number = |name: &str| -> StepResult<f64> {
             get(p, name)?
@@ -215,6 +319,7 @@ impl Runner {
             deadline,
             libs: None,
             families: Families::default(),
+            profile,
             c,
         };
         runner.screen_inputs()?;
@@ -433,7 +538,7 @@ impl Runner {
         let logical = read_text(netlist, 256 << 20, CODE)?;
         let names = lef::physical_only_cells(&lef_text, self.libs()?, &logical)?;
         let mut paths = Vec::new();
-        for corner in CORNERS {
+        for corner in &self.profile.corners {
             let path = root.join(format!("{corner}-physical.lib"));
             std::fs::write(&path, lef::stub_library(corner, &names))?;
             paths.push(path);
@@ -453,7 +558,7 @@ impl Runner {
         root: &Path,
         spef: &Path,
         netlist: &Path,
-    ) -> StepResult<(Value, Vec<(&'static str, Vec<Value>)>)> {
+    ) -> StepResult<(Value, Vec<(String, Vec<Value>)>)> {
         let (stubs, names) = self.physical_models(netlist, root)?;
         let sta = root.join("sta").display().to_string();
         let (rusteda, ruststa) = (
@@ -503,12 +608,13 @@ impl Runner {
             Ok(text(get(sub(timing, name)?, "path")?, name)?.to_owned())
         };
         let spef_text = spef.display().to_string();
-        for (corner, stub) in CORNERS.iter().zip(&stubs) {
-            for lib in [
-                timing_path(&format!("std_{corner}"))?,
-                timing_path(&format!("ram_{corner}"))?,
-                stub.display().to_string(),
-            ] {
+        for (corner, stub) in self.profile.corners.iter().zip(&stubs) {
+            let mut libraries = Vec::new();
+            for group in &self.profile.groups {
+                libraries.push(timing_path(&format!("{group}_{corner}"))?);
+            }
+            libraries.push(stub.display().to_string());
+            for lib in libraries {
                 argv.extend(s(&["--lib", &lib, "--corner", corner]));
             }
             argv.extend(s(&["--spef", &spef_text, "--spef-corner", corner]));
@@ -550,7 +656,8 @@ impl Runner {
         )?;
         self.remaining()?;
         let mut jobs = Vec::new();
-        for corner in CORNERS {
+        for corner in self.profile.corners.clone() {
+            let corner = corner.as_str();
             let common = [
                 &ruststa,
                 "report",
@@ -589,7 +696,8 @@ impl Runner {
         let outputs = self.finish(jobs, 256 << 20)?;
         let mut corners = Vec::new();
         let mut metrics_by_corner = Dict::new();
-        for (index, corner) in CORNERS.into_iter().enumerate() {
+        for (index, corner) in self.profile.corners.iter().enumerate() {
+            let corner = corner.as_str();
             let summary = read(&outputs[2 * index], 64 << 20)?;
             let drv = read(&outputs[2 * index + 1], 64 << 20)?;
             let drv = dict_of(&drv, CODE, "DRV report")?;
@@ -636,7 +744,7 @@ impl Runner {
                 metrics.insert(name, lookup(name));
             }
             metrics_by_corner.insert(corner, metrics);
-            corners.push((corner, rows.to_vec()));
+            corners.push((corner.to_owned(), rows.to_vec()));
         }
         let summary = Value::Dict(
             Dict::new()
@@ -653,7 +761,7 @@ impl Runner {
         let timing = sub(&self.c, "timing")?;
         let mut libs = Vec::new();
         let mut sources = Vec::new();
-        for corner in CORNERS {
+        for corner in &self.profile.corners {
             let record = sub(timing, &format!("std_{corner}"))?;
             libs.push(liberty::read(Path::new(text(
                 get(record, "path")?,
@@ -673,7 +781,10 @@ impl Runner {
             get(sub(&self.c, "profiles")?, "cell_lef")?,
             "cell_lef",
         )?);
-        let sizes = lef::sizes(&read_text(&cell_lef, 256 << 20, CODE)?)?;
+        let sizes = lef::sizes(
+            &read_text(&cell_lef, 256 << 20, CODE)?,
+            self.profile.dbu_per_um,
+        )?;
         self.families = families(&libs, &sizes)?;
         self.libs = Some(libs);
         let lef_id = identity(&cell_lef)?;
@@ -685,22 +796,30 @@ impl Runner {
                 .with("bytes", lef_id.bytes),
         ));
         let top = text(get(&self.c, "top")?, "top")?;
+        let [first, second] = self.profile.labels();
         let profile = Value::Dict(
             Dict::new()
                 .with("schema", "rustroad.sizing-profile.v1")
-                .with("pdk", "ihp-sg13g2")
+                .with("pdk", self.profile.pdk.as_str())
                 .with("library", format!("{top}-equal-width"))
                 .with("generator", "native_postroute.py")
                 .with("sources", list(sources))
-                .with("dbu_per_um", 1000)
+                .with("dbu_per_um", self.profile.dbu_per_um)
                 .with(
                     "rule",
-                    "equal LEF width/height, identical pins/directions/output functions in TT and SS; \
-                     no sequential, bus, bundle, clock-gating or dont_use cell",
+                    format!(
+                        "equal LEF width/height, identical pins/directions/output functions in {first} and {second}; \
+                         no sequential, bus, bundle, clock-gating or dont_use cell"
+                    ),
                 )
                 .with(
                     "families",
-                    list(self.families.list.iter().map(super::policy::Family::to_value)),
+                    list(
+                        self.families
+                            .list
+                            .iter()
+                            .map(|family| family.to_value(&first, &second)),
+                    ),
                 )
                 .with("excluded", Value::List(Vec::new())),
         );
@@ -711,7 +830,7 @@ impl Runner {
 
     fn plan(
         &self,
-        corners: &[(&'static str, Vec<Value>)],
+        corners: &[(String, Vec<Value>)],
         netlist: &Path,
         resized: &Dict,
     ) -> StepResult<super::policy::Plan> {
@@ -733,7 +852,7 @@ impl Runner {
         let known: HashSet<&str> = prects.0.iter().map(|(name, _)| name.as_str()).collect();
         let rows: Vec<(&str, &[Value])> = corners
             .iter()
-            .map(|(corner, rows)| (*corner, rows.as_slice()))
+            .map(|(corner, rows)| (corner.as_str(), rows.as_slice()))
             .collect();
         plan(
             &rows,
@@ -1481,4 +1600,51 @@ pub fn run(inputs: &Path, out_dir: &Path) -> StepResult<String> {
         },
         message: error.message,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FlowProfile;
+    use rustroad_pyjson::parse;
+
+    /// Without a `profile` member the step is the Ibex SG13G2/EZ130 recipe's.
+    #[test]
+    fn the_recipe_without_a_profile_is_the_ihp_one() {
+        let profile = FlowProfile::parse(None).unwrap();
+        assert_eq!(profile.pdk, "ihp-sg13g2");
+        assert_eq!(profile.corners, ["tt", "ss"]);
+        assert_eq!(profile.groups, ["std", "ram"]);
+        assert_eq!(profile.dbu_per_um, 1000);
+        assert_eq!(profile.labels(), ["TT", "SS"]);
+    }
+
+    /// A profile states the PDK label, two corners, the Liberty groups and the database unit.
+    #[test]
+    fn a_profile_states_pdk_corners_groups_and_unit() {
+        let read = |text: &str| FlowProfile::parse(Some(&parse(text).unwrap()));
+        let profile = read(
+            r#"{"pdk": "gf180mcuD", "corners": ["typ", "slow"], "groups": ["std", "ram", "rom"],
+                "dbu_per_um": 2000}"#,
+        )
+        .unwrap();
+        assert_eq!(profile.pdk, "gf180mcuD");
+        assert_eq!(profile.corners, ["typ", "slow"]);
+        assert_eq!(profile.groups, ["std", "ram", "rom"]);
+        assert_eq!(profile.dbu_per_um, 2000);
+        assert_eq!(profile.labels(), ["TYP", "SLOW"]);
+        for bad in [
+            r#"{"pdk": "p", "corners": ["tt"], "groups": ["std"], "dbu_per_um": 1000}"#,
+            r#"{"pdk": "p", "corners": ["tt", "tt"], "groups": ["std"], "dbu_per_um": 1000}"#,
+            r#"{"pdk": "p", "corners": ["tt", "ss", "ff"], "groups": ["std"], "dbu_per_um": 1000}"#,
+            r#"{"pdk": "p", "corners": ["TT", "ss"], "groups": ["std"], "dbu_per_um": 1000}"#,
+            r#"{"pdk": "p", "corners": ["tt", "ss"], "groups": ["ram", "std"], "dbu_per_um": 1000}"#,
+            r#"{"pdk": "p", "corners": ["tt", "ss"], "groups": ["std", "std"], "dbu_per_um": 1000}"#,
+            r#"{"pdk": "p", "corners": ["tt", "ss"], "groups": ["std"], "dbu_per_um": 0}"#,
+            r#"{"pdk": "a b", "corners": ["tt", "ss"], "groups": ["std"], "dbu_per_um": 1000}"#,
+            r#"{"pdk": "p", "corners": ["tt", "ss"], "groups": ["std"]}"#,
+            r#"{"pdk": "p", "corners": ["tt", "ss"], "groups": ["std"], "dbu_per_um": 1000, "x": 1}"#,
+        ] {
+            assert!(read(bad).is_err(), "{bad}");
+        }
+    }
 }

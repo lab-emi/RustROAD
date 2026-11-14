@@ -1,0 +1,115 @@
+tech
+ format 35
+ sky130
+end
+
+types
+ locali li1,localiwire
+ metal1 met1,metal1wire
+ metal2 met2,metal2wire
+ metal3 met3,metal3wire
+ metal4 met4,metal4wire
+ metal5 met5,metal5wire
+ locali mcon,viali
+ metal1 m2contact,m2c,via1,v1
+ metal2 m3contact,m3c,via2,v2
+ metal3 via3,v3
+ metal4 via4,v4
+end
+
+contact
+ mcon locali metal1
+ m2contact metal1 metal2
+ m3contact metal2 metal3
+ via3 metal3 metal4
+ via4 metal4 metal5
+ pc poly locali
+end
+
+extract
+ style ngspice variants (),(hrhc),(lrlc)
+ cscale 1
+
+ variants ()
+ resist (allli)/locali 125.0   # mOhm/sq
+ resist (allm1)/metal1 105.0   # mOhm/sq
+ resist (allm2)/metal2 85.0   # mOhm/sq
+ resist (allm3)/metal3 65.0   # mOhm/sq
+ resist (allm4)/metal4 45.0   # mOhm/sq
+ resist (allm5)/metal5 25.0   # mOhm/sq
+ contact mcon 9300
+ contact m2c 7800
+ contact m3c 6300
+ contact via3 4800
+ contact via4 3300
+ contact pc 1800
+ contact ndc 300
+ contact pdc -1200
+
+ variants (hrhc)
+ resist (allli)/locali 156.25   # mOhm/sq
+ resist (allm1)/metal1 131.25   # mOhm/sq
+ resist (allm2)/metal2 106.25   # mOhm/sq
+ resist (allm3)/metal3 81.25   # mOhm/sq
+ resist (allm4)/metal4 56.25   # mOhm/sq
+ resist (allm5)/metal5 31.25   # mOhm/sq
+ contact mcon 15000
+ contact m2c 15000
+ contact m3c 15000
+ contact via3 15000
+ contact via4 15000
+ contact pc 15000
+ contact ndc 15000
+ contact pdc 15000
+
+ variants (lrlc)
+ resist (allli)/locali 93.75   # mOhm/sq
+ resist (allm1)/metal1 78.75   # mOhm/sq
+ resist (allm2)/metal2 63.75   # mOhm/sq
+ resist (allm3)/metal3 48.75   # mOhm/sq
+ resist (allm4)/metal4 33.75   # mOhm/sq
+ resist (allm5)/metal5 18.75   # mOhm/sq
+ contact mcon 0
+ contact m2c 0
+ contact m3c 0
+ contact via3 0
+ contact via4 0
+ contact pc 0
+ contact ndc 0
+ contact pdc 0
+
+ variants *
+ defaultareacap allli locali 32.8
+ defaultperimeter allli locali 38.1
+ defaultsidewall allli locali 28.5 -0.05
+ defaultareacap allm1 metal1 28.7
+ defaultperimeter allm1 metal1 35.5
+ defaultsidewall allm1 metal1 31.5
+ defaultoverlap allm1 metal1 allli locali 49.3
+ defaultareacap allm2 metal2 24.6
+ defaultperimeter allm2 metal2 32.9
+ defaultsidewall allm2 metal2 34.5 -0.05
+ defaultoverlap allm2 metal2 allli locali 43.3
+ defaultoverlap allm2 metal2 allm1 metal1 49.3
+ defaultareacap allm3 metal3 20.5
+ defaultperimeter allm3 metal3 30.3
+ defaultsidewall allm3 metal3 37.5
+ defaultoverlap allm3 metal3 allli locali 37.3
+ defaultoverlap allm3 metal3 allm1 metal1 43.3
+ defaultoverlap allm3 metal3 allm2 metal2 49.3
+ defaultareacap allm4 metal4 16.4
+ defaultperimeter allm4 metal4 27.7
+ defaultsidewall allm4 metal4 40.5 -0.05
+ defaultoverlap allm4 metal4 allli locali 31.3
+ defaultoverlap allm4 metal4 allm1 metal1 37.3
+ defaultoverlap allm4 metal4 allm2 metal2 43.3
+ defaultoverlap allm4 metal4 allm3 metal3 49.3
+ defaultareacap allm5 metal5 12.3
+ defaultperimeter allm5 metal5 25.1
+ defaultsidewall allm5 metal5 43.5
+ defaultoverlap allm5 metal5 allli locali 25.3
+ defaultoverlap allm5 metal5 allm1 metal1 31.3
+ defaultoverlap allm5 metal5 allm2 metal2 37.3
+ defaultoverlap allm5 metal5 allm3 metal3 43.3
+ defaultoverlap allm5 metal5 allm4 metal4 49.3
+end

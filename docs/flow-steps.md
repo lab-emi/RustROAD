@@ -14,7 +14,7 @@ RustEDA repository as the reference implementations.
 | `physical-inputs` | `native_physical_inputs.py` | no | no |
 | `bundle-cell-gds` | its GDS merge | no | no |
 | `gds-layer-map` | its layer-map projection | no | no |
-| `rc-profile` | `scripts/build_rc_profile.py --pdk ihp` | no | no |
+| `rc-profile` | `scripts/build_rc_profile.py` (`ihp`, `sky130`, `gf180`) | no | no |
 | `antenna-session` | `native_antenna_groups.py` | no | one `repair-antenna-groups` |
 | `verify-antenna-lineage` | `antenna_session/verify.py` | no | no |
 | `postroute-repair` | `native_postroute.py` (screen order) | no | `rustroad`, `rusteda`, `ruststa` |
@@ -79,14 +79,62 @@ identities), `HEAD` and `workspace.lock`. The v1 schema of the Python helper
 additionally pinned `rc_builder`, the profile script it imported; that record
 is the only difference between the two helpers' `result.json`.
 
+That schema is the Ibex SG13G2/EZ130 recipe and is unchanged. Any other PDK
+profile uses `rusteda.native-physical-inputs.v3`, which names nothing by its
+place in a PDK tree:
+
+```json
+{
+  "schema": "rusteda.native-physical-inputs.v3",
+  "pdk": "sky130A",
+  "library": "sky130_fd_sc_hd",
+  "cell_gds": ["std_gds", "ram_gds"],
+  "layers": ["li1", "mcon", "met1", "via", "met2", "via2", "met3", "via3", "met4", "via4", "met5"],
+  "rc": {"builder": "sky130", "resistance_model": "magic"},
+  "files": {
+    "std_gds": {"path": "...", "sha256": "...", "bytes": 0}, "ram_gds": {},
+    "tech_lef": {}, "layer_map": {},
+    "rules_nom": {}, "magic_tech": {}
+  }
+}
+```
+
+- `cell_gds` lists the keys of the GDS libraries to bundle, in order; every
+  record whose key ends in `_gds` must be listed once (one library or many:
+  cells, then macros).
+- The layer map is `files.layer_map`, the PDK's KLayout LEF/DEF map, projected
+  onto `layers` (bottom to top; a layer is a cut layer when `files.tech_lef`
+  declares it `TYPE CUT`, and must be a routing or cut layer), or
+  `files.gds_map`, a tracked `rustroad.gds-layer-map.v1` that is copied
+  (`layers` is then empty).
+- The RC profile is built from `files.rules_nom`, `files.magic_tech` and, for
+  a table entry with a second Magic file, `files.magic_extract`, by the entry
+  `rc.builder` of `rc-profile` with `rc.resistance_model`; or it is
+  `files.rc_profile`, a tracked nominal `rustroad.rc-profile.v1` whose
+  `technology_lef_sha256` is the digest of `files.tech_lef`, copied (`rc` is
+  then `{}`).
+- No other record is accepted. The built profile must name exactly the pinned
+  files as its sources (`RC profile sources differ` otherwise), so a file is
+  identified by its bytes and not by its name.
+
+The directory holds `combined-cells.gds`, `gds-inputs.json`, `gds-map.json`,
+`rc-nom.json` and `result.json` (with `pdk` and `library` after `status`).
+
 The three parts are also commands of their own:
 
 ```sh
 rustroad bundle-cell-gds --gds std.gds --gds ram.gds --out combined.gds
 rustroad gds-layer-map --map sg13g2.map --out gds-map.json
+rustroad gds-layer-map --map sky130A.map --pdk sky130A --library sky130_fd_sc_hd \
+  --technology-lef sky130_fd_sc_hd__nom.tlef --layer li1 --layer mcon --layer met1 \
+  --out gds-map.json
 rustroad rc-profile --corner nom --pdk-root /path/to/IHP-Open-PDK \
   --resistance-model openrcx-pdk --rules IHP_rcx_patterns.rules \
   --technology-lef ez130_sg13g2_tech.lef --out ihp-rc-nom.json
+rustroad rc-profile --pdk sky130 --corner nom --pdk-root / \
+  --rules /pdk/sky130A/libs.tech/openlane/rules.openrcx.sky130A.nom.calibre \
+  --technology-lef /pdk/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef \
+  --magic /pdk/sky130A/libs.tech/magic/sky130A.tech --out sky130-rc-nom.json
 ```
 
 - `bundle-cell-gds` copies every structure (`BGNSTR`..`ENDSTR`) byte for
@@ -97,19 +145,42 @@ rustroad rc-profile --corner nom --pdk-root /path/to/IHP-Open-PDK \
   `output`, `structures`, `records`, `scope`.
 - `gds-layer-map` projects a KLayout LEF/DEF layer map (`<layer> <purposes>
   <gds layer> <datatype>`) onto `rustroad.gds-layer-map.v1`: per LEF layer
-  the pairs of its `NET`, `SPNET`, `VIA` and `PIN` purposes, the `NAME
-  <layer>/PIN` label pair and the source lines; a layer whose name contains
-  `Via` keeps only `VIA`; `DIEAREA` gives the boundary. `--layer` (repeatable)
-  selects the layers; the default is the IHP SG13G2 stack Metal1..TopMetal2.
+  the pairs of its `NET`, `SPNET`, `VIA` and `PIN` purposes, the label pair
+  and the source lines; a cut layer keeps only `VIA`; `DIEAREA` gives the
+  boundary. `--layer` (repeatable) selects the layers. Two forms exist.
+  Without `--technology-lef` the projection is the IHP recipe's, unchanged:
+  the default layers are the SG13G2 stack Metal1..TopMetal2, a layer whose
+  name contains `Via` is a cut layer, the label row is `NAME <layer>/PIN`,
+  every row that names the layer is cited, and the source is called
+  `ihp_map`. With `--technology-lef` (and `--layer`) a layer is a cut layer
+  when the LEF declares it `TYPE CUT` (SKY130's `mcon`, `via`, `via2`), the
+  label row is a `NAME` row that lists `<layer>/LABEL` or `<layer>/PIN`
+  (both PDKs write `NAME <layer>/LABEL[,<layer>/LEFPIN]`), only the rows an
+  entry was read from are cited, a cut entry has `lef`, `kind`, `via` and
+  `cite` only, and the source is called `klayout_map`. That is the form of
+  the tracked `fixtures/pdk/sky130-gds-map.json` and `gf180-gds-map.json`:
+  for the maps of the two PDK trees (SHA-256 `80a0e06e...` and
+  `ac49b08c...`) the projection gives the same `layers` and `boundary`
+  values, layer for layer and line for line. The tracked files differ in what
+  the projection does not read: they also cite the Magic technology file
+  (`sources[1]` and a second `cite` entry per layer), carry `notes`, and
+  record the map's path on the machine that wrote them.
 - `rc-profile` builds a `rustroad.rc-profile.v1` profile from the PDK data
-  files only ([extraction.md](extraction.md) describes the model). It is the
-  IHP path of `scripts/build_rc_profile.py`, value for value: `--corner`
-  `min|nom|max`, `--resistance-model` `magic|openrcx-pdk`, optional `--rules`
-  and `--technology-lef` overrides. Only `--pdk ihp` is built natively: the
-  SKY130 and GF180 profiles in `fixtures/pdk` are still produced by the
-  script, because their PDK data was not available to check the port against.
-  The profile's `generator` field keeps the script's name, so a profile has
-  the same bytes whichever implementation wrote it.
+  files only ([extraction.md](extraction.md) describes the model). It is
+  `scripts/build_rc_profile.py`, value for value: `--pdk ihp|sky130|gf180`
+  selects the table entry (the files below `--pdk-root`, the routing layers,
+  the Magic types and planes, the contact type of each cut, whether the
+  technology LEF's RC statements are valid cross-check data), `--corner`
+  `min|nom|max`, `--resistance-model` `magic|openrcx-pdk` (the latter for
+  `ihp` only, as in the script). `--rules`, `--technology-lef`, `--magic`
+  and, for `ihp`, `--magic-extract` replace the entry's files; given as
+  absolute paths they make `--pdk-root` irrelevant, which is how a flow
+  passes its pinned files (the SKY130 tree of open_pdks 1.0.471 keeps the
+  rules under `libs.tech/openlane`, not `libs.tech/librelane`). The profile's
+  `generator` field keeps the script's name, so a profile has the same bytes
+  whichever implementation wrote it. The tests compare all three entries at
+  all three corners with profiles the script wrote for synthetic PDK trees
+  (`tests/fixtures/steps/generate.py`, `generate_pdk_profiles.py`).
 
 ## `antenna-session`: one grouped repair session and its lineage
 
@@ -220,7 +291,15 @@ Python pins:
   (`std_tt`, `ram_tt`, `std_ss`, `ram_ss`, `sdc`), `tools` (`rustroad`,
   `rusteda`, `ruststa`), `policy` (`near_limit_ratio`, `target_ratio`,
   `max_rounds` <= 3, `max_resizes` <= 1024), `limits` (`threads`,
-  `deadline_seconds`).
+  `deadline_seconds`);
+- optionally `profile`, the PDK identity of a flow that is not the Ibex
+  SG13G2/EZ130 recipe: `pdk` (the label of the equal-width sizing profile),
+  `corners` (exactly two names: the repair policy compares two Liberty
+  corners), `groups` (the Liberty groups, `std` first, then one per macro
+  master: the libraries of a corner are `timing.<group>_<corner>`) and
+  `dbu_per_um` (the database unit of the workspaces, in which the sizing
+  profile gives cell widths). Without it the step uses `ihp-sg13g2`, `tt` and
+  `ss`, `std` and `ram`, and 1000, and writes the files it always wrote.
 
 One command instead of a planning command plus manifest steps: the repair is
 a data-dependent loop of zero to `max_rounds` rebuilds, each of which is

@@ -1,16 +1,18 @@
 //! Build a `rustroad.rc-profile.v1` extraction profile from PDK data files.
 //!
-//! This is the IHP SG13G2 path of `scripts/build_rc_profile.py`, value for
-//! value and byte for byte: the same three PDK data files are read as data
-//! (the OpenRCX calibration table, the Magic technology `extract` section and
-//! the technology LEF), the same arithmetic is done in the same order on IEEE
-//! doubles, and the profile is rendered as `json.dumps(profile, indent=1)`.
-//! The physical model is documented in `docs/extraction.md`; no coefficient
-//! is fitted to an extractor output.
+//! This is `scripts/build_rc_profile.py`, value for value and byte for byte,
+//! for its three table entries (`ihp`, `sky130`, `gf180`): the same PDK data
+//! files are read as data (the OpenRCX calibration table, the Magic technology
+//! `extract` section and the technology LEF), the same arithmetic is done in
+//! the same order on IEEE doubles, and the profile is rendered as
+//! `json.dumps(profile, indent=1)`. The physical model is documented in
+//! `docs/extraction.md`; no coefficient is fitted to an extractor output.
 //!
-//! Only the `ihp` table entry is ported: the SKY130 and GF180 profiles in
-//! `fixtures/pdk` are still produced by the script, whose PDK data this port
-//! was not checked against.
+//! A table entry names the files of one PDK below `pdk_root` and the layer,
+//! Magic type and contact names that tie the three files together. Each file
+//! can also be given explicitly (`Request::rules_override`, `technology_lef`,
+//! `magic`, `magic_extract`): the flow passes its hash-pinned files, wherever
+//! the PDK tree keeps them.
 //!
 //! Caps: 8 MiB per input file.
 use super::text::{float, format_g, is_digits, split, splitlines, strip};
@@ -43,41 +45,64 @@ impl ResistanceModel {
     }
 }
 
+/// The table entries of the builder: `ihp`, `sky130`, `gf180`.
+pub const PDKS: [&str; 3] = ["ihp", "sky130", "gf180"];
+
 /// One profile request. Paths are used as given (joined lexically, as the
 /// script joins them) and recorded in the profile's `sources`.
 #[derive(Clone, Debug)]
 pub struct Request<'a> {
+    /// The table entry: `ihp`, `sky130` or `gf180`.
+    pub pdk: &'a str,
     /// `min`, `nom` or `max`.
     pub corner: &'a str,
-    /// Directory that holds `ihp-sg13g2/`.
+    /// Directory that holds the entry's PDK tree (`ihp-sg13g2/`,
+    /// `sky130/versions/<version>/sky130A/`, `gf180mcu/versions/<version>/gf180mcuD/`).
     pub pdk_root: &'a str,
     pub model: ResistanceModel,
-    /// Calibration table to use instead of the PDK's per-corner Magic rules.
+    /// Calibration table to use instead of the PDK's per-corner rules.
     pub rules_override: Option<&'a str>,
     /// Technology LEF to use instead of the PDK standard-cell technology LEF.
     pub technology_lef: Option<&'a str>,
+    /// Magic technology file to use instead of the entry's.
+    pub magic: Option<&'a str>,
+    /// Second Magic file (the `extract` section) to use instead of the
+    /// entry's; only for an entry that has one (`ihp`).
+    pub magic_extract: Option<&'a str>,
 }
 
 struct Spec {
+    tag: &'static str,
     library: &'static str,
     base: &'static str,
     technology_lef: &'static str,
     rules: [&'static str; 2],
     magic: &'static str,
-    magic_extract: &'static str,
-    routing: [&'static str; 7],
-    cuts: [(&'static str, &'static str); 6],
+    magic_extract: Option<&'static str>,
+    /// Routing layers of the technology LEF, bottom to top.
+    routing: &'static [&'static str],
+    /// The Magic type and plane of each routing layer.
+    magic_types: &'static [&'static str],
+    magic_planes: &'static [&'static str],
+    /// Cut layer and its Magic contact type, bottom to top.
+    cuts: &'static [(&'static str, &'static str)],
+    /// The technology LEF's RC statements are valid cross-check data.
+    lef_rc_valid: bool,
     pdk_version: &'static str,
 }
 
+/// The open_pdks build the SKY130 and GF180 entries name.
+const CIEL_VERSION: &str = "f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7";
+
 const IHP: Spec = Spec {
+    tag: "ihp",
     library: "ez130_8t",
     base: "ihp-sg13g2",
     technology_lef: "libs.ref/sg13g2_stdcell/lef/sg13g2_tech.lef",
     rules: ["libs.tech/librelane/openrcx/ihp-sg13g2.", ".magic.rules"],
     magic: "libs.tech/magic/ihp-sg13g2.tech",
-    magic_extract: "libs.tech/magic/ihp-sg13g2-extract.tech",
-    routing: [
+    magic_extract: Some("libs.tech/magic/ihp-sg13g2-extract.tech"),
+    routing: &[
         "Metal1",
         "Metal2",
         "Metal3",
@@ -86,7 +111,13 @@ const IHP: Spec = Spec {
         "TopMetal1",
         "TopMetal2",
     ],
-    cuts: [
+    magic_types: &[
+        "allm1", "allm2", "allm3", "allm4", "allm5", "allm6", "allm7",
+    ],
+    magic_planes: &[
+        "metal1", "metal2", "metal3", "metal4", "metal5", "metal6", "metal7",
+    ],
+    cuts: &[
         ("Via1", "via1"),
         ("Via2", "via2"),
         ("Via3", "via3"),
@@ -94,14 +125,62 @@ const IHP: Spec = Spec {
         ("TopVia1", "via5"),
         ("TopVia2", "via6"),
     ],
+    lef_rc_valid: true,
     pdk_version: "5cccb161f7492697cfa52eb14dc03beb00bdca9e",
 };
 
-fn magic_type(index: usize) -> String {
-    format!("allm{index}")
-}
-fn magic_plane(index: usize) -> String {
-    format!("metal{index}")
+const SKY130: Spec = Spec {
+    tag: "sky130",
+    library: "sky130_fd_sc_hd",
+    base: "sky130/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/sky130A",
+    technology_lef: "libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef",
+    rules: ["libs.tech/librelane/rules.openrcx.sky130A.", ".calibre"],
+    magic: "libs.tech/magic/sky130A.tech",
+    magic_extract: None,
+    routing: &["li1", "met1", "met2", "met3", "met4", "met5"],
+    magic_types: &["allli", "allm1", "allm2", "allm3", "allm4", "allm5"],
+    magic_planes: &["locali", "metal1", "metal2", "metal3", "metal4", "metal5"],
+    cuts: &[
+        ("mcon", "mcon"),
+        ("via", "m2c"),
+        ("via2", "m3c"),
+        ("via3", "via3"),
+        ("via4", "via4"),
+    ],
+    lef_rc_valid: true,
+    pdk_version: CIEL_VERSION,
+};
+
+const GF180: Spec = Spec {
+    tag: "gf180",
+    library: "gf180mcu_fd_sc_mcu7t5v0",
+    base: "gf180mcu/versions/f6eeac7dad085ffcc829ccfd721f7b4ce39edcf7/gf180mcuD",
+    technology_lef: "libs.ref/gf180mcu_fd_sc_mcu7t5v0/techlef/gf180mcu_fd_sc_mcu7t5v0__nom.tlef",
+    rules: ["libs.tech/librelane/rules.openrcx.gf180mcuD.", ""],
+    magic: "libs.tech/magic/gf180mcuD.tech",
+    magic_extract: None,
+    routing: &["Metal1", "Metal2", "Metal3", "Metal4", "Metal5"],
+    magic_types: &["allm1", "allm2", "allm3", "allm4", "allm5"],
+    magic_planes: &["metal1", "metal2", "metal3", "metal4", "metal5"],
+    cuts: &[
+        ("Via1", "m2c"),
+        ("Via2", "m3c"),
+        ("Via3", "via3"),
+        ("Via4", "via4"),
+    ],
+    // The GF180 technology LEF states its parasitic values are placeholders;
+    // they are never read into a profile.
+    lef_rc_valid: false,
+    pdk_version: CIEL_VERSION,
+};
+
+fn spec_of(pdk: &str) -> StepResult<&'static Spec> {
+    match pdk {
+        "ihp" => Ok(&IHP),
+        "sky130" => Ok(&SKY130),
+        "gf180" => Ok(&GF180),
+        _ => Err(bad(format!("unsupported PDK {pdk}"))),
+    }
 }
 
 fn bad(message: impl Into<String>) -> super::StepError {
@@ -599,7 +678,10 @@ fn check_magic_contacts(text: &str, spec: &Spec) -> StepResult<()> {
     }
     for (index, (cut, ctype)) in spec.cuts.iter().enumerate() {
         let canonical = aliases.get(ctype).map_or(*ctype, String::as_str);
-        let want = [magic_plane(index + 1), magic_plane(index + 2)];
+        let want = [
+            spec.magic_planes[index].to_owned(),
+            spec.magic_planes[index + 1].to_owned(),
+        ];
         if residues.get(ctype) != Some(&want) && residues.get(canonical) != Some(&want) {
             return Err(bad(format!(
                 "magic contact {ctype} ({canonical}) does not join ['{}', '{}'] for cut {cut}",
@@ -648,14 +730,16 @@ fn isolated_side(rules: &Rules, metal: i64, over: i64) -> Option<f64> {
 /// Face area capacitance to the substrate and over each lower routing layer
 /// (pF/um^2): Magic nominal values moved to the corner by the table's ratio.
 fn overlap_area(
+    spec: &Spec,
     index: usize,
     rules: &Rules,
     rules_nom: &Rules,
     nominal: &Magic,
 ) -> StepResult<(f64, Vec<Value>)> {
-    let mtype = magic_type(index);
+    let tag = spec.tag;
+    let mtype = spec.magic_types[index - 1];
     let metal = index as i64;
-    let area = nominal.areacap.get(&mtype).copied();
+    let area = nominal.areacap.get(mtype).copied();
     let (sub, sub_nom) = (
         isolated_side(rules, metal, 0),
         isolated_side(rules_nom, metal, 0),
@@ -666,21 +750,21 @@ fn overlap_area(
         sub_nom.filter(|v| *v != 0.0),
     ) else {
         return Err(bad(format!(
-            "ihp: magic nominal area capacitance or substrate row missing for {mtype}"
+            "{tag}: magic nominal area capacitance or substrate row missing for {mtype}"
         )));
     };
     let area_cap = area * (sub / sub_nom) * 1e-6;
     let mut out = Vec::new();
     for lower in 1..index {
-        let lower_type = magic_type(lower);
+        let lower_type = spec.magic_types[lower - 1];
         let ov = nominal
             .overlap
             .iter()
-            .find(|((a, b), _)| *a == mtype && *b == lower_type)
+            .find(|((a, b), _)| a == mtype && b == lower_type)
             .map(|(_, v)| *v)
             .ok_or_else(|| {
                 bad(format!(
-                    "ihp: magic nominal overlap {mtype} over {lower_type} missing"
+                    "{tag}: magic nominal overlap {mtype} over {lower_type} missing"
                 ))
             })?;
         let (Some(plate), Some(plate_nom)) = (
@@ -688,7 +772,7 @@ fn overlap_area(
             isolated_side(rules_nom, metal, lower as i64),
         ) else {
             return Err(bad(format!(
-                "ihp: calibration plate context metal {index} over {lower} missing"
+                "{tag}: calibration plate context metal {index} over {lower} missing"
             )));
         };
         let (ratio, source) = if plate - sub > 0.0 && plate_nom - sub_nom > 0.0 {
@@ -723,8 +807,14 @@ fn overlap_area(
 /// not support, or PDK files that disagree with each other.
 #[allow(clippy::too_many_lines)]
 pub fn build(request: &Request) -> StepResult<Value> {
-    let spec = &IHP;
+    let spec = spec_of(request.pdk)?;
+    let tag = spec.tag;
     let matched = request.model == ResistanceModel::OpenRcxPdk;
+    if matched && tag != "ihp" {
+        return Err(bad(
+            "openrcx-pdk resistance is qualified only for IHP; baseline PDKs use Magic",
+        ));
+    }
     let corner = request.corner;
     let variant = match corner {
         "nom" => "()",
@@ -743,8 +833,15 @@ pub fn build(request: &Request) -> StepResult<Value> {
     let rules_path = request
         .rules_override
         .map_or_else(|| rules_for(corner), pure_path);
-    let magic_path = join(&base, spec.magic);
-    let extract_path = join(&base, spec.magic_extract);
+    let magic_path = join(&base, request.magic.unwrap_or(spec.magic));
+    if request.magic_extract.is_some() && spec.magic_extract.is_none() {
+        return Err(bad(format!(
+            "{tag}: the Magic technology file holds the extract section; no second file is read"
+        )));
+    }
+    let extract_path = spec
+        .magic_extract
+        .map(|path| join(&base, request.magic_extract.unwrap_or(path)));
     let lef_source = load(&lef_path)?;
     let lef = parse_lef(&lef_source.text)?;
     let rules_source = load(&rules_path)?;
@@ -765,27 +862,38 @@ pub fn build(request: &Request) -> StepResult<Value> {
     };
     let rules_nom = parsed_nominal.as_ref().unwrap_or(&rules);
     let magic_source = load(&magic_path)?;
-    let extract_source = load(&extract_path)?;
-    let magic_text = format!("{}\n{}", magic_source.text, extract_source.text);
+    let extract_source = match &extract_path {
+        Some(path) => Some(load(path)?),
+        None => None,
+    };
+    let magic_text = match &extract_source {
+        Some(extract) => format!("{}\n{}", magic_source.text, extract.text),
+        None => magic_source.text.clone(),
+    };
     check_magic_contacts(&magic_text, spec)?;
-    let types: Vec<String> = (1..=7).map(magic_type).collect();
+    let types: Vec<String> = spec.magic_types.iter().map(|t| (*t).to_owned()).collect();
     let cut_types: Vec<&str> = spec.cuts.iter().map(|(_, ctype)| *ctype).collect();
     let magic = parse_magic(&magic_text, variant, &types, &cut_types)?;
     let nominal = parse_magic(&magic_text, "()", &types, &cut_types)?;
-    // The IHP technology LEF carries valid parasitics (cross-check data).
-    if lef.placeholder_parasitics {
-        return Err(bad(
-            "ihp: LEF parasitic validity marker disagrees with the PDK profile table",
-        ));
+    // A technology LEF either carries valid parasitics (cross-check data) or
+    // says that it does not; the table entry states which.
+    if lef.placeholder_parasitics == spec.lef_rc_valid {
+        return Err(bad(format!(
+            "{tag}: LEF parasitic validity marker disagrees with the PDK profile table"
+        )));
     }
     let routing: Vec<&LefLayer> = lef
         .layers
         .iter()
         .filter(|layer| layer.kind.as_deref() == Some("ROUTING"))
         .collect();
-    if !routing.iter().map(|l| l.name.as_str()).eq(spec.routing) {
+    if !routing
+        .iter()
+        .map(|l| l.name.as_str())
+        .eq(spec.routing.iter().copied())
+    {
         return Err(bad(format!(
-            "ihp: routing layer order [{}] differs from profile table",
+            "{tag}: routing layer order [{}] differs from profile table",
             routing
                 .iter()
                 .map(|l| format!("'{}'", l.name))
@@ -795,7 +903,7 @@ pub fn build(request: &Request) -> StepResult<Value> {
     }
     if rules.layer_count != routing.len() as i64 {
         return Err(bad(format!(
-            "ihp: calibration LayerCount {} != {} routing layers",
+            "{tag}: calibration LayerCount {} != {} routing layers",
             rules.layer_count,
             routing.len()
         )));
@@ -819,20 +927,20 @@ pub fn build(request: &Request) -> StepResult<Value> {
         let name = lef_layer.name.as_str();
         let lef_width = lef_layer
             .width
-            .ok_or_else(|| bad(format!("ihp: LEF WIDTH missing for {name}")))?;
+            .ok_or_else(|| bad(format!("{tag}: LEF WIDTH missing for {name}")))?;
         let width = match rules.widths.get(&metal) {
             Some(width) if (width - lef_width).abs() <= 1e-9 => *width,
             other => {
                 return Err(bad(format!(
-                    "ihp: calibration width for {name} ({}) != LEF WIDTH {lef_width}",
+                    "{tag}: calibration width for {name} ({}) != LEF WIDTH {lef_width}",
                     other.map_or("None".into(), |w| w.to_string())
                 )));
             }
         };
-        let mtype = magic_type(index);
-        let sheet = *magic.resist.get(&mtype).ok_or_else(|| {
+        let mtype = spec.magic_types[position];
+        let sheet = *magic.resist.get(mtype).ok_or_else(|| {
             bad(format!(
-                "ihp: magic sheet resistance missing for {mtype} {variant}"
+                "{tag}: magic sheet resistance missing for {mtype} {variant}"
             ))
         })?;
         let mut sheet_ohm = sheet / 1000.0;
@@ -845,13 +953,13 @@ pub fn build(request: &Request) -> StepResult<Value> {
                 })
                 .ok_or_else(|| {
                     bad(format!(
-                        "ihp: invalid/missing RESOVER0 resistance for metal {index}"
+                        "{tag}: invalid/missing RESOVER0 resistance for metal {index}"
                     ))
                 })?;
             if resistance.iter().any(|v| (v - resistance[0]).abs() > 1e-15) {
-                return Err(bad(
-                    "ihp: context-dependent RESOVER resistance is not supported",
-                ));
+                return Err(bad(format!(
+                    "{tag}: context-dependent RESOVER resistance is not supported"
+                )));
             }
             sheet_ohm = resistance[0] * 1000.0 * width;
         }
@@ -866,8 +974,8 @@ pub fn build(request: &Request) -> StepResult<Value> {
             .iter()
             .find(|(over, under, _)| *over == 0 && under.is_none())
             .map(|(_, _, rows)| *rows)
-            .ok_or_else(|| bad(format!("ihp: no OVER 0 calibration context for {name}")))?;
-        let (area_cap, overlap) = overlap_area(index, &rules, rules_nom, &nominal)?;
+            .ok_or_else(|| bad(format!("{tag}: no OVER 0 calibration context for {name}")))?;
+        let (area_cap, overlap) = overlap_area(spec, index, &rules, rules_nom, &nominal)?;
         let rendered: Vec<Value> = contexts
             .iter()
             .map(|(over, under, rows)| {
@@ -908,21 +1016,22 @@ pub fn build(request: &Request) -> StepResult<Value> {
             check.insert("magic_relative_difference", rel(sheet_ohm, sheet / 1000.0));
         }
         if let (Some(area), Some(perimeter)) =
-            (magic.areacap.get(&mtype), magic.perimeter.get(&mtype))
+            (magic.areacap.get(mtype), magic.perimeter.get(mtype))
         {
             let m_iso = (area * width + 2.0 * perimeter) * 1e-6;
             check.insert("magic_isolated_ground_pf_per_um", m_iso);
             check.insert("isolated_ground_relative_difference", rel(isolated, m_iso));
         }
-        if let Some(side) = magic.sidewall.get(&mtype) {
+        if let Some(side) = magic.sidewall.get(mtype) {
             let m_cc = side[0] / (s0 + side[1]) * 1e-6;
             check.insert("magic_coupling_at_min_spacing_pf_per_um", m_cc);
             check.insert("coupling_relative_difference", rel(cc0, m_cc));
         }
-        if let Some(rpersq) = lef_layer.rpersq {
-            let nominal_sheet = nominal.resist.get(&mtype).ok_or_else(|| {
+        // LEF RC statements are read only where the PDK states they are valid.
+        if let Some(rpersq) = lef_layer.rpersq.filter(|_| spec.lef_rc_valid) {
+            let nominal_sheet = nominal.resist.get(mtype).ok_or_else(|| {
                 bad(format!(
-                    "ihp: magic nominal sheet resistance missing for {mtype}"
+                    "{tag}: magic nominal sheet resistance missing for {mtype}"
                 ))
             })?;
             check.insert("lef_rpersq_ohm", rpersq);
@@ -931,7 +1040,9 @@ pub fn build(request: &Request) -> StepResult<Value> {
                 rel(rpersq, nominal_sheet / 1000.0),
             );
         }
-        if let (Some(cpersqdist), Some(edgecap)) = (lef_layer.cpersqdist, lef_layer.edgecap) {
+        if let (Some(cpersqdist), Some(edgecap), true) =
+            (lef_layer.cpersqdist, lef_layer.edgecap, spec.lef_rc_valid)
+        {
             check.insert(
                 "lef_isolated_ground_pf_per_um_nominal",
                 cpersqdist * width + 2.0 * edgecap,
@@ -945,19 +1056,19 @@ pub fn build(request: &Request) -> StepResult<Value> {
     for (index, (cut, ctype)) in spec.cuts.iter().enumerate() {
         let cut_layer = by_name(cut)
             .filter(|layer| layer.kind.as_deref() == Some("CUT"))
-            .ok_or_else(|| bad(format!("ihp: cut layer {cut} missing from LEF")))?;
+            .ok_or_else(|| bad(format!("{tag}: cut layer {cut} missing from LEF")))?;
         let (lower, upper) = (spec.routing[index], spec.routing[index + 1]);
         match (position(lower), position(cut), position(upper)) {
             (Some(l), Some(c), Some(u)) if l < c && c < u => {}
             _ => {
                 return Err(bad(format!(
-                    "ihp: LEF order does not place {cut} between {lower} and {upper}"
+                    "{tag}: LEF order does not place {cut} between {lower} and {upper}"
                 )));
             }
         }
         let mut value = *magic.contact.get(ctype).ok_or_else(|| {
             bad(format!(
-                "ihp: magic contact resistance missing for {ctype} {variant}"
+                "{tag}: magic contact resistance missing for {ctype} {variant}"
             ))
         })?;
         let mut source = format!("magic contact {ctype} {variant}");
@@ -965,7 +1076,7 @@ pub fn build(request: &Request) -> StepResult<Value> {
         let nominal_contact = || {
             nominal.contact.get(ctype).copied().ok_or_else(|| {
                 bad(format!(
-                    "ihp: magic nominal contact resistance missing for {ctype}"
+                    "{tag}: magic nominal contact resistance missing for {ctype}"
                 ))
             })
         };
@@ -996,7 +1107,11 @@ pub fn build(request: &Request) -> StepResult<Value> {
             let lef_cut = cut_layer
                 .resistance
                 .filter(|r| 0.0 < *r && *r < f64::INFINITY)
-                .ok_or_else(|| bad(format!("ihp: LEF cut resistance absent/invalid for {cut}")))?;
+                .ok_or_else(|| {
+                    bad(format!(
+                        "{tag}: LEF cut resistance absent/invalid for {cut}"
+                    ))
+                })?;
             value = lef_cut * 1000.0;
             source =
                 format!("original technology LEF LAYER {cut} RESISTANCE (fixed across RC corners)");
@@ -1007,7 +1122,7 @@ pub fn build(request: &Request) -> StepResult<Value> {
             .with("upper", upper)
             .with("resistance_ohm_per_cut", value / 1000.0)
             .with("source", source);
-        if let Some(resistance) = cut_layer.resistance {
+        if let Some(resistance) = cut_layer.resistance.filter(|_| spec.lef_rc_valid) {
             entry.insert("lef_resistance_ohm_nominal", resistance);
         }
         cuts.push(Value::Dict(entry));
@@ -1016,8 +1131,10 @@ pub fn build(request: &Request) -> StepResult<Value> {
         fingerprint("capacitance_calibration_table", &rules_path, &rules_source),
         fingerprint("resistance_and_crosscheck_tech", &magic_path, &magic_source),
         fingerprint("technology_lef", &lef_path, &lef_source),
-        fingerprint("resistance_extract_tech", &extract_path, &extract_source),
     ];
+    if let (Some(path), Some(source)) = (&extract_path, &extract_source) {
+        sources.push(fingerprint("resistance_extract_tech", path, source));
+    }
     if let Some(source) = &nominal_source {
         sources.push(fingerprint(
             "nominal_calibration_table_for_overlap_corner_ratio",
@@ -1069,7 +1186,10 @@ pub fn build(request: &Request) -> StepResult<Value> {
                 )
                 .with(
                     "independent_cross_check",
-                    format!("{magic_path} and {extract_path}: Magic sheet/contact values"),
+                    format!(
+                        "{magic_path} and {}: Magic sheet/contact values",
+                        extract_path.as_deref().unwrap_or("None")
+                    ),
                 )
                 .with(
                     "matching_scope",
@@ -1080,7 +1200,7 @@ pub fn build(request: &Request) -> StepResult<Value> {
     Ok(Value::Dict(
         Dict::new()
             .with("schema", "rustroad.rc-profile.v1")
-            .with("pdk", "ihp")
+            .with("pdk", tag)
             .with("library", spec.library)
             .with("corner", corner)
             .with("pdk_version", spec.pdk_version)
@@ -1097,8 +1217,10 @@ pub fn build(request: &Request) -> StepResult<Value> {
                 "lef_parasitics",
                 if matched {
                     "cut_resistance_used; routing_RC_is_cross_check_only"
-                } else {
+                } else if spec.lef_rc_valid {
                     "cross_check_only"
+                } else {
+                    "placeholder_excluded"
                 },
             )
             .with("sources", list(sources))
