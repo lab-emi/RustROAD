@@ -96,6 +96,32 @@ impl Config {
     }
 }
 
+/// True when `wire` lies within `spacing` of an opposite-polarity wire of
+/// `others` on its layer: the test of the final collection spacing check.
+fn near_opposite(wire: &SupplyWire, others: &[SupplyWire], spacing: i64) -> Result<bool> {
+    let a = wire_bounds(wire).map_err(|e| invalid(e.to_string()))?;
+    for other in others {
+        if other.layer != wire.layer || other.polarity == wire.polarity {
+            continue;
+        }
+        let b = wire_bounds(other).map_err(|e| invalid(e.to_string()))?;
+        let grown = |v: i64, d: i64| {
+            v.checked_add(d)
+                .ok_or_else(|| invalid("macro spacing overflow"))
+        };
+        let expanded = Rect {
+            lx: grown(b.lx, -spacing)?,
+            ly: grown(b.ly, -spacing)?,
+            ux: grown(b.ux, spacing)?,
+            uy: grown(b.uy, spacing)?,
+        };
+        if rustroad_core::fixed::overlaps(a, expanded) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) fn collect(
     design: &Design,
     bundle: &PhysicalBundle,
@@ -162,6 +188,9 @@ pub(crate) fn collect(
     let mut wires = Vec::new();
     let mut vias = Vec::new();
     let mut work = 0usize;
+    // Access probes are budgeted apart from `work`, which is stored state.
+    let mut probes = 0usize;
+    let collection_spacing = layer.spacing.unwrap_or(0);
     for (i, cell) in design
         .cells
         .iter()
@@ -182,6 +211,7 @@ pub(crate) fn collect(
                 RailPolarity::Ground
             };
             let mut target = None;
+            let mut fallback = None;
             for shape in pin.ports.iter().flatten() {
                 work += 1;
                 if work > 2_000_000 {
@@ -234,11 +264,30 @@ pub(crate) fn collect(
                     .iter()
                     .all(|r| translate(*r, at).is_ok_and(|r| contains(rect, r)))
                 {
-                    target = Some(at);
-                    break;
+                    // The first enclosed access in LEF order is kept unless its
+                    // collector would sit within spacing of an opposite-polarity
+                    // collector already drawn (supply pins whose first shapes
+                    // share a macro edge); later shapes are then tried in order.
+                    fallback.get_or_insert(at);
+                    probes += wires.len();
+                    if probes > 2_000_000 {
+                        return Err(Error::Budget("macro supply access probes".into()));
+                    }
+                    let spine = &supply.wires[spines[&polarity]];
+                    let probe = SupplyWire {
+                        polarity,
+                        layer: cfg.collection_layer.clone(),
+                        width: cfg.wire_width,
+                        start: [spine.start[0], at[1]],
+                        end: at,
+                    };
+                    if !near_opposite(&probe, &wires, collection_spacing)? {
+                        target = Some(at);
+                        break;
+                    }
                 }
             }
-            let at = target.ok_or_else(|| {
+            let at = target.or(fallback).ok_or_else(|| {
                 invalid(format!(
                     "no enclosed macro supply via access on {}.{}",
                     cell.name, pin.name
