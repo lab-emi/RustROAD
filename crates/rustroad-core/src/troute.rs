@@ -3780,12 +3780,12 @@ impl<'a> Router<'a> {
                 let mut search = 0usize;
                 while let Some((priority, Reverse(cost), id)) = heap.pop(&mut self.search) {
                     let close_nodes = self.close_expanded || (pin_weight > 1 && search >= 32_768);
-                    if close_nodes && self.search.is_closed(id) {
-                        continue;
-                    }
-                    let Some(state) = self.search.get(id).filter(|state| state.cost == cost) else {
+                    let Some((state, closed)) = self.search.get_with_closed(id) else {
                         continue;
                     };
+                    if (close_nodes && closed) || state.cost != cost {
+                        continue;
+                    }
                     if tree.contains(&id) {
                         found = Some(id);
                         break;
@@ -3908,11 +3908,7 @@ impl<'a> Router<'a> {
                                     let kind = previous.kind as usize;
                                     break !self.via_pad_ok[layer as usize][kind] && run < need;
                                 }
-                                let prev = self
-                                    .search
-                                    .get(cur)
-                                    .ok_or_else(|| invalid("missing routing parent state"))?
-                                    .parent;
+                                let prev = previous.parent;
                                 run += distance(self.graph.point(cur).1, self.graph.point(prev).1)?;
                                 cur = prev;
                                 steps += 1;
@@ -3922,9 +3918,15 @@ impl<'a> Router<'a> {
                             }
                         };
                     for &(next, mv) in nbuf.iter() {
-                        if close_nodes && self.search.is_closed(next) {
-                            continue;
-                        }
+                        let previous_cost = if close_nodes {
+                            match self.search.get_with_closed(next) {
+                                Some((_, true)) => continue,
+                                Some((state, false)) => Some(state.cost),
+                                None => None,
+                            }
+                        } else {
+                            None
+                        };
                         let (nl, q) = self.graph.point(next);
                         if !self.plan.allows_routing_layer(nl) {
                             continue;
@@ -3966,11 +3968,14 @@ impl<'a> Router<'a> {
                         {
                             step = step.saturating_add(self.bend_cost);
                         }
-                        if self
-                            .search
-                            .get(next)
-                            .is_some_and(|s| s.cost <= cost.saturating_add(step))
-                        {
+                        // No search record changes while this move's costs and
+                        // geometry are checked.
+                        let previous_cost = if close_nodes {
+                            previous_cost
+                        } else {
+                            self.search.get(next).map(|state| state.cost)
+                        };
+                        if previous_cost.is_some_and(|old| old <= cost.saturating_add(step)) {
                             continue;
                         }
                         let jump = if matches!(mv, Move::Along) {
@@ -4066,7 +4071,7 @@ impl<'a> Router<'a> {
                             );
                         }
                         let base = cost.saturating_add(step);
-                        if self.search.get(next).is_some_and(|s| s.cost <= base) {
+                        if previous_cost.is_some_and(|old| old <= base) {
                             continue;
                         }
                         let (kind, extra) = match mv {
@@ -4271,7 +4276,7 @@ impl<'a> Router<'a> {
                             }
                         };
                         let nc = base.saturating_add(extra);
-                        if self.search.get(next).is_some_and(|s| s.cost <= nc) {
+                        if previous_cost.is_some_and(|old| old <= nc) {
                             continue;
                         }
                         self.search.set(

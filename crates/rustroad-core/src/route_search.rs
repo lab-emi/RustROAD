@@ -328,8 +328,8 @@ impl Search {
     pub fn get(&self, id: u32) -> Option<State> {
         self.current(id).map(|r| r.state)
     }
-    pub fn is_closed(&self, id: u32) -> bool {
-        self.current(id).is_some_and(Tagged::closed)
+    pub(crate) fn get_with_closed(&self, id: u32) -> Option<(State, bool)> {
+        self.current(id).map(|r| (r.state, r.closed()))
     }
     pub fn close(&mut self, id: u32) {
         if let Some(r) = self.current_mut(id) {
@@ -783,8 +783,10 @@ mod tests {
                     reference.get(&id).map(|r| r.0)
                 );
                 assert_eq!(
-                    search.is_closed(id),
-                    reference.get(&id).is_some_and(|r| r.1)
+                    search
+                        .get_with_closed(id)
+                        .map(|(s, closed)| (s.cost, closed)),
+                    reference.get(&id).map(|r| (r.0, r.1))
                 );
                 assert_eq!(search.position(id), reference.get(&id).and_then(|r| r.2));
                 assert_eq!(search.current_count(), reference.len());
