@@ -249,8 +249,14 @@ pub(crate) fn build(
     let mut full = rails.clone();
     full.row_rails
         .retain(|r| r.x_start == design.core_area.lx && r.x_end == design.core_area.ux);
+    let supply_region = Rect {
+        lx: integer(
+            i128::from(design.die_area.lx) + i128::from(cfg.supply_left_inset.unwrap_or(0)),
+        )?,
+        ..design.die_area
+    };
     let mut out = build_supply_grid(
-        design.die_area,
+        supply_region,
         design.core_area,
         grid,
         &full,

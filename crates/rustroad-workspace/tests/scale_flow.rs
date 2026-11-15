@@ -111,6 +111,7 @@ fn config() -> PhysicalConfig {
         io_spacing: None,
         strap_width: None,
         strap_spacing: None,
+        supply_left_inset: None,
         max_added_cells: 512,
         max_tie_fanout: 8,
         tap: None,

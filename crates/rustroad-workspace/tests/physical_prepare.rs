@@ -99,6 +99,7 @@ fn config() -> PhysicalConfig {
         io_spacing: None,
         strap_width: None,
         strap_spacing: None,
+        supply_left_inset: None,
         max_added_cells: 64,
         max_tie_fanout: 8,
         tap: None,
@@ -235,12 +236,13 @@ fn clock_fixture(max_buffers: usize) -> Fixture {
 }
 
 #[test]
-fn supply_stack_keeps_original_vias_and_enclosed_intermediate_metal() {
+fn inset_supply_stack_keeps_original_vias_and_enclosed_intermediate_metal() {
     // Three logic cells and two rows; <1 MiB including the workspace.
     let mut cfg = config();
     cfg.strap_layer = "M3".into();
     cfg.io_layer = "M2".into();
     cfg.rail_via_stack = vec!["V12".into(), "V23".into()];
+    cfg.supply_left_inset = Some(1000);
     let f = Fixture::new(LOGIC, &cfg);
     let via = "LAYER V2 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V2\nVIA V23 DEFAULT\nLAYER M2 ; RECT -0.05 -0.05 0.05 0.05 ;\nLAYER V2 ; RECT -0.03 -0.03 0.03 0.03 ;\nLAYER M3 ; RECT -0.05 -0.05 0.05 0.05 ; END V23\nEND LIBRARY";
     fs::write(
@@ -262,6 +264,7 @@ fn supply_stack_keeps_original_vias_and_enclosed_intermediate_metal() {
         .supply;
     assert!(supply.vias.iter().any(|v| v.name == "V12"));
     assert!(supply.vias.iter().any(|v| v.name == "V23"));
+    assert_eq!(supply.vias.iter().map(|v| v.at[0]).min(), Some(1100));
     for v in &supply.vias {
         assert!(
             supply

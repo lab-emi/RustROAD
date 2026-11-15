@@ -141,6 +141,10 @@ pub struct PhysicalConfig {
     pub strap_width: Option<i64>,
     #[serde(default)]
     pub strap_spacing: Option<i64>,
+    /// Distance from the west die edge to the supply region, in DBU.
+    /// Reserves room for signal pads on intermediate via-stack layers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supply_left_inset: Option<i64>,
     #[serde(default = "default_added")]
     pub max_added_cells: usize,
     #[serde(default = "default_fanout")]
@@ -453,6 +457,9 @@ impl PhysicalConfig {
             || self.strap_spacing.is_some_and(|v| v < 0)
         {
             return Err(Error::Invalid("invalid physical width/spacing".into()));
+        }
+        if self.supply_left_inset.is_some_and(|inset| inset < 0) {
+            return Err(Error::Invalid("negative left supply inset".into()));
         }
         let mut power = HashSet::new();
         power.insert(self.power_pin.as_str());
