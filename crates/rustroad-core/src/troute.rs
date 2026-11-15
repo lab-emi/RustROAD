@@ -5991,9 +5991,8 @@ pub(crate) fn route_with_prior(
                     })?;
                 }
             }
-            if r.protected.take().is_some()
-                && matches!(outcome, Outcome::Failed(_) | Outcome::Limited(_))
-            {
+            let protected = r.protected.take();
+            if protected.is_some() && matches!(outcome, Outcome::Failed(_) | Outcome::Limited(_)) {
                 // Yielding walled the net in: route it as before.
                 if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
                     eprintln!("[troute] yield walls in net {net}, dropped");
@@ -6116,6 +6115,7 @@ pub(crate) fn route_with_prior(
                     {
                         let movable = |v| {
                             v != net
+                                && protected != Some(v)
                                 && rips.get(&v).copied().unwrap_or(0) < r.plan.max_ripups_per_net
                                 && groups.get(&v).is_some_and(|terminals| {
                                     terminals.len() <= ATOMIC_REPAIR_MAX_TERMINALS
