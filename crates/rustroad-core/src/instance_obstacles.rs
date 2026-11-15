@@ -155,19 +155,22 @@ impl InstanceObstacles {
             .get(ordinal)
             .ok_or_else(|| invalid("instance shape ordinal"))?;
         let shape = &master.layers[&layer][local].1;
+        self.placed_shape(cell, master.height, shape)
+    }
+
+    fn placed_shape(
+        &self,
+        cell: &ObstacleInstance,
+        height: i64,
+        shape: &TemplateObstacle,
+    ) -> Result<(Blockage, Option<u32>)> {
         let pin = shape.pin.map(|p| (cell.pin_start + p) as usize);
         let net = pin.map(|p| self.pin_nets[p]).filter(|&n| n != NO_NET);
         let owner = pin.and_then(|p| self.pin_ids.as_ref().map(|ids| ids[p]));
         Ok((
             Blockage {
-                layer,
-                rect: transform_rect(
-                    shape.rect,
-                    cell.at[0],
-                    cell.at[1],
-                    master.height,
-                    cell.orientation,
-                )?,
+                layer: shape.layer,
+                rect: transform_rect(shape.rect, cell.at[0], cell.at[1], height, cell.orientation)?,
                 net,
             },
             owner,
@@ -187,9 +190,9 @@ impl InstanceObstacles {
             .ok_or_else(|| invalid("instance shape owner"))?;
         let master = &self.templates[cell.template as usize];
         if let Some(shapes) = master.layers.get(&layer) {
-            for &(ordinal, _) in shapes {
-                let (shape, pin) = self.shape(instance, ordinal)?;
-                if !visitor(ordinal, shape, pin)? {
+            for (ordinal, template) in shapes {
+                let (shape, pin) = self.placed_shape(cell, master.height, template)?;
+                if !visitor(*ordinal, shape, pin)? {
                     return Ok(false);
                 }
             }
@@ -238,7 +241,7 @@ impl InstanceObstacles {
                     && i128::from(r.ly) < uy
                     && ly < i128::from(r.uy)
                 {
-                    let (shape, pin) = self.shape(instance, ordinal)?;
+                    let (shape, pin) = self.placed_shape(cell, master.height, shape)?;
                     if !visitor(ordinal, shape, pin)? {
                         return Ok(false);
                     }

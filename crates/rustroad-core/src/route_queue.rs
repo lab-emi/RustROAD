@@ -43,7 +43,6 @@ impl Pending {
             .map_err(|_| budget("routing frontier allocation"))?;
         let at = self.heap.len();
         self.heap.push(key);
-        search.set_position(key.2, Some(at));
         self.up(at, search);
         Ok(())
     }
@@ -54,28 +53,28 @@ impl Pending {
         search.set_position(first.2, None);
         if !self.heap.is_empty() {
             self.heap[0] = last;
-            search.set_position(last.2, Some(0));
             self.down(0, search);
         }
         Some(first)
     }
 
-    fn swap(&mut self, a: usize, b: usize, search: &mut Search) {
-        self.heap.swap(a, b);
-        search.set_position(self.heap[a].2, Some(a));
-        search.set_position(self.heap[b].2, Some(b));
-    }
     fn up(&mut self, mut at: usize, search: &mut Search) {
+        let key = self.heap[at];
         while at > 0 {
             let parent = (at - 1) / 2;
-            if self.heap[parent] <= self.heap[at] {
+            let entry = self.heap[parent];
+            if entry <= key {
                 break;
             }
-            self.swap(at, parent, search);
+            self.heap[at] = entry;
+            search.set_position(entry.2, Some(at));
             at = parent;
         }
+        self.heap[at] = key;
+        search.set_position(key.2, Some(at));
     }
     fn down(&mut self, mut at: usize, search: &mut Search) {
+        let key = self.heap[at];
         while let Some(left) = at
             .checked_mul(2)
             .and_then(|n| n.checked_add(1))
@@ -87,12 +86,16 @@ impl Pending {
             } else {
                 left
             };
-            if self.heap[at] <= self.heap[child] {
+            let entry = self.heap[child];
+            if key <= entry {
                 break;
             }
-            self.swap(at, child, search);
+            self.heap[at] = entry;
+            search.set_position(entry.2, Some(at));
             at = child;
         }
+        self.heap[at] = key;
+        search.set_position(key.2, Some(at));
     }
 }
 
