@@ -33,6 +33,8 @@
 mod cycle_repair;
 #[path = "route_owner_repair.rs"]
 mod owner_repair;
+#[path = "prior_escape.rs"]
+mod prior_escape;
 #[path = "route_replay.rs"]
 pub(crate) mod replay;
 #[path = "route_straighten.rs"]
@@ -109,6 +111,8 @@ struct AccessPass<'p, 'a> {
     windows: &'p [Rect],
     /// Net members for access preferences (empty: cheapest tops only).
     by_net: &'p HashMap<u32, Vec<usize>, BuildFx>,
+    /// Escapes kept live from an earlier stage of pin access.
+    retained_records: usize,
     started: std::time::Instant,
 }
 
@@ -2509,6 +2513,14 @@ impl<'a> Router<'a> {
 
     /// Conflict-aware escapes for every terminal of a routed net.
     fn reserve(&mut self, terminals: &[&'a Terminal]) -> Result<HashMap<u32, Plan>> {
+        self.reserve_after(terminals, 0)
+    }
+
+    fn reserve_after(
+        &mut self,
+        terminals: &[&'a Terminal],
+        retained_records: usize,
+    ) -> Result<HashMap<u32, Plan>> {
         let started = std::time::Instant::now();
         let mut tables = BTreeMap::new();
         // Most constrained first: fewest start candidates, then pin index.
@@ -2568,6 +2580,7 @@ impl<'a> Router<'a> {
             order: &order,
             windows: &windows,
             by_net: &by_net,
+            retained_records,
             started,
         };
         let Some(failure) = self.reserve_pass(&pass, &mut tables, &mut window_index, &mut plans)?
@@ -2652,6 +2665,7 @@ impl<'a> Router<'a> {
             terminals,
             windows,
             by_net,
+            retained_records,
             started,
             ..
         } = *pass;
@@ -2660,7 +2674,7 @@ impl<'a> Router<'a> {
         // the cheapest top from then on, so a repair cannot be re-blocked by
         // the same nearer-to-the-net top of a neighbour on every attempt.
         let mut unhinted: HashSet<usize, BuildFx> = HashSet::with_hasher(BuildFx);
-        let mut plan_records = 0usize;
+        let mut plan_records = retained_records;
         let mut owner: BTreeMap<u32, usize> = BTreeMap::new();
         let mut attempts = vec![0usize; terminals.len()];
         // Landing footprints of the pins a failed terminal displaced. Its
@@ -5463,6 +5477,9 @@ fn terminal_groups(input: &RouteInput) -> Result<BTreeMap<u32, Vec<&Terminal>>> 
 #[derive(Clone, Debug, Default)]
 pub struct PriorRoutes {
     pub nets: BTreeMap<u32, (Vec<Wire>, Vec<Via>)>,
+    /// Exact added diode pin IDs to delay until unchanged routes are reserved.
+    /// Empty selects ordinary pin access.
+    pub preserve_escape_pins: BTreeSet<u32>,
 }
 
 /// Track routing that first keeps every prior net whose geometry still
@@ -5515,7 +5532,30 @@ pub(crate) fn route_with_prior(
     r.guard("setup")?;
     trace("spatial index", t0, format_args!("work {}", r.spatial.work));
     let all: Vec<&Terminal> = groups.values().flatten().copied().collect();
-    let mut plans = r.reserve(&all)?;
+    let mut plans = if let Some(prior) = prior.filter(|p| !p.preserve_escape_pins.is_empty()) {
+        match prior_escape::reserve(&mut r, &groups, &all, prior, estimate.total()) {
+            Ok(plans) => plans,
+            Err(error @ crate::Error::PinAccess { .. }) => {
+                eprintln!(
+                    "[troute] prior escape preservation fell back to ordinary access: {error}"
+                );
+                let (work, expansions, retries) = (r.spatial.work, r.expansions, r.access_retries);
+                // A failed reservation may retain partial shapes. Rebuild the
+                // entire index before spending the remaining work allowance.
+                drop(r);
+                let graph = Graph::new(input, plan, limits)?;
+                let cells = Cells::new(input.die, plan.gcell)?;
+                r = Router::prepared(input, limits, graph, cells)?;
+                prior_escape::charge(&mut r, work)?;
+                r.expansions = expansions;
+                r.access_retries = retries.saturating_add(1);
+                r.reserve(&all)?
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        r.reserve(&all)?
+    };
     r.guard("pin access")?;
     trace(
         "access",
@@ -7643,6 +7683,49 @@ mod tests {
             assert_eq!(key(&replay, net), key(&batched, net), "batched net {net}");
         }
         assert!(crate::route_batches::route_with_prior(&design, &limits, 2, Some(&own)).is_err());
+    }
+
+    #[test]
+    fn staged_prior_escape_finishes_with_the_ordinary_router() {
+        let mut design = input(
+            vec![
+                terminal(0, 0, true, rect(130, 130, 150, 150)),
+                terminal(1, 0, false, rect(570, 130, 590, 150)),
+                terminal(2, 1, true, rect(130, 610, 150, 630)),
+                terminal(3, 1, false, rect(570, 610, 590, 630)),
+            ],
+            Vec::new(),
+        );
+        let limits = limits();
+        let previous = route(&design, &limits).unwrap();
+        let mut prior = PriorRoutes::default();
+        for wire in &previous.wires {
+            prior.nets.entry(wire.net).or_default().0.push(wire.clone());
+        }
+        for via in &previous.vias {
+            prior.nets.entry(via.net).or_default().1.push(via.clone());
+        }
+        design
+            .terminals
+            .push(terminal(4, 1, false, rect(370, 690, 390, 710)));
+        let ordinary = route_with_prior(&design, &limits, Some(&prior)).unwrap();
+        prior.preserve_escape_pins.insert(4);
+        let staged = route_with_prior(&design, &limits, Some(&prior)).unwrap();
+        validate(&design, &staged, &limits).unwrap();
+        assert!(staged.access.iter().any(|a| a.pin == 4 && a.net == 1));
+        assert!(staged.stats.comparisons > ordinary.stats.comparisons);
+        assert_eq!(
+            staged
+                .wires
+                .iter()
+                .filter(|w| w.net == 0)
+                .collect::<Vec<_>>(),
+            previous
+                .wires
+                .iter()
+                .filter(|w| w.net == 0)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -11093,6 +11176,7 @@ mod tests {
         }
         let old_length = route_length(&route);
         let prior = case.prior.map(|same| PriorRoutes {
+            preserve_escape_pins: BTreeSet::new(),
             nets: BTreeMap::from([(
                 0,
                 if same {

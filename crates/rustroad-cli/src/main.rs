@@ -135,6 +135,9 @@ enum Command {
         /// Typed ECO plan permitting the router to check prior geometry on diode nets.
         #[arg(long, requires = "prior_workspace")]
         prior_diode_plan: Option<PathBuf>,
+        /// Reserve unchanged prior routes while planning new diode escapes.
+        #[arg(long, requires = "prior_diode_plan")]
+        preserve_prior_escapes: bool,
     },
     /// Read-only diagnostic: geometric cleanup on a `RUSTROAD_RULE_DUMP` file.
     CleanupReplay {
@@ -895,6 +898,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             prior_workspace,
             prior_rev,
             prior_diode_plan,
+            preserve_prior_escapes,
         } => {
             let prior = prior_workspace
                 .as_deref()
@@ -903,7 +907,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     workspace: w,
                     revision: r,
                 });
-            emit(&rustroad_workspace::routing::route_eco_with_plan(
+            emit(&rustroad_workspace::routing::route_eco_with_options(
                 &workspace,
                 &base_rev,
                 &config,
@@ -913,7 +917,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     rustroad_workspace::routing::RouteScope::All
                 },
                 prior.as_ref(),
-                prior_diode_plan.as_deref(),
+                rustroad_workspace::routing::PriorDiodeOptions {
+                    plan: prior_diode_plan.as_deref(),
+                    preserve_escapes: preserve_prior_escapes,
+                },
                 &limits,
             )?)
         }
