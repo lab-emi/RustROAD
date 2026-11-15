@@ -1816,6 +1816,84 @@ fn grouped_repair_refuses_conflicts_and_invalid_or_existing_outputs() {
 }
 
 #[test]
+fn ranked_group_repair_keeps_declared_order_and_pins_its_model_source() {
+    use rustroad_workspace::antenna::{
+        GroupRepairPlan, InventoryBounds, RankedGroupRepair, antenna_inventory,
+        repair_antenna_groups,
+    };
+    let tech = TECHNOLOGY.replace(
+        "ANTENNADIFFSIDEAREARATIO 400 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+        "ANTENNADIFFSIDEAREARATIO 20 ; ANTENNAGATEPLUSDIFF 15 ; END M2",
+    );
+    let f = routed_with_technology(PLAIN, &tech);
+    let workspace = copy_workspace(&f, "ranked-workspace");
+    let inventory = antenna_inventory(&workspace, &InventoryBounds::default(), &limits()).unwrap();
+    let base = inventory.workspace_revision.clone();
+    let names: Vec<_> = inventory
+        .nets
+        .iter()
+        .map(|entry| entry.canonical_name.clone())
+        .collect();
+    let technology = inventory
+        .sources
+        .iter()
+        .find(|source| source.role == "technology_lef")
+        .unwrap()
+        .sha256
+        .clone();
+    drop(inventory);
+    let profile_path = f.root.join("ranked-model.json");
+    let profile = serde_json::json!({
+        "schema": "rustroad.antenna-cut-area.v1", "dbu_per_micron": 1000,
+        "technology_lef_sha256": technology,
+        "lower_cut": {"layer": "V1", "square_dbu": 60},
+        "upper_cut": {"layer": "V2", "square_dbu": 60},
+        "containment_dbu": 40, "overlap_dbu": 80,
+    });
+    fs::write(&profile_path, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let before = check_antenna(
+        &workspace,
+        &AntennaRequest {
+            selected_nets: Some(names.clone()),
+            cut_area_model: Some(profile_path.clone()),
+            ..AntennaRequest::default()
+        },
+        &limits(),
+    )
+    .unwrap();
+    let source = before.selection.unwrap().source_sha256;
+    let mut groups: Vec<_> = names.into_iter().rev().map(|name| vec![name]).collect();
+    assert!(groups.len() > 1);
+    let mut plan = GroupRepairPlan::new(f.root.join("ranked-groups"));
+    plan.max_rounds = 1;
+    plan.ranked = Some(RankedGroupRepair {
+        groups: groups.clone(),
+        cut_area_model: profile_path,
+        source_sha256: "0".repeat(64),
+        max_planner_work: 45_000_000,
+    });
+    let error = repair_antenna_groups(&workspace, &base, &plan, &limits()).unwrap_err();
+    assert!(error.to_string().contains("STALE_REPORT"));
+    assert!(!plan.output.exists());
+    plan.ranked.as_mut().unwrap().source_sha256 = source;
+    let summary = repair_antenna_groups(&workspace, &base, &plan, &limits()).unwrap();
+    assert_eq!(summary.scope, "selected_supported_nets");
+    assert!(summary.native_analysis_status.starts_with("subset_"));
+    assert!(summary.total_jumpers > 0);
+    for (i, selected) in groups.drain(..).enumerate() {
+        let report: serde_json::Value = serde_json::from_slice(
+            &fs::read(plan.output.join(format!("final-group-{i}.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            report["selection"]["canonical_nets"],
+            serde_json::json!(selected)
+        );
+        assert!(report["scope"]["cut_area_model_sha256"].is_string());
+    }
+}
+
+#[test]
 fn grouped_repair_exact_operation_budget_still_publishes_summary() {
     use rustroad_workspace::antenna::{GroupRepairPlan, repair_antenna_groups};
     let f = routed("module chip(input a, output y); BUF u0(.A(a),.Y(y)); endmodule");

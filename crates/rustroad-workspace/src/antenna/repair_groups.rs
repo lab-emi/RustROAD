@@ -10,8 +10,9 @@ use super::net_index::NetIndex;
 use super::report::SourceDigest;
 use super::{
     AntennaReport, AntennaRequest, InventoryBounds, InventoryReport, NetObservation, Prepared,
-    RepairReport, RepairRequest, RepairScope, RepairSession, check_prepared, inventory,
-    planner_limits, prepare, repair_prepared, source_fingerprint,
+    RepairReport, RepairRequest, RepairScope, RepairSession, check_prepared, cut_area_source,
+    inventory, planner_limits, prepare, prepare_cut_area, repair_prepared, source_fingerprint,
+    validate_selection,
 };
 use crate::{Error, Metadata, Result, SnapshotCaps};
 use rustroad_core::{Limits, Placed, connectivity::PinOwner};
@@ -67,6 +68,21 @@ pub struct GroupRepairPlan {
     /// counts all evaluated rows).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub full_rows: bool,
+    /// A frozen metal-only repair subset, in externally scored group order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ranked: Option<RankedGroupRepair>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RankedGroupRepair {
+    /// Outer order is priority order. Each group contains sorted canonical names.
+    pub groups: Vec<Vec<String>>,
+    pub cut_area_model: PathBuf,
+    /// Source fingerprint of the base check, including the exact model.
+    pub source_sha256: String,
+    /// Planner work limit per attempt; aggregate work remains in the policy.
+    pub max_planner_work: usize,
 }
 impl GroupRepairPlan {
     /// Use the frozen native grouped-runner's round, deadline and budget policy.
@@ -79,6 +95,7 @@ impl GroupRepairPlan {
             deadline_seconds: 1800,
             policy: GroupRepairPolicy::default(),
             full_rows: false,
+            ranked: None,
         }
     }
     fn validate(&self) -> Result<()> {
@@ -96,6 +113,32 @@ impl GroupRepairPlan {
             || !(1..=200_000_000_000).contains(&p.max_cumulative_work)
         {
             return Err(Error::Budget("ANTENNA_GROUP_REPAIR: plan bounds".into()));
+        }
+        if let Some(ranked) = &self.ranked {
+            if ranked.groups.is_empty()
+                || ranked.groups.len() > p.max_groups
+                || ranked.cut_area_model.as_os_str().is_empty()
+                || ranked.source_sha256.len() != 64
+                || !ranked.source_sha256.bytes().all(|b| b.is_ascii_hexdigit())
+                || !(1..=AntennaRequest::default().max_work).contains(&ranked.max_planner_work)
+            {
+                return Err(Error::Budget(
+                    "ANTENNA_GROUP_REPAIR: ranked plan bounds".into(),
+                ));
+            }
+            let mut seen = BTreeSet::new();
+            for group in &ranked.groups {
+                validate_selection(group)?;
+                if group.len() > p.group_names
+                    || group.windows(2).any(|pair| pair[0] >= pair[1])
+                    || group.iter().any(|name| !seen.insert(name))
+                {
+                    return Err(super::fail(
+                        "ANTENNA_GROUP_REPAIR",
+                        "ranked groups require distinct canonical names in sorted groups",
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -280,7 +323,12 @@ struct Session {
     paranoid: bool,
 }
 impl Session {
-    fn open(path: &Path, base_rev: &str, limits: &Limits) -> Result<(Self, Prepared)> {
+    fn open(
+        path: &Path,
+        base_rev: &str,
+        limits: &Limits,
+        ranked: Option<&RankedGroupRepair>,
+    ) -> Result<(Self, Prepared)> {
         let lock = crate::lock(path, false, true)?;
         crate::check_base(base_rev, &crate::head(path)?)?;
         let number = crate::revision_number(base_rev)?;
@@ -314,7 +362,11 @@ impl Session {
         }
         // Preparation depends on static placement/PDN/LEF/config, not signal routes.
         // The selected jumper worker changes only signal routes and revision fields.
-        let prep = prepare(&metadata.design, bundle, &placed, state)?;
+        let mut prep = prepare(&metadata.design, bundle, &placed, state)?;
+        prepare_cut_area(
+            &mut prep,
+            ranked.map(|ranked| ranked.cut_area_model.as_path()),
+        )?;
         let digest = SourceDigest::new(
             &metadata.design,
             &bundle.connectivity,
@@ -323,6 +375,12 @@ impl Session {
             &prep.sources,
         )?;
         let source = digest.fingerprint(&state.routes)?;
+        if ranked.is_some_and(|ranked| ranked.source_sha256 != source) {
+            return Err(super::fail(
+                "STALE_REPORT",
+                "ranked base route or model source differs",
+            ));
+        }
         let paranoid = std::env::var_os("RUSTROAD_ANTENNA_PARANOID").is_some();
         if paranoid
             && source
@@ -365,13 +423,17 @@ impl Session {
             .map(|r| &r.routes)
             .ok_or_else(|| super::fail("NO_ROUTING", "missing routing state"))
     }
-    fn inventory(&self) -> Result<InventoryReport> {
-        inventory::from_prepared(
+    fn inventory(&self, prep: &Prepared) -> Result<InventoryReport> {
+        let mut inventory = inventory::from_prepared(
             &self.metadata,
             &self.placed,
             &InventoryBounds::default(),
             Some(&self.source),
-        )
+        )?;
+        if let Some(model) = cut_area_source(&prep.sources) {
+            inventory.sources.push(model.clone());
+        }
+        Ok(inventory)
     }
     fn check(&self, prep: &Prepared, names: &[String]) -> Result<AntennaReport> {
         let request = AntennaRequest {
@@ -397,6 +459,7 @@ impl Session {
         before: &AntennaReport,
         before_bytes: u64,
         remaining: usize,
+        max_planner_work: Option<usize>,
     ) -> Result<RepairReport> {
         let base = self.metadata.revision.clone();
         let mut result = repair_prepared(
@@ -405,6 +468,7 @@ impl Session {
             &RepairRequest {
                 scope: RepairScope::SelectedSupportedNets(names.to_vec()),
                 max_jumpers: remaining,
+                max_planner_work,
                 ..RepairRequest::default()
             },
             &mut self.metadata,
@@ -531,6 +595,39 @@ fn eligible(report: &AntennaReport, touches: &BTreeSet<String>) -> Vec<String> {
                 .collect()
         })
 }
+
+/// Apply the existing first-violating-layer restriction before spending a
+/// ranked attempt. Keep all rows for evaluation and final coverage.
+fn eligible_ranked(
+    report: &AntennaReport,
+    touches: &BTreeSet<String>,
+    prep: &Prepared,
+) -> Vec<String> {
+    let layers: BTreeMap<&str, usize> = prep
+        .input
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(id, layer)| (layer.name.as_str(), id))
+        .collect();
+    let mut first: BTreeMap<&str, usize> = BTreeMap::new();
+    for row in report.checks.iter().filter(|row| row.violated) {
+        let id = layers[row.layer.as_str()];
+        let existing = first.entry(row.net.as_str()).or_insert(id);
+        if prep.positions[id] < prep.positions[*existing] {
+            *existing = id;
+        }
+    }
+    let upper: BTreeSet<_> = prep.input.vias.iter().map(|via| via.lower).collect();
+    eligible(report, touches)
+        .into_iter()
+        .filter(|net| {
+            first.get(net.as_str()).is_some_and(|&id| {
+                prep.input.layers[id].vertical.is_some() && upper.contains(&(id as u32))
+            })
+        })
+        .collect()
+}
 fn charge(work: &mut usize, add: usize, cap: usize) -> Result<()> {
     *work = work
         .checked_add(add)
@@ -560,9 +657,11 @@ pub fn repair_antenna_groups(
 ) -> Result<GroupRepairSummary> {
     plan.validate()?;
     let started = Instant::now();
-    let (mut session, prep) = Session::open(workspace, base_rev, limits)?;
+    let ranked = plan.ranked.as_ref();
+    let (mut session, prep) = Session::open(workspace, base_rev, limits, ranked)?;
     trace(|| format!("open {:.3}s", started.elapsed().as_secs_f64()));
     let per_work = AntennaRequest::default().max_work;
+    let max_planner_work = ranked.map(|ranked| ranked.max_planner_work);
     let session_limits = planner_limits(
         &session
             .metadata
@@ -573,8 +672,13 @@ pub fn repair_antenna_groups(
             .config
             .limits,
         per_work,
-        RepairRequest::default().max_planner_work,
+        max_planner_work,
     );
+    // The planner's spatial and rule ledgers can each reach the limit.
+    // Preserve the original reservation for an ordinary inventory pass.
+    let planner_bound = 2 * ranked.map_or(per_work, |_| session_limits.max_comparisons);
+    let repair_bound = 2 * per_work + planner_bound;
+    let before_repair_bound = repair_bound + ranked.map_or(0, |_| per_work);
     let mut planner = None;
     fs::create_dir(&plan.output)?;
     let p = &plan.policy;
@@ -588,7 +692,7 @@ pub fn repair_antenna_groups(
         max_count: p.max_commands,
     };
     let tick = Instant::now();
-    let initial = session.inventory()?;
+    let initial = session.inventory(&prep)?;
     output.write("inventory-initial", &initial, false)?;
     let inventory_seconds = tick.elapsed().as_secs_f64();
     let names: Vec<_> = initial
@@ -607,7 +711,29 @@ pub fn repair_antenna_groups(
     let initial_model = super::report::fingerprint(session.model()?)?;
     let model_seconds = tick.elapsed().as_secs_f64();
     let touches = macro_touches(&session)?;
-    let groups: Vec<_> = names.chunks(p.group_names).collect();
+    let groups: Vec<_> = if let Some(ranked) = ranked {
+        if let Some(name) = ranked
+            .groups
+            .iter()
+            .flatten()
+            .find(|name| names.binary_search(name).is_err())
+        {
+            return Err(super::fail(
+                "ANTENNA_SELECTION",
+                format!("ranked net {name} has no routed canonical identity"),
+            ));
+        }
+        ranked.groups.iter().map(Vec::as_slice).collect()
+    } else {
+        names.chunks(p.group_names).collect()
+    };
+    let eligible_group = |report: &AntennaReport| {
+        if ranked.is_some() {
+            eligible_ranked(report, &touches, &prep)
+        } else {
+            eligible(report, &touches)
+        }
+    };
     if groups.len() > p.max_groups {
         return Err(Error::Budget("ANTENNA_GROUP_REPAIR: groups".into()));
     }
@@ -649,7 +775,7 @@ pub fn repair_antenna_groups(
             reported_work += report.stats.work;
             check_seconds = check_seconds.max(tick.elapsed().as_secs_f64());
             checks_total += tick.elapsed().as_secs_f64();
-            let selected = eligible(&report, &touches);
+            let selected = eligible_group(&report);
             drop(report);
             if selected.is_empty() {
                 continue;
@@ -666,7 +792,7 @@ pub fn repair_antenna_groups(
                 stop = Some("jumper_budget");
                 break;
             }
-            if 4 * per_work > p.max_cumulative_work.saturating_sub(work) {
+            if before_repair_bound > p.max_cumulative_work.saturating_sub(work) {
                 stop = Some("work_budget");
                 break;
             }
@@ -676,8 +802,7 @@ pub fn repair_antenna_groups(
             }
             let tick = Instant::now();
             let mut before = session.check(&prep, &selected)?;
-            if eligible(&before, &touches) != selected || violating(&before).len() != selected.len()
-            {
+            if eligible_group(&before) != selected || violating(&before).len() != selected.len() {
                 return Err(super::fail(
                     "ANTENNA_GROUP_REPAIR",
                     "fresh supported obligations changed",
@@ -690,7 +815,7 @@ pub fn repair_antenna_groups(
             )?;
             charge(&mut work, before.stats.work, p.max_cumulative_work)?;
             reported_work += before.stats.work;
-            if 4 * per_work > p.max_cumulative_work.saturating_sub(work) {
+            if repair_bound > p.max_cumulative_work.saturating_sub(work) {
                 return Err(Error::Budget(
                     "ANTENNA_GROUP_REPAIR: repair work admission".into(),
                 ));
@@ -705,6 +830,7 @@ pub fn repair_antenna_groups(
                 &before,
                 before_bytes,
                 p.max_total_jumpers - total_jumpers,
+                max_planner_work,
             )?;
             drop(before);
             repairs_total += repair_tick.elapsed().as_secs_f64();
@@ -725,7 +851,7 @@ pub fn repair_antenna_groups(
                 .ok_or_else(|| {
                     Error::Budget("ANTENNA_GROUP_REPAIR: repair work overflow".into())
                 })?;
-            if repair.stats.antenna_work > per_work || repair.stats.planner_work > 2 * per_work {
+            if repair.stats.antenna_work > per_work || repair.stats.planner_work > planner_bound {
                 return Err(Error::Budget(
                     "ANTENNA_GROUP_REPAIR: repair work bounds".into(),
                 ));
@@ -759,7 +885,7 @@ pub fn repair_antenna_groups(
             started.elapsed().as_secs_f64()
         )
     });
-    let final_inventory = session.inventory()?;
+    let final_inventory = session.inventory(&prep)?;
     if final_inventory.nets != initial.nets
         || final_inventory.excluded_nonlogical_supply_tie_count
             != initial.excluded_nonlogical_supply_tie_count
@@ -790,6 +916,13 @@ pub fn repair_antenna_groups(
         .enumerate()
         .map(|(i, c)| (i * batch, c))
     {
+        if ranked.is_some()
+            && chunk.len().saturating_mul(per_work) > p.max_cumulative_work.saturating_sub(work)
+        {
+            return Err(Error::Budget(
+                "ANTENNA_GROUP_REPAIR: final check window work admission".into(),
+            ));
+        }
         use rayon::prelude::*;
         let reports: Vec<Result<AntennaReport>> = chunk
             .par_iter()
@@ -834,7 +967,11 @@ pub fn repair_antenna_groups(
     let unresolved: Vec<_> = violations.difference(&touches).cloned().collect();
     let summary = GroupRepairSummary {
         schema: "rustroad.antenna-group-repair-result.v2",
-        status: if unresolved.is_empty() {
+        status: if ranked.is_some() && unresolved.is_empty() {
+            "subset_complete"
+        } else if ranked.is_some() {
+            "subset_unresolved"
+        } else if unresolved.is_empty() {
             "complete"
         } else {
             "unresolved"
@@ -844,10 +981,20 @@ pub fn repair_antenna_groups(
         logical_revisions: session.logical as usize,
         committed_revision: committed,
         check_rows: if full_rows { "all" } else { "violated" },
-        scope: "supported_standard_cell_subset",
+        scope: if ranked.is_some() {
+            "selected_supported_nets"
+        } else {
+            "supported_standard_cell_subset"
+        },
         route_scope: "all_signal_nets",
         inventory_status: "complete",
-        native_analysis_status: if partial {
+        native_analysis_status: if ranked.is_some() && partial {
+            "subset_partial"
+        } else if ranked.is_some() && violations.is_empty() {
+            "subset_clean"
+        } else if ranked.is_some() {
+            "subset_violated"
+        } else if partial {
             "partial"
         } else if violations.is_empty() {
             "clean"
