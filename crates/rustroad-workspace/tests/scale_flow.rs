@@ -195,8 +195,7 @@ impl Fixture {
         })?;
         Ok(serde_json::to_value(report).unwrap())
     }
-    /// floorplan -> import -> place -> route; returns the workspace.
-    fn flow(&self, tag: &str, routing: &str) -> rustroad_workspace::Result<PathBuf> {
+    fn placed(&self, tag: &str) -> rustroad_workspace::Result<(PathBuf, String)> {
         self.floorplan(tag)?;
         let ws = self.path(&format!("{tag}-ws"));
         let summary = import_pdk_with_config(
@@ -224,13 +223,12 @@ impl Fixture {
             report.hpwl_dbu,
             report.baseline_hpwl_dbu
         );
-        route(
-            &ws,
-            &placed.revision,
-            &self.path(routing),
-            RouteScope::All,
-            &limits(),
-        )?;
+        Ok((ws, placed.revision))
+    }
+    /// floorplan -> import -> place -> route; returns the workspace.
+    fn flow(&self, tag: &str, routing: &str) -> rustroad_workspace::Result<PathBuf> {
+        let (ws, rev) = self.placed(tag)?;
+        route(&ws, &rev, &self.path(routing), RouteScope::All, &limits())?;
         Ok(ws)
     }
 }
@@ -807,6 +805,28 @@ fn rail_input_ties_are_routed_to_the_cells_own_rail() {
     // Deterministic, and the stored routes re-validate on load.
     let again = f.flow("u", "track.json").unwrap();
     assert_eq!(text, def(&again));
+
+    let prior_rev = fs::read_to_string(ws.join("HEAD")).unwrap();
+    let (eco, eco_placed) = f.placed("eco-ties").unwrap();
+    let reused = rustroad_workspace::routing::route_eco(
+        &eco,
+        &eco_placed,
+        &f.path("track.json"),
+        RouteScope::All,
+        Some(&rustroad_workspace::routing::PriorSource {
+            workspace: &ws,
+            revision: prior_rev.trim(),
+        }),
+        &limits(),
+    )
+    .unwrap();
+    let prior = reused.eco_prior.unwrap();
+    assert!(prior.offered_nets > 0);
+    assert_eq!(prior.prior_routed_nets - prior.offered_nets, 3);
+    assert_eq!((prior.changed_nets, prior.new_nets), (0, 0));
+    let eco_def = def(&eco);
+    assert!(eco_def.contains("- VDD ( b24 A ) + USE POWER\n  + ROUTED"));
+    assert!(eco_def.contains("- VSS ( k0 A ) ( rr_tie_cell_0 A ) + USE GROUND\n  + ROUTED"));
 }
 
 #[test]

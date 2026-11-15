@@ -1663,12 +1663,17 @@ pub fn route(
     route_eco(path, base_rev, config_path, scope, None, limits)
 }
 
-/// Terminals of each net as comparable geometry: (driver, sorted shapes),
-/// sorted. Pin and access-class ids are input-local and are not compared.
+/// Terminals of each named connectivity net as comparable geometry: (driver,
+/// sorted shapes), sorted. Pin and access-class ids are input-local and are
+/// not compared. Rail ties have revision-local route ids and are routed fresh.
 type NetPins = Vec<(bool, Vec<(u32, i64, i64, i64, i64)>)>;
-fn net_pins(input: &RouteInput) -> BTreeMap<u32, NetPins> {
+fn net_pins(input: &RouteInput, connectivity_nets: usize) -> BTreeMap<u32, NetPins> {
     let mut out: BTreeMap<u32, NetPins> = BTreeMap::new();
-    for t in &input.terminals {
+    for t in input
+        .terminals
+        .iter()
+        .filter(|t| (t.net as usize) < connectivity_nets)
+    {
         let mut shapes: Vec<_> = t
             .shapes
             .iter()
@@ -1723,25 +1728,22 @@ fn prior_routes(
     {
         return Err(fail("prior routing uses another layer or via table"));
     }
-    let name_of = |b: &PhysicalBundle, n: u32| -> Result<String> {
-        b.connectivity
-            .nets
-            .get(n as usize)
-            .map(|x| x.name.clone())
-            .ok_or_else(|| fail("routing net outside connectivity"))
-    };
+    let old_nets = ExportNets::new(old);
     let mut old_ids = BTreeMap::new();
     for &n in &state.routes.nets {
-        old_ids.insert(name_of(old, n)?, n);
+        if old_nets.of(n)? == n {
+            old_ids.insert(old.connectivity.nets[n as usize].name.as_str(), n);
+        }
     }
-    let (new_pins, old_pins) = (net_pins(input), net_pins(&old_input));
+    let new_pins = net_pins(input, bundle.connectivity.nets.len());
+    let old_pins = net_pins(&old_input, old.connectivity.nets.len());
     let mut keep: BTreeMap<u32, u32> = BTreeMap::new();
     let (mut changed, mut fresh) = (0usize, 0usize);
     for (&n, pins) in &new_pins {
         if pins.len() < 2 {
             continue;
         }
-        match old_ids.get(&name_of(bundle, n)?) {
+        match old_ids.get(bundle.connectivity.nets[n as usize].name.as_str()) {
             Some(&o) if old_pins.get(&o) == Some(pins) => {
                 keep.insert(o, n);
             }
