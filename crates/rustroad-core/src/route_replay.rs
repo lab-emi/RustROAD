@@ -1,10 +1,14 @@
 //! Bounded snapshots of one detailed repair attempt, never a routing revision.
 use super::owner_repair::{self, BoundaryOwner};
-use super::{Cells, Graph, Move, Outcome, Plan, Router};
+use super::{
+    ATOMIC_REPAIR_MAX_OWNERS, ATOMIC_REPAIR_MAX_SHAPES, ATOMIC_REPAIR_MAX_TERMINALS, Cells,
+    DetourLedger, Graph, Move, NetRoute, Outcome, Plan, Router, memory_estimate_limited,
+    repair_group, repair_terminal_order, terminal_groups,
+};
 use crate::route_search::History;
 use crate::routing::{
-    RouteInput, RouteLimits, SingleOwnerRepairConfig, SingleOwnerRepairStats, Soft, Spatial,
-    SpatialCapture, SpatialState, Terminal, Via, Wire, budget, int, invalid,
+    Blockage, RouteInput, RouteLimits, SingleOwnerRepairConfig, SingleOwnerRepairStats, Soft,
+    Spatial, SpatialCapture, SpatialState, Terminal, Via, Wire, budget, int, invalid,
 };
 use crate::{Rect, Result};
 use serde::{Deserialize, Serialize};
@@ -116,6 +120,9 @@ pub struct ReplayOptions {
     /// Replay-only experiment: this owner may be displaced, all others stay hard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_victim: Option<u32>,
+    /// Attempt to reconnect exactly these observed soft victims in this order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reconnect_victims: Vec<u32>,
     /// Explicit local experiment after source validation; production uses TrackPlan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub single_owner_repair: Option<SingleOwnerRepairConfig>,
@@ -145,6 +152,18 @@ pub struct TerminalProbe {
     pub at: [i64; 2],
     pub top_via: bool,
     pub neighbors: Vec<NeighborProbe>,
+}
+
+/// Diagnostic result with regenerated pin plans and one shared guide. Route
+/// lengths of the old owners were not captured, so no detour policy is tested.
+#[derive(Debug, Serialize)]
+pub struct OwnerRecoveryReport {
+    pub status: &'static str,
+    pub requested_order: Vec<u32>,
+    pub last_order: Vec<u32>,
+    pub expansions: usize,
+    pub comparisons: usize,
+    pub recovered_records: Option<usize>,
 }
 
 /// One local search result; it never establishes whole-design physical signoff.
@@ -186,6 +205,8 @@ pub struct ReplayReport {
     pub wires: Option<Vec<Wire>>,
     pub vias: Option<Vec<Via>>,
     pub victims: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_recovery: Option<OwnerRecoveryReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_frontier: Option<Vec<SearchFrontierNode>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -683,6 +704,192 @@ pub(super) fn capture_at_phase(
     Ok(())
 }
 
+struct RecoveryEscapes<'a> {
+    groups: BTreeMap<u32, Vec<&'a Terminal>>,
+    plans: HashMap<u32, Plan>,
+    fixed: Vec<(usize, Blockage)>,
+    expansions: usize,
+    comparisons: usize,
+}
+
+fn prepare_recovery<'a>(
+    input: &'a RouteInput,
+    limits: &RouteLimits,
+    graph: Graph,
+    cells: Cells,
+    active_plans: &BTreeMap<u32, Plan>,
+    owners: &[u32],
+) -> Result<(Graph, Cells, RecoveryEscapes<'a>)> {
+    let track = input
+        .tracks
+        .as_ref()
+        .ok_or_else(|| invalid("track plan absent"))?;
+    let mut groups = terminal_groups(input)?;
+    if owners.iter().any(|owner| {
+        groups
+            .get(owner)
+            .is_none_or(|g| g.len() > ATOMIC_REPAIR_MAX_TERMINALS)
+    }) {
+        return Err(invalid("replay recovery owner terminal set"));
+    }
+    let mut router = Router::prepared(input, limits, graph, cells)?;
+    let all: Vec<_> = groups.values().flatten().copied().collect();
+    let mut plans = router.reserve(&all)?;
+    drop(all);
+    if track.qor.as_ref().is_some_and(|q| q.dedupe_vias) {
+        router.share_escape_vias(&groups, &mut plans)?;
+    }
+    for (pin, captured) in active_plans {
+        let regenerated = plans
+            .get(pin)
+            .ok_or_else(|| invalid("replay active escape missing"))?;
+        if captured.access != regenerated.access
+            || captured.top != regenerated.top
+            || captured.top_via != regenerated.top_via
+            || captured.wires != regenerated.wires
+            || captured.vias != regenerated.vias
+        {
+            return Err(invalid("replay regenerated active escape differs"));
+        }
+    }
+    groups.retain(|net, _| owners.contains(net));
+    plans.retain(|_, plan| owners.contains(&plan.access.net));
+    let mut fixed = Vec::new();
+    for terminals in groups.values_mut() {
+        let before = fixed.len();
+        repair_terminal_order(
+            terminals,
+            |t| router.graph.point(plans[&t.pin].top).1,
+            &mut router.spatial.work,
+            limits.max_comparisons,
+        )?;
+        for terminal in terminals {
+            let plan = &plans[&terminal.pin];
+            // Portal slots can be released and reused before the capture.
+            let ids = &plan.shapes[..plan.shapes.len() - usize::from(plan.portal_shapes)];
+            if fixed.len().saturating_add(ids.len()) - before > ATOMIC_REPAIR_MAX_SHAPES {
+                return Err(budget("replay fixed-escape count"));
+            }
+            for &id in ids {
+                let shape = router
+                    .spatial
+                    .fixed_escape_shape(id)
+                    .ok_or_else(|| invalid("replay regenerated escape shape missing"))?;
+                fixed.push((id, shape.clone()));
+            }
+        }
+    }
+    let recovery = RecoveryEscapes {
+        groups,
+        plans,
+        fixed,
+        expansions: router.expansions,
+        comparisons: router.spatial.work,
+    };
+    Ok((router.graph, router.cells, recovery))
+}
+
+impl RecoveryEscapes<'_> {
+    fn verify_fixed(&self, spatial: &Spatial<'_>) -> Result<()> {
+        for (id, expected) in &self.fixed {
+            if spatial.fixed_escape_shape(*id).is_none_or(|actual| {
+                (actual.layer, actual.rect, actual.net)
+                    != (expected.layer, expected.rect, expected.net)
+            }) {
+                return Err(invalid("replay regenerated victim escape differs"));
+            }
+        }
+        Ok(())
+    }
+
+    fn reconnect(
+        self,
+        router: &mut Router<'_>,
+        requested: &[u32],
+        victims: &[u32],
+        rips: &BTreeMap<u32, usize>,
+        round: usize,
+    ) -> Result<OwnerRecoveryReport> {
+        let mut order = requested.to_vec();
+        if victims.len() != order.len() || victims.iter().any(|v| !order.contains(v)) {
+            return Ok(OwnerRecoveryReport {
+                status: "different_soft_victims",
+                requested_order: order,
+                last_order: Vec::new(),
+                expansions: 0,
+                comparisons: 0,
+                recovered_records: None,
+            });
+        }
+        let before = (router.expansions, router.spatial.work);
+        let shapes = router
+            .spatial
+            .routed_owner_shapes(&order, ATOMIC_REPAIR_MAX_SHAPES)?;
+        if shapes.values().any(Vec::is_empty) {
+            return Err(invalid("replay victim has no live routed shapes"));
+        }
+        router.spatial.work = router
+            .spatial
+            .work
+            .checked_add(router.gmark.len())
+            .filter(|&work| work <= router.limits.max_comparisons)
+            .ok_or_else(|| budget("replay recovery guide scan work"))?;
+        let guide: Vec<_> = router
+            .gmark
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &mark)| (mark == router.gepoch).then_some(i as u32))
+            .take(4097)
+            .collect();
+        if guide.is_empty() || guide.len() > 4096 {
+            return Err(budget("replay recovery guide cells"));
+        }
+        let guides = order.iter().map(|&owner| (owner, guide.clone())).collect();
+        // The capture records indexed geometry, not original route segments.
+        // Use the existing atomic search with lengths intentionally unchecked.
+        let mut routed = shapes
+            .into_iter()
+            .map(|(net, shapes)| {
+                (
+                    net,
+                    NetRoute {
+                        shapes,
+                        ..NetRoute::default()
+                    },
+                )
+            })
+            .collect();
+        let mut segments = 0;
+        let kept = repair_group(
+            router,
+            &mut order,
+            &self.groups,
+            &self.plans,
+            &guides,
+            &Default::default(),
+            &Default::default(),
+            rips,
+            round,
+            0,
+            &mut routed,
+            &mut segments,
+            &mut DetourLedger::new(None),
+        )?;
+        Ok(OwnerRecoveryReport {
+            status: if kept {
+                "reconnected"
+            } else {
+                "not_reconnected"
+            },
+            requested_order: requested.to_vec(),
+            last_order: order,
+            expansions: router.expansions - before.0,
+            comparisons: router.spatial.work - before.1,
+            recovered_records: kept.then_some(segments),
+        })
+    }
+}
+
 /// Rebuild exactly one captured search without publishing a workspace revision.
 ///
 /// # Errors
@@ -717,6 +924,24 @@ pub fn replay(
     {
         return Err(invalid(
             "single-owner replay needs an explicit bound and soft search, without terminal probes",
+        ));
+    }
+    let reconnect = &options.reconnect_victims;
+    if !reconnect.is_empty()
+        && (!(2..=ATOMIC_REPAIR_MAX_OWNERS).contains(&reconnect.len())
+            || reconnect
+                .iter()
+                .enumerate()
+                .any(|(i, net)| reconnect[..i].contains(net))
+            || options.max_search_expansions.is_none()
+            || options.hard_search
+            || options.probe_terminals
+            || options.allowed_victim.is_some()
+            || options.single_owner_repair.is_some()
+            || options.query_indices.is_some())
+    {
+        return Err(invalid(
+            "replay recovery needs 2-4 unique owners and a bounded soft search",
         ));
     }
     if options.hard_search && (options.max_search_expansions.is_none() || options.probe_terminals) {
@@ -768,6 +993,13 @@ pub fn replay(
         .map_err(|e| invalid(&format!("replay decoding: {e}")))?;
     if state.schema != "rustroad.route-replay.v1" || state.input_sha256 != input_digest(input)? {
         return Err(invalid("REPLAY_INPUT_CHANGED: source compute view differs"));
+    }
+    if !reconnect.is_empty()
+        && (state.phase != ReplayPhase::PreSoft || reconnect.contains(&state.net))
+    {
+        return Err(invalid(
+            "replay recovery needs a pre-soft capture and foreign owners",
+        ));
     }
     if options.allowed_victim.is_some_and(|owner| {
         owner == state.net || !input.terminals.iter().any(|terminal| terminal.net == owner)
@@ -881,6 +1113,39 @@ pub fn replay(
     {
         return Err(budget("replay source state counts"));
     }
+    let (graph, cells, recovery) = if reconnect.is_empty() {
+        (graph, cells, None)
+    } else {
+        let total = memory_estimate_limited(input, nodes, cells.len(), &original)?
+            .total()
+            .saturating_add(bytes.saturating_mul(8))
+            .saturating_add(5 << 20);
+        if total > (4 << 30).min(plan.memory_mib.saturating_mul(1 << 20)) {
+            return Err(budget("replay recovery whole-route memory admission"));
+        }
+        if state.terminal_order.len() > ATOMIC_REPAIR_MAX_TERMINALS
+            || current.eager_repair_expansions.is_none()
+        {
+            return Err(invalid("replay recovery terminal set or eager limits"));
+        }
+        let preparation_limits = RouteLimits {
+            max_comparisons: original.max_comparisons.saturating_sub(state.spatial.work),
+            max_expansions: original.max_expansions.saturating_sub(state.expansions),
+            ..original.clone()
+        };
+        if preparation_limits.max_comparisons == 0 || preparation_limits.max_expansions == 0 {
+            return Err(budget("replay recovery has no remaining preparation work"));
+        }
+        let (graph, cells, recovery) = prepare_recovery(
+            input,
+            &preparation_limits,
+            graph,
+            cells,
+            &state.plans,
+            reconnect,
+        )?;
+        (graph, cells, Some(recovery))
+    };
     let mut router = Router::prepared(input, &current, graph, cells)?;
     router.heuristic_weight_override = options.heuristic_weight;
     router.allowed_victim = options.allowed_victim;
@@ -898,6 +1163,16 @@ pub fn replay(
         .checked_add(prepared_work)
         .filter(|&n| n <= current.max_comparisons)
         .ok_or_else(|| budget("replay prepared instance-index work"))?;
+    if let Some(recovery) = &recovery {
+        router.spatial.work = router
+            .spatial
+            .work
+            .checked_add(recovery.comparisons)
+            .and_then(|work| work.checked_add(recovery.fixed.len()))
+            .filter(|&n| n <= current.max_comparisons)
+            .ok_or_else(|| budget("replay recovery preparation work"))?;
+        recovery.verify_fixed(&router.spatial)?;
+    }
     let query_index_build_work = if let Some(indices) = &options.query_indices {
         router.query_indices_override = Some(indices.clone());
         Some(
@@ -919,7 +1194,12 @@ pub fn replay(
     router.gmark = state.guide_marks;
     router.gepoch = state.guide_epoch;
     router.epoch = state.search_epoch;
-    router.expansions = state.expansions;
+    router.expansions = state
+        .expansions
+        .checked_add(recovery.as_ref().map_or(0, |r| r.expansions))
+        .filter(|&n| n <= current.max_expansions)
+        .ok_or_else(|| budget("replay recovery preparation expansions"))?;
+    let search_start_expansions = router.expansions;
     router.access_entries = state.access_entries;
     router.access_cache_bytes = state.access_cache_bytes;
     let by_pin: BTreeMap<_, _> = input.terminals.iter().map(|t| (t.pin, t)).collect();
@@ -1005,6 +1285,7 @@ pub fn replay(
         .then(|| probe_terminals(&mut router, &state.plans, state.net))
         .transpose()?;
     let plans: HashMap<_, _> = state.plans.into_iter().collect();
+    let mut owner_recovery = None;
     let (status, failed_pin, wires, vias, victims) = if options.probe_terminals {
         ("geometry_probed", None, None, None, Vec::new())
     } else {
@@ -1074,7 +1355,21 @@ pub fn replay(
             Outcome::Limited(pin) => ("budget_exceeded", Some(pin), None, None, Vec::new()),
             Outcome::Failed(pin) => ("no_route", Some(pin), None, None, Vec::new()),
             Outcome::Routed(route, victims) => {
-                ("routed", None, Some(route.wires), Some(route.vias), victims)
+                if let Some(recovery) = recovery {
+                    owner_recovery = Some(recovery.reconnect(
+                        &mut router,
+                        reconnect,
+                        &victims,
+                        &state.rips,
+                        state.round,
+                    )?);
+                }
+                let status = match owner_recovery.as_ref().map(|report| report.status) {
+                    Some("reconnected") => "reconnected",
+                    Some(_) => "routed_with_unrecovered_victims",
+                    None => "routed",
+                };
+                (status, None, Some(route.wires), Some(route.vias), victims)
             }
         }
     };
@@ -1118,7 +1413,9 @@ pub fn replay(
     Ok(ReplayReport {
         schema: "rustroad.route-replay-result.v1",
         status,
-        search_mode: if options.probe_terminals {
+        search_mode: if !reconnect.is_empty() {
+            "soft_then_reconnect_observed_victims"
+        } else if options.probe_terminals {
             "terminal_probe"
         } else if options.hard_search {
             "hard_no_ripup"
@@ -1136,6 +1433,9 @@ pub fn replay(
             "soft_ripup"
         },
         scope: match (options.probe_terminals, options.hard_search, state.phase) {
+            _ if !reconnect.is_empty() => {
+                "local geometry recovery with verified fixed pin plans, a shared guide and nominal owner rule modes; no prior detour limit, revision or signoff"
+            }
             (_, _, ReplayPhase::PostBudgetError) => {
                 "new attempt from actual partial post-budget-error state; no committed-round checkpoint, original-call replay, revision or signoff"
             }
@@ -1173,7 +1473,7 @@ pub fn replay(
         configured_repair_heuristic_weight: plan.repair_heuristic_weight,
         used_heuristic_weight: router.detail_weight(true),
         terminal_probes,
-        expansions_before: state.expansions,
+        expansions_before: search_start_expansions,
         expansions_after: router.expansions,
         spatial_index_rebuilt: options.rebuild_spatial_index,
         comparisons_before: if options.query_indices.is_some() {
@@ -1188,6 +1488,7 @@ pub fn replay(
         wires,
         vias,
         victims,
+        owner_recovery,
         search_frontier,
         search_frontier_work,
         boundary_owners,

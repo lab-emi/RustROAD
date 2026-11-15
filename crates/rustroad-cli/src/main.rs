@@ -172,6 +172,9 @@ enum Command {
         /// Permit only this routed net to be displaced in a bounded soft replay.
         #[arg(long, requires = "max_search_expansions", conflicts_with_all = ["hard_search", "probe_terminals"])]
         allowed_victim: Option<u32>,
+        /// Try reconnecting these observed soft victims in the supplied order.
+        #[arg(long, num_args = 2..=4, requires = "max_search_expansions", conflicts_with_all = ["allowed_victim", "hard_search", "probe_terminals", "single_owner_repair_config", "query_indices_config"])]
+        reconnect_victims: Vec<u32>,
         /// Explicit bounded production-stage policy for a read-only replay.
         #[arg(long, conflicts_with_all = ["allowed_victim", "hard_search", "probe_terminals", "probe_search_frontier"])]
         single_owner_repair_config: Option<PathBuf>,
@@ -975,6 +978,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             probe_search_frontier,
             rebuild_spatial_index,
             allowed_victim,
+            reconnect_victims,
             single_owner_repair_config,
             query_indices_config,
         } => {
@@ -1030,6 +1034,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     probe_search_frontier,
                     rebuild_spatial_index,
                     allowed_victim,
+                    reconnect_victims,
                     single_owner_repair,
                     query_indices,
                 },

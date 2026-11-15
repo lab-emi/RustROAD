@@ -2552,6 +2552,37 @@ impl<'a> Spatial<'a> {
     fn routed(&self, id: usize) -> bool {
         id >= self.input.obstacles.len() && self.routed[id - self.input.obstacles.len()]
     }
+    pub(crate) fn fixed_escape_shape(&self, id: usize) -> Option<&Blockage> {
+        (id >= self.input.obstacles.len() && id < self.len() && self.alive(id) && !self.routed(id))
+            .then(|| self.shape(id))
+    }
+
+    pub(crate) fn routed_owner_shapes(
+        &mut self,
+        owners: &[u32],
+        cap: usize,
+    ) -> Result<BTreeMap<u32, Vec<usize>>> {
+        self.work = self
+            .work
+            .checked_add(self.shapes.len().saturating_mul(owners.len()))
+            .filter(|&work| work <= self.limits.max_comparisons)
+            .ok_or_else(|| budget("replay owner-shape scan work"))?;
+        let mut result: BTreeMap<_, Vec<_>> =
+            owners.iter().map(|&owner| (owner, Vec::new())).collect();
+        for (offset, shape) in self.shapes.iter().enumerate() {
+            if self.alive[offset]
+                && self.routed[offset]
+                && let Some(ids) = shape.net.and_then(|owner| result.get_mut(&owner))
+            {
+                if ids.len() >= cap {
+                    return Err(budget("replay owner-shape count"));
+                }
+                ids.push(self.input.obstacles.len() + offset);
+            }
+        }
+        Ok(result)
+    }
+
     fn index(&mut self, id: usize, b: &Blockage) -> Result<()> {
         if b.layer as usize >= self.input.layers.len() || !b.rect.valid() {
             return Err(invalid("routing obstacle"));

@@ -5442,6 +5442,21 @@ pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> 
     route_with_prior(input, limits, None)
 }
 
+fn terminal_groups(input: &RouteInput) -> Result<BTreeMap<u32, Vec<&Terminal>>> {
+    let mut groups = BTreeMap::<u32, Vec<&Terminal>>::new();
+    for terminal in &input.terminals {
+        groups.entry(terminal.net).or_default().push(terminal);
+    }
+    groups.retain(|_, terminals| terminals.len() >= 2);
+    for terminals in groups.values_mut() {
+        terminals.sort_by_key(|terminal| (!terminal.driver, terminal.pin));
+        if terminals.iter().filter(|terminal| terminal.driver).count() != 1 {
+            return Err(invalid("routed net needs one driver"));
+        }
+    }
+    Ok(groups)
+}
+
 /// ECO routing: the geometry of an earlier routing of the same design, by
 /// router net id of *this* input (the caller maps names and drops nets whose
 /// pins changed). Only wires and vias are kept; cleanup patches are rebuilt.
@@ -5495,17 +5510,7 @@ pub(crate) fn route_with_prior(
             estimate.check >> 20
         )));
     }
-    let mut groups = BTreeMap::<u32, Vec<&Terminal>>::new();
-    for t in &input.terminals {
-        groups.entry(t.net).or_default().push(t);
-    }
-    groups.retain(|_, g| g.len() >= 2);
-    for g in groups.values_mut() {
-        g.sort_by_key(|p| (!p.driver, p.pin));
-        if g.iter().filter(|p| p.driver).count() != 1 {
-            return Err(invalid("routed net needs one driver"));
-        }
-    }
+    let mut groups = terminal_groups(input)?;
     let mut r = Router::prepared(input, limits, graph, cells)?;
     r.guard("setup")?;
     trace("spatial index", t0, format_args!("work {}", r.spatial.work));
@@ -13873,6 +13878,15 @@ mod tests {
         .unwrap();
         assert_eq!(limited.status, "budget_exceeded");
         for options in [
+            replay::ReplayOptions {
+                reconnect_victims: vec![9, 9],
+                max_search_expansions: Some(1_000),
+                ..Default::default()
+            },
+            replay::ReplayOptions {
+                reconnect_victims: vec![8, 9],
+                ..Default::default()
+            },
             replay::ReplayOptions {
                 hard_search: true,
                 ..Default::default()
