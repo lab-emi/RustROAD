@@ -153,6 +153,9 @@ pub struct RouteQorConfig {
     /// Pin access of small nets leans toward the net's other terminals.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub net_aware_access: bool,
+    /// Try an upper orthogonal escape for short nets spanning access tracks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub short_net_access: bool,
     /// Pin access accepts a step near its own pin when the escape wires
     /// behind it cover the gap (needed by off-track pins on their own layer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1552,6 +1555,7 @@ fn route_qor(
         release_portals: config.release_portals,
         drop_portals: config.drop_portals,
         net_aware_access: config.net_aware_access,
+        short_net_access: config.short_net_access,
         path_aware_access: config.path_aware_access,
         layer_cost_milli: resolve(&config.layer_cost_milli)?,
         via_cost_milli: resolve(&config.via_cost_milli)?,
@@ -2493,13 +2497,15 @@ mod qor_config_tests {
         let resolved = route_qor(&off, &layers()).unwrap();
         assert!(!resolved.strict_wide_cycles);
         assert!(!resolved.atomic_eager_repair);
+        assert!(!resolved.short_net_access);
         assert_eq!(resolved.via_reduction, None);
         assert_eq!(
             serde_json::to_string(&off).unwrap(),
             r#"{"notch_bridge":true}"#
         );
         let on: RouteQorConfig = serde_json::from_str(
-            r#"{"strict_wide_cycles": true, "atomic_eager_repair": true, "via_reduction": {"passes": 1,
+            r#"{"strict_wide_cycles": true, "atomic_eager_repair": true, "short_net_access": true,
+               "via_reduction": {"passes": 1,
                 "via_milli": 3000, "max_terminals": 10, "length_per_via": 1680,
                 "net_expansions": 10000, "max_connection_length": 40000}}"#,
         )
@@ -2507,6 +2513,7 @@ mod qor_config_tests {
         let resolved = route_qor(&on, &layers()).unwrap();
         assert!(resolved.strict_wide_cycles);
         assert!(resolved.atomic_eager_repair);
+        assert!(resolved.short_net_access);
         let reduction = resolved.via_reduction.unwrap();
         assert_eq!(
             (reduction.passes, reduction.via_milli, reduction.weight),

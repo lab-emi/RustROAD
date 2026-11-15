@@ -94,6 +94,8 @@ const WINDOW_INDEX_BYTES: u64 = 32;
 const ACCESS_HINT_SLACK: u64 = 840;
 /// Net-aware pin access looks at nets of at most this many terminals.
 const ACCESS_HINT_TERMINALS: usize = 8;
+/// Work for one optional upper-layer access scout, before ordinary fallback.
+const UPPER_ACCESS_EXPANSIONS: usize = 2048;
 type AccessKey = (u32, Vec<(u32, [i64; 2])>);
 type AccessTables = BTreeMap<AccessKey, Vec<AccessEntry>>;
 
@@ -105,7 +107,7 @@ struct AccessPass<'p, 'a> {
     order: &'p [usize],
     /// Repair window of each terminal.
     windows: &'p [Rect],
-    /// Net members for net-aware access (empty: cheapest tops only).
+    /// Net members for access preferences (empty: cheapest tops only).
     by_net: &'p HashMap<u32, Vec<usize>, BuildFx>,
     started: std::time::Instant,
 }
@@ -846,7 +848,20 @@ fn memory_estimate_limited(
         .unwrap_or(u64::MAX)
         .saturating_mul(8)
         .saturating_add(layers.saturating_mul(layers).saturating_mul(2))
-        .saturating_add(layers.saturating_mul(32));
+        .saturating_add(layers.saturating_mul(32))
+        .saturating_add(
+            if input
+                .tracks
+                .as_ref()
+                .and_then(|plan| plan.qor.as_ref())
+                .is_some_and(|q| q.short_net_access)
+            {
+                // Net member groups and the temporary frontier for a single scout.
+                t.saturating_mul(96).saturating_add(2 << 20)
+            } else {
+                0
+            },
+        );
     let shapes_per_record = input
         .vias
         .iter()
@@ -1725,11 +1740,6 @@ impl<'a> Router<'a> {
         Ok(starts)
     }
 
-    /// One terminal escape search; None when no legal escape exists.
-    fn escape(&mut self, t: &Terminal, tables: &mut AccessTables) -> Result<Option<Plan>> {
-        self.escape_avoiding(t, tables, &[])
-    }
-
     /// Escape search whose metal above the pin layer stays off `avoid`, the
     /// landing footprints of neighbouring pins that this escape displaced.
     /// With `area_stacks`, an escape whose own top metal meets AREA is tried
@@ -1739,16 +1749,23 @@ impl<'a> Router<'a> {
         t: &Terminal,
         tables: &mut AccessTables,
         avoid: &[LayerRect],
+        preferred_slot: Option<usize>,
     ) -> Result<Option<Plan>> {
-        if self.plan.area_stacks {
-            self.escape_area = true;
-            let plan = self.escape_search(t, tables, avoid);
-            self.escape_area = false;
-            if let Some(plan) = plan? {
+        let normal_slot = self.graph.slot[&self.input.access_layer];
+        for slot in [preferred_slot, Some(normal_slot)].into_iter().flatten() {
+            if self.plan.area_stacks {
+                self.escape_area = true;
+                let plan = self.escape_search(t, tables, avoid, slot);
+                self.escape_area = false;
+                if let Some(plan) = plan? {
+                    return Ok(Some(plan));
+                }
+            }
+            if let Some(plan) = self.escape_search(t, tables, avoid, slot)? {
                 return Ok(Some(plan));
             }
         }
-        self.escape_search(t, tables, avoid)
+        Ok(None)
     }
 
     fn escape_search(
@@ -1756,13 +1773,14 @@ impl<'a> Router<'a> {
         t: &Terminal,
         tables: &mut AccessTables,
         avoid: &[LayerRect],
+        access_slot: usize,
     ) -> Result<Option<Plan>> {
         let input = self.input;
         let starts = self.starts(t, tables, true)?;
         if starts.is_empty() {
             return Ok(None);
         }
-        let access_slot = self.graph.slot[&input.access_layer];
+        let upper_scout = access_slot != self.graph.slot[&input.access_layer];
         let pin_slot = starts
             .iter()
             .filter_map(|s| self.graph.slot.get(&s.0).copied())
@@ -1968,6 +1986,11 @@ impl<'a> Router<'a> {
                     }
                     first_goal.get_or_insert(cost);
                 }
+            }
+            if upper_scout
+                && search >= UPPER_ACCESS_EXPANSIONS.min(self.limits.max_search_expansions)
+            {
+                break;
             }
             self.tick(&mut search, "pin access", t.pin, t.net)?;
             let layer = self.graph.layers[slots[li]].layer;
@@ -2511,9 +2534,14 @@ impl<'a> Router<'a> {
             })
             .collect::<Result<_>>()?;
         let order: Vec<usize> = order.into_iter().map(|o| o.2).collect();
-        // Net members for net-aware access (opt-in); small nets only.
+        // Member lookups are shared by the two optional access preferences.
         let mut by_net: HashMap<u32, Vec<usize>, BuildFx> = HashMap::with_hasher(BuildFx);
-        if self.plan.qor.as_ref().is_some_and(|q| q.net_aware_access) {
+        if self
+            .plan
+            .qor
+            .as_ref()
+            .is_some_and(|q| q.net_aware_access || q.short_net_access)
+        {
             for (i, t) in terminals.iter().enumerate() {
                 by_net.entry(t.net).or_default().push(i);
             }
@@ -2560,6 +2588,40 @@ impl<'a> Router<'a> {
         }
     }
 
+    fn short_net_access_slot(&self, members: &[usize], windows: &[Rect]) -> Option<usize> {
+        if !(2..=4).contains(&members.len()) {
+            return None;
+        }
+        let base = self.graph.slot[&self.input.access_layer];
+        let upper = base + 1;
+        let layer = self.graph.layers.get(upper)?;
+        let vertical = self.graph.layers[base].vertical;
+        if vertical == layer.vertical
+            || !self.plan.allows_routing_layer(layer.layer)
+            || !self
+                .graph
+                .pairs
+                .iter()
+                .any(|p| p.lower == base && p.upper == upper)
+        {
+            return None;
+        }
+        let mut lo = [i64::MAX; 2];
+        let mut hi = [i64::MIN; 2];
+        for &member in members {
+            let r = windows[member];
+            let x = r.lx.midpoint(r.ux);
+            let y = r.ly.midpoint(r.uy);
+            lo = [lo[0].min(x), lo[1].min(y)];
+            hi = [hi[0].max(x), hi[1].max(y)];
+        }
+        let across = usize::from(!vertical);
+        let cross = hi[across].abs_diff(lo[across]);
+        let along = hi[1 - across].abs_diff(lo[1 - across]);
+        (cross > 0 && cross >= 2 * along && cross + along <= 2 * self.plan.gcell as u64)
+            .then_some(upper)
+    }
+
     /// One pin-access pass in `pass.order` with conflict repair. Escapes go
     /// into `plans` (and the spatial index). `Ok(Some(error))` is an access
     /// failure (a pin with no legal escape, or the repair-round cap) with
@@ -2589,6 +2651,10 @@ impl<'a> Router<'a> {
         // Landing footprints of the pins a failed terminal displaced. Its
         // next escape first stays off them, so the displaced pins can land.
         let mut protect: HashMap<usize, Vec<LayerRect>> = HashMap::new();
+        let qor = self.plan.qor.as_ref();
+        let net_aware = qor.is_some_and(|q| q.net_aware_access);
+        let short_net_access = qor.is_some_and(|q| q.short_net_access);
+        let (mut upper_attempts, mut upper_kept) = (0, 0);
         let mut rounds = 0usize;
         while let Some(i) = queue.pop_front() {
             rounds += 1;
@@ -2608,43 +2674,47 @@ impl<'a> Router<'a> {
                 );
             }
             let avoid = protect.remove(&i).unwrap_or_default();
-            let hint: Vec<Rect> = match by_net.get(&t.net) {
-                Some(members)
-                    if members.len() <= ACCESS_HINT_TERMINALS && !unhinted.contains(&i) =>
-                {
-                    members
-                        .iter()
-                        .filter(|&&j| j != i)
-                        .map(|&j| {
-                            let o = terminals[j];
-                            match plans.get(&o.pin) {
-                                Some(p) => {
-                                    let at = self.graph.point(p.top).1;
-                                    Rect {
-                                        lx: at[0],
-                                        ly: at[1],
-                                        ux: at[0],
-                                        uy: at[1],
-                                    }
+            let members = by_net.get(&t.net).filter(|_| !unhinted.contains(&i));
+            let hint: Vec<Rect> = match members {
+                Some(members) if net_aware && members.len() <= ACCESS_HINT_TERMINALS => members
+                    .iter()
+                    .filter(|&&j| j != i)
+                    .map(|&j| {
+                        let o = terminals[j];
+                        match plans.get(&o.pin) {
+                            Some(p) => {
+                                let at = self.graph.point(p.top).1;
+                                Rect {
+                                    lx: at[0],
+                                    ly: at[1],
+                                    ux: at[0],
+                                    uy: at[1],
                                 }
-                                None => pin_box(o),
                             }
-                        })
-                        .collect()
-                }
+                            None => pin_box(o),
+                        }
+                    })
+                    .collect(),
                 _ => Vec::new(),
             };
+            let preferred = members
+                .filter(|_| short_net_access)
+                .and_then(|members| self.short_net_access_slot(members, windows));
+            upper_attempts += usize::from(preferred.is_some());
             let mut plan = None;
             if !avoid.is_empty() {
                 self.access_hint.clone_from(&hint);
-                plan = self.escape_avoiding(t, tables, &avoid)?;
+                plan = self.escape_avoiding(t, tables, &avoid, preferred)?;
             }
             if plan.is_none() {
                 self.access_hint.clone_from(&hint);
-                plan = self.escape(t, tables)?;
+                plan = self.escape_avoiding(t, tables, &[], preferred)?;
             }
             self.access_hint.clear();
             if let Some(plan) = plan {
+                upper_kept += usize::from(preferred.is_some_and(|slot| {
+                    self.graph.layers[slot].layer == self.graph.point(plan.top).0
+                }));
                 plan_records = plan_records
                     .checked_add(plan.wires.len())
                     .and_then(|n| n.checked_add(plan.vias.len()))
@@ -2735,6 +2805,13 @@ impl<'a> Router<'a> {
                 queue.push_front(j);
             }
             queue.push_front(i);
+        }
+        if short_net_access {
+            trace(
+                "pin access preference",
+                started,
+                format_args!("upper attempts {upper_attempts} kept {upper_kept}"),
+            );
         }
         Ok(None)
     }
@@ -10151,6 +10228,62 @@ mod tests {
     }
 
     #[test]
+    fn short_cross_track_net_uses_an_upper_escape_when_legal() {
+        let mut design = access_row(
+            5040,
+            1,
+            &[
+                (0, rect(470, 1100, 790, 1420)),
+                (0, rect(2150, 1100, 2470, 1420)),
+            ],
+        );
+        let lower = access_only(&design, false, false).0.unwrap();
+        assert!(
+            lower
+                .values()
+                .all(|(_, _, _, vias)| vias.iter().all(|v| v.kind == 0))
+        );
+        design
+            .tracks
+            .as_mut()
+            .unwrap()
+            .qor
+            .as_mut()
+            .unwrap()
+            .short_net_access = true;
+        let upper = access_only(&design, false, false).0.unwrap();
+        assert!(
+            upper
+                .values()
+                .all(|(_, _, _, vias)| vias.iter().any(|v| v.kind == 1))
+        );
+        let routed = route_cpu_ref(&design, &limits()).unwrap();
+        validate(&design, &routed, &limits()).unwrap();
+
+        // A pin already on the normal access layer needs no upper portal.
+        // Cover the next layer and verify that the scout falls back for both.
+        for terminal in &mut design.terminals {
+            terminal.shapes[0].layer = 1;
+        }
+        design.obstacles.push(Blockage {
+            layer: 2,
+            rect: design.die,
+            net: None,
+        });
+        let fallback = access_only(&design, false, false).0.unwrap();
+        design
+            .tracks
+            .as_mut()
+            .unwrap()
+            .qor
+            .as_mut()
+            .unwrap()
+            .short_net_access = false;
+        let normal = access_only(&design, false, false).0.unwrap();
+        assert_eq!(fallback, normal);
+    }
+
+    #[test]
     fn net_aware_access_falls_back_to_the_cheapest_tops_after_a_failed_escape() {
         // Smallest row of a seeded search over random EZ130-like rows (3,000
         // rows; 140 behave like this) that reproduces the Ibex flow-placement
@@ -10347,6 +10480,7 @@ mod tests {
             release_portals: true,
             drop_portals: true,
             net_aware_access: true,
+            short_net_access: false,
             path_aware_access: true,
             layer_cost_milli: vec![1000, 1000, 1300, 1000, 1000],
             via_cost_milli: vec![1000, 1000, 1500, 1000, 1000],

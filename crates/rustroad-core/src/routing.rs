@@ -454,6 +454,10 @@ pub struct RouteQor {
     /// nearest the net's other terminals (so aligned pins share a track).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub net_aware_access: bool,
+    /// Try the next orthogonal routing layer for short nets whose span is
+    /// mostly across the normal access tracks, with the usual escape as fallback.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub short_net_access: bool,
     /// Pin access counts the escape wires that lead to a step as same-net
     /// metal next to the pin's own shapes: a step within spacing of its pin
     /// is legal when the gap is covered by the pin and those wires. Without
