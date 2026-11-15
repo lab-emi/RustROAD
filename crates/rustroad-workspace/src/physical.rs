@@ -1965,7 +1965,7 @@ fn block_intervals_observed(
         let mut x = v.lx;
         for (lo, hi) in cuts {
             if x < lo {
-                out.push(rustroad_core::place::Interval { ux: lo, ..v });
+                out.push(rustroad_core::place::Interval { lx: x, ux: lo, ..v });
             }
             x = x.max(hi);
         }
@@ -3175,6 +3175,50 @@ mod blockage_tests {
             uy: 2000,
         }];
         assert!(block_intervals(rows, &all, 10, 50).is_err());
+    }
+
+    #[test]
+    fn disjoint_blockages_preserve_the_free_span_between_them() {
+        let rows = vec![Interval {
+            y: 0,
+            lx: 30,
+            ux: 330,
+        }];
+        let cuts = [
+            Rect {
+                lx: 212,
+                ly: 0,
+                ux: 244,
+                uy: 10,
+            },
+            Rect {
+                lx: 95,
+                ly: 0,
+                ux: 153,
+                uy: 10,
+            },
+        ];
+        let out = block_intervals(rows, &cuts, 10, 50).unwrap();
+        assert_eq!(
+            out,
+            vec![
+                Interval {
+                    y: 0,
+                    lx: 30,
+                    ux: 90
+                },
+                Interval {
+                    y: 0,
+                    lx: 160,
+                    ux: 210
+                },
+                Interval {
+                    y: 0,
+                    lx: 250,
+                    ux: 330
+                },
+            ]
+        );
     }
 
     #[test]
