@@ -487,6 +487,9 @@ pub struct RouteQor {
     /// admissible A*.
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub small_net_weight: u64,
+    /// Route short fanout groups in dense pin regions earlier during detail routing.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dense_net_order: bool,
     /// Same-net notch repair for facing shapes: cleanup's bridges add the
     /// stair bridge (one bar across a gap the two shapes face over less
     /// than a width) and bars clipped to two widths past the gap before the

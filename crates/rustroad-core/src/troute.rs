@@ -902,6 +902,20 @@ fn memory_estimate_limited(
             if input
                 .tracks
                 .as_ref()
+                .and_then(|plan| plan.qor.as_ref())
+                .is_some_and(|q| q.dense_net_order)
+            {
+                // Cached sort keys and the two GCell occupancy arrays.
+                t.saturating_mul(48)
+                    .saturating_add((gcells as u64).saturating_mul(16))
+            } else {
+                0
+            },
+        )
+        .saturating_add(
+            if input
+                .tracks
+                .as_ref()
                 .is_some_and(|p| p.own_pin_index.is_some())
             {
                 input.layers.len() as u64 * 64
@@ -5343,6 +5357,86 @@ fn repair_group(
     failure
 }
 
+fn dense_net_priority(
+    cells: impl IntoIterator<Item = u32>,
+    loads: &[usize],
+    dense: usize,
+) -> usize {
+    let mut first_dense_cell = None;
+    let mut spans_dense_cells = false;
+    let mut peak = 0;
+    let mut total = 0usize;
+    for cell in cells {
+        let load = loads[cell as usize];
+        total = total.saturating_add(load);
+        peak = peak.max(load);
+        if load >= dense {
+            spans_dense_cells |= *first_dense_cell.get_or_insert(cell) != cell;
+        }
+    }
+    if spans_dense_cells && peak >= dense.saturating_mul(5).div_ceil(4) {
+        total
+    } else {
+        0
+    }
+}
+
+fn prioritize_dense_nets(
+    r: &mut Router<'_>,
+    groups: &BTreeMap<u32, Vec<&Terminal>>,
+    plans: &HashMap<u32, Plan>,
+    order: &mut [(usize, u32)],
+) -> Result<()> {
+    let work = r
+        .input
+        .terminals
+        .len()
+        .saturating_mul(2)
+        .saturating_add(r.cells.len().saturating_mul(3))
+        .saturating_add(
+            order
+                .len()
+                .saturating_mul(order.len().max(1).ilog2() as usize + 1),
+        );
+    r.spatial.work = r
+        .spatial
+        .work
+        .checked_add(work)
+        .filter(|&work| work <= r.limits.max_comparisons)
+        .ok_or_else(|| budget("dense net order work"))?;
+    let cell_of = |terminal: &&Terminal| r.cells.of(r.graph.point(plans[&terminal.pin].top).1);
+    let mut loads = vec![0usize; r.cells.len()];
+    for terminal in groups.values().flatten() {
+        loads[cell_of(terminal) as usize] += 1;
+    }
+    let mut occupied: Vec<_> = loads.iter().copied().filter(|&n| n != 0).collect();
+    if occupied.is_empty() {
+        order.sort_unstable();
+        return Ok(());
+    }
+    let index = (occupied.len() * 9).div_ceil(10) - 1;
+    let dense = *occupied.select_nth_unstable(index).1;
+    let mut promoted = 0;
+    order.sort_by_cached_key(|&(guide_cells, net)| {
+        let terminals = &groups[&net];
+        let priority = if (3..=12).contains(&terminals.len()) {
+            dense_net_priority(terminals.iter().map(cell_of), &loads, dense)
+        } else {
+            0
+        };
+        promoted += usize::from(priority > 0);
+        (std::cmp::Reverse(priority), guide_cells, net)
+    });
+    if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+        eprintln!(
+            "[troute] dense net order promoted {promoted} of {} p90 {dense} nonempty gcells {}",
+            order.len(),
+            occupied.len()
+        );
+    }
+    Ok(())
+}
+
 /// Track-router entry point (called by `routing::route_cpu_ref`).
 pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> {
     route_with_prior(input, limits, None)
@@ -5482,9 +5576,13 @@ pub(crate) fn route_with_prior(
             r.release_portals(group, &plans);
         }
     }
-    // Detailed routing: small nets first.
+    // Detailed routing: small-guide nets first, with optional dense-net priority.
     let mut order: Vec<(usize, u32)> = guides.iter().map(|(n, g)| (g.len(), *n)).collect();
-    order.sort_unstable();
+    if r.plan.qor.as_ref().is_some_and(|q| q.dense_net_order) {
+        prioritize_dense_nets(&mut r, &groups, &plans, &mut order)?;
+    } else {
+        order.sort_unstable();
+    }
     let mut routed: BTreeMap<u32, NetRoute> = BTreeMap::new();
     let mut retained_edges = 0usize;
     let mut queue: VecDeque<u32> = VecDeque::new();
@@ -10554,6 +10652,14 @@ mod tests {
     }
 
     #[test]
+    fn dense_net_priority_requires_multiple_dense_cells_and_one_high_load() {
+        let loads = [32, 32, 39, 40, 30];
+        assert_eq!(dense_net_priority([0, 1, 2], &loads, 32), 0);
+        assert_eq!(dense_net_priority([3, 3, 3], &loads, 32), 0);
+        assert_eq!(dense_net_priority([1, 3, 4], &loads, 32), 102);
+    }
+
+    #[test]
     fn default_quality_controls_reproduce_the_legacy_route() {
         let legacy = crossing_nets();
         let mut defaulted = crossing_nets();
@@ -10581,6 +10687,7 @@ mod tests {
             bend_cost: 40,
             small_net_terminals: 3,
             small_net_weight: 1,
+            dense_net_order: true,
             notch_bridge: true,
             strict_wide_cycles: true,
             atomic_eager_repair: false,

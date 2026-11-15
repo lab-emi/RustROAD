@@ -175,6 +175,9 @@ pub struct RouteQorConfig {
     pub small_net_terminals: usize,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub small_net_weight: u64,
+    /// Prioritize short fanout groups spanning multiple dense GCells.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dense_net_order: bool,
     /// Same-net notch repair with the stair bridge, clipped bars and
     /// reserved fills (off keeps the legacy bars).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1562,6 +1565,7 @@ fn route_qor(
         bend_cost: config.bend_cost,
         small_net_terminals: config.small_net_terminals,
         small_net_weight: config.small_net_weight,
+        dense_net_order: config.dense_net_order,
         notch_bridge: config.notch_bridge,
         strict_wide_cycles: config.strict_wide_cycles,
         atomic_eager_repair: config.atomic_eager_repair,
@@ -2498,6 +2502,7 @@ mod qor_config_tests {
         assert!(!resolved.strict_wide_cycles);
         assert!(!resolved.atomic_eager_repair);
         assert!(!resolved.short_net_access);
+        assert!(!resolved.dense_net_order);
         assert_eq!(resolved.via_reduction, None);
         assert_eq!(
             serde_json::to_string(&off).unwrap(),
@@ -2505,7 +2510,7 @@ mod qor_config_tests {
         );
         let on: RouteQorConfig = serde_json::from_str(
             r#"{"strict_wide_cycles": true, "atomic_eager_repair": true, "short_net_access": true,
-               "via_reduction": {"passes": 1,
+               "dense_net_order": true, "via_reduction": {"passes": 1,
                 "via_milli": 3000, "max_terminals": 10, "length_per_via": 1680,
                 "net_expansions": 10000, "max_connection_length": 40000}}"#,
         )
@@ -2514,6 +2519,7 @@ mod qor_config_tests {
         assert!(resolved.strict_wide_cycles);
         assert!(resolved.atomic_eager_repair);
         assert!(resolved.short_net_access);
+        assert!(resolved.dense_net_order);
         let reduction = resolved.via_reduction.unwrap();
         assert_eq!(
             (reduction.passes, reduction.via_milli, reduction.weight),
