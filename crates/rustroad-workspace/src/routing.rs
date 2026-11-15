@@ -1651,6 +1651,13 @@ pub struct PriorSource<'a> {
     pub revision: &'a str,
 }
 
+/// Typed diode authorization and the optional two-stage pin-access policy.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PriorDiodeOptions<'a> {
+    pub plan: Option<&'a Path>,
+    pub preserve_escapes: bool,
+}
+
 /// What an ECO route offered the router. By default the prior must have
 /// routed the net with the same driver flags and absolute pin shapes.
 /// A typed diode plan also admits an otherwise unchanged net with one
@@ -1817,7 +1824,7 @@ fn diode_only_addition(
     old: (&Design, &ConnectedDesign, &[&Terminal]),
     new: (&Design, &ConnectedDesign, &[&Terminal]),
     expected: &(String, String),
-) -> Option<()> {
+) -> Option<u32> {
     let (old_design, old_model, old_group) = old;
     let (new_design, new_model, new_group) = new;
     if old_group.len() < 2
@@ -1831,7 +1838,7 @@ fn diode_only_addition(
         .map(|t| terminal_signature(old_design, old_model, t))
         .collect::<Option<_>>()?;
     let mut next = Vec::with_capacity(old.len());
-    let mut diode = false;
+    let mut diode = None;
     for t in new_group {
         let signature = terminal_signature(new_design, new_model, t)?;
         let ((instance_name, _, _), _) = signature;
@@ -1841,7 +1848,7 @@ fn diode_only_addition(
                 return None;
             };
             let master = &new_model.masters[new_model.instance_masters[instance as usize] as usize];
-            if diode
+            if diode.is_some()
                 || t.driver
                 || master.name != expected.1
                 || master.pins.len() > MAX_PRIOR_DIODE_TERMINALS
@@ -1859,14 +1866,14 @@ fn diode_only_addition(
             {
                 return None;
             }
-            diode = true;
+            diode = Some(t.pin);
         } else {
             next.push(signature);
         }
     }
     old.sort_unstable();
     next.sort_unstable();
-    (diode && old == next).then_some(())
+    if old == next { diode } else { None }
 }
 
 /// Prior geometry keyed by this input's net ids, matched by connectivity name.
@@ -1877,7 +1884,7 @@ fn prior_routes(
     bundle: &PhysicalBundle,
     input: &RouteInput,
     limits: &Limits,
-    diode_plan: Option<(&Design, &PriorDiodePlan)>,
+    diode_plan: Option<(&Design, &PriorDiodePlan, bool)>,
 ) -> Result<(rustroad_core::routing::PriorRoutes, EcoPrior)> {
     let snapshot = crate::read(prior.workspace, limits)?;
     crate::check_base(prior.revision, &crate::head(prior.workspace)?)?;
@@ -1918,7 +1925,7 @@ fn prior_routes(
     }
     let new_pins = net_pins(input, bundle.connectivity.nets.len());
     let old_pins = net_pins(&old_input, old.connectivity.nets.len());
-    let diode_groups = diode_plan.map(|(_, plan)| {
+    let diode_groups = diode_plan.map(|(_, plan, _)| {
         let expected: HashSet<_> = plan
             .additions
             .values()
@@ -1941,6 +1948,7 @@ fn prior_routes(
     let mut keep: BTreeMap<u32, u32> = BTreeMap::new();
     let (mut changed, mut fresh) = (0usize, 0usize);
     let mut diode_offers = BTreeSet::new();
+    let mut diode_pins = BTreeSet::new();
     for (&n, pins) in &new_pins {
         if pins.len() < 2 {
             continue;
@@ -1952,7 +1960,7 @@ fn prior_routes(
             Some(&o) => {
                 changed += 1;
                 let added = (|| {
-                    let (design, plan) = diode_plan?;
+                    let (design, plan, _) = diode_plan?;
                     let (before, after, existing) = diode_groups.as_ref()?;
                     let [operation] = plan
                         .additions
@@ -1970,9 +1978,12 @@ fn prior_routes(
                         operation,
                     )
                 })();
-                if added.is_some() {
+                if let Some(pin) = added {
                     keep.insert(o, n);
                     diode_offers.insert(n);
+                    if diode_plan.is_some_and(|(_, _, preserve)| preserve) {
+                        diode_pins.insert(pin);
+                    }
                 }
             }
             None => fresh += 1,
@@ -1993,6 +2004,18 @@ fn prior_routes(
             routes.nets.entry(n).or_default().1.push(v);
         }
     }
+    if let Some((_, plan, true)) = diode_plan {
+        if diode_pins.len() != plan.additions.len()
+            || diode_offers
+                .iter()
+                .any(|net| !routes.nets.contains_key(net))
+        {
+            return Err(fail(
+                "preserve prior escapes requires a verified additive diode terminal and prior route for each plan net",
+            ));
+        }
+        routes.preserve_escape_pins = diode_pins;
+    }
     let report = EcoPrior {
         workspace: prior.workspace.display().to_string(),
         revision: prior.revision.to_string(),
@@ -2000,7 +2023,7 @@ fn prior_routes(
         offered_nets: routes.nets.len(),
         changed_nets: changed,
         new_nets: fresh,
-        diode_addition_offer: diode_plan.map(|(_, plan)| DiodePriorOffer {
+        diode_addition_offer: diode_plan.map(|(_, plan, _)| DiodePriorOffer {
             plan_sha256: plan.sha256.clone(),
             offered_nets: diode_offers
                 .iter()
@@ -2034,6 +2057,33 @@ pub fn route_eco_with_plan(
     diode_plan: Option<&Path>,
     limits: &Limits,
 ) -> Result<Summary> {
+    route_eco_with_options(
+        path,
+        base_rev,
+        config_path,
+        scope,
+        prior,
+        PriorDiodeOptions {
+            plan: diode_plan,
+            preserve_escapes: false,
+        },
+        limits,
+    )
+}
+
+/// Route with explicitly selected typed diode access behavior.
+pub fn route_eco_with_options(
+    path: &Path,
+    base_rev: &str,
+    config_path: &Path,
+    scope: RouteScope,
+    prior: Option<&PriorSource<'_>>,
+    diode: PriorDiodeOptions<'_>,
+    limits: &Limits,
+) -> Result<Summary> {
+    if diode.preserve_escapes && diode.plan.is_none() {
+        return Err(fail("preserve prior escapes requires a typed diode plan"));
+    }
     let lock = crate::lock(path, false, true)?;
     let current = crate::head(path)?;
     crate::check_base(base_rev, &current)?;
@@ -2062,12 +2112,13 @@ pub fn route_eco_with_plan(
     rustroad_core::memory::trace("loaded");
     let placed: Vec<_> = snapshot.records().collect();
     let (_lock, mut metadata) = snapshot.into_metadata();
-    if diode_plan.is_some() && (prior.is_none() || scope != RouteScope::All) {
+    if diode.plan.is_some() && (prior.is_none() || scope != RouteScope::All) {
         return Err(fail(
             "prior diode plan requires a prior workspace and all-signal routing",
         ));
     }
-    let diode_plan = diode_plan
+    let diode_plan = diode
+        .plan
         .map(|path| PriorDiodePlan::read(path, &metadata.design))
         .transpose()?;
     rustroad_core::memory::trace("metadata owned");
@@ -2122,7 +2173,9 @@ pub fn route_eco_with_plan(
                 bundle,
                 &input,
                 limits,
-                diode_plan.as_ref().map(|plan| (&metadata.design, plan)),
+                diode_plan
+                    .as_ref()
+                    .map(|plan| (&metadata.design, plan, diode.preserve_escapes)),
             )?)
         }
         None => None,
