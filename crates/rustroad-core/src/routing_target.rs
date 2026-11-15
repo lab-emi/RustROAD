@@ -109,7 +109,28 @@ impl CostModel {
         Ok(Self { hops, wrong, axis })
     }
     fn estimate(&self, from: usize, to: usize, dx: u64, dy: u64) -> Option<u64> {
-        let hops = self.hops.get(from)?.get(to)?;
+        self.estimate_hops(self.hops.get(from)?.get(to)?, dx, dy)
+    }
+    fn estimate_layers(&self, from: usize, mut layers: u64, dx: u64, dy: u64) -> Option<u64> {
+        if layers.is_power_of_two() {
+            return self.estimate(from, layers.trailing_zeros() as usize, dx, dy);
+        }
+        // A BVH node's rectangle gives the same displacement for every
+        // destination layer. Minimize the via cost for each direction first.
+        let source_hops = self.hops.get(from)?;
+        let mut hops = [u64::MAX; 4];
+        while layers != 0 {
+            let to = layers.trailing_zeros() as usize;
+            layers &= layers - 1;
+            if let Some(candidate) = source_hops.get(to) {
+                for (best, &cost) in hops.iter_mut().zip(candidate) {
+                    *best = (*best).min(cost);
+                }
+            }
+        }
+        self.estimate_hops(&hops, dx, dy)
+    }
+    fn estimate_hops(&self, hops: &[u64; 4], dx: u64, dy: u64) -> Option<u64> {
         let cost = |mask: usize, x: u64, y: u64| {
             (hops[mask] != u64::MAX).then_some(())?;
             hops[mask].checked_add(x)?.checked_add(y)
@@ -277,16 +298,7 @@ impl Block {
         let dx = p[0].abs_diff(p[0].clamp(node.rect.lx, node.rect.ux));
         let dy = p[1].abs_diff(p[1].clamp(node.rect.ly, node.rect.uy));
         charge(work, node.layers.count_ones() as usize + 1, cap)?;
-        let mut mask = node.layers;
-        let mut best = None;
-        while mask != 0 {
-            let target = mask.trailing_zeros() as usize;
-            mask &= mask - 1;
-            if let Some(cost) = model.estimate(layer, target, dx, dy) {
-                best = Some(best.map_or(cost, |b: u64| b.min(cost)));
-            }
-        }
-        Ok(best)
+        Ok(model.estimate_layers(layer, node.layers, dx, dy))
     }
 
     fn distance(
@@ -498,6 +510,24 @@ mod tests {
         assert_eq!(model.estimate(0, 0, u64::MAX, 0), Some(u64::MAX));
         assert_eq!(model.estimate(0, 1, u64::MAX, 0), None);
         assert_eq!(model.estimate(0, 0, u64::MAX, 1), None);
+    }
+
+    #[test]
+    fn layer_mask_bound_matches_the_minimum_over_single_layers() {
+        let model =
+            CostModel::weighted(&[false, true, false], &[(0, 1, 7)], 2, &[1000, 1500, 2700])
+                .unwrap();
+        for source in 0..4 {
+            for mask in 0u64..16 {
+                for (dx, dy) in [(0, 0), (41, 0), (0, 123), (1123, 7221), (u64::MAX, 0)] {
+                    let expected = (0..4)
+                        .filter(|to| mask & (1 << to) != 0)
+                        .filter_map(|to| model.estimate(source, to, dx, dy))
+                        .min();
+                    assert_eq!(model.estimate_layers(source, mask, dx, dy), expected);
+                }
+            }
+        }
     }
 
     #[test]

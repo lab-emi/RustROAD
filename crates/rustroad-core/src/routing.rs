@@ -2129,7 +2129,7 @@ pub(crate) enum Soft {
     Clear { near: bool, victims: Vec<u32> },
 }
 fn same_net_shapes(
-    ties: &HashMap<u32, (u32, LayerRect)>,
+    tie: Option<&(u32, LayerRect)>,
     net: u32,
     layer: u32,
     rect: Rect,
@@ -2138,7 +2138,7 @@ fn same_net_shapes(
     if b.net == Some(net) {
         return true;
     }
-    match (ties.get(&net), b.net) {
+    match (tie, b.net) {
         (Some((supply, zone)), Some(n)) if n == *supply => {
             zone.layer == layer
                 && overlap(rect, zone.rect)
@@ -2345,7 +2345,7 @@ impl<'a> Spatial<'a> {
     /// Is stored shape `b` the query net's own metal? A supply tie also owns
     /// supply shapes that its query touches inside its rail zone.
     fn same_net(&self, net: u32, layer: u32, rect: Rect, b: &Blockage) -> bool {
-        same_net_shapes(&self.ties, net, layer, rect, b)
+        same_net_shapes(self.ties.get(&net), net, layer, rect, b)
     }
     fn probe_instances(
         &mut self,
@@ -2357,7 +2357,7 @@ impl<'a> Spatial<'a> {
         let Some(instances) = &mut self.instances else {
             return Ok(Some(false));
         };
-        let ties = &self.ties;
+        let tie = self.ties.get(&net);
         let routing = self.input.layers[layer as usize].vertical.is_some();
         let rules = self.input.rules;
         let spacing = self.input.layers[layer as usize].spacing;
@@ -2369,7 +2369,7 @@ impl<'a> Spatial<'a> {
             if rules && routing_separated(&self.input.layers[layer as usize], rect, b.rect) {
                 return Ok(true);
             }
-            let shared = same_net_shapes(ties, net, layer, rect, &b) && (routing || rect == b.rect);
+            let shared = same_net_shapes(tie, net, layer, rect, &b) && (routing || rect == b.rect);
             if !shared {
                 return Ok(false);
             }
@@ -2605,6 +2605,7 @@ impl<'a> Spatial<'a> {
         let mut victims = Vec::new();
         let rule = &self.input.layers[layer as usize];
         let query = expand(rect, rule.spacing)?;
+        let tie = self.ties.get(&net);
         self.generation = self
             .generation
             .checked_add(1)
@@ -2646,8 +2647,8 @@ impl<'a> Spatial<'a> {
                         if self.input.rules && routing_separated(rule, rect, b.rect) {
                             continue;
                         }
-                        let shared =
-                            self.same_net(net, layer, rect, b) && (routing || rect == b.rect);
+                        let shared = same_net_shapes(tie, net, layer, rect, b)
+                            && (routing || rect == b.rect);
                         if !shared {
                             match b.net {
                                 Some(other) if self.routed(id) && other != net => {
@@ -2705,6 +2706,7 @@ impl<'a> Spatial<'a> {
         let rule = &self.input.layers[layer as usize];
         let query = expand(rect, rule.spacing)?;
         let routing = rule.vertical.is_some();
+        let tie = self.ties.get(&net);
         self.generation = self
             .generation
             .checked_add(1)
@@ -2745,8 +2747,8 @@ impl<'a> Spatial<'a> {
                         if self.input.rules && routing_separated(rule, rect, b.rect) {
                             continue;
                         }
-                        let shared =
-                            self.same_net(net, layer, rect, b) && (routing || rect == b.rect);
+                        let shared = same_net_shapes(tie, net, layer, rect, b)
+                            && (routing || rect == b.rect);
                         if !shared {
                             return Ok(None);
                         }
@@ -5092,7 +5094,7 @@ impl Spatial<'_> {
             return Ok(Some(work));
         };
         let source = instances.source;
-        let ties = &self.ties;
+        let tie = self.ties.get(&net);
         let rules = self.input.rules;
         let limits = self.limits;
         let clear = instances.visit_cells_with_scratch(
@@ -5120,7 +5122,7 @@ impl Spatial<'_> {
                         if rules && routing_separated(rule, rect, b.rect) {
                             return Ok(true);
                         }
-                        Ok(same_net_shapes(ties, net, layer, rect, &b)
+                        Ok(same_net_shapes(tie, net, layer, rect, &b)
                             && (routing || rect == b.rect))
                     },
                 )
