@@ -1,12 +1,11 @@
 //! Bounded ownership of selected-report rows and their input inventory.
-use super::{AntennaRequest, AntennaStats, CheckRow, Error, Result};
+use super::{AntennaRequest, AntennaStats, CheckRow, Error, ROW_SLOT_BYTES, Result};
 use serde::de::{DeserializeSeed, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::mem;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -157,7 +156,7 @@ impl Rows {
             let capacity = needed.max(self.data.capacity().saturating_mul(2)).max(4);
             let bytes = capacity
                 .checked_sub(self.data.capacity())
-                .and_then(|n| n.checked_mul(mem::size_of::<CheckRow>()))
+                .and_then(|n| n.checked_mul(ROW_SLOT_BYTES))
                 .ok_or_else(|| Error::Budget("ANTENNA: row capacity".into()))?;
             lease.grow(bytes)?;
             self.data
@@ -176,7 +175,7 @@ impl Rows {
             .ok_or_else(|| Error::Budget("ANTENNA: report memory budget".into()))?;
         self.reserve_slots(1)?;
         if let Some(lease) = &mut self.lease {
-            let variable = bytes.saturating_sub(mem::size_of::<CheckRow>());
+            let variable = bytes.saturating_sub(ROW_SLOT_BYTES);
             lease.grow(variable)?;
             self.variable_bytes = self
                 .variable_bytes
@@ -512,7 +511,7 @@ impl<'input> Visitor<'input> for BindingRows<'_> {
                 .get()
                 .len()
                 .checked_mul(16)
-                .and_then(|n| n.checked_add(mem::size_of::<CheckRow>() + 512))
+                .and_then(|n| n.checked_add(ROW_SLOT_BYTES + 512))
                 .ok_or_else(|| A::Error::custom("selected row allocation overflow"))?;
             let _row_hold = match self.memory.reserve(bytes) {
                 Ok(reservation) => reservation,
@@ -612,6 +611,8 @@ struct ExactRow<'input> {
     #[serde(borrow)]
     metal_um2: &'input RawValue,
     #[serde(borrow)]
+    effective_metal_um2: Option<&'input RawValue>,
+    #[serde(borrow)]
     denominator_um2: &'input RawValue,
     #[serde(borrow)]
     ratio: &'input RawValue,
@@ -636,6 +637,7 @@ fn exact_row(text: &str) -> Result<CheckRow> {
         gate_area_um2: scalar(row.gate_area_um2)?,
         diff_area_um2: scalar(row.diff_area_um2)?,
         metal_um2: scalar(row.metal_um2)?,
+        effective_metal_um2: row.effective_metal_um2.map(scalar).transpose()?,
         denominator_um2: scalar(row.denominator_um2)?,
         ratio: scalar(row.ratio)?,
         limit: scalar(row.limit)?,
@@ -681,10 +683,26 @@ mod tests {
     }
 
     #[test]
+    fn row_capacity_charges_the_full_in_memory_slot() {
+        let capacity_bytes = 4 * std::mem::size_of::<CheckRow>();
+        let tight = ReportMemory::new(capacity_bytes - 1);
+        let mut rows = Rows::new(Some(&tight)).unwrap();
+        assert!(rows.reserve_slots(1).is_err());
+        assert_eq!(rows.data.capacity(), 0);
+        assert_eq!(tight.stats(0).live_bytes, 0);
+
+        let exact = ReportMemory::new(capacity_bytes);
+        let mut rows = Rows::new(Some(&exact)).unwrap();
+        rows.reserve_slots(1).unwrap();
+        assert_eq!(rows.data.capacity(), 4);
+        assert_eq!(exact.stats(0).live_bytes, capacity_bytes);
+    }
+
+    #[test]
     fn selected_row_decimals_and_pwl_values_round_trip_exactly() {
         let value = 221.39601139601137;
         let small = 1.1965811965811965;
-        let row = CheckRow {
+        let mut row = CheckRow {
             net: "clock".into(),
             layer: "M2".into(),
             kind: "area".into(),
@@ -693,6 +711,7 @@ mod tests {
             gate_area_um2: small,
             diff_area_um2: 0.0,
             metal_um2: value,
+            effective_metal_um2: None,
             denominator_um2: small,
             ratio: value,
             limit: value,
@@ -710,11 +729,22 @@ mod tests {
             violated: true,
             exceeds_lef_limit: true,
         };
-        let text = serde_json::to_string(&row).unwrap();
-        let decoded = exact_row(&text).unwrap();
-        assert_eq!(decoded.ratio.to_bits(), row.ratio.to_bits());
-        assert_eq!(serde_json::to_string(&decoded).unwrap(), text);
-        assert_eq!(digest(&decoded).unwrap(), digest(&row).unwrap());
+        for effective in [None, Some(value + small)] {
+            row.effective_metal_um2 = effective;
+            let text = serde_json::to_string(&row).unwrap();
+            assert_eq!(
+                text.contains("\"effective_metal_um2\""),
+                effective.is_some()
+            );
+            let decoded = exact_row(&text).unwrap();
+            assert_eq!(decoded.ratio.to_bits(), row.ratio.to_bits());
+            assert_eq!(
+                decoded.effective_metal_um2.map(f64::to_bits),
+                effective.map(f64::to_bits)
+            );
+            assert_eq!(serde_json::to_string(&decoded).unwrap(), text);
+            assert_eq!(digest(&decoded).unwrap(), digest(&row).unwrap());
+        }
     }
 }
 

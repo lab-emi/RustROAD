@@ -22,8 +22,9 @@
 //! Magic, i.e. 5.4 % low; the phase-B1 length sweep bounds the under-read
 //! below 8.4 %). A row is therefore `violated` when its ratio exceeds
 //! `(1 - safety_margin) x limit` (default margin `DEFAULT_SAFETY_MARGIN` =
-//! 0.10, above the measured bound); `exceeds_lef_limit` keeps the raw LEF
-//! comparison. The foundry deck stays the signoff gate (docs/rtl2gds.md).
+//! 0.10, above the measured bound); `exceeds_lef_limit` compares the active
+//! ratio to the LEF limit without applying the margin. The foundry deck stays
+//! the signoff gate (docs/rtl2gds.md).
 //!
 //! Inputs are the workspace's own technology/cell LEF sources, re-read and
 //! verified by SHA-256, and the routed geometry: wires (LEF width), vias,
@@ -49,6 +50,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod batch;
+mod cut_area;
 mod inventory;
 mod net_index;
 mod repair_groups;
@@ -71,6 +73,8 @@ pub const ANTENNA_SCHEMA: &str = "rustroad.antenna-check.v1";
 pub const DEFAULT_SAFETY_MARGIN: f64 = 0.10;
 /// Legacy cumulative ceiling; explicit selected reports use the same hard live cap.
 const MAX_REPORT_MEMORY_BYTES: usize = 128 * 1024 * 1024;
+// Allocated rows contain the optional area slot even when it serializes away.
+const ROW_SLOT_BYTES: usize = mem::size_of::<CheckRow>();
 pub const SAFETY_MARGIN_DERIVATION: &str = "native partial-net ratios read low against the \
 foundry deck: sky130 clk/met3 445.6 native vs 470.866 Magic (-5.4 %); planted met3 sweep: \
 native 379.5 already fails Magic, native 366.6 passes (-5.1 % .. -8.4 %). Margin 0.10 exceeds \
@@ -83,6 +87,8 @@ fn fail(code: &str, m: impl std::fmt::Display) -> Error {
 #[derive(Clone, Debug)]
 pub struct AntennaRequest {
     pub extra_shapes: Option<PathBuf>,
+    /// Optional PDK-pinned process-stage cut-area model.
+    pub cut_area_model: Option<PathBuf>,
     /// Explicit read-only subset. Omission preserves the legacy complete inventory.
     pub selected_nets: Option<Vec<String>>,
     pub max_shapes_per_net: usize,
@@ -109,6 +115,7 @@ impl Default for AntennaRequest {
     fn default() -> Self {
         Self {
             extra_shapes: None,
+            cut_area_model: None,
             selected_nets: None,
             max_shapes_per_net: 200_000,
             max_total_shapes: 2_000_000,
@@ -232,14 +239,18 @@ pub struct CheckRow {
     pub layer: String,
     /// side_area | area | cumulative_side_area | cumulative_area, and with
     /// `AntennaRequest::whole_net` also whole_net_side_area | whole_net_area.
-    /// For cumulative rows, `ratio` sums historical partial ratios; `metal_um2`
-    /// and `denominator_um2` describe only the current process-stage component.
+    /// For cumulative rows, `ratio` sums historical partial ratios. Area and
+    /// denominator fields describe the current process-stage component.
     pub kind: String,
     pub gates: Vec<String>,
     pub diffusions: Vec<String>,
     pub gate_area_um2: f64,
     pub diff_area_um2: f64,
+    /// Drawn area, or perimeter times thickness for side-area rows.
     pub metal_um2: f64,
+    /// Modeled area used for this stage's ratio when it differs from drawn area.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_metal_um2: Option<f64>,
     pub denominator_um2: f64,
     pub ratio: f64,
     pub limit: f64,
@@ -249,7 +260,7 @@ pub struct CheckRow {
     pub rules: RulePair,
     /// Conservative native verdict: `ratio > effective_limit`.
     pub violated: bool,
-    /// Raw LEF comparison: `ratio > limit`.
+    /// Active model's ratio exceeds the LEF limit without the safety margin.
     pub exceeds_lef_limit: bool,
 }
 
@@ -271,6 +282,9 @@ pub struct AntennaScope {
     pub checked_layers: Vec<String>,
     pub rule_free_layers: Vec<String>,
     pub extra_shapes: usize,
+    /// Digest of the optional model also listed in the report sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cut_area_model_sha256: Option<String>,
     pub drc_status: &'static str,
 }
 #[derive(Clone, Debug, Default, Serialize)]
@@ -306,6 +320,7 @@ pub struct AntennaReport {
     pub status: &'static str,
     pub safety_margin: SafetyMargin,
     /// Rows above the raw LEF limit (subset of `violations`).
+    /// Rows whose active ratio exceeds the un-margined LEF limit.
     pub lef_violations: usize,
     pub workspace_revision: String,
     pub design: String,
@@ -373,6 +388,21 @@ fn union_area_perimeter(
     work: &mut usize,
     max_work: usize,
 ) -> Result<(i128, i128)> {
+    let (area, perimeter, _) =
+        union_area_perimeter_weighted(rects, |_| 1, max_cells, used, work, max_work)?;
+    Ok((area, perimeter))
+}
+
+/// The maximum weight covers each occupied tile once, even when duplicate
+/// cut records or overlapping rectangles would overcount their raw union.
+fn union_area_perimeter_weighted(
+    rects: &[Rect],
+    weight: impl Fn(&Rect) -> u8,
+    max_cells: usize,
+    used: &mut usize,
+    work: &mut usize,
+    max_work: usize,
+) -> Result<(i128, i128, Option<i128>)> {
     let mut xs: Vec<i64> = rects.iter().flat_map(|r| [r.lx, r.ux]).collect();
     let mut ys: Vec<i64> = rects.iter().flat_map(|r| [r.ly, r.uy]).collect();
     xs.sort_unstable();
@@ -390,8 +420,9 @@ fn union_area_perimeter(
     }
     *used += cells;
     charge_work(work, cells.saturating_mul(2), max_work)?;
-    let mut grid = vec![false; cells];
+    let mut grid = vec![0u8; cells];
     for r in rects {
+        let weight = weight(r);
         let x0 = xs.partition_point(|&x| x < r.lx);
         let x1 = xs.partition_point(|&x| x < r.ux);
         let y0 = ys.partition_point(|&y| y < r.ly);
@@ -399,7 +430,8 @@ fn union_area_perimeter(
         charge_work(work, (x1 - x0).saturating_mul(y1 - y0), max_work)?;
         for x in x0..x1 {
             for y in y0..y1 {
-                grid[x * ny + y] = true;
+                let tile = &mut grid[x * ny + y];
+                *tile = (*tile).max(weight);
             }
         }
     }
@@ -408,17 +440,25 @@ fn union_area_perimeter(
             && y >= 0
             && (x as usize) < nx
             && (y as usize) < ny
-            && grid[x as usize * ny + y as usize]
+            && grid[x as usize * ny + y as usize] != 0
     };
-    let (mut area, mut perimeter) = (0i128, 0i128);
+    let (mut area, mut perimeter, mut extra_area) = (0i128, 0i128, 0i128);
     for x in 0..nx {
         for y in 0..ny {
-            if !grid[x * ny + y] {
+            let weight = grid[x * ny + y];
+            if weight == 0 {
                 continue;
             }
             let dx = i128::from(xs[x + 1] - xs[x]);
             let dy = i128::from(ys[y + 1] - ys[y]);
-            area += dx * dy;
+            let tile_area = dx * dy;
+            area += tile_area;
+            if weight > 1 {
+                extra_area = tile_area
+                    .checked_mul(i128::from(weight - 1))
+                    .and_then(|a| extra_area.checked_add(a))
+                    .ok_or_else(|| Error::Budget("ANTENNA: weighted cut area overflow".into()))?;
+            }
             let (xi, yi) = (x as isize, y as isize);
             if !at(xi - 1, yi) {
                 perimeter += dy;
@@ -434,7 +474,15 @@ fn union_area_perimeter(
             }
         }
     }
-    Ok((area, perimeter))
+    let effective = if extra_area == 0 {
+        None
+    } else {
+        Some(
+            area.checked_add(extra_area)
+                .ok_or_else(|| Error::Budget("ANTENNA: weighted cut area overflow".into()))?,
+        )
+    };
+    Ok((area, perimeter, effective))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -533,6 +581,7 @@ struct Prepared {
     order: Vec<u32>,
     positions: Vec<usize>,
     cut_adjacent: HashMap<u32, (u32, u32)>,
+    cut_area: Option<cut_area::Model>,
     layer_rules: HashMap<String, LayerAntenna>,
     pin_area: HashMap<String, HashMap<String, PinArea>>,
     checked_layers: Vec<String>,
@@ -799,6 +848,7 @@ fn prepare(
         order,
         positions: position,
         cut_adjacent,
+        cut_area: None,
         layer_rules,
         pin_area,
         checked_layers,
@@ -1165,6 +1215,19 @@ fn evaluate_net(
         if rule.model.as_deref().is_some_and(|m| m != "OXIDE1") {
             continue;
         }
+        // The DSU contains only the upper cut and earlier layers here.
+        // A later upper-metal connection cannot transfer a cut's weight.
+        let cut_weights = match &prep.cut_area {
+            Some(model) if model.upper == layer => model.weights(
+                by_layer.get(&model.lower).map(Vec::as_slice).unwrap_or(&[]),
+                list,
+                shapes,
+                &mut dsu,
+                request,
+                stats,
+            )?,
+            _ => Vec::new(),
+        };
         // Components with gate area: gate/diff sums and pin names.
         charge_work(
             &mut stats.work,
@@ -1205,23 +1268,46 @@ fn evaluate_net(
                 continue;
             }
             stats.partial_nets_checked += 1;
-            let (area, perimeter) = union_area_perimeter(
-                &rects,
-                request.max_union_cells,
-                &mut stats.union_cells,
-                &mut stats.work,
-                request.max_work,
-            )?;
+            let (area, perimeter, effective_area) = if cut_weights.is_empty() {
+                let (area, perimeter) = union_area_perimeter(
+                    &rects,
+                    request.max_union_cells,
+                    &mut stats.union_cells,
+                    &mut stats.work,
+                    request.max_work,
+                )?;
+                (area, perimeter, None)
+            } else {
+                charge_work(
+                    &mut stats.work,
+                    rects
+                        .len()
+                        .saturating_mul(cut_weights.len().ilog2() as usize + 1),
+                    request.max_work,
+                )?;
+                union_area_perimeter_weighted(
+                    &rects,
+                    |rect| cut_area::lookup(&cut_weights, shapes, rect),
+                    request.max_union_cells,
+                    &mut stats.union_cells,
+                    &mut stats.work,
+                    request.max_work,
+                )?
+            };
             let gate_um2 = component.gate as f64 / dbu2;
             let diff_um2 = component.diffusion as f64 / dbu2;
-            let mut kinds = vec![(false, area as f64 / dbu2)];
+            let mut kinds = vec![(
+                false,
+                area as f64 / dbu2,
+                effective_area.map(|a| a as f64 / dbu2),
+            )];
             if !is_cut && let Some(t) = rule.thickness {
-                kinds.push((true, (perimeter * i128::from(t)) as f64 / dbu2));
+                kinds.push((true, (perimeter * i128::from(t)) as f64 / dbu2, None));
             }
-            for (side, metal_um2) in kinds {
+            for (side, metal_um2, effective_metal_um2) in kinds {
                 let partial_rules = rules_for(rule, dbu2, side, false);
                 let denominator = partial_rules.denominator(gate_um2, diff_um2);
-                let partial_ratio = metal_um2 / denominator;
+                let partial_ratio = effective_metal_um2.unwrap_or(metal_um2) / denominator;
                 charge_work(&mut stats.work, component.gates.len(), request.max_work)?;
                 let mut worst: Option<(usize, String, f64)> = None;
                 for (terminal, name) in &component.gates {
@@ -1261,7 +1347,7 @@ fn evaluate_net(
                         _ => 0,
                     };
                     // Charge before cloning any fanout list or variable-length name.
-                    let bytes = mem::size_of::<CheckRow>()
+                    let bytes = ROW_SLOT_BYTES
                         + 256
                         + net_name.len()
                         + lname.len()
@@ -1299,6 +1385,7 @@ fn evaluate_net(
                         gate_area_um2: gate_um2,
                         diff_area_um2: diff_um2,
                         metal_um2,
+                        effective_metal_um2,
                         denominator_um2: denominator,
                         ratio,
                         limit,
@@ -1423,7 +1510,7 @@ fn whole_net_rows(
                 Some(Limit::Pwl { points }) => points.len() * mem::size_of::<[f64; 2]>(),
                 _ => 0,
             };
-            let bytes = mem::size_of::<CheckRow>()
+            let bytes = ROW_SLOT_BYTES
                 + 256
                 + net_name.len()
                 + lname.len()
@@ -1453,6 +1540,7 @@ fn whole_net_rows(
                 gate_area_um2: gate_um2,
                 diff_area_um2: diff_um2,
                 metal_um2,
+                effective_metal_um2: None,
                 denominator_um2: denominator,
                 ratio,
                 limit,
@@ -1729,7 +1817,12 @@ pub fn check_antenna(
         .as_ref()
         .ok_or_else(|| fail("NO_ROUTING", "route before the antenna check"))?;
     let placed: Vec<_> = snapshot.records().collect();
-    let prep = prepare(design, bundle, &placed, state)?;
+    let mut prep = prepare(design, bundle, &placed, state)?;
+    if let Some(path) = &request.cut_area_model {
+        let (model, source) = cut_area::read(path, &prep)?;
+        prep.cut_area = Some(model);
+        prep.sources.push(source);
+    }
     check_prepared(metadata, &placed, &prep, request, None, None)
 }
 
@@ -1913,7 +2006,11 @@ fn check_prepared(
         status,
         safety_margin: SafetyMargin {
             fraction: request.safety_margin,
-            rule: "violated when ratio > (1 - fraction) x LEF limit; exceeds_lef_limit is the raw comparison".into(),
+            rule: if prep.cut_area.is_some() {
+                "violated when the active ratio > (1 - fraction) x LEF limit. exceeds_lef_limit compares the active ratio (with cut-area weights where applicable) to the LEF limit without applying the margin. lef_violations counts those rows."
+            } else {
+                "violated when ratio > (1 - fraction) x LEF limit; exceeds_lef_limit is the raw comparison"
+            }.into(),
             derivation: SAFETY_MARGIN_DERIVATION.into(),
         },
         lef_violations,
@@ -1940,6 +2037,8 @@ fn check_prepared(
             checked_layers: prep.checked_layers.clone(),
             rule_free_layers: prep.rule_free_layers.clone(),
             extra_shapes: extra_count,
+            cut_area_model_sha256: prep.sources.iter().find(|source| source.role == "antenna_cut_area")
+                .map(|source| source.sha256.clone()),
             drc_status: "unchecked",
         },
         stats,
@@ -3162,6 +3261,7 @@ mod tests {
             gate_area_um2: 0.1,
             diff_area_um2: 0.0,
             metal_um2: 30.0,
+            effective_metal_um2: None,
             denominator_um2: 0.1,
             ratio: 300.0,
             limit: 200.0,
@@ -3258,6 +3358,22 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn weighted_cut_union_observes_each_physical_tile_once() {
+        let first = r(0, 0, 10, 2);
+        let next = r(5, 0, 15, 2);
+        let (mut used, mut work) = (0, 0);
+        let (area, perimeter, effective) = union_area_perimeter_weighted(
+            &[first, next, first],
+            |rect| if *rect == first { 4 } else { 2 },
+            100,
+            &mut used,
+            &mut work,
+            10000,
+        )
+        .unwrap();
+        assert_eq!((area, perimeter, effective), (30, 34, Some(100)));
     }
     #[test]
     fn rule_selection_and_pwl() {

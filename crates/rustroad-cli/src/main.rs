@@ -446,6 +446,9 @@ enum Command {
         /// What-if shapes `[{net, layer, rect:[lx,ly,ux,uy]}]` in DBU merged into nets.
         #[arg(long)]
         extra_shapes: Option<PathBuf>,
+        /// Optional PDK-pinned process-stage cut-area model.
+        #[arg(long)]
+        cut_area_model: Option<PathBuf>,
         /// Explicit bounded routed-net subset; omitted keeps the legacy complete report.
         #[arg(long)]
         selected_nets: Option<PathBuf>,
@@ -1200,6 +1203,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::CheckAntenna {
             extra_shapes,
+            cut_area_model,
             selected_nets,
             max_shapes_per_net,
             max_total_shapes,
@@ -1213,6 +1217,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             &workspace,
             &rustroad_workspace::antenna::AntennaRequest {
                 extra_shapes,
+                cut_area_model,
                 selected_nets: selected_nets
                     .as_deref()
                     .map(rustroad_workspace::antenna::read_check_selection)

@@ -2539,7 +2539,9 @@ pub fn plan_antenna_with_limits(
                 // Sized against the conservative (effective) limit.
                 match row.rules.limit(d) {
                     Some((limit, _)) => {
-                        row.metal_um2 / row.rules.denominator(g, d) / (limit * (1.0 - margin))
+                        row.effective_metal_um2.unwrap_or(row.metal_um2)
+                            / row.rules.denominator(g, d)
+                            / (limit * (1.0 - margin))
                     }
                     None => f64::INFINITY,
                 }
