@@ -1,5 +1,6 @@
 //! Optional cut-area weights calibrated by a process deck, applied to the
 //! lower-side component that exists when the upper cut is formed.
+use super::sidewall_bridge;
 use super::{AntennaRequest, AntennaStats, Dsu, Prepared, Shape, SourceCheck, charge_work, fail};
 use crate::pdk::read_input;
 use crate::{Error, Result};
@@ -26,6 +27,7 @@ struct Profile {
     upper_cut: CutLayer,
     containment_dbu: i64,
     overlap_dbu: i64,
+    sidewall_bridge: Option<sidewall_bridge::Profile>,
 }
 
 pub(super) struct Model {
@@ -35,6 +37,7 @@ pub(super) struct Model {
     upper_size: i64,
     containment: i64,
     overlap: i64,
+    pub(super) sidewall_bridge: Option<sidewall_bridge::Model>,
 }
 
 pub(super) fn read(path: &Path, prep: &Prepared) -> Result<(Model, SourceCheck)> {
@@ -99,6 +102,10 @@ pub(super) fn read(path: &Path, prep: &Prepared) -> Result<(Model, SourceCheck)>
             upper_size: profile.upper_cut.square_dbu,
             containment: profile.containment_dbu,
             overlap: profile.overlap_dbu,
+            sidewall_bridge: profile
+                .sidewall_bridge
+                .map(|profile| profile.resolve(prep))
+                .transpose()?,
         },
         SourceCheck {
             role: source.role,
@@ -233,6 +240,7 @@ mod tests {
             upper_size: 800,
             containment: 430,
             overlap: 750,
+            sidewall_bridge: None,
         }
     }
 

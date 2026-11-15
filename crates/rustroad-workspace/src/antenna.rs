@@ -55,6 +55,7 @@ mod inventory;
 mod net_index;
 mod repair_groups;
 mod report;
+mod sidewall_bridge;
 pub use batch::{CheckBatchPlan, CheckBatchSummary, check_antenna_batch, read_check_batch_plan};
 pub use inventory::{InventoryBounds, InventoryEntry, InventoryReport, antenna_inventory};
 use net_index::NetIndex;
@@ -319,7 +320,6 @@ pub struct AntennaReport {
     pub schema: &'static str,
     pub status: &'static str,
     pub safety_margin: SafetyMargin,
-    /// Rows above the raw LEF limit (subset of `violations`).
     /// Rows whose active ratio exceeds the un-margined LEF limit.
     pub lef_violations: usize,
     pub workspace_revision: String,
@@ -1019,6 +1019,7 @@ fn terminal_info(
 struct ComponentAreas {
     gate: i64,
     diffusion: i64,
+    terminals: usize,
     gates: Vec<(usize, String)>,
     diffusions: Vec<String>,
 }
@@ -1115,7 +1116,18 @@ fn evaluate_net(
             shapes.len() + prep.layer_rules.len(),
             request.max_work,
         )?;
-        Some(memory.reserve(report_scratch_bytes(prep, design, model, shapes)?)?)
+        let bridge_bytes = prep
+            .cut_area
+            .as_ref()
+            .and_then(|model| model.sidewall_bridge.as_ref())
+            .map_or(0, |_| sidewall_bridge::scratch_bytes(shapes.len()));
+        Some(
+            memory.reserve(
+                report_scratch_bytes(prep, design, model, shapes)?
+                    .checked_add(bridge_bytes)
+                    .ok_or_else(|| Error::Budget("ANTENNA: sidewall bridge scratch".into()))?,
+            )?,
+        )
     } else {
         None
     };
@@ -1240,6 +1252,7 @@ fn evaluate_net(
             let (name, g, d, q) = terminal_info(prep, design, model, t, Some(layer));
             *qualified |= q;
             let e = comp.entry(root).or_default();
+            e.terminals += 1;
             e.gate = e
                 .gate
                 .checked_add(g)
@@ -1259,8 +1272,26 @@ fn evaluate_net(
         for &i in list {
             metal.entry(dsu.find(i)).or_default().push(shapes[i].rect);
         }
+        let bridge = prep
+            .cut_area
+            .as_ref()
+            .and_then(|model| model.sidewall_bridge.as_ref())
+            .filter(|bridge| bridge.measured_layer == layer);
+        let bridges = match bridge {
+            Some(bridge) => bridge.transfers(
+                sidewall_bridge::Stage {
+                    by_layer: &by_layer,
+                    shapes,
+                    components: &comp,
+                    dsu: &mut dsu,
+                },
+                request,
+                stats,
+            )?,
+            None => BTreeMap::new(),
+        };
         let is_cut = input.layers[layer as usize].vertical.is_none();
-        for (root, rects) in metal {
+        for (&root, rects) in &metal {
             let Some(component) = comp.get(&root) else {
                 continue;
             };
@@ -1270,7 +1301,7 @@ fn evaluate_net(
             stats.partial_nets_checked += 1;
             let (area, perimeter, effective_area) = if cut_weights.is_empty() {
                 let (area, perimeter) = union_area_perimeter(
-                    &rects,
+                    rects,
                     request.max_union_cells,
                     &mut stats.union_cells,
                     &mut stats.work,
@@ -1286,7 +1317,7 @@ fn evaluate_net(
                     request.max_work,
                 )?;
                 union_area_perimeter_weighted(
-                    &rects,
+                    rects,
                     |rect| cut_area::lookup(&cut_weights, shapes, rect),
                     request.max_union_cells,
                     &mut stats.union_cells,
@@ -1302,7 +1333,25 @@ fn evaluate_net(
                 effective_area.map(|a| a as f64 / dbu2),
             )];
             if !is_cut && let Some(t) = rule.thickness {
-                kinds.push((true, (perimeter * i128::from(t)) as f64 / dbu2, None));
+                let modeled = match (bridge, bridges.get(&root)) {
+                    (Some(bridge), Some(donor)) => {
+                        let (_, donor_perimeter) = union_area_perimeter(
+                            &metal[donor],
+                            request.max_union_cells,
+                            &mut stats.union_cells,
+                            &mut stats.work,
+                            request.max_work,
+                        )?;
+                        // Distinct M3 DSU roots have disjoint, non-touching shapes.
+                        // Their union perimeter is the sum of the two perimeters.
+                        Some(
+                            (perimeter + donor_perimeter) as f64 * bridge.thickness_dbu as f64
+                                / dbu2,
+                        )
+                    }
+                    _ => None,
+                };
+                kinds.push((true, (perimeter * i128::from(t)) as f64 / dbu2, modeled));
             }
             for (side, metal_um2, effective_metal_um2) in kinds {
                 let partial_rules = rules_for(rule, dbu2, side, false);
@@ -2006,7 +2055,9 @@ fn check_prepared(
         status,
         safety_margin: SafetyMargin {
             fraction: request.safety_margin,
-            rule: if prep.cut_area.is_some() {
+            rule: if prep.cut_area.as_ref().is_some_and(|model| model.sidewall_bridge.is_some()) {
+                "violated when the active ratio > (1 - fraction) x LEF limit. exceeds_lef_limit compares the active ratio, including optional cut weights and local sidewall transfers, to the un-margined LEF limit."
+            } else if prep.cut_area.is_some() {
                 "violated when the active ratio > (1 - fraction) x LEF limit. exceeds_lef_limit compares the active ratio (with cut-area weights where applicable) to the LEF limit without applying the margin. lef_violations counts those rows."
             } else {
                 "violated when ratio > (1 - fraction) x LEF limit; exceeds_lef_limit is the raw comparison"
@@ -2031,7 +2082,11 @@ fn check_prepared(
             },
             oxide: "OXIDE1",
             cumulative: prep.cumulative.clone(),
-            side_area: "union perimeter x LEF THICKNESS",
+            side_area: if prep.cut_area.as_ref().is_some_and(|model| model.sidewall_bridge.is_some()) {
+                "drawn union perimeter x LEF THICKNESS; effective sidewall includes PDK-calibrated local bridge transfers on matched process components"
+            } else {
+                "union perimeter x LEF THICKNESS"
+            },
             block_ports: "top-level ports carry no gate or diffusion area",
             cell_internal_metal: "routing-layer pin port geometry counted; other cell-internal metal not modeled",
             checked_layers: prep.checked_layers.clone(),
