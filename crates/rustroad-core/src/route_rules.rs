@@ -630,6 +630,88 @@ pub(crate) fn fill_for(a: Rect, b: Rect, width: i64, grid: i64) -> Rect {
     r
 }
 
+/// The single facing gap and its bounded, grid-aligned fill.
+fn aligned_notch_geometry(
+    a: Rect,
+    b: Rect,
+    rule: &crate::routing::RouteLayer,
+    grid: i64,
+) -> Option<(Rect, Rect)> {
+    let (ox, oy) = (overlap_x(a, b), overlap_y(a, b));
+    let (gap, face) = if ox < 0 { (-ox, oy) } else { (-oy, ox) };
+    let width = i128::from(rule.width);
+    if !(0 < gap
+        && gap < i128::from(rule.spacing)
+        && gap <= width
+        && (1..=2 * width).contains(&face))
+    {
+        return None;
+    }
+    let [Some(gap), None] = gap_regions(a, b) else {
+        return None;
+    };
+    let rect = fill_for(a, b, rule.width, grid);
+    let dx = i128::from(rect.ux) - i128::from(rect.lx);
+    let dy = i128::from(rect.uy) - i128::from(rect.ly);
+    (rect.valid() && dx <= 2 * width && dy <= 2 * width).then_some((gap, rect))
+}
+
+/// Match the first full validation finding to this exact facing pad pair.
+pub(crate) fn aligned_notch_fill(
+    detail: &str,
+    net: u32,
+    layer: u32,
+    a: Rect,
+    b: Rect,
+    rule: &crate::routing::RouteLayer,
+    grid: i64,
+) -> Option<Rect> {
+    let (_, rect) = aligned_notch_geometry(a, b, rule, grid)?;
+    let matches = |a, b| {
+        let finding = Violation::Spacing { net, layer, a, b };
+        let prefix = format!("ROUTING_RULE {} (", finding.describe());
+        detail
+            .strip_prefix(&prefix)
+            .and_then(|s| s.strip_suffix(" total)"))
+            .is_some_and(|count| !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit()))
+    };
+    (matches(a, b) || matches(b, a)).then_some(rect)
+}
+
+/// Propose a fill before validation only for a provably uncovered facing gap.
+pub(crate) fn uncovered_aligned_notch_fill(
+    a: Rect,
+    b: Rect,
+    input: &RouteInput,
+    layer: u32,
+    shapes: &[crate::routing::LayerRect],
+    work: &mut usize,
+    cap: usize,
+) -> Result<Option<(Rect, Rect)>> {
+    let Some((gap, patch)) =
+        aligned_notch_geometry(a, b, &input.layers[layer as usize], input.grid)
+    else {
+        return Ok(None);
+    };
+    // Three rectangles partition the gap into at most 7 x 7 cells (<64).
+    // More cover shapes defer to the full validator's ordinary path.
+    const MAX_COVERS: usize = 3;
+    let mut covers = Vec::with_capacity(MAX_COVERS);
+    charge(work, shapes.len(), cap)?;
+    for shape in shapes.iter().filter(|shape| shape.layer == layer) {
+        if let Some(clipped) = clip(gap, shape.rect) {
+            if covers.contains(&clipped) {
+                continue;
+            }
+            if covers.len() == MAX_COVERS {
+                return Ok(None);
+            }
+            covers.push(clipped);
+        }
+    }
+    Ok((!covered(gap, covers.into_iter(), work, cap)?).then_some((gap, patch)))
+}
+
 /// Track-router patch: like `fill_for`, but a corner/point bridge overlaps
 /// each shape by at least the layer width (or the shape's full extent) in
 /// both axes, so the union never forms a sub-width neck at the junction.
@@ -1929,6 +2011,34 @@ mod tests {
     use super::*;
     fn r(lx: i64, ly: i64, ux: i64, uy: i64) -> Rect {
         Rect { lx, ly, ux, uy }
+    }
+
+    #[test]
+    fn notch_fill_requires_the_reported_pad_pair_and_uses_the_pdk_width() {
+        let retained = r(650735, 354455, 651065, 354785);
+        let moved = r(649390, 354710, 650570, 355890);
+        let rule = crate::routing::RouteLayer {
+            name: "met4".into(),
+            width: 300,
+            spacing: 300,
+            vertical: Some(true),
+            min_area: None,
+            min_step: None,
+            wide_spacing: None,
+        };
+        let finding = Violation::Spacing {
+            net: 3,
+            layer: 4,
+            a: moved,
+            b: retained,
+        };
+        let detail = format!("ROUTING_RULE {} (3 total)", finding.describe());
+        assert_eq!(
+            aligned_notch_fill(&detail, 3, 4, retained, moved, &rule, 5),
+            Some(r(650570, 354595, 650735, 354900))
+        );
+        assert!(aligned_notch_fill(&detail, 4, 4, retained, moved, &rule, 5).is_none());
+        assert!(aligned_notch_fill("foreign collision", 3, 4, retained, moved, &rule, 5).is_none());
     }
     #[test]
     fn area_certificate_preserves_exact_failure_values_and_bounds_large_passes() {

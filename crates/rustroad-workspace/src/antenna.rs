@@ -60,8 +60,9 @@ pub use batch::{CheckBatchPlan, CheckBatchSummary, check_antenna_batch, read_che
 pub use inventory::{InventoryBounds, InventoryEntry, InventoryReport, antenna_inventory};
 use net_index::NetIndex;
 pub use repair_groups::{
-    GroupRepairPlan, GroupRepairPolicy, GroupRepairSummary, RankedGroupRepair,
-    read_group_repair_plan, repair_antenna_groups,
+    GroupRepairPlan, GroupRepairPolicy, GroupRepairSummary, RankedGroupRepair, ViaOffsetPlan,
+    ViaOffsetSummary, read_group_repair_plan, read_via_offset_plan, repair_antenna_groups,
+    repair_via_offsets,
 };
 pub use report::{
     AnalysisLimits, NetCoverage, NetObservation, ReportMemoryStats, SelectedAnalysis,

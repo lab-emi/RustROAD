@@ -4496,6 +4496,108 @@ pub fn validate_with_work_limit(
     validate_geometry(input, routes, limits, Some(max_validation_comparisons))
 }
 
+fn shared_via_pads(
+    input: &RouteInput,
+    lower_via: &Via,
+    upper_via: &Via,
+) -> Result<Option<(u32, Rect, Rect)>> {
+    if !input.rules || input.grid <= 0 || lower_via.net != upper_via.net {
+        return Ok(None);
+    }
+    let (Some(lower), Some(upper)) = (
+        input.vias.get(lower_via.kind as usize),
+        input.vias.get(upper_via.kind as usize),
+    ) else {
+        return Ok(None);
+    };
+    let layer = upper.lower;
+    let Some(rule) = input.layers.get(layer as usize) else {
+        return Ok(None);
+    };
+    if lower.upper != layer || rule.vertical.is_none() || rule.width <= 0 {
+        return Ok(None);
+    }
+    let pad = |spec: &RouteVia, at| -> Result<Option<Rect>> {
+        let mut pads = spec.shapes.iter().filter(|s| s.layer == layer);
+        let Some(shape) = pads.next() else {
+            return Ok(None);
+        };
+        if pads.next().is_some() {
+            return Ok(None);
+        }
+        shifted(shape.rect, at).map(Some)
+    };
+    let (Some(a), Some(b)) = (pad(lower, lower_via.at)?, pad(upper, upper_via.at)?) else {
+        return Ok(None);
+    };
+    Ok(Some((layer, a, b)))
+}
+
+/// Propose one on-grid patch for a full validator finding on two exact
+/// same-net via pads. The caller must validate any resulting route again.
+///
+/// # Errors
+/// A via pad has an out-of-range translated coordinate.
+pub fn aligned_via_notch_patch(
+    input: &RouteInput,
+    detail: &str,
+    lower_via: &Via,
+    upper_via: &Via,
+) -> Result<Option<Patch>> {
+    let Some((layer, a, b)) = shared_via_pads(input, lower_via, upper_via)? else {
+        return Ok(None);
+    };
+    let net = upper_via.net;
+    let rule = &input.layers[layer as usize];
+    Ok(
+        route_rules::aligned_notch_fill(detail, net, layer, a, b, rule, input.grid)
+            .map(|rect| Patch { net, layer, rect }),
+    )
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ViaPadGap {
+    pub lower_pad: Rect,
+    pub upper_pad: Rect,
+    pub facing_gap: Rect,
+}
+
+/// Determine one missing aligned gap fill from the exact two vias and all
+/// edited-net metal (including pin shapes). The caller must validate a trial
+/// with this patch against all routing and geometry rules before accepting it.
+///
+/// # Errors
+/// A via pad has an out-of-range coordinate or the geometry work budget is reached.
+pub fn eager_aligned_via_notch_patch(
+    input: &RouteInput,
+    lower_via: &Via,
+    upper_via: &Via,
+    net_shapes: &[LayerRect],
+    work: &mut usize,
+    cap: usize,
+) -> Result<Option<(Patch, ViaPadGap)>> {
+    let Some((layer, lower_pad, upper_pad)) = shared_via_pads(input, lower_via, upper_via)? else {
+        return Ok(None);
+    };
+    Ok(route_rules::uncovered_aligned_notch_fill(
+        lower_pad, upper_pad, input, layer, net_shapes, work, cap,
+    )?
+    .map(|(facing_gap, rect)| {
+        (
+            Patch {
+                net: upper_via.net,
+                layer,
+                rect,
+            },
+            ViaPadGap {
+                lower_pad,
+                upper_pad,
+                facing_gap,
+            },
+        )
+    }))
+}
+
 fn validate_geometry(
     input: &RouteInput,
     routes: &Routes,

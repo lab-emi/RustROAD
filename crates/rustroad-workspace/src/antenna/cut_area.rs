@@ -142,6 +142,22 @@ impl Model {
             - u8::from(dy >= i128::from(self.containment))
     }
 
+    fn square(rect: Rect, size: i64) -> bool {
+        i128::from(rect.ux) - i128::from(rect.lx) == i128::from(size)
+            && i128::from(rect.uy) - i128::from(rect.ly) == i128::from(size)
+    }
+
+    /// Geometric support weight only. The full antenna check still resolves
+    /// whether both cuts belong to one fabrication component.
+    pub(super) fn support_weight(&self, lower: Rect, upper: Rect) -> Option<u8> {
+        if !Self::square(lower, self.lower_size) || !Self::square(upper, self.upper_size) {
+            return None;
+        }
+        let center = |lo, size| i128::from(lo) + i128::from(size / 2);
+        let delta = |a, b| (center(a, self.lower_size) - center(b, self.upper_size)).abs();
+        Some(self.weight(delta(lower.lx, upper.lx), delta(lower.ly, upper.ly)))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn weights(
         &self,
@@ -152,16 +168,15 @@ impl Model {
         request: &AntennaRequest,
         stats: &mut AntennaStats,
     ) -> Result<Vec<Weight>> {
-        let square = |i: usize, size: i64| {
-            let r = shapes[i].rect;
-            i128::from(r.ux) - i128::from(r.lx) == i128::from(size)
-                && i128::from(r.uy) - i128::from(r.ly) == i128::from(size)
-        };
         // Equal input widths preserve the original ordering by lower x edge,
         // and make (lx, ly) a complete key for each physical upper cut.
         charge_work(&mut stats.work, lower.len() + upper.len(), request.max_work)?;
-        if !lower.iter().all(|&i| square(i, self.lower_size))
-            || !upper.iter().all(|&i| square(i, self.upper_size))
+        if !lower
+            .iter()
+            .all(|&i| Self::square(shapes[i].rect, self.lower_size))
+            || !upper
+                .iter()
+                .all(|&i| Self::square(shapes[i].rect, self.upper_size))
         {
             return Err(fail(
                 "ANTENNA_CUT_MODEL",
@@ -272,6 +287,17 @@ mod tests {
         ] {
             assert_eq!(m.weight(dx, dy), expected);
         }
+    }
+
+    #[test]
+    fn fixed_upper_cut_loses_geometric_weight_from_lower_track_shift() {
+        let m = model();
+        let old = cut(m.lower, [650900, 354620], 100);
+        let shifted = cut(m.lower, [650900, 353940], 100);
+        let upper = cut(m.upper, [650900, 355300], 400);
+        assert_eq!(m.support_weight(old.rect, upper.rect), Some(3));
+        assert_eq!(m.support_weight(shifted.rect, upper.rect), Some(1));
+        assert_eq!(m.support_weight(upper.rect, old.rect), None);
     }
 
     #[test]

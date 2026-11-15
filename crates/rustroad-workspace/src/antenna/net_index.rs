@@ -96,6 +96,10 @@ impl NetIndex {
     pub(super) fn terminals(&self, net: u32) -> &[u32] {
         self.terminals.of(net)
     }
+    /// Global wire slots in the same order as the per-net route view.
+    pub(super) fn wire_slots(&self, net: u32) -> &[u32] {
+        self.wires.of(net)
+    }
     /// Shapes of one net in the full scan's order: wires, via shapes,
     /// patches, terminal shapes. `None` when the net has none.
     fn shapes(&self, prep: &Prepared, routes: &Routes, net: u32) -> Result<Vec<Shape>> {
@@ -198,8 +202,7 @@ impl NetIndex {
         self.check(routes)?;
         Ok(Routes {
             wires: self
-                .wires
-                .of(net)
+                .wire_slots(net)
                 .iter()
                 .map(|&i| routes.wires[i as usize].clone())
                 .collect(),

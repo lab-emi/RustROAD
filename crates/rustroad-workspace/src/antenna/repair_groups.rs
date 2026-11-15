@@ -23,6 +23,9 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+mod via_offsets;
+pub use via_offsets::{ViaOffsetPlan, ViaOffsetSummary, read_via_offset_plan, repair_via_offsets};
+
 fn trace(message: impl FnOnce() -> String) {
     if std::env::var_os("RUSTROAD_ANTENNA_TRACE").is_some() {
         eprintln!("[antenna-session] {}", message());
@@ -327,7 +330,7 @@ impl Session {
         path: &Path,
         base_rev: &str,
         limits: &Limits,
-        ranked: Option<&RankedGroupRepair>,
+        bound_model: Option<(&Path, &str)>,
     ) -> Result<(Self, Prepared)> {
         let lock = crate::lock(path, false, true)?;
         crate::check_base(base_rev, &crate::head(path)?)?;
@@ -363,10 +366,7 @@ impl Session {
         // Preparation depends on static placement/PDN/LEF/config, not signal routes.
         // The selected jumper worker changes only signal routes and revision fields.
         let mut prep = prepare(&metadata.design, bundle, &placed, state)?;
-        prepare_cut_area(
-            &mut prep,
-            ranked.map(|ranked| ranked.cut_area_model.as_path()),
-        )?;
+        prepare_cut_area(&mut prep, bound_model.map(|(path, _)| path))?;
         let digest = SourceDigest::new(
             &metadata.design,
             &bundle.connectivity,
@@ -375,7 +375,7 @@ impl Session {
             &prep.sources,
         )?;
         let source = digest.fingerprint(&state.routes)?;
-        if ranked.is_some_and(|ranked| ranked.source_sha256 != source) {
+        if bound_model.is_some_and(|(_, sha)| sha != source) {
             return Err(super::fail(
                 "STALE_REPORT",
                 "ranked base route or model source differs",
@@ -658,7 +658,17 @@ pub fn repair_antenna_groups(
     plan.validate()?;
     let started = Instant::now();
     let ranked = plan.ranked.as_ref();
-    let (mut session, prep) = Session::open(workspace, base_rev, limits, ranked)?;
+    let (mut session, prep) = Session::open(
+        workspace,
+        base_rev,
+        limits,
+        ranked.map(|ranked| {
+            (
+                ranked.cut_area_model.as_path(),
+                ranked.source_sha256.as_str(),
+            )
+        }),
+    )?;
     trace(|| format!("open {:.3}s", started.elapsed().as_secs_f64()));
     let per_work = AntennaRequest::default().max_work;
     let max_planner_work = ranked.map(|ranked| ranked.max_planner_work);
