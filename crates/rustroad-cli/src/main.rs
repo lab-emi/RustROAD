@@ -132,6 +132,9 @@ enum Command {
         /// HEAD revision the prior workspace must be at (REVISION_CONFLICT otherwise).
         #[arg(long, requires = "prior_workspace")]
         prior_rev: Option<String>,
+        /// Typed ECO plan permitting the router to check prior geometry on diode nets.
+        #[arg(long, requires = "prior_workspace")]
+        prior_diode_plan: Option<PathBuf>,
     },
     /// Read-only diagnostic: geometric cleanup on a `RUSTROAD_RULE_DUMP` file.
     CleanupReplay {
@@ -891,6 +894,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             scope,
             prior_workspace,
             prior_rev,
+            prior_diode_plan,
         } => {
             let prior = prior_workspace
                 .as_deref()
@@ -899,7 +903,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     workspace: w,
                     revision: r,
                 });
-            emit(&rustroad_workspace::routing::route_eco(
+            emit(&rustroad_workspace::routing::route_eco_with_plan(
                 &workspace,
                 &base_rev,
                 &config,
@@ -909,6 +913,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     rustroad_workspace::routing::RouteScope::All
                 },
                 prior.as_ref(),
+                prior_diode_plan.as_deref(),
                 &limits,
             )?)
         }

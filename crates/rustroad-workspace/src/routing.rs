@@ -1,12 +1,13 @@
 //! Revisioned routing bridge. Geometry/search live in the independent CPU view.
 use crate::pdk::{PhysicalBundle, SourcePin};
 use crate::{Error, Result, Stage, Summary};
-use rustroad_core::connectivity::{Direction, Geometry, PinOwner, PinUse};
+use rustroad_core::connectivity::{ConnectedDesign, Direction, Geometry, PinOwner, PinUse};
 use rustroad_core::routing::{
     self, AccessClass, Blockage, InstanceObstacles, LayerRect, ObstacleInstance, ObstacleTemplate,
     RouteInput, RouteLayer, RouteLimits, RouteVia, Routes, TemplateObstacle, Terminal,
 };
 use rustroad_core::{Design, Limits, Placed, Rect};
+use rustroad_formats::eco::{ECO_PLAN_SCHEMA, EcoOp, EcoPlan};
 use rustroad_formats::lef::LefGeometry;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -1650,10 +1651,10 @@ pub struct PriorSource<'a> {
     pub revision: &'a str,
 }
 
-/// What an ECO route offered the router. A net is offered when the prior
-/// routed it and every terminal of it has the same driver flag and pin
-/// geometry (absolute shapes) in both inputs; the router still re-checks
-/// each offered net (escape tops reached, shapes clear) and keeps only those.
+/// What an ECO route offered the router. By default the prior must have
+/// routed the net with the same driver flags and absolute pin shapes.
+/// A typed diode plan also admits an otherwise unchanged net with one
+/// additional diode terminal. The router independently checks every offer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EcoPrior {
@@ -1663,6 +1664,17 @@ pub struct EcoPrior {
     pub offered_nets: usize,
     pub changed_nets: usize,
     pub new_nets: usize,
+    /// Extra route offers authorized by a typed plan. Core import still checks
+    /// that the existing wire and via geometry reaches every terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diode_addition_offer: Option<DiodePriorOffer>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiodePriorOffer {
+    pub plan_sha256: String,
+    pub offered_nets: usize,
 }
 
 pub fn route(
@@ -1678,7 +1690,18 @@ pub fn route(
 /// Terminals of each named connectivity net as comparable geometry: (driver,
 /// sorted shapes), sorted. Pin and access-class ids are input-local and are
 /// not compared. Rail ties have revision-local route ids and are routed fresh.
-type NetPins = Vec<(bool, Vec<(u32, i64, i64, i64, i64)>)>;
+type PinGeometry = (bool, Vec<(u32, i64, i64, i64, i64)>);
+type NetPins = Vec<PinGeometry>;
+
+fn pin_geometry(t: &Terminal) -> PinGeometry {
+    let mut shapes: Vec<_> = t
+        .shapes
+        .iter()
+        .map(|s| (s.layer, s.rect.lx, s.rect.ly, s.rect.ux, s.rect.uy))
+        .collect();
+    shapes.sort_unstable();
+    (t.driver, shapes)
+}
 fn net_pins(input: &RouteInput, connectivity_nets: usize) -> BTreeMap<u32, NetPins> {
     let mut out: BTreeMap<u32, NetPins> = BTreeMap::new();
     for t in input
@@ -1686,13 +1709,7 @@ fn net_pins(input: &RouteInput, connectivity_nets: usize) -> BTreeMap<u32, NetPi
         .iter()
         .filter(|t| (t.net as usize) < connectivity_nets)
     {
-        let mut shapes: Vec<_> = t
-            .shapes
-            .iter()
-            .map(|s| (s.layer, s.rect.lx, s.rect.ly, s.rect.ux, s.rect.uy))
-            .collect();
-        shapes.sort_unstable();
-        out.entry(t.net).or_default().push((t.driver, shapes));
+        out.entry(t.net).or_default().push(pin_geometry(t));
     }
     for v in out.values_mut() {
         v.sort_unstable();
@@ -1700,8 +1717,159 @@ fn net_pins(input: &RouteInput, connectivity_nets: usize) -> BTreeMap<u32, NetPi
     out
 }
 
-/// Prior geometry of every net of `input` whose pins are unchanged, keyed by
-/// this input's net ids (matched by connectivity net name).
+const MAX_PRIOR_DIODE_NETS: usize = 512;
+const MAX_PRIOR_DIODE_TERMINALS: usize = 64;
+const MAX_PRIOR_DIODE_PIN_SHAPES: usize = 64;
+
+struct PriorDiodePlan {
+    additions: BTreeMap<String, Vec<(String, String)>>,
+    sha256: String,
+}
+
+impl PriorDiodePlan {
+    fn read(path: &Path, design: &Design) -> Result<Self> {
+        let (text, source) = crate::pdk::read_input(path, 1024 * 1024, "prior_diode_plan")?;
+        let plan: EcoPlan = serde_json::from_str(&text)?;
+        if plan.schema != ECO_PLAN_SCHEMA
+            || plan.module != design.name
+            || plan.operations.len() > 4096
+        {
+            return Err(fail("prior diode plan schema, module or operation count"));
+        }
+        let mut additions: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for op in plan.operations {
+            if let EcoOp::InsertDiode {
+                cell,
+                instance,
+                net,
+            } = op
+            {
+                additions.entry(net).or_default().push((instance, cell));
+            }
+        }
+        if additions.is_empty() || additions.len() > MAX_PRIOR_DIODE_NETS {
+            return Err(fail("prior diode plan net count"));
+        }
+        Ok(Self {
+            additions,
+            sha256: source.sha256,
+        })
+    }
+
+    fn selected_terminals<'a>(
+        &self,
+        input: &'a RouteInput,
+        model: &ConnectedDesign,
+    ) -> BTreeMap<u32, Vec<&'a Terminal>> {
+        let mut groups: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for t in &input.terminals {
+            if let Some(net) = model.nets.get(t.net as usize)
+                && self
+                    .additions
+                    .get(&net.name)
+                    .is_some_and(|entry| entry.len() == 1)
+            {
+                let group = groups.entry(t.net).or_default();
+                if group.len() <= MAX_PRIOR_DIODE_TERMINALS {
+                    group.push(t);
+                }
+            }
+        }
+        groups
+    }
+}
+
+type TerminalSignature<'a> = ((&'a str, &'a str, &'a str), PinGeometry);
+
+fn terminal_signature<'a>(
+    design: &'a Design,
+    model: &'a ConnectedDesign,
+    t: &Terminal,
+) -> Option<TerminalSignature<'a>> {
+    if t.shapes.len() > MAX_PRIOR_DIODE_PIN_SHAPES {
+        return None;
+    }
+    let key = match model.pins.get(t.pin as usize)?.owner {
+        PinOwner::Instance { instance, terminal } => {
+            let cell = design.cells.get(instance as usize)?;
+            let master = model
+                .masters
+                .get(*model.instance_masters.get(instance as usize)? as usize)?;
+            (
+                cell.name.as_str(),
+                master.name.as_str(),
+                master.pins.get(terminal as usize)?.name.as_str(),
+            )
+        }
+        PinOwner::Port { port, bit } => {
+            let port = model.ports.get(port as usize)?;
+            (
+                "",
+                port.name.as_str(),
+                port.bits.get(bit as usize)?.as_str(),
+            )
+        }
+    };
+    Some((key, pin_geometry(t)))
+}
+
+fn diode_only_addition(
+    old: (&Design, &ConnectedDesign, &[&Terminal]),
+    new: (&Design, &ConnectedDesign, &[&Terminal]),
+    expected: &(String, String),
+) -> Option<()> {
+    let (old_design, old_model, old_group) = old;
+    let (new_design, new_model, new_group) = new;
+    if old_group.len() < 2
+        || new_group.len() != old_group.len() + 1
+        || new_group.len() > MAX_PRIOR_DIODE_TERMINALS
+    {
+        return None;
+    }
+    let mut old: Vec<_> = old_group
+        .iter()
+        .map(|t| terminal_signature(old_design, old_model, t))
+        .collect::<Option<_>>()?;
+    let mut next = Vec::with_capacity(old.len());
+    let mut diode = false;
+    for t in new_group {
+        let signature = terminal_signature(new_design, new_model, t)?;
+        let ((instance_name, _, _), _) = signature;
+        if instance_name == expected.0 {
+            let PinOwner::Instance { instance, terminal } = new_model.pins[t.pin as usize].owner
+            else {
+                return None;
+            };
+            let master = &new_model.masters[new_model.instance_masters[instance as usize] as usize];
+            if diode
+                || t.driver
+                || master.name != expected.1
+                || master.pins.len() > MAX_PRIOR_DIODE_TERMINALS
+                || !master
+                    .class
+                    .as_deref()
+                    .is_some_and(|class| class.split_whitespace().any(|x| x == "ANTENNACELL"))
+                || master.pins[terminal as usize].direction != Some(Direction::Input)
+                || master
+                    .pins
+                    .iter()
+                    .filter(|pin| !pin.use_.is_supply())
+                    .count()
+                    != 1
+            {
+                return None;
+            }
+            diode = true;
+        } else {
+            next.push(signature);
+        }
+    }
+    old.sort_unstable();
+    next.sort_unstable();
+    (diode && old == next).then_some(())
+}
+
+/// Prior geometry keyed by this input's net ids, matched by connectivity name.
 fn prior_routes(
     prior: &PriorSource<'_>,
     config: &RoutingConfig,
@@ -1709,6 +1877,7 @@ fn prior_routes(
     bundle: &PhysicalBundle,
     input: &RouteInput,
     limits: &Limits,
+    diode_plan: Option<(&Design, &PriorDiodePlan)>,
 ) -> Result<(rustroad_core::routing::PriorRoutes, EcoPrior)> {
     let snapshot = crate::read(prior.workspace, limits)?;
     crate::check_base(prior.revision, &crate::head(prior.workspace)?)?;
@@ -1749,8 +1918,29 @@ fn prior_routes(
     }
     let new_pins = net_pins(input, bundle.connectivity.nets.len());
     let old_pins = net_pins(&old_input, old.connectivity.nets.len());
+    let diode_groups = diode_plan.map(|(_, plan)| {
+        let expected: HashSet<_> = plan
+            .additions
+            .values()
+            .flatten()
+            .map(|op| op.0.as_str())
+            .collect();
+        let existing: HashSet<_> = metadata
+            .design
+            .cells
+            .iter()
+            .map(|cell| cell.name.as_str())
+            .filter(|name| expected.contains(name))
+            .collect();
+        (
+            plan.selected_terminals(&old_input, &old.connectivity),
+            plan.selected_terminals(input, &bundle.connectivity),
+            existing,
+        )
+    });
     let mut keep: BTreeMap<u32, u32> = BTreeMap::new();
     let (mut changed, mut fresh) = (0usize, 0usize);
+    let mut diode_offers = BTreeSet::new();
     for (&n, pins) in &new_pins {
         if pins.len() < 2 {
             continue;
@@ -1759,7 +1949,32 @@ fn prior_routes(
             Some(&o) if old_pins.get(&o) == Some(pins) => {
                 keep.insert(o, n);
             }
-            Some(_) => changed += 1,
+            Some(&o) => {
+                changed += 1;
+                let added = (|| {
+                    let (design, plan) = diode_plan?;
+                    let (before, after, existing) = diode_groups.as_ref()?;
+                    let [operation] = plan
+                        .additions
+                        .get(&bundle.connectivity.nets[n as usize].name)?
+                        .as_slice()
+                    else {
+                        return None;
+                    };
+                    if existing.contains(operation.0.as_str()) {
+                        return None;
+                    }
+                    diode_only_addition(
+                        (&metadata.design, &old.connectivity, before.get(&o)?),
+                        (design, &bundle.connectivity, after.get(&n)?),
+                        operation,
+                    )
+                })();
+                if added.is_some() {
+                    keep.insert(o, n);
+                    diode_offers.insert(n);
+                }
+            }
             None => fresh += 1,
         }
     }
@@ -1785,6 +2000,13 @@ fn prior_routes(
         offered_nets: routes.nets.len(),
         changed_nets: changed,
         new_nets: fresh,
+        diode_addition_offer: diode_plan.map(|(_, plan)| DiodePriorOffer {
+            plan_sha256: plan.sha256.clone(),
+            offered_nets: diode_offers
+                .iter()
+                .filter(|n| routes.nets.contains_key(n))
+                .count(),
+        }),
     };
     Ok((routes, report))
 }
@@ -1797,6 +2019,19 @@ pub fn route_eco(
     config_path: &Path,
     scope: RouteScope,
     prior: Option<&PriorSource<'_>>,
+    limits: &Limits,
+) -> Result<Summary> {
+    route_eco_with_plan(path, base_rev, config_path, scope, prior, None, limits)
+}
+
+/// Offer routes for exact typed diode additions as well as unchanged nets.
+pub fn route_eco_with_plan(
+    path: &Path,
+    base_rev: &str,
+    config_path: &Path,
+    scope: RouteScope,
+    prior: Option<&PriorSource<'_>>,
+    diode_plan: Option<&Path>,
     limits: &Limits,
 ) -> Result<Summary> {
     let lock = crate::lock(path, false, true)?;
@@ -1827,6 +2062,14 @@ pub fn route_eco(
     rustroad_core::memory::trace("loaded");
     let placed: Vec<_> = snapshot.records().collect();
     let (_lock, mut metadata) = snapshot.into_metadata();
+    if diode_plan.is_some() && (prior.is_none() || scope != RouteScope::All) {
+        return Err(fail(
+            "prior diode plan requires a prior workspace and all-signal routing",
+        ));
+    }
+    let diode_plan = diode_plan
+        .map(|path| PriorDiodePlan::read(path, &metadata.design))
+        .transpose()?;
     rustroad_core::memory::trace("metadata owned");
     let bundle = metadata
         .physical
@@ -1873,7 +2116,13 @@ pub fn route_eco(
                 ));
             }
             Some(prior_routes(
-                source, &config, scope, bundle, &input, limits,
+                source,
+                &config,
+                scope,
+                bundle,
+                &input,
+                limits,
+                diode_plan.as_ref().map(|plan| (&metadata.design, plan)),
             )?)
         }
         None => None,
@@ -2594,6 +2843,115 @@ mod qor_config_tests {
                 r#"{"straighten": {"passes": 1, "neighbors": {"max_victims": 2}}}"#
             )
             .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod diode_prior_tests {
+    use super::*;
+    use rustroad_core::connectivity::{Connection, Master, MasterPin, Port};
+    use rustroad_core::{Cell, Site};
+
+    #[test]
+    fn offers_only_a_new_diode_with_identical_existing_terminals() {
+        let rect = Rect {
+            lx: 0,
+            ly: 0,
+            ux: 1,
+            uy: 1,
+        };
+        let old_design = Design {
+            name: "chip".into(),
+            units_per_micron: 1000,
+            die_area: rect,
+            core_area: rect,
+            site: Site {
+                name: "site".into(),
+                width: 1,
+                height: 1,
+            },
+            rows: vec![],
+            cells: vec![],
+        };
+        let old_model = ConnectedDesign {
+            layers: vec!["M1".into()],
+            masters: vec![],
+            instance_masters: vec![],
+            ports: [("a", Direction::Input), ("y", Direction::Output)]
+                .into_iter()
+                .map(|(name, direction)| Port {
+                    name: name.into(),
+                    direction,
+                    bits: vec![name.into()],
+                    use_: PinUse::Signal,
+                })
+                .collect(),
+            nets: vec![],
+            pins: (0..2)
+                .map(|port| Connection {
+                    owner: PinOwner::Port { port, bit: 0 },
+                    net: Some(0),
+                })
+                .collect(),
+        };
+        let terminal = |pin| Terminal {
+            pin,
+            net: 0,
+            driver: pin == 0,
+            shapes: vec![LayerRect { layer: 0, rect }],
+            class: None,
+        };
+        let (a, y, diode) = (terminal(0), terminal(1), terminal(2));
+        let terminals = [&a, &y];
+        let old = (&old_design, &old_model, terminals.as_slice());
+        let mut design = old_design.clone();
+        design.cells.push(Cell {
+            name: "d0".into(),
+            master: "DIODE".into(),
+            width: 1,
+            height: 1,
+            fixed: None,
+        });
+        let mut model = old_model.clone();
+        model.masters.push(Master {
+            buses: Default::default(),
+            obstruction_spacing: Default::default(),
+            name: "DIODE".into(),
+            class: Some("CORE ANTENNACELL".into()),
+            symmetry: vec![],
+            site: "site".into(),
+            size: [1, 1],
+            pins: vec![MasterPin {
+                name: "D".into(),
+                direction: Some(Direction::Input),
+                use_: PinUse::Signal,
+                shape: None,
+                ports: vec![],
+            }],
+            obstructions: vec![],
+        });
+        model.instance_masters.push(0);
+        model.pins.push(Connection {
+            owner: PinOwner::Instance {
+                instance: 0,
+                terminal: 0,
+            },
+            net: Some(0),
+        });
+        let expected = ("d0".into(), "DIODE".into());
+        assert!(
+            diode_only_addition(old, (&design, &model, &[&y, &diode, &a]), &expected).is_some()
+        );
+
+        let mut moved = y.clone();
+        moved.shapes[0].rect.ux += 1;
+        assert!(
+            diode_only_addition(old, (&design, &model, &[&a, &moved, &diode]), &expected).is_none()
+        );
+        model.masters[0].class = Some("CORE".into());
+        assert!(
+            diode_only_addition(old, (&design, &model, &[&a, &y, &diode]), &expected).is_none()
         );
     }
 }
