@@ -183,7 +183,7 @@ pub struct RouteQorConfig {
     /// at most three cuts per wide region.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub strict_wide_cycles: bool,
-    /// Try reconnecting two displaced nets together during cold repair.
+    /// Try reconnecting up to four displaced nets together during cold repair.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub atomic_eager_repair: bool,
     /// Post-route via reduction (`rustroad_core::routing::ViaReduction`);

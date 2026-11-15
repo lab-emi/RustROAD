@@ -506,7 +506,8 @@ pub struct RouteQor {
     /// owners, once per net, after both halos.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub strict_wide_cycles: bool,
-    /// Try a bounded, reversible pair of displaced nets during cold repair.
+    /// Reconnect up to four displaced nets together during cold repair.
+    /// Commit all replacement routes together or restore the previous geometry.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub atomic_eager_repair: bool,
     /// Post-route via reduction: once every net is routed, nets are re-routed
