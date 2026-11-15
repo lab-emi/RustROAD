@@ -287,6 +287,7 @@ pub(super) fn fingerprint(value: &impl Serialize) -> Result<String> {
 struct InputScope {
     extra_shapes: usize,
     routing_scope: String,
+    cut_area_model_sha256: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -429,6 +430,8 @@ impl SelectedInput {
             || scalar(reported_margin.fraction)? != margin
             || reported_scope.extra_shapes != 0
             || reported_scope.routing_scope != routing_scope
+            || reported_scope.cut_area_model_sha256.as_deref()
+                != super::cut_area_source(sources).map(|source| source.sha256.as_str())
             || self.analysis != *fresh
         {
             return Err(stale(

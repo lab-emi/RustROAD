@@ -498,6 +498,9 @@ enum Command {
     RepairAntenna {
         #[arg(long)]
         base_rev: String,
+        /// Use one PDK-pinned cut-area model for initial and trial checks.
+        #[arg(long)]
+        cut_area_model: Option<PathBuf>,
         /// `check-antenna` report of --base-rev (same revision, margin and
         /// violated rows required; STALE_REPORT otherwise).
         #[arg(long)]
@@ -1259,6 +1262,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::RepairAntenna {
             base_rev,
+            cut_area_model,
             antenna_report,
             selected_report,
             selected_nets,
@@ -1275,6 +1279,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             &base_rev,
             &rustroad_workspace::antenna::RepairRequest {
                 antenna: rustroad_workspace::antenna::AntennaRequest {
+                    cut_area_model,
                     safety_margin,
                     max_work,
                     ..Default::default()

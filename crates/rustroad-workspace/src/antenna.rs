@@ -1880,6 +1880,12 @@ fn prepare_cut_area(prep: &mut Prepared, path: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+fn cut_area_source(sources: &[SourceCheck]) -> Option<&SourceCheck> {
+    sources
+        .iter()
+        .find(|source| source.role == "antenna_cut_area")
+}
+
 fn check_prepared(
     metadata: &crate::Metadata,
     placed: &[rustroad_core::Placed],
@@ -2097,8 +2103,7 @@ fn check_prepared(
             checked_layers: prep.checked_layers.clone(),
             rule_free_layers: prep.rule_free_layers.clone(),
             extra_shapes: extra_count,
-            cut_area_model_sha256: prep.sources.iter().find(|source| source.role == "antenna_cut_area")
-                .map(|source| source.sha256.clone()),
+            cut_area_model_sha256: cut_area_source(&prep.sources).map(|source| source.sha256.clone()),
             drc_status: "unchecked",
         },
         stats,
@@ -2329,7 +2334,13 @@ fn new_gate_violation(rows: &[CheckRow], before: &BTreeSet<GateViolation<'_>>) -
 
 /// Check the caller's report against the recomputed rows (same revision,
 /// margin and violated row set).
-fn bind_report(path: &Path, revision: &str, margin: f64, rows: &[CheckRow]) -> Result<()> {
+fn bind_report(
+    path: &Path,
+    revision: &str,
+    margin: f64,
+    model: Option<&SourceCheck>,
+    rows: &[CheckRow],
+) -> Result<()> {
     let (text, _) = read_input(path, MAX_REPORT_MEMORY_BYTES as u64, "antenna_report")?;
     let mut v: serde_json::Value = serde_json::from_str(&text)?;
     let stale = |m: &str| fail("STALE_REPORT", format!("{}: {m}", path.display()));
@@ -2349,6 +2360,23 @@ fn bind_report(path: &Path, revision: &str, margin: f64, rows: &[CheckRow]) -> R
     }
     if v["scope"]["extra_shapes"].as_u64() != Some(0) {
         return Err(stale("report contains what-if shapes"));
+    }
+    let declared_sha = &v["scope"]["cut_area_model_sha256"];
+    let mut model_sources = v["sources"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry["role"] == "antenna_cut_area");
+    let reported_model: Option<SourceCheck> = model_sources
+        .next()
+        .map(|entry| serde_json::from_value(entry.clone()))
+        .transpose()?;
+    if (!declared_sha.is_null() && !declared_sha.is_string())
+        || declared_sha.as_str() != model.map(|source| source.sha256.as_str())
+        || reported_model.as_ref() != model
+        || model_sources.next().is_some()
+    {
+        return Err(stale("cut-area model source or digest differs"));
     }
     let checked = v["checks"]
         .as_array()
@@ -2415,7 +2443,8 @@ pub fn repair_antenna(
         .routing
         .as_ref()
         .ok_or_else(|| fail("NO_ROUTING", "route before the antenna repair"))?;
-    let prep = prepare(&metadata.design, bundle, &placed, state)?;
+    let mut prep = prepare(&metadata.design, bundle, &placed, state)?;
+    prepare_cut_area(&mut prep, request.antenna.cut_area_model.as_deref())?;
     repair_prepared(path, base_rev, request, &mut metadata, &placed, &prep, None)
 }
 
@@ -2716,7 +2745,13 @@ fn repair_prepared<'a>(
                 None,
                 None,
             )?;
-            bind_report(report, &current, antenna.safety_margin, &all_rows.data)?;
+            bind_report(
+                report,
+                &current,
+                antenna.safety_margin,
+                cut_area_source(&prep.sources),
+                &all_rows.data,
+            )?;
         }
         let index: &NetIndex = match &session_index {
             Some(index) => {
@@ -2749,7 +2784,13 @@ fn repair_prepared<'a>(
         if selected.is_none()
             && let Some(report) = &request.report
         {
-            bind_report(report, &current, antenna.safety_margin, &rows_before.data)?;
+            bind_report(
+                report,
+                &current,
+                antenna.safety_margin,
+                cut_area_source(&prep.sources),
+                &rows_before.data,
+            )?;
         }
         analysis = if let (Some(memory), true) = (&memory, selected_input.is_some() || in_session) {
             let fresh = selected_analysis(
@@ -3353,11 +3394,30 @@ mod tests {
             "safety_margin":{"fraction":0.0}, "scope":{"extra_shapes":0},
             "violations":2, "checks":rows});
         std::fs::write(&path, serde_json::to_vec(&report).unwrap()).unwrap();
-        bind_report(&path, "rev4", 0.0, &rows).unwrap();
+        bind_report(&path, "rev4", 0.0, None, &rows).unwrap();
+        let mut calibrated = report.clone();
+        let source = SourceCheck {
+            role: "antenna_cut_area".into(),
+            path: root.join("model.json"),
+            sha256: "5".repeat(64),
+        };
+        calibrated["scope"]["cut_area_model_sha256"] = serde_json::json!(source.sha256);
+        calibrated["sources"] = serde_json::json!([source]);
+        std::fs::write(&path, serde_json::to_vec(&calibrated).unwrap()).unwrap();
+        bind_report(&path, "rev4", 0.0, Some(&source), &rows).unwrap();
+        assert!(bind_report(&path, "rev4", 0.0, None, &rows).is_err());
+        calibrated["sources"][0]["sha256"] = serde_json::json!("7".repeat(64));
+        std::fs::write(&path, serde_json::to_vec(&calibrated).unwrap()).unwrap();
+        assert!(
+            bind_report(&path, "rev4", 0.0, Some(&source), &rows)
+                .unwrap_err()
+                .to_string()
+                .contains("cut-area model source or digest differs")
+        );
         report["checks"][1]["gates"][0] = serde_json::json!("another_gate");
         std::fs::write(&path, serde_json::to_vec(&report).unwrap()).unwrap();
         assert!(
-            bind_report(&path, "rev4", 0.0, &rows)
+            bind_report(&path, "rev4", 0.0, None, &rows)
                 .unwrap_err()
                 .to_string()
                 .contains("STALE_REPORT")
@@ -3365,7 +3425,7 @@ mod tests {
         report["checks"].as_array_mut().unwrap().pop();
         std::fs::write(&path, serde_json::to_vec(&report).unwrap()).unwrap();
         assert!(
-            bind_report(&path, "rev4", 0.0, &rows)
+            bind_report(&path, "rev4", 0.0, None, &rows)
                 .unwrap_err()
                 .to_string()
                 .contains("STALE_REPORT")
