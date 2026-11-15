@@ -1053,6 +1053,8 @@ pub enum OwnPinIndex {
 #[serde(rename_all = "snake_case")]
 pub enum InstanceIndexMode {
     TemplateLayers,
+    /// Four grid steps per instance bin, cached bounds, and larger dense track grids.
+    FineTemplateLayers,
 }
 
 /// Explicit replay-only query representation, applied after source validation.
@@ -1396,7 +1398,16 @@ pub(crate) enum BinMode {
     Sparse,
 }
 pub(crate) fn bin_mode(input: &RouteInput, cells: u64) -> BinMode {
-    if cells.saturating_mul(input.layers.len() as u64) <= 1_000_000 {
+    let dense_slots = if input
+        .tracks
+        .as_ref()
+        .is_some_and(|plan| plan.instance_index == Some(InstanceIndexMode::FineTemplateLayers))
+    {
+        8_000_000
+    } else {
+        1_000_000
+    };
+    if cells.saturating_mul(input.layers.len() as u64) <= dense_slots {
         BinMode::Dense
     } else if input.obstacles.len() + input.instances.as_ref().map_or(0, InstanceObstacles::len)
         >= 1024
@@ -1573,6 +1584,16 @@ pub(crate) fn bin_side(input: &RouteInput) -> Result<i64> {
         .ok_or_else(|| invalid("bin overflow"))
 }
 
+fn instance_bin_side(step: i64, mode: Option<InstanceIndexMode>) -> Result<i64> {
+    let steps = match mode {
+        Some(InstanceIndexMode::FineTemplateLayers) => 4,
+        _ => 16,
+    };
+    step.checked_mul(steps)
+        .filter(|&side| side > 0)
+        .ok_or_else(|| budget("instance bin size"))
+}
+
 pub(crate) struct InstanceIndex<'a> {
     source: &'a InstanceObstacles,
     bin: i64,
@@ -1581,9 +1602,7 @@ pub(crate) struct InstanceIndex<'a> {
     generation: u64,
     entries: usize,
     mode: Option<InstanceIndexMode>,
-    /// Extraction-only per-instance world bounds and layer masks, computed
-    /// once at construction. Router indices keep `None` and their original
-    /// per-visit bounds computation.
+    /// Per-instance world bounds and layer masks for extraction and fine bins.
     cache: Option<InstanceCache>,
 }
 
@@ -1618,7 +1637,7 @@ impl InstanceCache {
 fn layer_bit(layer: u32) -> u64 {
     if layer < 64 { 1 << layer } else { u64::MAX }
 }
-/// Bytes of the extraction-only instance cache (bounds plus layer mask).
+/// Bytes of the instance cache (bounds plus layer mask).
 pub(crate) fn instance_cache_bytes(instances: usize) -> u64 {
     (instances as u64).saturating_mul((size_of::<Option<Rect>>() + size_of::<u64>()) as u64)
 }
@@ -1695,10 +1714,7 @@ pub(crate) fn instance_index_override_bytes(
     instance_geometry_bytes_mode(
         source,
         input.die,
-        input
-            .step
-            .checked_mul(16)
-            .ok_or_else(|| budget("instance bin size"))?,
+        instance_bin_side(input.step, mode)?,
         input.layers.len(),
         limits,
         mode,
@@ -1760,7 +1776,13 @@ fn instance_geometry_bytes_mode(
             .min(entries as u64)
             .saturating_mul(96)
     };
+    let cache = if mode == Some(InstanceIndexMode::FineTemplateLayers) {
+        instance_cache_bytes(source.len())
+    } else {
+        0
+    };
     Ok(grid
+        .saturating_add(cache)
         .saturating_add(entries as u64 * 16)
         .saturating_add(source.len() as u64 * 8)
         .saturating_add(if mode.is_some() {
@@ -1781,9 +1803,21 @@ impl<'a> InstanceIndex<'a> {
             return Ok(0);
         }
         let (_, _, entries) = instance_extent(die, bin, source, mode)?;
+        Self::construction_work(entries, source.len(), mode)
+    }
+    fn construction_work(
+        entries: usize,
+        instances: usize,
+        mode: Option<InstanceIndexMode>,
+    ) -> Result<usize> {
+        let passes = match mode {
+            None => return Ok(0),
+            Some(InstanceIndexMode::TemplateLayers) => 2,
+            Some(InstanceIndexMode::FineTemplateLayers) => 3,
+        };
         entries
-            .checked_add(source.len())
-            .and_then(|n| n.checked_mul(2))
+            .checked_add(instances)
+            .and_then(|work| work.checked_mul(passes))
             .ok_or_else(|| budget("instance layer-index construction work"))
     }
     fn new(
@@ -1791,16 +1825,14 @@ impl<'a> InstanceIndex<'a> {
         source: &'a InstanceObstacles,
         limits: &RouteLimits,
     ) -> Result<Self> {
+        let mode = input.tracks.as_ref().and_then(|p| p.instance_index);
         Self::for_geometry_mode(
             source,
             input.die,
-            input
-                .step
-                .checked_mul(16)
-                .ok_or_else(|| budget("instance bin size"))?,
+            instance_bin_side(input.step, mode)?,
             input.layers.len(),
             limits,
-            input.tracks.as_ref().and_then(|p| p.instance_index),
+            mode,
         )
     }
     /// Extraction index: shares the router's bins and work accounting, plus
@@ -1880,6 +1912,9 @@ impl<'a> InstanceIndex<'a> {
             .try_reserve_exact(source.len())
             .map_err(|_| budget("instance query-mark allocation"))?;
         marks.resize(source.len(), 0);
+        let cache = (mode == Some(InstanceIndexMode::FineTemplateLayers))
+            .then(|| InstanceCache::new(source))
+            .transpose()?;
         Ok(Self {
             source,
             bin,
@@ -1888,7 +1923,7 @@ impl<'a> InstanceIndex<'a> {
             generation: 0,
             entries,
             mode,
-            cache: None,
+            cache,
         })
     }
     fn visit(
@@ -2183,15 +2218,13 @@ impl<'a> Spatial<'a> {
         {
             return Err(budget("routing obstacle count"));
         }
+        let instance_mode = input.tracks.as_ref().and_then(|p| p.instance_index);
         let instance_work = input.instances.as_ref().map_or(Ok(0), |source| {
             InstanceIndex::build_work(
                 source,
                 input.die,
-                input
-                    .step
-                    .checked_mul(16)
-                    .ok_or_else(|| budget("instance bin size"))?,
-                input.tracks.as_ref().and_then(|p| p.instance_index),
+                instance_bin_side(input.step, instance_mode)?,
+                instance_mode,
             )
         })?;
         if instance_work > limits.max_comparisons {
@@ -2253,11 +2286,7 @@ impl<'a> Spatial<'a> {
         let Some(source) = self.input.instances.as_ref() else {
             return Ok(0);
         };
-        let bin = self
-            .input
-            .step
-            .checked_mul(16)
-            .ok_or_else(|| budget("instance bin size"))?;
+        let bin = instance_bin_side(self.input.step, mode)?;
         let bytes = instance_geometry_bytes_mode(
             source,
             self.input.die,
@@ -2307,11 +2336,9 @@ impl<'a> Spatial<'a> {
     }
     pub(crate) fn instance_index_build_work(&self) -> Result<usize> {
         match &self.instances {
-            Some(index) if index.mode.is_some() => index
-                .entries
-                .checked_add(index.source.len())
-                .and_then(|n| n.checked_mul(2))
-                .ok_or_else(|| budget("instance layer-index construction work")),
+            Some(index) => {
+                InstanceIndex::construction_work(index.entries, index.source.len(), index.mode)
+            }
             _ => Ok(0),
         }
     }
@@ -2576,7 +2603,8 @@ impl<'a> Spatial<'a> {
         }
         let mut near = false;
         let mut victims = Vec::new();
-        let query = expand(rect, self.input.layers[layer as usize].spacing)?;
+        let rule = &self.input.layers[layer as usize];
+        let query = expand(rect, rule.spacing)?;
         self.generation = self
             .generation
             .checked_add(1)
@@ -2591,7 +2619,7 @@ impl<'a> Spatial<'a> {
         if bins > self.limits.max_bin_entries as i128 {
             return Err(budget("routing query extent"));
         }
-        let routing = self.input.layers[layer as usize].vertical.is_some();
+        let routing = rule.vertical.is_some();
         for x in x0..=x1 {
             for y in y0..=y1 {
                 self.work += 1;
@@ -2615,9 +2643,7 @@ impl<'a> Spatial<'a> {
                         if !overlap(query, b.rect) {
                             continue;
                         }
-                        if self.input.rules
-                            && routing_separated(&self.input.layers[layer as usize], rect, b.rect)
-                        {
+                        if self.input.rules && routing_separated(rule, rect, b.rect) {
                             continue;
                         }
                         let shared =
@@ -2633,11 +2659,8 @@ impl<'a> Spatial<'a> {
                         }
                         if self.input.rules
                             && routing
-                            && route_rules::relation(
-                                rect,
-                                b.rect,
-                                self.input.layers[layer as usize].spacing,
-                            ) == route_rules::Relation::Near
+                            && route_rules::relation(rect, b.rect, rule.spacing)
+                                == route_rules::Relation::Near
                         {
                             near = true;
                         }
@@ -2679,7 +2702,9 @@ impl<'a> Spatial<'a> {
             return Ok(None);
         }
         let mut near = false;
-        let query = expand(rect, self.input.layers[layer as usize].spacing)?;
+        let rule = &self.input.layers[layer as usize];
+        let query = expand(rect, rule.spacing)?;
+        let routing = rule.vertical.is_some();
         self.generation = self
             .generation
             .checked_add(1)
@@ -2714,13 +2739,10 @@ impl<'a> Spatial<'a> {
                             continue;
                         }
                         let b = self.shape(id);
-                        let routing = self.input.layers[layer as usize].vertical.is_some();
                         if !overlap(query, b.rect) {
                             continue;
                         }
-                        if self.input.rules
-                            && routing_separated(&self.input.layers[layer as usize], rect, b.rect)
-                        {
+                        if self.input.rules && routing_separated(rule, rect, b.rect) {
                             continue;
                         }
                         let shared =
@@ -2730,11 +2752,8 @@ impl<'a> Spatial<'a> {
                         }
                         if self.input.rules
                             && routing
-                            && route_rules::relation(
-                                rect,
-                                b.rect,
-                                self.input.layers[layer as usize].spacing,
-                            ) == route_rules::Relation::Near
+                            && route_rules::relation(rect, b.rect, rule.spacing)
+                                == route_rules::Relation::Near
                         {
                             near = true;
                         }
@@ -5205,6 +5224,8 @@ mod tests {
             uy: 100,
         };
         let limits = RouteLimits::default();
+        let fine_mode = Some(InstanceIndexMode::FineTemplateLayers);
+        assert_eq!(instance_bin_side(680, fine_mode).unwrap(), 2720);
         for bin in [8, 64, 1000] {
             // The extraction index (cached bounds + layer mask) must visit the
             // same instances and charge the same work as the router form.
@@ -5243,6 +5264,10 @@ mod tests {
                 Some(InstanceIndexMode::TemplateLayers),
             )
             .unwrap();
+            let mut fine =
+                InstanceIndex::for_geometry_mode(&source, die, bin / 4, 8, &limits, fine_mode)
+                    .unwrap();
+            assert!(fine.cache.is_some());
             for layer in 0..8 {
                 for x in (-100..200).step_by(13) {
                     let query = Rect {
@@ -5282,6 +5307,12 @@ mod tests {
                     assert_eq!(
                         actual, oracle,
                         "linear oracle layer {layer} query {query:?}"
+                    );
+                    let mut fine_hits = gather(&mut fine);
+                    fine_hits.sort();
+                    assert_eq!(
+                        fine_hits, oracle,
+                        "fine index layer {layer} query {query:?}"
                     );
                 }
             }

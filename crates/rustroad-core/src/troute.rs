@@ -3621,6 +3621,7 @@ impl<'a> Router<'a> {
         let zones = self.notch_zones.get(&net).cloned().unwrap_or_default();
         let excluded = self.own_exclusions.get(&net).cloned().unwrap_or_default();
         let mut nbuf = Vec::with_capacity(8);
+        let mut via_kinds = Vec::new();
         // Own pin metal, except where a terminal's escape reaches the graph:
         // a path that runs over, or drops a via onto, a pin of its own net
         // would connect that pin a second time (an RC loop through the pin
@@ -3782,9 +3783,9 @@ impl<'a> Router<'a> {
                     if close_nodes && self.search.is_closed(id) {
                         continue;
                     }
-                    if self.search.get(id).is_none_or(|s| s.cost != cost) {
+                    let Some(state) = self.search.get(id).filter(|state| state.cost == cost) else {
                         continue;
-                    }
+                    };
                     if tree.contains(&id) {
                         found = Some(id);
                         break;
@@ -3838,18 +3839,14 @@ impl<'a> Router<'a> {
                     let layer_milli = self.layer_milli[layer as usize];
                     // Axis of the wire step that reached this node (None after
                     // a via or at the start); only read for the bend surcharge.
-                    let incoming_vertical = if self.bend_cost != 0 && id != start {
-                        let state = self
-                            .search
-                            .get(id)
-                            .ok_or_else(|| invalid("missing routing parent state"))?;
-                        (state.kind == WIRE && state.parent != NONE)
-                            .then(|| self.graph.point(state.parent))
-                            .filter(|&(parent_layer, _)| parent_layer == layer)
-                            .map(|(_, at)| at[0] == p[0])
-                    } else {
-                        None
-                    };
+                    let incoming_wire = id != start && state.kind == WIRE;
+                    let incoming_vertical =
+                        if self.bend_cost != 0 && incoming_wire && state.parent != NONE {
+                            let (parent_layer, at) = self.graph.point(state.parent);
+                            (parent_layer == layer).then_some(at[0] == p[0])
+                        } else {
+                            None
+                        };
                     let target_distance = target.bounds_distance(p);
                     let interior_distance = if target_distance == 0 {
                         // During this search the tree is fixed. A non-saturated
@@ -4079,9 +4076,9 @@ impl<'a> Router<'a> {
                                 }
                                 // A wire that ends here on this layer wants the
                                 // pad elongated along it (end-of-line enclosure).
-                                let original = self.graph.pairs[pi].kinds.clone();
-                                let mut kinds = Vec::with_capacity(original.len());
-                                for kind in original {
+                                via_kinds.clear();
+                                for index in 0..self.graph.pairs[pi].kinds.len() {
+                                    let kind = self.graph.pairs[pi].kinds[index];
                                     if no_stack && !self.via_pad_ok[layer as usize][kind] {
                                         continue;
                                     }
@@ -4093,37 +4090,21 @@ impl<'a> Router<'a> {
                                         continue;
                                     }
                                     if !self.via_on_own_pin(kind, p, &own)? {
-                                        kinds.push(kind);
+                                        via_kinds.push(kind);
                                     }
                                 }
-                                if kinds.is_empty() {
+                                if via_kinds.is_empty() {
                                     continue;
                                 }
-                                if id != start
-                                    && self
-                                        .search
-                                        .get(id)
-                                        .ok_or_else(|| invalid("missing routing parent state"))?
-                                        .kind
-                                        == WIRE
-                                {
-                                    let prev = self
-                                        .graph
-                                        .point(
-                                            self.search
-                                                .get(id)
-                                                .ok_or_else(|| {
-                                                    invalid("missing routing parent state")
-                                                })?
-                                                .parent,
-                                        )
-                                        .1;
-                                    let vertical = prev[0] == p[0];
-                                    kinds.sort_by_key(|k| !self.pad_along(*k, layer, vertical));
+                                if incoming_wire {
+                                    let vertical = incoming_vertical.unwrap_or_else(|| {
+                                        self.graph.point(state.parent).1[0] == p[0]
+                                    });
+                                    via_kinds.sort_by_key(|k| !self.pad_along(*k, layer, vertical));
                                 }
                                 if soft {
                                     let mut best: Option<(u64, usize)> = None;
-                                    for k in kinds {
+                                    for &k in &via_kinds {
                                         if let Soft::Clear { near, victims } =
                                             self.spatial.via_probe_soft(k, p, net)?
                                         {
@@ -4188,7 +4169,7 @@ impl<'a> Router<'a> {
                                     }
                                 } else if strict || zoned_point(&zones, layer, nl, p) {
                                     let mut chosen = None;
-                                    for k in kinds {
+                                    for &k in &via_kinds {
                                         if self.spatial.via_probe(k, p, net)? == Some(false) {
                                             chosen = Some(k);
                                             break;
@@ -4199,7 +4180,7 @@ impl<'a> Router<'a> {
                                         None => continue,
                                     }
                                 } else {
-                                    match self.spatial.choose(&kinds, p, net)? {
+                                    match self.spatial.choose(&via_kinds, p, net)? {
                                         Some(k) => (k as u32, 0),
                                         None => continue,
                                     }

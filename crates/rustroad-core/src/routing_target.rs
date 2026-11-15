@@ -123,38 +123,29 @@ impl CostModel {
         };
         let a = self.axis;
         let (x, y) = (scale(dx, a.x)?, scale(dy, a.y)?);
+        let wrong_way = |d: u64, milli| scale(d.checked_mul(self.wrong)?, milli);
+        let lesser = |a: Option<u64>, b: Option<u64>| match (a, b) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            (None, None) => None,
+        };
         match (dx == 0, dy == 0) {
             (true, true) => cost(0, 0, 0),
-            (false, true) => [
+            (false, true) => lesser(
                 cost(1, x, 0),
-                dx.checked_mul(self.wrong)
-                    .and_then(|v| scale(v, a.x_wrong))
-                    .and_then(|x| cost(2, x, 0)),
-            ]
-            .into_iter()
-            .flatten()
-            .min(),
-            (true, false) => [
+                wrong_way(dx, a.x_wrong).and_then(|x| cost(2, x, 0)),
+            ),
+            (true, false) => lesser(
                 cost(2, 0, y),
-                dy.checked_mul(self.wrong)
-                    .and_then(|v| scale(v, a.y_wrong))
-                    .and_then(|y| cost(1, 0, y)),
-            ]
-            .into_iter()
-            .flatten()
-            .min(),
-            (false, false) => [
+                wrong_way(dy, a.y_wrong).and_then(|y| cost(1, 0, y)),
+            ),
+            (false, false) => lesser(
                 cost(3, x, y),
-                dy.checked_mul(self.wrong)
-                    .and_then(|v| scale(v, a.y_wrong))
-                    .and_then(|y| cost(1, x, y)),
-                dx.checked_mul(self.wrong)
-                    .and_then(|v| scale(v, a.x_wrong))
-                    .and_then(|x| cost(2, x, y)),
-            ]
-            .into_iter()
-            .flatten()
-            .min(),
+                lesser(
+                    wrong_way(dy, a.y_wrong).and_then(|y| cost(1, x, y)),
+                    wrong_way(dx, a.x_wrong).and_then(|x| cost(2, x, y)),
+                ),
+            ),
         }
     }
 }
@@ -501,6 +492,14 @@ impl TreeDistance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn layer_bound_accepts_the_largest_finite_cost_and_rejects_overflow() {
+        let model = CostModel::new(&[false, true], &[(0, 1)], 1, 2).unwrap();
+        assert_eq!(model.estimate(0, 0, u64::MAX, 0), Some(u64::MAX));
+        assert_eq!(model.estimate(0, 1, u64::MAX, 0), None);
+        assert_eq!(model.estimate(0, 0, u64::MAX, 1), None);
+    }
+
     #[test]
     fn layer_bound_matches_independent_grid_shortest_paths() {
         use std::cmp::Reverse;

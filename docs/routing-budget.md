@@ -1,5 +1,12 @@
 # Constrained routing / extraction verification resource contract
 
+`track_router.instance_index` can use `fine_template_layers` for short-edge
+queries in dense rows. It indexes instance geometry by layer in bins of four
+routing grid steps and caches world-coordinate bounds once per instance. The
+dynamic track index can use a dense grid up to 8,000,000 slots. Memory
+admission includes the instance cache and both grids. Probes use the original
+rectangles and charge work for the bins and candidates they visit.
+
 The optional `track_router.single_owner_repair` policy adds a bounded stage
 after a hard frontier is exhausted and before ordinary soft repair. None keeps
 legacy behavior/encoding. Its explicit limits are at most16 candidate owners,
