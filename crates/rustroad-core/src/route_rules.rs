@@ -20,6 +20,129 @@ use crate::{Error, Rect, Result};
 use std::collections::BTreeMap;
 
 const MAX_PIECES: usize = 64;
+pub(crate) const MAX_VIA_NOTCHES: usize = 64;
+const MAX_VIAS_PER_NOTCHED_NET: usize = 128;
+
+/// Change the pad facing a reported same-net notch, keeping the cut and
+/// the other conductor unchanged. The caller must clean and validate the
+/// entire trial before publishing it.
+pub(crate) fn reorient_notched_vias(
+    input: &RouteInput,
+    routes: &mut Routes,
+    violations: &[Violation],
+    work: &mut usize,
+    cap: usize,
+) -> Result<usize> {
+    if violations.is_empty()
+        || violations.len() > MAX_VIA_NOTCHES
+        || !violations
+            .iter()
+            .all(|v| matches!(v, Violation::Spacing { .. }))
+    {
+        return Ok(0);
+    }
+    let mut by_net: BTreeMap<u32, Vec<usize>> =
+        violations.iter().map(|v| (v.net(), Vec::new())).collect();
+    charge(work, routes.vias.len(), cap)?;
+    for (index, via) in routes.vias.iter().enumerate() {
+        if let Some(indices) = by_net.get_mut(&via.net) {
+            if indices.len() == MAX_VIAS_PER_NOTCHED_NET {
+                return Ok(0);
+            }
+            indices.push(index);
+        }
+    }
+    let mut replacements = BTreeMap::new();
+    let mut dirty_layers = std::collections::BTreeSet::new();
+    for violation in violations {
+        let Violation::Spacing { net, layer, a, b } = *violation else {
+            unreachable!("the trial only considers spacing violations")
+        };
+        let mut matching = None;
+        for &index in &by_net[&net] {
+            charge(work, 1, cap)?;
+            if replacements.contains_key(&index) {
+                continue;
+            }
+            if let Some(kind) =
+                notch_via_variant(input, &routes.vias[index], layer, a, b, work, cap)?
+            {
+                matching = Some((index, kind));
+                break;
+            }
+        }
+        let Some((index, kind)) = matching else {
+            return Ok(0);
+        };
+        replacements.insert(index, kind);
+        dirty_layers.insert((net, layer));
+    }
+    charge(work, routes.patches.len(), cap)?;
+    for (&index, &kind) in &replacements {
+        routes.vias[index].kind = kind;
+    }
+    routes
+        .patches
+        .retain(|p| !dirty_layers.contains(&(p.net, p.layer)));
+    Ok(replacements.len())
+}
+
+fn notch_via_variant(
+    input: &RouteInput,
+    via: &Via,
+    layer: u32,
+    a: Rect,
+    b: Rect,
+    work: &mut usize,
+    cap: usize,
+) -> Result<Option<u32>> {
+    let original = &input.vias[via.kind as usize];
+    if original.shapes.len() != 3 || (layer != original.lower && layer != original.upper) {
+        return Ok(None);
+    }
+    let Some(pad) = original.shapes.iter().find(|s| s.layer == layer) else {
+        return Ok(None);
+    };
+    let pad = shifted(pad.rect, via.at)?;
+    let other = if pad == a {
+        b
+    } else if pad == b {
+        a
+    } else {
+        return Ok(None);
+    };
+    let spacing = input.layers[layer as usize].spacing;
+    for (kind, candidate) in input.vias.iter().enumerate() {
+        charge(work, 1, cap)?;
+        if kind == via.kind as usize
+            || candidate.lower != original.lower
+            || candidate.upper != original.upper
+            || candidate.shapes.len() != 3
+        {
+            continue;
+        }
+        charge(work, 9, cap)?;
+        if !original
+            .shapes
+            .iter()
+            .filter(|s| s.layer != layer)
+            .all(|s| {
+                candidate
+                    .shapes
+                    .iter()
+                    .any(|p| p.layer == s.layer && p.rect == s.rect)
+            })
+        {
+            continue;
+        }
+        if let Some(pad) = candidate.shapes.iter().find(|s| s.layer == layer)
+            && relation(shifted(pad.rect, via.at)?, other, spacing) == Relation::Far
+        {
+            return Ok(Some(kind as u32));
+        }
+    }
+    Ok(None)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Relation {

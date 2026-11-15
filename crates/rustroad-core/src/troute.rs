@@ -5408,6 +5408,7 @@ pub(crate) fn route_with_prior(
     // Same-net notch fills reserved as fixed metal (net, layer, rects).
     let mut notch_reserved: BTreeSet<(u32, u32, Vec<[i64; 4]>)> = BTreeSet::new();
     let notch_bridge = r.plan.qor.as_ref().is_some_and(|q| q.notch_bridge);
+    let mut tried_notched_vias = false;
     // Directed rip counts (ripper, victim), at most `MAX_PAIR_RIPS` pairs. Two
     // nets that keep ripping each other rebuild the same pair of routes every
     // time (their rip prices grow together), so once both directions reach
@@ -6082,7 +6083,58 @@ pub(crate) fn route_with_prior(
             .comparisons
             .checked_add(work)
             .ok_or_else(|| budget("routing comparison limit"))?;
-        if remaining.is_empty() {
+        let mut reoriented = false;
+        if notch_bridge
+            && !tried_notched_vias
+            && !remaining.is_empty()
+            && remaining.len() <= route_rules::MAX_VIA_NOTCHES
+            && remaining
+                .iter()
+                .all(|v| matches!(v, route_rules::Violation::Spacing { .. }))
+        {
+            tried_notched_vias = true;
+            // Only this uncommitted assembly changes. On rejection the live
+            // search retains its routes, escape plans and original violations.
+            let cap = limits
+                .max_comparisons
+                .checked_sub(out.stats.comparisons)
+                .ok_or_else(|| budget("routing comparison limit"))?;
+            let mut trial_work = 0;
+            let count = route_rules::reorient_notched_vias(
+                input,
+                &mut out,
+                &remaining,
+                &mut trial_work,
+                cap,
+            )?;
+            if count > 0 {
+                let trial_limits = RouteLimits {
+                    max_comparisons: cap - trial_work,
+                    ..limits.clone()
+                };
+                let (cleanup_work, unresolved) =
+                    crate::routing::cleanup_report(input, &mut out, &trial_limits)?;
+                trial_work = trial_work
+                    .checked_add(cleanup_work)
+                    .filter(|&n| n <= cap)
+                    .ok_or_else(|| budget("routing comparison limit"))?;
+                reoriented = unresolved.is_empty();
+                r.guard("via notch repair")?;
+                trace(
+                    "via notch repair",
+                    t0,
+                    format_args!("reoriented {count} remaining {}", unresolved.len()),
+                );
+            }
+            out.stats.comparisons += trial_work;
+            r.spatial.work = r
+                .spatial
+                .work
+                .checked_add(trial_work)
+                .filter(|&n| n <= limits.max_comparisons)
+                .ok_or_else(|| budget("routing comparison limit"))?;
+        }
+        if remaining.is_empty() || reoriented {
             if out.stats.comparisons > limits.max_comparisons {
                 return Err(budget("routing comparison limit"));
             }
@@ -6090,30 +6142,37 @@ pub(crate) fn route_with_prior(
                 n.checked_add(distance(w.start, w.end)?)
                     .ok_or_else(|| budget("total wire length"))
             })?;
-            validate(input, &out, limits)?;
-            r.guard("validation")?;
-            let fp = r.spatial.footprint();
-            trace(
-                "validated",
-                t0,
-                format_args!(
-                    "records {} wires {} vias {} access {} patches {} bins {} entries {} shapes {} bin {} obstacles {} terminals {} die {:?} layers {}",
-                    out.wires.len() + out.vias.len(),
-                    out.wires.len(),
-                    out.vias.len(),
-                    out.access.len(),
-                    out.patches.len(),
-                    fp.0,
-                    fp.1,
-                    fp.2,
-                    fp.3,
-                    input.obstacles.len(),
-                    input.terminals.len(),
-                    input.die,
-                    input.layers.len()
-                ),
-            );
-            return Ok(out);
+            match validate(input, &out, limits) {
+                Err(crate::Error::Invalid(reason)) if reoriented => {
+                    trace("via notch repair rejected", t0, format_args!("{reason}"));
+                }
+                result => {
+                    result?;
+                    r.guard("validation")?;
+                    let fp = r.spatial.footprint();
+                    trace(
+                        "validated",
+                        t0,
+                        format_args!(
+                            "records {} wires {} vias {} access {} patches {} bins {} entries {} shapes {} bin {} obstacles {} terminals {} die {:?} layers {}",
+                            out.wires.len() + out.vias.len(),
+                            out.wires.len(),
+                            out.vias.len(),
+                            out.access.len(),
+                            out.patches.len(),
+                            fp.0,
+                            fp.1,
+                            fp.2,
+                            fp.3,
+                            input.obstacles.len(),
+                            input.terminals.len(),
+                            input.die,
+                            input.layers.len()
+                        ),
+                    );
+                    return Ok(out);
+                }
+            }
         }
         if pass == MAX_RULE_PASS {
             let v = &remaining[0];
@@ -6937,6 +6996,114 @@ mod tests {
     }
     fn limits() -> RouteLimits {
         RouteLimits::default()
+    }
+
+    #[test]
+    fn notch_via_repair_keeps_the_cut_and_other_pad() {
+        // Two pins, two via cuts and two wires. The first pin faces the second
+        // via's lower pad across a 10 DBU gap with a 20 DBU spacing rule.
+        let near = rect(480, 305, 570, 335);
+        let mut design = input(
+            vec![
+                terminal(0, 7, true, near),
+                terminal(1, 7, false, rect(595, 290, 610, 310)),
+            ],
+            Vec::new(),
+        );
+        design.vias[0].shapes[0].rect = rect(-20, -10, 20, 10);
+        let mut vertical = design.vias[0].clone();
+        vertical.name = "V12_vertical".into();
+        vertical.shapes[0].rect = rect(-10, -20, 10, 20);
+        let mut changed_cut = vertical.clone();
+        changed_cut.name = "V12_changed_cut".into();
+        changed_cut.shapes[1].rect = rect(0, -5, 10, 5);
+        design.vias.push(changed_cut);
+        design.vias.push(vertical);
+        let at = [600, 300];
+        let violation = route_rules::Violation::Spacing {
+            net: 7,
+            layer: 0,
+            a: near,
+            b: rect(580, 290, 620, 310),
+        };
+        let limits = limits();
+        let mut routes = Routes {
+            wires: vec![
+                Wire {
+                    net: 7,
+                    layer: 1,
+                    start: [530, 320],
+                    end: [530, 300],
+                },
+                Wire {
+                    net: 7,
+                    layer: 1,
+                    start: [530, 300],
+                    end: at,
+                },
+            ],
+            vias: vec![
+                Via {
+                    net: 7,
+                    kind: 0,
+                    at: [530, 320],
+                },
+                Via {
+                    net: 7,
+                    kind: 0,
+                    at,
+                },
+            ],
+            access: vec![
+                Access {
+                    net: 7,
+                    pin: 0,
+                    layer: 0,
+                    at: [530, 320],
+                },
+                Access {
+                    net: 7,
+                    pin: 1,
+                    layer: 0,
+                    at,
+                },
+            ],
+            patches: vec![crate::routing::Patch {
+                net: 7,
+                layer: 0,
+                rect: rect(570, 285, 580, 305),
+            }],
+            nets: vec![7],
+            stats: RouteStats {
+                grid_nodes: graph_nodes(&design, &limits).unwrap(),
+                wire_length_dbu: 90,
+                ..Default::default()
+            },
+        };
+        let issues = [violation];
+        let mut work = 0;
+        assert!(matches!(
+            route_rules::reorient_notched_vias(&design, &mut routes, &issues, &mut work, 1),
+            Err(crate::Error::Budget(_))
+        ));
+        assert_eq!(routes.vias[1].kind, 0);
+        assert_eq!(routes.patches.len(), 1);
+        assert_eq!(
+            route_rules::reorient_notched_vias(&design, &mut routes, &issues, &mut work, 1000)
+                .unwrap(),
+            1
+        );
+        assert_eq!(routes.vias[0].kind, 0);
+        assert_eq!(
+            routes.vias[1],
+            Via {
+                net: 7,
+                kind: 3,
+                at
+            }
+        );
+        assert!(routes.patches.is_empty());
+        validate(&design, &routes, &limits).unwrap();
     }
 
     // Hand-constructed cuts: no external PDK or alternate routing algorithm is
