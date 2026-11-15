@@ -921,6 +921,20 @@ fn memory_estimate_limited(
             .saturating_add(t.saturating_mul(WINDOW_INDEX_BYTES))
             .saturating_add(records.saturating_mul(96))
             .saturating_add(
+                if input
+                    .tracks
+                    .as_ref()
+                    .and_then(|p| p.qor.as_ref())
+                    .is_some_and(|q| q.atomic_eager_repair)
+                {
+                    // A completed pair can retain two extra wire/via/handle sets
+                    // until commit. Per-search scratch and the index are separate.
+                    (ATOMIC_REPAIR_MAX_SHAPES as u64).saturating_mul(2 * 160)
+                } else {
+                    0
+                },
+            )
+            .saturating_add(
                 (nodes.min(limits.max_segments).min(limits.max_active_nodes) as u64)
                     .saturating_mul(ACTIVE_TOPOLOGY_BYTES),
             )
@@ -5126,6 +5140,100 @@ fn eager_hard_repair(
     Ok(repaired)
 }
 
+// Keep at most one small completed route alongside the second hard search.
+// Old shapes keep their indices and are restored if either search fails.
+const ATOMIC_REPAIR_MAX_SHAPES: usize = 8192;
+const ATOMIC_REPAIR_MAX_TERMINALS: usize = 12;
+const ATOMIC_REPAIR_MAX_ATTEMPTS: usize = 256;
+
+#[allow(clippy::too_many_arguments)]
+fn repair_pair(
+    r: &mut Router<'_>,
+    pair: [u32; 2],
+    groups: &BTreeMap<u32, Vec<&Terminal>>,
+    plans: &HashMap<u32, Plan>,
+    guides: &BTreeMap<u32, Vec<u32>>,
+    strict: &BTreeSet<u32>,
+    demoted: &BTreeMap<u32, u8>,
+    rips: &BTreeMap<u32, usize>,
+    round: usize,
+    wide: usize,
+    routed: &mut BTreeMap<u32, NetRoute>,
+    retained_edges: &mut usize,
+    detour: &mut DetourLedger,
+) -> Result<bool> {
+    let [a, b] = pair;
+    let mut segments = *retained_edges - routed[&a].segments() - routed[&b].segments();
+    let old_shapes = routed[&a].shapes.len() + routed[&b].shapes.len();
+    // Reserve the removal and possible restoration work before detaching.
+    r.spatial.work = r
+        .spatial
+        .work
+        .checked_add(2 * old_shapes)
+        .filter(|&n| n <= r.limits.max_comparisons)
+        .ok_or_else(|| budget("atomic repair geometry work"))?;
+    for net in pair {
+        for &id in &routed[&net].shapes {
+            r.spatial.remove(id);
+        }
+    }
+    let previous_area_level = r.area_level;
+    let mut repaired = Vec::with_capacity(pair.len());
+    let result = (|| -> Result<()> {
+        for net in pair {
+            r.area_level = if r.plan.area_stacks {
+                2 - demoted.get(&net).copied().unwrap_or(0)
+            } else {
+                0
+            };
+            r.mark_region_corridor(&guides[&net], wide);
+            let Some(new) = eager_hard_repair(
+                r,
+                net,
+                &groups[&net],
+                plans,
+                strict.contains(&net),
+                rips,
+                round,
+            )?
+            else {
+                break;
+            };
+            segments = segments.saturating_add(new.segments());
+            if new.shapes.len().max(new.segments()) > ATOMIC_REPAIR_MAX_SHAPES
+                || segments > r.limits.max_segments
+            {
+                discard_route(r, new)?;
+                break;
+            }
+            repaired.push((net, new));
+        }
+        Ok(())
+    })();
+    r.area_level = previous_area_level;
+    if result.is_ok()
+        && repaired.len() == pair.len()
+        && repaired
+            .iter()
+            .all(|(net, route)| detour.admits(*net, route))
+    {
+        for (net, route) in repaired {
+            routed.insert(net, route);
+        }
+        *retained_edges = segments;
+        return Ok(true);
+    }
+    for (_, route) in repaired {
+        discard_route(r, route)?;
+    }
+    for net in pair {
+        for &id in &routed[&net].shapes {
+            r.spatial.restore(id)?;
+        }
+    }
+    result.map(|()| false)
+}
+
 /// Track-router entry point (called by `routing::route_cpu_ref`).
 pub(crate) fn route(input: &RouteInput, limits: &RouteLimits) -> Result<Routes> {
     route_with_prior(input, limits, None)
@@ -5387,6 +5495,12 @@ pub(crate) fn route_with_prior(
     // (owner, layer, rect), at most `MAX_REGION_CUTS` each.
     let mut cycle_regions: BTreeMap<(u32, u32, [i64; 4]), u8> = BTreeMap::new();
     let strict_wide_cycles = r.plan.qor.as_ref().is_some_and(|q| q.strict_wide_cycles);
+    let atomic_eager_repair = prior.is_none()
+        && r.close_expanded
+        && limits.eager_repair_expansions.is_some()
+        && limits.eager_repair_max_victims.unwrap_or(1) >= 2
+        && r.plan.qor.as_ref().is_some_and(|q| q.atomic_eager_repair);
+    let mut atomic_repair_attempts = 0;
     // Remaining violations by exact geometry -> passes seen, and the notch
     // zones placed for them (bounded by `MAX_NOTCH_ZONES`).
     let mut rule_seen: BTreeMap<String, u8> = BTreeMap::new();
@@ -5879,6 +5993,86 @@ pub(crate) fn route_with_prior(
                         route,
                         limits.max_segments,
                     )?;
+                    if atomic_eager_repair
+                        && atomic_repair_attempts < ATOMIC_REPAIR_MAX_ATTEMPTS
+                        && rips.get(&net).copied().unwrap_or(0) >= 2
+                        && groups[&net].len() <= ATOMIC_REPAIR_MAX_TERMINALS
+                        && routed[&net].shapes.len() <= ATOMIC_REPAIR_MAX_SHAPES
+                        && let [first, rest @ ..] = victims.as_slice()
+                        && rest.len() <= 1
+                    {
+                        let movable = |v| {
+                            v != net
+                                && rips.get(&v).copied().unwrap_or(0) < r.plan.max_ripups_per_net
+                                && groups.get(&v).is_some_and(|terminals| {
+                                    terminals.len() <= ATOMIC_REPAIR_MAX_TERMINALS
+                                })
+                                && routed.get(&v).is_some_and(|route| {
+                                    route.shapes.len().max(route.segments())
+                                        <= ATOMIC_REPAIR_MAX_SHAPES
+                                })
+                        };
+                        // With a single soft victim, use one earlier displaced
+                        // neighbor to avoid repeating the same one-net repair.
+                        let other = rest.first().copied().or_else(|| {
+                            pair_rips
+                                .range((net, 0)..=(net, u32::MAX))
+                                .take(16)
+                                .filter(|&(&(_, v), _)| v != *first && movable(v))
+                                .max_by_key(|&(&(_, v), &count)| (count, std::cmp::Reverse(v)))
+                                .map(|(&(_, v), _)| v)
+                        });
+                        if movable(*first)
+                            && let Some(other) = other.filter(|&v| movable(v))
+                        {
+                            atomic_repair_attempts += 1;
+                            // The regular eager path processes victims in
+                            // net-ID order. Start with the other net here.
+                            let pair = [other, *first];
+                            let kept = repair_pair(
+                                &mut r,
+                                pair,
+                                &groups,
+                                &plans,
+                                &guides,
+                                &strict,
+                                &demoted,
+                                &rips,
+                                round,
+                                wide,
+                                &mut routed,
+                                &mut retained_edges,
+                                &mut detour,
+                            )?;
+                            if std::env::var_os("RUSTROAD_ROUTE_TRACE").is_some() {
+                                eprintln!(
+                                    "[troute] atomic eager repair round {round} net {net} owners {pair:?} kept {kept}"
+                                );
+                            }
+                            if kept {
+                                for victim in pair {
+                                    *rips.entry(victim).or_insert(0) += 1;
+                                }
+                                r.spatial.work = r
+                                    .spatial
+                                    .work
+                                    .checked_add(2 * queue.len())
+                                    .filter(|&n| n <= limits.max_comparisons)
+                                    .ok_or_else(|| budget("atomic repair queue work"))?;
+                                queue.retain(|pending| !pair.contains(pending));
+                                trace_repair_round(
+                                    &r,
+                                    round,
+                                    net,
+                                    round_before,
+                                    queue.len(),
+                                    &routed[&net],
+                                    &[],
+                                );
+                                continue;
+                            }
+                        }
+                    }
                     let eager_enabled = limits.eager_repair_expansions.is_some()
                         && victims.len() <= limits.eager_repair_max_victims.unwrap_or(1);
                     // At most sixteen IDs; no displaced route is kept alive.
@@ -7619,6 +7813,84 @@ mod tests {
             router.expansions - before <= 3,
             "all stages must honor the one-expansion cap"
         );
+    }
+
+    #[test]
+    fn atomic_repair_restores_both_routes_if_one_exceeds_its_detour_bound() {
+        let mut design = conflict_fixture(&[[100, 100], [100, 900]]);
+        design.terminals.extend([
+            terminal(2, 8, true, rect(890, 90, 910, 110)),
+            terminal(3, 8, false, rect(890, 890, 910, 910)),
+        ]);
+        let limits = RouteLimits {
+            eager_repair_expansions: Some(5000),
+            ..limits()
+        };
+        let plan = design.tracks.as_ref().unwrap();
+        let graph = Graph::new(&design, plan, &limits).unwrap();
+        let cells = Cells::new(design.die, plan.gcell).unwrap();
+        let all_cells: Vec<_> = (0..cells.len() as u32).collect();
+        let mut router = Router::prepared(&design, &limits, graph, cells).unwrap();
+        router.close_expanded = true;
+        let terminals: Vec<_> = design.terminals.iter().collect();
+        let plans = router.reserve(&terminals).unwrap();
+        let groups = BTreeMap::from([(7, terminals[..2].to_vec()), (8, terminals[2..].to_vec())]);
+        let guides = BTreeMap::from([(7, all_cells.clone()), (8, all_cells)]);
+        let mut routed = BTreeMap::new();
+        let mut segments = 0;
+        let rips = BTreeMap::new();
+        for net in [7, 8] {
+            router.mark_region_corridor(&guides[&net], 1);
+            let old = eager_hard_repair(&mut router, net, &groups[&net], &plans, false, &rips, 1)
+                .unwrap()
+                .unwrap();
+            retain_route(&mut routed, &mut segments, net, old, limits.max_segments).unwrap();
+        }
+        let old_shapes = [routed[&7].shapes.clone(), routed[&8].shapes.clone()];
+        let old_segments = segments;
+        let mut detour = DetourLedger::new(Some(crate::routing::DetourBound {
+            percent: 100,
+            slack: 0,
+            max_rejections_per_net: 1,
+            max_rejections: 1,
+        }));
+        detour.record(7, &routed[&7]);
+        detour.first.insert(8, 0);
+        for kept in [false, true] {
+            let before = router.expansions;
+            assert_eq!(
+                repair_pair(
+                    &mut router,
+                    [7, 8],
+                    &groups,
+                    &plans,
+                    &guides,
+                    &BTreeSet::new(),
+                    &BTreeMap::new(),
+                    &rips,
+                    2,
+                    1,
+                    &mut routed,
+                    &mut segments,
+                    &mut detour,
+                )
+                .unwrap(),
+                kept
+            );
+            assert!(router.expansions > before);
+            assert!(router.expansions - before <= 10_000);
+            assert_eq!(segments, old_segments);
+            for (net, old) in [7, 8].into_iter().zip(&old_shapes) {
+                assert_eq!(routed[&net].shapes == *old, !kept);
+                assert!(old.iter().all(|&id| router.spatial.is_alive(id) != kept));
+                assert!(
+                    routed[&net]
+                        .shapes
+                        .iter()
+                        .all(|&id| router.spatial.is_alive(id))
+                );
+            }
+        }
     }
 
     #[test]
@@ -10083,6 +10355,7 @@ mod tests {
             small_net_weight: 1,
             notch_bridge: true,
             strict_wide_cycles: true,
+            atomic_eager_repair: false,
             via_reduction: None,
             dedupe_vias: true,
             straighten: Some(crate::routing::Straighten {

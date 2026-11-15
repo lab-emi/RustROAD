@@ -180,6 +180,9 @@ pub struct RouteQorConfig {
     /// at most three cuts per wide region.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub strict_wide_cycles: bool,
+    /// Try reconnecting two displaced nets together during cold repair.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub atomic_eager_repair: bool,
     /// Post-route via reduction (`rustroad_core::routing::ViaReduction`);
     /// omitted keeps the routes of the repair loop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1557,6 +1560,7 @@ fn route_qor(
         small_net_weight: config.small_net_weight,
         notch_bridge: config.notch_bridge,
         strict_wide_cycles: config.strict_wide_cycles,
+        atomic_eager_repair: config.atomic_eager_repair,
         via_reduction: config.via_reduction.clone(),
         dedupe_vias: config.dedupe_vias,
         straighten: config.straighten.clone(),
@@ -2488,19 +2492,21 @@ mod qor_config_tests {
         let off: RouteQorConfig = serde_json::from_str(r#"{"notch_bridge": true}"#).unwrap();
         let resolved = route_qor(&off, &layers()).unwrap();
         assert!(!resolved.strict_wide_cycles);
+        assert!(!resolved.atomic_eager_repair);
         assert_eq!(resolved.via_reduction, None);
         assert_eq!(
             serde_json::to_string(&off).unwrap(),
             r#"{"notch_bridge":true}"#
         );
         let on: RouteQorConfig = serde_json::from_str(
-            r#"{"strict_wide_cycles": true, "via_reduction": {"passes": 1,
+            r#"{"strict_wide_cycles": true, "atomic_eager_repair": true, "via_reduction": {"passes": 1,
                 "via_milli": 3000, "max_terminals": 10, "length_per_via": 1680,
                 "net_expansions": 10000, "max_connection_length": 40000}}"#,
         )
         .unwrap();
         let resolved = route_qor(&on, &layers()).unwrap();
         assert!(resolved.strict_wide_cycles);
+        assert!(resolved.atomic_eager_repair);
         let reduction = resolved.via_reduction.unwrap();
         assert_eq!(
             (reduction.passes, reduction.via_milli, reduction.weight),
