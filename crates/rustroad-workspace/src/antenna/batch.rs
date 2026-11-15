@@ -1,13 +1,15 @@
 //! Ordered selected checks sharing one locked snapshot and prepared LEF model.
 use super::{
-    AnalysisLimits, AntennaRequest, check_budgets, check_prepared, prepare, source_fingerprint,
-    validate_selection,
+    AnalysisLimits, AntennaRequest, check_budgets, check_prepared, prepare, prepare_cut_area,
+    source_fingerprint, validate_selection,
 };
 use crate::{Error, Result, SnapshotCaps};
 use rustroad_core::Limits;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+const DEFAULT_GROUP_NETS: usize = 128;
 
 /// A bounded same-revision selection sequence; each group keeps legacy check limits.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -18,8 +20,17 @@ pub struct CheckBatchPlan {
     pub revision: String,
     /// Canonical, distinct names within each group; group order is preserved.
     pub groups: Vec<Vec<String>>,
+    /// Override the default 128-net group cap, up to the selected check's cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_group_nets: Option<usize>,
     pub analysis: AnalysisLimits,
     pub safety_margin: f64,
+    /// Include the same whole-net observations as the selected check command.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub whole_net: bool,
+    /// Optional PDK-bound model used by every group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut_area_model: Option<PathBuf>,
     /// Aggregate measured check work; each next check reserves its full work bound.
     pub max_work: usize,
     /// Aggregate serialized JSON-array bytes, including framing and final newline.
@@ -27,6 +38,11 @@ pub struct CheckBatchPlan {
     /// Snapshot admission bound, independent of the per-group 128 MiB report limit.
     pub snapshot_memory_bytes: u64,
 }
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl CheckBatchPlan {
     /// Create a bounded plan with the native grouped-runner's check and work limits.
     #[must_use]
@@ -35,8 +51,11 @@ impl CheckBatchPlan {
             schema: "rustroad.antenna-check-batch.v1".into(),
             revision,
             groups,
+            max_group_nets: None,
             analysis: AnalysisLimits::from(&AntennaRequest::default()),
             safety_margin: super::DEFAULT_SAFETY_MARGIN,
+            whole_net: false,
+            cut_area_model: None,
             max_work: 200_000_000_000,
             max_output_bytes: 8 << 30,
             snapshot_memory_bytes: 2 << 30,
@@ -44,9 +63,11 @@ impl CheckBatchPlan {
     }
 
     fn request(&self) -> Result<AntennaRequest> {
+        let group_limit = self.max_group_nets.unwrap_or(DEFAULT_GROUP_NETS);
         if self.schema != "rustroad.antenna-check-batch.v1"
             || self.groups.is_empty()
             || self.groups.len() > 1024
+            || !(1..=super::MAX_SELECTION_NETS).contains(&group_limit)
             || !(1..=200_000_000_000).contains(&self.max_work)
             || !(3..=8 << 30).contains(&self.max_output_bytes)
             || !(1..=4 << 30).contains(&self.snapshot_memory_bytes)
@@ -57,7 +78,7 @@ impl CheckBatchPlan {
         let mut count = 0usize;
         let mut bytes = 0usize;
         for group in &self.groups {
-            if group.len() > 128 || group.windows(2).any(|names| names[0] >= names[1]) {
+            if group.len() > group_limit || group.windows(2).any(|names| names[0] >= names[1]) {
                 return Err(Error::Budget(
                     "ANTENNA_BATCH: canonical group/name bound".into(),
                 ));
@@ -80,6 +101,8 @@ impl CheckBatchPlan {
             max_rows: a.max_rows,
             max_work: a.max_work,
             safety_margin: self.safety_margin,
+            whole_net: self.whole_net,
+            cut_area_model: self.cut_area_model.clone(),
             ..AntennaRequest::default()
         };
         check_budgets(&request)?;
@@ -167,7 +190,8 @@ pub fn check_antenna_batch(
         .as_ref()
         .ok_or_else(|| super::fail("NO_ROUTING", "route before the antenna check"))?;
     let placed: Vec<_> = snapshot.records().collect();
-    let prep = prepare(&metadata.design, bundle, &placed, state)?;
+    let mut prep = prepare(&metadata.design, bundle, &placed, state)?;
+    prepare_cut_area(&mut prep, request.cut_area_model.as_deref())?;
     let source = source_fingerprint(
         &metadata.design,
         &bundle.connectivity,
@@ -217,4 +241,29 @@ pub fn check_antenna_batch(
         work,
         output_bytes: counted.bytes,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicitly_larger_group_keeps_the_selected_check_hard_cap() {
+        let mut plan = CheckBatchPlan::new(
+            "rev2".into(),
+            vec![(0..129).map(|i| format!("net{i:04}")).collect()],
+        );
+        assert!(plan.request().is_err());
+        plan.max_group_nets = Some(2048);
+        plan.whole_net = true;
+        plan.cut_area_model = Some(PathBuf::from("model.json"));
+        let request = plan.request().unwrap();
+        assert!(request.whole_net);
+        assert_eq!(
+            request.cut_area_model.as_deref(),
+            Some(Path::new("model.json"))
+        );
+        plan.max_group_nets = Some(super::super::MAX_SELECTION_NETS + 1);
+        assert!(plan.request().is_err());
+    }
 }

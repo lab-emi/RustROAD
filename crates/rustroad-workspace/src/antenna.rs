@@ -1867,12 +1867,17 @@ pub fn check_antenna(
         .ok_or_else(|| fail("NO_ROUTING", "route before the antenna check"))?;
     let placed: Vec<_> = snapshot.records().collect();
     let mut prep = prepare(design, bundle, &placed, state)?;
-    if let Some(path) = &request.cut_area_model {
-        let (model, source) = cut_area::read(path, &prep)?;
+    prepare_cut_area(&mut prep, request.cut_area_model.as_deref())?;
+    check_prepared(metadata, &placed, &prep, request, None, None)
+}
+
+fn prepare_cut_area(prep: &mut Prepared, path: Option<&Path>) -> Result<()> {
+    if let Some(path) = path {
+        let (model, source) = cut_area::read(path, prep)?;
         prep.cut_area = Some(model);
         prep.sources.push(source);
     }
-    check_prepared(metadata, &placed, &prep, request, None, None)
+    Ok(())
 }
 
 fn check_prepared(
@@ -2140,9 +2145,11 @@ pub fn read_check_selection(path: &Path) -> Result<Vec<String>> {
     Ok(nets)
 }
 
+const MAX_SELECTION_NETS: usize = 4096;
+
 fn validate_selection(nets: &[String]) -> Result<()> {
     if nets.is_empty()
-        || nets.len() > 4096
+        || nets.len() > MAX_SELECTION_NETS
         || nets
             .iter()
             .any(|n| n.is_empty() || n.len() > 4096 || n.contains(['\0', '\r', '\n']))
